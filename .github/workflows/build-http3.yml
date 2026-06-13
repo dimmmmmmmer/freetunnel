@@ -1,0 +1,117 @@
+name: Build (HTTP/3 variant)
+
+# Optional build with HTTP/3 (QUIC) enabled. This pulls quiche, which adds a
+# Rust toolchain to the build and can break on the yanked `boring` crate — so it
+# is kept separate from the main release builds and is non-blocking.
+#
+# Run manually (workflow_dispatch) or observe it on PRs without it gating them.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build-http3.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: build-http3-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
+  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
+  CONAN_VER: '2.12'
+
+jobs:
+  http3:
+    name: Linux HTTP/3
+    runs-on: ubuntu-latest
+    # Non-blocking: HTTP/3 is experimental for this client.
+    continue-on-error: true
+    steps:
+      - name: Checkout client
+        uses: actions/checkout@v5
+        with:
+          path: client
+
+      - name: Checkout upstream core
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_REF }}
+          path: upstream
+
+      - name: Inject client into upstream tree
+        shell: bash
+        run: |
+          set -eux
+          rm -rf upstream/FreeTunnel && mkdir -p upstream/FreeTunnel
+          (cd client && tar --exclude='./.git' -cf - .) | (cd upstream/FreeTunnel && tar -xf -)
+          {
+            printf '\nif (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")\n'
+            printf '    add_subdirectory(FreeTunnel)\n'
+            printf 'endif ()\n'
+          } >> upstream/CMakeLists.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Set up Rust (needed by quiche)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Patch core wrapper (surface tunnel stats)
+        shell: bash
+        run: python3 client/scripts/patch_core_wrapper.py upstream
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang \
+            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev qt6-svg-dev
+          pip install -r upstream/requirements.txt
+          pip install "conan~=${CONAN_VER}"
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: http3-ccache
+
+      - name: Conan cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2
+          key: http3-conan2-${{ hashFiles('upstream/conanfile.py') }}
+          restore-keys: http3-conan2-
+
+      - name: Bootstrap conan dependencies
+        working-directory: upstream
+        shell: bash
+        run: ./scripts/bootstrap_conan_deps.py
+
+      - name: Prepare conan profile and pin AdGuard deps
+        shell: bash
+        run: |
+          set -eux
+          conan profile detect --force
+          DNS_VER=$(grep -oE 'dns-libs/[0-9]+\.[0-9]+\.[0-9]+@adguard/oss' \
+            upstream/conanfile.py | head -1 | sed -E 's#dns-libs/([0-9.]+)@.*#\1#')
+          git clone --depth 1 --branch "v${DNS_VER}" \
+            https://github.com/AdguardTeam/DnsLibs.git _dnslibs
+          conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
+          rm -rf _dnslibs
+
+      - name: Configure (HTTP/3 enabled)
+        run: |
+          cmake -S upstream -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF \
+            -DBUILD_TRUSTTUNNEL_QT=ON
+
+      - name: Build
+        run: cmake --build build --target FreeTunnel -j 4

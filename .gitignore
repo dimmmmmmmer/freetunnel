@@ -1,0 +1,51 @@
+# macOS
+.DS_Store
+
+# CMake/build
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+cmake_install.cmake
+CTestTestfile.cmake
+_testing/
+
+# Qt Creator / qmake
+*.pro.user*
+*.pri.user*
+*.qmlproject.user*
+.qmake.stash
+.qmake.cache
+
+# Qt generated
+*.autogen/
+*.qrc.depends
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Binaries/artifacts
+*.app
+*.dSYM/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+FreeTunnel
+freetunnel
+
+# Logs/temp
+*.log
+*.tmp
+
+env/
+.env/
+venv/
+.idea/
+.vscode/
+*.swp

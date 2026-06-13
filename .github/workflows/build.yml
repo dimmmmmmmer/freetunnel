@@ -1,0 +1,393 @@
+name: Build
+
+# Builds the FreeTunnel Qt client for Linux, macOS (arm64 + Intel) and Windows.
+#
+# The client is not self-contained: it links against the C++ VPN core from
+# TrustTunnel/TrustTunnelClient (target `vpnlibs_trusttunnel`). The strategy is
+# to check that repo out as `upstream/`, drop this repo into
+# `upstream/FreeTunnel/`, then configure CMake from the upstream root so the
+# upstream conan bootstrap runs and the `vpnlibs_trusttunnel` target exists.
+#
+# HTTP3/QUIC (quiche) is disabled for the release builds, which removes the Rust
+# dependency from the core build. An optional HTTP/3 variant lives in
+# build-http3.yml.
+#
+# Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
+# signed so it launches after the user approves it in Gatekeeper; see the README.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
+  # Pinned for reproducible builds and so the wrapper telemetry patch
+  # (scripts/patch_core_wrapper.py) applies against a known source. Bump
+  # deliberately and re-verify the patch.
+  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
+  CONAN_VER: '2.12'
+  # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
+  # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build:
+    name: Build (${{ matrix.artifact }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Built on ubuntu-22.04 (glibc 2.35) so the AppImage runs on most
+          # current distros (Ubuntu 22.04+, Debian 12+, recent Fedora). Qt and a
+          # modern clang come from aqt/llvm.sh, not the distro's old packages.
+          - os: ubuntu-22.04
+            platform: linux
+            qt_host: linux
+            qt_arch: linux_gcc_64
+            artifact: freetunnel-linux-x86_64
+          # Universal macOS: built on the Apple-Silicon runner; the x86_64 slice
+          # is cross-compiled (Apple clang) and lipo-merged, so no Intel runner
+          # is needed. Qt comes from aqt (clang_64 is a universal build).
+          - os: macos-15
+            platform: macos
+            qt_host: mac
+            qt_arch: clang_64
+            artifact: freetunnel-macos-universal
+          - os: windows-latest
+            platform: windows
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
+            artifact: freetunnel-windows-x86_64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout client
+        uses: actions/checkout@v5
+        with:
+          path: client
+
+      - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_REF }}
+          path: upstream
+
+      - name: Inject client into upstream tree
+        shell: bash
+        run: |
+          set -eux
+          rm -rf upstream/FreeTunnel
+          mkdir -p upstream/FreeTunnel
+          (cd client && tar --exclude='./.git' -cf - .) | (cd upstream/FreeTunnel && tar -xf -)
+          {
+            printf '\n# --- injected by FreeTunnel CI ---\n'
+            printf 'if (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")\n'
+            printf '    add_subdirectory(FreeTunnel)\n'
+            printf 'endif ()\n'
+          } >> upstream/CMakeLists.txt
+          test -f upstream/conanfile.py
+          test -f upstream/requirements.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Patch core wrapper (surface tunnel stats)
+        shell: bash
+        run: python3 client/scripts/patch_core_wrapper.py upstream
+
+      # ---------------------------------------------------------------- Linux
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          # Modern clang (the core is clang-only; 22.04's default clang is too old).
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
+          # transitive includes the core relies on (e.g. <algorithm>); clang-18
+          # auto-selects the newest GCC, matching what works on ubuntu-24.04.
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y g++-13
+          # ninja, FUSE for AppImage, and the X/GL libs Qt's platform plugin needs
+          # so linuxdeploy can find and bundle them.
+          sudo apt-get install -y ninja-build libfuse2 libbsd-dev \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+          pip install -r upstream/requirements.txt
+          pip install "conan~=${CONAN_VER}"
+
+      # ---------------------------------------------------------------- macOS
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          # Target macOS 11 (Big Sur, first Apple-Silicon release) for broad
+          # compatibility. Set early so conan-built deps and the app share it.
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          # ninja is preinstalled on the macOS runner; only install if missing.
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          pip install -r upstream/requirements.txt
+          pip install "conan~=${CONAN_VER}"
+
+      # -------------------------------------------------------------- Windows
+      - name: Set up MSVC (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+
+      # Qt via aqt for all platforms: Linux (gcc_64), macOS (universal clang_64),
+      # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
+      # AppImage bundle a modern Qt regardless of the distro.
+      - name: Install Qt (aqt)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: ${{ matrix.qt_host }}
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # ninja is preinstalled on windows-latest; installing it again warns.
+          choco install -y strawberryperl nasm nsis
+          pip install -r upstream/requirements.txt
+          pip install "conan~=$env:CONAN_VER"
+
+      # ------------------------------------------------------------- Caching
+      - name: ccache
+        if: matrix.platform != 'windows'
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          # Key includes the runner OS so deps/objects built against one glibc
+          # are never reused on another (e.g. ubuntu-24.04 -> ubuntu-22.04).
+          key: ${{ matrix.os }}-${{ matrix.artifact }}-ccache
+
+      - name: Conan cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2
+          key: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
+          restore-keys: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-
+
+      - name: Patch bootstrap for Windows (run .sh via sh)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -eux
+          sed -i 's/subprocess\.run(\[os\.path\.join(/subprocess.run(["sh", os.path.join(/g' \
+            upstream/scripts/bootstrap_conan_deps.py
+
+      - name: Bootstrap conan dependencies
+        working-directory: upstream
+        shell: bash
+        run: ./scripts/bootstrap_conan_deps.py
+
+      - name: Prepare conan profile and pin AdGuard deps
+        shell: bash
+        run: |
+          set -eux
+          conan profile detect --force
+          # The upstream bootstrap exports the *latest* DnsLibs tag, which can drift
+          # ahead of the version pinned in conanfile.py. Export the exact one.
+          DNS_VER=$(grep -oE 'dns-libs/[0-9]+\.[0-9]+\.[0-9]+@adguard/oss' \
+            upstream/conanfile.py | head -1 | sed -E 's#dns-libs/([0-9.]+)@.*#\1#')
+          echo "pinned dns-libs=${DNS_VER}"
+          rm -rf _dnslibs
+          git clone --depth 1 --branch "v${DNS_VER}" \
+            https://github.com/AdguardTeam/DnsLibs.git _dnslibs
+          conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
+          rm -rf _dnslibs
+
+      # ----------------------------------------------------------- Configure
+      - name: Configure (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          # clang-18 from llvm.sh (upstream is clang-only; gcc trips -Werror=extra)
+          # with libstdc++; Qt comes from aqt ($QT_ROOT_DIR).
+          cmake -S upstream -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries"
+
+      # macOS configures/builds both arches in the universal step below.
+
+      - name: Configure (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cmake -S upstream -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON `
+            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+
+      # --------------------------------------------------------------- Build
+      - name: Build
+        if: matrix.platform != 'macos'
+        run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ------------------------------------------------------------- Package
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -eux
+          mkdir -p out staging
+          cp build/FreeTunnel/FreeTunnel staging/
+          cp -a build/FreeTunnel/assets staging/assets 2>/dev/null || true
+          tar -C staging -czf out/${{ matrix.artifact }}.tar.gz .
+
+          # AppImage (best-effort: never block the tar.gz artifact). Qt is the
+          # aqt install, so point linuxdeploy-plugin-qt at its qmake.
+          set +e
+          export ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 QMAKE="$QT_ROOT_DIR/bin/qmake"
+          ld=linuxdeploy-x86_64.AppImage
+          ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
+          chmod +x "$ld" "$ldqt"
+          rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
+          cp client/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
+          printf '%s\n' \
+            '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
+            'Exec=FreeTunnel' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            > AppDir/usr/share/applications/freetunnel.desktop
+          # Bundle the gcc-13 libstdc++/libgcc we built against, so the AppImage
+          # also runs on distros that ship an older libstdc++.
+          PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --plugin qt \
+            --desktop-file AppDir/usr/share/applications/freetunnel.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png \
+            --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
+            --library "$(g++-13 -print-file-name=libgcc_s.so.1)" \
+            --output appimage
+          img=$(ls FreeTunnel*.AppImage 2>/dev/null | head -1)
+          [ -n "$img" ] && mv "$img" out/${{ matrix.artifact }}.AppImage || echo "AppImage build skipped/failed"
+          set -e
+          ls -la out
+
+      - name: Build & package universal (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          set -eux
+          common=(-S upstream -G Ninja
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON
+            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR")
+
+          # The core deps include quiche (Rust); cross-building the x86_64 slice
+          # needs that Rust target installed (the runner only has the native one).
+          rustup target add x86_64-apple-darwin
+
+          # arm64 (native) and x86_64 (cross-compiled by Apple clang).
+          cmake "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build-arm64 --target FreeTunnel -j3
+          cmake "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build build-x64 --target FreeTunnel -j3
+
+          # Merge the two slices into a universal binary inside the arm64 bundle.
+          APP=build-arm64/FreeTunnel/FreeTunnel.app
+          lipo -create \
+            build-arm64/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel \
+            build-x64/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel \
+            -output "$APP/Contents/MacOS/FreeTunnel"
+          lipo -info "$APP/Contents/MacOS/FreeTunnel"
+
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite
+          # Ad-hoc sign so the bundle launches once the user approves it in
+          # Gatekeeper (no Developer ID available for full signing/notarization).
+          codesign --force --deep --sign - "$APP" || true
+          mkdir -p out
+          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -ov -format UDZO \
+            out/${{ matrix.artifact }}.dmg
+
+      - name: Package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "build\FreeTunnel"
+          $exe = Get-ChildItem -Path $bin -Recurse -Filter FreeTunnel.exe | Select-Object -First 1
+          $deploy = Join-Path $env:QT_ROOT_DIR "bin\windeployqt.exe"
+          New-Item -ItemType Directory -Force -Path dist, out | Out-Null
+          Copy-Item $exe.FullName dist\
+          if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
+          & $deploy --release --no-translations dist\FreeTunnel.exe
+          Compress-Archive -Path dist\* -DestinationPath out\${{ matrix.artifact }}.zip -Force
+
+          # NSIS installer (best-effort). NSIS resolves relative File paths
+          # against the .nsi directory, so pass an ABSOLUTE build dir.
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (Test-Path $nsis) {
+            $distAbs = (Resolve-Path dist).Path
+            & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
+            $setup = Get-ChildItem -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
+            if ($setup) { Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" }
+          } else {
+            Write-Host "NSIS not found; skipping installer"
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+          if-no-files-found: warn
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Unsigned builds.
+
+            - **macOS**: the app is ad-hoc signed but not notarized. On first launch
+              right-click the app → Open (or run
+              `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
+            - **Windows**: SmartScreen may warn — choose "More info" → "Run anyway".

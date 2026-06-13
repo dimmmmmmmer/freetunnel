@@ -1,0 +1,35 @@
+name: Tests
+
+# Fast, core-independent unit tests (Qt only — no conan/VPN core), so they give
+# quick feedback on every push/PR without the heavy native build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qt6-base-dev
+
+      - name: Configure
+        run: cmake -S tests -B build-tests -G Ninja
+
+      - name: Build
+        run: cmake --build build-tests -j
+
+      - name: Test
+        run: ctest --test-dir build-tests --output-on-failure
