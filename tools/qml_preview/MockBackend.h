@@ -23,7 +23,16 @@ class MockBackend : public QObject {
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY changed)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY changed)
     Q_PROPERTY(QStringList domains READ domains NOTIFY changed)
+    Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY changed)
+    Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY changed)
+    Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY changed)
 public:
+    QString hotkeyToggle() const { return m_hkToggle; }
+    QString hotkeyConnect() const { return m_hkConnect; }
+    QString hotkeyDisconnect() const { return m_hkDisconnect; }
+    void setHotkeyToggle(const QString &v) { m_hkToggle = v; emit changed(); }
+    void setHotkeyConnect(const QString &v) { m_hkConnect = v; emit changed(); }
+    void setHotkeyDisconnect(const QString &v) { m_hkDisconnect = v; emit changed(); }
     bool splitEnabled() const { return m_split; }
     void setSplitEnabled(bool v) { m_split = v; emit changed(); }
     QStringList domains() const { return m_domains; }
@@ -88,4 +97,7 @@ private:
     bool m_split = true;
     QStringList m_domains{QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
                           QStringLiteral("netflix.com")};
+    QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");
+    QString m_hkConnect;
+    QString m_hkDisconnect;
 };

@@ -48,6 +48,12 @@ struct AppSettings {
     bool ssh_bypass_enabled = false;
     bool p2p_bypass_enabled = false;
 
+    // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
+    // Empty string = unbound.
+    QString hotkey_toggle = "";
+    QString hotkey_connect = "";
+    QString hotkey_disconnect = "";
+
     // Last used config
     QString last_config_path = "";
 

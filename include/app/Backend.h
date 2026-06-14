@@ -16,6 +16,8 @@
 #include "core/AppSettings.h"
 #include "vpn/qt_trusttunnel_client.h"
 
+class QHotkey;
+
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
@@ -34,6 +36,10 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY logChanged)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
+    // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
+    Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
+    Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
+    Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -79,6 +85,13 @@ public:
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
 
+    QString hotkeyToggle() const { return m_settings.hotkey_toggle; }
+    QString hotkeyConnect() const { return m_settings.hotkey_connect; }
+    QString hotkeyDisconnect() const { return m_settings.hotkey_disconnect; }
+    void setHotkeyToggle(const QString &v);
+    void setHotkeyConnect(const QString &v);
+    void setHotkeyDisconnect(const QString &v);
+
 signals:
     void stateChanged();
     void tick();
@@ -87,17 +100,22 @@ signals:
     void settingsChanged();
     void logChanged();
     void splitChanged();
+    void hotkeysChanged();
     void errorOccurred(const QString &msg);
 
 private:
     void reloadConfigs();
     void persistSettings();
+    void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);
     bool ensureElevated(); // returns false (and relaunches) if elevation needed
     QString nameForPath(const QString &path) const;
 
     QtTrustTunnelClient m_client;
     AppSettings m_settings;
+    QHotkey *m_hkToggle = nullptr;
+    QHotkey *m_hkConnect = nullptr;
+    QHotkey *m_hkDisconnect = nullptr;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;

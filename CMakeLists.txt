@@ -10,6 +10,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 COMPONENTS Gui Widgets Qml Quick Network Svg REQUIRED)
 set(TRUSTTUNNEL_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." CACHE PATH "Path to TrustTunnelClient repository root")
 
+# QHotkey: cross-platform global (system-wide) hotkeys. Fetched at configure
+# time; builds a small static lib linked into the app.
+include(FetchContent)
+set(QHOTKEY_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+# QHotkey 1.5.0 declares cmake_minimum_required(VERSION 3.1), which modern CMake
+# rejects; relax the floor so its subproject configures.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+FetchContent_Declare(
+    QHotkey
+    GIT_REPOSITORY https://github.com/Skycoder42/QHotkey.git
+    GIT_TAG 1.5.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(QHotkey)
+
 set(FREETUNNEL_GIT_VERSION "unknown")
 find_package(Git QUIET)
 if (GIT_FOUND)
@@ -79,7 +95,7 @@ if (NOT TARGET vpnlibs_trusttunnel)
         "(this directory injected as a subdirectory of the core's root CMake), "
         "so the VPN core library is available to link against.")
 endif()
-target_link_libraries(FreeTunnel PRIVATE Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::Network Qt6::Svg vpnlibs_trusttunnel)
+target_link_libraries(FreeTunnel PRIVATE Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::Network Qt6::Svg QHotkey::QHotkey vpnlibs_trusttunnel)
 target_include_directories(FreeTunnel PRIVATE
     ${TRUSTTUNNEL_REPO_ROOT}/trusttunnel/include
     ${TRUSTTUNNEL_REPO_ROOT}/common/include

@@ -68,6 +68,21 @@ Window {
     property string overlay: "" // "", "create", "adapters"
     readonly property var navIcons: ["connection", "network", "configs", "settings", "log"]
 
+    // Map a Qt key code to a portable QKeySequence name (used by HotkeyField).
+    function keyName(key, text) {
+        if (key >= Qt.Key_A && key <= Qt.Key_Z) return String.fromCharCode(key)
+        if (key >= Qt.Key_0 && key <= Qt.Key_9) return String.fromCharCode(key)
+        if (key >= Qt.Key_F1 && key <= Qt.Key_F12) return "F" + (key - Qt.Key_F1 + 1)
+        var m = {}
+        m[Qt.Key_Space] = "Space"; m[Qt.Key_Tab] = "Tab"; m[Qt.Key_Return] = "Return"
+        m[Qt.Key_Enter] = "Enter"; m[Qt.Key_Home] = "Home"; m[Qt.Key_End] = "End"
+        m[Qt.Key_Insert] = "Ins"; m[Qt.Key_PageUp] = "PgUp"; m[Qt.Key_PageDown] = "PgDown"
+        m[Qt.Key_Up] = "Up"; m[Qt.Key_Down] = "Down"; m[Qt.Key_Left] = "Left"; m[Qt.Key_Right] = "Right"
+        if (m[key] !== undefined) return m[key]
+        if (text && text.length === 1 && text.charCodeAt(0) >= 33) return text.toUpperCase()
+        return ""
+    }
+
     // ---------- main content (nav + page) ----------
     ColumnLayout {
         anchors.fill: parent
@@ -121,6 +136,57 @@ Window {
         leftPadding: 2; bottomPadding: 4
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
+
+    // Click to record a global hotkey chord; emits a portable sequence string
+    // ("Ctrl+Alt+T"). Backspace clears, Esc cancels.
+    component HotkeyField: Item {
+        id: hk
+        property string label: ""
+        property string value: ""
+        signal captured(string seq)
+        Layout.fillWidth: true
+        Layout.preferredHeight: 42
+        property bool capturing: false
+        RowLayout {
+            anchors.fill: parent
+            Text { text: hk.label; color: theme.text; font.pixelSize: 14 }
+            Item { Layout.fillWidth: true }
+            Rectangle {
+                Layout.preferredHeight: 28
+                Layout.preferredWidth: Math.max(96, lbl.implicitWidth + 24)
+                radius: 6
+                color: hk.capturing ? theme.infoBg : theme.surface
+                border.width: hk.capturing ? 1 : 0; border.color: theme.accent
+                Text {
+                    id: lbl; anchors.centerIn: parent
+                    text: hk.capturing ? "Нажмите…" : (hk.value || "—")
+                    color: (hk.value || hk.capturing) ? theme.text : theme.textFaint
+                    font.pixelSize: 13
+                }
+                MouseArea { anchors.fill: parent; onClicked: { hk.capturing = true; hk.forceActiveFocus() } }
+            }
+        }
+        Keys.onPressed: function(e) {
+            if (!hk.capturing) return
+            e.accepted = true
+            if (e.key === Qt.Key_Escape) { hk.capturing = false; return }
+            if (e.key === Qt.Key_Backspace || e.key === Qt.Key_Delete) {
+                hk.capturing = false; hk.captured(""); return
+            }
+            if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift
+                    || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return
+            var parts = []
+            if (e.modifiers & Qt.ControlModifier) parts.push("Ctrl")
+            if (e.modifiers & Qt.AltModifier) parts.push("Alt")
+            if (e.modifiers & Qt.ShiftModifier) parts.push("Shift")
+            if (e.modifiers & Qt.MetaModifier) parts.push("Meta")
+            var kn = win.keyName(e.key, e.text)
+            if (kn === "") return
+            parts.push(kn)
+            hk.capturing = false
+            hk.captured(parts.join("+"))
+        }
+    }
 
     // ===================== Home (Подключение) =====================
     Component {
@@ -355,6 +421,16 @@ Window {
                     Text { text: "блокировать трафик вне VPN"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
                     Item { Layout.fillWidth: true }
                     Toggle { checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
+                Item { Layout.preferredHeight: 16 }
+                SectionLabel { text: "Горячие клавиши" }
+                HotkeyField { label: "Переключить VPN"; value: backend.hotkeyToggle
+                    onCaptured: function(s){ backend.hotkeyToggle = s } }
+                Sep {}
+                HotkeyField { label: "Подключить"; value: backend.hotkeyConnect
+                    onCaptured: function(s){ backend.hotkeyConnect = s } }
+                Sep {}
+                HotkeyField { label: "Отключить"; value: backend.hotkeyDisconnect
+                    onCaptured: function(s){ backend.hotkeyDisconnect = s } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: "Обслуживание" }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42

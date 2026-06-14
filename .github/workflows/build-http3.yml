@@ -71,7 +71,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build clang \
-            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev libqt6svg6-dev qt6-svg-dev
+            qt6-base-dev qt6-base-dev-tools qt6-base-private-dev \
+            qt6-declarative-dev libqt6svg6-dev qt6-svg-dev \
+            libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey (GuiPrivate + xcb)
           pip install -r upstream/requirements.txt
           pip install "conan~=${CONAN_VER}"
 

@@ -125,7 +125,8 @@ jobs:
           sudo apt-get install -y ninja-build libfuse2 libbsd-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey builds against xcb/X11
           pip install -r upstream/requirements.txt
           pip install "conan~=${CONAN_VER}"
 
