@@ -1,4 +1,5 @@
 #pragma once
+#include <QMap>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -23,6 +24,8 @@ class MockBackend : public QObject {
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY changed)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY changed)
     Q_PROPERTY(QStringList domains READ domains NOTIFY changed)
+    Q_PROPERTY(QStringList profiles READ profiles NOTIFY changed)
+    Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY changed)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY changed)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY changed)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY changed)
@@ -76,10 +79,18 @@ public:
     void setHotkeyDisconnect(const QString &v) { m_hkDisconnect = v; emit changed(); }
     bool splitEnabled() const { return m_split; }
     void setSplitEnabled(bool v) { m_split = v; emit changed(); }
-    QStringList domains() const { return m_domains; }
-    Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_domains << d.trimmed(); emit changed(); }
-    Q_INVOKABLE void removeDomain(int i) { if (i >= 0 && i < m_domains.size()) m_domains.removeAt(i); emit changed(); }
-    Q_INVOKABLE void clearDomains() { m_domains.clear(); emit changed(); }
+    QStringList domains() const { return m_profiles.value(m_activeProfile); }
+    Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); }
+    Q_INVOKABLE void removeDomain(int i) { auto &l = m_profiles[m_activeProfile]; if (i >= 0 && i < l.size()) l.removeAt(i); emit changed(); }
+    Q_INVOKABLE void clearDomains() { m_profiles[m_activeProfile].clear(); emit changed(); }
+    QStringList profiles() const {
+        QStringList n = m_profiles.keys(); n.removeAll("Default"); n.sort(); n.prepend("Default"); return n;
+    }
+    QString activeProfile() const { return m_activeProfile; }
+    Q_INVOKABLE void selectProfile(const QString &n) { if (m_profiles.contains(n)) m_activeProfile = n; emit changed(); }
+    Q_INVOKABLE void addProfile(const QString &n) { if (!n.trimmed().isEmpty() && !m_profiles.contains(n)) { m_profiles.insert(n, {}); m_activeProfile = n; } emit changed(); }
+    Q_INVOKABLE void removeProfile(const QString &n) { if (n != "Default") { m_profiles.remove(n); if (m_activeProfile == n) m_activeProfile = "Default"; } emit changed(); }
+    Q_INVOKABLE void renameProfile(const QString &o, const QString &nn) { if (o != "Default" && !nn.trimmed().isEmpty() && m_profiles.contains(o) && !m_profiles.contains(nn)) { m_profiles.insert(nn, m_profiles.take(o)); if (m_activeProfile == o) m_activeProfile = nn; } emit changed(); }
     QVariantList logEntries() const {
         auto e = [](const char *t, const char *l, const char *m) {
             QVariantMap v; v["time"] = t; v["level"] = l; v["msg"] = m; return QVariant(v);
@@ -136,8 +147,11 @@ private:
     bool m_kill = true;
     bool m_logCleared = false;
     bool m_split = true;
-    QStringList m_domains{QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
-                          QStringLiteral("netflix.com")};
+    QString m_activeProfile = QStringLiteral("Default");
+    QMap<QString, QStringList> m_profiles{
+        {QStringLiteral("Default"), {QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
+                                     QStringLiteral("netflix.com")}},
+        {QStringLiteral("Работа"), {QStringLiteral("intranet.corp")}}};
     QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");
     QString m_hkConnect;
     QString m_hkDisconnect;

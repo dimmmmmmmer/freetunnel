@@ -29,9 +29,15 @@ struct AppSettings {
     QStringList custom_dns_servers = {"1.1.1.1", "8.8.8.8"};
 
     // Domain bypass rules: domains matching these patterns skip the VPN tunnel.
-    // Supports wildcards: *.example.com, exact: example.com
+    // Supports wildcards: *.example.com, exact: example.com. domain_bypass_rules
+    // mirrors the active profile's list (this is what the core consumes).
     bool domain_bypass_enabled = false;
     QStringList domain_bypass_rules;
+
+    // Split-tunnel profiles: named sets of domain-bypass rules. The active
+    // profile's rules are mirrored into domain_bypass_rules above.
+    QString active_profile = "Default";
+    QMap<QString, QStringList> profiles{{"Default", {}}};
 
     // Adapter conflict scanning
     bool scan_adapter_conflicts = true;

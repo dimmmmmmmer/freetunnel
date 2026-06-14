@@ -38,6 +38,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY logChanged)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
+    Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
+    Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
@@ -98,6 +100,13 @@ public:
     Q_INVOKABLE void addDomain(const QString &domain);
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
+
+    QStringList profiles() const;
+    QString activeProfile() const { return m_settings.active_profile; }
+    Q_INVOKABLE void selectProfile(const QString &name);
+    Q_INVOKABLE void addProfile(const QString &name);
+    Q_INVOKABLE void removeProfile(const QString &name);
+    Q_INVOKABLE void renameProfile(const QString &oldName, const QString &newName);
 
     QString hotkeyToggle() const { return m_settings.hotkey_toggle; }
     QString hotkeyConnect() const { return m_settings.hotkey_connect; }

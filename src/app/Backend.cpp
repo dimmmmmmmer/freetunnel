@@ -608,15 +608,68 @@ void Backend::setSplitEnabled(bool v) {
 void Backend::addDomain(const QString &domain) {
     const QString d = domain.trimmed();
     if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d)) return;
-    m_settings.domain_bypass_rules << d; persistSettings(); emit splitChanged();
+    m_settings.domain_bypass_rules << d;
+    m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
+    persistSettings(); emit splitChanged();
 }
 void Backend::removeDomain(int index) {
     if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
-    m_settings.domain_bypass_rules.removeAt(index); persistSettings(); emit splitChanged();
+    m_settings.domain_bypass_rules.removeAt(index);
+    m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
+    persistSettings(); emit splitChanged();
 }
 void Backend::clearDomains() {
     if (m_settings.domain_bypass_rules.isEmpty()) return;
-    m_settings.domain_bypass_rules.clear(); persistSettings(); emit splitChanged();
+    m_settings.domain_bypass_rules.clear();
+    m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
+    persistSettings(); emit splitChanged();
+}
+
+// ---------- split-tunnel profiles ----------
+
+QStringList Backend::profiles() const {
+    QStringList names = m_settings.profiles.keys();
+    names.removeAll(QStringLiteral("Default"));
+    names.sort(Qt::CaseInsensitive);
+    names.prepend(QStringLiteral("Default")); // Default always first
+    return names;
+}
+
+void Backend::selectProfile(const QString &name) {
+    if (!m_settings.profiles.contains(name) || m_settings.active_profile == name) return;
+    m_settings.active_profile = name;
+    m_settings.domain_bypass_rules = m_settings.profiles.value(name);
+    persistSettings(); emit splitChanged();
+}
+
+void Backend::addProfile(const QString &name) {
+    const QString n = name.trimmed();
+    if (n.isEmpty() || m_settings.profiles.contains(n)) return;
+    m_settings.profiles.insert(n, {});
+    m_settings.active_profile = n;
+    m_settings.domain_bypass_rules.clear();
+    persistSettings(); emit splitChanged();
+}
+
+void Backend::removeProfile(const QString &name) {
+    if (name == QLatin1String("Default") || !m_settings.profiles.contains(name)) return;
+    m_settings.profiles.remove(name);
+    if (m_settings.active_profile == name) {
+        m_settings.active_profile = QStringLiteral("Default");
+        m_settings.domain_bypass_rules = m_settings.profiles.value(QStringLiteral("Default"));
+    }
+    persistSettings(); emit splitChanged();
+}
+
+void Backend::renameProfile(const QString &oldName, const QString &newName) {
+    const QString n = newName.trimmed();
+    if (oldName == QLatin1String("Default") || n.isEmpty()
+            || !m_settings.profiles.contains(oldName) || m_settings.profiles.contains(n))
+        return;
+    m_settings.profiles.insert(n, m_settings.profiles.take(oldName));
+    if (m_settings.active_profile == oldName)
+        m_settings.active_profile = n;
+    persistSettings(); emit splitChanged();
 }
 
 void Backend::persistSettings() { saveAppSettings(m_settings); }

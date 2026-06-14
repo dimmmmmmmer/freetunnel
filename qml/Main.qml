@@ -233,6 +233,7 @@ Window {
                     Layout.alignment: Qt.AlignHCenter; spacing: 6
                     Text { text: backend.activeConfig; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                     Text { text: "▾"; color: theme.textDim; font.pixelSize: 15 }
+                    MouseArea { anchors.fill: parent; onClicked: win.currentPage = 2 } // open Configs
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12; visible: backend.connected
@@ -277,6 +278,46 @@ Window {
                     Text { text: "Включить"; color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
                     Toggle { checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
+                }
+                Item { Layout.preferredHeight: 10 }
+                SectionLabel { text: "Профиль" }
+                Flow {
+                    Layout.fillWidth: true; Layout.topMargin: 2; spacing: 6
+                    Repeater {
+                        model: backend.profiles
+                        Rectangle {
+                            required property string modelData
+                            radius: 13; height: 28; implicitWidth: prn.width + 24
+                            color: modelData === backend.activeProfile ? theme.accent : theme.surface
+                            Text { id: prn; anchors.centerIn: parent; text: parent.modelData
+                                   color: parent.modelData === backend.activeProfile ? "white" : theme.text; font.pixelSize: 13 }
+                            MouseArea { anchors.fill: parent; onClicked: backend.selectProfile(parent.modelData) }
+                        }
+                    }
+                    Rectangle {
+                        radius: 13; height: 28; implicitWidth: 34; color: theme.surface
+                        border.color: theme.border; border.width: 1
+                        Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 17 }
+                        MouseArea { anchors.fill: parent; onClicked: { npRow.visible = true; npInput.forceActiveFocus() } }
+                    }
+                }
+                Rectangle {
+                    id: npRow; visible: false
+                    Layout.fillWidth: true; Layout.topMargin: 6; Layout.preferredHeight: 36; radius: 8
+                    color: theme.bg; border.color: theme.accent; border.width: 1
+                    TextInput {
+                        id: npInput; anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        verticalAlignment: TextInput.AlignVCenter; clip: true; font.pixelSize: 13; color: theme.text
+                        onAccepted: { backend.addProfile(text); text = ""; npRow.visible = false }
+                    }
+                    Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                           text: "имя профиля и Enter"; color: theme.textFaint; font.pixelSize: 13
+                           visible: npInput.text.length === 0 }
+                }
+                RowLayout { Layout.fillWidth: true; Layout.topMargin: 6; visible: backend.activeProfile !== "Default"
+                    Item { Layout.fillWidth: true }
+                    Text { text: "Удалить профиль «" + backend.activeProfile + "»"; color: theme.danger; font.pixelSize: 12
+                        MouseArea { anchors.fill: parent; onClicked: backend.removeProfile(backend.activeProfile) } }
                 }
                 Item { Layout.preferredHeight: 12 }
                 RowLayout { Layout.fillWidth: true
