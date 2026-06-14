@@ -10,6 +10,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 
 #include "core/AppSettings.h"
 #include "vpn/qt_trusttunnel_client.h"
@@ -29,6 +30,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY logChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -59,17 +61,23 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
 
+    QVariantList logEntries() const { return m_log; }
+    Q_INVOKABLE void clearLogs();
+    Q_INVOKABLE void openLogFolder();
+
 signals:
     void stateChanged();
     void tick();
     void configChanged();
     void configsChanged();
     void settingsChanged();
+    void logChanged();
     void errorOccurred(const QString &msg);
 
 private:
     void reloadConfigs();
     void persistSettings();
+    void appendLog(const QString &level, const QString &msg);
     bool ensureElevated(); // returns false (and relaunches) if elevation needed
     QString nameForPath(const QString &path) const;
 
@@ -79,6 +87,7 @@ private:
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;
     bool m_connected = false;
+    QVariantList m_log;
 
     QElapsedTimer m_session;
     QTimer m_ticker;

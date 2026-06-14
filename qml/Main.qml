@@ -330,31 +330,35 @@ Window {
             anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 8
             RowLayout { Layout.fillWidth: true; Layout.topMargin: 6
                 Item { Layout.fillWidth: true }
-                Text { text: "Уровень: INFO ▾"; color: theme.textDim; font.pixelSize: 13; rightPadding: 12 }
-                Text { text: "⧉"; color: theme.textDim; font.pixelSize: 16; rightPadding: 10 }
-                Text { text: "🗑"; color: theme.textDim; font.pixelSize: 15 }
+                Text { text: "Уровень: INFO ▾"; color: theme.textDim; font.pixelSize: 13; rightPadding: 14 }
+                Text { text: "Очистить"; color: theme.textDim; font.pixelSize: 13
+                    MouseArea { anchors.fill: parent; onClicked: backend.clearLogs() } }
             }
             Rectangle {
                 Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
-                Column {
+                clip: true
+                Text {
+                    anchors.centerIn: parent; visible: backend.logEntries.length === 0
+                    text: "Логи появятся после подключения"; color: theme.textFaint; font.pixelSize: 13
+                }
+                ListView {
                     anchors.fill: parent; anchors.margins: 12; spacing: 3
-                    Repeater {
-                        model: [ { t: "12:04:32", l: "INFO", c: "#185fa5", m: "connecting frankfurt.example.com:443 (HTTP/2)" },
-                                 { t: "12:04:33", l: "WARN", c: "#ba7517", m: "DNS upstream 1.1.1.1 slow, retrying" },
-                                 { t: "12:04:34", l: "INFO", c: "#1d9e75", m: "tunnel established (utun5)" },
-                                 { t: "12:04:34", l: "INFO", c: "#6b7280", m: "post-quantum key exchange: X25519MLKEM768" },
-                                 { t: "12:06:11", l: "ERROR", c: "#a32d2d", m: "connection reset, reconnecting (1)" },
-                                 { t: "12:06:13", l: "INFO", c: "#1d9e75", m: "tunnel re-established" } ]
-                        Row { required property var modelData; spacing: 6
-                            Text { text: parent.modelData.t; color: theme.textFaint; font.pixelSize: 11; font.family: "Menlo" }
-                            Text { text: parent.modelData.l; color: parent.modelData.c; font.pixelSize: 11; font.family: "Menlo" }
-                            Text { text: parent.modelData.m; color: theme.text; font.pixelSize: 11; font.family: "Menlo" }
-                        }
+                    model: backend.logEntries
+                    clip: true
+                    onCountChanged: positionViewAtEnd()
+                    delegate: Row {
+                        required property var modelData
+                        spacing: 6
+                        Text { text: modelData.time; color: theme.textFaint; font.pixelSize: 11; font.family: "Menlo" }
+                        Text { text: modelData.level; font.pixelSize: 11; font.family: "Menlo"
+                               color: modelData.level === "ERROR" ? "#a32d2d" : modelData.level === "WARN" ? "#ba7517" : "#185fa5" }
+                        Text { text: modelData.msg; color: theme.text; font.pixelSize: 11; font.family: "Menlo" }
                     }
                 }
             }
             RowLayout { Layout.fillWidth: true; Layout.bottomMargin: 12
-                Text { text: "📂 ~/Library/Application Support/FreeTunnel/freetunnel.log"; color: theme.accent; font.pixelSize: 12 }
+                Text { text: "📂 открыть файл логов"; color: theme.accent; font.pixelSize: 12
+                    MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
                 Item { Layout.fillWidth: true }
                 Text { text: "Авто-прокрутка"; color: theme.textDim; font.pixelSize: 12; rightPadding: 8 }
                 Toggle { checked: true; implicitWidth: 34; implicitHeight: 20 }

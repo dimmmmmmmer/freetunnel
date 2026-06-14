@@ -2,6 +2,8 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 
 // Stand-in for the real Backend so the QML UI can be built/previewed without the
 // C++ core. Mirrors the Backend property/method surface the QML binds to.
@@ -18,7 +20,22 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY changed)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY changed)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY changed)
+    Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY changed)
 public:
+    QVariantList logEntries() const {
+        auto e = [](const char *t, const char *l, const char *m) {
+            QVariantMap v; v["time"] = t; v["level"] = l; v["msg"] = m; return QVariant(v);
+        };
+        return m_logCleared ? QVariantList{}
+                            : QVariantList{
+                                  e("12:04:32", "INFO", "connecting frankfurt.example.com:443 (HTTP/2)"),
+                                  e("12:04:33", "WARN", "DNS upstream 1.1.1.1 slow, retrying"),
+                                  e("12:04:34", "INFO", "tunnel established (utun5)"),
+                                  e("12:06:11", "ERROR", "connection reset, reconnecting (1)"),
+                                  e("12:06:13", "INFO", "tunnel re-established") };
+    }
+    Q_INVOKABLE void clearLogs() { m_logCleared = true; emit changed(); }
+    Q_INVOKABLE void openLogFolder() {}
     bool connected() const { return m_on; }
     QString sessionTime() const { return QStringLiteral("01:24:36"); }
     QString downSpeed() const { return QStringLiteral("12.4"); }
@@ -57,4 +74,5 @@ private:
     QString m_theme = QStringLiteral("system");
     bool m_autoConnect = false;
     bool m_kill = true;
+    bool m_logCleared = false;
 };

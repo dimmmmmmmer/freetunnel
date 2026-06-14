@@ -3,8 +3,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QProcess>
 #include <QStandardPaths>
+#include <QTime>
 #include <QUrl>
+#include <QVariantMap>
 
 #include "core/AppSettings.h"
 #include "core/AppUiUtils.h"
@@ -32,14 +35,19 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 }
                 m_connected = nowConnected;
                 emit stateChanged();
+                appendLog(QStringLiteral("INFO"), statusText());
             });
     connect(&m_client, &QtTrustTunnelClient::tunnelStats, this,
             [this](quint64 up, quint64 down) {
                 m_accUp += up;
                 m_accDown += down;
             });
-    connect(&m_client, &QtTrustTunnelClient::vpnError, this,
-            [this](const QString &m) { emit errorOccurred(m); });
+    connect(&m_client, &QtTrustTunnelClient::connectionInfo, this,
+            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
+    connect(&m_client, &QtTrustTunnelClient::vpnError, this, [this](const QString &m) {
+        appendLog(QStringLiteral("ERROR"), m);
+        emit errorOccurred(m);
+    });
 
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() {
@@ -161,6 +169,45 @@ bool Backend::importFile(const QString &path) {
     }
     reloadConfigs();
     return true;
+}
+
+void Backend::appendLog(const QString &level, const QString &msg) {
+    QVariantMap e;
+    e[QStringLiteral("time")] = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    e[QStringLiteral("level")] = level;
+    e[QStringLiteral("msg")] = msg;
+    m_log.append(e);
+    if (m_log.size() > 500)
+        m_log.removeFirst();
+    emit logChanged();
+}
+
+void Backend::clearLogs() {
+    m_log.clear();
+    emit logChanged();
+}
+
+void Backend::openLogFolder() {
+    QString path = m_settings.log_path;
+    if (path.isEmpty()) {
+        path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                + QStringLiteral("/freetunnel.log");
+    }
+    const QString dir = QFileInfo(path).absolutePath();
+#if defined(Q_OS_MACOS)
+    if (QFileInfo::exists(path))
+        QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-R"), path});
+    else
+        QProcess::startDetached(QStringLiteral("open"), {dir});
+#elif defined(Q_OS_WIN)
+    if (QFileInfo::exists(path))
+        QProcess::startDetached(QStringLiteral("explorer.exe"),
+                                {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
+    else
+        QProcess::startDetached(QStringLiteral("explorer.exe"), {QDir::toNativeSeparators(dir)});
+#else
+    QProcess::startDetached(QStringLiteral("xdg-open"), {dir});
+#endif
 }
 
 void Backend::persistSettings() { saveAppSettings(m_settings); }
