@@ -1,6 +1,6 @@
 # FreeTunnel — Project Audit
 
-Date: 2026-06-14 · Version: 1.0.0 · Scope: the Qt/QML client in this repository.
+Date: 2026-06-15 · Version: 1.0.0 · Scope: the Qt/QML client in this repository.
 The VPN core lives in `TrustTunnel/TrustTunnelClient` and is out of scope except
 where the integration matters.
 
@@ -37,13 +37,14 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 | 1 | Distribution | Medium | Binaries are unsigned → Gatekeeper/SmartScreen friction; macOS is ad-hoc signed only. | Documented for users; add Developer ID / Windows signing when certs exist (CI hooks ready). |
 | 2 | Integration fragility | Medium | Live telemetry relies on patching upstream `client.{h,cpp}` in CI (`scripts/patch_core_wrapper.py`); deep-link/`tunnel_stats` assume a specific core API. | Pinned `UPSTREAM_REF` mitigates. On bump: re-run the patch, rebuild, re-check `VpnCallbacks`. Better: upstream a PR exposing the handler. |
 | 3 | Dependency drift | Medium | `dns-libs` is re-pinned in CI because the upstream bootstrap exports the *latest* tag. | Current pin handles it; pin `native_libs_common` too if it ever drifts. |
-| 4 | Feature scope | Low (by design) | Split tunneling is **domain-based only**. Per-app routing is not implemented (the core does not expose it); the old per-app mock UI was removed. | Revisit per-app routing only if/when the core supports it (Win WFP / mac NE / Linux cgroup). |
+| 4 | Feature scope | Low (by design) | Split tunneling is **domain-based**, with named **profiles** (functional). Per-app routing is not implemented — verified the core exposes only domain `exclusions` + routes, no app-level API. | Revisit per-app only if/when the core supports it (Win WFP / mac NE / Linux cgroup). |
 | 5 | Hotkeys (Linux) | Low | Global hotkeys use QHotkey, which is **X11-only** on Linux — no Wayland support. | Acceptable; document. Hotkeys are optional and empty by default. |
 | 6 | Tray (Linux) | Low | The Qt.labs.platform tray needs a StatusNotifier/AppIndicator host; absent on some minimal desktops. | App still works without a tray; window remains usable. |
 | 7 | Updater | Low | The in-app updater works because the repo is **public** (GitHub Releases API, unauthenticated). | Keep the repo public, or ship a token-less alternative if it ever goes private. |
 | 8 | Credentials | Low (by design) | Deep links and TOML configs carry cleartext username/password. | Deep-link URIs are not logged; configs live in the per-user config dir. |
 | 9 | Security (elevation) | Low (OK) | Elevation uses `osascript`/`pkexec` with escaped args on the app's own path (not user input). | No action; keep inputs non-user-controlled. |
 | 10 | Housekeeping | Low | `removeConfig` drops a config from the list but leaves a self-created `.toml` on disk; a few QML `MouseArea`s anchor inside a layout (benign UB warning). | Cosmetic; tidy opportunistically. |
+| 11 | i18n | Low (OK) | Full EN/RU: English source strings, bundled Russian `.qm`, live language switch. New strings must be wrapped in `qsTr`/`tr` and `freetunnel_ru.ts` re-released. | Run `lupdate`/`lrelease` when adding strings. |
 
 ## What is solid
 
@@ -54,7 +55,12 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
   release-on-tag publishes artifacts; cheap Linux unit-test job on every push.
 - **Reproducible core** via pinned `UPSTREAM_REF`; conan + ccache caching.
 - **Clean codebase**: the Qt Widgets layer and dead helpers/assets from the
-  fork were removed; the QML UI binds to one well-scoped `Backend`.
+  fork were removed; the QML UI binds to one well-scoped `Backend`. Every UI
+  control is wired to real behaviour (no decorative toggles/buttons).
+- **Functional depth**: deep-link control, global hotkeys, tray, in-app
+  updater, network-adapter scan, split-tunnel profiles, per-config ping,
+  autostart, clipboard/file import — all backed.
+- **Localised**: full EN/RU with a live language switch.
 - **Tested surface**: 5 Qt-only unit suites — deep-link codec, config import,
   app settings round-trip, config store, and control-command parsing.
 
