@@ -28,3 +28,19 @@ add_executable(test_configimport
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
 target_link_libraries(test_configimport PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME configimport COMMAND test_configimport)
+
+add_executable(test_appsettings
+    test_appsettings.cpp
+    ../src/core/AppSettings.cpp
+)
+target_include_directories(test_appsettings PRIVATE ../include ../include/core)
+target_link_libraries(test_appsettings PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME appsettings COMMAND test_appsettings)
+
+add_executable(test_configstore
+    test_configstore.cpp
+    ../src/core/ConfigStore.cpp
+)
+target_include_directories(test_configstore PRIVATE ../include ../include/core)
+target_link_libraries(test_configstore PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME configstore COMMAND test_configstore)

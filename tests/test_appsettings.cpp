@@ -1,0 +1,67 @@
+#include <QtTest>
+
+#include <QCoreApplication>
+#include <QSettings>
+#include <QTemporaryDir>
+
+#include "core/AppSettings.h"
+
+// Round-trip coverage for the settings store, including the global-hotkey
+// fields. QSettings is redirected to a temp dir so the test never touches the
+// real user scope.
+class TestAppSettings : public QObject {
+    Q_OBJECT
+    QTemporaryDir m_dir;
+
+private slots:
+    void initTestCase();
+    void defaultsWhenEmpty();
+    void roundTrip();
+};
+
+void TestAppSettings::initTestCase() {
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnel"));
+    QCoreApplication::setApplicationName(QStringLiteral("FreeTunnel"));
+    QVERIFY(m_dir.isValid());
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_dir.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.path());
+}
+
+void TestAppSettings::defaultsWhenEmpty() {
+    // Fresh, empty scope yields the documented defaults.
+    AppSettings s = loadAppSettings();
+    QCOMPARE(s.language, QStringLiteral("en"));
+    QCOMPARE(s.theme_mode, QStringLiteral("system"));
+    QCOMPARE(s.auto_connect_on_start, false);
+    QVERIFY(s.hotkey_toggle.isEmpty());
+    QVERIFY(s.hotkey_connect.isEmpty());
+    QVERIFY(s.hotkey_disconnect.isEmpty());
+}
+
+void TestAppSettings::roundTrip() {
+    AppSettings in;
+    in.language = QStringLiteral("ru");
+    in.theme_mode = QStringLiteral("dark");
+    in.auto_connect_on_start = true;
+    in.killswitch_enabled = true;
+    in.domain_bypass_enabled = true;
+    in.domain_bypass_rules = {QStringLiteral("github.com"), QStringLiteral("*.gov.ru")};
+    in.hotkey_toggle = QStringLiteral("Ctrl+Alt+T");
+    in.hotkey_connect = QStringLiteral("Ctrl+Alt+C");
+    in.hotkey_disconnect = QStringLiteral("Ctrl+Alt+D");
+    saveAppSettings(in);
+
+    AppSettings out = loadAppSettings();
+    QCOMPARE(out.language, in.language);
+    QCOMPARE(out.theme_mode, in.theme_mode);
+    QCOMPARE(out.auto_connect_on_start, true);
+    QCOMPARE(out.killswitch_enabled, true);
+    QCOMPARE(out.domain_bypass_enabled, true);
+    QCOMPARE(out.domain_bypass_rules, in.domain_bypass_rules);
+    QCOMPARE(out.hotkey_toggle, in.hotkey_toggle);
+    QCOMPARE(out.hotkey_connect, in.hotkey_connect);
+    QCOMPARE(out.hotkey_disconnect, in.hotkey_disconnect);
+}
+
+QTEST_MAIN(TestAppSettings)
+#include "test_appsettings.moc"
