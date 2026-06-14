@@ -3,21 +3,11 @@
         <file>logo.png</file>
         <file alias="LICENSE">../LICENSE</file>
     </qresource>
-    <qresource prefix="/styles">
-        <file alias="claude.qss">../resources/styles/claude.qss</file>
-    </qresource>
     <qresource prefix="/icons">
-        <file alias="general.svg">icons/general.svg</file>
         <file alias="connection.svg">icons/connection.svg</file>
         <file alias="network.svg">icons/network.svg</file>
-        <file alias="adapters.svg">icons/adapters.svg</file>
-        <file alias="logging.svg">icons/logging.svg</file>
-        <file alias="maintenance.svg">icons/maintenance.svg</file>
-        <file alias="about.svg">icons/about.svg</file>
-        <file alias="licenses.svg">icons/licenses.svg</file>
-        <file alias="home.svg">icons/home.svg</file>
-        <file alias="log.svg">icons/log.svg</file>
-        <file alias="settings.svg">icons/settings.svg</file>
         <file alias="configs.svg">icons/configs.svg</file>
+        <file alias="settings.svg">icons/settings.svg</file>
+        <file alias="log.svg">icons/log.svg</file>
     </qresource>
 </RCC>

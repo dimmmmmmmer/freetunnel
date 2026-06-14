@@ -15,13 +15,14 @@ name: Build
 # Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
 # signed so it launches after the user approves it in Gatekeeper; see the README.
 
-# Cost control: the full Mac/Win/Linux matrix is expensive (macOS minutes are
-# billed 10x), so it runs only on release tags and manual dispatch — NOT on
-# every push/PR. Per-push validation is handled by the cheap Linux-only
-# tests.yml. Trigger a one-off matrix build from the Actions tab if needed.
+# The repo is public, so Actions on standard runners are free — run the full
+# Mac/Win/Linux matrix on PRs and main for continuous validation, plus on
+# release tags (which also publish artifacts) and manual dispatch.
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 concurrency:
