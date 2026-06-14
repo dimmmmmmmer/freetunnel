@@ -53,8 +53,6 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/AppSettings.h
     src/core/ConfigStore.cpp
     include/core/ConfigStore.h
-    src/core/ConfigInspector.cpp
-    include/core/ConfigInspector.h
     src/core/DeepLink.cpp
     include/core/DeepLink.h
     src/core/ConfigImport.cpp
@@ -63,8 +61,6 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/AppUiUtils.h
     src/core/NetworkAdapterManager.cpp
     include/core/NetworkAdapterManager.h
-    src/core/ProcessManager.cpp
-    include/core/ProcessManager.h
     src/core/UpdateChecker.cpp
     include/core/UpdateChecker.h
     src/vpn/qt_trusttunnel_client.cpp

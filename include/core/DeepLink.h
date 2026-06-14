@@ -44,7 +44,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error =
 QString encodeDeepLink(const DeepLinkConfig &cfg);
 
 // Render the config as TrustTunnel client TOML so the normal import path can
-// consume it. Mirrors the schema produced by ConfigWizard.
+// consume it. Mirrors the schema produced by the create-config form.
 QString deepLinkConfigToToml(const DeepLinkConfig &cfg);
 
 } // namespace freetunnel

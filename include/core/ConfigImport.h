@@ -1,7 +1,7 @@
 #pragma once
 
 // Pure, UI-independent logic for importing a config from a deep link, so it can
-// be unit-tested without MainWindow / the VPN core.
+// be unit-tested without the UI / the VPN core.
 
 #include <QString>
 #include <optional>
