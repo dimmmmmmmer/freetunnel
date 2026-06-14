@@ -301,6 +301,24 @@ bool Backend::createConfig(const QVariantMap &f) {
     return true;
 }
 
+void Backend::setSplitEnabled(bool v) {
+    if (m_settings.domain_bypass_enabled == v) return;
+    m_settings.domain_bypass_enabled = v; persistSettings(); emit splitChanged();
+}
+void Backend::addDomain(const QString &domain) {
+    const QString d = domain.trimmed();
+    if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d)) return;
+    m_settings.domain_bypass_rules << d; persistSettings(); emit splitChanged();
+}
+void Backend::removeDomain(int index) {
+    if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
+    m_settings.domain_bypass_rules.removeAt(index); persistSettings(); emit splitChanged();
+}
+void Backend::clearDomains() {
+    if (m_settings.domain_bypass_rules.isEmpty()) return;
+    m_settings.domain_bypass_rules.clear(); persistSettings(); emit splitChanged();
+}
+
 void Backend::persistSettings() { saveAppSettings(m_settings); }
 
 void Backend::setLanguage(const QString &v) {

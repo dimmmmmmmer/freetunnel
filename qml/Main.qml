@@ -171,13 +171,13 @@ Window {
                     Text { text: "✎"; color: theme.textDim; font.pixelSize: 16 }
                     Text { text: "🗑"; color: theme.textDim; font.pixelSize: 15 }
                 }
-                RowLayout { Layout.fillWidth: true; height: 42
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Включить"; color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
-                    Toggle { checked: true }
+                    Toggle { checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
                 }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; height: 42
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Режим"; color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
                     Text { text: "Указанное — мимо VPN ▾"; color: theme.textDim; font.pixelSize: 14 }
@@ -191,7 +191,7 @@ Window {
                 Repeater {
                     model: [ { n: "Google Chrome", on: true }, { n: "Telegram", on: false }, { n: "Steam", on: true } ]
                     ColumnLayout { required property var modelData; Layout.fillWidth: true
-                        RowLayout { Layout.fillWidth: true; height: 40
+                        RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 40
                             Text { text: "▣"; color: theme.textDim; font.pixelSize: 16 }
                             Text { text: parent.parent.modelData.n; color: theme.text; font.pixelSize: 14; leftPadding: 8 }
                             Item { Layout.fillWidth: true }
@@ -204,28 +204,39 @@ Window {
                 RowLayout { Layout.fillWidth: true
                     SectionLabel { text: "Домены — мимо VPN" }
                     Item { Layout.fillWidth: true }
-                    Text { text: "🧹 Очистить все"; color: theme.danger; font.pixelSize: 12 }
+                    Text { text: "🧹 Очистить все"; color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
+                        MouseArea { anchors.fill: parent; onClicked: backend.clearDomains() } }
                 }
                 Flow {
                     Layout.fillWidth: true; Layout.topMargin: 4; spacing: 6
                     Repeater {
-                        model: ["github.com", "*.gov.ru", "netflix.com"]
+                        model: backend.domains
                         Rectangle {
                             required property string modelData
+                            required property int index
                             radius: 12; color: theme.surface
                             implicitWidth: chipRow.width + 20; implicitHeight: 26
                             Row { id: chipRow; anchors.centerIn: parent; spacing: 5
                                 Text { text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
-                                Text { text: "×"; color: theme.textDim; font.pixelSize: 14 }
+                                Text { text: "×"; color: theme.textDim; font.pixelSize: 14
+                                    MouseArea { anchors.fill: parent; onClicked: backend.removeDomain(parent.parent.parent.index) } }
                             }
                         }
                     }
                 }
                 Rectangle {
-                    Layout.fillWidth: true; Layout.topMargin: 8; height: 36; radius: 8
-                    color: theme.bg; border.color: theme.border; border.width: 1
+                    Layout.fillWidth: true; Layout.topMargin: 8; Layout.preferredHeight: 36; radius: 8
+                    color: theme.bg; border.color: domInput.activeFocus ? theme.accent : theme.border; border.width: 1
+                    TextInput {
+                        id: domInput
+                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        verticalAlignment: TextInput.AlignVCenter; clip: true
+                        font.pixelSize: 13; color: theme.text
+                        onAccepted: { backend.addDomain(text); text = "" }
+                    }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                           text: "добавить домен и Enter"; color: theme.textFaint; font.pixelSize: 13 }
+                           text: "добавить домен и Enter"; color: theme.textFaint; font.pixelSize: 13
+                           visible: domInput.text.length === 0 && !domInput.activeFocus }
                 }
                 Item { Layout.preferredHeight: 16 }
             }

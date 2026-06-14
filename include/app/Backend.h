@@ -32,6 +32,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY logChanged)
+    Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
+    Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -67,6 +69,13 @@ public:
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE void openLogFolder();
 
+    bool splitEnabled() const { return m_settings.domain_bypass_enabled; }
+    QStringList domains() const { return m_settings.domain_bypass_rules; }
+    void setSplitEnabled(bool v);
+    Q_INVOKABLE void addDomain(const QString &domain);
+    Q_INVOKABLE void removeDomain(int index);
+    Q_INVOKABLE void clearDomains();
+
 signals:
     void stateChanged();
     void tick();
@@ -74,6 +83,7 @@ signals:
     void configsChanged();
     void settingsChanged();
     void logChanged();
+    void splitChanged();
     void errorOccurred(const QString &msg);
 
 private:

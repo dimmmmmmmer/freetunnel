@@ -21,7 +21,15 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY changed)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY changed)
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY changed)
+    Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY changed)
+    Q_PROPERTY(QStringList domains READ domains NOTIFY changed)
 public:
+    bool splitEnabled() const { return m_split; }
+    void setSplitEnabled(bool v) { m_split = v; emit changed(); }
+    QStringList domains() const { return m_domains; }
+    Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_domains << d.trimmed(); emit changed(); }
+    Q_INVOKABLE void removeDomain(int i) { if (i >= 0 && i < m_domains.size()) m_domains.removeAt(i); emit changed(); }
+    Q_INVOKABLE void clearDomains() { m_domains.clear(); emit changed(); }
     QVariantList logEntries() const {
         auto e = [](const char *t, const char *l, const char *m) {
             QVariantMap v; v["time"] = t; v["level"] = l; v["msg"] = m; return QVariant(v);
@@ -77,4 +85,7 @@ private:
     bool m_autoConnect = false;
     bool m_kill = true;
     bool m_logCleared = false;
+    bool m_split = true;
+    QStringList m_domains{QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
+                          QStringLiteral("netflix.com")};
 };
