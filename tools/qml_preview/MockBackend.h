@@ -62,6 +62,8 @@ public:
         emit changed();
     }
     Q_INVOKABLE bool importDeepLink(const QString &) { return true; }
+    Q_INVOKABLE bool importFile(const QString &) { return true; }
+    Q_INVOKABLE bool createConfig(const QVariantMap &) { return true; }
 signals:
     void changed();
 private:

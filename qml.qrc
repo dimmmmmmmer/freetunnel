@@ -2,5 +2,6 @@
   <qresource prefix="/">
     <file alias="Main.qml">qml/Main.qml</file>
     <file alias="Toggle.qml">qml/Toggle.qml</file>
+    <file alias="Field.qml">qml/Field.qml</file>
   </qresource>
 </RCC>

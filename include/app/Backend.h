@@ -11,6 +11,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include "core/AppSettings.h"
 #include "vpn/qt_trusttunnel_client.h"
@@ -60,6 +61,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
+    Q_INVOKABLE bool createConfig(const QVariantMap &fields);
 
     QVariantList logEntries() const { return m_log; }
     Q_INVOKABLE void clearLogs();

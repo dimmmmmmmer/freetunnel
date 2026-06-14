@@ -1,6 +1,7 @@
 #include "app/Backend.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
@@ -208,6 +209,96 @@ void Backend::openLogFolder() {
 #else
     QProcess::startDetached(QStringLiteral("xdg-open"), {dir});
 #endif
+}
+
+static QString tomlEsc(const QString &s) {
+    QString o = s;
+    o.replace('\\', "\\\\").replace('"', "\\\"");
+    return o;
+}
+static QString csvToTomlArray(const QString &csv) {
+    QStringList items;
+    for (const QString &raw : csv.split(',', Qt::SkipEmptyParts)) {
+        const QString v = raw.trimmed();
+        if (!v.isEmpty())
+            items << QStringLiteral("\"%1\"").arg(tomlEsc(v));
+    }
+    return items.join(QStringLiteral(", "));
+}
+
+bool Backend::createConfig(const QVariantMap &f) {
+    const QString name = f.value(QStringLiteral("name")).toString().trimmed();
+    const QString hostname = f.value(QStringLiteral("hostname")).toString().trimmed();
+    const QString addresses = f.value(QStringLiteral("addresses")).toString().trimmed();
+    const QString username = f.value(QStringLiteral("username")).toString().trimmed();
+    const QString password = f.value(QStringLiteral("password")).toString();
+    if (hostname.isEmpty() || addresses.isEmpty() || username.isEmpty() || password.isEmpty()) {
+        emit errorOccurred(tr("Заполните имя хоста, адрес, логин и пароль"));
+        return false;
+    }
+    const QString proto = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
+    const bool ipv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
+    const QString cert = f.value(QStringLiteral("certificate")).toString().trimmed();
+
+    QString t;
+    t += QStringLiteral("loglevel = \"info\"\n");
+    t += QStringLiteral("vpn_mode = \"general\"\n");
+    t += QStringLiteral("killswitch_enabled = false\n");
+    t += QStringLiteral("post_quantum_group_enabled = true\n");
+    t += QStringLiteral("dns_upstreams = [%1]\n")
+                 .arg(csvToTomlArray(f.value(QStringLiteral("dns")).toString()));
+    t += QStringLiteral("\n[endpoint]\n");
+    t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEsc(hostname));
+    t += QStringLiteral("addresses = [%1]\n").arg(csvToTomlArray(addresses));
+    t += QStringLiteral("username = \"%1\"\n").arg(tomlEsc(username));
+    t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(password));
+    t += QStringLiteral("client_random = \"%1\"\n")
+                 .arg(tomlEsc(f.value(QStringLiteral("clientRandom")).toString()));
+    t += QStringLiteral("custom_sni = \"%1\"\n")
+                 .arg(tomlEsc(f.value(QStringLiteral("customSni")).toString()));
+    t += QStringLiteral("has_ipv6 = %1\n").arg(ipv6 ? "true" : "false");
+    t += QStringLiteral("skip_verification = false\n");
+    t += QStringLiteral("upstream_protocol = \"%1\"\n").arg(proto == "http3" ? "http3" : "http2");
+    t += QStringLiteral("anti_dpi = false\n");
+    if (!cert.isEmpty())
+        t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n").arg(cert);
+    else
+        t += QStringLiteral("certificate = \"\"\n");
+    t += QStringLiteral("\n[listener.tun]\n");
+    t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
+    t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
+    t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
+                        "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+
+    QString safe;
+    const QString src = name.isEmpty() ? hostname : name;
+    for (const QChar &c : src)
+        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
+    if (safe.isEmpty())
+        safe = QStringLiteral("config-%1").arg(QDateTime::currentSecsSinceEpoch());
+
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    const QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
+    QFile file(target);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        emit errorOccurred(tr("Не удалось записать конфиг"));
+        return false;
+    }
+    file.write(t.toUtf8());
+    file.close();
+
+    QStringList stored = loadStoredConfigs();
+    if (!stored.contains(target)) {
+        stored << target;
+        saveStoredConfigs(stored);
+    }
+    reloadConfigs();
+    m_activePath = target;
+    m_settings.last_config_path = target;
+    persistSettings();
+    emit configChanged();
+    return true;
 }
 
 void Backend::persistSettings() { saveAppSettings(m_settings); }

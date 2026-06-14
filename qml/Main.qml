@@ -370,7 +370,10 @@ Window {
     Component {
         id: createConfig
         Rectangle {
+            id: cform
             color: theme.bg
+            property string protocol: "http2"
+            property bool ipv6: true
             RowLayout {
                 id: chdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                 anchors.margins: 14; spacing: 10
@@ -383,34 +386,52 @@ Window {
                 anchors.leftMargin: 18; anchors.rightMargin: 18; contentHeight: fcol.height; clip: true
                 Column {
                     id: fcol; width: parent.width; spacing: 10
-                    Repeater {
-                        model: ["Имя", "Хост сервера", "Адрес(а) · host:port", "Логин", "Пароль",
-                                "Протокол · HTTP/2 ▾", "DNS-серверы", "Custom SNI",
-                                "Routing profile ▾", "Client random (hex)"]
-                        Column { required property string modelData; width: parent.width; spacing: 4
-                            Text { text: parent.modelData; color: theme.textDim; font.pixelSize: 13 }
-                            Rectangle { width: parent.width; height: 34; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1 }
-                        }
+                    Field { id: fName; label: "Имя"; placeholder: "Германия · Франкфурт" }
+                    Field { id: fHost; label: "Хост сервера"; placeholder: "frankfurt.example.com" }
+                    Field { id: fAddr; label: "Адрес(а) · host:port (через запятую)"; placeholder: "1.2.3.4:443" }
+                    Row { width: parent.width; spacing: 10
+                        Field { id: fUser; label: "Логин"; width: (parent.width - 10) / 2 }
+                        Field { id: fPass; label: "Пароль"; password: true; width: (parent.width - 10) / 2 }
                     }
-                    Row { width: parent.width; height: 30; spacing: 8
+                    Row { width: parent.width; spacing: 10
+                        Column { width: (parent.width - 10) / 2; spacing: 4
+                            Text { text: "Протокол"; color: theme.textDim; font.pixelSize: 13 }
+                            Rectangle { width: parent.width; height: 34; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
+                                Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                                       text: (cform.protocol === "http3" ? "HTTP/3" : "HTTP/2") + "  ▾"; color: theme.text; font.pixelSize: 14 }
+                                MouseArea { anchors.fill: parent; onClicked: cform.protocol = (cform.protocol === "http2" ? "http3" : "http2") } }
+                        }
+                        Field { id: fDns; label: "DNS-серверы"; placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
+                    }
+                    Row { width: parent.width; spacing: 10
+                        Field { id: fSni; label: "Custom SNI"; width: (parent.width - 10) / 2 }
+                        Field { id: fRandom; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
+                    }
+                    Row { width: parent.width; height: 32; spacing: 8
                         Text { text: "Allow IPv6 connections"; color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
-                        Item { width: parent.width - 240; height: 1 }
-                        Toggle { checked: true; anchors.verticalCenter: parent.verticalCenter }
+                        Item { width: parent.width - 220; height: 1 }
+                        Toggle { checked: cform.ipv6; anchors.verticalCenter: parent.verticalCenter; onToggled: function(v){ cform.ipv6 = v } }
                     }
                     Column { width: parent.width; spacing: 4
-                        Row { width: parent.width
-                            Text { text: "Сертификат (PEM)"; color: theme.textDim; font.pixelSize: 13 }
-                            Item { width: parent.width - 230; height: 1 }
-                            Text { text: "из файла"; color: theme.accent; font.pixelSize: 12; rightPadding: 12 }
-                            Text { text: "вставить"; color: theme.accent; font.pixelSize: 12 }
-                        }
-                        Rectangle { width: parent.width; height: 60; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1 }
+                        Text { text: "Сертификат (PEM) · необязательно"; color: theme.textDim; font.pixelSize: 13 }
+                        Rectangle { width: parent.width; height: 70; radius: 8; color: theme.bg; border.color: fCert.activeFocus ? theme.accent : theme.border; border.width: 1
+                            Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
+                                TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: "Menlo"; color: theme.text; wrapMode: TextEdit.WrapAnywhere } } }
                     }
                     Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 10; topPadding: 4; bottomPadding: 16
                         Rectangle { width: 110; height: 36; radius: 8; color: theme.accent
-                            Text { anchors.centerIn: parent; text: "Сохранить"; color: "white"; font.pixelSize: 14 } }
+                            Text { anchors.centerIn: parent; text: "Сохранить"; color: "white"; font.pixelSize: 14 }
+                            MouseArea { anchors.fill: parent; onClicked: {
+                                var ok = backend.createConfig({
+                                    name: fName.text, hostname: fHost.text, addresses: fAddr.text,
+                                    username: fUser.text, password: fPass.text, protocol: cform.protocol,
+                                    dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
+                                    allowIpv6: cform.ipv6, certificate: fCert.text });
+                                if (ok) win.overlay = "";
+                            } } }
                         Rectangle { width: 90; height: 36; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Отмена"; color: theme.text; font.pixelSize: 14 } }
+                            Text { anchors.centerIn: parent; text: "Отмена"; color: theme.text; font.pixelSize: 14 }
+                            MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
                     }
                 }
             }
