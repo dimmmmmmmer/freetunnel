@@ -127,6 +127,25 @@ void Backend::connectVpn() {
 
 void Backend::disconnectVpn() { m_client.disconnectVpn(); }
 
+void Backend::handleControl(const QString &command) {
+    QString c = command.trimmed();
+    if (c.isEmpty() || c == QLatin1String("focus"))
+        return; // window raise handled by the caller
+    if (c.startsWith(QLatin1String("tt://"))) {
+        importDeepLink(c);
+        return;
+    }
+    if (c.startsWith(QLatin1String("freetunnel://")))
+        c = c.mid(QStringLiteral("freetunnel://").size());
+    c = c.remove('/').toLower();
+    if (c == QLatin1String("toggle"))
+        toggle();
+    else if (c == QLatin1String("connect"))
+        connectVpn();
+    else if (c == QLatin1String("disconnect"))
+        disconnectVpn();
+}
+
 void Backend::selectConfig(int index) {
     if (index < 0 || index >= m_paths.size())
         return;

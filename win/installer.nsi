@@ -1,4 +1,4 @@
-; TrustTunnel Qt Client — NSIS Installer Script
+; FreeTunnel — NSIS Installer Script
 ; Installs to Program Files, requests admin elevation, creates uninstaller,
 ; Start Menu shortcut, and optional Desktop shortcut.
 
@@ -116,6 +116,17 @@ Section "Install"
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=in action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=out action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
 
+  ; URL protocol handlers: route freetunnel:// and tt:// links to the app
+  ; (e.g. freetunnel://toggle, or a tt:// config-import link).
+  WriteRegStr HKLM "Software\Classes\freetunnel" "" "URL:FreeTunnel Protocol"
+  WriteRegStr HKLM "Software\Classes\freetunnel" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\freetunnel\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
+  WriteRegStr HKLM "Software\Classes\freetunnel\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
+  WriteRegStr HKLM "Software\Classes\tt" "" "URL:FreeTunnel Protocol"
+  WriteRegStr HKLM "Software\Classes\tt" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\tt\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
+  WriteRegStr HKLM "Software\Classes\tt\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
+
 SectionEnd
 
 ;--------------------------------
@@ -148,5 +159,7 @@ Section "Uninstall"
 
   ; Remove registry keys
   DeleteRegKey HKLM "${PRODUCT_UNINST_KEY}"
+  DeleteRegKey HKLM "Software\Classes\freetunnel"
+  DeleteRegKey HKLM "Software\Classes\tt"
 
 SectionEnd

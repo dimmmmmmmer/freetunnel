@@ -93,6 +93,11 @@ set_target_properties(FreeTunnel PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "FreeTunnel"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.freetunnel.app"
     MACOSX_BUNDLE_ICON_FILE "logo.icns"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    # Custom Info.plist adds CFBundleURLTypes so macOS routes freetunnel:// and
+    # tt:// links to the app (delivered as QFileOpenEvent).
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/macos/Info.plist.in"
 )
 
 if (WIN32 AND MSVC)

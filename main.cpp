@@ -1,11 +1,52 @@
+#include <QEvent>
+#include <QFileOpenEvent>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QString>
 #include <QUrl>
+#include <QWindow>
 
 #include "app/Backend.h"
+
+// macOS delivers custom-scheme URLs via QFileOpenEvent (not argv). Buffer any
+// URL that arrives before the engine is ready, then route it to the backend.
+class UrlOpenFilter : public QObject {
+public:
+    Backend *backend = nullptr;
+    QWindow *win = nullptr;
+    QString pending;
+    void ready(Backend *b, QWindow *w) {
+        backend = b; win = w;
+        if (!pending.isEmpty()) { apply(pending); pending.clear(); }
+    }
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override {
+        if (e->type() == QEvent::FileOpen) {
+            const QString u = static_cast<QFileOpenEvent *>(e)->url().toString();
+            if (!u.isEmpty()) { backend ? apply(u) : (void)(pending = u); }
+            return true;
+        }
+        return QObject::eventFilter(o, e);
+    }
+    void apply(const QString &u) {
+        backend->handleControl(u);
+        if (win) { win->show(); win->raise(); win->requestActivate(); }
+    }
+};
+
+// Pull a control argument (deep link) out of argv, if present.
+static QString controlArgFrom(int argc, char *argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        const QString a = QString::fromLocal8Bit(argv[i]);
+        if (a.startsWith(QStringLiteral("tt://")) || a.startsWith(QStringLiteral("freetunnel://")))
+            return a;
+    }
+    return QString();
+}
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -45,20 +86,57 @@ int main(int argc, char *argv[]) {
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
     app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
 
-    Backend backend;
+    const QString controlArg = controlArgFrom(argc, argv);
+    const QString kInstanceKey = QStringLiteral("FreeTunnelInstance");
 
-    // Import an official deep link passed on the command line (tt://...).
-    for (int i = 1; i < argc; ++i) {
-        const QString arg = QString::fromLocal8Bit(argv[i]);
-        if (arg.startsWith(QStringLiteral("tt://")))
-            backend.importDeepLink(arg);
+    // Single instance: if one is already running, hand it our control command
+    // (e.g. freetunnel://toggle) and exit instead of opening a second window.
+    {
+        QLocalSocket probe;
+        probe.connectToServer(kInstanceKey);
+        if (probe.waitForConnected(250)) {
+            probe.write((controlArg.isEmpty() ? QStringLiteral("focus") : controlArg).toUtf8());
+            probe.flush();
+            probe.waitForBytesWritten(300);
+            probe.disconnectFromServer();
+            return 0;
+        }
     }
+    QLocalServer::removeServer(kInstanceKey);
+    auto *server = new QLocalServer(&app);
+    server->listen(kInstanceKey);
+
+    UrlOpenFilter urlFilter;
+    app.installEventFilter(&urlFilter); // catch macOS URL opens early
+
+    Backend backend;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty())
         return -1;
+
+    auto *win = qobject_cast<QWindow *>(engine.rootObjects().first());
+    urlFilter.ready(&backend, win); // flush any URL that arrived during startup
+    if (!controlArg.isEmpty())
+        backend.handleControl(controlArg);
+
+    // A second instance forwards its command here.
+    QObject::connect(server, &QLocalServer::newConnection, &app, [server, &backend, win]() {
+        QLocalSocket *c = server->nextPendingConnection();
+        if (!c)
+            return;
+        c->waitForReadyRead(250);
+        const QString cmd = QString::fromUtf8(c->readAll());
+        c->deleteLater();
+        backend.handleControl(cmd);
+        if (win) {
+            win->show();
+            win->raise();
+            win->requestActivate();
+        }
+    });
 
     return app.exec();
 }

@@ -282,7 +282,8 @@ jobs:
           cp client/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
-            'Exec=FreeTunnel' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'Exec=FreeTunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > AppDir/usr/share/applications/freetunnel.desktop
           # Bundle the gcc-13 libstdc++/libgcc we built against, so the AppImage
           # also runs on distros that ship an older libstdc++.
