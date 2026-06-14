@@ -25,7 +25,6 @@
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
 #include "core/ControlCommand.h"
-#include "core/NetworkAdapterManager.h"
 #include "core/UpdateChecker.h"
 
 #ifndef _WIN32
@@ -168,49 +167,6 @@ void Backend::openLatestRelease() {
             ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
             : m_latestUrl;
     QDesktopServices::openUrl(QUrl(url));
-}
-
-// ---------- network adapters ----------
-
-bool Backend::adapterScanSupported() const {
-#ifdef Q_OS_WIN
-    return true;
-#else
-    return false;
-#endif
-}
-
-void Backend::scanAdapters() {
-    if (!m_adapterMgr)
-        m_adapterMgr = new NetworkAdapterManager(this);
-    m_adapters.clear();
-    const auto found = m_adapterMgr->scanAdapters();
-    const QStringList conflicts = NetworkAdapterManager::knownConflictPatterns();
-    for (const AdapterInfo &a : found) {
-        bool conflict = false;
-        for (const QString &p : conflicts)
-            if (a.name.contains(p, Qt::CaseInsensitive)
-                || a.description.contains(p, Qt::CaseInsensitive)) { conflict = true; break; }
-        QVariantMap m;
-        m[QStringLiteral("name")] = a.name;
-        m[QStringLiteral("description")] = a.description;
-        m[QStringLiteral("ours")] = a.isOurs;
-        m[QStringLiteral("enabled")] = a.enabled;
-        m[QStringLiteral("conflict")] = conflict && !a.isOurs;
-        m_adapters << m;
-    }
-    emit adaptersChanged();
-}
-
-void Backend::setAdapterEnabled(const QString &name, bool enabled) {
-    if (!m_adapterMgr)
-        m_adapterMgr = new NetworkAdapterManager(this);
-    const bool ok = enabled ? m_adapterMgr->enableAdapter(name)
-                            : m_adapterMgr->disableAdapter(name);
-    if (ok)
-        scanAdapters();
-    else
-        emit errorOccurred(tr("Could not change adapter: %1").arg(name));
 }
 
 // ---------- misc: log path, autostart, ping, clipboard import ----------

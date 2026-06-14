@@ -72,8 +72,6 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/ControlCommand.h
     src/core/AppUiUtils.cpp
     include/core/AppUiUtils.h
-    src/core/NetworkAdapterManager.cpp
-    include/core/NetworkAdapterManager.h
     src/core/UpdateChecker.cpp
     include/core/UpdateChecker.h
     src/vpn/qt_trusttunnel_client.cpp

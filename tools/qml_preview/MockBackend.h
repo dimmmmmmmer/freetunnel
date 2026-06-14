@@ -34,8 +34,6 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString updateState READ updateState NOTIFY changed)
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY changed)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY changed)
-    Q_PROPERTY(QVariantList adapters READ adapters NOTIFY changed)
-    Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY changed)
     Q_PROPERTY(QVariantList pings READ pings NOTIFY changed)
@@ -50,20 +48,6 @@ public:
         m_updateMessage = QStringLiteral("Доступна версия 1.1.0"); emit changed();
     }
     Q_INVOKABLE void openLatestRelease() {}
-    QVariantList adapters() const {
-        auto a = [](const char *n, const char *d, bool ours, bool on, bool conflict) {
-            QVariantMap v; v["name"] = n; v["description"] = d; v["ours"] = ours;
-            v["enabled"] = on; v["conflict"] = conflict; return QVariant(v);
-        };
-        return QVariantList{
-            a("FreeTunnel WinTUN", "Wintun Userspace Tunnel", true, true, false),
-            a("Radmin VPN Network Adapter", "Radmin VPN", false, true, true),
-            a("TAP-Windows Adapter V9", "TAP-Windows Provider V9", false, true, true),
-            a("OpenVPN Wintun", "Wintun Userspace Tunnel", false, false, false)};
-    }
-    bool adapterScanSupported() const { return true; }
-    Q_INVOKABLE void scanAdapters() { emit changed(); }
-    Q_INVOKABLE void setAdapterEnabled(const QString &, bool) { emit changed(); }
     QString logPath() const { return QStringLiteral("/Users/me/Library/Application Support/FreeTunnel/freetunnel.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v) { m_autoStart = v; emit changed(); }

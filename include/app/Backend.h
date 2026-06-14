@@ -18,7 +18,6 @@
 
 class QHotkey;
 class UpdateChecker;
-class NetworkAdapterManager;
 
 class Backend : public QObject {
     Q_OBJECT
@@ -50,9 +49,6 @@ class Backend : public QObject {
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|error
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
-    // Network adapters (third-party VPN adapter conflicts; Windows-only scan)
-    Q_PROPERTY(QVariantList adapters READ adapters NOTIFY adaptersChanged)
-    Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
     // Misc
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
@@ -124,11 +120,6 @@ public:
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestRelease();
 
-    QVariantList adapters() const { return m_adapters; }
-    bool adapterScanSupported() const;
-    Q_INVOKABLE void scanAdapters();
-    Q_INVOKABLE void setAdapterEnabled(const QString &name, bool enabled);
-
     QString logPath() const;
     bool autoStart() const;
     void setAutoStart(bool v);
@@ -146,7 +137,6 @@ signals:
     void splitChanged();
     void hotkeysChanged();
     void updateChanged();
-    void adaptersChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
@@ -167,8 +157,6 @@ private:
 
     UpdateChecker *m_updater = nullptr;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
-    NetworkAdapterManager *m_adapterMgr = nullptr;
-    QVariantList m_adapters;
     QVariantList m_pings;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths

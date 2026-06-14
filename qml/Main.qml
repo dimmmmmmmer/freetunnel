@@ -70,7 +70,7 @@ Window {
     }
 
     property int currentPage: 0
-    property string overlay: "" // "", "create", "adapters"
+    property string overlay: "" // "", "create"
     readonly property var navIcons: ["connection", "network", "configs", "settings", "log"]
 
     // Map a Qt key code to a portable QKeySequence name (used by HotkeyField).
@@ -134,8 +134,7 @@ Window {
     Loader {
         anchors.fill: parent
         active: win.overlay !== ""
-        sourceComponent: win.overlay === "create" ? createConfig
-                       : win.overlay === "adapters" ? adaptersPage : null
+        sourceComponent: win.overlay === "create" ? createConfig : null
     }
 
     // ---------- toast (errors/notices) ----------
@@ -512,12 +511,6 @@ Window {
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Network adapters"); color: theme.text; font.pixelSize: 14 }
-                    Text { text: "Windows"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
-                    Item { Layout.fillWidth: true } Text { text: "›"; color: theme.textDim; font.pixelSize: 16 }
-                    MouseArea { anchors.fill: parent; onClicked: win.overlay = "adapters" } }
-                Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: qsTr("Check for updates"); color: theme.text; font.pixelSize: 14 }
                     Text { visible: backend.updateMessage.length > 0; text: backend.updateMessage
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
@@ -664,59 +657,4 @@ Window {
         }
     }
 
-    // ===================== Adapters (sub-screen) =====================
-    Component {
-        id: adaptersPage
-        Rectangle {
-            color: theme.bg
-            Component.onCompleted: if (backend.adapterScanSupported) backend.scanAdapters()
-            RowLayout {
-                id: ahdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-                anchors.margins: 14; spacing: 10
-                Text { text: "←"; color: theme.textDim; font.pixelSize: 20
-                       MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
-                Text { text: qsTr("Network adapters"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
-                Item { Layout.fillWidth: true }
-                Text { visible: backend.adapterScanSupported; text: qsTr("Scan"); color: theme.accent; font.pixelSize: 13
-                       MouseArea { anchors.fill: parent; onClicked: backend.scanAdapters() } }
-            }
-            // Unsupported-platform notice (scan is Windows-only).
-            Text {
-                visible: !backend.adapterScanSupported
-                anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
-                anchors.margins: 18; wrapMode: Text.WordWrap
-                text: qsTr("Network adapter management is available on Windows only.")
-                color: theme.textFaint; font.pixelSize: 13
-            }
-            ColumnLayout {
-                visible: backend.adapterScanSupported
-                anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
-                anchors.leftMargin: 18; anchors.rightMargin: 18; anchors.topMargin: 4; spacing: 0
-                Text { text: qsTr("Third-party VPN adapters may conflict with FreeTunnel."); color: theme.textFaint; font.pixelSize: 12; Layout.bottomMargin: 8 }
-                Text { visible: backend.adapters.length === 0; text: qsTr("No adapters found. Tap “Scan”.")
-                       color: theme.textFaint; font.pixelSize: 13; Layout.topMargin: 8 }
-                Repeater {
-                    model: backend.adapters
-                    ColumnLayout { required property var modelData; Layout.fillWidth: true
-                        RowLayout { Layout.fillWidth: true; Layout.topMargin: 9; Layout.bottomMargin: 9; spacing: 12
-                            Image { visible: parent.parent.modelData.ours; source: "qrc:/assets/logo.png"; width: 20; height: 20; sourceSize: Qt.size(40,40) }
-                            ColumnLayout { spacing: 1
-                                Text { text: parent.parent.parent.modelData.name; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
-                                Text { text: parent.parent.parent.modelData.ours ? parent.parent.parent.modelData.description
-                                             : (parent.parent.parent.modelData.conflict
-                                                ? (qsTr("may conflict") + (parent.parent.parent.modelData.enabled ? qsTr(" · on") : qsTr(" · off")))
-                                                : (parent.parent.parent.modelData.enabled ? qsTr("on") : qsTr("off")))
-                                       color: parent.parent.parent.modelData.ours ? theme.textDim
-                                             : (parent.parent.parent.modelData.conflict ? theme.warn : theme.textFaint); font.pixelSize: 12 }
-                            }
-                            Item { Layout.fillWidth: true }
-                            Toggle { visible: !parent.parent.modelData.ours; checked: parent.parent.modelData.enabled
-                                     onToggled: function(v){ backend.setAdapterEnabled(parent.parent.modelData.name, v) } }
-                        }
-                        Sep {}
-                    }
-                }
-            }
-        }
-    }
 }
