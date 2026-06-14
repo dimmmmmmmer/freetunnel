@@ -532,7 +532,7 @@ Window {
                                                                        : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
                 Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
-                       text: qsTr("FreeTunnel %1 · TrustTunnel core").arg(backend.appVersion); color: theme.textFaint; font.pixelSize: 12 }
+                       text: qsTr("FreeTunnel %1 · TrustTunnel core %2").arg(backend.appVersion).arg(backend.coreVersion); color: theme.textFaint; font.pixelSize: 12 }
                 Item { Layout.preferredHeight: 14 }
             }
         }

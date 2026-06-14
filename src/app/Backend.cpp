@@ -128,6 +128,14 @@ QString Backend::appVersion() const {
 #endif
 }
 
+QString Backend::coreVersion() const {
+#ifdef FREETUNNEL_CORE_REF
+    return QStringLiteral(FREETUNNEL_CORE_REF);
+#else
+    return QStringLiteral("unknown");
+#endif
+}
+
 void Backend::checkForUpdates() {
     if (m_updateState == QLatin1String("checking"))
         return;

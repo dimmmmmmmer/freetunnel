@@ -27,15 +27,26 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(QHotkey)
 
 set(FREETUNNEL_GIT_VERSION "unknown")
+set(FREETUNNEL_CORE_REF "unknown")
 find_package(Git QUIET)
 if (GIT_FOUND)
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
         OUTPUT_VARIABLE FREETUNNEL_GIT_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
+    # The TrustTunnel core lives in the parent (upstream) checkout.
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" rev-parse --short HEAD
+        OUTPUT_VARIABLE FREETUNNEL_CORE_REF
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+if (NOT FREETUNNEL_CORE_REF)
+    set(FREETUNNEL_CORE_REF "unknown")
 endif()
 
 set(APP_ICON_RC)
@@ -80,6 +91,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
 target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_VERSION="${PROJECT_VERSION}"
     FREETUNNEL_GIT_VERSION="${FREETUNNEL_GIT_VERSION}"
+    FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
 )
 
 target_include_directories(FreeTunnel PRIVATE

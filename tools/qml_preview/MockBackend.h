@@ -30,6 +30,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY changed)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY changed)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
     Q_PROPERTY(QString updateState READ updateState NOTIFY changed)
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY changed)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY changed)
@@ -40,6 +41,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QVariantList pings READ pings NOTIFY changed)
 public:
     QString appVersion() const { return QStringLiteral("1.0.0"); }
+    QString coreVersion() const { return QStringLiteral("fa033c0"); }
     QString updateState() const { return m_updateState; }
     QString updateMessage() const { return m_updateMessage; }
     QString latestVersion() const { return m_latestVersion; }

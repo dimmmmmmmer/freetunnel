@@ -46,6 +46,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
     // Updater (GitHub Releases)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|error
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
@@ -116,6 +117,7 @@ public:
     void setHotkeyDisconnect(const QString &v);
 
     QString appVersion() const;
+    QString coreVersion() const;
     QString updateState() const { return m_updateState; }
     QString updateMessage() const { return m_updateMessage; }
     QString latestVersion() const { return m_latestVersion; }
