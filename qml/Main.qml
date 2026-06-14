@@ -110,7 +110,10 @@ Window {
                     Image {
                         anchors.centerIn: parent
                         width: 22; height: 22
-                        source: "qrc:/icons/" + parent.modelData + ".svg"
+                        // Home shows our logo; Configs uses the "servers" glyph.
+                        source: parent.modelData === "connection" ? "qrc:/assets/logo.png"
+                              : parent.modelData === "configs" ? "qrc:/icons/connection.svg"
+                              : "qrc:/icons/" + parent.modelData + ".svg"
                         sourceSize: Qt.size(44, 44)
                         opacity: parent.index === win.currentPage ? 1.0 : 0.5
                     }
@@ -266,7 +269,7 @@ Window {
                     MouseArea { anchors.fill: parent; onClicked: win.currentPage = 2 } // open Configs
                 }
                 RowLayout {
-                    Layout.alignment: Qt.AlignHCenter; spacing: 12; visible: backend.connected
+                    Layout.alignment: Qt.AlignHCenter; spacing: 12
                     Repeater {
                         model: [ { l: qsTr("Download"), v: backend.downSpeed, c: theme.success, a: "↓" },
                                  { l: qsTr("Upload"), v: backend.upSpeed, c: "#378add", a: "↑" } ]
@@ -357,7 +360,8 @@ Window {
                         MouseArea { anchors.fill: parent; onClicked: backend.clearDomains() } }
                 }
                 Flow {
-                    Layout.fillWidth: true; Layout.topMargin: 4; spacing: 6
+                    Layout.fillWidth: true; spacing: 6
+                    Layout.topMargin: backend.domains.length > 0 ? 6 : 0
                     Repeater {
                         model: backend.domains
                         Rectangle {
@@ -374,7 +378,8 @@ Window {
                     }
                 }
                 Rectangle {
-                    Layout.fillWidth: true; Layout.topMargin: 8; Layout.preferredHeight: 36; radius: 8
+                    Layout.fillWidth: true; Layout.preferredHeight: 36; radius: 8
+                    Layout.topMargin: backend.domains.length > 0 ? 8 : 2
                     color: theme.bg; border.color: domInput.activeFocus ? theme.accent : theme.border; border.width: 1
                     TextInput {
                         id: domInput
@@ -428,9 +433,10 @@ Window {
                             Item { Layout.fillWidth: true }
                             Text { visible: index < backend.pings.length; text: index < backend.pings.length ? backend.pings[index] : ""
                                    color: theme.textDim; font.pixelSize: 12 }
-                            Rectangle { visible: index === backend.activeIndex; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
+                            Rectangle { visible: index === backend.activeIndex && backend.connected
+                                radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
                                 implicitWidth: ab.width+16; implicitHeight: 20
-                                Text { id: ab; anchors.centerIn: parent; text: qsTr("active"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                                Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
                             Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 6
                                    MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
                         }
