@@ -1,5 +1,5 @@
 #include "qt_trusttunnel_client.h"
-#include <QApplication>
+#include <QCoreApplication>
 #include <QMetaObject>
 #include <QRandomGenerator>
 #include <QThread>

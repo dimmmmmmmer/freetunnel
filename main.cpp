@@ -1,8 +1,11 @@
-#include <QApplication>
-#include <QMainWindow>
+#include <QGuiApplication>
 #include <QIcon>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QString>
+#include <QUrl>
 
-#include "MainWindow.h"
+#include "app/Backend.h"
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -36,9 +39,26 @@ static void raise_fd_limit() {} // no-op on Windows
 
 int main(int argc, char *argv[]) {
     raise_fd_limit();
-    QApplication app(argc, argv);
-    app.setWindowIcon(QIcon(":/assets/logo.png"));
-    QMainWindow *w = createMainWindow();
-    w->show();
+    QGuiApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("FreeTunnel"));
+    app.setOrganizationName(QStringLiteral("FreeTunnel"));
+    app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
+
+    Backend backend;
+
+    // Import an official deep link passed on the command line (tt://...).
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg.startsWith(QStringLiteral("tt://")))
+            backend.importDeepLink(arg);
+    }
+
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
+    if (engine.rootObjects().isEmpty())
+        return -1;
+
     return app.exec();
 }

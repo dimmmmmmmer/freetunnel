@@ -9,7 +9,7 @@
 #include <QStandardPaths>
 #include <QCoreApplication>
 #include <QFile>
-#include <QApplication>
+#include <QCoreApplication>
 
 QString shellEscape(QString s) {
     s.replace("'", "'\"'\"'");

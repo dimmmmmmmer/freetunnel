@@ -52,7 +52,7 @@ Window {
                     Image {
                         anchors.centerIn: parent
                         width: 22; height: 22
-                        source: "qrc:/assets/icons/" + parent.modelData + ".svg"
+                        source: "qrc:/icons/" + parent.modelData + ".svg"
                         sourceSize: Qt.size(44, 44)
                         opacity: parent.index === win.currentPage ? 1.0 : 0.5
                     }
