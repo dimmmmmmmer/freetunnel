@@ -71,7 +71,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build clang \
-            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev qt6-svg-dev
+            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev libqt6svg6-dev qt6-svg-dev
           pip install -r upstream/requirements.txt
           pip install "conan~=${CONAN_VER}"
 

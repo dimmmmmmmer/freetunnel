@@ -271,6 +271,7 @@ jobs:
           # aqt install, so point linuxdeploy-plugin-qt at its qmake.
           set +e
           export ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export QML_SOURCES_PATHS="$PWD/client/qml" # let the qt plugin deploy Qt Quick
           ld=linuxdeploy-x86_64.AppImage
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
@@ -325,7 +326,7 @@ jobs:
             -output "$APP/Contents/MacOS/FreeTunnel"
           lipo -info "$APP/Contents/MacOS/FreeTunnel"
 
-          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
           # Ad-hoc sign so the bundle launches once the user approves it in
           # Gatekeeper (no Developer ID available for full signing/notarization).
           codesign --force --deep --sign - "$APP" || true
@@ -344,7 +345,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist, out | Out-Null
           Copy-Item $exe.FullName dist\
           if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
-          & $deploy --release --no-translations dist\FreeTunnel.exe
+          & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
           Compress-Archive -Path dist\* -DestinationPath out\${{ matrix.artifact }}.zip -Force
 
           # NSIS installer (best-effort). NSIS resolves relative File paths
