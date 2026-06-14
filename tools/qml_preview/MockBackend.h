@@ -26,7 +26,36 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY changed)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY changed)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY changed)
+    Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString updateState READ updateState NOTIFY changed)
+    Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY changed)
+    Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY changed)
+    Q_PROPERTY(QVariantList adapters READ adapters NOTIFY changed)
+    Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
 public:
+    QString appVersion() const { return QStringLiteral("1.0.0"); }
+    QString updateState() const { return m_updateState; }
+    QString updateMessage() const { return m_updateMessage; }
+    QString latestVersion() const { return m_latestVersion; }
+    Q_INVOKABLE void checkForUpdates() {
+        m_updateState = QStringLiteral("available"); m_latestVersion = QStringLiteral("1.1.0");
+        m_updateMessage = QStringLiteral("Доступна версия 1.1.0"); emit changed();
+    }
+    Q_INVOKABLE void openLatestRelease() {}
+    QVariantList adapters() const {
+        auto a = [](const char *n, const char *d, bool ours, bool on, bool conflict) {
+            QVariantMap v; v["name"] = n; v["description"] = d; v["ours"] = ours;
+            v["enabled"] = on; v["conflict"] = conflict; return QVariant(v);
+        };
+        return QVariantList{
+            a("FreeTunnel WinTUN", "Wintun Userspace Tunnel", true, true, false),
+            a("Radmin VPN Network Adapter", "Radmin VPN", false, true, true),
+            a("TAP-Windows Adapter V9", "TAP-Windows Provider V9", false, true, true),
+            a("OpenVPN Wintun", "Wintun Userspace Tunnel", false, false, false)};
+    }
+    bool adapterScanSupported() const { return true; }
+    Q_INVOKABLE void scanAdapters() { emit changed(); }
+    Q_INVOKABLE void setAdapterEnabled(const QString &, bool) { emit changed(); }
     QString hotkeyToggle() const { return m_hkToggle; }
     QString hotkeyConnect() const { return m_hkConnect; }
     QString hotkeyDisconnect() const { return m_hkDisconnect; }
@@ -100,4 +129,7 @@ private:
     QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");
     QString m_hkConnect;
     QString m_hkDisconnect;
+    QString m_updateState;
+    QString m_updateMessage;
+    QString m_latestVersion;
 };

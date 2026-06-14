@@ -4,13 +4,6 @@
 #include <QStringList>
 #include <QMap>
 
-struct AppRule {
-    QString appPath;      // Full path to executable
-    QString appName;      // Display name
-    QString rule;         // "tunnel" | "bypass" | "throttle"
-    int throttleSpeed = 0; // KB/s, 0 = unlimited
-};
-
 struct AppSettings {
     bool save_logs = true;
     QString log_level = "info";
@@ -59,10 +52,6 @@ struct AppSettings {
 
     // Notifications
     bool enable_notifications = true;
-
-    // Per-app rules
-    bool per_app_rules_enabled = false;
-    QList<AppRule> app_rules;
 };
 
 AppSettings loadAppSettings();

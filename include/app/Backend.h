@@ -17,6 +17,8 @@
 #include "vpn/qt_trusttunnel_client.h"
 
 class QHotkey;
+class UpdateChecker;
+class NetworkAdapterManager;
 
 class Backend : public QObject {
     Q_OBJECT
@@ -40,6 +42,14 @@ class Backend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
+    // Updater (GitHub Releases)
+    Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|error
+    Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
+    Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
+    // Network adapters (third-party VPN adapter conflicts; Windows-only scan)
+    Q_PROPERTY(QVariantList adapters READ adapters NOTIFY adaptersChanged)
+    Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -92,6 +102,18 @@ public:
     void setHotkeyConnect(const QString &v);
     void setHotkeyDisconnect(const QString &v);
 
+    QString appVersion() const;
+    QString updateState() const { return m_updateState; }
+    QString updateMessage() const { return m_updateMessage; }
+    QString latestVersion() const { return m_latestVersion; }
+    Q_INVOKABLE void checkForUpdates();
+    Q_INVOKABLE void openLatestRelease();
+
+    QVariantList adapters() const { return m_adapters; }
+    bool adapterScanSupported() const;
+    Q_INVOKABLE void scanAdapters();
+    Q_INVOKABLE void setAdapterEnabled(const QString &name, bool enabled);
+
 signals:
     void stateChanged();
     void tick();
@@ -101,6 +123,8 @@ signals:
     void logChanged();
     void splitChanged();
     void hotkeysChanged();
+    void updateChanged();
+    void adaptersChanged();
     void errorOccurred(const QString &msg);
 
 private:
@@ -116,6 +140,11 @@ private:
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;
     QHotkey *m_hkDisconnect = nullptr;
+
+    UpdateChecker *m_updater = nullptr;
+    QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    NetworkAdapterManager *m_adapterMgr = nullptr;
+    QVariantList m_adapters;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;

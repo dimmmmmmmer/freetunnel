@@ -267,42 +267,15 @@ Window {
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18
                 spacing: 0
-                RowLayout {
-                    Layout.topMargin: 6; Layout.bottomMargin: 8; spacing: 8
-                    Text { text: "Профиль"; color: theme.textFaint; font.pixelSize: 12 }
-                    Text { text: "Default ▾"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
-                    Item { Layout.fillWidth: true }
-                    Text { text: "✎"; color: theme.textDim; font.pixelSize: 16 }
-                    Text { text: "🗑"; color: theme.textDim; font.pixelSize: 15 }
-                }
+                Item { Layout.preferredHeight: 10 }
+                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap
+                       text: "Раздельное туннелирование: домены из списка ниже идут напрямую, мимо VPN."
+                       color: theme.textFaint; font.pixelSize: 12 }
+                Item { Layout.preferredHeight: 4 }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Включить"; color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
                     Toggle { checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
-                }
-                Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Режим"; color: theme.text; font.pixelSize: 14 }
-                    Item { Layout.fillWidth: true }
-                    Text { text: "Указанное — мимо VPN ▾"; color: theme.textDim; font.pixelSize: 14 }
-                }
-                Item { Layout.preferredHeight: 12 }
-                RowLayout { Layout.fillWidth: true
-                    SectionLabel { text: "Приложения" }
-                    Item { Layout.fillWidth: true }
-                    Text { text: "＋ Добавить"; color: theme.accent; font.pixelSize: 12 }
-                }
-                Repeater {
-                    model: [ { n: "Google Chrome", on: true }, { n: "Telegram", on: false }, { n: "Steam", on: true } ]
-                    ColumnLayout { required property var modelData; Layout.fillWidth: true
-                        RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 40
-                            Text { text: "▣"; color: theme.textDim; font.pixelSize: 16 }
-                            Text { text: parent.parent.modelData.n; color: theme.text; font.pixelSize: 14; leftPadding: 8 }
-                            Item { Layout.fillWidth: true }
-                            Toggle { checked: parent.parent.modelData.on; implicitWidth: 34; implicitHeight: 20 }
-                        }
-                        Sep {}
-                    }
                 }
                 Item { Layout.preferredHeight: 12 }
                 RowLayout { Layout.fillWidth: true
@@ -439,10 +412,22 @@ Window {
                     Item { Layout.fillWidth: true } Text { text: "›"; color: theme.textDim; font.pixelSize: 16 }
                     MouseArea { anchors.fill: parent; onClicked: win.overlay = "adapters" } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Проверить обновления"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Text { text: "1.0.0"; color: theme.textFaint; font.pixelSize: 13 } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { text: "Проверить обновления"; color: theme.text; font.pixelSize: 14 }
+                    Text { visible: backend.updateMessage.length > 0; text: backend.updateMessage
+                           color: backend.updateState === "available" ? theme.accent : theme.textFaint
+                           font.pixelSize: 12; leftPadding: 8 }
+                    Item { Layout.fillWidth: true }
+                    Text { text: backend.updateState === "checking" ? "…"
+                                 : backend.updateState === "available" ? "Скачать ›" : backend.appVersion
+                           color: backend.updateState === "available" ? theme.accent : theme.textFaint
+                           font.pixelSize: 13 }
+                    MouseArea { anchors.fill: parent
+                        onClicked: backend.updateState === "available" ? backend.openLatestRelease()
+                                                                       : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
                 Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
-                       text: "FreeTunnel 1.0.0 · ядро TrustTunnel"; color: theme.textFaint; font.pixelSize: 12 }
+                       text: "FreeTunnel " + backend.appVersion + " · ядро TrustTunnel"; color: theme.textFaint; font.pixelSize: 12 }
                 Item { Layout.preferredHeight: 14 }
             }
         }
@@ -568,6 +553,7 @@ Window {
         id: adaptersPage
         Rectangle {
             color: theme.bg
+            Component.onCompleted: if (backend.adapterScanSupported) backend.scanAdapters()
             RowLayout {
                 id: ahdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                 anchors.margins: 14; spacing: 10
@@ -575,29 +561,45 @@ Window {
                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
                 Text { text: "Сетевые адаптеры"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                 Item { Layout.fillWidth: true }
-                Text { text: "⟳ Сканировать"; color: theme.text; font.pixelSize: 13 }
+                Text { visible: backend.adapterScanSupported; text: "⟳ Сканировать"; color: theme.accent; font.pixelSize: 13
+                       MouseArea { anchors.fill: parent; onClicked: backend.scanAdapters() } }
+            }
+            // Unsupported-platform notice (scan is Windows-only).
+            Text {
+                visible: !backend.adapterScanSupported
+                anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
+                anchors.margins: 18; wrapMode: Text.WordWrap
+                text: "Управление сетевыми адаптерами доступно только в Windows."
+                color: theme.textFaint; font.pixelSize: 13
             }
             ColumnLayout {
+                visible: backend.adapterScanSupported
                 anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18; anchors.topMargin: 4; spacing: 0
                 Text { text: "Сторонние VPN-адаптеры могут конфликтовать с FreeTunnel."; color: theme.textFaint; font.pixelSize: 12; Layout.bottomMargin: 8 }
+                Text { visible: backend.adapters.length === 0; text: "Адаптеры не найдены. Нажмите «Сканировать»."
+                       color: theme.textFaint; font.pixelSize: 13; Layout.topMargin: 8 }
                 Repeater {
-                    model: [ { n: "FreeTunnel WinTUN", s: "Wintun Userspace Tunnel", ours: true, on: true },
-                             { n: "Radmin VPN Network Adapter", s: "может конфликтовать · включён", ours: false, on: true },
-                             { n: "TAP-Windows Adapter V9", s: "может конфликтовать · включён", ours: false, on: true },
-                             { n: "OpenVPN Wintun", s: "отключён", ours: false, on: false } ]
+                    model: backend.adapters
                     ColumnLayout { required property var modelData; Layout.fillWidth: true
                         RowLayout { Layout.fillWidth: true; Layout.topMargin: 9; Layout.bottomMargin: 9; spacing: 12
                             Image { visible: parent.parent.modelData.ours; source: "qrc:/assets/logo.png"; width: 20; height: 20; sourceSize: Qt.size(40,40) }
-                            Text { visible: !parent.parent.modelData.ours; text: parent.parent.modelData.on ? "⚠" : "○"; color: parent.parent.modelData.on ? theme.warn : theme.textFaint; font.pixelSize: 16 }
+                            Text { visible: !parent.parent.modelData.ours
+                                   text: parent.parent.modelData.conflict ? "⚠" : "○"
+                                   color: parent.parent.modelData.conflict ? theme.warn : theme.textFaint; font.pixelSize: 16 }
                             ColumnLayout { spacing: 1
-                                Text { text: parent.parent.parent.modelData.n; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
-                                Text { text: parent.parent.parent.modelData.s; color: parent.parent.parent.modelData.ours ? theme.textDim : (parent.parent.parent.modelData.on ? theme.warn : theme.textFaint); font.pixelSize: 12 }
+                                Text { text: parent.parent.parent.modelData.name; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
+                                Text { text: parent.parent.parent.modelData.ours ? parent.parent.parent.modelData.description
+                                             : (parent.parent.parent.modelData.conflict ? "может конфликтовать" : "")
+                                             + (parent.parent.parent.modelData.enabled ? " · включён" : " · отключён")
+                                       color: parent.parent.parent.modelData.ours ? theme.textDim
+                                             : (parent.parent.parent.modelData.conflict ? theme.warn : theme.textFaint); font.pixelSize: 12 }
                             }
                             Item { Layout.fillWidth: true }
                             Rectangle { visible: parent.parent.modelData.ours; radius: 10; color: theme.infoBg; implicitWidth: ow.width+16; implicitHeight: 20
                                 Text { id: ow; anchors.centerIn: parent; text: "наш"; color: theme.accent; font.pixelSize: 11; font.weight: Font.Medium } }
-                            Toggle { visible: !parent.parent.modelData.ours; checked: parent.parent.modelData.on }
+                            Toggle { visible: !parent.parent.modelData.ours; checked: parent.parent.modelData.enabled
+                                     onToggled: function(v){ backend.setAdapterEnabled(parent.parent.modelData.name, v) } }
                         }
                         Sep {}
                     }

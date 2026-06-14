@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
@@ -18,6 +19,8 @@
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
 #include "core/ControlCommand.h"
+#include "core/NetworkAdapterManager.h"
+#include "core/UpdateChecker.h"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -107,6 +110,93 @@ void Backend::setHotkeyDisconnect(const QString &v) {
     persistSettings();
     registerHotkeys();
     emit hotkeysChanged();
+}
+
+// ---------- updater ----------
+
+QString Backend::appVersion() const {
+#ifdef FREETUNNEL_VERSION
+    return QStringLiteral(FREETUNNEL_VERSION);
+#else
+    return QStringLiteral("1.0.0");
+#endif
+}
+
+void Backend::checkForUpdates() {
+    if (m_updateState == QLatin1String("checking"))
+        return;
+    if (!m_updater) {
+        m_updater = new UpdateChecker(QStringLiteral("enrvate/freetunnel"), appVersion(), this);
+        connect(m_updater, &UpdateChecker::updateAvailable, this,
+                [this](const UpdateChecker::ReleaseInfo &info) {
+                    m_updateState = QStringLiteral("available");
+                    m_latestVersion = info.version;
+                    m_latestUrl = info.htmlUrl;
+                    m_updateMessage = tr("Доступна версия %1").arg(info.version);
+                    emit updateChanged();
+                });
+        connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
+                [this](const QString &message) {
+                    m_updateState = QStringLiteral("current");
+                    m_updateMessage = message.isEmpty()
+                            ? tr("Установлена последняя версия") : message;
+                    emit updateChanged();
+                });
+    }
+    m_updateState = QStringLiteral("checking");
+    m_updateMessage = tr("Проверка…");
+    emit updateChanged();
+    m_updater->checkNow();
+}
+
+void Backend::openLatestRelease() {
+    const QString url = m_latestUrl.isEmpty()
+            ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
+            : m_latestUrl;
+    QDesktopServices::openUrl(QUrl(url));
+}
+
+// ---------- network adapters ----------
+
+bool Backend::adapterScanSupported() const {
+#ifdef Q_OS_WIN
+    return true;
+#else
+    return false;
+#endif
+}
+
+void Backend::scanAdapters() {
+    if (!m_adapterMgr)
+        m_adapterMgr = new NetworkAdapterManager(this);
+    m_adapters.clear();
+    const auto found = m_adapterMgr->scanAdapters();
+    const QStringList conflicts = NetworkAdapterManager::knownConflictPatterns();
+    for (const AdapterInfo &a : found) {
+        bool conflict = false;
+        for (const QString &p : conflicts)
+            if (a.name.contains(p, Qt::CaseInsensitive)
+                || a.description.contains(p, Qt::CaseInsensitive)) { conflict = true; break; }
+        QVariantMap m;
+        m[QStringLiteral("name")] = a.name;
+        m[QStringLiteral("description")] = a.description;
+        m[QStringLiteral("ours")] = a.isOurs;
+        m[QStringLiteral("enabled")] = a.enabled;
+        m[QStringLiteral("conflict")] = conflict && !a.isOurs;
+        m_adapters << m;
+    }
+    emit adaptersChanged();
+}
+
+void Backend::setAdapterEnabled(const QString &name, bool enabled) {
+    if (!m_adapterMgr)
+        m_adapterMgr = new NetworkAdapterManager(this);
+    const bool ok = enabled ? m_adapterMgr->enableAdapter(name)
+                            : m_adapterMgr->disableAdapter(name);
+    if (ok)
+        scanAdapters();
+    else
+        emit errorOccurred(tr("Не удалось изменить адаптер: %1").arg(name));
 }
 
 QString Backend::statusText() const {
