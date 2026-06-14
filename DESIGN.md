@@ -8,7 +8,8 @@ for the QML implementation.
 
 - Flat, light, minimal. No heavy frames/boxes, no redundant dividers, no titles
   where the active nav already makes context obvious.
-- Single accent: **blue flame** `#185FA5` (light/dark aware). App mark = the flame.
+- Single accent: **blue** `#185FA5` (light/dark aware). App mark = the **tunnel
+  portal** (concentric blue arches).
 - Everything adapts to light/dark mode.
 
 ## Navigation
@@ -30,9 +31,9 @@ for the QML implementation.
 ### 1. Подключение (Home)
 - Big **ring that is itself the connect/disconnect button**.
 - State is shown by the ring only (no status text/pill):
-  - Connected → solid blue ring; center: blue flame + session timer (`01:24:36`).
+  - Connected → solid blue ring; center: tunnel mark + session timer (`01:24:36`).
   - Connecting/reconnecting → animated blue arc.
-  - Disconnected → thin gray ring; center: gray flame + "Выключено"; speed tiles hidden.
+  - Disconnected → thin gray ring; center: dimmed tunnel mark + "Выключено"; speed tiles hidden.
 - Below the ring: **config name + ▾** (collapsed dropdown). Selecting another config:
   - if connected → switch & reconnect immediately;
   - if disconnected → just set it for next connect.

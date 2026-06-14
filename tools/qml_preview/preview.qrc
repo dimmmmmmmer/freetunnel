@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="Main.qml">../../qml/Main.qml</file>
+  </qresource>
+  <qresource prefix="/assets">
+    <file alias="logo.png">../../assets/logo.png</file>
+    <file alias="icons/connection.svg">../../assets/icons/connection.svg</file>
+    <file alias="icons/network.svg">../../assets/icons/network.svg</file>
+    <file alias="icons/configs.svg">../../assets/icons/configs.svg</file>
+    <file alias="icons/settings.svg">../../assets/icons/settings.svg</file>
+    <file alias="icons/log.svg">../../assets/icons/log.svg</file>
+  </qresource>
+</RCC>
