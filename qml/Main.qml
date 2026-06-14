@@ -82,7 +82,7 @@ Window {
         color: theme.textFaint; font.pixelSize: 12
         leftPadding: 2; bottomPadding: 4
     }
-    component Sep: Rectangle { height: 1; color: theme.border; Layout.fillWidth: true }
+    component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
 
     // ===================== Home (Подключение) =====================
     Component {
@@ -244,23 +244,29 @@ Window {
                 Text { text: "＋ Создать"; color: theme.textDim; font.pixelSize: 15
                     MouseArea { anchors.fill: parent; onClicked: win.overlay = "create" } }
             }
+            Text {
+                visible: backend.configs.length === 0
+                Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 30
+                text: "Нет конфигов — импортируйте или создайте"; color: theme.textFaint; font.pixelSize: 14
+            }
             Repeater {
-                model: [ { n: "Германия · Франкфурт", s: "frankfurt.example.com:443 · HTTP/2", a: true },
-                         { n: "Нидерланды · Амстердам", s: "ams.example.com:443 · HTTP/3", a: false },
-                         { n: "США · Нью-Йорк", s: "ny.example.com:443 · HTTP/2", a: false } ]
-                ColumnLayout { required property var modelData; Layout.fillWidth: true
+                model: backend.configs
+                ColumnLayout {
+                    required property int index
+                    required property string modelData
+                    Layout.fillWidth: true
                     RowLayout { Layout.fillWidth: true; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 12
-                        Image { source: "qrc:/assets/logo.png"; width: 22; height: 22; sourceSize: Qt.size(44,44)
-                                opacity: parent.parent.modelData.a ? 1 : 0.35 }
-                        ColumnLayout { spacing: 1
-                            Text { text: parent.parent.parent.modelData.n; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
-                            Text { text: parent.parent.parent.modelData.s; color: theme.textDim; font.pixelSize: 12 }
-                        }
+                        Image { source: "qrc:/assets/logo.png"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                                sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.35 }
+                        Text { text: modelData; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
                         Item { Layout.fillWidth: true }
-                        Rectangle { visible: parent.parent.modelData.a; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
+                        Rectangle { visible: index === backend.activeIndex; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
                             implicitWidth: ab.width+16; implicitHeight: 20
                             Text { id: ab; anchors.centerIn: parent; text: "активен"; color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                        Text { text: "⋮"; color: theme.textDim; font.pixelSize: 18; leftPadding: 6 }
+                        Text { text: "✓"; color: theme.accent; font.pixelSize: 16; leftPadding: 6; visible: index !== backend.activeIndex
+                               MouseArea { anchors.fill: parent; onClicked: backend.selectConfig(index) } }
+                        Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 10
+                               MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
                     }
                     Sep {}
                 }
@@ -279,28 +285,36 @@ Window {
                 anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
                 Item { Layout.preferredHeight: 6 }
                 SectionLabel { text: "Основное" }
-                RowLayout { Layout.fillWidth: true; height: 42; Text { text: "Язык"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Text { text: "English ▾"; color: theme.textDim; font.pixelSize: 14 } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { text: "Язык"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                    Text { text: (backend.language === "ru" ? "Русский" : "English") + " ▾"; color: theme.textDim; font.pixelSize: 14
+                        MouseArea { anchors.fill: parent; onClicked: backend.language = (backend.language === "ru" ? "en" : "ru") } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; height: 42; Text { text: "Тема"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Text { text: "Система ▾"; color: theme.textDim; font.pixelSize: 14 } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { text: "Тема"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                    Text { text: ({system:"Система",light:"Светлая",dark:"Тёмная"}[backend.themeMode] || "Система") + " ▾"; color: theme.textDim; font.pixelSize: 14
+                        MouseArea { anchors.fill: parent; onClicked: backend.themeMode = (backend.themeMode === "system" ? "light" : backend.themeMode === "light" ? "dark" : "system") } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; height: 42; Text { text: "Запускать при входе в систему"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: true } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Запускать при входе в систему"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: true } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; height: 42; Text { text: "Подключаться автоматически"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: false } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Подключаться автоматически"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                    Toggle { checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: "Безопасность" }
-                RowLayout { Layout.fillWidth: true; height: 42
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
                     Text { text: "блокировать трафик вне VPN"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
-                    Item { Layout.fillWidth: true } Toggle { checked: true } }
+                    Item { Layout.fillWidth: true }
+                    Toggle { checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: "Обслуживание" }
-                RowLayout { Layout.fillWidth: true; height: 42
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Сетевые адаптеры"; color: theme.text; font.pixelSize: 14 }
                     Text { text: "Windows"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
                     Item { Layout.fillWidth: true } Text { text: "›"; color: theme.textDim; font.pixelSize: 16 }
                     MouseArea { anchors.fill: parent; onClicked: win.overlay = "adapters" } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; height: 42; Text { text: "Проверить обновления"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Text { text: "1.0.0"; color: theme.textFaint; font.pixelSize: 13 } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Проверить обновления"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Text { text: "1.0.0"; color: theme.textFaint; font.pixelSize: 13 } }
                 Item { Layout.preferredHeight: 14 }
                 Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
                        text: "FreeTunnel 1.0.0 · ядро TrustTunnel"; color: theme.textFaint; font.pixelSize: 12 }

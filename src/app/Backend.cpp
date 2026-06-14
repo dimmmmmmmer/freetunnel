@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QUrl>
 
 #include "core/AppSettings.h"
 #include "core/AppUiUtils.h"
@@ -15,10 +16,10 @@
 #endif
 
 Backend::Backend(QObject *parent) : QObject(parent) {
+    m_settings = loadAppSettings();
     reloadConfigs();
-    const AppSettings s = loadAppSettings();
-    if (!s.last_config_path.isEmpty() && m_paths.contains(s.last_config_path)) {
-        m_activePath = s.last_config_path;
+    if (!m_settings.last_config_path.isEmpty() && m_paths.contains(m_settings.last_config_path)) {
+        m_activePath = m_settings.last_config_path;
     } else if (!m_paths.isEmpty()) {
         m_activePath = m_paths.first();
     }
@@ -121,14 +122,64 @@ void Backend::selectConfig(int index) {
     if (index < 0 || index >= m_paths.size())
         return;
     m_activePath = m_paths.at(index);
-    AppSettings s = loadAppSettings();
-    s.last_config_path = m_activePath;
-    saveAppSettings(s);
+    m_settings.last_config_path = m_activePath;
+    persistSettings();
     emit configChanged();
     if (m_connected) { // switch live
         m_client.loadConfigFromFile(m_activePath);
         m_client.connectVpn();
     }
+}
+
+void Backend::removeConfig(int index) {
+    if (index < 0 || index >= m_paths.size())
+        return;
+    const QString path = m_paths.at(index);
+    QStringList stored = loadStoredConfigs();
+    stored.removeAll(path);
+    saveStoredConfigs(stored);
+    if (m_activePath == path)
+        m_activePath.clear();
+    reloadConfigs();
+    if (m_activePath.isEmpty() && !m_paths.isEmpty())
+        m_activePath = m_paths.first();
+    emit configChanged();
+}
+
+bool Backend::importFile(const QString &path) {
+    QString p = path;
+    if (p.startsWith(QStringLiteral("file://")))
+        p = QUrl(p).toLocalFile();
+    if (!QFileInfo::exists(p)) {
+        emit errorOccurred(tr("Файл не найден: %1").arg(p));
+        return false;
+    }
+    QStringList stored = loadStoredConfigs();
+    if (!stored.contains(p)) {
+        stored << p;
+        saveStoredConfigs(stored);
+    }
+    reloadConfigs();
+    return true;
+}
+
+void Backend::persistSettings() { saveAppSettings(m_settings); }
+
+void Backend::setLanguage(const QString &v) {
+    if (m_settings.language == v) return;
+    m_settings.language = v; persistSettings(); emit settingsChanged();
+}
+void Backend::setThemeMode(const QString &v) {
+    if (m_settings.theme_mode == v) return;
+    m_settings.theme_mode = v; persistSettings(); emit settingsChanged();
+}
+void Backend::setAutoConnect(bool v) {
+    if (m_settings.auto_connect_on_start == v) return;
+    m_settings.auto_connect_on_start = v; persistSettings(); emit settingsChanged();
+}
+void Backend::setKillSwitch(bool v) {
+    if (m_settings.killswitch_enabled == v) return;
+    m_settings.killswitch_enabled = v; persistSettings(); emit settingsChanged();
 }
 
 bool Backend::importDeepLink(const QString &link) {

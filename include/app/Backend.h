@@ -11,6 +11,7 @@
 #include <QStringList>
 #include <QTimer>
 
+#include "core/AppSettings.h"
 #include "vpn/qt_trusttunnel_client.h"
 
 class Backend : public QObject {
@@ -22,6 +23,12 @@ class Backend : public QObject {
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY tick)
     Q_PROPERTY(QString activeConfig READ activeConfig NOTIFY configChanged)
     Q_PROPERTY(QStringList configs READ configs NOTIFY configsChanged)
+    Q_PROPERTY(int activeIndex READ activeIndex NOTIFY configChanged)
+    // settings (read/write; persisted on set)
+    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY settingsChanged)
+    Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
+    Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
+    Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -33,26 +40,41 @@ public:
     QString upSpeed() const;
     QString activeConfig() const;
     QStringList configs() const { return m_names; }
+    int activeIndex() const { return m_paths.indexOf(m_activePath); }
+
+    QString language() const { return m_settings.language; }
+    QString themeMode() const { return m_settings.theme_mode; }
+    bool autoConnect() const { return m_settings.auto_connect_on_start; }
+    bool killSwitch() const { return m_settings.killswitch_enabled; }
+    void setLanguage(const QString &v);
+    void setThemeMode(const QString &v);
+    void setAutoConnect(bool v);
+    void setKillSwitch(bool v);
 
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void connectVpn();
     Q_INVOKABLE void disconnectVpn();
     Q_INVOKABLE void selectConfig(int index);
+    Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE bool importDeepLink(const QString &link);
+    Q_INVOKABLE bool importFile(const QString &path);
 
 signals:
     void stateChanged();
     void tick();
     void configChanged();
     void configsChanged();
+    void settingsChanged();
     void errorOccurred(const QString &msg);
 
 private:
     void reloadConfigs();
+    void persistSettings();
     bool ensureElevated(); // returns false (and relaunches) if elevation needed
     QString nameForPath(const QString &path) const;
 
     QtTrustTunnelClient m_client;
+    AppSettings m_settings;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;
