@@ -133,7 +133,7 @@ Window {
     // shared bits ------------------------------------------------------------
     component SectionLabel: Text {
         color: theme.textFaint; font.pixelSize: 12
-        leftPadding: 2; bottomPadding: 4
+        leftPadding: 0; bottomPadding: 4
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
 
@@ -193,9 +193,10 @@ Window {
         id: homePage
         Item {
             ColumnLayout {
-                anchors.centerIn: parent
+                anchors.top: parent.top; anchors.topMargin: 40
+                anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width
-                spacing: 14
+                spacing: 18
                 Item {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: 200; Layout.preferredHeight: 200
@@ -242,13 +243,13 @@ Window {
                             required property var modelData
                             width: 140; height: 56; radius: 8; color: theme.surface
                             Column {
-                                anchors.left: parent.left; anchors.leftMargin: 14
-                                anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                Row { spacing: 5
+                                anchors.centerIn: parent; spacing: 2
+                                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 5
                                     Text { text: parent.parent.parent.modelData.a; color: parent.parent.parent.modelData.c; font.pixelSize: 13 }
                                     Text { text: parent.parent.parent.modelData.l; color: theme.textDim; font.pixelSize: 12 }
                                 }
-                                Text { text: parent.parent.modelData.v + " МБ/с"; color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter
+                                       text: parent.parent.modelData.v + " МБ/с"; color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
                             }
                         }
                     }
@@ -281,7 +282,7 @@ Window {
                 RowLayout { Layout.fillWidth: true
                     SectionLabel { text: "Домены — мимо VPN" }
                     Item { Layout.fillWidth: true }
-                    Text { text: "🧹 Очистить все"; color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
+                    Text { text: "Очистить все"; color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
                         MouseArea { anchors.fill: parent; onClicked: backend.clearDomains() } }
                 }
                 Flow {
@@ -323,43 +324,70 @@ Window {
     // ===================== Configs =====================
     Component {
         id: configsPage
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 24
-                Text { text: "⤓ Импорт ▾"; color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium }
-                Text { text: "＋ Создать"; color: theme.textDim; font.pixelSize: 15
-                    MouseArea { anchors.fill: parent; onClicked: win.overlay = "create" } }
-            }
-            Text {
-                visible: backend.configs.length === 0
-                Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 30
-                text: "Нет конфигов — импортируйте или создайте"; color: theme.textFaint; font.pixelSize: 14
-            }
-            Repeater {
-                model: backend.configs
-                ColumnLayout {
-                    required property int index
-                    required property string modelData
-                    Layout.fillWidth: true
-                    RowLayout { Layout.fillWidth: true; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 12
-                        Image { source: "qrc:/assets/logo.png"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
-                                sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.35 }
-                        Text { text: modelData; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
-                        Item { Layout.fillWidth: true }
-                        Rectangle { visible: index === backend.activeIndex; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
-                            implicitWidth: ab.width+16; implicitHeight: 20
-                            Text { id: ab; anchors.centerIn: parent; text: "активен"; color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                        Text { text: "✓"; color: theme.accent; font.pixelSize: 16; leftPadding: 6; visible: index !== backend.activeIndex
-                               MouseArea { anchors.fill: parent; onClicked: backend.selectConfig(index) } }
-                        Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 10
-                               MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 24
+                    Text { text: "Импорт ▾"; color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium
+                        MouseArea { anchors.fill: parent; onClicked: importMenu.visible = !importMenu.visible } }
+                    Text { text: "Создать"; color: theme.text; font.pixelSize: 15
+                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "create" } }
+                    Text { text: "Пинг"; color: theme.text; font.pixelSize: 15; visible: backend.configs.length > 0
+                        MouseArea { anchors.fill: parent; onClicked: backend.pingConfigs() } }
+                }
+                Text {
+                    visible: backend.configs.length === 0
+                    Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 30
+                    text: "Нет конфигов — импортируйте или создайте"; color: theme.textFaint; font.pixelSize: 14
+                }
+                Repeater {
+                    model: backend.configs
+                    ColumnLayout {
+                        required property int index
+                        required property string modelData
+                        Layout.fillWidth: true
+                        RowLayout { Layout.fillWidth: true; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 12
+                            Image { source: "qrc:/assets/logo.png"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                                    sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.35 }
+                            Text { text: modelData; color: theme.text; font.pixelSize: 14
+                                   font.weight: index === backend.activeIndex ? Font.Medium : Font.Normal
+                                   MouseArea { anchors.fill: parent; onClicked: backend.selectConfig(index) } }
+                            Item { Layout.fillWidth: true }
+                            Text { visible: index < backend.pings.length; text: index < backend.pings.length ? backend.pings[index] : ""
+                                   color: theme.textDim; font.pixelSize: 12 }
+                            Rectangle { visible: index === backend.activeIndex; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
+                                implicitWidth: ab.width+16; implicitHeight: 20
+                                Text { id: ab; anchors.centerIn: parent; text: "активен"; color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                            Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 6
+                                   MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
+                        }
+                        Sep {}
                     }
-                    Sep {}
+                }
+                Item { Layout.fillHeight: true }
+            }
+            // Import dropdown (collapsed by default).
+            Rectangle {
+                id: importMenu; visible: false; z: 10
+                anchors.top: parent.top; anchors.topMargin: 40; anchors.horizontalCenter: parent.horizontalCenter
+                width: 230; height: menuCol.height + 12; radius: 10; color: theme.bg
+                border.color: theme.border; border.width: 1
+                Column { id: menuCol; width: parent.width; y: 6
+                    Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
+                           text: "Вставить из буфера"; color: theme.text; font.pixelSize: 14
+                           MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; backend.importFromClipboard() } } }
+                    Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
+                           text: "Из файла…"; color: theme.text; font.pixelSize: 14
+                           MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; fileDlg.open() } } }
                 }
             }
-            Item { Layout.fillHeight: true }
+            Platform.FileDialog {
+                id: fileDlg; title: "Выберите конфиг"
+                nameFilters: ["TOML (*.toml)", "Все файлы (*)"]
+                onAccepted: backend.importFile(fileDlg.file.toString())
+            }
         }
     }
 
@@ -383,7 +411,7 @@ Window {
                     Text { text: ({system:"Система",light:"Светлая",dark:"Тёмная"}[backend.themeMode] || "Система") + " ▾"; color: theme.textDim; font.pixelSize: 14
                         MouseArea { anchors.fill: parent; onClicked: backend.themeMode = (backend.themeMode === "system" ? "light" : backend.themeMode === "light" ? "dark" : "system") } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Запускать при входе в систему"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: true } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Запускать при входе в систему"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Подключаться автоматически"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
                     Toggle { checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
@@ -436,13 +464,15 @@ Window {
     // ===================== Logs =====================
     Component {
         id: logsPage
+        Item {
         ColumnLayout {
-            anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 8
-            RowLayout { Layout.fillWidth: true; Layout.topMargin: 6
+            anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
+            anchors.topMargin: 6; anchors.bottomMargin: 12; spacing: 8
+            RowLayout { Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                Text { text: "Уровень: INFO ▾"; color: theme.textDim; font.pixelSize: 13; rightPadding: 14 }
-                Text { text: "Очистить"; color: theme.textDim; font.pixelSize: 13
+                Text { text: "Очистить"; color: theme.accent; font.pixelSize: 13
                     MouseArea { anchors.fill: parent; onClicked: backend.clearLogs() } }
+                Item { Layout.fillWidth: true }
             }
             Rectangle {
                 Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
@@ -452,27 +482,32 @@ Window {
                     text: "Логи появятся после подключения"; color: theme.textFaint; font.pixelSize: 13
                 }
                 ListView {
+                    id: logList
                     anchors.fill: parent; anchors.margins: 12; spacing: 3
                     model: backend.logEntries
                     clip: true
-                    onCountChanged: positionViewAtEnd()
+                    property bool autoScroll: true
+                    onCountChanged: if (autoScroll) positionViewAtEnd()
                     delegate: Row {
                         required property var modelData
-                        spacing: 6
+                        width: logList.width; spacing: 6
                         Text { text: modelData.time; color: theme.textFaint; font.pixelSize: 11; font.family: "Menlo" }
                         Text { text: modelData.level; font.pixelSize: 11; font.family: "Menlo"
                                color: modelData.level === "ERROR" ? "#a32d2d" : modelData.level === "WARN" ? "#ba7517" : "#185fa5" }
-                        Text { text: modelData.msg; color: theme.text; font.pixelSize: 11; font.family: "Menlo" }
+                        Text { text: modelData.msg; color: theme.text; font.pixelSize: 11; font.family: "Menlo"
+                               width: parent.width - 116; elide: Text.ElideRight }
                     }
                 }
             }
-            RowLayout { Layout.fillWidth: true; Layout.bottomMargin: 12
-                Text { text: "📂 открыть файл логов"; color: theme.accent; font.pixelSize: 12
-                    MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
-                Item { Layout.fillWidth: true }
-                Text { text: "Авто-прокрутка"; color: theme.textDim; font.pixelSize: 12; rightPadding: 8 }
-                Toggle { checked: true; implicitWidth: 34; implicitHeight: 20 }
+            RowLayout { Layout.fillWidth: true; spacing: 8
+                Text { Layout.fillWidth: true; text: backend.logPath; color: theme.textDim; font.pixelSize: 11
+                       elide: Text.ElideMiddle
+                       MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
+                Text { text: "Авто-прокрутка"; color: theme.textDim; font.pixelSize: 12 }
+                Toggle { checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
+                         onToggled: function(v){ logList.autoScroll = v } }
             }
+        }
         }
     }
 
@@ -484,12 +519,14 @@ Window {
             color: theme.bg
             property string protocol: "http2"
             property bool ipv6: true
-            RowLayout {
+            Item {
                 id: chdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-                anchors.margins: 14; spacing: 10
-                Text { text: "←"; color: theme.textDim; font.pixelSize: 20
+                height: 48
+                Text { id: cBack; anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                       text: "←"; color: theme.textDim; font.pixelSize: 20
                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
-                Text { text: "Новый конфиг"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                Text { anchors.left: cBack.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                       text: "Новый конфиг"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
             Flickable {
                 anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -508,7 +545,9 @@ Window {
                             Text { text: "Протокол"; color: theme.textDim; font.pixelSize: 13 }
                             Rectangle { width: parent.width; height: 34; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
                                 Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
-                                       text: (cform.protocol === "http3" ? "HTTP/3" : "HTTP/2") + "  ▾"; color: theme.text; font.pixelSize: 14 }
+                                       text: cform.protocol === "http3" ? "HTTP/3" : "HTTP/2"; color: theme.text; font.pixelSize: 14 }
+                                Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                                       text: "▾"; color: theme.textDim; font.pixelSize: 14 }
                                 MouseArea { anchors.fill: parent; onClicked: cform.protocol = (cform.protocol === "http2" ? "http3" : "http2") } }
                         }
                         Field { id: fDns; label: "DNS-серверы"; placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
@@ -518,7 +557,7 @@ Window {
                         Field { id: fRandom; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; height: 32; spacing: 8
-                        Text { text: "Allow IPv6 connections"; color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "Разрешить IPv6"; color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
                         Item { width: parent.width - 220; height: 1 }
                         Toggle { checked: cform.ipv6; anchors.verticalCenter: parent.verticalCenter; onToggled: function(v){ cform.ipv6 = v } }
                     }
@@ -561,7 +600,7 @@ Window {
                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
                 Text { text: "Сетевые адаптеры"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                 Item { Layout.fillWidth: true }
-                Text { visible: backend.adapterScanSupported; text: "⟳ Сканировать"; color: theme.accent; font.pixelSize: 13
+                Text { visible: backend.adapterScanSupported; text: "Сканировать"; color: theme.accent; font.pixelSize: 13
                        MouseArea { anchors.fill: parent; onClicked: backend.scanAdapters() } }
             }
             // Unsupported-platform notice (scan is Windows-only).
@@ -584,20 +623,16 @@ Window {
                     ColumnLayout { required property var modelData; Layout.fillWidth: true
                         RowLayout { Layout.fillWidth: true; Layout.topMargin: 9; Layout.bottomMargin: 9; spacing: 12
                             Image { visible: parent.parent.modelData.ours; source: "qrc:/assets/logo.png"; width: 20; height: 20; sourceSize: Qt.size(40,40) }
-                            Text { visible: !parent.parent.modelData.ours
-                                   text: parent.parent.modelData.conflict ? "⚠" : "○"
-                                   color: parent.parent.modelData.conflict ? theme.warn : theme.textFaint; font.pixelSize: 16 }
                             ColumnLayout { spacing: 1
                                 Text { text: parent.parent.parent.modelData.name; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
                                 Text { text: parent.parent.parent.modelData.ours ? parent.parent.parent.modelData.description
-                                             : (parent.parent.parent.modelData.conflict ? "может конфликтовать" : "")
-                                             + (parent.parent.parent.modelData.enabled ? " · включён" : " · отключён")
+                                             : (parent.parent.parent.modelData.conflict
+                                                ? ("может конфликтовать" + (parent.parent.parent.modelData.enabled ? " · включён" : " · отключён"))
+                                                : (parent.parent.parent.modelData.enabled ? "включён" : "отключён"))
                                        color: parent.parent.parent.modelData.ours ? theme.textDim
                                              : (parent.parent.parent.modelData.conflict ? theme.warn : theme.textFaint); font.pixelSize: 12 }
                             }
                             Item { Layout.fillWidth: true }
-                            Rectangle { visible: parent.parent.modelData.ours; radius: 10; color: theme.infoBg; implicitWidth: ow.width+16; implicitHeight: 20
-                                Text { id: ow; anchors.centerIn: parent; text: "наш"; color: theme.accent; font.pixelSize: 11; font.weight: Font.Medium } }
                             Toggle { visible: !parent.parent.modelData.ours; checked: parent.parent.modelData.enabled
                                      onToggled: function(v){ backend.setAdapterEnabled(parent.parent.modelData.name, v) } }
                         }

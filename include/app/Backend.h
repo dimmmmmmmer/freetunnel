@@ -50,6 +50,10 @@ class Backend : public QObject {
     // Network adapters (third-party VPN adapter conflicts; Windows-only scan)
     Q_PROPERTY(QVariantList adapters READ adapters NOTIFY adaptersChanged)
     Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
+    // Misc
+    Q_PROPERTY(QString logPath READ logPath CONSTANT)
+    Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList pings READ pings NOTIFY pingsChanged) // per-config latency text
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -114,6 +118,13 @@ public:
     Q_INVOKABLE void scanAdapters();
     Q_INVOKABLE void setAdapterEnabled(const QString &name, bool enabled);
 
+    QString logPath() const;
+    bool autoStart() const;
+    void setAutoStart(bool v);
+    QVariantList pings() const { return m_pings; }
+    Q_INVOKABLE void pingConfigs();
+    Q_INVOKABLE bool importFromClipboard();
+
 signals:
     void stateChanged();
     void tick();
@@ -125,6 +136,7 @@ signals:
     void hotkeysChanged();
     void updateChanged();
     void adaptersChanged();
+    void pingsChanged();
     void errorOccurred(const QString &msg);
 
 private:
@@ -145,6 +157,7 @@ private:
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
     NetworkAdapterManager *m_adapterMgr = nullptr;
     QVariantList m_adapters;
+    QVariantList m_pings;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;

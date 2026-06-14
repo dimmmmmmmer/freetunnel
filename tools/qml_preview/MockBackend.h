@@ -32,6 +32,9 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY changed)
     Q_PROPERTY(QVariantList adapters READ adapters NOTIFY changed)
     Q_PROPERTY(bool adapterScanSupported READ adapterScanSupported CONSTANT)
+    Q_PROPERTY(QString logPath READ logPath CONSTANT)
+    Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY changed)
+    Q_PROPERTY(QVariantList pings READ pings NOTIFY changed)
 public:
     QString appVersion() const { return QStringLiteral("1.0.0"); }
     QString updateState() const { return m_updateState; }
@@ -56,6 +59,15 @@ public:
     bool adapterScanSupported() const { return true; }
     Q_INVOKABLE void scanAdapters() { emit changed(); }
     Q_INVOKABLE void setAdapterEnabled(const QString &, bool) { emit changed(); }
+    QString logPath() const { return QStringLiteral("/Users/me/Library/Application Support/FreeTunnel/freetunnel.log"); }
+    bool autoStart() const { return m_autoStart; }
+    void setAutoStart(bool v) { m_autoStart = v; emit changed(); }
+    QVariantList pings() const { return m_pings; }
+    Q_INVOKABLE void pingConfigs() {
+        m_pings = QVariantList{QStringLiteral("38 мс"), QStringLiteral("52 мс"), QStringLiteral("—")};
+        emit changed();
+    }
+    Q_INVOKABLE bool importFromClipboard() { return true; }
     QString hotkeyToggle() const { return m_hkToggle; }
     QString hotkeyConnect() const { return m_hkConnect; }
     QString hotkeyDisconnect() const { return m_hkDisconnect; }
@@ -132,4 +144,6 @@ private:
     QString m_updateState;
     QString m_updateMessage;
     QString m_latestVersion;
+    bool m_autoStart = false;
+    QVariantList m_pings;
 };

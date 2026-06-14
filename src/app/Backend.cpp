@@ -1,13 +1,19 @@
 #include "app/Backend.h"
 
+#include <QAbstractSocket>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
-#include <QProcess>
+#include <QGuiApplication>
 #include <QKeySequence>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QSettings>
 #include <QStandardPaths>
+#include <QTcpSocket>
 #include <QTime>
 #include <QUrl>
 #include <QVariantMap>
@@ -197,6 +203,149 @@ void Backend::setAdapterEnabled(const QString &name, bool enabled) {
         scanAdapters();
     else
         emit errorOccurred(tr("Не удалось изменить адаптер: %1").arg(name));
+}
+
+// ---------- misc: log path, autostart, ping, clipboard import ----------
+
+QString Backend::logPath() const {
+    if (!m_settings.log_path.isEmpty())
+        return m_settings.log_path;
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+            + QStringLiteral("/freetunnel.log");
+}
+
+#if defined(Q_OS_WIN)
+static const char *kRunKey =
+    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+bool Backend::autoStart() const {
+    QSettings r(QString::fromLatin1(kRunKey), QSettings::NativeFormat);
+    return !r.value(QStringLiteral("FreeTunnel")).toString().isEmpty();
+}
+void Backend::setAutoStart(bool v) {
+    QSettings r(QString::fromLatin1(kRunKey), QSettings::NativeFormat);
+    if (v)
+        r.setValue(QStringLiteral("FreeTunnel"),
+                   QLatin1Char('"') + QDir::toNativeSeparators(QCoreApplication::applicationFilePath())
+                           + QLatin1Char('"'));
+    else
+        r.remove(QStringLiteral("FreeTunnel"));
+    emit settingsChanged();
+}
+#elif defined(Q_OS_MACOS)
+static QString autoStartPath() {
+    return QDir::homePath() + QStringLiteral("/Library/LaunchAgents/com.freetunnel.app.plist");
+}
+bool Backend::autoStart() const { return QFileInfo::exists(autoStartPath()); }
+void Backend::setAutoStart(bool v) {
+    const QString p = autoStartPath();
+    if (v) {
+        QDir().mkpath(QFileInfo(p).absolutePath());
+        QFile f(p);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            f.write(QStringLiteral(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+                "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                "<plist version=\"1.0\"><dict>\n"
+                "  <key>Label</key><string>com.freetunnel.app</string>\n"
+                "  <key>ProgramArguments</key><array><string>%1</string></array>\n"
+                "  <key>RunAtLoad</key><true/>\n"
+                "</dict></plist>\n").arg(QCoreApplication::applicationFilePath()).toUtf8());
+    } else {
+        QFile::remove(p);
+    }
+    emit settingsChanged();
+}
+#else
+static QString autoStartPath() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+            + QStringLiteral("/autostart/freetunnel.desktop");
+}
+bool Backend::autoStart() const { return QFileInfo::exists(autoStartPath()); }
+void Backend::setAutoStart(bool v) {
+    const QString p = autoStartPath();
+    if (v) {
+        QDir().mkpath(QFileInfo(p).absolutePath());
+        QFile f(p);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            f.write(QStringLiteral("[Desktop Entry]\nType=Application\nName=FreeTunnel\n"
+                                   "Exec=%1\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+                            .arg(QCoreApplication::applicationFilePath()).toUtf8());
+    } else {
+        QFile::remove(p);
+    }
+    emit settingsChanged();
+}
+#endif
+
+// Read the first endpoint "host:port" out of a config TOML.
+static QString firstAddress(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    const QString content = QString::fromUtf8(f.readAll());
+    static const QRegularExpression re(QStringLiteral("addresses\\s*=\\s*\\[\\s*\"([^\"]+)\""));
+    const auto m = re.match(content);
+    return m.hasMatch() ? m.captured(1) : QString();
+}
+
+void Backend::pingConfigs() {
+    m_pings.clear();
+    for (int i = 0; i < m_paths.size(); ++i)
+        m_pings << QStringLiteral("…");
+    emit pingsChanged();
+
+    for (int i = 0; i < m_paths.size(); ++i) {
+        const QString addr = firstAddress(m_paths.at(i));
+        const int colon = addr.lastIndexOf(':');
+        if (colon < 0) {
+            m_pings[i] = QStringLiteral("—");
+            emit pingsChanged();
+            continue;
+        }
+        const QString host = addr.left(colon);
+        const quint16 port = addr.mid(colon + 1).toUShort();
+        auto *sock = new QTcpSocket(this);
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+        connect(sock, &QTcpSocket::connected, this, [this, i, sock, t0]() {
+            if (i < m_pings.size())
+                m_pings[i] = QString::number(QDateTime::currentMSecsSinceEpoch() - t0)
+                        + QStringLiteral(" мс");
+            sock->abort();
+            sock->deleteLater();
+            emit pingsChanged();
+        });
+        connect(sock, &QTcpSocket::errorOccurred, this,
+                [this, i, sock](QAbstractSocket::SocketError) {
+                    if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…"))
+                        m_pings[i] = QStringLiteral("—");
+                    sock->deleteLater();
+                    emit pingsChanged();
+                });
+        QTimer::singleShot(3000, sock, [this, i, sock]() {
+            if (sock->state() != QAbstractSocket::ConnectedState) {
+                if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…")) {
+                    m_pings[i] = QStringLiteral("—");
+                    emit pingsChanged();
+                }
+                sock->abort();
+                sock->deleteLater();
+            }
+        });
+        sock->connectToHost(host, port);
+    }
+}
+
+bool Backend::importFromClipboard() {
+    const QString text = QGuiApplication::clipboard()->text().trimmed();
+    if (text.isEmpty()) {
+        emit errorOccurred(tr("Буфер обмена пуст"));
+        return false;
+    }
+    if (text.startsWith(QStringLiteral("tt://")))
+        return importDeepLink(text);
+    emit errorOccurred(tr("В буфере нет ссылки tt://"));
+    return false;
 }
 
 QString Backend::statusText() const {
