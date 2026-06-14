@@ -159,7 +159,7 @@ Window {
                 border.width: hk.capturing ? 1 : 0; border.color: theme.accent
                 Text {
                     id: lbl; anchors.centerIn: parent
-                    text: hk.capturing ? "Нажмите…" : (hk.value || "—")
+                    text: hk.capturing ? qsTr("Press…") : (hk.value || "—")
                     color: (hk.value || hk.capturing) ? theme.text : theme.textFaint
                     font.pixelSize: 13
                 }
@@ -222,7 +222,7 @@ Window {
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: backend.connected ? backend.sessionTime : "Выключено"
+                            text: backend.connected ? backend.sessionTime : qsTr("Off")
                             color: theme.text
                             font.pixelSize: backend.connected ? 22 : 15; font.weight: Font.Medium
                         }
@@ -238,8 +238,8 @@ Window {
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12; visible: backend.connected
                     Repeater {
-                        model: [ { l: "Загрузка", v: backend.downSpeed, c: theme.success, a: "↓" },
-                                 { l: "Отправка", v: backend.upSpeed, c: "#378add", a: "↑" } ]
+                        model: [ { l: qsTr("Download"), v: backend.downSpeed, c: theme.success, a: "↓" },
+                                 { l: qsTr("Upload"), v: backend.upSpeed, c: "#378add", a: "↑" } ]
                         Rectangle {
                             required property var modelData
                             width: 140; height: 56; radius: 8; color: theme.surface
@@ -250,7 +250,7 @@ Window {
                                     Text { text: parent.parent.parent.modelData.l; color: theme.textDim; font.pixelSize: 12 }
                                 }
                                 Text { anchors.horizontalCenter: parent.horizontalCenter
-                                       text: parent.parent.modelData.v + " МБ/с"; color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
+                                       text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
                             }
                         }
                     }
@@ -271,16 +271,16 @@ Window {
                 spacing: 0
                 Item { Layout.preferredHeight: 10 }
                 Text { Layout.fillWidth: true; wrapMode: Text.WordWrap
-                       text: "Раздельное туннелирование: домены из списка ниже идут напрямую, мимо VPN."
+                       text: qsTr("Split tunneling: the domains below go directly, bypassing the VPN.")
                        color: theme.textFaint; font.pixelSize: 12 }
                 Item { Layout.preferredHeight: 4 }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Включить"; color: theme.text; font.pixelSize: 14 }
+                    Text { text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
                     Toggle { checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
                 }
                 Item { Layout.preferredHeight: 10 }
-                SectionLabel { text: "Профиль" }
+                SectionLabel { text: qsTr("Profile") }
                 Flow {
                     Layout.fillWidth: true; Layout.topMargin: 2; spacing: 6
                     Repeater {
@@ -311,19 +311,19 @@ Window {
                         onAccepted: { backend.addProfile(text); text = ""; npRow.visible = false }
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                           text: "имя профиля и Enter"; color: theme.textFaint; font.pixelSize: 13
+                           text: qsTr("profile name, then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: npInput.text.length === 0 }
                 }
                 RowLayout { Layout.fillWidth: true; Layout.topMargin: 6; visible: backend.activeProfile !== "Default"
                     Item { Layout.fillWidth: true }
-                    Text { text: "Удалить профиль «" + backend.activeProfile + "»"; color: theme.danger; font.pixelSize: 12
+                    Text { text: qsTr("Delete profile “%1”").arg(backend.activeProfile); color: theme.danger; font.pixelSize: 12
                         MouseArea { anchors.fill: parent; onClicked: backend.removeProfile(backend.activeProfile) } }
                 }
                 Item { Layout.preferredHeight: 12 }
                 RowLayout { Layout.fillWidth: true
-                    SectionLabel { text: "Домены — мимо VPN" }
+                    SectionLabel { text: qsTr("Domains — bypass VPN") }
                     Item { Layout.fillWidth: true }
-                    Text { text: "Очистить все"; color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
+                    Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
                         MouseArea { anchors.fill: parent; onClicked: backend.clearDomains() } }
                 }
                 Flow {
@@ -354,7 +354,7 @@ Window {
                         onAccepted: { backend.addDomain(text); text = "" }
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                           text: "добавить домен и Enter"; color: theme.textFaint; font.pixelSize: 13
+                           text: qsTr("add a domain, then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: domInput.text.length === 0 && !domInput.activeFocus }
                 }
                 Item { Layout.preferredHeight: 16 }
@@ -371,17 +371,17 @@ Window {
                 anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 24
-                    Text { text: "Импорт ▾"; color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium
+                    Text { text: qsTr("Import ▾"); color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium
                         MouseArea { anchors.fill: parent; onClicked: importMenu.visible = !importMenu.visible } }
-                    Text { text: "Создать"; color: theme.text; font.pixelSize: 15
+                    Text { text: qsTr("Create"); color: theme.text; font.pixelSize: 15
                         MouseArea { anchors.fill: parent; onClicked: win.overlay = "create" } }
-                    Text { text: "Пинг"; color: theme.text; font.pixelSize: 15; visible: backend.configs.length > 0
+                    Text { text: qsTr("Ping"); color: theme.text; font.pixelSize: 15; visible: backend.configs.length > 0
                         MouseArea { anchors.fill: parent; onClicked: backend.pingConfigs() } }
                 }
                 Text {
                     visible: backend.configs.length === 0
                     Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 30
-                    text: "Нет конфигов — импортируйте или создайте"; color: theme.textFaint; font.pixelSize: 14
+                    text: qsTr("No configs — import or create one"); color: theme.textFaint; font.pixelSize: 14
                 }
                 Repeater {
                     model: backend.configs
@@ -400,7 +400,7 @@ Window {
                                    color: theme.textDim; font.pixelSize: 12 }
                             Rectangle { visible: index === backend.activeIndex; radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
                                 implicitWidth: ab.width+16; implicitHeight: 20
-                                Text { id: ab; anchors.centerIn: parent; text: "активен"; color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                                Text { id: ab; anchors.centerIn: parent; text: qsTr("active"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
                             Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 6
                                    MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
                         }
@@ -417,16 +417,16 @@ Window {
                 border.color: theme.border; border.width: 1
                 Column { id: menuCol; width: parent.width; y: 6
                     Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
-                           text: "Вставить из буфера"; color: theme.text; font.pixelSize: 14
+                           text: qsTr("Paste from clipboard"); color: theme.text; font.pixelSize: 14
                            MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; backend.importFromClipboard() } } }
                     Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
-                           text: "Из файла…"; color: theme.text; font.pixelSize: 14
+                           text: qsTr("From file…"); color: theme.text; font.pixelSize: 14
                            MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; fileDlg.open() } } }
                 }
             }
             Platform.FileDialog {
-                id: fileDlg; title: "Выберите конфиг"
-                nameFilters: ["TOML (*.toml)", "Все файлы (*)"]
+                id: fileDlg; title: qsTr("Select a config")
+                nameFilters: ["TOML (*.toml)", qsTr("All files (*)")]
                 onAccepted: backend.importFile(fileDlg.file.toString())
             }
         }
@@ -441,54 +441,54 @@ Window {
                 id: setcol; anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
                 Item { Layout.preferredHeight: 6 }
-                SectionLabel { text: "Основное" }
+                SectionLabel { text: qsTr("General") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Язык"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                    Text { text: qsTr("Language"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
                     Text { text: (backend.language === "ru" ? "Русский" : "English") + " ▾"; color: theme.textDim; font.pixelSize: 14
                         MouseArea { anchors.fill: parent; onClicked: backend.language = (backend.language === "ru" ? "en" : "ru") } } }
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Тема"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
-                    Text { text: ({system:"Система",light:"Светлая",dark:"Тёмная"}[backend.themeMode] || "Система") + " ▾"; color: theme.textDim; font.pixelSize: 14
+                    Text { text: qsTr("Theme"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                    Text { text: ({system:qsTr("System"),light:qsTr("Light"),dark:qsTr("Dark")}[backend.themeMode] || qsTr("System")) + " ▾"; color: theme.textDim; font.pixelSize: 14
                         MouseArea { anchors.fill: parent; onClicked: backend.themeMode = (backend.themeMode === "system" ? "light" : backend.themeMode === "light" ? "dark" : "system") } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Запускать при входе в систему"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: "Подключаться автоматически"; color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Connect automatically"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
                     Toggle { checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
                 Item { Layout.preferredHeight: 16 }
-                SectionLabel { text: "Безопасность" }
+                SectionLabel { text: qsTr("Security") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
-                    Text { text: "блокировать трафик вне VPN"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
+                    Text { text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
                     Item { Layout.fillWidth: true }
                     Toggle { checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
                 Item { Layout.preferredHeight: 16 }
-                SectionLabel { text: "Горячие клавиши" }
-                HotkeyField { label: "Переключить VPN"; value: backend.hotkeyToggle
+                SectionLabel { text: qsTr("Hotkeys") }
+                HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle
                     onCaptured: function(s){ backend.hotkeyToggle = s } }
                 Sep {}
-                HotkeyField { label: "Подключить"; value: backend.hotkeyConnect
+                HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect
                     onCaptured: function(s){ backend.hotkeyConnect = s } }
                 Sep {}
-                HotkeyField { label: "Отключить"; value: backend.hotkeyDisconnect
+                HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect
                     onCaptured: function(s){ backend.hotkeyDisconnect = s } }
                 Item { Layout.preferredHeight: 16 }
-                SectionLabel { text: "Обслуживание" }
+                SectionLabel { text: qsTr("Maintenance") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Сетевые адаптеры"; color: theme.text; font.pixelSize: 14 }
+                    Text { text: qsTr("Network adapters"); color: theme.text; font.pixelSize: 14 }
                     Text { text: "Windows"; color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
                     Item { Layout.fillWidth: true } Text { text: "›"; color: theme.textDim; font.pixelSize: 16 }
                     MouseArea { anchors.fill: parent; onClicked: win.overlay = "adapters" } }
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Проверить обновления"; color: theme.text; font.pixelSize: 14 }
+                    Text { text: qsTr("Check for updates"); color: theme.text; font.pixelSize: 14 }
                     Text { visible: backend.updateMessage.length > 0; text: backend.updateMessage
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
                            font.pixelSize: 12; leftPadding: 8 }
                     Item { Layout.fillWidth: true }
                     Text { text: backend.updateState === "checking" ? "…"
-                                 : backend.updateState === "available" ? "Скачать ›" : backend.appVersion
+                                 : backend.updateState === "available" ? qsTr("Download ›") : backend.appVersion
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
                            font.pixelSize: 13 }
                     MouseArea { anchors.fill: parent
@@ -496,7 +496,7 @@ Window {
                                                                        : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
                 Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
-                       text: "FreeTunnel " + backend.appVersion + " · ядро TrustTunnel"; color: theme.textFaint; font.pixelSize: 12 }
+                       text: qsTr("FreeTunnel %1 · TrustTunnel core").arg(backend.appVersion); color: theme.textFaint; font.pixelSize: 12 }
                 Item { Layout.preferredHeight: 14 }
             }
         }
@@ -511,7 +511,7 @@ Window {
             anchors.topMargin: 6; anchors.bottomMargin: 12; spacing: 8
             RowLayout { Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                Text { text: "Очистить"; color: theme.accent; font.pixelSize: 13
+                Text { text: qsTr("Clear"); color: theme.accent; font.pixelSize: 13
                     MouseArea { anchors.fill: parent; onClicked: backend.clearLogs() } }
                 Item { Layout.fillWidth: true }
             }
@@ -520,7 +520,7 @@ Window {
                 clip: true
                 Text {
                     anchors.centerIn: parent; visible: backend.logEntries.length === 0
-                    text: "Логи появятся после подключения"; color: theme.textFaint; font.pixelSize: 13
+                    text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
                 }
                 ListView {
                     id: logList
@@ -544,7 +544,7 @@ Window {
                 Text { Layout.fillWidth: true; text: backend.logPath; color: theme.textDim; font.pixelSize: 11
                        elide: Text.ElideMiddle
                        MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
-                Text { text: "Авто-прокрутка"; color: theme.textDim; font.pixelSize: 12 }
+                Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
                 Toggle { checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
                          onToggled: function(v){ logList.autoScroll = v } }
             }
@@ -567,23 +567,23 @@ Window {
                        text: "←"; color: theme.textDim; font.pixelSize: 20
                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
                 Text { anchors.left: cBack.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                       text: "Новый конфиг"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                       text: qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
             Flickable {
                 anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 anchors.leftMargin: 18; anchors.rightMargin: 18; contentHeight: fcol.height; clip: true
                 Column {
                     id: fcol; width: parent.width; spacing: 10
-                    Field { id: fName; label: "Имя"; placeholder: "Германия · Франкфурт" }
-                    Field { id: fHost; label: "Хост сервера"; placeholder: "frankfurt.example.com" }
-                    Field { id: fAddr; label: "Адрес(а) · host:port (через запятую)"; placeholder: "1.2.3.4:443" }
+                    Field { id: fName; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
+                    Field { id: fHost; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
+                    Field { id: fAddr; label: qsTr("Address(es) · host:port (comma-separated)"); placeholder: "1.2.3.4:443" }
                     Row { width: parent.width; spacing: 10
-                        Field { id: fUser; label: "Логин"; width: (parent.width - 10) / 2 }
-                        Field { id: fPass; label: "Пароль"; password: true; width: (parent.width - 10) / 2 }
+                        Field { id: fUser; label: qsTr("Username"); width: (parent.width - 10) / 2 }
+                        Field { id: fPass; label: qsTr("Password"); password: true; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; spacing: 10
                         Column { width: (parent.width - 10) / 2; spacing: 4
-                            Text { text: "Протокол"; color: theme.textDim; font.pixelSize: 13 }
+                            Text { text: qsTr("Protocol"); color: theme.textDim; font.pixelSize: 13 }
                             Rectangle { width: parent.width; height: 34; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
                                 Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
                                        text: cform.protocol === "http3" ? "HTTP/3" : "HTTP/2"; color: theme.text; font.pixelSize: 14 }
@@ -591,26 +591,26 @@ Window {
                                        text: "▾"; color: theme.textDim; font.pixelSize: 14 }
                                 MouseArea { anchors.fill: parent; onClicked: cform.protocol = (cform.protocol === "http2" ? "http3" : "http2") } }
                         }
-                        Field { id: fDns; label: "DNS-серверы"; placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
+                        Field { id: fDns; label: qsTr("DNS servers"); placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; spacing: 10
                         Field { id: fSni; label: "Custom SNI"; width: (parent.width - 10) / 2 }
                         Field { id: fRandom; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; height: 32; spacing: 8
-                        Text { text: "Разрешить IPv6"; color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: qsTr("Allow IPv6"); color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
                         Item { width: parent.width - 220; height: 1 }
                         Toggle { checked: cform.ipv6; anchors.verticalCenter: parent.verticalCenter; onToggled: function(v){ cform.ipv6 = v } }
                     }
                     Column { width: parent.width; spacing: 4
-                        Text { text: "Сертификат (PEM) · необязательно"; color: theme.textDim; font.pixelSize: 13 }
+                        Text { text: qsTr("Certificate (PEM) · optional"); color: theme.textDim; font.pixelSize: 13 }
                         Rectangle { width: parent.width; height: 70; radius: 8; color: theme.bg; border.color: fCert.activeFocus ? theme.accent : theme.border; border.width: 1
                             Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
                                 TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: "Menlo"; color: theme.text; wrapMode: TextEdit.WrapAnywhere } } }
                     }
                     Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 10; topPadding: 4; bottomPadding: 16
                         Rectangle { width: 110; height: 36; radius: 8; color: theme.accent
-                            Text { anchors.centerIn: parent; text: "Сохранить"; color: "white"; font.pixelSize: 14 }
+                            Text { anchors.centerIn: parent; text: qsTr("Save"); color: "white"; font.pixelSize: 14 }
                             MouseArea { anchors.fill: parent; onClicked: {
                                 var ok = backend.createConfig({
                                     name: fName.text, hostname: fHost.text, addresses: fAddr.text,
@@ -620,7 +620,7 @@ Window {
                                 if (ok) win.overlay = "";
                             } } }
                         Rectangle { width: 90; height: 36; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Отмена"; color: theme.text; font.pixelSize: 14 }
+                            Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
                             MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
                     }
                 }
@@ -639,9 +639,9 @@ Window {
                 anchors.margins: 14; spacing: 10
                 Text { text: "←"; color: theme.textDim; font.pixelSize: 20
                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
-                Text { text: "Сетевые адаптеры"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                Text { text: qsTr("Network adapters"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                 Item { Layout.fillWidth: true }
-                Text { visible: backend.adapterScanSupported; text: "Сканировать"; color: theme.accent; font.pixelSize: 13
+                Text { visible: backend.adapterScanSupported; text: qsTr("Scan"); color: theme.accent; font.pixelSize: 13
                        MouseArea { anchors.fill: parent; onClicked: backend.scanAdapters() } }
             }
             // Unsupported-platform notice (scan is Windows-only).
@@ -649,15 +649,15 @@ Window {
                 visible: !backend.adapterScanSupported
                 anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
                 anchors.margins: 18; wrapMode: Text.WordWrap
-                text: "Управление сетевыми адаптерами доступно только в Windows."
+                text: qsTr("Network adapter management is available on Windows only.")
                 color: theme.textFaint; font.pixelSize: 13
             }
             ColumnLayout {
                 visible: backend.adapterScanSupported
                 anchors.top: ahdr.bottom; anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18; anchors.topMargin: 4; spacing: 0
-                Text { text: "Сторонние VPN-адаптеры могут конфликтовать с FreeTunnel."; color: theme.textFaint; font.pixelSize: 12; Layout.bottomMargin: 8 }
-                Text { visible: backend.adapters.length === 0; text: "Адаптеры не найдены. Нажмите «Сканировать»."
+                Text { text: qsTr("Third-party VPN adapters may conflict with FreeTunnel."); color: theme.textFaint; font.pixelSize: 12; Layout.bottomMargin: 8 }
+                Text { visible: backend.adapters.length === 0; text: qsTr("No adapters found. Tap “Scan”.")
                        color: theme.textFaint; font.pixelSize: 13; Layout.topMargin: 8 }
                 Repeater {
                     model: backend.adapters
@@ -668,8 +668,8 @@ Window {
                                 Text { text: parent.parent.parent.modelData.name; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
                                 Text { text: parent.parent.parent.modelData.ours ? parent.parent.parent.modelData.description
                                              : (parent.parent.parent.modelData.conflict
-                                                ? ("может конфликтовать" + (parent.parent.parent.modelData.enabled ? " · включён" : " · отключён"))
-                                                : (parent.parent.parent.modelData.enabled ? "включён" : "отключён"))
+                                                ? (qsTr("may conflict") + (parent.parent.parent.modelData.enabled ? qsTr(" · on") : qsTr(" · off")))
+                                                : (parent.parent.parent.modelData.enabled ? qsTr("on") : qsTr("off")))
                                        color: parent.parent.parent.modelData.ours ? theme.textDim
                                              : (parent.parent.parent.modelData.conflict ? theme.warn : theme.textFaint); font.pixelSize: 12 }
                             }

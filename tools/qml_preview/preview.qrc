@@ -7,6 +7,9 @@
   <qresource prefix="/assets">
     <file alias="logo.png">../../assets/logo.png</file>
   </qresource>
+  <qresource prefix="/i18n">
+    <file alias="freetunnel_ru.qm">../../i18n/freetunnel_ru.qm</file>
+  </qresource>
   <qresource prefix="/icons">
     <file alias="connection.svg">../../assets/icons/connection.svg</file>
     <file alias="network.svg">../../assets/icons/network.svg</file>

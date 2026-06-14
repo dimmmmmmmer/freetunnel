@@ -69,6 +69,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/vpn/qt_trusttunnel_client.h
     assets/app.qrc
     qml.qrc
+    i18n/i18n.qrc
     ${APP_ICON_RC}
 )
 

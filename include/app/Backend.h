@@ -146,6 +146,7 @@ signals:
     void updateChanged();
     void adaptersChanged();
     void pingsChanged();
+    void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
 
 private:

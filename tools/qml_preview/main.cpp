@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QTranslator>
 #include <QUrl>
 
 #include "MockBackend.h"
@@ -17,6 +18,12 @@ int main(int argc, char **argv) {
     MockBackend backend;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("backend", &backend);
+
+    // Preview Russian UI with QML_PREVIEW_LANG=ru
+    QTranslator tr;
+    if (qgetenv("QML_PREVIEW_LANG") == "ru" && tr.load(QStringLiteral(":/i18n/freetunnel_ru.qm")))
+        app.installTranslator(&tr);
+
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty())
         return 1;

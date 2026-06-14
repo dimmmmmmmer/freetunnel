@@ -138,19 +138,19 @@ void Backend::checkForUpdates() {
                     m_updateState = QStringLiteral("available");
                     m_latestVersion = info.version;
                     m_latestUrl = info.htmlUrl;
-                    m_updateMessage = tr("Доступна версия %1").arg(info.version);
+                    m_updateMessage = tr("Version %1 is available").arg(info.version);
                     emit updateChanged();
                 });
         connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
                 [this](const QString &message) {
                     m_updateState = QStringLiteral("current");
                     m_updateMessage = message.isEmpty()
-                            ? tr("Установлена последняя версия") : message;
+                            ? tr("You have the latest version") : message;
                     emit updateChanged();
                 });
     }
     m_updateState = QStringLiteral("checking");
-    m_updateMessage = tr("Проверка…");
+    m_updateMessage = tr("Checking…");
     emit updateChanged();
     m_updater->checkNow();
 }
@@ -202,7 +202,7 @@ void Backend::setAdapterEnabled(const QString &name, bool enabled) {
     if (ok)
         scanAdapters();
     else
-        emit errorOccurred(tr("Не удалось изменить адаптер: %1").arg(name));
+        emit errorOccurred(tr("Could not change adapter: %1").arg(name));
 }
 
 // ---------- misc: log path, autostart, ping, clipboard import ----------
@@ -339,24 +339,24 @@ void Backend::pingConfigs() {
 bool Backend::importFromClipboard() {
     const QString text = QGuiApplication::clipboard()->text().trimmed();
     if (text.isEmpty()) {
-        emit errorOccurred(tr("Буфер обмена пуст"));
+        emit errorOccurred(tr("Clipboard is empty"));
         return false;
     }
     if (text.startsWith(QStringLiteral("tt://")))
         return importDeepLink(text);
-    emit errorOccurred(tr("В буфере нет ссылки tt://"));
+    emit errorOccurred(tr("No tt:// link in the clipboard"));
     return false;
 }
 
 QString Backend::statusText() const {
     switch (m_client.state()) {
-    case QtTrustTunnelClient::State::Connected: return tr("Подключено");
-    case QtTrustTunnelClient::State::Connecting: return tr("Подключение…");
-    case QtTrustTunnelClient::State::Reconnecting: return tr("Переподключение…");
-    case QtTrustTunnelClient::State::WaitingForNetwork: return tr("Ожидание сети…");
-    case QtTrustTunnelClient::State::Disconnecting: return tr("Отключение…");
-    case QtTrustTunnelClient::State::Error: return tr("Ошибка");
-    default: return tr("Выключено");
+    case QtTrustTunnelClient::State::Connected: return tr("Connected");
+    case QtTrustTunnelClient::State::Connecting: return tr("Connecting…");
+    case QtTrustTunnelClient::State::Reconnecting: return tr("Reconnecting…");
+    case QtTrustTunnelClient::State::WaitingForNetwork: return tr("Waiting for network…");
+    case QtTrustTunnelClient::State::Disconnecting: return tr("Disconnecting…");
+    case QtTrustTunnelClient::State::Error: return tr("Error");
+    default: return tr("Off");
     }
 }
 
@@ -377,7 +377,7 @@ QString Backend::downSpeed() const { return fmtRate(m_downRate); }
 QString Backend::upSpeed() const { return fmtRate(m_upRate); }
 
 QString Backend::activeConfig() const {
-    return m_activePath.isEmpty() ? tr("Нет конфига") : nameForPath(m_activePath);
+    return m_activePath.isEmpty() ? tr("No config") : nameForPath(m_activePath);
 }
 
 QString Backend::nameForPath(const QString &path) const {
@@ -401,13 +401,13 @@ void Backend::toggle() {
 
 void Backend::connectVpn() {
     if (m_activePath.isEmpty()) {
-        emit errorOccurred(tr("Сначала выберите конфиг"));
+        emit errorOccurred(tr("Select a config first"));
         return;
     }
     if (!ensureElevated())
         return; // app is relaunching with privileges
     if (!m_client.loadConfigFromFile(m_activePath)) {
-        emit errorOccurred(tr("Не удалось загрузить конфиг: %1").arg(m_activePath));
+        emit errorOccurred(tr("Failed to load config: %1").arg(m_activePath));
         return;
     }
     m_client.connectVpn();
@@ -460,7 +460,7 @@ bool Backend::importFile(const QString &path) {
     if (p.startsWith(QStringLiteral("file://")))
         p = QUrl(p).toLocalFile();
     if (!QFileInfo::exists(p)) {
-        emit errorOccurred(tr("Файл не найден: %1").arg(p));
+        emit errorOccurred(tr("File not found: %1").arg(p));
         return false;
     }
     QStringList stored = loadStoredConfigs();
@@ -533,7 +533,7 @@ bool Backend::createConfig(const QVariantMap &f) {
     const QString username = f.value(QStringLiteral("username")).toString().trimmed();
     const QString password = f.value(QStringLiteral("password")).toString();
     if (hostname.isEmpty() || addresses.isEmpty() || username.isEmpty() || password.isEmpty()) {
-        emit errorOccurred(tr("Заполните имя хоста, адрес, логин и пароль"));
+        emit errorOccurred(tr("Fill in host, address, username and password"));
         return false;
     }
     const QString proto = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
@@ -582,7 +582,7 @@ bool Backend::createConfig(const QVariantMap &f) {
     const QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
     QFile file(target);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        emit errorOccurred(tr("Не удалось записать конфиг"));
+        emit errorOccurred(tr("Could not write config"));
         return false;
     }
     file.write(t.toUtf8());
@@ -676,7 +676,7 @@ void Backend::persistSettings() { saveAppSettings(m_settings); }
 
 void Backend::setLanguage(const QString &v) {
     if (m_settings.language == v) return;
-    m_settings.language = v; persistSettings(); emit settingsChanged();
+    m_settings.language = v; persistSettings(); emit settingsChanged(); emit languageChanged(v);
 }
 void Backend::setThemeMode(const QString &v) {
     if (m_settings.theme_mode == v) return;
@@ -695,7 +695,7 @@ bool Backend::importDeepLink(const QString &link) {
     QString err;
     auto prepared = freetunnel::prepareDeepLinkImport(link, &err);
     if (!prepared) {
-        emit errorOccurred(tr("Ошибка ссылки: %1").arg(err));
+        emit errorOccurred(tr("Link error: %1").arg(err));
         return false;
     }
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -703,7 +703,7 @@ bool Backend::importDeepLink(const QString &link) {
     const QString target = QDir(base).filePath(prepared->fileName);
     QFile f(target);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        emit errorOccurred(tr("Не удалось записать конфиг"));
+        emit errorOccurred(tr("Could not write config"));
         return false;
     }
     f.write(prepared->tomlContent.toUtf8());
@@ -728,7 +728,7 @@ bool Backend::ensureElevated() {
             QStringLiteral("exec %1 >/tmp/freetunnel.relaunch.log 2>&1 &").arg(shellEscape(exe));
     QString err;
     if (!runElevatedShell(cmd, &err)) {
-        emit errorOccurred(tr("Не удалось получить права администратора.\n%1").arg(err));
+        emit errorOccurred(tr("Could not obtain administrator privileges.\n%1").arg(err));
         return true; // don't block; let the connect attempt surface the real error
     }
     QCoreApplication::quit();

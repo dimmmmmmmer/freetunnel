@@ -7,10 +7,28 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QString>
+#include <QTranslator>
 #include <QUrl>
 #include <QWindow>
 
 #include "app/Backend.h"
+
+// Install/replace the UI translation for `lang` ("ru" loads the bundled .qm;
+// anything else falls back to the English source strings). Retranslates live.
+static void applyLanguage(QApplication &app, QQmlApplicationEngine &engine,
+                          QTranslator *&tr, const QString &lang) {
+    if (tr) {
+        app.removeTranslator(tr);
+        delete tr;
+        tr = nullptr;
+    }
+    if (lang == QLatin1String("ru")) {
+        tr = new QTranslator(&app);
+        if (tr->load(QStringLiteral(":/i18n/freetunnel_ru.qm")))
+            app.installTranslator(tr);
+    }
+    engine.retranslate();
+}
 
 // macOS delivers custom-scheme URLs via QFileOpenEvent (not argv). Buffer any
 // URL that arrives before the engine is ready, then route it to the backend.
@@ -118,6 +136,14 @@ int main(int argc, char *argv[]) {
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty())
         return -1;
+
+    // UI language: apply the saved choice and re-apply live when it changes.
+    QTranslator *translator = nullptr;
+    applyLanguage(app, engine, translator, backend.language());
+    QObject::connect(&backend, &Backend::languageChanged, &app,
+                     [&app, &engine, &translator](const QString &lang) {
+                         applyLanguage(app, engine, translator, lang);
+                     });
 
     auto *win = qobject_cast<QWindow *>(engine.rootObjects().first());
     urlFilter.ready(&backend, win); // flush any URL that arrived during startup
