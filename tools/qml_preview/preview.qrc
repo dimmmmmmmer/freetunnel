@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/">
     <file alias="Main.qml">../../qml/Main.qml</file>
+    <file alias="Toggle.qml">../../qml/Toggle.qml</file>
   </qresource>
   <qresource prefix="/assets">
     <file alias="logo.png">../../assets/logo.png</file>

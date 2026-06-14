@@ -24,6 +24,10 @@ int main(int argc, char **argv) {
     auto *win = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     const QString out = argc > 1 ? QString::fromLocal8Bit(argv[1])
                                  : QStringLiteral("/tmp/freetunnel_home.png");
+    if (win && argc > 2)
+        win->setProperty("currentPage", QString::fromLocal8Bit(argv[2]).toInt());
+    if (win && argc > 3)
+        win->setProperty("overlay", QString::fromLocal8Bit(argv[3]));
     QTimer::singleShot(2500, [&]() {
         if (win) {
             QImage img = win->grabWindow();
