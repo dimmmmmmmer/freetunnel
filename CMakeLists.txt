@@ -7,7 +7,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 COMPONENTS Gui Qml Quick Network Svg REQUIRED)
+find_package(Qt6 COMPONENTS Gui Widgets Qml Quick Network Svg REQUIRED)
 set(TRUSTTUNNEL_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." CACHE PATH "Path to TrustTunnelClient repository root")
 
 set(FREETUNNEL_GIT_VERSION "unknown")
@@ -79,7 +79,7 @@ if (NOT TARGET vpnlibs_trusttunnel)
         "(this directory injected as a subdirectory of the core's root CMake), "
         "so the VPN core library is available to link against.")
 endif()
-target_link_libraries(FreeTunnel PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Network Qt6::Svg vpnlibs_trusttunnel)
+target_link_libraries(FreeTunnel PRIVATE Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::Network Qt6::Svg vpnlibs_trusttunnel)
 target_include_directories(FreeTunnel PRIVATE
     ${TRUSTTUNNEL_REPO_ROOT}/trusttunnel/include
     ${TRUSTTUNNEL_REPO_ROOT}/common/include

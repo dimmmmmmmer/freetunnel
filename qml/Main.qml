@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import Qt.labs.platform as Platform
 
 // FreeTunnel main window: centered top nav + pages, plus back-arrow sub-screens.
 // Consumes a `backend` context object (mock in preview; real app injects VPN).
@@ -10,6 +11,43 @@ Window {
     height: 620
     color: theme.bg
     title: "FreeTunnel"
+
+    // Closing the window hides to tray instead of quitting (quitOnLastWindowClosed
+    // is off in main.cpp). Quit explicitly from the tray menu.
+    onClosing: function(close) { close.accepted = false; win.hide() }
+
+    // ---------- system tray ----------
+    Platform.SystemTrayIcon {
+        id: tray
+        visible: true
+        icon.source: "qrc:/assets/logo.png"
+        tooltip: backend.connected ? "FreeTunnel — connected" : "FreeTunnel"
+        onActivated: function(reason) {
+            if (reason === Platform.SystemTrayIcon.Trigger
+                    || reason === Platform.SystemTrayIcon.DoubleClick) {
+                if (win.visible) {
+                    win.hide()
+                } else {
+                    win.show(); win.raise(); win.requestActivate()
+                }
+            }
+        }
+        menu: Platform.Menu {
+            Platform.MenuItem {
+                text: backend.connected ? qsTr("Disconnect") : qsTr("Connect")
+                onTriggered: backend.toggle()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: qsTr("Show FreeTunnel")
+                onTriggered: { win.show(); win.raise(); win.requestActivate() }
+            }
+            Platform.MenuItem {
+                text: qsTr("Quit")
+                onTriggered: Qt.quit()
+            }
+        }
+    }
 
     QtObject {
         id: theme

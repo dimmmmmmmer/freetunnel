@@ -1,6 +1,6 @@
+#include <QApplication>
 #include <QEvent>
 #include <QFileOpenEvent>
-#include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -80,11 +80,13 @@ static void raise_fd_limit() {} // no-op on Windows
 
 int main(int argc, char *argv[]) {
     raise_fd_limit();
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
     app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
+    // Keep running in the tray when the window is closed.
+    QApplication::setQuitOnLastWindowClosed(false);
 
     const QString controlArg = controlArgFrom(argc, argv);
     const QString kInstanceKey = QStringLiteral("FreeTunnelInstance");

@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 COMPONENTS Gui Qml Quick Svg REQUIRED)
+find_package(Qt6 COMPONENTS Gui Widgets Qml Quick Svg REQUIRED)
 
 qt_add_executable(preview main.cpp MockBackend.h preview.qrc)
-target_link_libraries(preview PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Svg)
+target_link_libraries(preview PRIVATE Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::Svg)
