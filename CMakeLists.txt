@@ -57,6 +57,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/DeepLink.h
     src/core/ConfigImport.cpp
     include/core/ConfigImport.h
+    src/core/ControlCommand.cpp
+    include/core/ControlCommand.h
     src/core/AppUiUtils.cpp
     include/core/AppUiUtils.h
     src/core/NetworkAdapterManager.cpp

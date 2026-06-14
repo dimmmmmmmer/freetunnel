@@ -20,10 +20,13 @@ private slots:
 };
 
 void TestAppSettings::initTestCase() {
-    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnel"));
-    QCoreApplication::setApplicationName(QStringLiteral("FreeTunnel"));
+    // A unique org/app + IniFormat redirected to a temp dir keeps the test
+    // fully hermetic and away from the real "FreeTunnel" store on every
+    // platform (macOS NativeFormat goes through cfprefsd, which ignores setPath).
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("AppSettingsTest"));
     QVERIFY(m_dir.isValid());
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_dir.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.path());
 }
 

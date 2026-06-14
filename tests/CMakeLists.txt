@@ -44,3 +44,11 @@ add_executable(test_configstore
 target_include_directories(test_configstore PRIVATE ../include ../include/core)
 target_link_libraries(test_configstore PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME configstore COMMAND test_configstore)
+
+add_executable(test_control
+    test_control.cpp
+    ../src/core/ControlCommand.cpp
+)
+target_include_directories(test_control PRIVATE ../include ../include/core)
+target_link_libraries(test_control PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME control COMMAND test_control)

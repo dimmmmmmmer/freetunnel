@@ -17,6 +17,7 @@
 #include "core/AppUiUtils.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
+#include "core/ControlCommand.h"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -176,22 +177,15 @@ void Backend::connectVpn() {
 void Backend::disconnectVpn() { m_client.disconnectVpn(); }
 
 void Backend::handleControl(const QString &command) {
-    QString c = command.trimmed();
-    if (c.isEmpty() || c == QLatin1String("focus"))
-        return; // window raise handled by the caller
-    if (c.startsWith(QLatin1String("tt://"))) {
-        importDeepLink(c);
-        return;
+    using freetunnel::ControlAction;
+    const auto cmd = freetunnel::parseControlCommand(command);
+    switch (cmd.action) {
+    case ControlAction::ImportLink: importDeepLink(cmd.payload); break;
+    case ControlAction::Toggle:     toggle(); break;
+    case ControlAction::Connect:    connectVpn(); break;
+    case ControlAction::Disconnect: disconnectVpn(); break;
+    case ControlAction::None:       break; // window raise handled by the caller
     }
-    if (c.startsWith(QLatin1String("freetunnel://")))
-        c = c.mid(QStringLiteral("freetunnel://").size());
-    c = c.remove('/').toLower();
-    if (c == QLatin1String("toggle"))
-        toggle();
-    else if (c == QLatin1String("connect"))
-        connectVpn();
-    else if (c == QLatin1String("disconnect"))
-        disconnectVpn();
 }
 
 void Backend::selectConfig(int index) {

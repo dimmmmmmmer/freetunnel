@@ -16,7 +16,9 @@ static QString defaultRoutingCachePath() {
 }
 
 AppSettings loadAppSettings() {
-    QSettings s("FreeTunnel", "FreeTunnel");
+    // Uses QCoreApplication's organization/application name (set to "FreeTunnel"
+    // in main()), so tests can redirect the store to an isolated domain.
+    QSettings s;
     AppSettings out;
     out.save_logs = s.value("logs/save", true).toBool();
     out.log_level = s.value("logs/level", "info").toString();
@@ -54,7 +56,7 @@ AppSettings loadAppSettings() {
 }
 
 void saveAppSettings(const AppSettings &cfg) {
-    QSettings s("FreeTunnel", "FreeTunnel");
+    QSettings s;
     s.setValue("logs/save", cfg.save_logs);
     s.setValue("logs/level", cfg.log_level);
     s.setValue("logs/path", cfg.log_path);
