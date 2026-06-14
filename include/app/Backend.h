@@ -14,7 +14,7 @@
 #include <QVariantMap>
 
 #include "core/AppSettings.h"
-#include "vpn/qt_trusttunnel_client.h"
+#include "vpn/vpn_helper_client.h"
 
 class QHotkey;
 class UpdateChecker;
@@ -155,10 +155,9 @@ private:
     void applySplitRules(); // push active profile's domain-bypass list to the core
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);
-    bool ensureElevated(); // returns false (and relaunches) if elevation needed
     QString nameForPath(const QString &path) const;
 
-    QtTrustTunnelClient m_client;
+    VpnHelperClient m_client;
     AppSettings m_settings;
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;

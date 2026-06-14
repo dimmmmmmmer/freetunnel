@@ -41,9 +41,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         m_activePath = m_paths.first();
     }
 
-    connect(&m_client, &QtTrustTunnelClient::stateChanged, this,
-            [this](QtTrustTunnelClient::State st) {
-                const bool nowConnected = st == QtTrustTunnelClient::State::Connected;
+    connect(&m_client, &VpnHelperClient::stateChanged, this,
+            [this](VpnHelperClient::State st) {
+                const bool nowConnected = st == VpnHelperClient::State::Connected;
                 if (nowConnected && !m_connected) {
                     m_session.restart();
                 }
@@ -51,14 +51,14 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 emit stateChanged();
                 appendLog(QStringLiteral("INFO"), statusText());
             });
-    connect(&m_client, &QtTrustTunnelClient::tunnelStats, this,
+    connect(&m_client, &VpnHelperClient::tunnelStats, this,
             [this](quint64 up, quint64 down) {
                 m_accUp += up;
                 m_accDown += down;
             });
-    connect(&m_client, &QtTrustTunnelClient::connectionInfo, this,
+    connect(&m_client, &VpnHelperClient::connectionInfo, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
-    connect(&m_client, &QtTrustTunnelClient::vpnError, this, [this](const QString &m) {
+    connect(&m_client, &VpnHelperClient::vpnError, this, [this](const QString &m) {
         appendLog(QStringLiteral("ERROR"), m);
         emit errorOccurred(m);
     });
@@ -350,12 +350,12 @@ bool Backend::importFromClipboard() {
 
 QString Backend::statusText() const {
     switch (m_client.state()) {
-    case QtTrustTunnelClient::State::Connected: return tr("Connected");
-    case QtTrustTunnelClient::State::Connecting: return tr("Connecting…");
-    case QtTrustTunnelClient::State::Reconnecting: return tr("Reconnecting…");
-    case QtTrustTunnelClient::State::WaitingForNetwork: return tr("Waiting for network…");
-    case QtTrustTunnelClient::State::Disconnecting: return tr("Disconnecting…");
-    case QtTrustTunnelClient::State::Error: return tr("Error");
+    case VpnHelperClient::State::Connected: return tr("Connected");
+    case VpnHelperClient::State::Connecting: return tr("Connecting…");
+    case VpnHelperClient::State::Reconnecting: return tr("Reconnecting…");
+    case VpnHelperClient::State::WaitingForNetwork: return tr("Waiting for network…");
+    case VpnHelperClient::State::Disconnecting: return tr("Disconnecting…");
+    case VpnHelperClient::State::Error: return tr("Error");
     default: return tr("Off");
     }
 }
@@ -404,12 +404,8 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Select a config first"));
         return;
     }
-    if (!ensureElevated())
-        return; // app is relaunching with privileges
-    if (!m_client.loadConfigFromFile(m_activePath)) {
-        emit errorOccurred(tr("Failed to load config: %1").arg(m_activePath));
-        return;
-    }
+    // The helper handles elevation; just hand it the config + rules.
+    m_client.loadConfigFromFile(m_activePath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.connectVpn();
 }
@@ -726,23 +722,4 @@ bool Backend::importDeepLink(const QString &link) {
     }
     reloadConfigs();
     return true;
-}
-
-bool Backend::ensureElevated() {
-#ifdef _WIN32
-    return true; // the exe requests admin via its UAC manifest at launch
-#else
-    if (geteuid() == 0)
-        return true;
-    const QString exe = QCoreApplication::applicationFilePath();
-    const QString cmd =
-            QStringLiteral("exec %1 >/tmp/freetunnel.relaunch.log 2>&1 &").arg(shellEscape(exe));
-    QString err;
-    if (!runElevatedShell(cmd, &err)) {
-        emit errorOccurred(tr("Could not obtain administrator privileges.\n%1").arg(err));
-        return true; // don't block; let the connect attempt surface the real error
-    }
-    QCoreApplication::quit();
-    return false;
-#endif
 }

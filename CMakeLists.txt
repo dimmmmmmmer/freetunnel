@@ -67,6 +67,10 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/UpdateChecker.h
     src/vpn/qt_trusttunnel_client.cpp
     include/vpn/qt_trusttunnel_client.h
+    src/vpn/vpn_helper_client.cpp
+    include/vpn/vpn_helper_client.h
+    src/vpn/vpn_helper_server.cpp
+    include/vpn/vpn_helper_server.h
     assets/app.qrc
     qml.qrc
     i18n/i18n.qrc
@@ -115,12 +119,11 @@ set_target_properties(FreeTunnel PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/macos/Info.plist.in"
 )
 
-if (WIN32 AND MSVC)
-    # Request administrator privileges via UAC at launch (needed for TUN interface).
-    # Using /MANIFESTUAC linker flag directly — avoids conflict with CMake's
-    # auto-generated manifest that defaults to asInvoker.
-    set_property(TARGET FreeTunnel APPEND_STRING PROPERTY
-        LINK_FLAGS " /MANIFESTUAC:\"level='requireAdministrator' uiAccess='false'\"")
+if (WIN32)
+    # The GUI runs as the normal user (asInvoker, the default). Only the helper
+    # process is elevated on demand via ShellExecuteEx "runas", which needs
+    # shell32 for ShellExecuteExW.
+    target_link_libraries(FreeTunnel PRIVATE shell32)
 endif()
 
 if (APPLE)

@@ -12,6 +12,7 @@
 #include <QWindow>
 
 #include "app/Backend.h"
+#include "vpn/vpn_helper_server.h"
 
 // Install/replace the UI translation for `lang` ("ru" loads the bundled .qm;
 // anything else falls back to the English source strings). Retranslates live.
@@ -98,6 +99,13 @@ static void raise_fd_limit() {} // no-op on Windows
 
 int main(int argc, char *argv[]) {
     raise_fd_limit();
+
+    // Privileged helper mode: headless process that runs the VPN core for the
+    // user-level GUI (spawned elevated via VpnHelperClient). No GUI here.
+    for (int i = 1; i < argc; ++i)
+        if (QString::fromLocal8Bit(argv[i]) == QLatin1String("--helper"))
+            return runVpnHelper(argc, argv);
+
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
