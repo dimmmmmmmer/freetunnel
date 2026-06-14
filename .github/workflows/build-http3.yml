@@ -4,15 +4,10 @@ name: Build (HTTP/3 variant)
 # Rust toolchain to the build and can break on the yanked `boring` crate — so it
 # is kept separate from the main release builds and is non-blocking.
 #
-# Run manually (workflow_dispatch) or observe it on PRs without it gating them.
+# Experimental and non-blocking, so it runs only on manual dispatch to avoid
+# spending CI minutes (building quiche/Rust) on every PR push.
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/build-http3.yml'
-      - 'src/**'
-      - 'include/**'
-      - 'CMakeLists.txt'
   workflow_dispatch:
 
 concurrency:
