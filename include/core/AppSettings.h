@@ -35,9 +35,11 @@ struct AppSettings {
     QStringList domain_bypass_rules;
 
     // Split-tunnel profiles: named sets of domain-bypass rules. The active
-    // profile's rules are mirrored into domain_bypass_rules above.
+    // profile's rules are mirrored into domain_bypass_rules above. profile_order
+    // preserves creation order (QMap would sort alphabetically).
     QString active_profile = "Default";
     QMap<QString, QStringList> profiles{{"Default", {}}};
+    QStringList profile_order{"Default"};
 
     // Adapter conflict scanning
     bool scan_adapter_conflicts = true;

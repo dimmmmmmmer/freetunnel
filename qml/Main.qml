@@ -49,19 +49,24 @@ Window {
         }
     }
 
+    // Active palette: light/dark, or follow the OS when themeMode === "system".
+    readonly property bool systemDark: Application.styleHints.colorScheme === Qt.Dark
     QtObject {
         id: theme
-        readonly property color bg: "#ffffff"
-        readonly property color surface: "#f3f4f6"
-        readonly property color text: "#1b1d21"
-        readonly property color textDim: "#6b7280"
-        readonly property color textFaint: "#9aa1ab"
-        readonly property color accent: "#185fa5"
-        readonly property color border: "#e7e9ee"
-        readonly property color success: "#1d9e75"
-        readonly property color warn: "#ba7517"
-        readonly property color danger: "#a32d2d"
-        readonly property color infoBg: Qt.rgba(0.094, 0.373, 0.647, 0.12)
+        readonly property bool dark: backend.themeMode === "dark"
+                                     || (backend.themeMode === "system" && win.systemDark)
+        readonly property color bg: dark ? "#16181d" : "#ffffff"
+        readonly property color surface: dark ? "#23262d" : "#f3f4f6"
+        readonly property color text: dark ? "#e8eaed" : "#1b1d21"
+        readonly property color textDim: dark ? "#9aa1ab" : "#6b7280"
+        readonly property color textFaint: dark ? "#6b7280" : "#9aa1ab"
+        readonly property color accent: dark ? "#4a9eea" : "#185fa5"
+        readonly property color border: dark ? "#2d313a" : "#e7e9ee"
+        readonly property color success: dark ? "#3fbf93" : "#1d9e75"
+        readonly property color warn: dark ? "#d99634" : "#ba7517"
+        readonly property color danger: dark ? "#e06a6a" : "#a32d2d"
+        readonly property color infoBg: dark ? Qt.rgba(0.29, 0.62, 0.92, 0.18)
+                                             : Qt.rgba(0.094, 0.373, 0.647, 0.12)
     }
 
     property int currentPage: 0
@@ -128,6 +133,31 @@ Window {
         active: win.overlay !== ""
         sourceComponent: win.overlay === "create" ? createConfig
                        : win.overlay === "adapters" ? adaptersPage : null
+    }
+
+    // ---------- toast (errors/notices) ----------
+    Connections {
+        target: backend
+        function onErrorOccurred(msg) { toast.show(msg) }
+    }
+    Rectangle {
+        id: toast
+        z: 1000
+        property string message: ""
+        function show(m) { message = m; opacity = 0.97; toastTimer.restart() }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 26
+        width: Math.min(parent.width - 36, tmsg.implicitWidth + 32)
+        height: Math.max(40, tmsg.implicitHeight + 18)
+        radius: 9; color: "#2a2d33"; opacity: 0; visible: opacity > 0
+        Text {
+            id: tmsg; anchors.centerIn: parent; width: toast.width - 24
+            text: toast.message; color: "white"; font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+        }
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        Timer { id: toastTimer; interval: 3200; onTriggered: toast.opacity = 0 }
+        MouseArea { anchors.fill: parent; onClicked: toast.opacity = 0 }
     }
 
     // shared bits ------------------------------------------------------------
@@ -202,13 +232,13 @@ Window {
                     Layout.preferredWidth: 200; Layout.preferredHeight: 200
                     Canvas {
                         anchors.fill: parent
-                        property bool on: backend.connected
-                        onOnChanged: requestPaint()
+                        property color ringColor: backend.connected ? theme.accent : theme.border
+                        onRingColorChanged: requestPaint()
                         Component.onCompleted: requestPaint()
                         onPaint: {
                             var ctx = getContext("2d"); ctx.reset();
                             ctx.lineWidth = 9; ctx.lineCap = "round";
-                            ctx.strokeStyle = on ? "#185fa5" : "#d8dbe0";
+                            ctx.strokeStyle = ringColor;
                             ctx.beginPath(); ctx.arc(width/2, height/2, 86, 0, 2*Math.PI); ctx.stroke();
                         }
                     }

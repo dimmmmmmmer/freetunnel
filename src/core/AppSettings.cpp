@@ -58,6 +58,17 @@ AppSettings loadAppSettings() {
     if (!out.profiles.contains(out.active_profile))
         out.active_profile = out.profiles.firstKey();
     out.domain_bypass_rules = out.profiles.value(out.active_profile);
+    // Preserve creation order; reconcile with the actual profile set.
+    QStringList order;
+    for (const QString &n : s.value("bypass/profile_order", names).toStringList())
+        if (out.profiles.contains(n) && !order.contains(n))
+            order << n;
+    for (const QString &n : out.profiles.keys())
+        if (!order.contains(n))
+            order << n;
+    if (!order.contains(QStringLiteral("Default")))
+        order.prepend(QStringLiteral("Default"));
+    out.profile_order = order;
     out.scan_adapter_conflicts = s.value("net/scan_adapter_conflicts", true).toBool();
     out.ssh_bypass_enabled = s.value("bypass/ssh_enabled", false).toBool();
     out.p2p_bypass_enabled = s.value("bypass/p2p_enabled", false).toBool();
@@ -96,6 +107,7 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("bypass/rules", cfg.domain_bypass_rules); // active mirror (core)
     s.setValue("bypass/active_profile", cfg.active_profile);
     s.setValue("bypass/profile_names", QStringList(cfg.profiles.keys()));
+    s.setValue("bypass/profile_order", cfg.profile_order);
     s.remove("bypass/profile"); // drop stale per-profile entries, then rewrite
     for (auto it = cfg.profiles.constBegin(); it != cfg.profiles.constEnd(); ++it)
         s.setValue("bypass/profile/" + it.key(), it.value());

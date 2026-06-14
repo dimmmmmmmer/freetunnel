@@ -152,6 +152,7 @@ signals:
 private:
     void reloadConfigs();
     void persistSettings();
+    void applySplitRules(); // push active profile's domain-bypass list to the core
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);
     bool ensureElevated(); // returns false (and relaunches) if elevation needed

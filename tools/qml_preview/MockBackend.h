@@ -83,13 +83,11 @@ public:
     Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); }
     Q_INVOKABLE void removeDomain(int i) { auto &l = m_profiles[m_activeProfile]; if (i >= 0 && i < l.size()) l.removeAt(i); emit changed(); }
     Q_INVOKABLE void clearDomains() { m_profiles[m_activeProfile].clear(); emit changed(); }
-    QStringList profiles() const {
-        QStringList n = m_profiles.keys(); n.removeAll("Default"); n.sort(); n.prepend("Default"); return n;
-    }
+    QStringList profiles() const { return m_profileOrder; }
     QString activeProfile() const { return m_activeProfile; }
     Q_INVOKABLE void selectProfile(const QString &n) { if (m_profiles.contains(n)) m_activeProfile = n; emit changed(); }
-    Q_INVOKABLE void addProfile(const QString &n) { if (!n.trimmed().isEmpty() && !m_profiles.contains(n)) { m_profiles.insert(n, {}); m_activeProfile = n; } emit changed(); }
-    Q_INVOKABLE void removeProfile(const QString &n) { if (n != "Default") { m_profiles.remove(n); if (m_activeProfile == n) m_activeProfile = "Default"; } emit changed(); }
+    Q_INVOKABLE void addProfile(const QString &n) { if (!n.trimmed().isEmpty() && !m_profiles.contains(n)) { m_profiles.insert(n, {}); m_profileOrder << n; m_activeProfile = n; } emit changed(); }
+    Q_INVOKABLE void removeProfile(const QString &n) { if (n != "Default") { m_profiles.remove(n); m_profileOrder.removeAll(n); if (m_activeProfile == n) m_activeProfile = "Default"; } emit changed(); }
     Q_INVOKABLE void renameProfile(const QString &o, const QString &nn) { if (o != "Default" && !nn.trimmed().isEmpty() && m_profiles.contains(o) && !m_profiles.contains(nn)) { m_profiles.insert(nn, m_profiles.take(o)); if (m_activeProfile == o) m_activeProfile = nn; } emit changed(); }
     QVariantList logEntries() const {
         auto e = [](const char *t, const char *l, const char *m) {
@@ -135,6 +133,7 @@ public:
     Q_INVOKABLE bool createConfig(const QVariantMap &) { return true; }
 signals:
     void changed();
+    void errorOccurred(const QString &msg);
 private:
     bool m_on = true;
     QStringList m_configs{QStringLiteral("Германия · Франкфурт"),
@@ -148,6 +147,7 @@ private:
     bool m_logCleared = false;
     bool m_split = true;
     QString m_activeProfile = QStringLiteral("Default");
+    QStringList m_profileOrder{QStringLiteral("Default"), QStringLiteral("Работа")};
     QMap<QString, QStringList> m_profiles{
         {QStringLiteral("Default"), {QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
                                      QStringLiteral("netflix.com")}},

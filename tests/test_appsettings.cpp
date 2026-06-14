@@ -17,6 +17,7 @@ private slots:
     void initTestCase();
     void defaultsWhenEmpty();
     void roundTrip();
+    void profilesPreserveOrder();
 };
 
 void TestAppSettings::initTestCase() {
@@ -64,6 +65,23 @@ void TestAppSettings::roundTrip() {
     QCOMPARE(out.hotkey_toggle, in.hotkey_toggle);
     QCOMPARE(out.hotkey_connect, in.hotkey_connect);
     QCOMPARE(out.hotkey_disconnect, in.hotkey_disconnect);
+}
+
+void TestAppSettings::profilesPreserveOrder() {
+    AppSettings in;
+    // Names chosen so alphabetical order would differ from creation order.
+    in.profiles = {{"Default", {}}, {"Work", {"intra.corp"}}, {"Alpha", {"a.com"}}};
+    in.profile_order = {"Default", "Work", "Alpha"};
+    in.active_profile = "Work";
+    in.domain_bypass_rules = in.profiles.value("Work");
+    saveAppSettings(in);
+
+    AppSettings out = loadAppSettings();
+    // Creation order preserved (not sorted to Alpha, Default, Work).
+    QCOMPARE(out.profile_order, (QStringList{"Default", "Work", "Alpha"}));
+    QCOMPARE(out.active_profile, QStringLiteral("Work"));
+    QCOMPARE(out.profiles.value("Work"), (QStringList{"intra.corp"}));
+    QCOMPARE(out.domain_bypass_rules, (QStringList{"intra.corp"}));
 }
 
 QTEST_MAIN(TestAppSettings)

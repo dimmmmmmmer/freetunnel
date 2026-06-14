@@ -410,6 +410,7 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Failed to load config: %1").arg(m_activePath));
         return;
     }
+    applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.connectVpn();
 }
 
@@ -603,62 +604,60 @@ bool Backend::createConfig(const QVariantMap &f) {
 
 void Backend::setSplitEnabled(bool v) {
     if (m_settings.domain_bypass_enabled == v) return;
-    m_settings.domain_bypass_enabled = v; persistSettings(); emit splitChanged();
+    m_settings.domain_bypass_enabled = v; persistSettings(); applySplitRules(); emit splitChanged();
 }
 void Backend::addDomain(const QString &domain) {
     const QString d = domain.trimmed();
     if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d)) return;
     m_settings.domain_bypass_rules << d;
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 void Backend::removeDomain(int index) {
     if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
     m_settings.domain_bypass_rules.removeAt(index);
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 void Backend::clearDomains() {
     if (m_settings.domain_bypass_rules.isEmpty()) return;
     m_settings.domain_bypass_rules.clear();
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 
 // ---------- split-tunnel profiles ----------
 
 QStringList Backend::profiles() const {
-    QStringList names = m_settings.profiles.keys();
-    names.removeAll(QStringLiteral("Default"));
-    names.sort(Qt::CaseInsensitive);
-    names.prepend(QStringLiteral("Default")); // Default always first
-    return names;
+    return m_settings.profile_order; // creation order, Default first
 }
 
 void Backend::selectProfile(const QString &name) {
     if (!m_settings.profiles.contains(name) || m_settings.active_profile == name) return;
     m_settings.active_profile = name;
     m_settings.domain_bypass_rules = m_settings.profiles.value(name);
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 
 void Backend::addProfile(const QString &name) {
     const QString n = name.trimmed();
     if (n.isEmpty() || m_settings.profiles.contains(n)) return;
     m_settings.profiles.insert(n, {});
+    m_settings.profile_order << n;
     m_settings.active_profile = n;
     m_settings.domain_bypass_rules.clear();
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 
 void Backend::removeProfile(const QString &name) {
     if (name == QLatin1String("Default") || !m_settings.profiles.contains(name)) return;
     m_settings.profiles.remove(name);
+    m_settings.profile_order.removeAll(name);
     if (m_settings.active_profile == name) {
         m_settings.active_profile = QStringLiteral("Default");
         m_settings.domain_bypass_rules = m_settings.profiles.value(QStringLiteral("Default"));
     }
-    persistSettings(); emit splitChanged();
+    persistSettings(); applySplitRules(); emit splitChanged();
 }
 
 void Backend::renameProfile(const QString &oldName, const QString &newName) {
@@ -667,9 +666,21 @@ void Backend::renameProfile(const QString &oldName, const QString &newName) {
             || !m_settings.profiles.contains(oldName) || m_settings.profiles.contains(n))
         return;
     m_settings.profiles.insert(n, m_settings.profiles.take(oldName));
+    const int i = m_settings.profile_order.indexOf(oldName);
+    if (i >= 0) m_settings.profile_order[i] = n;
     if (m_settings.active_profile == oldName)
         m_settings.active_profile = n;
     persistSettings(); emit splitChanged();
+}
+
+// Push the active profile's domain-bypass list to the core (C2). Applied on
+// connect and whenever rules change; takes effect on the next (re)connect.
+void Backend::applySplitRules() {
+    std::vector<std::string> ex;
+    if (m_settings.domain_bypass_enabled)
+        for (const QString &d : m_settings.domain_bypass_rules)
+            ex.push_back(d.toStdString());
+    m_client.setExtraExclusions(ex);
 }
 
 void Backend::persistSettings() { saveAppSettings(m_settings); }

@@ -23,6 +23,8 @@ int main(int argc, char **argv) {
     QTranslator tr;
     if (qgetenv("QML_PREVIEW_LANG") == "ru" && tr.load(QStringLiteral(":/i18n/freetunnel_ru.qm")))
         app.installTranslator(&tr);
+    if (qEnvironmentVariableIsSet("QML_PREVIEW_THEME"))
+        backend.setThemeMode(QString::fromLocal8Bit(qgetenv("QML_PREVIEW_THEME")));
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty())
