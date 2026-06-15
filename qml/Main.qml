@@ -71,6 +71,7 @@ Window {
 
     property int currentPage: 0
     property string overlay: "" // "", "create"
+    property int editIndex: -1  // config being edited in the create overlay (-1 = new)
     readonly property var navIcons: ["connection", "network", "configs", "settings", "log"]
 
     // Map a Qt key code to a portable QKeySequence name (used by HotkeyField).
@@ -408,7 +409,7 @@ Window {
                     Text { text: qsTr("Import ▾"); color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium
                         MouseArea { anchors.fill: parent; onClicked: importMenu.visible = !importMenu.visible } }
                     Text { text: qsTr("Create"); color: theme.text; font.pixelSize: 15
-                        MouseArea { anchors.fill: parent; onClicked: win.overlay = "create" } }
+                        MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "create" } } }
                     Text { text: qsTr("Ping"); color: theme.text; font.pixelSize: 15; visible: backend.configs.length > 0
                         MouseArea { anchors.fill: parent; onClicked: backend.pingConfigs() } }
                 }
@@ -436,7 +437,9 @@ Window {
                                 radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
                                 implicitWidth: ab.width+16; implicitHeight: 20
                                 Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                            Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 6
+                            Text { text: qsTr("Edit"); color: theme.accent; font.pixelSize: 12; leftPadding: 10
+                                   MouseArea { anchors.fill: parent; onClicked: { win.editIndex = index; win.overlay = "create" } } }
+                            Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 10
                                    MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
                         }
                         Sep {}
@@ -589,14 +592,27 @@ Window {
             color: theme.bg
             property string protocol: "http2"
             property bool ipv6: true
+            readonly property bool editing: win.editIndex >= 0
+            // Prefill from the selected config when editing.
+            Component.onCompleted: {
+                if (!editing) return
+                var f = backend.configFields(win.editIndex)
+                fName.text = f.name || ""; fHost.text = f.hostname || ""
+                fAddr.text = f.addresses || ""; fUser.text = f.username || ""
+                fPass.text = f.password || ""; fDns.text = f.dns || ""
+                fSni.text = f.customSni || ""; fRandom.text = f.clientRandom || ""
+                fCert.text = f.certificate || ""
+                cform.protocol = f.protocol === "http3" ? "http3" : "http2"
+                cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
+            }
             Item {
                 id: chdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                 height: 48
                 Text { id: cBack; anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter
                        text: "←"; color: theme.textDim; font.pixelSize: 20
-                       MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
+                       MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "" } } }
                 Text { anchors.left: cBack.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                       text: qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                       text: cform.editing ? qsTr("Edit config") : qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
             Flickable {
                 anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -645,12 +661,12 @@ Window {
                                     name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                     username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                     dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
-                                    allowIpv6: cform.ipv6, certificate: fCert.text });
-                                if (ok) win.overlay = "";
+                                    allowIpv6: cform.ipv6, certificate: fCert.text, editIndex: win.editIndex });
+                                if (ok) { win.editIndex = -1; win.overlay = "" }
                             } } }
                         Rectangle { width: 90; height: 36; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
                             Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
-                            MouseArea { anchors.fill: parent; onClicked: win.overlay = "" } }
+                            MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "" } } }
                     }
                 }
             }

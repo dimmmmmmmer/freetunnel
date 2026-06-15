@@ -538,6 +538,10 @@ bool Backend::createConfig(const QVariantMap &f) {
     if (safe.isEmpty())
         safe = QStringLiteral("config-%1").arg(QDateTime::currentSecsSinceEpoch());
 
+    const int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
+    const QString oldPath = (editIndex >= 0 && editIndex < m_paths.size())
+            ? m_paths.at(editIndex) : QString();
+
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
     const QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
@@ -550,16 +554,65 @@ bool Backend::createConfig(const QVariantMap &f) {
     file.close();
 
     QStringList stored = loadStoredConfigs();
-    if (!stored.contains(target)) {
-        stored << target;
-        saveStoredConfigs(stored);
+    if (!oldPath.isEmpty() && oldPath != target) { // edit + rename
+        QFile::remove(oldPath);
+        stored.removeAll(oldPath);
+        if (m_activePath == oldPath) m_activePath = target;
     }
+    if (!stored.contains(target))
+        stored << target;
+    saveStoredConfigs(stored);
     reloadConfigs();
     m_activePath = target;
     m_settings.last_config_path = target;
     persistSettings();
     emit configChanged();
     return true;
+}
+
+QVariantMap Backend::configFields(int index) const {
+    QVariantMap f;
+    if (index < 0 || index >= m_paths.size())
+        return f;
+    QFile file(m_paths.at(index));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return f;
+    const QString c = QString::fromUtf8(file.readAll());
+
+    auto unesc = [](QString v) { return v.replace("\\\"", "\"").replace("\\\\", "\\"); };
+    auto str = [&](const char *key) -> QString {
+        QRegularExpression re(QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+                                      .arg(QLatin1String(key)));
+        const auto m = re.match(c);
+        return m.hasMatch() ? unesc(m.captured(1)) : QString();
+    };
+    auto arr = [&](const char *key) -> QString {
+        QRegularExpression re(QStringLiteral("(?m)^%1\\s*=\\s*\\[([^\\]]*)\\]").arg(QLatin1String(key)));
+        const auto m = re.match(c);
+        if (!m.hasMatch()) return QString();
+        QStringList out;
+        static const QRegularExpression item(QStringLiteral("\"((?:[^\"\\\\]|\\\\.)*)\""));
+        auto it = item.globalMatch(m.captured(1));
+        while (it.hasNext()) out << unesc(it.next().captured(1));
+        return out.join(QStringLiteral(", "));
+    };
+
+    f[QStringLiteral("name")] = nameForPath(m_paths.at(index));
+    f[QStringLiteral("hostname")] = str("hostname");
+    f[QStringLiteral("addresses")] = arr("addresses");
+    f[QStringLiteral("username")] = str("username");
+    f[QStringLiteral("password")] = str("password");
+    f[QStringLiteral("protocol")] = str("upstream_protocol");
+    f[QStringLiteral("dns")] = arr("dns_upstreams");
+    f[QStringLiteral("customSni")] = str("custom_sni");
+    f[QStringLiteral("clientRandom")] = str("client_random");
+    f[QStringLiteral("allowIpv6")] = !c.contains(QStringLiteral("has_ipv6 = false"));
+    static const QRegularExpression certRe(
+            QStringLiteral("certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
+            QRegularExpression::DotMatchesEverythingOption);
+    const auto cm = certRe.match(c);
+    f[QStringLiteral("certificate")] = cm.hasMatch() ? cm.captured(1) : QString();
+    return f;
 }
 
 void Backend::setSplitEnabled(bool v) {

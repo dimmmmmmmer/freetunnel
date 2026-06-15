@@ -86,6 +86,7 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
+    Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
 
     QVariantList logEntries() const { return m_log; }
     Q_INVOKABLE void clearLogs();

@@ -117,6 +117,15 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &) { return true; }
     Q_INVOKABLE bool importFile(const QString &) { return true; }
     Q_INVOKABLE bool createConfig(const QVariantMap &) { return true; }
+    Q_INVOKABLE QVariantMap configFields(int i) const {
+        QVariantMap f;
+        f["name"] = i >= 0 && i < m_configs.size() ? m_configs.at(i) : QString();
+        f["hostname"] = "frankfurt.example.com"; f["addresses"] = "1.2.3.4:443";
+        f["username"] = "user"; f["password"] = "secret"; f["protocol"] = "http2";
+        f["dns"] = "1.1.1.1, 8.8.8.8"; f["customSni"] = ""; f["clientRandom"] = "";
+        f["allowIpv6"] = true; f["certificate"] = "";
+        return f;
+    }
 signals:
     void changed();
     void errorOccurred(const QString &msg);
