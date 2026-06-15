@@ -4,103 +4,103 @@
 <context>
     <name>Backend</name>
     <message>
-        <location filename="../src/app/Backend.cpp" line="148"/>
+        <location filename="../src/app/Backend.cpp" line="174"/>
         <source>Version %1 is available</source>
         <translation>Доступна версия %1</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="158"/>
+        <location filename="../src/app/Backend.cpp" line="184"/>
         <source>Could not check for updates</source>
         <translation>Не удалось проверить обновления</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="159"/>
+        <location filename="../src/app/Backend.cpp" line="185"/>
         <source>You have the latest version</source>
         <translation>Установлена последняя версия</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="164"/>
+        <location filename="../src/app/Backend.cpp" line="190"/>
         <source>Checking…</source>
         <translation>Проверка…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="281"/>
+        <location filename="../src/app/Backend.cpp" line="307"/>
         <source> ms</source>
         <translation> мс</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="310"/>
+        <location filename="../src/app/Backend.cpp" line="336"/>
         <source>Clipboard is empty</source>
         <translation>Буфер обмена пуст</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="316"/>
+        <location filename="../src/app/Backend.cpp" line="342"/>
         <source>No tt:// link in the clipboard</source>
         <translation>В буфере нет ссылки tt://</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="322"/>
+        <location filename="../src/app/Backend.cpp" line="348"/>
         <source>Connected</source>
         <translation>Подключено</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="323"/>
+        <location filename="../src/app/Backend.cpp" line="349"/>
         <source>Connecting…</source>
         <translation>Подключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="324"/>
+        <location filename="../src/app/Backend.cpp" line="350"/>
         <source>Reconnecting…</source>
         <translation>Переподключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="325"/>
+        <location filename="../src/app/Backend.cpp" line="351"/>
         <source>Waiting for network…</source>
         <translation>Ожидание сети…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="326"/>
+        <location filename="../src/app/Backend.cpp" line="352"/>
         <source>Disconnecting…</source>
         <translation>Отключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="327"/>
+        <location filename="../src/app/Backend.cpp" line="353"/>
         <source>Error</source>
         <translation>Ошибка</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="328"/>
+        <location filename="../src/app/Backend.cpp" line="354"/>
         <source>Off</source>
         <translation>Выключено</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="349"/>
+        <location filename="../src/app/Backend.cpp" line="375"/>
         <source>No config</source>
         <translation>Нет конфига</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="373"/>
+        <location filename="../src/app/Backend.cpp" line="399"/>
         <source>Select a config first</source>
         <translation>Сначала выберите конфиг</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="429"/>
+        <location filename="../src/app/Backend.cpp" line="455"/>
         <source>File not found: %1</source>
         <translation>Файл не найден: %1</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="502"/>
+        <location filename="../src/app/Backend.cpp" line="528"/>
         <source>Fill in host, address, username and password</source>
         <translation>Заполните имя хоста, адрес, логин и пароль</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="555"/>
-        <location filename="../src/app/Backend.cpp" line="735"/>
+        <location filename="../src/app/Backend.cpp" line="581"/>
+        <location filename="../src/app/Backend.cpp" line="770"/>
         <source>Could not write config</source>
         <translation>Не удалось записать конфиг</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="727"/>
+        <location filename="../src/app/Backend.cpp" line="762"/>
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
@@ -109,13 +109,13 @@
     <name>Main</name>
     <message>
         <location filename="../qml/Main.qml" line="39"/>
-        <location filename="../qml/Main.qml" line="733"/>
+        <location filename="../qml/Main.qml" line="770"/>
         <source>Disconnect</source>
         <translation>Отключить</translation>
     </message>
     <message>
         <location filename="../qml/Main.qml" line="39"/>
-        <location filename="../qml/Main.qml" line="730"/>
+        <location filename="../qml/Main.qml" line="767"/>
         <source>Connect</source>
         <translation>Подключить</translation>
     </message>
@@ -130,291 +130,306 @@
         <translation>Выход</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="322"/>
+        <location filename="../qml/Main.qml" line="356"/>
         <source>Press…</source>
         <translation>Нажмите…</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="406"/>
-        <source>Download</source>
-        <translation>Загрузка</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="407"/>
-        <source>Upload</source>
-        <translation>Отправка</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="418"/>
+        <location filename="../qml/Main.qml" line="450"/>
         <source> MB/s</source>
         <translation> МБ/с</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="482"/>
-        <source>Split tunneling: the domains below go directly, bypassing the VPN.</source>
-        <translation>Раздельное туннелирование: домены из списка ниже идут напрямую, мимо VPN.</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="486"/>
+        <location filename="../qml/Main.qml" line="520"/>
         <source>Enable</source>
         <translation>Включить</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="491"/>
+        <location filename="../qml/Main.qml" line="528"/>
         <source>Profile</source>
         <translation>Профиль</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="538"/>
+        <location filename="../qml/Main.qml" line="575"/>
         <source>profile name, then Enter</source>
         <translation>имя профиля и Enter</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="543"/>
-        <source>Domains — bypass VPN</source>
-        <translation>Домены — мимо VPN</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="545"/>
+        <location filename="../qml/Main.qml" line="582"/>
         <source>Clear all</source>
         <translation>Очистить все</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="580"/>
-        <source>add a domain, then Enter</source>
-        <translation>добавить домен и Enter</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="653"/>
+        <location filename="../qml/Main.qml" line="690"/>
         <source>connected</source>
         <translation>подключён</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="752"/>
+        <location filename="../qml/Main.qml" line="793"/>
         <source>FreeTunnel %1 · TrustTunnel core %2</source>
         <translation>FreeTunnel %1 · ядро TrustTunnel %2</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="673"/>
+        <location filename="../qml/Main.qml" line="710"/>
         <source>Paste from clipboard</source>
         <translation>Вставить из буфера</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="267"/>
-        <location filename="../qml/Main.qml" line="587"/>
+        <location filename="../qml/Main.qml" line="301"/>
+        <location filename="../qml/Main.qml" line="624"/>
         <source>Delete</source>
         <translation>Удалить</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="396"/>
-        <location filename="../qml/Main.qml" line="622"/>
+        <location filename="../qml/Main.qml" line="430"/>
+        <location filename="../qml/Main.qml" line="659"/>
         <source>Add a config</source>
         <translation>Добавить конфиг</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="459"/>
+        <location filename="../qml/Main.qml" line="491"/>
         <source>Add a config…</source>
         <translation>Добавить конфиг…</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="513"/>
+        <location filename="../qml/Main.qml" line="515"/>
+        <source>Selective: only the rules below go through the VPN; everything else is direct.</source>
+        <translation>Выборочно: через VPN идут только правила ниже, остальное напрямую.</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="516"/>
+        <source>Bypass: the rules below go direct; everything else goes through the VPN.</source>
+        <translation>Мимо: правила ниже идут напрямую, остальное — через VPN.</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="524"/>
+        <source>Mode</source>
+        <translation>Режим</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="525"/>
+        <source>Bypass listed</source>
+        <translation>Перечисленное — мимо</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="525"/>
+        <source>Only listed via VPN</source>
+        <translation>Только перечисленное — в VPN</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="550"/>
         <source>Delete profile “%1”?</source>
         <translation>Удалить профиль «%1»?</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="588"/>
+        <location filename="../qml/Main.qml" line="580"/>
+        <source>Rules — via VPN</source>
+        <translation>Правила — через VPN</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="580"/>
+        <source>Rules — bypass VPN</source>
+        <translation>Правила — мимо VPN</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="617"/>
+        <source>domain, IP or subnet, then Enter</source>
+        <translation>домен, IP или подсеть, затем Enter</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="625"/>
         <source>Clear all domains?</source>
         <translation>Очистить все домены?</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="677"/>
+        <location filename="../qml/Main.qml" line="714"/>
         <source>From file…</source>
         <translation>Из файла…</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="682"/>
+        <location filename="../qml/Main.qml" line="719"/>
         <source>Create new…</source>
         <translation>Создать новый…</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="689"/>
+        <location filename="../qml/Main.qml" line="726"/>
         <source>Select a config</source>
         <translation>Выберите конфиг</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="690"/>
+        <location filename="../qml/Main.qml" line="727"/>
         <source>All files (*)</source>
         <translation>Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="705"/>
+        <location filename="../qml/Main.qml" line="742"/>
         <source>General</source>
         <translation>Основное</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="706"/>
+        <location filename="../qml/Main.qml" line="743"/>
         <source>Language</source>
         <translation>Язык</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="710"/>
+        <location filename="../qml/Main.qml" line="747"/>
         <source>Theme</source>
         <translation>Тема</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="711"/>
+        <location filename="../qml/Main.qml" line="748"/>
         <source>System</source>
         <translation>Система</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="711"/>
+        <location filename="../qml/Main.qml" line="748"/>
         <source>Light</source>
         <translation>Светлая</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="711"/>
+        <location filename="../qml/Main.qml" line="748"/>
         <source>Dark</source>
         <translation>Тёмная</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="714"/>
+        <location filename="../qml/Main.qml" line="751"/>
         <source>Launch at system startup</source>
         <translation>Запускать при входе в систему</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="716"/>
-        <source>Connect automatically</source>
-        <translation>Подключаться автоматически</translation>
-    </message>
-    <message>
-        <location filename="../qml/Main.qml" line="719"/>
+        <location filename="../qml/Main.qml" line="756"/>
         <source>Security</source>
         <translation>Безопасность</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="722"/>
+        <location filename="../qml/Main.qml" line="759"/>
         <source>block traffic outside the VPN</source>
         <translation>блокировать трафик вне VPN</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="726"/>
+        <location filename="../qml/Main.qml" line="763"/>
         <source>Hotkeys</source>
         <translation>Горячие клавиши</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="727"/>
+        <location filename="../qml/Main.qml" line="764"/>
         <source>Toggle VPN</source>
         <translation>Переключить VPN</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="736"/>
+        <location filename="../qml/Main.qml" line="773"/>
         <source>Maintenance</source>
         <translation>Обслуживание</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="738"/>
+        <location filename="../qml/Main.qml" line="778"/>
         <source>Check for updates</source>
         <translation>Проверить обновления</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="744"/>
+        <location filename="../qml/Main.qml" line="785"/>
         <source>Download ›</source>
         <translation>Скачать ›</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="916"/>
+        <location filename="../qml/Main.qml" line="959"/>
         <source>Discard unsaved changes?</source>
         <translation>Отменить несохранённые изменения?</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="917"/>
+        <location filename="../qml/Main.qml" line="960"/>
         <source>Discard</source>
         <translation>Отменить</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="589"/>
-        <location filename="../qml/Main.qml" line="767"/>
+        <location filename="../qml/Main.qml" line="626"/>
+        <location filename="../qml/Main.qml" line="808"/>
         <source>Clear</source>
         <translation>Очистить</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="776"/>
+        <location filename="../qml/Main.qml" line="753"/>
+        <source>Connect on startup</source>
+        <translation>Подключаться при запуске</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="817"/>
         <source>Logs will appear after connecting</source>
         <translation>Логи появятся после подключения</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="800"/>
+        <location filename="../qml/Main.qml" line="843"/>
         <source>Auto-scroll</source>
         <translation>Авто-прокрутка</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="855"/>
+        <location filename="../qml/Main.qml" line="898"/>
         <source>New config</source>
         <translation>Новый конфиг</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="855"/>
+        <location filename="../qml/Main.qml" line="898"/>
         <source>Edit config</source>
         <translation>Редактировать конфиг</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="862"/>
+        <location filename="../qml/Main.qml" line="905"/>
         <source>Name</source>
         <translation>Имя</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="862"/>
+        <location filename="../qml/Main.qml" line="905"/>
         <source>Germany · Frankfurt</source>
         <translation>Германия · Франкфурт</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="863"/>
+        <location filename="../qml/Main.qml" line="906"/>
         <source>Server host</source>
         <translation>Хост сервера</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="864"/>
+        <location filename="../qml/Main.qml" line="907"/>
         <source>Address(es) · host:port (comma-separated)</source>
         <translation>Адрес(а) · host:port (через запятую)</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="866"/>
+        <location filename="../qml/Main.qml" line="909"/>
         <source>Username</source>
         <translation>Логин</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="867"/>
+        <location filename="../qml/Main.qml" line="910"/>
         <source>Password</source>
         <translation>Пароль</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="871"/>
+        <location filename="../qml/Main.qml" line="914"/>
         <source>Protocol</source>
         <translation>Протокол</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="879"/>
+        <location filename="../qml/Main.qml" line="922"/>
         <source>DNS servers</source>
         <translation>DNS-серверы</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="886"/>
+        <location filename="../qml/Main.qml" line="929"/>
         <source>Allow IPv6</source>
         <translation>Разрешить IPv6</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="891"/>
+        <location filename="../qml/Main.qml" line="934"/>
         <source>Certificate (PEM) · optional</source>
         <translation>Сертификат (PEM) · необязательно</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="898"/>
+        <location filename="../qml/Main.qml" line="941"/>
         <source>Save</source>
         <translation>Сохранить</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="287"/>
-        <location filename="../qml/Main.qml" line="908"/>
+        <location filename="../qml/Main.qml" line="321"/>
+        <location filename="../qml/Main.qml" line="951"/>
         <source>Cancel</source>
         <translation>Отмена</translation>
     </message>

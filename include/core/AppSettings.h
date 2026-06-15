@@ -33,6 +33,9 @@ struct AppSettings {
     // mirrors the active profile's list (this is what the core consumes).
     bool domain_bypass_enabled = false;
     QStringList domain_bypass_rules;
+    // "general" = route everything except the rules (bypass); "selective" =
+    // route only the rules through the VPN. Maps to the core's vpn_mode.
+    QString vpn_mode = "general";
 
     // Split-tunnel profiles: named sets of domain-bypass rules. The active
     // profile's rules are mirrored into domain_bypass_rules above. profile_order

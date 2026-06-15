@@ -36,6 +36,7 @@ public:
     // real load errors arrive asynchronously via vpnError.
     bool loadConfigFromFile(const QString &path);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
+    void setVpnMode(bool selective);
 
     void connectVpn();    // spawns/elevates the helper if needed, then connects
     void disconnectVpn();
@@ -63,6 +64,7 @@ private:
     QString m_token;
     QString m_configPath;
     std::vector<std::string> m_exclusions;
+    bool m_selective = false;
     State m_state = State::Disconnected;
     bool m_helloAcked = false;
     bool m_connectPending = false;

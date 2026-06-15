@@ -99,6 +99,8 @@ private:
             std::vector<std::string> ex;
             for (const auto v : c.value("domains").toArray()) ex.push_back(v.toString().toStdString());
             m_client.setExtraExclusions(ex);
+        } else if (cmd == "setMode") {
+            m_client.setVpnMode(c.value("selective").toBool());
         } else if (cmd == "connect") {
             const QString path = c.value("configPath").toString();
             if (!m_client.loadConfigFromFile(path)) {

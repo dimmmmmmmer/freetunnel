@@ -93,6 +93,15 @@ Window {
         return ""
     }
 
+    // Render a portable shortcut ("Ctrl+Alt+T") with OS-native modifier glyphs.
+    function keyGlyphs(seq) {
+        if (!seq) return ""
+        if (Qt.platform.os === "osx")
+            return seq.replace(/Ctrl/g, "⌘").replace(/Meta/g, "⌃")
+                      .replace(/Alt/g, "⌥").replace(/Shift/g, "⇧").replace(/\+/g, "")
+        return seq
+    }
+
     // ---------- main content (nav + page) ----------
     // Stays visible behind the create popup (dimmed by its backdrop).
     ColumnLayout {
@@ -344,7 +353,7 @@ Window {
                 border.width: hk.capturing ? 1 : 0; border.color: theme.accent
                 Text {
                     id: lbl; anchors.centerIn: parent
-                    text: hk.capturing ? qsTr("Press…") : (hk.value || "—")
+                    text: hk.capturing ? qsTr("Press…") : (hk.value ? win.keyGlyphs(hk.value) : "—")
                     color: (hk.value || hk.capturing) ? theme.text : theme.textFaint
                     font.pixelSize: 13
                 }
@@ -502,7 +511,9 @@ Window {
                 spacing: 0
                 Item { Layout.preferredHeight: 10 }
                 Text { Layout.fillWidth: true; wrapMode: Text.WordWrap
-                       text: qsTr("Split tunneling: the domains below go directly, bypassing the VPN.")
+                       text: backend.vpnMode === "selective"
+                             ? qsTr("Selective: only the rules below go through the VPN; everything else is direct.")
+                             : qsTr("Bypass: the rules below go direct; everything else goes through the VPN.")
                        color: theme.textFaint; font.pixelSize: 12 }
                 Item { Layout.preferredHeight: 4 }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
@@ -510,7 +521,10 @@ Window {
                     Item { Layout.fillWidth: true }
                     Toggle { accent: theme.accent; checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
                 }
-                Item { Layout.preferredHeight: 10 }
+                Dropdown { label: qsTr("Mode"); value: backend.vpnMode
+                    model: [{v:"general",t:qsTr("Bypass listed")},{v:"selective",t:qsTr("Only listed via VPN")}]
+                    onPicked: function(v){ backend.vpnMode = v } }
+                Item { Layout.preferredHeight: 6 }
                 SectionLabel { text: qsTr("Profile") }
                 Flow {
                     Layout.fillWidth: true; Layout.topMargin: 2; spacing: 6
@@ -563,7 +577,7 @@ Window {
                 }
                 Item { Layout.preferredHeight: 14 }
                 RowLayout { Layout.fillWidth: true
-                    SectionLabel { text: qsTr("Domains — bypass VPN") }
+                    SectionLabel { text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
                     Item { Layout.fillWidth: true }
                     Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
                         MouseArea { anchors.fill: parent; onClicked: clearDomains.open() } }
@@ -600,7 +614,7 @@ Window {
                         onAccepted: { backend.addDomain(text); text = "" }
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                           text: qsTr("add a domain, then Enter"); color: theme.textFaint; font.pixelSize: 13
+                           text: qsTr("domain, IP or subnet, then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: domInput.text.length === 0 && !domInput.activeFocus }
                 }
                 Item { Layout.preferredHeight: 16 }
@@ -736,7 +750,7 @@ Window {
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { accent: theme.accent; checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Connect automatically"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
                     Toggle { accent: theme.accent; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Security") }

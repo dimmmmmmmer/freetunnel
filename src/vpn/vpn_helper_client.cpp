@@ -56,6 +56,14 @@ void VpnHelperClient::setExtraExclusions(const std::vector<std::string> &exclusi
     }
 }
 
+void VpnHelperClient::setVpnMode(bool selective) {
+    m_selective = selective;
+    if (m_helloAcked) {
+        QJsonObject c; c["cmd"] = "setMode"; c["selective"] = selective;
+        send(c);
+    }
+}
+
 void VpnHelperClient::connectVpn() {
     if (!ensureHelper())
         return;
@@ -197,7 +205,8 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     const QString type = ev.value("ev").toString();
     if (type == "ready") {
         m_helloAcked = true;
-        // Push any pending exclusions, then connect if requested.
+        // Push any pending routing config, then connect if requested.
+        setVpnMode(m_selective);
         setExtraExclusions(m_exclusions);
         if (m_connectPending) { m_connectPending = false; connectVpn(); }
     } else if (type == "state") {

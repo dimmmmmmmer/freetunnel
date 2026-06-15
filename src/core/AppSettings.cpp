@@ -42,6 +42,7 @@ AppSettings loadAppSettings() {
     out.custom_dns_enabled = s.value("dns/custom_enabled", false).toBool();
     out.custom_dns_servers = s.value("dns/custom_servers", QStringList{"1.1.1.1", "8.8.8.8"}).toStringList();
     out.domain_bypass_enabled = s.value("bypass/enabled", false).toBool();
+    out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     // Split-tunnel profiles.
     const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
     out.profiles.clear();
@@ -104,6 +105,7 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("dns/custom_enabled", cfg.custom_dns_enabled);
     s.setValue("dns/custom_servers", cfg.custom_dns_servers);
     s.setValue("bypass/enabled", cfg.domain_bypass_enabled);
+    s.setValue("bypass/mode", cfg.vpn_mode);
     s.setValue("bypass/rules", cfg.domain_bypass_rules); // active mirror (core)
     s.setValue("bypass/active_profile", cfg.active_profile);
     s.setValue("bypass/profile_names", QStringList(cfg.profiles.keys()));

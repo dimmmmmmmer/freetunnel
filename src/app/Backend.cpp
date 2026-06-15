@@ -73,6 +73,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 
     registerHotkeys();
     trimLogFile();
+
+    // Connect on startup if requested (deferred so the window shows first).
+    if (m_settings.auto_connect_on_start && !m_activePath.isEmpty())
+        QTimer::singleShot(600, this, [this] { connectVpn(); });
 }
 
 // Keep the on-disk log from growing without bound: if it exceeds the cap,
@@ -721,6 +725,15 @@ void Backend::applySplitRules() {
         for (const QString &d : m_settings.domain_bypass_rules)
             ex.push_back(d.toStdString());
     m_client.setExtraExclusions(ex);
+    m_client.setVpnMode(m_settings.vpn_mode == QLatin1String("selective"));
+}
+
+void Backend::setVpnMode(const QString &mode) {
+    if (m_settings.vpn_mode == mode) return;
+    m_settings.vpn_mode = mode;
+    persistSettings();
+    applySplitRules();
+    emit splitChanged();
 }
 
 void Backend::persistSettings() { saveAppSettings(m_settings); }

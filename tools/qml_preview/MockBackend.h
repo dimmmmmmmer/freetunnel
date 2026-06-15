@@ -23,6 +23,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY changed)
     Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY changed)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY changed)
+    Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY changed)
     Q_PROPERTY(QStringList domains READ domains NOTIFY changed)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY changed)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY changed)
@@ -65,6 +66,8 @@ public:
     void setHotkeyDisconnect(const QString &v) { m_hkDisconnect = v; emit changed(); }
     bool splitEnabled() const { return m_split; }
     void setSplitEnabled(bool v) { m_split = v; emit changed(); }
+    QString vpnMode() const { return m_vpnMode; }
+    void setVpnMode(const QString &m) { m_vpnMode = m; emit changed(); }
     QStringList domains() const { return m_profiles.value(m_activeProfile); }
     Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); }
     Q_INVOKABLE void removeDomain(int i) { auto &l = m_profiles[m_activeProfile]; if (i >= 0 && i < l.size()) l.removeAt(i); emit changed(); }
@@ -141,6 +144,7 @@ private:
     bool m_kill = true;
     bool m_logCleared = false;
     bool m_split = true;
+    QString m_vpnMode = QStringLiteral("general");
     QString m_activeProfile = QStringLiteral("Default");
     QStringList m_profileOrder{QStringLiteral("Default"), QStringLiteral("Работа")};
     QMap<QString, QStringList> m_profiles{
