@@ -9,6 +9,8 @@ Window {
     visible: true
     width: 420
     height: 620
+    minimumWidth: 360
+    minimumHeight: 480
     color: theme.bg
     title: "FreeTunnel"
 
@@ -72,7 +74,8 @@ Window {
     property int currentPage: 0
     property string overlay: "" // "", "create"
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
-    readonly property var navIcons: ["connection", "network", "configs", "settings", "log"]
+    // nav order: Home, Configs, Split, Settings, Logs (configs before split)
+    readonly property var navIcons: ["connection", "configs", "network", "settings", "log"]
 
     // Map a Qt key code to a portable QKeySequence name (used by HotkeyField).
     function keyName(key, text) {
@@ -104,21 +107,31 @@ Window {
             Repeater {
                 model: win.navIcons
                 Rectangle {
+                    id: navItem
                     required property int index
                     required property string modelData
+                    property bool active: index === win.currentPage
                     width: 46; height: 38; radius: 8
-                    color: index === win.currentPage ? theme.infoBg : "transparent"
+                    color: active ? theme.infoBg : (nma.containsMouse ? theme.surface : "transparent")
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    scale: nma.containsMouse && !active ? 1.08 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    // Home shows our (colourful) logo; other tabs use tinted glyphs.
                     Image {
-                        anchors.centerIn: parent
-                        width: 22; height: 22
-                        // Home shows our logo; Configs uses the "servers" glyph.
-                        source: parent.modelData === "connection" ? "qrc:/assets/logo.png"
-                              : parent.modelData === "configs" ? "qrc:/icons/connection.svg"
-                              : "qrc:/icons/" + parent.modelData + ".svg"
-                        sourceSize: Qt.size(44, 44)
-                        opacity: parent.index === win.currentPage ? 1.0 : 0.5
+                        visible: navItem.modelData === "connection"
+                        anchors.centerIn: parent; width: 22; height: 22
+                        source: "qrc:/assets/logo.png"; sourceSize: Qt.size(44, 44)
+                        opacity: navItem.active ? 1.0 : 0.8
                     }
-                    MouseArea { anchors.fill: parent; onClicked: win.currentPage = parent.index }
+                    Icon {
+                        visible: navItem.modelData !== "connection"
+                        anchors.centerIn: parent; width: 22; height: 22
+                        svg: navItem.modelData === "configs" ? "qrc:/icons/connection.svg"
+                                                             : "qrc:/icons/" + navItem.modelData + ".svg"
+                        color: navItem.active ? theme.accent : theme.textDim
+                    }
+                    MouseArea { id: nma; anchors.fill: parent; hoverEnabled: true
+                                onClicked: win.currentPage = navItem.index }
                 }
             }
             Item { Layout.fillWidth: true }
@@ -127,7 +140,7 @@ Window {
         Loader {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            sourceComponent: [homePage, splitPage, configsPage, settingsPage, logsPage][win.currentPage]
+            sourceComponent: [homePage, configsPage, splitPage, settingsPage, logsPage][win.currentPage]
         }
     }
 
@@ -169,6 +182,32 @@ Window {
         leftPadding: 0; bottomPadding: 4
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
+
+    // Monochrome SVG icon tinted to `color`. Recolors by substituting
+    // "currentColor" in the SVG and feeding a data URI — shader-free, so it
+    // works on every render backend (raw Image would render black).
+    component Icon: Image {
+        id: ic
+        property color color: theme.text
+        property url svg
+        fillMode: Image.PreserveAspectFit; smooth: true
+        sourceSize: Qt.size(width * 2, height * 2)
+        function reload() {
+            if (svg == "") return
+            var x = new XMLHttpRequest()
+            x.open("GET", svg)
+            x.onreadystatechange = function() {
+                if (x.readyState === XMLHttpRequest.DONE && x.responseText) {
+                    var s = x.responseText.replace(/currentColor/g, "" + ic.color)
+                    ic.source = "data:image/svg+xml;utf8," + encodeURIComponent(s)
+                }
+            }
+            x.send()
+        }
+        onColorChanged: reload()
+        onSvgChanged: reload()
+        Component.onCompleted: reload()
+    }
 
     // Animated inline dropdown (real options list, not a click-cycle).
     component Dropdown: Item {
@@ -276,8 +315,7 @@ Window {
         id: homePage
         Item {
             ColumnLayout {
-                anchors.top: parent.top; anchors.topMargin: 40
-                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.centerIn: parent
                 width: parent.width
                 spacing: 18
                 Item {
@@ -316,7 +354,7 @@ Window {
                     Layout.alignment: Qt.AlignHCenter; spacing: 6
                     Text { text: backend.activeConfig; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                     Text { text: "▾"; color: theme.textDim; font.pixelSize: 15 }
-                    MouseArea { anchors.fill: parent; onClicked: win.currentPage = 2 } // open Configs
+                    MouseArea { anchors.fill: parent; onClicked: win.currentPage = 1 } // open Configs
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12

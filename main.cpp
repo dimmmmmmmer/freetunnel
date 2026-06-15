@@ -99,6 +99,7 @@ static void raise_fd_limit() {} // no-op on Windows
 
 int main(int argc, char *argv[]) {
     raise_fd_limit();
+    qputenv("QML_XHR_ALLOW_FILE_READ", "1"); // Icon recolors bundled SVGs via XHR
 
     // Privileged helper mode: headless process that runs the VPN core for the
     // user-level GUI (spawned elevated via VpnHelperClient). No GUI here.

@@ -13,6 +13,7 @@
 // screenshot to PNG (run with QT_QPA_PLATFORM=offscreen). Not shipped.
 int main(int argc, char **argv) {
     qputenv("QT_QUICK_BACKEND", "software");
+    qputenv("QML_XHR_ALLOW_FILE_READ", "1"); // let Icon recolor qrc SVGs via XHR
     QGuiApplication app(argc, argv);
 
     MockBackend backend;
