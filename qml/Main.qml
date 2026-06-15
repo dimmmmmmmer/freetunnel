@@ -170,6 +170,56 @@ Window {
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
 
+    // Animated inline dropdown (real options list, not a click-cycle).
+    component Dropdown: Item {
+        id: dd
+        property string label: ""
+        property var model: []     // [{ v: "...", t: "..." }]
+        property string value: ""
+        signal picked(string v)
+        property bool open: false
+        property real panelHeight: open ? optCol.implicitHeight : 0
+        Behavior on panelHeight { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+        Layout.fillWidth: true
+        implicitHeight: 42 + panelHeight
+        Layout.preferredHeight: implicitHeight
+        function labelFor(v) {
+            for (var i = 0; i < model.length; i++) if (model[i].v === v) return model[i].t
+            return ""
+        }
+        RowLayout {
+            id: ddRow; width: parent.width; height: 42
+            Text { text: dd.label; color: theme.text; font.pixelSize: 14 }
+            Item { Layout.fillWidth: true }
+            Text { text: dd.labelFor(dd.value); color: theme.textDim; font.pixelSize: 14 }
+            Text { text: "▾"; color: theme.textDim; font.pixelSize: 13; leftPadding: 6
+                   rotation: dd.open ? 180 : 0
+                   Behavior on rotation { NumberAnimation { duration: 150 } } }
+            MouseArea { anchors.fill: parent; onClicked: dd.open = !dd.open }
+        }
+        Item {
+            anchors.top: ddRow.bottom; width: parent.width; height: dd.panelHeight; clip: true
+            Column {
+                id: optCol; width: parent.width
+                Repeater {
+                    model: dd.model
+                    Rectangle {
+                        required property var modelData
+                        width: parent.width; height: 38; radius: 6
+                        color: oma.containsMouse ? theme.surface : "transparent"
+                        Text { anchors.verticalCenter: parent.verticalCenter; x: 12
+                               text: parent.modelData.t
+                               color: parent.modelData.v === dd.value ? theme.accent : theme.text; font.pixelSize: 14 }
+                        Text { visible: parent.modelData.v === dd.value; text: "✓"; color: theme.accent; font.pixelSize: 14
+                               anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
+                        MouseArea { id: oma; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { dd.picked(parent.modelData.v); dd.open = false } }
+                    }
+                }
+            }
+        }
+    }
+
     // Click to record a global hotkey chord; emits a portable sequence string
     // ("Ctrl+Alt+T"). Backspace clears, Esc cancels.
     component HotkeyField: Item {
@@ -480,15 +530,13 @@ Window {
                 anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
                 Item { Layout.preferredHeight: 6 }
                 SectionLabel { text: qsTr("General") }
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Language"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
-                    Text { text: (backend.language === "ru" ? "Русский" : "English") + " ▾"; color: theme.textDim; font.pixelSize: 14
-                        MouseArea { anchors.fill: parent; onClicked: backend.language = (backend.language === "ru" ? "en" : "ru") } } }
+                Dropdown { label: qsTr("Language"); value: backend.language
+                    model: [{v:"en",t:"English"},{v:"ru",t:"Русский"}]
+                    onPicked: function(v){ backend.language = v } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Theme"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
-                    Text { text: ({system:qsTr("System"),light:qsTr("Light"),dark:qsTr("Dark")}[backend.themeMode] || qsTr("System")) + " ▾"; color: theme.textDim; font.pixelSize: 14
-                        MouseArea { anchors.fill: parent; onClicked: backend.themeMode = (backend.themeMode === "system" ? "light" : backend.themeMode === "light" ? "dark" : "system") } } }
+                Dropdown { label: qsTr("Theme"); value: backend.themeMode
+                    model: [{v:"system",t:qsTr("System")},{v:"light",t:qsTr("Light")},{v:"dark",t:qsTr("Dark")}]
+                    onPicked: function(v){ backend.themeMode = v } }
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
