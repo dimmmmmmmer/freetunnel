@@ -468,7 +468,9 @@ Window {
     // ===================== Split tunnel =====================
     Component {
         id: splitPage
-        Flickable {
+        Item {
+          Flickable {
+            anchors.fill: parent
             contentHeight: scol.height; clip: true
             ColumnLayout {
                 id: scol; width: parent.width
@@ -483,7 +485,7 @@ Window {
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
-                    Toggle { checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
+                    Toggle { accent: theme.accent; checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
                 }
                 Item { Layout.preferredHeight: 10 }
                 SectionLabel { text: qsTr("Profile") }
@@ -492,19 +494,35 @@ Window {
                     Repeater {
                         model: backend.profiles
                         Rectangle {
+                            id: chip
                             required property string modelData
-                            radius: 13; height: 28; implicitWidth: prn.width + 24
-                            color: modelData === backend.activeProfile ? theme.accent : theme.surface
-                            Text { id: prn; anchors.centerIn: parent; text: parent.modelData
-                                   color: parent.modelData === backend.activeProfile ? "white" : theme.text; font.pixelSize: 13 }
-                            MouseArea { anchors.fill: parent; onClicked: backend.selectProfile(parent.modelData) }
+                            property bool isActive: modelData === backend.activeProfile
+                            property bool isDefault: modelData === "Default"
+                            radius: 13; height: 28; implicitWidth: prow.width + 22
+                            color: isActive ? theme.accent : (chipMa.containsMouse ? theme.border : theme.surface)
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: backend.selectProfile(chip.modelData) }
+                            Row { id: prow; anchors.centerIn: parent; spacing: 6
+                                Text { text: chip.modelData
+                                       color: chip.isActive ? "white" : theme.text; font.pixelSize: 13 }
+                                Text { visible: !chip.isDefault; text: "×"
+                                       color: chip.isActive ? "white" : theme.textDim; font.pixelSize: 14
+                                       MouseArea { anchors.fill: parent
+                                           onClicked: { delProfile.target = chip.modelData
+                                               delProfile.text = qsTr("Delete profile “%1”?").arg(chip.modelData)
+                                               delProfile.open() } } }
+                            }
                         }
                     }
                     Rectangle {
-                        radius: 13; height: 28; implicitWidth: 34; color: theme.surface
+                        radius: 13; height: 28; implicitWidth: 34
+                        color: addChipMa.containsMouse ? theme.border : theme.surface
+                        Behavior on color { ColorAnimation { duration: 120 } }
                         border.color: theme.border; border.width: 1
                         Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 17 }
-                        MouseArea { anchors.fill: parent; onClicked: { npRow.visible = true; npInput.forceActiveFocus() } }
+                        MouseArea { id: addChipMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { npRow.visible = true; npInput.forceActiveFocus() } }
                     }
                 }
                 Rectangle {
@@ -520,21 +538,18 @@ Window {
                            text: qsTr("profile name, then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: npInput.text.length === 0 }
                 }
-                RowLayout { Layout.fillWidth: true; Layout.topMargin: 6; visible: backend.activeProfile !== "Default"
-                    Item { Layout.fillWidth: true }
-                    Text { text: qsTr("Delete profile “%1”").arg(backend.activeProfile); color: theme.danger; font.pixelSize: 12
-                        MouseArea { anchors.fill: parent; onClicked: backend.removeProfile(backend.activeProfile) } }
-                }
-                Item { Layout.preferredHeight: 12 }
+                Item { Layout.preferredHeight: 14 }
                 RowLayout { Layout.fillWidth: true
                     SectionLabel { text: qsTr("Domains — bypass VPN") }
                     Item { Layout.fillWidth: true }
                     Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
-                        MouseArea { anchors.fill: parent; onClicked: backend.clearDomains() } }
+                        MouseArea { anchors.fill: parent; onClicked: clearDomains.open() } }
                 }
                 Flow {
                     Layout.fillWidth: true; spacing: 6
-                    Layout.topMargin: backend.domains.length > 0 ? 6 : 0
+                    visible: backend.domains.length > 0
+                    Layout.topMargin: visible ? 6 : 0
+                    Layout.preferredHeight: visible ? implicitHeight : 0
                     Repeater {
                         model: backend.domains
                         Rectangle {
@@ -552,7 +567,7 @@ Window {
                 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 36; radius: 8
-                    Layout.topMargin: backend.domains.length > 0 ? 8 : 2
+                    Layout.topMargin: 6
                     color: theme.bg; border.color: domInput.activeFocus ? theme.accent : theme.border; border.width: 1
                     TextInput {
                         id: domInput
@@ -567,6 +582,11 @@ Window {
                 }
                 Item { Layout.preferredHeight: 16 }
             }
+          }
+          ConfirmDialog { id: delProfile; property string target: ""
+              confirmText: qsTr("Delete"); onConfirmed: backend.removeProfile(target) }
+          ConfirmDialog { id: clearDomains; text: qsTr("Clear all domains?")
+              confirmText: qsTr("Clear"); onConfirmed: backend.clearDomains() }
         }
     }
 
@@ -691,17 +711,17 @@ Window {
                     model: [{v:"system",t:qsTr("System")},{v:"light",t:qsTr("Light")},{v:"dark",t:qsTr("Dark")}]
                     onPicked: function(v){ backend.themeMode = v } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { accent: theme.accent; checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Connect automatically"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
-                    Toggle { checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
+                    Toggle { accent: theme.accent; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Security") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                     Text { text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
                     Text { text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
                     Item { Layout.fillWidth: true }
-                    Toggle { checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
+                    Toggle { accent: theme.accent; checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Hotkeys") }
                 HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle
@@ -778,7 +798,7 @@ Window {
                        elide: Text.ElideMiddle
                        MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
                 Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
-                Toggle { checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
+                Toggle { accent: theme.accent; checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
                          onToggled: function(v){ logList.autoScroll = v } }
             }
         }
@@ -865,7 +885,7 @@ Window {
                     Row { width: parent.width; height: 32; spacing: 8
                         Text { text: qsTr("Allow IPv6"); color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
                         Item { width: parent.width - 220; height: 1 }
-                        Toggle { checked: cform.ipv6; anchors.verticalCenter: parent.verticalCenter; onToggled: function(v){ cform.ipv6 = v } }
+                        Toggle { accent: theme.accent; checked: cform.ipv6; anchors.verticalCenter: parent.verticalCenter; onToggled: function(v){ cform.ipv6 = v } }
                     }
                     Column { width: parent.width; spacing: 4
                         Text { text: qsTr("Certificate (PEM) · optional"); color: theme.textDim; font.pixelSize: 13 }

@@ -5,13 +5,15 @@ import QtQuick
 Rectangle {
     id: root
     property bool checked: false
-    property color accent: "#185fa5"
+    property color accent: "#6b7280"
+    property color offColor: "#c4c8d0"
     signal toggled(bool value)
 
     implicitWidth: 38
     implicitHeight: 22
     radius: height / 2
-    color: checked ? accent : "#d3d6dc"
+    color: checked ? accent : offColor
+    Behavior on color { ColorAnimation { duration: 120 } }
 
     Rectangle {
         width: 16; height: 16; radius: 8; color: "white"
