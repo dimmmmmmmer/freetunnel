@@ -111,6 +111,12 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     };
 
     QString s = uri.trimmed();
+    // Also accept share links like https://trusttunnel.org/qr.html#tt=<base64>
+    // (or ?tt=<base64>): the payload after tt= is the same base64url body.
+    const int ttIdx = s.indexOf(QLatin1String("tt="));
+    if (ttIdx >= 0 && !s.startsWith(QLatin1String("tt://")))
+        s = QStringLiteral("tt://?") + s.mid(ttIdx + 3);
+
     // Scheme is case-sensitive `tt`; payload lives in the query part.
     if (s.startsWith(QLatin1String("tt://?"))) {
         s = s.mid(6);

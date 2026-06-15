@@ -490,65 +490,95 @@ Window {
     Component {
         id: configsPage
         Item {
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
-                RowLayout {
-                    Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 24
-                    Text { text: qsTr("Import ▾"); color: theme.accent; font.pixelSize: 15; font.weight: Font.Medium
-                        MouseArea { anchors.fill: parent; onClicked: importMenu.visible = !importMenu.visible } }
-                    Text { text: qsTr("Create"); color: theme.text; font.pixelSize: 15
-                        MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "create" } } }
-                    Text { text: qsTr("Ping"); color: theme.text; font.pixelSize: 15; visible: backend.configs.length > 0
-                        MouseArea { anchors.fill: parent; onClicked: backend.pingConfigs() } }
+            // Header: Add (+) opens the import/create menu, Ping (speedometer).
+            RowLayout {
+                id: cfgHdr
+                anchors.top: parent.top; anchors.topMargin: 8
+                anchors.horizontalCenter: parent.horizontalCenter; spacing: 16
+                Rectangle {
+                    width: 40; height: 32; radius: 8
+                    color: addMa.containsMouse ? theme.surface : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 22 }
+                    MouseArea { id: addMa; anchors.fill: parent; hoverEnabled: true
+                                onClicked: importMenu.visible = !importMenu.visible }
                 }
-                Text {
-                    visible: backend.configs.length === 0
-                    Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 30
-                    text: qsTr("No configs — import or create one"); color: theme.textFaint; font.pixelSize: 14
+                Rectangle {
+                    visible: backend.configs.length > 0
+                    width: 40; height: 32; radius: 8
+                    color: pingMa.containsMouse ? theme.surface : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: theme.text }
+                    MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: backend.pingConfigs() }
                 }
-                Repeater {
-                    model: backend.configs
-                    ColumnLayout {
-                        required property int index
-                        required property string modelData
-                        Layout.fillWidth: true
-                        RowLayout { Layout.fillWidth: true; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 12
-                            Image { source: "qrc:/assets/logo.svg"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
-                                    sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.35 }
-                            Text { text: modelData; color: theme.text; font.pixelSize: 14
-                                   font.weight: index === backend.activeIndex ? Font.Medium : Font.Normal
-                                   MouseArea { anchors.fill: parent; onClicked: backend.selectConfig(index) } }
-                            Item { Layout.fillWidth: true }
-                            Text { visible: index < backend.pings.length; text: index < backend.pings.length ? backend.pings[index] : ""
-                                   color: theme.textDim; font.pixelSize: 12 }
-                            Rectangle { visible: index === backend.activeIndex && backend.connected
-                                radius: 10; color: Qt.rgba(0.11,0.62,0.46,0.16)
-                                implicitWidth: ab.width+16; implicitHeight: 20
-                                Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                            Text { text: qsTr("Edit"); color: theme.accent; font.pixelSize: 12; leftPadding: 10
-                                   MouseArea { anchors.fill: parent; onClicked: { win.editIndex = index; win.overlay = "create" } } }
-                            Text { text: "✕"; color: theme.danger; font.pixelSize: 15; leftPadding: 10
-                                   MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
-                        }
-                        Sep {}
+            }
+            Text {
+                visible: backend.configs.length === 0
+                anchors.centerIn: parent
+                text: qsTr("Add a config"); color: theme.textFaint; font.pixelSize: 15
+                MouseArea { anchors.fill: parent; onClicked: importMenu.visible = true }
+            }
+            ListView {
+                id: cfgList
+                anchors.top: cfgHdr.bottom; anchors.topMargin: 8; anchors.bottom: parent.bottom
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.leftMargin: 18; anchors.rightMargin: 18
+                clip: true; spacing: 0
+                model: backend.configs
+                delegate: Item {
+                    required property int index
+                    required property string modelData
+                    width: cfgList.width; height: 56
+                    Rectangle { anchors.fill: parent; anchors.topMargin: 4; anchors.bottomMargin: 4; radius: 8
+                        color: rowMa.containsMouse ? theme.surface : "transparent"
+                        Behavior on color { ColorAnimation { duration: 120 } } }
+                    MouseArea { id: rowMa; anchors.fill: parent; hoverEnabled: true
+                                onClicked: backend.selectConfig(index) }
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 6; spacing: 10
+                        Image { source: "qrc:/assets/logo.svg"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                                sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.4 }
+                        Text { text: modelData; color: theme.text; font.pixelSize: 14
+                               font.weight: index === backend.activeIndex ? Font.Medium : Font.Normal }
+                        Item { Layout.fillWidth: true }
+                        Text { visible: index < backend.pings.length && backend.pings[index] !== ""
+                               text: index < backend.pings.length ? backend.pings[index] : ""
+                               color: theme.textDim; font.pixelSize: 12 }
+                        Rectangle { visible: index === backend.activeIndex && backend.connected
+                            radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
+                            Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                        Text { text: "⋯"; color: dotsMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 18; padding: 6
+                               MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
+                                           onClicked: { win.editIndex = index; win.overlay = "create" } } }
+                        Text { text: "✕"; color: theme.danger; font.pixelSize: 14; padding: 6
+                               MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
                     }
                 }
-                Item { Layout.fillHeight: true }
             }
-            // Import dropdown (collapsed by default).
+            // Import / create dropdown (collapsed by default).
             Rectangle {
                 id: importMenu; visible: false; z: 10
-                anchors.top: parent.top; anchors.topMargin: 40; anchors.horizontalCenter: parent.horizontalCenter
-                width: 230; height: menuCol.height + 12; radius: 10; color: theme.bg
+                anchors.top: parent.top; anchors.topMargin: 44; anchors.horizontalCenter: parent.horizontalCenter
+                width: 240; height: menuCol.height + 12; radius: 10; color: theme.bg
                 border.color: theme.border; border.width: 1
                 Column { id: menuCol; width: parent.width; y: 6
-                    Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
-                           text: qsTr("Paste from clipboard"); color: theme.text; font.pixelSize: 14
-                           MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; backend.importFromClipboard() } } }
-                    Text { width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
-                           text: qsTr("From file…"); color: theme.text; font.pixelSize: 14
-                           MouseArea { anchors.fill: parent; onClicked: { importMenu.visible = false; fileDlg.open() } } }
+                    component MenuRow: Text {
+                        width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
+                        color: theme.text; font.pixelSize: 14
+                    }
+                    MenuRow { text: qsTr("Paste from clipboard")
+                        Rectangle { anchors.fill: parent; z: -1; color: m1.containsMouse ? theme.surface : "transparent" }
+                        MouseArea { id: m1; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { importMenu.visible = false; backend.importFromClipboard() } } }
+                    MenuRow { text: qsTr("From file…")
+                        Rectangle { anchors.fill: parent; z: -1; color: m2.containsMouse ? theme.surface : "transparent" }
+                        MouseArea { id: m2; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { importMenu.visible = false; fileDlg.open() } } }
+                    Rectangle { width: parent.width; height: 1; color: theme.border }
+                    MenuRow { text: qsTr("Create new…")
+                        Rectangle { anchors.fill: parent; z: -1; color: m3.containsMouse ? theme.surface : "transparent" }
+                        MouseArea { id: m3; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { importMenu.visible = false; win.editIndex = -1; win.overlay = "create" } } }
                 }
             }
             Platform.FileDialog {

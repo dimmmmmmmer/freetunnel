@@ -306,7 +306,8 @@ bool Backend::importFromClipboard() {
         emit errorOccurred(tr("Clipboard is empty"));
         return false;
     }
-    if (text.startsWith(QStringLiteral("tt://")))
+    // Accept tt:// links and trusttunnel.org share links (…#tt=… / …?tt=…).
+    if (text.startsWith(QStringLiteral("tt://")) || text.contains(QStringLiteral("tt=")))
         return importDeepLink(text);
     emit errorOccurred(tr("No tt:// link in the clipboard"));
     return false;

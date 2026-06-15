@@ -17,5 +17,6 @@
     <file alias="configs.svg">../../assets/icons/configs.svg</file>
     <file alias="settings.svg">../../assets/icons/settings.svg</file>
     <file alias="log.svg">../../assets/icons/log.svg</file>
+    <file alias="speedometer.svg">../../assets/icons/speedometer.svg</file>
   </qresource>
 </RCC>
