@@ -314,6 +314,7 @@ Window {
     Component {
         id: homePage
         Item {
+            id: homeRoot
             ColumnLayout {
                 anchors.centerIn: parent
                 width: parent.width
@@ -352,10 +353,14 @@ Window {
                     MouseArea { anchors.fill: parent; onClicked: backend.toggle() }
                 }
                 Row {
+                    id: cfgSel
                     Layout.alignment: Qt.AlignHCenter; spacing: 6
-                    Text { text: backend.activeConfig; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                    Text { text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
+                           color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                     Text { text: "▾"; color: theme.textDim; font.pixelSize: 15 }
-                    MouseArea { anchors.fill: parent; onClicked: win.currentPage = 1 } // open Configs
+                    MouseArea { anchors.fill: parent
+                        onClicked: backend.configs.length > 0 ? (cfgPopup.open = !cfgPopup.open)
+                                                              : (win.currentPage = 1) }
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12
@@ -375,6 +380,47 @@ Window {
                                        text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
                             }
                         }
+                    }
+                }
+            }
+            // Config picker dropdown, anchored under the selector.
+            Rectangle {
+                id: cfgPopup
+                property bool open: false
+                visible: open; z: 100
+                width: 250
+                x: cfgSel.mapToItem(homeRoot, 0, 0).x + cfgSel.width / 2 - width / 2
+                y: cfgSel.mapToItem(homeRoot, 0, 0).y + cfgSel.height + 6
+                height: picker.height + addRow.height + 11
+                radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
+                Column {
+                    anchors.fill: parent; anchors.margins: 5
+                    ListView {
+                        id: picker; width: parent.width
+                        height: Math.min(contentHeight, 3 * 40); clip: true
+                        model: backend.configs
+                        delegate: Rectangle {
+                            required property int index
+                            required property string modelData
+                            width: picker.width; height: 40; radius: 6
+                            color: pma.containsMouse ? theme.surface : "transparent"
+                            Text { anchors.verticalCenter: parent.verticalCenter; x: 10
+                                   width: parent.width - 20; elide: Text.ElideRight
+                                   text: parent.modelData
+                                   color: parent.index === backend.activeIndex ? theme.accent : theme.text
+                                   font.pixelSize: 14 }
+                            MouseArea { id: pma; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: { backend.selectConfig(parent.index); cfgPopup.open = false } }
+                        }
+                    }
+                    Rectangle { width: parent.width; height: 1; color: theme.border }
+                    Rectangle {
+                        id: addRow; width: parent.width; height: 40; radius: 6
+                        color: ama.containsMouse ? theme.surface : "transparent"
+                        Text { anchors.verticalCenter: parent.verticalCenter; x: 10
+                               text: qsTr("Add a config…"); color: theme.accent; font.pixelSize: 14 }
+                        MouseArea { id: ama; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { cfgPopup.open = false; win.currentPage = 1 } }
                     }
                 }
             }
