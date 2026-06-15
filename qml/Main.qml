@@ -93,10 +93,10 @@ Window {
     }
 
     // ---------- main content (nav + page) ----------
+    // Stays visible behind the create popup (dimmed by its backdrop).
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        visible: win.overlay === ""
 
         RowLayout {
             Layout.fillWidth: true
@@ -257,6 +257,44 @@ Window {
                 }
             }
         }
+    }
+
+    // Reusable confirmation dialog (centered card + dimmed backdrop). Call
+    // open(); emits confirmed() on the destructive action.
+    component ConfirmDialog: Item {
+        id: cd
+        property string text: ""
+        property string confirmText: qsTr("Delete")
+        signal confirmed()
+        anchors.fill: parent
+        visible: false
+        z: 2000
+        function open() { visible = true }
+        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
+            MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 56, 300)
+            height: cdCol.implicitHeight + 36
+            radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
+            Column {
+                id: cdCol; width: parent.width - 36; anchors.centerIn: parent; spacing: 18
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: cd.text
+                       color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
+                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 10
+                    Rectangle { width: 110; height: 36; radius: 8
+                        color: c1.containsMouse ? theme.border : theme.surface
+                        Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
+                        MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
+                    Rectangle { width: 110; height: 36; radius: 8
+                        color: c2.containsMouse ? Qt.darker(theme.danger, 1.15) : theme.danger
+                        Text { anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14 }
+                        MouseArea { id: c2; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { cd.visible = false; cd.confirmed() } } }
+                }
+            }
+        }
+        Shortcut { sequences: ["Escape"]; enabled: cd.visible; onActivated: cd.visible = false }
     }
 
     // Click to record a global hotkey chord; emits a portable sequence string
@@ -750,30 +788,49 @@ Window {
     // ===================== Create config (sub-screen) =====================
     Component {
         id: createConfig
-        Rectangle {
+        Item {
+            anchors.fill: parent
+            // Dimmed backdrop — the main UI shows through; click to close.
+            Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
+                MouseArea { anchors.fill: parent; onClicked: cform.tryClose() } }
+            Shortcut { sequences: ["Escape"]; enabled: !discardConfirm.visible; onActivated: cform.tryClose() }
+
+            Rectangle {
             id: cform
-            color: theme.bg
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 28, 380)
+            height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 24)
+            radius: 14; color: theme.bg; border.color: theme.border; border.width: 1
             property string protocol: "http2"
             property bool ipv6: true
+            property string snap: ""
             readonly property bool editing: win.editIndex >= 0
-            // Prefill from the selected config when editing.
+            function snapshot() {
+                return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
+                        protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6].join("")
+            }
+            function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
+            function close() { win.editIndex = -1; win.overlay = "" }
+            // Prefill from the selected config when editing; snapshot for dirty-check.
             Component.onCompleted: {
-                if (!editing) return
-                var f = backend.configFields(win.editIndex)
-                fName.text = f.name || ""; fHost.text = f.hostname || ""
-                fAddr.text = f.addresses || ""; fUser.text = f.username || ""
-                fPass.text = f.password || ""; fDns.text = f.dns || ""
-                fSni.text = f.customSni || ""; fRandom.text = f.clientRandom || ""
-                fCert.text = f.certificate || ""
-                cform.protocol = f.protocol === "http3" ? "http3" : "http2"
-                cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
+                if (editing) {
+                    var f = backend.configFields(win.editIndex)
+                    fName.text = f.name || ""; fHost.text = f.hostname || ""
+                    fAddr.text = f.addresses || ""; fUser.text = f.username || ""
+                    fPass.text = f.password || ""; fDns.text = f.dns || ""
+                    fSni.text = f.customSni || ""; fRandom.text = f.clientRandom || ""
+                    fCert.text = f.certificate || ""
+                    cform.protocol = f.protocol === "http3" ? "http3" : "http2"
+                    cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
+                }
+                snap = snapshot()
             }
             Item {
                 id: chdr; anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                 height: 48
                 Text { id: cBack; anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter
                        text: "←"; color: theme.textDim; font.pixelSize: 20
-                       MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "" } } }
+                       MouseArea { anchors.fill: parent; onClicked: cform.tryClose() } }
                 Text { anchors.left: cBack.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                        text: cform.editing ? qsTr("Edit config") : qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
@@ -825,13 +882,20 @@ Window {
                                     username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                     dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
                                     allowIpv6: cform.ipv6, certificate: fCert.text, editIndex: win.editIndex });
-                                if (ok) { win.editIndex = -1; win.overlay = "" }
+                                if (ok) cform.close()
                             } } }
                         Rectangle { width: 90; height: 36; radius: 8; color: theme.bg; border.color: theme.border; border.width: 1
                             Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
-                            MouseArea { anchors.fill: parent; onClicked: { win.editIndex = -1; win.overlay = "" } } }
+                            MouseArea { anchors.fill: parent; onClicked: cform.tryClose() } }
                     }
                 }
+            }
+            }
+            ConfirmDialog {
+                id: discardConfirm
+                text: qsTr("Discard unsaved changes?")
+                confirmText: qsTr("Discard")
+                onConfirmed: cform.close()
             }
         }
     }
