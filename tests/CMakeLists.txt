@@ -52,3 +52,11 @@ add_executable(test_control
 target_include_directories(test_control PRIVATE ../include ../include/core)
 target_link_libraries(test_control PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME control COMMAND test_control)
+
+add_executable(test_configtoml
+    test_configtoml.cpp
+    ../src/core/ConfigToml.cpp
+)
+target_include_directories(test_configtoml PRIVATE ../include ../include/core)
+target_link_libraries(test_configtoml PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME configtoml COMMAND test_configtoml)

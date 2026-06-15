@@ -24,6 +24,7 @@
 #include "core/AppUiUtils.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
+#include "core/ConfigToml.h"
 #include "core/ControlCommand.h"
 #include "core/UpdateChecker.h"
 
@@ -503,64 +504,25 @@ void Backend::openLogFolder() {
 #endif
 }
 
-static QString tomlEsc(const QString &s) {
-    QString o = s;
-    o.replace('\\', "\\\\").replace('"', "\\\"");
-    return o;
-}
-static QString csvToTomlArray(const QString &csv) {
-    QStringList items;
-    for (const QString &raw : csv.split(',', Qt::SkipEmptyParts)) {
-        const QString v = raw.trimmed();
-        if (!v.isEmpty())
-            items << QStringLiteral("\"%1\"").arg(tomlEsc(v));
-    }
-    return items.join(QStringLiteral(", "));
-}
-
 bool Backend::createConfig(const QVariantMap &f) {
     const QString name = f.value(QStringLiteral("name")).toString().trimmed();
-    const QString hostname = f.value(QStringLiteral("hostname")).toString().trimmed();
-    const QString addresses = f.value(QStringLiteral("addresses")).toString().trimmed();
-    const QString username = f.value(QStringLiteral("username")).toString().trimmed();
-    const QString password = f.value(QStringLiteral("password")).toString();
-    if (hostname.isEmpty() || addresses.isEmpty() || username.isEmpty() || password.isEmpty()) {
+    freetunnel::ConfigToml ct;
+    ct.hostname = f.value(QStringLiteral("hostname")).toString().trimmed();
+    ct.addresses = f.value(QStringLiteral("addresses")).toString().trimmed();
+    ct.username = f.value(QStringLiteral("username")).toString().trimmed();
+    ct.password = f.value(QStringLiteral("password")).toString();
+    if (ct.hostname.isEmpty() || ct.addresses.isEmpty() || ct.username.isEmpty() || ct.password.isEmpty()) {
         emit errorOccurred(tr("Fill in host, address, username and password"));
         return false;
     }
-    const QString proto = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
-    const bool ipv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
-    const QString cert = f.value(QStringLiteral("certificate")).toString().trimmed();
-
-    QString t;
-    t += QStringLiteral("loglevel = \"info\"\n");
-    t += QStringLiteral("vpn_mode = \"general\"\n");
-    t += QStringLiteral("killswitch_enabled = false\n");
-    t += QStringLiteral("post_quantum_group_enabled = true\n");
-    t += QStringLiteral("dns_upstreams = [%1]\n")
-                 .arg(csvToTomlArray(f.value(QStringLiteral("dns")).toString()));
-    t += QStringLiteral("\n[endpoint]\n");
-    t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEsc(hostname));
-    t += QStringLiteral("addresses = [%1]\n").arg(csvToTomlArray(addresses));
-    t += QStringLiteral("username = \"%1\"\n").arg(tomlEsc(username));
-    t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(password));
-    t += QStringLiteral("client_random = \"%1\"\n")
-                 .arg(tomlEsc(f.value(QStringLiteral("clientRandom")).toString()));
-    t += QStringLiteral("custom_sni = \"%1\"\n")
-                 .arg(tomlEsc(f.value(QStringLiteral("customSni")).toString()));
-    t += QStringLiteral("has_ipv6 = %1\n").arg(ipv6 ? "true" : "false");
-    t += QStringLiteral("skip_verification = false\n");
-    t += QStringLiteral("upstream_protocol = \"%1\"\n").arg(proto == "http3" ? "http3" : "http2");
-    t += QStringLiteral("anti_dpi = false\n");
-    if (!cert.isEmpty())
-        t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n").arg(cert);
-    else
-        t += QStringLiteral("certificate = \"\"\n");
-    t += QStringLiteral("\n[listener.tun]\n");
-    t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
-    t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
-    t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
-                        "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
+    ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
+    ct.certificate = f.value(QStringLiteral("certificate")).toString().trimmed();
+    ct.dns = f.value(QStringLiteral("dns")).toString();
+    ct.customSni = f.value(QStringLiteral("customSni")).toString();
+    ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
+    const QString t = freetunnel::buildConfigToml(ct);
+    const QString hostname = ct.hostname;
 
     QString safe;
     const QString src = name.isEmpty() ? hostname : name;
@@ -608,41 +570,18 @@ QVariantMap Backend::configFields(int index) const {
     QFile file(m_paths.at(index));
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return f;
-    const QString c = QString::fromUtf8(file.readAll());
-
-    auto unesc = [](QString v) { return v.replace("\\\"", "\"").replace("\\\\", "\\"); };
-    auto str = [&](const char *key) -> QString {
-        QRegularExpression re(QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-                                      .arg(QLatin1String(key)));
-        const auto m = re.match(c);
-        return m.hasMatch() ? unesc(m.captured(1)) : QString();
-    };
-    auto arr = [&](const char *key) -> QString {
-        QRegularExpression re(QStringLiteral("(?m)^%1\\s*=\\s*\\[([^\\]]*)\\]").arg(QLatin1String(key)));
-        const auto m = re.match(c);
-        if (!m.hasMatch()) return QString();
-        QStringList out;
-        static const QRegularExpression item(QStringLiteral("\"((?:[^\"\\\\]|\\\\.)*)\""));
-        auto it = item.globalMatch(m.captured(1));
-        while (it.hasNext()) out << unesc(it.next().captured(1));
-        return out.join(QStringLiteral(", "));
-    };
-
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
     f[QStringLiteral("name")] = nameForPath(m_paths.at(index));
-    f[QStringLiteral("hostname")] = str("hostname");
-    f[QStringLiteral("addresses")] = arr("addresses");
-    f[QStringLiteral("username")] = str("username");
-    f[QStringLiteral("password")] = str("password");
-    f[QStringLiteral("protocol")] = str("upstream_protocol");
-    f[QStringLiteral("dns")] = arr("dns_upstreams");
-    f[QStringLiteral("customSni")] = str("custom_sni");
-    f[QStringLiteral("clientRandom")] = str("client_random");
-    f[QStringLiteral("allowIpv6")] = !c.contains(QStringLiteral("has_ipv6 = false"));
-    static const QRegularExpression certRe(
-            QStringLiteral("certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
-            QRegularExpression::DotMatchesEverythingOption);
-    const auto cm = certRe.match(c);
-    f[QStringLiteral("certificate")] = cm.hasMatch() ? cm.captured(1) : QString();
+    f[QStringLiteral("hostname")] = c.hostname;
+    f[QStringLiteral("addresses")] = c.addresses;
+    f[QStringLiteral("username")] = c.username;
+    f[QStringLiteral("password")] = c.password;
+    f[QStringLiteral("protocol")] = c.protocol;
+    f[QStringLiteral("dns")] = c.dns;
+    f[QStringLiteral("customSni")] = c.customSni;
+    f[QStringLiteral("clientRandom")] = c.clientRandom;
+    f[QStringLiteral("allowIpv6")] = c.allowIpv6;
+    f[QStringLiteral("certificate")] = c.certificate;
     return f;
 }
 
