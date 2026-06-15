@@ -176,6 +176,52 @@ Window {
         MouseArea { anchors.fill: parent; onClicked: toast.opacity = 0 }
     }
 
+    // ---------- window-level select popup (used by Dropdown) ----------
+    function showSelect(anchorItem, model, value, cb) {
+        selectPopup.model = model
+        selectPopup.value = value
+        selectPopup.cb = cb
+        var p = anchorItem.mapToItem(overlayLayer, 0, anchorItem.height + 4)
+        selectPopup.x = Math.max(8, Math.min(p.x, overlayLayer.width - selectPopup.width - 8))
+        selectPopup.y = p.y
+        selectPopup.open = true
+    }
+    Item {
+        id: overlayLayer; anchors.fill: parent; z: 1500
+        visible: selectPopup.open
+        MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
+        Rectangle {
+            id: selectPopup
+            property bool open: false
+            property var model: []
+            property string value: ""
+            property var cb: null
+            visible: open
+            width: 200
+            height: spCol.implicitHeight + 10
+            radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
+            Column {
+                id: spCol; width: parent.width; y: 5
+                Repeater {
+                    model: selectPopup.model
+                    Rectangle {
+                        required property var modelData
+                        width: parent.width; height: 38; radius: 6
+                        color: spMa.containsMouse ? theme.surface : "transparent"
+                        Text { anchors.verticalCenter: parent.verticalCenter; x: 12
+                               text: parent.modelData.t
+                               color: parent.modelData.v === selectPopup.value ? theme.accent : theme.text
+                               font.pixelSize: 14 }
+                        Text { visible: parent.modelData.v === selectPopup.value; text: "✓"; color: theme.accent
+                               anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
+                        MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(parent.modelData.v) } }
+                    }
+                }
+            }
+        }
+    }
+
     // shared bits ------------------------------------------------------------
     component SectionLabel: Text {
         color: theme.textFaint; font.pixelSize: 12
@@ -209,54 +255,32 @@ Window {
         Component.onCompleted: reload()
     }
 
-    // Animated inline dropdown (real options list, not a click-cycle).
+    // Dropdown row that opens a floating select popup (like the import menu).
     component Dropdown: Item {
         id: dd
         property string label: ""
         property var model: []     // [{ v: "...", t: "..." }]
         property string value: ""
         signal picked(string v)
-        property bool open: false
-        property real panelHeight: open ? optCol.implicitHeight : 0
-        Behavior on panelHeight { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
         Layout.fillWidth: true
-        implicitHeight: 42 + panelHeight
-        Layout.preferredHeight: implicitHeight
+        Layout.preferredHeight: 42
+        implicitHeight: 42
         function labelFor(v) {
             for (var i = 0; i < model.length; i++) if (model[i].v === v) return model[i].t
             return ""
         }
+        Rectangle { anchors.fill: parent; anchors.topMargin: 2; anchors.bottomMargin: 2; radius: 6
+            color: ddMa.containsMouse ? theme.surface : "transparent"
+            Behavior on color { ColorAnimation { duration: 120 } } }
         RowLayout {
-            id: ddRow; width: parent.width; height: 42
+            anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6
             Text { text: dd.label; color: theme.text; font.pixelSize: 14 }
             Item { Layout.fillWidth: true }
             Text { text: dd.labelFor(dd.value); color: theme.textDim; font.pixelSize: 14 }
-            Text { text: "▾"; color: theme.textDim; font.pixelSize: 13; leftPadding: 6
-                   rotation: dd.open ? 180 : 0
-                   Behavior on rotation { NumberAnimation { duration: 150 } } }
-            MouseArea { anchors.fill: parent; onClicked: dd.open = !dd.open }
+            Text { text: "▾"; color: theme.textDim; font.pixelSize: 13; leftPadding: 6 }
         }
-        Item {
-            anchors.top: ddRow.bottom; width: parent.width; height: dd.panelHeight; clip: true
-            Column {
-                id: optCol; width: parent.width
-                Repeater {
-                    model: dd.model
-                    Rectangle {
-                        required property var modelData
-                        width: parent.width; height: 38; radius: 6
-                        color: oma.containsMouse ? theme.surface : "transparent"
-                        Text { anchors.verticalCenter: parent.verticalCenter; x: 12
-                               text: parent.modelData.t
-                               color: parent.modelData.v === dd.value ? theme.accent : theme.text; font.pixelSize: 14 }
-                        Text { visible: parent.modelData.v === dd.value; text: "✓"; color: theme.accent; font.pixelSize: 14
-                               anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
-                        MouseArea { id: oma; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { dd.picked(parent.modelData.v); dd.open = false } }
-                    }
-                }
-            }
-        }
+        MouseArea { id: ddMa; anchors.fill: parent; hoverEnabled: true
+                    onClicked: win.showSelect(dd, dd.model, dd.value, function(v){ dd.picked(v) }) }
     }
 
     // Reusable confirmation dialog (centered card + dimmed backdrop). Call
