@@ -21,6 +21,10 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 
 - `main.cpp` — `QApplication` + `QQmlApplicationEngine`; single-instance via
   `QLocalServer`, deep-link/`QFileOpenEvent` routing, tray-friendly lifecycle.
+  With `--helper` it runs the headless **privileged helper** instead.
+- **Privilege model**: the GUI stays user-level; the VPN core runs in a
+  separate elevated helper process (`VpnHelperClient` ↔ `runVpnHelper`, token-
+  authed localhost JSON). Elevated once per session (osascript/pkexec/runas).
 - `qml/Main.qml` — the entire UI (home, split-tunnel, configs, settings, logs,
   create-config + adapters sub-screens) bound to a single `backend` object.
 - `include|src/app/Backend.*` — the QML bridge; wraps `QtTrustTunnelClient`
@@ -37,7 +41,8 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 | 1 | Distribution | Medium | Binaries are unsigned → Gatekeeper/SmartScreen friction; macOS is ad-hoc signed only. | Documented for users; add Developer ID / Windows signing when certs exist (CI hooks ready). |
 | 2 | Integration fragility | Medium | Live telemetry relies on patching upstream `client.{h,cpp}` in CI (`scripts/patch_core_wrapper.py`); deep-link/`tunnel_stats` assume a specific core API. | Pinned `UPSTREAM_REF` mitigates. On bump: re-run the patch, rebuild, re-check `VpnCallbacks`. Better: upstream a PR exposing the handler. |
 | 3 | Dependency drift | Medium | `dns-libs` is re-pinned in CI because the upstream bootstrap exports the *latest* tag. | Current pin handles it; pin `native_libs_common` too if it ever drifts. |
-| 4 | Feature scope | Low (by design) | Split tunneling is **domain-based**, with named **profiles** (functional). Per-app routing is not implemented — verified the core exposes only domain `exclusions` + routes, no app-level API. | Revisit per-app only if/when the core supports it (Win WFP / mac NE / Linux cgroup). |
+| 4 | Feature scope | Low (by design) | Split tunneling is **domain-based** (bypass), with named **profiles** (functional). Neither per-app routing nor an inverse "only-these-via-VPN" mode is offered — the core exposes only domain `exclusions` + routes. | Revisit only if/when the core gains app-level / inclusive routing. |
+| 12 | Autostart | Low | "Launch at startup" writes a LaunchAgent/registry/.desktop entry pointing at the running binary — so it only works once the app is installed to a stable location (not run from a mounted .dmg). | Documented; consider a check that warns when launched from a volume. |
 | 5 | Hotkeys (Linux) | Low | Global hotkeys use QHotkey, which is **X11-only** on Linux — no Wayland support. | Acceptable; document. Hotkeys are optional and empty by default. |
 | 6 | Tray (Linux) | Low | The Qt.labs.platform tray needs a StatusNotifier/AppIndicator host; absent on some minimal desktops. | App still works without a tray; window remains usable. |
 | 7 | Updater | Low | The in-app updater works because the repo is **public** (GitHub Releases API, unauthenticated). | Keep the repo public, or ship a token-less alternative if it ever goes private. |
