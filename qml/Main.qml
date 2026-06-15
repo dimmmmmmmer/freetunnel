@@ -23,21 +23,48 @@ Window {
         id: tray
         visible: true
         icon.source: "qrc:/assets/logo.svg"
-        tooltip: backend.connected ? "FreeTunnel — connected" : "FreeTunnel"
+        tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
+                                    : "FreeTunnel"
+        // Click opens the menu (below). Double-click brings the window forward.
         onActivated: function(reason) {
-            if (reason === Platform.SystemTrayIcon.Trigger
-                    || reason === Platform.SystemTrayIcon.DoubleClick) {
-                if (win.visible) {
-                    win.hide()
-                } else {
-                    win.show(); win.raise(); win.requestActivate()
-                }
+            if (reason === Platform.SystemTrayIcon.DoubleClick) {
+                win.show(); win.raise(); win.requestActivate()
             }
         }
         menu: Platform.Menu {
+            // Status line + session time (read-only).
+            Platform.MenuItem {
+                enabled: false
+                text: backend.connected ? qsTr("Connected · %1").arg(backend.activeConfig)
+                                         : qsTr("Disconnected")
+            }
+            Platform.MenuItem {
+                enabled: false; visible: backend.connected
+                text: "   " + backend.sessionTime
+            }
+            Platform.MenuSeparator {}
             Platform.MenuItem {
                 text: backend.connected ? qsTr("Disconnect") : qsTr("Connect")
                 onTriggered: backend.toggle()
+            }
+            // Config switcher.
+            Platform.Menu {
+                id: traySwitchMenu
+                title: qsTr("Switch config")
+                enabled: backend.configs.length > 0
+                Instantiator {
+                    model: backend.configs
+                    delegate: Platform.MenuItem {
+                        required property int index
+                        required property string modelData
+                        text: modelData
+                        checkable: true
+                        checked: index === backend.activeIndex
+                        onTriggered: backend.selectConfig(index)
+                    }
+                    onObjectAdded: (i, obj) => traySwitchMenu.insertItem(i, obj)
+                    onObjectRemoved: (i, obj) => traySwitchMenu.removeItem(obj)
+                }
             }
             Platform.MenuSeparator {}
             Platform.MenuItem {
