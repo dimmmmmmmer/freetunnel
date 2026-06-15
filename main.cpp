@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
-    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
     // Keep running in the tray when the window is closed.
     QApplication::setQuitOnLastWindowClosed(false);
 

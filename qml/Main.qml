@@ -22,7 +22,7 @@ Window {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        icon.source: "qrc:/assets/logo.png"
+        icon.source: "qrc:/assets/logo.svg"
         tooltip: backend.connected ? "FreeTunnel — connected" : "FreeTunnel"
         onActivated: function(reason) {
             if (reason === Platform.SystemTrayIcon.Trigger
@@ -62,13 +62,13 @@ Window {
         readonly property color text: dark ? "#e8eaed" : "#1b1d21"
         readonly property color textDim: dark ? "#9aa1ab" : "#6b7280"
         readonly property color textFaint: dark ? "#6b7280" : "#9aa1ab"
-        readonly property color accent: dark ? "#4a9eea" : "#185fa5"
+        readonly property color accent: dark ? "#aeb6c2" : "#4b5563"
         readonly property color border: dark ? "#2d313a" : "#e7e9ee"
         readonly property color success: dark ? "#3fbf93" : "#1d9e75"
         readonly property color warn: dark ? "#d99634" : "#ba7517"
         readonly property color danger: dark ? "#e06a6a" : "#a32d2d"
-        readonly property color infoBg: dark ? Qt.rgba(0.29, 0.62, 0.92, 0.18)
-                                             : Qt.rgba(0.094, 0.373, 0.647, 0.12)
+        readonly property color infoBg: dark ? Qt.rgba(0.68, 0.71, 0.76, 0.16)
+                                             : Qt.rgba(0.29, 0.33, 0.39, 0.12)
     }
 
     property int currentPage: 0
@@ -120,7 +120,7 @@ Window {
                     Image {
                         visible: navItem.modelData === "connection"
                         anchors.centerIn: parent; width: 22; height: 22
-                        source: "qrc:/assets/logo.png"; sourceSize: Qt.size(44, 44)
+                        source: "qrc:/assets/logo.svg"; sourceSize: Qt.size(44, 44)
                         opacity: navItem.active ? 1.0 : 0.8
                     }
                     Icon {
@@ -337,15 +337,16 @@ Window {
                         anchors.centerIn: parent; spacing: 4
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            source: "qrc:/assets/logo.png"; width: 56; height: 56
+                            source: "qrc:/assets/logo.svg"; width: 56; height: 56
                             sourceSize: Qt.size(112, 112)
                             opacity: backend.connected ? 1.0 : 0.4
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: backend.connected ? backend.sessionTime : qsTr("Off")
+                            visible: backend.connected
+                            text: backend.sessionTime
                             color: theme.text
-                            font.pixelSize: backend.connected ? 22 : 15; font.weight: Font.Medium
+                            font.pixelSize: 17; font.weight: Font.Medium
                         }
                     }
                     MouseArea { anchors.fill: parent; onClicked: backend.toggle() }
@@ -360,7 +361,7 @@ Window {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12
                     Repeater {
                         model: [ { l: qsTr("Download"), v: backend.downSpeed, c: theme.success, a: "↓" },
-                                 { l: qsTr("Upload"), v: backend.upSpeed, c: "#378add", a: "↑" } ]
+                                 { l: qsTr("Upload"), v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
                         Rectangle {
                             required property var modelData
                             width: 140; height: 56; radius: 8; color: theme.surface
@@ -513,7 +514,7 @@ Window {
                         required property string modelData
                         Layout.fillWidth: true
                         RowLayout { Layout.fillWidth: true; Layout.topMargin: 8; Layout.bottomMargin: 8; spacing: 12
-                            Image { source: "qrc:/assets/logo.png"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                            Image { source: "qrc:/assets/logo.svg"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
                                     sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.35 }
                             Text { text: modelData; color: theme.text; font.pixelSize: 14
                                    font.weight: index === backend.activeIndex ? Font.Medium : Font.Normal
@@ -652,7 +653,7 @@ Window {
                         width: logList.width; spacing: 6
                         Text { text: modelData.time; color: theme.textFaint; font.pixelSize: 11; font.family: "Menlo" }
                         Text { text: modelData.level; font.pixelSize: 11; font.family: "Menlo"
-                               color: modelData.level === "ERROR" ? "#a32d2d" : modelData.level === "WARN" ? "#ba7517" : "#185fa5" }
+                               color: modelData.level === "ERROR" ? theme.danger : modelData.level === "WARN" ? theme.warn : theme.textDim }
                         Text { text: modelData.msg; color: theme.text; font.pixelSize: 11; font.family: "Menlo"
                                width: parent.width - 116; elide: Text.ElideRight }
                     }
