@@ -37,9 +37,10 @@ if (GIT_FOUND)
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
-    # The TrustTunnel core lives in the parent (upstream) checkout.
+    # The TrustTunnel core lives in the parent (upstream) checkout. Prefer the
+    # nearest tag (a version) and fall back to a short commit.
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" rev-parse --short HEAD
+        COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" describe --tags --always
         OUTPUT_VARIABLE FREETUNNEL_CORE_REF
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET

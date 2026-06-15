@@ -150,9 +150,13 @@ void Backend::checkForUpdates() {
                 });
         connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
                 [this](const QString &message) {
-                    m_updateState = QStringLiteral("current");
-                    m_updateMessage = message.isEmpty()
-                            ? tr("You have the latest version") : message;
+                    // 404 (no releases yet) or a transient network error — show a
+                    // clean message rather than a raw HTTP/transfer error.
+                    const bool netErr = message.contains(QLatin1String("rror"))
+                            || message.contains(QLatin1String("network"), Qt::CaseInsensitive);
+                    m_updateState = netErr ? QStringLiteral("error") : QStringLiteral("current");
+                    m_updateMessage = netErr ? tr("Could not check for updates")
+                                             : tr("You have the latest version");
                     emit updateChanged();
                 });
     }
@@ -274,7 +278,7 @@ void Backend::pingConfigs() {
         connect(sock, &QTcpSocket::connected, this, [this, i, sock, t0]() {
             if (i < m_pings.size())
                 m_pings[i] = QString::number(QDateTime::currentMSecsSinceEpoch() - t0)
-                        + QStringLiteral(" мс");
+                        + tr(" ms");
             sock->abort();
             sock->deleteLater();
             emit pingsChanged();

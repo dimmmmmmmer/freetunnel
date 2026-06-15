@@ -9,88 +9,98 @@
         <translation>Доступна версия %1</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="155"/>
+        <location filename="../src/app/Backend.cpp" line="158"/>
+        <source>Could not check for updates</source>
+        <translation>Не удалось проверить обновления</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Backend.cpp" line="159"/>
         <source>You have the latest version</source>
         <translation>Установлена последняя версия</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="160"/>
+        <location filename="../src/app/Backend.cpp" line="164"/>
         <source>Checking…</source>
         <translation>Проверка…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="306"/>
+        <location filename="../src/app/Backend.cpp" line="281"/>
+        <source> ms</source>
+        <translation> мс</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Backend.cpp" line="310"/>
         <source>Clipboard is empty</source>
         <translation>Буфер обмена пуст</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="312"/>
+        <location filename="../src/app/Backend.cpp" line="316"/>
         <source>No tt:// link in the clipboard</source>
         <translation>В буфере нет ссылки tt://</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="318"/>
+        <location filename="../src/app/Backend.cpp" line="322"/>
         <source>Connected</source>
         <translation>Подключено</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="319"/>
+        <location filename="../src/app/Backend.cpp" line="323"/>
         <source>Connecting…</source>
         <translation>Подключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="320"/>
+        <location filename="../src/app/Backend.cpp" line="324"/>
         <source>Reconnecting…</source>
         <translation>Переподключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="321"/>
+        <location filename="../src/app/Backend.cpp" line="325"/>
         <source>Waiting for network…</source>
         <translation>Ожидание сети…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="322"/>
+        <location filename="../src/app/Backend.cpp" line="326"/>
         <source>Disconnecting…</source>
         <translation>Отключение…</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="323"/>
+        <location filename="../src/app/Backend.cpp" line="327"/>
         <source>Error</source>
         <translation>Ошибка</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="324"/>
+        <location filename="../src/app/Backend.cpp" line="328"/>
         <source>Off</source>
         <translation>Выключено</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="345"/>
+        <location filename="../src/app/Backend.cpp" line="349"/>
         <source>No config</source>
         <translation>Нет конфига</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="369"/>
+        <location filename="../src/app/Backend.cpp" line="373"/>
         <source>Select a config first</source>
         <translation>Сначала выберите конфиг</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="425"/>
+        <location filename="../src/app/Backend.cpp" line="429"/>
         <source>File not found: %1</source>
         <translation>Файл не найден: %1</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="498"/>
+        <location filename="../src/app/Backend.cpp" line="502"/>
         <source>Fill in host, address, username and password</source>
         <translation>Заполните имя хоста, адрес, логин и пароль</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="551"/>
-        <location filename="../src/app/Backend.cpp" line="731"/>
+        <location filename="../src/app/Backend.cpp" line="555"/>
+        <location filename="../src/app/Backend.cpp" line="735"/>
         <source>Could not write config</source>
         <translation>Не удалось записать конфиг</translation>
     </message>
     <message>
-        <location filename="../src/app/Backend.cpp" line="723"/>
+        <location filename="../src/app/Backend.cpp" line="727"/>
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
