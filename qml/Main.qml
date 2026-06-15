@@ -57,8 +57,9 @@ Window {
         id: theme
         readonly property bool dark: backend.themeMode === "dark"
                                      || (backend.themeMode === "system" && win.systemDark)
-        readonly property color bg: dark ? "#16181d" : "#ffffff"
-        readonly property color surface: dark ? "#23262d" : "#f3f4f6"
+        readonly property color bg: dark ? "#16181d" : "#eceef2"
+        readonly property color surface: dark ? "#23262d" : "#e2e5ea"
+        readonly property color tile: dark ? "#20232a" : "#d7dbe2"
         readonly property color text: dark ? "#e8eaed" : "#1b1d21"
         readonly property color textDim: dark ? "#9aa1ab" : "#6b7280"
         readonly property color textFaint: dark ? "#6b7280" : "#9aa1ab"
@@ -427,18 +428,16 @@ Window {
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12
                     Repeater {
-                        model: [ { l: qsTr("Download"), v: backend.downSpeed, c: theme.success, a: "↓" },
-                                 { l: qsTr("Upload"), v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
+                        model: [ { v: backend.downSpeed, c: theme.success, a: "↓" },
+                                 { v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
                         Rectangle {
                             required property var modelData
-                            width: 140; height: 56; radius: 8; color: theme.surface
-                            Column {
-                                anchors.centerIn: parent; spacing: 2
-                                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 5
-                                    Text { text: parent.parent.parent.modelData.a; color: parent.parent.parent.modelData.c; font.pixelSize: 13 }
-                                    Text { text: parent.parent.parent.modelData.l; color: theme.textDim; font.pixelSize: 12 }
-                                }
-                                Text { anchors.horizontalCenter: parent.horizontalCenter
+                            width: 140; height: 52; radius: 8; color: theme.tile
+                            Row {
+                                anchors.centerIn: parent; spacing: 6
+                                Text { anchors.verticalCenter: parent.verticalCenter
+                                       text: parent.parent.modelData.a; color: parent.parent.modelData.c; font.pixelSize: 17 }
+                                Text { anchors.verticalCenter: parent.verticalCenter
                                        text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 19; font.weight: Font.Medium }
                             }
                         }
