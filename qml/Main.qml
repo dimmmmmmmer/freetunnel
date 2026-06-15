@@ -759,7 +759,11 @@ Window {
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Check for updates"); color: theme.text; font.pixelSize: 14 }
+                    Rectangle { anchors.fill: parent; anchors.topMargin: 2; anchors.bottomMargin: 2; radius: 6
+                        color: updMa.containsMouse ? theme.surface : "transparent"
+                        Behavior on color { ColorAnimation { duration: 120 } } }
+                    Text { text: qsTr("Check for updates")
+                           color: updMa.containsMouse ? theme.accent : theme.text; font.pixelSize: 14 }
                     Text { visible: backend.updateMessage.length > 0; text: backend.updateMessage
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
                            font.pixelSize: 12; leftPadding: 8 }
@@ -768,7 +772,7 @@ Window {
                                  : backend.updateState === "available" ? qsTr("Download ›") : backend.appVersion
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
                            font.pixelSize: 13 }
-                    MouseArea { anchors.fill: parent
+                    MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true
                         onClicked: backend.updateState === "available" ? backend.openLatestRelease()
                                                                        : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
@@ -818,9 +822,11 @@ Window {
                 }
             }
             RowLayout { Layout.fillWidth: true; spacing: 8
-                Text { Layout.fillWidth: true; text: backend.logPath; color: theme.textDim; font.pixelSize: 11
-                       elide: Text.ElideMiddle
-                       MouseArea { anchors.fill: parent; onClicked: backend.openLogFolder() } }
+                Text { Layout.fillWidth: true; text: backend.logPath; font.pixelSize: 11
+                       color: logPathMa.containsMouse ? theme.accent : theme.textDim
+                       font.underline: logPathMa.containsMouse; elide: Text.ElideMiddle
+                       MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
+                                   cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
                 Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
                 Toggle { accent: theme.accent; checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
                          onToggled: function(v){ logList.autoScroll = v } }

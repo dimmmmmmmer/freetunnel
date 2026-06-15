@@ -72,6 +72,28 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_ticker.start();
 
     registerHotkeys();
+    trimLogFile();
+}
+
+// Keep the on-disk log from growing without bound: if it exceeds the cap,
+// drop the oldest entries and keep the most recent tail.
+void Backend::trimLogFile() {
+    const QString p = logPath();
+    QFileInfo fi(p);
+    if (!fi.exists() || fi.size() <= 5 * 1024 * 1024) // 5 MB cap
+        return;
+    QFile f(p);
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    f.seek(fi.size() - 2 * 1024 * 1024); // keep the last ~2 MB
+    f.readLine();                        // discard the partial first line
+    const QByteArray tail = f.readAll();
+    f.close();
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write("... (older log entries trimmed) ...\n");
+        f.write(tail);
+        f.close();
+    }
 }
 
 void Backend::registerHotkeys() {

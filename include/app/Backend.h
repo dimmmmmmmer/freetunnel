@@ -146,6 +146,7 @@ private:
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(); // push active profile's domain-bypass list to the core
+    void trimLogFile();     // cap the log file size so it never grows unbounded
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
