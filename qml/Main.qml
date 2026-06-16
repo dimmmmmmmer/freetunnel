@@ -697,7 +697,7 @@ Window {
                     width: 40; height: 32; radius: 8
                     color: pingMa.containsMouse ? theme.surface : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
-                    Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: theme.text }
+                    Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: theme.accent }
                     MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: backend.pingConfigs() }
                 }
             }
@@ -736,11 +736,18 @@ Window {
                         Rectangle { visible: index === backend.activeIndex && backend.connected
                             radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
                             Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                        Text { text: "⋯"; color: dotsMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 18; padding: 6
-                               MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
-                                           onClicked: { win.editIndex = index; win.overlay = "create" } } }
-                        Text { text: "✕"; color: theme.danger; font.pixelSize: 14; padding: 6
-                               MouseArea { anchors.fill: parent; onClicked: backend.removeConfig(index) } }
+                        Item { Layout.preferredWidth: 30; Layout.fillHeight: true
+                            Text { anchors.centerIn: parent; text: "⋯"; font.pixelSize: 20
+                                   color: dotsMa.containsMouse ? theme.text : theme.textDim }
+                            MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: { win.editIndex = index; win.overlay = "create" } } }
+                        Item { Layout.preferredWidth: 30; Layout.fillHeight: true
+                            Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 17
+                                   color: delMa.containsMouse ? theme.danger : theme.textDim }
+                            MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: { delCfg.target = index
+                                            delCfg.text = qsTr("Delete config “%1”?").arg(modelData)
+                                            delCfg.open() } } }
                     }
                 }
             }
@@ -775,6 +782,8 @@ Window {
                 nameFilters: ["TOML (*.toml)", qsTr("All files (*)")]
                 onAccepted: backend.importFile(fileDlg.file.toString())
             }
+            ConfirmDialog { id: delCfg; property int target: -1
+                confirmText: qsTr("Delete"); onConfirmed: if (target >= 0) backend.removeConfig(target) }
         }
     }
 
@@ -863,8 +872,13 @@ Window {
             anchors.topMargin: 6; anchors.bottomMargin: 12; spacing: 8
             RowLayout { Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                Text { text: qsTr("Clear"); color: theme.accent; font.pixelSize: 13
-                    MouseArea { anchors.fill: parent; onClicked: backend.clearLogs() } }
+                Rectangle { Layout.preferredHeight: 28; Layout.preferredWidth: clrTxt.implicitWidth + 24; radius: 7
+                    color: clrMa.containsMouse ? theme.surface : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text { id: clrTxt; anchors.centerIn: parent; text: qsTr("Clear")
+                           color: clrMa.containsMouse ? theme.text : theme.accent; font.pixelSize: 13 }
+                    MouseArea { id: clrMa; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor; onClicked: backend.clearLogs() } }
                 Item { Layout.fillWidth: true }
             }
             Rectangle {
