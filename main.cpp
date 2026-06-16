@@ -12,6 +12,7 @@
 #include <QWindow>
 
 #include "app/Backend.h"
+#include "app/MacWindow.h"
 #include "vpn/vpn_helper_server.h"
 
 // Install/replace the UI translation for `lang` ("ru" loads the bundled .qm;
@@ -155,6 +156,10 @@ int main(int argc, char *argv[]) {
                      });
 
     auto *win = qobject_cast<QWindow *>(engine.rootObjects().first());
+#ifdef Q_OS_MACOS
+    if (win)
+        applyMacUnifiedTitlebar(win->winId()); // transparent, content-filled title bar
+#endif
     urlFilter.ready(&backend, win); // flush any URL that arrived during startup
     if (!controlArg.isEmpty())
         backend.handleControl(controlArg);

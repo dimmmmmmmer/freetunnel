@@ -140,7 +140,9 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: 12
+            // Leave room for the macOS traffic-light buttons (the title bar is
+            // transparent and the content flows under it).
+            Layout.topMargin: Qt.platform.os === "osx" ? 26 : 12
             Layout.bottomMargin: 6
             spacing: 8
             Item { Layout.fillWidth: true }

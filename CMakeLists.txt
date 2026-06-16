@@ -143,6 +143,10 @@ if (APPLE)
     # Place macOS icon into the bundle Resources dir
     set_source_files_properties(assets/logo.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     target_sources(FreeTunnel PRIVATE assets/logo.icns)
+    # Unified title bar (transparent bar + full-size content) needs a tiny bit of
+    # Objective-C++ talking to AppKit.
+    target_sources(FreeTunnel PRIVATE src/app/MacWindow.mm include/app/MacWindow.h)
+    target_link_libraries(FreeTunnel PRIVATE "-framework AppKit")
 endif()
 
 # Bundle assets
