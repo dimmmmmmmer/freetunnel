@@ -37,6 +37,7 @@ public:
     bool loadConfigFromFile(const QString &path);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setVpnMode(bool selective);
+    void setKillSwitch(bool enabled);
 
     void connectVpn();    // spawns/elevates the helper if needed, then connects
     void disconnectVpn();
@@ -65,6 +66,7 @@ private:
     QString m_configPath;
     std::vector<std::string> m_exclusions;
     bool m_selective = false;
+    bool m_killSwitch = false;
     State m_state = State::Disconnected;
     bool m_helloAcked = false;
     bool m_connectPending = false;

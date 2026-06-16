@@ -64,6 +64,14 @@ void VpnHelperClient::setVpnMode(bool selective) {
     }
 }
 
+void VpnHelperClient::setKillSwitch(bool enabled) {
+    m_killSwitch = enabled;
+    if (m_helloAcked) {
+        QJsonObject c; c["cmd"] = "setKillSwitch"; c["enabled"] = enabled;
+        send(c);
+    }
+}
+
 void VpnHelperClient::connectVpn() {
     if (!ensureHelper())
         return;
@@ -207,6 +215,7 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
         m_helloAcked = true;
         // Push any pending routing config, then connect if requested.
         setVpnMode(m_selective);
+        setKillSwitch(m_killSwitch);
         setExtraExclusions(m_exclusions);
         if (m_connectPending) { m_connectPending = false; connectVpn(); }
     } else if (type == "state") {

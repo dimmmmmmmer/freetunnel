@@ -56,6 +56,7 @@ public:
     void setCustomDns(const std::vector<std::string> &dnsServers);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setVpnMode(bool selective); // selective = route only the exclusions list
+    void setKillSwitch(bool enabled);
 
 signals:
     void stateChanged(QtTrustTunnelClient::State state);
@@ -91,6 +92,7 @@ private:
     std::vector<std::string> m_extraExclusions;
     std::string m_originalExclusions; // exclusions from config file before our additions
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)
+    bool m_killSwitch = false;
     QTimer m_reconnectTimer;
     QTimer m_fdWatchdogTimer;
     QTimer m_networkWaitTimer;   // fires if we stay in WaitingForNetwork too long

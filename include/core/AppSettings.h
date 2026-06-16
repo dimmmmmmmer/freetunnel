@@ -54,9 +54,9 @@ struct AppSettings {
 
     // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
     // Empty string = unbound.
-    QString hotkey_toggle = "";
-    QString hotkey_connect = "";
-    QString hotkey_disconnect = "";
+    QString hotkey_toggle = "Ctrl+Shift+T";
+    QString hotkey_connect = "Ctrl+Shift+E";
+    QString hotkey_disconnect = "Ctrl+Shift+D";
 
     // Last used config
     QString last_config_path = "";

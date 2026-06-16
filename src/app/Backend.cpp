@@ -176,14 +176,10 @@ void Backend::checkForUpdates() {
                     emit updateChanged();
                 });
         connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
-                [this](const QString &message) {
-                    // 404 (no releases yet) or a transient network error — show a
-                    // clean message rather than a raw HTTP/transfer error.
-                    const bool netErr = message.contains(QLatin1String("rror"))
-                            || message.contains(QLatin1String("network"), Qt::CaseInsensitive);
-                    m_updateState = netErr ? QStringLiteral("error") : QStringLiteral("current");
-                    m_updateMessage = netErr ? tr("Could not check for updates")
-                                             : tr("You have the latest version");
+                [this](const QString &) {
+                    // No newer release (incl. 404 when no releases exist yet).
+                    m_updateState = QStringLiteral("current");
+                    m_updateMessage = tr("You have the latest version");
                     emit updateChanged();
                 });
     }
@@ -385,6 +381,8 @@ void Backend::reloadConfigs() {
     m_names.clear();
     for (const QString &p : m_paths)
         m_names << nameForPath(p);
+    m_pings.clear(); // indices shifted — stale pings would mislabel servers
+    emit pingsChanged();
     emit configsChanged();
 }
 
@@ -403,6 +401,7 @@ void Backend::connectVpn() {
     // The helper handles elevation; just hand it the config + rules.
     m_client.loadConfigFromFile(m_activePath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
+    m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.connectVpn();
 }
 
@@ -659,12 +658,15 @@ void Backend::renameProfile(const QString &oldName, const QString &newName) {
 // Push the active profile's domain-bypass list to the core (C2). Applied on
 // connect and whenever rules change; takes effect on the next (re)connect.
 void Backend::applySplitRules() {
+    const bool on = m_settings.domain_bypass_enabled;
     std::vector<std::string> ex;
-    if (m_settings.domain_bypass_enabled)
+    if (on)
         for (const QString &d : m_settings.domain_bypass_rules)
             ex.push_back(d.toStdString());
     m_client.setExtraExclusions(ex);
-    m_client.setVpnMode(m_settings.vpn_mode == QLatin1String("selective"));
+    // When split is off, force general mode (route everything) — otherwise a
+    // leftover "selective" mode with no rules would route NOTHING through the VPN.
+    m_client.setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
 }
 
 void Backend::setVpnMode(const QString &mode) {
@@ -691,7 +693,9 @@ void Backend::setAutoConnect(bool v) {
 }
 void Backend::setKillSwitch(bool v) {
     if (m_settings.killswitch_enabled == v) return;
-    m_settings.killswitch_enabled = v; persistSettings(); emit settingsChanged();
+    m_settings.killswitch_enabled = v; persistSettings();
+    m_client.setKillSwitch(v);
+    emit settingsChanged();
 }
 
 bool Backend::importDeepLink(const QString &link) {

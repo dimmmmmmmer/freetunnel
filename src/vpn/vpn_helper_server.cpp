@@ -56,6 +56,8 @@ public:
         return true;
     }
 
+    bool authed() const { return m_authed; }
+
 private:
     void onConnection() {
         QTcpSocket *s = m_server.nextPendingConnection();
@@ -101,6 +103,8 @@ private:
             m_client.setExtraExclusions(ex);
         } else if (cmd == "setMode") {
             m_client.setVpnMode(c.value("selective").toBool());
+        } else if (cmd == "setKillSwitch") {
+            m_client.setKillSwitch(c.value("enabled").toBool());
         } else if (cmd == "connect") {
             const QString path = c.value("configPath").toString();
             if (!m_client.loadConfigFromFile(path)) {
@@ -142,7 +146,10 @@ int runVpnHelper(int argc, char **argv) {
     if (!server.listen())
         return 3;
 
-    // Safety net: if no GUI ever connects, don't linger as root forever.
-    QTimer::singleShot(60000, &app, []() { /* idle check */ });
+    // Safety net: if no GUI authenticates within 60s, don't linger as root.
+    QTimer::singleShot(60000, &app, [&server]() {
+        if (!server.authed())
+            QCoreApplication::quit();
+    });
     return app.exec();
 }

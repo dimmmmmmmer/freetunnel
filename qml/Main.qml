@@ -376,7 +376,8 @@ Window {
                 Layout.preferredHeight: 28
                 Layout.preferredWidth: Math.max(96, lbl.implicitWidth + 24)
                 radius: 6
-                color: hk.capturing ? theme.infoBg : theme.surface
+                color: hk.capturing ? theme.infoBg : (hkMa.containsMouse ? theme.border : theme.surface)
+                Behavior on color { ColorAnimation { duration: 120 } }
                 border.width: hk.capturing ? 1 : 0; border.color: theme.accent
                 Text {
                     id: lbl; anchors.centerIn: parent
@@ -384,7 +385,15 @@ Window {
                     color: (hk.value || hk.capturing) ? theme.text : theme.textFaint
                     font.pixelSize: 13
                 }
-                MouseArea { anchors.fill: parent; onClicked: { hk.capturing = true; hk.forceActiveFocus() } }
+                MouseArea { id: hkMa; anchors.fill: parent; hoverEnabled: true
+                            onClicked: { hk.capturing = true; hk.forceActiveFocus() } }
+            }
+            // Clear (disable) the binding.
+            Text {
+                visible: hk.value !== "" && !hk.capturing
+                text: "✕"; color: clrMa.containsMouse ? theme.danger : theme.textDim
+                font.pixelSize: 14; leftPadding: 8
+                MouseArea { id: clrMa; anchors.fill: parent; hoverEnabled: true; onClicked: hk.captured("") }
             }
         }
         Keys.onPressed: function(e) {

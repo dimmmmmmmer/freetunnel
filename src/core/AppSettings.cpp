@@ -73,9 +73,9 @@ AppSettings loadAppSettings() {
     out.scan_adapter_conflicts = s.value("net/scan_adapter_conflicts", true).toBool();
     out.ssh_bypass_enabled = s.value("bypass/ssh_enabled", false).toBool();
     out.p2p_bypass_enabled = s.value("bypass/p2p_enabled", false).toBool();
-    out.hotkey_toggle = s.value("hotkeys/toggle", "").toString();
-    out.hotkey_connect = s.value("hotkeys/connect", "").toString();
-    out.hotkey_disconnect = s.value("hotkeys/disconnect", "").toString();
+    out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
+    out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
+    out.hotkey_disconnect = s.value("hotkeys/disconnect", "Ctrl+Shift+D").toString();
     if (out.log_path.isEmpty()) {
         out.log_path = defaultLogPath();
     }

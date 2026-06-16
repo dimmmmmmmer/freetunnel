@@ -139,12 +139,19 @@ void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
     }
     // Routing policy: general = bypass the exclusions, selective = route only them.
     m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+    m_config->killswitch_enabled = m_killSwitch;
 }
 
 void QtTrustTunnelClient::setVpnMode(bool selective) {
     m_selectiveMode = selective;
     if (m_config.has_value())
         m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+}
+
+void QtTrustTunnelClient::setKillSwitch(bool enabled) {
+    m_killSwitch = enabled;
+    if (m_config.has_value())
+        m_config->killswitch_enabled = enabled;
 }
 
 bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
