@@ -53,7 +53,8 @@ struct AppSettings {
     bool p2p_bypass_enabled = false;
 
     // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
-    // Empty string = unbound.
+    // Empty string = unbound. hotkeys_enabled is the master switch.
+    bool hotkeys_enabled = true;
     QString hotkey_toggle = "Ctrl+Shift+T";
     QString hotkey_connect = "Ctrl+Shift+E";
     QString hotkey_disconnect = "Ctrl+Shift+D";

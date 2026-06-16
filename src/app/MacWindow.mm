@@ -15,4 +15,7 @@ void applyMacUnifiedTitlebar(unsigned long long nsViewPtr) {
     window.titlebarAppearsTransparent = YES;
     window.titleVisibility = NSWindowTitleHidden;
     window.styleMask |= NSWindowStyleMaskFullSizeContentView;
+    // With a full-size content view the native title-bar drag region is gone, so
+    // let the window be dragged from any empty background area instead.
+    window.movableByWindowBackground = YES;
 }

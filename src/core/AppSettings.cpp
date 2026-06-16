@@ -65,6 +65,7 @@ AppSettings loadAppSettings() {
     out.scan_adapter_conflicts = s.value("net/scan_adapter_conflicts", true).toBool();
     out.ssh_bypass_enabled = s.value("bypass/ssh_enabled", false).toBool();
     out.p2p_bypass_enabled = s.value("bypass/p2p_enabled", false).toBool();
+    out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
     out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
     out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
     out.hotkey_disconnect = s.value("hotkeys/disconnect", "Ctrl+Shift+D").toString();
@@ -105,6 +106,7 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("net/scan_adapter_conflicts", cfg.scan_adapter_conflicts);
     s.setValue("bypass/ssh_enabled", cfg.ssh_bypass_enabled);
     s.setValue("bypass/p2p_enabled", cfg.p2p_bypass_enabled);
+    s.setValue("hotkeys/enabled", cfg.hotkeys_enabled);
     s.setValue("hotkeys/toggle", cfg.hotkey_toggle);
     s.setValue("hotkeys/connect", cfg.hotkey_connect);
     s.setValue("hotkeys/disconnect", cfg.hotkey_disconnect);

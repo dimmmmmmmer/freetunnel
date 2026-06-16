@@ -42,6 +42,7 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
+    Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
@@ -99,7 +100,7 @@ public:
     void setSplitEnabled(bool v);
     QString vpnMode() const { return m_settings.vpn_mode; }
     void setVpnMode(const QString &mode);
-    Q_INVOKABLE void addDomain(const QString &domain);
+    Q_INVOKABLE bool addDomain(const QString &domain); // accepts a list; true if any added
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
 
@@ -115,6 +116,8 @@ public:
     Q_INVOKABLE void removeProfile(const QString &name);
     Q_INVOKABLE void renameProfile(const QString &oldName, const QString &newName);
 
+    bool hotkeysEnabled() const { return m_settings.hotkeys_enabled; }
+    void setHotkeysEnabled(bool v);
     QString hotkeyToggle() const { return m_settings.hotkey_toggle; }
     QString hotkeyConnect() const { return m_settings.hotkey_connect; }
     QString hotkeyDisconnect() const { return m_settings.hotkey_disconnect; }
@@ -156,6 +159,7 @@ private:
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(); // push active profile's domain-bypass list to the core
+    void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);

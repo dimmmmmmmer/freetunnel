@@ -114,6 +114,8 @@ void Backend::registerHotkeys() {
     delete m_hkConnect;    m_hkConnect = nullptr;
     delete m_hkDisconnect; m_hkDisconnect = nullptr;
 
+    if (!m_settings.hotkeys_enabled) // master switch off — leave everything unbound
+        return;
     auto make = [this](const QString &seq, void (Backend::*slot)()) -> QHotkey * {
         const QString s = seq.trimmed();
         if (s.isEmpty())
@@ -130,6 +132,13 @@ void Backend::registerHotkeys() {
     m_hkDisconnect = make(m_settings.hotkey_disconnect, &Backend::disconnectVpn);
 }
 
+void Backend::setHotkeysEnabled(bool v) {
+    if (m_settings.hotkeys_enabled == v) return;
+    m_settings.hotkeys_enabled = v;
+    persistSettings();
+    registerHotkeys();
+    emit hotkeysChanged();
+}
 void Backend::setHotkeyToggle(const QString &v) {
     if (m_settings.hotkey_toggle == v) return;
     m_settings.hotkey_toggle = v;
@@ -410,6 +419,22 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Select a config first"));
         return;
     }
+    // Log the endpoint we're dialing (host, address:port, protocol, transport)
+    // so the log is useful even before the core chimes in.
+    {
+        QFile f(m_activePath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const freetunnel::ConfigToml c =
+                    freetunnel::parseConfigToml(QString::fromUtf8(f.readAll()));
+            const bool h3 = c.protocol == QLatin1String("http3");
+            appendLog(QStringLiteral("INFO"),
+                      tr("Connecting to %1 [%2] · %3 over %4")
+                          .arg(c.hostname.isEmpty() ? nameForPath(m_activePath) : c.hostname,
+                               c.addresses,
+                               h3 ? QStringLiteral("HTTP/3") : QStringLiteral("HTTP/2"),
+                               h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
+        }
+    }
     // The helper handles elevation; just hand it the config + rules.
     m_client.loadConfigFromFile(m_activePath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
@@ -472,7 +497,14 @@ bool Backend::importFile(const QString &path) {
         stored << p;
         saveStoredConfigs(stored);
     }
+    const bool hadNoActive = m_activePath.isEmpty();
     reloadConfigs();
+    if (hadNoActive) { // first config in an empty list — make it the active one
+        m_activePath = p;
+        m_settings.last_config_path = p;
+        persistSettings();
+        emit configChanged();
+    }
     return true;
 }
 
@@ -544,6 +576,21 @@ bool Backend::createConfig(const QVariantMap &f) {
     ct.dns = f.value(QStringLiteral("dns")).toString();
     ct.customSni = f.value(QStringLiteral("customSni")).toString();
     ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
+    // DNS servers (when given) must be valid IPs.
+    const QStringList dnsList = ct.dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
+                                            Qt::SkipEmptyParts);
+    for (const QString &d : dnsList) {
+        if (QHostAddress(d.trimmed()).isNull()) {
+            emit errorOccurred(tr("DNS must be IP addresses, e.g. 1.1.1.1, 8.8.8.8"));
+            return false;
+        }
+    }
+    // Client random (when given) must be a hex string.
+    const QString cr = ct.clientRandom.trimmed();
+    if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+$")).match(cr).hasMatch()) {
+        emit errorOccurred(tr("Client random must be hexadecimal"));
+        return false;
+    }
     const QString t = freetunnel::buildConfigToml(ct);
     const QString hostname = ct.hostname;
 
@@ -612,12 +659,48 @@ void Backend::setSplitEnabled(bool v) {
     if (m_settings.domain_bypass_enabled == v) return;
     m_settings.domain_bypass_enabled = v; persistSettings(); applySplitRules(); emit splitChanged();
 }
-void Backend::addDomain(const QString &domain) {
-    const QString d = domain.trimmed();
-    if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d)) return;
-    m_settings.domain_bypass_rules << d;
+// A bypass rule is valid if it's a domain (optionally wildcard "*.x.y"), or an
+// IP / CIDR subnet.
+static bool isValidBypassRule(const QString &rule) {
+    QString r = rule;
+    if (r.startsWith(QLatin1String("*.")))
+        r = r.mid(2);
+    // IP or subnet?
+    const int slash = r.indexOf(QLatin1Char('/'));
+    const QString addr = slash >= 0 ? r.left(slash) : r;
+    if (!QHostAddress(addr).isNull()) {
+        if (slash < 0) return true;
+        bool ok = false; const int p = r.mid(slash + 1).toInt(&ok);
+        const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
+        return ok && p >= 0 && p <= max;
+    }
+    // Otherwise a hostname: labels of [A-Za-z0-9-], at least one dot.
+    static const QRegularExpression re(
+        QStringLiteral("^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+"
+                       "[A-Za-z]{2,63}$"));
+    return re.match(r).hasMatch();
+}
+
+bool Backend::addDomain(const QString &domain) {
+    // Accept a whole list pasted at once: split on commas / whitespace / newlines.
+    const QStringList tokens = domain.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
+                                            Qt::SkipEmptyParts);
+    QStringList added, invalid;
+    for (const QString &raw : tokens) {
+        const QString d = raw.trimmed();
+        if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d) || added.contains(d))
+            continue;
+        if (!isValidBypassRule(d)) { invalid << d; continue; }
+        added << d;
+    }
+    if (!invalid.isEmpty())
+        emit errorOccurred(tr("Not a valid domain or subnet: %1").arg(invalid.join(QStringLiteral(", "))));
+    if (added.isEmpty())
+        return false;
+    m_settings.domain_bypass_rules << added;
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
     persistSettings(); applySplitRules(); emit splitChanged();
+    return true;
 }
 void Backend::removeDomain(int index) {
     if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
@@ -634,25 +717,36 @@ void Backend::clearDomains() {
 
 // ---------- excluded routes (subnets that bypass the tunnel) ----------
 
-bool Backend::addExcludedRoute(const QString &route) {
-    const QString r = route.trimmed();
-    if (r.isEmpty() || m_settings.excluded_routes.contains(r))
-        return false;
-    // Accept an IP or a CIDR subnet (IPv4/IPv6). QHostAddress validates the
-    // address part; the optional /prefix must be a sane integer.
+// Valid if it's an IP or CIDR subnet (IPv4/IPv6); the optional /prefix must be sane.
+static bool isValidSubnet(const QString &r) {
     const int slash = r.indexOf(QLatin1Char('/'));
     const QString addr = slash >= 0 ? r.left(slash) : r;
-    bool prefixOk = true;
-    if (slash >= 0) {
-        const int prefix = r.mid(slash + 1).toInt(&prefixOk);
-        const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
-        prefixOk = prefixOk && prefix >= 0 && prefix <= max;
-    }
-    if (QHostAddress(addr).isNull() || !prefixOk) {
-        emit errorOccurred(tr("Enter a valid IP or subnet, e.g. 10.0.0.0/8"));
+    if (QHostAddress(addr).isNull())
         return false;
+    if (slash < 0)
+        return true;
+    bool ok = false; const int p = r.mid(slash + 1).toInt(&ok);
+    const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
+    return ok && p >= 0 && p <= max;
+}
+
+bool Backend::addExcludedRoute(const QString &route) {
+    // Accept a whole list pasted at once.
+    const QStringList tokens = route.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
+                                           Qt::SkipEmptyParts);
+    QStringList added, invalid;
+    for (const QString &raw : tokens) {
+        const QString r = raw.trimmed();
+        if (r.isEmpty() || m_settings.excluded_routes.contains(r) || added.contains(r))
+            continue;
+        if (!isValidSubnet(r)) { invalid << r; continue; }
+        added << r;
     }
-    m_settings.excluded_routes << r;
+    if (!invalid.isEmpty())
+        emit errorOccurred(tr("Enter a valid IP or subnet, e.g. 10.0.0.0/8"));
+    if (added.isEmpty())
+        return false;
+    m_settings.excluded_routes << added;
     persistSettings(); applySplitRules(); emit splitChanged();
     return true;
 }
@@ -733,6 +827,20 @@ void Backend::applySplitRules() {
     for (const QString &r : m_settings.excluded_routes)
         routes.push_back(r.toStdString());
     m_client.setExcludedRoutes(routes);
+    reapplyIfConnected(); // make the change take effect on a live tunnel
+}
+
+// Routing/exclusion changes only bind when the tunnel is (re)built. If we're
+// connected, seamlessly rebuild it so edits apply immediately rather than only
+// after a manual reconnect. No-op (and no re-elevation) when disconnected.
+void Backend::reapplyIfConnected() {
+    if (!m_connected)
+        return;
+    m_client.disconnectVpn();
+    QTimer::singleShot(400, this, [this]() {
+        if (!m_activePath.isEmpty())
+            connectVpn();
+    });
 }
 
 void Backend::setVpnMode(const QString &mode) {
@@ -786,6 +894,13 @@ bool Backend::importDeepLink(const QString &link) {
         stored << target;
         saveStoredConfigs(stored);
     }
+    const bool hadNoActive = m_activePath.isEmpty();
     reloadConfigs();
+    if (hadNoActive) { // first config in an empty list — make it the active one
+        m_activePath = target;
+        m_settings.last_config_path = target;
+        persistSettings();
+        emit configChanged();
+    }
     return true;
 }

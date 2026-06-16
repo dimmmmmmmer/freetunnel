@@ -80,26 +80,27 @@ Window {
         id: theme
         readonly property bool dark: backend.themeMode === "dark"
                                      || (backend.themeMode === "system" && win.systemDark)
-        readonly property color bg: dark ? "#16181d" : "#eceef2"
-        readonly property color surface: dark ? "#23262d" : "#e2e5ea"
-        readonly property color tile: dark ? "#20232a" : "#d7dbe2"
-        readonly property color inputBg: dark ? "#0e1014" : "#d6dae1" // darker than the card
+        // Neutral gray ramp — deliberately no blue tint (R≈G≈B, a hair warm).
+        readonly property color bg: dark ? "#191a19" : "#ededec"
+        readonly property color surface: dark ? "#262625" : "#e3e3e1"
+        readonly property color tile: dark ? "#212120" : "#d8d8d6"
+        readonly property color inputBg: dark ? "#101010" : "#d6d6d4" // darker than the card
         // A clearly visible outline for input fields (the plain border is too
         // faint against the light background).
-        readonly property color inputBorder: dark ? "#363b45" : "#c2c7d0"
-        readonly property color text: dark ? "#e8eaed" : "#1b1d21"
-        readonly property color textDim: dark ? "#9aa1ab" : "#6b7280"
-        readonly property color textFaint: dark ? "#6b7280" : "#9aa1ab"
-        readonly property color accent: dark ? "#aeb6c2" : "#4b5563"
-        readonly property color border: dark ? "#2d313a" : "#e7e9ee"
+        readonly property color inputBorder: dark ? "#3a3a39" : "#c3c3c0"
+        readonly property color text: dark ? "#eaeae8" : "#1c1c1b"
+        readonly property color textDim: dark ? "#9b9b98" : "#6c6c69"
+        readonly property color textFaint: dark ? "#6a6a68" : "#9a9a97"
+        readonly property color accent: dark ? "#b2b2af" : "#525250"
+        readonly property color border: dark ? "#2f2f2e" : "#e6e6e4"
         // Off-state track for switches: clearly darker than the (light) accent
         // in dark mode so on/off don't blur together.
-        readonly property color toggleOff: dark ? "#3a3f4a" : "#c4c8d0"
+        readonly property color toggleOff: dark ? "#3b3b3a" : "#c5c5c2"
         readonly property color success: dark ? "#3fbf93" : "#1d9e75"
         readonly property color warn: dark ? "#d99634" : "#ba7517"
         readonly property color danger: dark ? "#e06a6a" : "#a32d2d"
-        readonly property color infoBg: dark ? Qt.rgba(0.68, 0.71, 0.76, 0.16)
-                                             : Qt.rgba(0.29, 0.33, 0.39, 0.12)
+        readonly property color infoBg: dark ? Qt.rgba(0.70, 0.70, 0.69, 0.16)
+                                             : Qt.rgba(0.32, 0.32, 0.31, 0.12)
     }
 
     property int currentPage: 0
@@ -219,10 +220,19 @@ Window {
     }
 
     // ---------- window-level select popup (used by Dropdown) ----------
+    TextMetrics { id: spMetrics; font.pixelSize: 14 }
     function showSelect(anchorItem, model, value, cb) {
         selectPopup.model = model
         selectPopup.value = value
         selectPopup.cb = cb
+        // Size to the widest option (+ room for the left pad and check mark),
+        // clamped to the window so it never spills off the edge.
+        var w = 140
+        for (var i = 0; i < model.length; i++) {
+            spMetrics.text = model[i].t
+            w = Math.max(w, spMetrics.advanceWidth + 56)
+        }
+        selectPopup.width = Math.min(w, overlayLayer.width - 16)
         // Anchor under the right edge of the value (so it opens where the choice is).
         var p = anchorItem.mapToItem(overlayLayer, anchorItem.width, anchorItem.height + 4)
         selectPopup.x = Math.max(8, Math.min(p.x - selectPopup.width, overlayLayer.width - selectPopup.width - 8))
@@ -233,6 +243,7 @@ Window {
         id: overlayLayer; anchors.fill: parent; z: 1500
         visible: selectPopup.open
         MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
+        Shortcut { sequence: "Escape"; enabled: selectPopup.open; onActivated: selectPopup.open = false }
         Rectangle {
             id: selectPopup
             property bool open: false
@@ -245,15 +256,15 @@ Window {
             transform: Translate { y: selectPopup.open ? 0 : -8
                                    Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
             width: 200
-            height: spCol.implicitHeight + 10
+            height: spCol.implicitHeight + 6
             radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
             Column {
-                id: spCol; width: parent.width; y: 5
+                id: spCol; width: parent.width; y: 3
                 Repeater {
                     model: selectPopup.model
                     Rectangle {
                         required property var modelData
-                        width: parent.width; height: 38; radius: 6
+                        width: parent.width; height: 36; radius: 6
                         color: spMa.containsMouse ? theme.surface : "transparent"
                         Text { anchors.verticalCenter: parent.verticalCenter; x: 12
                                text: parent.modelData.t
@@ -349,19 +360,19 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
         Rectangle {
             anchors.centerIn: parent
-            width: Math.min(parent.width - 56, 300)
-            height: cdCol.implicitHeight + 36
+            width: Math.min(parent.width - 56, 290)
+            height: cdCol.implicitHeight + 24
             radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
             Column {
-                id: cdCol; width: parent.width - 36; anchors.centerIn: parent; spacing: 18
+                id: cdCol; width: parent.width - 28; anchors.centerIn: parent; spacing: 14
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: cd.text
                        color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
-                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 10
-                    Rectangle { width: 110; height: 36; radius: 8
+                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
+                    Rectangle { width: 92; height: 32; radius: 8
                         color: c1.containsMouse ? theme.border : theme.surface
                         Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
                         MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
-                    Rectangle { width: 110; height: 36; radius: 8
+                    Rectangle { width: 92; height: 32; radius: 8
                         color: c2.containsMouse ? Qt.darker(theme.danger, 1.15) : theme.danger
                         Text { anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14 }
                         MouseArea { id: c2; anchors.fill: parent; hoverEnabled: true
@@ -441,49 +452,46 @@ Window {
                 anchors.centerIn: parent
                 width: parent.width
                 spacing: 18
+                // The logo IS the connect button. Centered when off; on connect
+                // it eases upward and the session timer fades in below it.
                 Item {
+                    id: hero
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: 200; Layout.preferredHeight: 200
-                    Canvas {
-                        anchors.fill: parent
-                        property color ringColor: backend.connected ? theme.accent : theme.textFaint
-                        onRingColorChanged: requestPaint()
-                        Component.onCompleted: requestPaint()
-                        onPaint: {
-                            var ctx = getContext("2d"); ctx.reset();
-                            ctx.lineWidth = 9; ctx.lineCap = "round";
-                            ctx.strokeStyle = ringColor;
-                            ctx.beginPath(); ctx.arc(width/2, height/2, 86, 0, 2*Math.PI); ctx.stroke();
-                        }
+                    Image {
+                        id: heroLogo
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        source: "qrc:/assets/logo.svg"; width: 132; height: 132
+                        sourceSize: Qt.size(264, 264)
+                        opacity: backend.connected ? 1.0 : 0.5
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        y: backend.connected ? hero.height / 2 - height / 2 - 24
+                                             : hero.height / 2 - height / 2
+                        Behavior on y { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                        scale: heroMa.pressed ? 0.96 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                     }
-                    Column {
-                        anchors.centerIn: parent; spacing: 4
-                        Image {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            source: "qrc:/assets/logo.svg"; width: 56; height: 56
-                            sourceSize: Qt.size(112, 112)
-                            opacity: backend.connected ? 1.0 : 0.4
-                            Behavior on opacity { NumberAnimation { duration: 200 } }
-                        }
-                        // Reserve the row height always so the logo doesn't jump
-                        // when the timer appears/disappears; fade the text instead.
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            opacity: backend.connected ? 1.0 : 0.0
-                            Behavior on opacity { NumberAnimation { duration: 200 } }
-                            text: backend.connected ? backend.sessionTime : "00:00:00"
-                            color: theme.text
-                            font.pixelSize: 17; font.weight: Font.Medium
-                        }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: heroLogo.bottom; anchors.topMargin: 8
+                        opacity: backend.connected ? 1.0 : 0.0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        text: backend.connected ? backend.sessionTime : "00:00:00"
+                        color: theme.text; font.pixelSize: 18; font.weight: Font.Medium
                     }
-                    MouseArea { anchors.fill: parent; onClicked: backend.toggle() }
+                    MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
-                Row {
+                Item {
                     id: cfgSel
-                    Layout.alignment: Qt.AlignHCenter; spacing: 6
-                    Text { text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                           color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
-                    Text { text: "▾"; color: theme.textDim; font.pixelSize: 15 }
+                    Layout.alignment: Qt.AlignHCenter
+                    implicitWidth: cfgRow.width; implicitHeight: cfgRow.height
+                    Row { id: cfgRow; anchors.centerIn: parent; spacing: 6
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                               text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
+                               color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                               visible: backend.configs.length > 0; text: "▾"; color: theme.textDim; font.pixelSize: 15 }
+                    }
                     MouseArea { anchors.fill: parent
                         onClicked: backend.configs.length > 0 ? (cfgPopup.open = !cfgPopup.open)
                                                               : (win.currentPage = 1) }
@@ -507,6 +515,10 @@ Window {
                     }
                 }
             }
+            // Click-away backdrop + Esc to dismiss the config picker.
+            MouseArea { anchors.fill: parent; z: 90; visible: cfgPopup.open
+                        onClicked: cfgPopup.open = false }
+            Shortcut { sequence: "Escape"; enabled: cfgPopup.open; onActivated: cfgPopup.open = false }
             // Config picker dropdown, anchored under the selector.
             Rectangle {
                 id: cfgPopup
@@ -575,7 +587,7 @@ Window {
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
                 }
                 Dropdown { label: qsTr("Mode"); value: backend.vpnMode
-                    model: [{v:"general",t:qsTr("Bypass listed")},{v:"selective",t:qsTr("Only listed via VPN")}]
+                    model: [{v:"general",t:qsTr("Bypass VPN")},{v:"selective",t:qsTr("Through VPN")}]
                     onPicked: function(v){ backend.vpnMode = v } }
                 Item { Layout.preferredHeight: 6 }
                 SectionLabel { text: qsTr("Profile") }
@@ -593,15 +605,16 @@ Window {
                             Behavior on color { ColorAnimation { duration: 120 } }
                             MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
                                         onClicked: backend.selectProfile(chip.modelData) }
-                            Row { id: prow; anchors.centerIn: parent; spacing: 6
-                                Text { text: chip.modelData
+                            Row { id: prow; anchors.centerIn: parent; spacing: 5
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: chip.modelData
                                        color: chip.isActive ? "white" : theme.text; font.pixelSize: 13 }
-                                Text { visible: !chip.isDefault; text: "×"
-                                       color: chip.isActive ? "white" : theme.textDim; font.pixelSize: 14
-                                       MouseArea { anchors.fill: parent
-                                           onClicked: { delProfile.target = chip.modelData
-                                               delProfile.text = qsTr("Delete profile “%1”?").arg(chip.modelData)
-                                               delProfile.open() } } }
+                                Item { visible: !chip.isDefault; width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter
+                                    Text { anchors.centerIn: parent; text: "×"; font.pixelSize: 17
+                                           color: pxMa.containsMouse ? theme.danger : (chip.isActive ? "white" : theme.textDim) }
+                                    MouseArea { id: pxMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: { delProfile.target = chip.modelData
+                                            delProfile.text = qsTr("Delete profile “%1”?").arg(chip.modelData)
+                                            delProfile.open() } } }
                             }
                         }
                     }
@@ -623,6 +636,9 @@ Window {
                         id: npInput; anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                         verticalAlignment: TextInput.AlignVCenter; clip: true; font.pixelSize: 13; color: theme.text
                         onAccepted: { backend.addProfile(text); text = ""; npRow.visible = false }
+                        Keys.onEscapePressed: { text = ""; npRow.visible = false }
+                        // Collapse the field when it loses focus (e.g. clicking elsewhere).
+                        onActiveFocusChanged: if (!activeFocus) { text = ""; npRow.visible = false }
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                            text: qsTr("profile name, then Enter"); color: theme.textFaint; font.pixelSize: 13
@@ -645,12 +661,15 @@ Window {
                         Rectangle {
                             required property string modelData
                             required property int index
-                            radius: 12; color: theme.surface
-                            implicitWidth: chipRow.width + 20; implicitHeight: 26
-                            Row { id: chipRow; anchors.centerIn: parent; spacing: 5
-                                Text { text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
-                                Text { text: "×"; color: theme.textDim; font.pixelSize: 14
-                                    MouseArea { anchors.fill: parent; onClicked: backend.removeDomain(parent.parent.parent.index) } }
+                            radius: 13; color: theme.surface
+                            implicitWidth: chipRow.width + 18; implicitHeight: 28
+                            Row { id: chipRow; anchors.centerIn: parent; spacing: 4
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
+                                Item { width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter
+                                    Text { anchors.centerIn: parent; text: "×"; font.pixelSize: 17
+                                           color: dxMa.containsMouse ? theme.danger : theme.textDim }
+                                    MouseArea { id: dxMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: backend.removeDomain(parent.parent.parent.index) } }
                             }
                         }
                     }
@@ -664,10 +683,11 @@ Window {
                         anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                         verticalAlignment: TextInput.AlignVCenter; clip: true
                         font.pixelSize: 13; color: theme.text
-                        onAccepted: { backend.addDomain(text); text = "" }
+                        onAccepted: { if (backend.addDomain(text)) text = "" }
+                        Keys.onEscapePressed: focus = false
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                           text: qsTr("domain, IP or subnet, then Enter"); color: theme.textFaint; font.pixelSize: 13
+                           text: qsTr("domain or domains (comma/space separated), then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: domInput.text.length === 0 && !domInput.activeFocus }
                 }
                 Item { Layout.preferredHeight: 16 }
@@ -724,7 +744,10 @@ Window {
                     required property string modelData
                     width: cfgList.width; height: 56
                     Rectangle { anchors.fill: parent; anchors.topMargin: 4; anchors.bottomMargin: 4; radius: 8
-                        color: rowMa.containsMouse ? theme.surface : "transparent"
+                        // Stay highlighted as a single block even when the cursor is
+                        // over the ⋯/✕ buttons (their hover would otherwise drop it).
+                        color: (rowMa.containsMouse || dotsMa.containsMouse || delMa.containsMouse)
+                               ? theme.surface : "transparent"
                         Behavior on color { ColorAnimation { duration: 120 } } }
                     MouseArea { id: rowMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: backend.selectConfig(index) }
@@ -756,6 +779,10 @@ Window {
                     }
                 }
             }
+            // Click-away backdrop + Esc to dismiss the import menu.
+            MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open
+                        onClicked: importMenu.open = false }
+            Shortcut { sequence: "Escape"; enabled: importMenu.open; onActivated: importMenu.open = false }
             // Import / create dropdown (collapsed by default).
             Rectangle {
                 id: importMenu; property bool open: false
@@ -847,12 +874,15 @@ Window {
                         Rectangle {
                             required property string modelData
                             required property int index
-                            radius: 12; color: theme.surface
-                            implicitWidth: rrow.width + 20; implicitHeight: 26
-                            Row { id: rrow; anchors.centerIn: parent; spacing: 5
-                                Text { text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
-                                Text { text: "×"; color: theme.textDim; font.pixelSize: 14
-                                    MouseArea { anchors.fill: parent; onClicked: backend.removeExcludedRoute(parent.parent.parent.index) } }
+                            radius: 13; color: theme.surface
+                            implicitWidth: rrow.width + 18; implicitHeight: 28
+                            Row { id: rrow; anchors.centerIn: parent; spacing: 4
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
+                                Item { width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter
+                                    Text { anchors.centerIn: parent; text: "×"; font.pixelSize: 17
+                                           color: rxMa.containsMouse ? theme.danger : theme.textDim }
+                                    MouseArea { id: rxMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: backend.removeExcludedRoute(parent.parent.parent.index) } }
                             }
                         }
                     }
@@ -874,36 +904,48 @@ Window {
                 Item { Layout.preferredHeight: 16 }
 
                 SectionLabel { text: qsTr("Hotkeys") }
-                HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle
-                    onCaptured: function(s){ backend.hotkeyToggle = s } }
-                Sep {}
-                HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect
-                    onCaptured: function(s){ backend.hotkeyConnect = s } }
-                Sep {}
-                HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect
-                    onCaptured: function(s){ backend.hotkeyDisconnect = s } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { text: qsTr("Enable hotkeys"); color: theme.text; font.pixelSize: 14 }
+                    Item { Layout.fillWidth: true }
+                    Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.hotkeysEnabled
+                             onToggled: function(v){ backend.hotkeysEnabled = v } } }
+                // The shortcut fields dim out while the feature is off.
+                Item { Layout.fillWidth: true; implicitHeight: hkCol.implicitHeight
+                    opacity: backend.hotkeysEnabled ? 1.0 : 0.4
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                    enabled: backend.hotkeysEnabled
+                    ColumnLayout { id: hkCol; anchors.left: parent.left; anchors.right: parent.right; spacing: 0
+                        HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle
+                            onCaptured: function(s){ backend.hotkeyToggle = s } }
+                        Sep {}
+                        HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect
+                            onCaptured: function(s){ backend.hotkeyConnect = s } }
+                        Sep {}
+                        HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect
+                            onCaptured: function(s){ backend.hotkeyDisconnect = s } }
+                    }
+                }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Rectangle { anchors.fill: parent; anchors.topMargin: 2; anchors.bottomMargin: 2; radius: 6
-                        color: updMa.containsMouse ? theme.surface : "transparent"
-                        Behavior on color { ColorAnimation { duration: 120 } } }
-                    Text { text: qsTr("Check for updates")
-                           color: updMa.containsMouse ? theme.accent : theme.text; font.pixelSize: 14 }
-                    Text { visible: backend.updateMessage.length > 0; text: backend.updateMessage
-                           color: backend.updateState === "available" ? theme.accent : theme.textFaint
-                           font.pixelSize: 12; leftPadding: 8 }
-                    Item { Layout.fillWidth: true }
-                    Text { text: backend.updateState === "checking" ? "…"
+                Item { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { id: updTxt; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                           text: qsTr("Check for updates"); font.pixelSize: 14
+                           color: updMa.containsMouse ? theme.accent : theme.text
+                           font.underline: updMa.containsMouse }
+                    Text { anchors.left: updTxt.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                           visible: backend.updateMessage.length > 0; text: backend.updateMessage
+                           color: backend.updateState === "available" ? theme.accent : theme.textFaint; font.pixelSize: 12 }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                           text: backend.updateState === "checking" ? "…"
                                  : backend.updateState === "available" ? qsTr("Download ›") : backend.appVersion
                            color: backend.updateState === "available" ? theme.accent : theme.textFaint
                            font.pixelSize: 13 }
-                    MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true
+                    MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: backend.updateState === "available" ? backend.openLatestRelease()
                                                                        : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
                 // Footer: project names link to their repos.
-                Row { Layout.fillWidth: true; Layout.alignment: Qt.AlignHCenter; spacing: 0
+                Row { Layout.alignment: Qt.AlignHCenter; spacing: 0
                     Text { text: "FreeTunnel " + backend.appVersion; font.pixelSize: 12
                            color: ftMa.containsMouse ? theme.accent : theme.textFaint
                            MouseArea { id: ftMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -929,16 +971,14 @@ Window {
         ColumnLayout {
             anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
             anchors.topMargin: 6; anchors.bottomMargin: 12; spacing: 8
-            RowLayout { Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                Rectangle { Layout.preferredHeight: 28; Layout.preferredWidth: clrTxt.implicitWidth + 24; radius: 7
-                    color: clrMa.containsMouse ? theme.surface : "transparent"
-                    Behavior on color { ColorAnimation { duration: 120 } }
-                    Text { id: clrTxt; anchors.centerIn: parent; text: qsTr("Clear")
-                           color: clrMa.containsMouse ? theme.text : theme.accent; font.pixelSize: 13 }
-                    MouseArea { id: clrMa; anchors.fill: parent; hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor; onClicked: backend.clearLogs() } }
-                Item { Layout.fillWidth: true }
+            Item { Layout.fillWidth: true; Layout.preferredHeight: 24
+                Text { id: clrTxt; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                       text: qsTr("Clear"); font.pixelSize: 13
+                       color: clrMa.containsMouse ? theme.text : theme.accent
+                       font.underline: clrMa.containsMouse }
+                MouseArea { id: clrMa; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            width: clrTxt.implicitWidth + 8; height: 22; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor; onClicked: backend.clearLogs() }
             }
             Rectangle {
                 Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
@@ -993,7 +1033,7 @@ Window {
             id: cform
             anchors.centerIn: parent
             width: Math.min(parent.width - 28, 380)
-            height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 24)
+            height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 10)
             radius: 14; color: theme.bg; border.color: theme.border; border.width: 1
             property string protocol: "http2"
             property bool ipv6: true
@@ -1074,8 +1114,8 @@ Window {
                             Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
                                 TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: "Menlo"; color: theme.text; wrapMode: TextEdit.WrapAnywhere } } }
                     }
-                    Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 10; topPadding: 4; bottomPadding: 16
-                        Rectangle { width: 110; height: 36; radius: 8
+                    Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8; topPadding: 4; bottomPadding: 4
+                        Rectangle { width: 96; height: 32; radius: 8
                             color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Text { anchors.centerIn: parent; text: qsTr("Save"); color: "white"; font.pixelSize: 14 }
@@ -1087,7 +1127,7 @@ Window {
                                     allowIpv6: cform.ipv6, certificate: fCert.text, editIndex: win.editIndex });
                                 if (ok) cform.close()
                             } } }
-                        Rectangle { width: 90; height: 36; radius: 8
+                        Rectangle { width: 84; height: 32; radius: 8
                             color: cancelMa.containsMouse ? theme.surface : theme.bg; border.color: theme.border; border.width: 1
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }

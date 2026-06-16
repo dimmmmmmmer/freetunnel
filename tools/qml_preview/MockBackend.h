@@ -28,6 +28,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY changed)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY changed)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY changed)
+    Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY changed)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY changed)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY changed)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY changed)
@@ -60,6 +61,8 @@ public:
         emit changed();
     }
     Q_INVOKABLE bool importFromClipboard() { return true; }
+    bool hotkeysEnabled() const { return m_hkEnabled; }
+    void setHotkeysEnabled(bool v) { m_hkEnabled = v; emit changed(); }
     QString hotkeyToggle() const { return m_hkToggle; }
     QString hotkeyConnect() const { return m_hkConnect; }
     QString hotkeyDisconnect() const { return m_hkDisconnect; }
@@ -71,7 +74,7 @@ public:
     QString vpnMode() const { return m_vpnMode; }
     void setVpnMode(const QString &m) { m_vpnMode = m; emit changed(); }
     QStringList domains() const { return m_profiles.value(m_activeProfile); }
-    Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); }
+    Q_INVOKABLE bool addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); return true; }
     Q_INVOKABLE void removeDomain(int i) { auto &l = m_profiles[m_activeProfile]; if (i >= 0 && i < l.size()) l.removeAt(i); emit changed(); }
     Q_INVOKABLE void clearDomains() { m_profiles[m_activeProfile].clear(); emit changed(); }
     QStringList excludedRoutes() const { return m_excludedRoutes; }
@@ -158,6 +161,7 @@ private:
                                      QStringLiteral("netflix.com")}},
         {QStringLiteral("Работа"), {QStringLiteral("intranet.corp")}}};
     QStringList m_excludedRoutes{QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
+    bool m_hkEnabled = true;
     QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");
     QString m_hkConnect;
     QString m_hkDisconnect;
