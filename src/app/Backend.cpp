@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QHostAddress>
 #include <QKeySequence>
 #include <QProcess>
 #include <QRegularExpression>
@@ -631,6 +632,43 @@ void Backend::clearDomains() {
     persistSettings(); applySplitRules(); emit splitChanged();
 }
 
+// ---------- excluded routes (subnets that bypass the tunnel) ----------
+
+bool Backend::addExcludedRoute(const QString &route) {
+    const QString r = route.trimmed();
+    if (r.isEmpty() || m_settings.excluded_routes.contains(r))
+        return false;
+    // Accept an IP or a CIDR subnet (IPv4/IPv6). QHostAddress validates the
+    // address part; the optional /prefix must be a sane integer.
+    const int slash = r.indexOf(QLatin1Char('/'));
+    const QString addr = slash >= 0 ? r.left(slash) : r;
+    bool prefixOk = true;
+    if (slash >= 0) {
+        const int prefix = r.mid(slash + 1).toInt(&prefixOk);
+        const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
+        prefixOk = prefixOk && prefix >= 0 && prefix <= max;
+    }
+    if (QHostAddress(addr).isNull() || !prefixOk) {
+        emit errorOccurred(tr("Enter a valid IP or subnet, e.g. 10.0.0.0/8"));
+        return false;
+    }
+    m_settings.excluded_routes << r;
+    persistSettings(); applySplitRules(); emit splitChanged();
+    return true;
+}
+
+void Backend::removeExcludedRoute(int index) {
+    if (index < 0 || index >= m_settings.excluded_routes.size()) return;
+    m_settings.excluded_routes.removeAt(index);
+    persistSettings(); applySplitRules(); emit splitChanged();
+}
+
+void Backend::clearExcludedRoutes() {
+    if (m_settings.excluded_routes.isEmpty()) return;
+    m_settings.excluded_routes.clear();
+    persistSettings(); applySplitRules(); emit splitChanged();
+}
+
 // ---------- split-tunnel profiles ----------
 
 QStringList Backend::profiles() const {
@@ -690,6 +728,11 @@ void Backend::applySplitRules() {
     // When split is off, force general mode (route everything) — otherwise a
     // leftover "selective" mode with no rules would route NOTHING through the VPN.
     m_client.setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
+    // Excluded routes (subnets) are a separate, always-on routing rule.
+    std::vector<std::string> routes;
+    for (const QString &r : m_settings.excluded_routes)
+        routes.push_back(r.toStdString());
+    m_client.setExcludedRoutes(routes);
 }
 
 void Backend::setVpnMode(const QString &mode) {

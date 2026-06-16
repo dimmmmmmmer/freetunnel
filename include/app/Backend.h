@@ -38,6 +38,7 @@ class Backend : public QObject {
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged) // general|selective
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
+    Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
@@ -101,6 +102,11 @@ public:
     Q_INVOKABLE void addDomain(const QString &domain);
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
+
+    QStringList excludedRoutes() const { return m_settings.excluded_routes; }
+    Q_INVOKABLE bool addExcludedRoute(const QString &route);
+    Q_INVOKABLE void removeExcludedRoute(int index);
+    Q_INVOKABLE void clearExcludedRoutes();
 
     QStringList profiles() const;
     QString activeProfile() const { return m_settings.active_profile; }

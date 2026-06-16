@@ -800,7 +800,9 @@ Window {
     // ===================== Settings =====================
     Component {
         id: settingsPage
-        Flickable {
+        Item {
+          Flickable {
+            anchors.fill: parent
             contentHeight: setcol.height; clip: true
             ColumnLayout {
                 id: setcol; anchors.left: parent.left; anchors.right: parent.right
@@ -827,6 +829,50 @@ Window {
                     Item { Layout.fillWidth: true }
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
                 Item { Layout.preferredHeight: 16 }
+
+                // ----- Excluded routes (subnets that bypass the tunnel) -----
+                RowLayout { Layout.fillWidth: true
+                    SectionLabel { text: qsTr("Excluded routes") }
+                    Item { Layout.fillWidth: true }
+                    Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12
+                        visible: backend.excludedRoutes.length > 0
+                        MouseArea { anchors.fill: parent; onClicked: clearRoutes.open() } }
+                }
+                Flow {
+                    Layout.fillWidth: true; spacing: 6
+                    visible: backend.excludedRoutes.length > 0
+                    Layout.topMargin: visible ? 6 : 0
+                    Repeater {
+                        model: backend.excludedRoutes
+                        Rectangle {
+                            required property string modelData
+                            required property int index
+                            radius: 12; color: theme.surface
+                            implicitWidth: rrow.width + 20; implicitHeight: 26
+                            Row { id: rrow; anchors.centerIn: parent; spacing: 5
+                                Text { text: parent.parent.modelData; color: theme.text; font.pixelSize: 13 }
+                                Text { text: "×"; color: theme.textDim; font.pixelSize: 14
+                                    MouseArea { anchors.fill: parent; onClicked: backend.removeExcludedRoute(parent.parent.parent.index) } }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.preferredHeight: 36; radius: 8; Layout.topMargin: 6
+                    color: theme.inputBg; border.color: rtInput.activeFocus ? theme.accent : theme.inputBorder; border.width: 1
+                    TextInput {
+                        id: rtInput
+                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        verticalAlignment: TextInput.AlignVCenter; clip: true
+                        font.pixelSize: 13; color: theme.text
+                        onAccepted: { if (backend.addExcludedRoute(text)) text = "" }
+                    }
+                    Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                           text: qsTr("IP or subnet (e.g. 10.0.0.0/8), then Enter"); color: theme.textFaint; font.pixelSize: 13
+                           visible: rtInput.text.length === 0 && !rtInput.activeFocus }
+                }
+                Item { Layout.preferredHeight: 16 }
+
                 SectionLabel { text: qsTr("Hotkeys") }
                 HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle
                     onCaptured: function(s){ backend.hotkeyToggle = s } }
@@ -870,6 +916,9 @@ Window {
                 }
                 Item { Layout.preferredHeight: 14 }
             }
+          }
+          ConfirmDialog { id: clearRoutes; text: qsTr("Clear all excluded routes?")
+              confirmText: qsTr("Clear"); onConfirmed: backend.clearExcludedRoutes() }
         }
     }
 

@@ -19,10 +19,6 @@ struct AppSettings {
     bool killswitch_enabled = false;
     bool strict_certificate_check = true;
     bool first_run_checked = false;
-    bool routing_enabled = false;
-    QString routing_mode = "tunnel_ru"; // tunnel_ru | bypass_ru
-    QString routing_cache_path = "";
-    QString routing_source_url = "https://antifilter.download/list/subnet.lst";
 
     // Custom DNS servers (override config dns_upstreams when non-empty)
     bool custom_dns_enabled = false;
@@ -36,6 +32,10 @@ struct AppSettings {
     // "general" = route everything except the rules (bypass); "selective" =
     // route only the rules through the VPN. Maps to the core's vpn_mode.
     QString vpn_mode = "general";
+
+    // Excluded routes: IP/CIDR subnets that bypass the tunnel at the routing
+    // level (the core's excluded_routes), independent of the domain rules above.
+    QStringList excluded_routes;
 
     // Split-tunnel profiles: named sets of domain-bypass rules. The active
     // profile's rules are mirrored into domain_bypass_rules above. profile_order

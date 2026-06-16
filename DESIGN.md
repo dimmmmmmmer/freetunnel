@@ -87,6 +87,9 @@ toggles sit at the right edge. Dropdowns slide in and anchor under the value.
   Запускать при входе, Подключаться автоматически.
 - **Безопасность**: Kill switch. Post-quantum and certificate verification are
   always on, so no toggles for them.
+- **Исключённые маршруты**: IP/CIDR subnets that bypass the tunnel at the routing
+  level (the core's `excluded_routes`) — chips + validated input. Distinct from
+  the domain-based split-tunnel rules.
 - **Горячие клавиши**: Toggle / Connect / Disconnect — each capturable and
   clearable (`×`); defaults Ctrl+Shift+T/E/D, shown with native glyphs on macOS.
 - **Обслуживание**: Проверить обновления (shows "latest"/"download").

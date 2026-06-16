@@ -101,6 +101,10 @@ private:
             std::vector<std::string> ex;
             for (const auto v : c.value("domains").toArray()) ex.push_back(v.toString().toStdString());
             m_client.setExtraExclusions(ex);
+        } else if (cmd == "setRoutes") {
+            std::vector<std::string> routes;
+            for (const auto v : c.value("excluded").toArray()) routes.push_back(v.toString().toStdString());
+            m_client.setRoutingRules({}, routes);
         } else if (cmd == "setMode") {
             m_client.setVpnMode(c.value("selective").toBool());
         } else if (cmd == "setKillSwitch") {

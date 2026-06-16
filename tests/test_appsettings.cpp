@@ -50,6 +50,7 @@ void TestAppSettings::roundTrip() {
     in.killswitch_enabled = true;
     in.domain_bypass_enabled = true;
     in.domain_bypass_rules = {QStringLiteral("github.com"), QStringLiteral("*.gov.ru")};
+    in.excluded_routes = {QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
     in.hotkey_toggle = QStringLiteral("Ctrl+Alt+T");
     in.hotkey_connect = QStringLiteral("Ctrl+Alt+C");
     in.hotkey_disconnect = QStringLiteral("Ctrl+Alt+D");
@@ -62,6 +63,7 @@ void TestAppSettings::roundTrip() {
     QCOMPARE(out.killswitch_enabled, true);
     QCOMPARE(out.domain_bypass_enabled, true);
     QCOMPARE(out.domain_bypass_rules, in.domain_bypass_rules);
+    QCOMPARE(out.excluded_routes, in.excluded_routes);
     QCOMPARE(out.hotkey_toggle, in.hotkey_toggle);
     QCOMPARE(out.hotkey_connect, in.hotkey_connect);
     QCOMPARE(out.hotkey_disconnect, in.hotkey_disconnect);

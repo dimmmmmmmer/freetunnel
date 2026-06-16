@@ -25,6 +25,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY changed)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY changed)
     Q_PROPERTY(QStringList domains READ domains NOTIFY changed)
+    Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY changed)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY changed)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY changed)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY changed)
@@ -73,6 +74,10 @@ public:
     Q_INVOKABLE void addDomain(const QString &d) { if (!d.trimmed().isEmpty()) m_profiles[m_activeProfile] << d.trimmed(); emit changed(); }
     Q_INVOKABLE void removeDomain(int i) { auto &l = m_profiles[m_activeProfile]; if (i >= 0 && i < l.size()) l.removeAt(i); emit changed(); }
     Q_INVOKABLE void clearDomains() { m_profiles[m_activeProfile].clear(); emit changed(); }
+    QStringList excludedRoutes() const { return m_excludedRoutes; }
+    Q_INVOKABLE bool addExcludedRoute(const QString &r) { if (!r.trimmed().isEmpty()) m_excludedRoutes << r.trimmed(); emit changed(); return true; }
+    Q_INVOKABLE void removeExcludedRoute(int i) { if (i >= 0 && i < m_excludedRoutes.size()) m_excludedRoutes.removeAt(i); emit changed(); }
+    Q_INVOKABLE void clearExcludedRoutes() { m_excludedRoutes.clear(); emit changed(); }
     QStringList profiles() const { return m_profileOrder; }
     QString activeProfile() const { return m_activeProfile; }
     Q_INVOKABLE void selectProfile(const QString &n) { if (m_profiles.contains(n)) m_activeProfile = n; emit changed(); }
@@ -152,6 +157,7 @@ private:
         {QStringLiteral("Default"), {QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
                                      QStringLiteral("netflix.com")}},
         {QStringLiteral("Работа"), {QStringLiteral("intranet.corp")}}};
+    QStringList m_excludedRoutes{QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
     QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");
     QString m_hkConnect;
     QString m_hkDisconnect;
