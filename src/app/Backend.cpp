@@ -59,8 +59,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     connect(&m_client, &VpnHelperClient::connectionInfo, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
     connect(&m_client, &VpnHelperClient::vpnError, this, [this](const QString &m) {
-        appendLog(QStringLiteral("ERROR"), m);
-        emit errorOccurred(m);
+        appendLog(QStringLiteral("ERROR"), m); // always logged
+        // Throttle toasts: a flaky connection can spit the same error every few
+        // seconds — show it once, then stay quiet for a while unless it changes.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
+            m_lastErrorMsg = m;
+            m_lastErrorAt = now;
+            emit errorOccurred(m);
+        }
     });
 
     m_ticker.setInterval(1000);
@@ -193,6 +200,10 @@ void Backend::openLatestRelease() {
     const QString url = m_latestUrl.isEmpty()
             ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
             : m_latestUrl;
+    QDesktopServices::openUrl(QUrl(url));
+}
+
+void Backend::openUrl(const QString &url) {
     QDesktopServices::openUrl(QUrl(url));
 }
 
@@ -513,6 +524,18 @@ bool Backend::createConfig(const QVariantMap &f) {
     if (ct.hostname.isEmpty() || ct.addresses.isEmpty() || ct.username.isEmpty() || ct.password.isEmpty()) {
         emit errorOccurred(tr("Fill in host, address, username and password"));
         return false;
+    }
+    // Each address must be host:port (e.g. 1.2.3.4:443 or [::1]:443).
+    const QStringList addrs = ct.addresses.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &raw : addrs) {
+        const QString a = raw.trimmed();
+        const int colon = a.lastIndexOf(QLatin1Char(':'));
+        bool portOk = false;
+        const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
+        if (colon <= 0 || !portOk || port < 1 || port > 65535) {
+            emit errorOccurred(tr("Address must be host:port, e.g. 1.2.3.4:443"));
+            return false;
+        }
     }
     ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
     ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();

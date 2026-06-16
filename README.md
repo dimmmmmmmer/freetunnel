@@ -46,7 +46,7 @@ FreeTunnel /path/to/vpn.toml
 
 ## Управление снаружи
 
-- **Диплинки** (как `happ://toggle`): `freetunnel://toggle`,
+- **Диплинки**: `freetunnel://toggle`,
   `freetunnel://connect`, `freetunnel://disconnect`, плюс `tt://…` для импорта.
   Приложение одно-экземплярное — повторный запуск со ссылкой передаёт команду
   уже открытому окну.

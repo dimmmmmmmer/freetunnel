@@ -49,6 +49,7 @@ public:
         m_updateMessage = QStringLiteral("Доступна версия 1.1.0"); emit changed();
     }
     Q_INVOKABLE void openLatestRelease() {}
+    Q_INVOKABLE void openUrl(const QString &) {}
     QString logPath() const { return QStringLiteral("/Users/me/Library/Application Support/FreeTunnel/freetunnel.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v) { m_autoStart = v; emit changed(); }

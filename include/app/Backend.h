@@ -123,6 +123,7 @@ public:
     QString latestVersion() const { return m_latestVersion; }
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestRelease();
+    Q_INVOKABLE void openUrl(const QString &url);
 
     QString logPath() const;
     bool autoStart() const;
@@ -173,4 +174,7 @@ private:
     QTimer m_ticker;
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
+
+    QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
+    qint64 m_lastErrorAt = 0;     // ms epoch of that toast
 };
