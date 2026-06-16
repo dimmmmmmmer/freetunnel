@@ -87,6 +87,7 @@ Window {
         readonly property color bg: dark ? "#16181d" : "#eceef2"
         readonly property color surface: dark ? "#23262d" : "#e2e5ea"
         readonly property color tile: dark ? "#20232a" : "#d7dbe2"
+        readonly property color inputBg: dark ? "#0e1014" : "#dcdfe5" // darker than the card
         readonly property color text: dark ? "#e8eaed" : "#1b1d21"
         readonly property color textDim: dark ? "#9aa1ab" : "#6b7280"
         readonly property color textFaint: dark ? "#6b7280" : "#9aa1ab"
@@ -540,8 +541,9 @@ Window {
           Flickable {
             anchors.fill: parent
             contentHeight: scol.height; clip: true
+            interactive: contentHeight > height // don't steal clicks from inputs when it fits
             ColumnLayout {
-                id: scol; width: parent.width
+                id: scol
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18
                 spacing: 0
@@ -601,7 +603,7 @@ Window {
                 Rectangle {
                     id: npRow; visible: false
                     Layout.fillWidth: true; Layout.topMargin: 6; Layout.preferredHeight: 36; radius: 8
-                    color: theme.bg; border.color: theme.accent; border.width: 1
+                    color: theme.inputBg; border.color: theme.accent; border.width: 1
                     TextInput {
                         id: npInput; anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                         verticalAlignment: TextInput.AlignVCenter; clip: true; font.pixelSize: 13; color: theme.text
@@ -641,7 +643,7 @@ Window {
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 36; radius: 8
                     Layout.topMargin: 6
-                    color: theme.bg; border.color: domInput.activeFocus ? theme.accent : theme.border; border.width: 1
+                    color: theme.inputBg; border.color: domInput.activeFocus ? theme.accent : theme.border; border.width: 1
                     TextInput {
                         id: domInput
                         anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
@@ -938,12 +940,12 @@ Window {
                 anchors.leftMargin: 18; anchors.rightMargin: 18; contentHeight: fcol.height; clip: true
                 Column {
                     id: fcol; width: parent.width; spacing: 10
-                    Field { id: fName; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
-                    Field { id: fHost; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
-                    Field { id: fAddr; label: qsTr("Address(es) · host:port (comma-separated)"); placeholder: "1.2.3.4:443" }
+                    Field { id: fName; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
+                    Field { id: fHost; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
+                    Field { id: fAddr; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Address(es) · host:port (comma-separated)"); placeholder: "1.2.3.4:443" }
                     Row { width: parent.width; spacing: 10
-                        Field { id: fUser; label: qsTr("Username"); width: (parent.width - 10) / 2 }
-                        Field { id: fPass; label: qsTr("Password"); password: true; width: (parent.width - 10) / 2 }
+                        Field { id: fUser; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Username"); width: (parent.width - 10) / 2 }
+                        Field { id: fPass; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Password"); password: true; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; spacing: 10
                         Column { width: (parent.width - 10) / 2; spacing: 4
@@ -955,11 +957,11 @@ Window {
                                        text: "▾"; color: theme.textDim; font.pixelSize: 14 }
                                 MouseArea { anchors.fill: parent; onClicked: cform.protocol = (cform.protocol === "http2" ? "http3" : "http2") } }
                         }
-                        Field { id: fDns; label: qsTr("DNS servers"); placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
+                        Field { id: fDns; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("DNS servers"); placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; spacing: 10
-                        Field { id: fSni; label: "Custom SNI"; width: (parent.width - 10) / 2 }
-                        Field { id: fRandom; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
+                        Field { id: fSni; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: "Custom SNI"; width: (parent.width - 10) / 2 }
+                        Field { id: fRandom; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
                     }
                     Row { width: parent.width; height: 32; spacing: 8
                         Text { text: qsTr("Allow IPv6"); color: theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
@@ -968,7 +970,7 @@ Window {
                     }
                     Column { width: parent.width; spacing: 4
                         Text { text: qsTr("Certificate (PEM) · optional"); color: theme.textDim; font.pixelSize: 13 }
-                        Rectangle { width: parent.width; height: 70; radius: 8; color: theme.bg; border.color: fCert.activeFocus ? theme.accent : theme.border; border.width: 1
+                        Rectangle { width: parent.width; height: 70; radius: 8; color: theme.inputBg; border.color: fCert.activeFocus ? theme.accent : theme.border; border.width: 1
                             Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
                                 TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: "Menlo"; color: theme.text; wrapMode: TextEdit.WrapAnywhere } } }
                     }
