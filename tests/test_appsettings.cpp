@@ -37,9 +37,9 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.language, QStringLiteral("en"));
     QCOMPARE(s.theme_mode, QStringLiteral("system"));
     QCOMPARE(s.auto_connect_on_start, false);
-    QVERIFY(s.hotkey_toggle.isEmpty());
-    QVERIFY(s.hotkey_connect.isEmpty());
-    QVERIFY(s.hotkey_disconnect.isEmpty());
+    QCOMPARE(s.hotkey_toggle, QStringLiteral("Ctrl+Shift+T"));
+    QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
+    QCOMPARE(s.hotkey_disconnect, QStringLiteral("Ctrl+Shift+D"));
 }
 
 void TestAppSettings::roundTrip() {
