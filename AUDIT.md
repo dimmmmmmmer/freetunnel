@@ -1,6 +1,6 @@
 # FreeTunnel — Project Audit
 
-Date: 2026-06-15 · Version: 1.0.0 · Scope: the Qt/QML client in this repository.
+Date: 2026-06-16 · Version: 1.0.0 · Scope: the Qt/QML client in this repository.
 The VPN core lives in `TrustTunnel/TrustTunnelClient` and is out of scope except
 where the integration matters.
 
@@ -25,11 +25,13 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 - **Privilege model**: the GUI stays user-level; the VPN core runs in a
   separate elevated helper process (`VpnHelperClient` ↔ `runVpnHelper`, token-
   authed localhost JSON). Elevated once per session (osascript/pkexec/runas).
-- `qml/Main.qml` — the entire UI (home, split-tunnel, configs, settings, logs,
-  create-config + adapters sub-screens) bound to a single `backend` object.
-- `include|src/app/Backend.*` — the QML bridge; wraps `QtTrustTunnelClient`
-  (VPN), `AppSettings`/`ConfigStore` (persistence), `UpdateChecker`,
-  `NetworkAdapterManager`, `QHotkey`, and the `ControlCommand` parser.
+- `qml/Main.qml` — the entire UI (home, configs, split-tunnel, settings, logs,
+  create-config sub-screen) bound to a single `backend` object.
+- `include|src/app/Backend.*` — the QML bridge; wraps `VpnHelperClient`
+  (VPN, via the elevated helper), `AppSettings`/`ConfigStore` (persistence),
+  `UpdateChecker`, `QHotkey`, and the `ControlCommand` parser.
+- `include|src/app/MacWindow.mm` — tiny AppKit shim for the unified
+  (transparent) macOS title bar.
 - `include|src/core/*` — small, mostly core-independent units (deep-link codec,
   config import, settings, control-command parsing) — the unit-tested surface.
 - `include|src/vpn/qt_trusttunnel_client.*` — the Qt wrapper over the C++ core.
@@ -41,7 +43,7 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 | 1 | Distribution | Medium | Binaries are unsigned → Gatekeeper/SmartScreen friction; macOS is ad-hoc signed only. | Documented for users; add Developer ID / Windows signing when certs exist (CI hooks ready). |
 | 2 | Integration fragility | Medium | Live telemetry relies on patching upstream `client.{h,cpp}` in CI (`scripts/patch_core_wrapper.py`); deep-link/`tunnel_stats` assume a specific core API. | Pinned `UPSTREAM_REF` mitigates. On bump: re-run the patch, rebuild, re-check `VpnCallbacks`. Better: upstream a PR exposing the handler. |
 | 3 | Dependency drift | Medium | `dns-libs` is re-pinned in CI because the upstream bootstrap exports the *latest* tag. | Current pin handles it; pin `native_libs_common` too if it ever drifts. |
-| 4 | Feature scope | Low (by design) | Split tunneling is **domain-based** (bypass), with named **profiles** (functional). Neither per-app routing nor an inverse "only-these-via-VPN" mode is offered — the core exposes only domain `exclusions` + routes. | Revisit only if/when the core gains app-level / inclusive routing. |
+| 4 | Feature scope | Low (by design) | Split tunneling is **domain/IP/subnet-based**, with both **bypass** (general) and **only-these-via-VPN** (selective) modes and named **profiles** (functional). **Per-app** routing is not offered — the core exposes domain `exclusions` + routes + `VpnMode`, not an app-level API. | Revisit only if/when the core gains app-level routing. |
 | 12 | Autostart | Low | "Launch at startup" writes a LaunchAgent/registry/.desktop entry pointing at the running binary — so it only works once the app is installed to a stable location (not run from a mounted .dmg). | Documented; consider a check that warns when launched from a volume. |
 | 5 | Hotkeys (Linux) | Low | Global hotkeys use QHotkey, which is **X11-only** on Linux — no Wayland support. | Acceptable; document. Hotkeys are optional and empty by default. |
 | 6 | Tray (Linux) | Low | The Qt.labs.platform tray needs a StatusNotifier/AppIndicator host; absent on some minimal desktops. | App still works without a tray; window remains usable. |
@@ -62,17 +64,19 @@ limitations** of optional features (global hotkeys, tray, per-app routing).
 - **Clean codebase**: the Qt Widgets layer and dead helpers/assets from the
   fork were removed; the QML UI binds to one well-scoped `Backend`. Every UI
   control is wired to real behaviour (no decorative toggles/buttons).
-- **Functional depth**: deep-link control, global hotkeys, tray, in-app
-  updater, network-adapter scan, split-tunnel profiles, per-config ping,
-  autostart, clipboard/file import — all backed.
+- **Functional depth**: deep-link control, global hotkeys, tray (with an
+  inline config switcher), in-app updater, split-tunnel mode + profiles,
+  kill switch, per-config ping, autostart, clipboard/file import,
+  host:port config validation — all backed.
 - **Localised**: full EN/RU with a live language switch.
-- **Tested surface**: 5 Qt-only unit suites — deep-link codec, config import,
-  app settings round-trip, config store, and control-command parsing.
+- **Tested surface**: 6 Qt-only unit suites — deep-link codec, config import,
+  app settings round-trip, config store, control-command parsing, and
+  config-TOML round-trip.
 
 ## Not covered by automated tests
 
-Runtime/E2E behaviour (actual tunnel establishment, elevation, adapter
-enable/disable, OS URL-scheme dispatch) requires a TUN device + the core and is
+Runtime/E2E behaviour (actual tunnel establishment, elevation, the native
+macOS title bar, OS URL-scheme dispatch) requires a TUN device + the core and is
 verified manually per release. The core itself is upstream's responsibility.
 
 ## Suggested next steps (priority order)
