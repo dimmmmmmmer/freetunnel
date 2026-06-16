@@ -693,7 +693,7 @@ Window {
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 22 }
                     MouseArea { id: addMa; anchors.fill: parent; hoverEnabled: true
-                                onClicked: importMenu.visible = !importMenu.visible }
+                                onClicked: importMenu.open = !importMenu.open }
                 }
                 Rectangle {
                     visible: backend.configs.length > 0
@@ -708,7 +708,7 @@ Window {
                 visible: backend.configs.length === 0
                 anchors.centerIn: parent
                 text: qsTr("Add a config"); color: theme.textFaint; font.pixelSize: 15
-                MouseArea { anchors.fill: parent; onClicked: importMenu.visible = true }
+                MouseArea { anchors.fill: parent; onClicked: importMenu.open = true }
             }
             ListView {
                 id: cfgList
@@ -756,28 +756,33 @@ Window {
             }
             // Import / create dropdown (collapsed by default).
             Rectangle {
-                id: importMenu; visible: false; z: 10
+                id: importMenu; property bool open: false
+                visible: opacity > 0; opacity: open ? 1 : 0; z: 10
+                Behavior on opacity { NumberAnimation { duration: 130 } }
+                transform: Translate { y: importMenu.open ? 0 : -8
+                                       Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
                 anchors.top: parent.top; anchors.topMargin: 44; anchors.horizontalCenter: parent.horizontalCenter
                 width: 240; height: menuCol.height + 12; radius: 10; color: theme.bg
                 border.color: theme.border; border.width: 1
-                Column { id: menuCol; width: parent.width; y: 6
-                    component MenuRow: Text {
-                        width: parent.width; height: 40; leftPadding: 14; verticalAlignment: Text.AlignVCenter
-                        color: theme.text; font.pixelSize: 14
+                Column { id: menuCol; width: parent.width - 10; x: 5; y: 6; spacing: 1
+                    component MenuRow: Rectangle {
+                        property alias text: mrLbl.text
+                        property alias hovered: mrMa.containsMouse
+                        signal triggered()
+                        width: parent.width; height: 40; radius: 6
+                        color: mrMa.containsMouse ? theme.surface : "transparent"
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text { id: mrLbl; anchors.verticalCenter: parent.verticalCenter; x: 9
+                               color: theme.text; font.pixelSize: 14 }
+                        MouseArea { id: mrMa; anchors.fill: parent; hoverEnabled: true; onClicked: parent.triggered() }
                     }
                     MenuRow { text: qsTr("Paste from clipboard")
-                        Rectangle { anchors.fill: parent; z: -1; color: m1.containsMouse ? theme.surface : "transparent" }
-                        MouseArea { id: m1; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { importMenu.visible = false; backend.importFromClipboard() } } }
+                        onTriggered: { importMenu.open = false; backend.importFromClipboard() } }
                     MenuRow { text: qsTr("From file…")
-                        Rectangle { anchors.fill: parent; z: -1; color: m2.containsMouse ? theme.surface : "transparent" }
-                        MouseArea { id: m2; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { importMenu.visible = false; fileDlg.open() } } }
+                        onTriggered: { importMenu.open = false; fileDlg.open() } }
                     Rectangle { width: parent.width; height: 1; color: theme.border }
                     MenuRow { text: qsTr("Create new…")
-                        Rectangle { anchors.fill: parent; z: -1; color: m3.containsMouse ? theme.surface : "transparent" }
-                        MouseArea { id: m3; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { importMenu.visible = false; win.editIndex = -1; win.overlay = "create" } } }
+                        onTriggered: { importMenu.open = false; win.editIndex = -1; win.overlay = "create" } }
                 }
             }
             Platform.FileDialog {
