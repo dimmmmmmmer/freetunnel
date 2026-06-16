@@ -834,12 +834,14 @@ void Backend::applySplitRules() {
 // connected, seamlessly rebuild it so edits apply immediately rather than only
 // after a manual reconnect. No-op (and no re-elevation) when disconnected.
 void Backend::reapplyIfConnected() {
-    if (!m_connected)
+    if (!m_connected || m_reapplying)
         return;
+    m_reapplying = true; // connectVpn() below calls applySplitRules() again — don't recurse
     m_client.disconnectVpn();
     QTimer::singleShot(400, this, [this]() {
         if (!m_activePath.isEmpty())
             connectVpn();
+        m_reapplying = false;
     });
 }
 

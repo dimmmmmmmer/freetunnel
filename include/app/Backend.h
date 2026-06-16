@@ -187,4 +187,5 @@ private:
 
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
+    bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
 };
