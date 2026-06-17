@@ -53,6 +53,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 m_connecting = st == VpnHelperClient::State::Connecting
                                || st == VpnHelperClient::State::Reconnecting
                                || st == VpnHelperClient::State::WaitingForNetwork;
+                // Don't surface "Disconnecting…" during a silent live re-apply
+                // (rule changes briefly tear the tunnel down and back up).
+                m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
                 emit stateChanged();
                 appendLog(QStringLiteral("INFO"), statusText());
             });
@@ -435,7 +438,9 @@ void Backend::reloadConfigs() {
 }
 
 void Backend::toggle() {
-    if (m_connected)
+    // A click while connecting cancels the attempt; while connected it
+    // disconnects; otherwise it starts connecting.
+    if (m_connected || m_connecting)
         disconnectVpn();
     else
         connectVpn();
@@ -445,6 +450,13 @@ void Backend::connectVpn() {
     if (m_activePath.isEmpty()) {
         emit errorOccurred(tr("Select a config first"));
         return;
+    }
+    // Show "Connecting…" immediately — the helper handshake (and any elevation
+    // prompt) can take a few seconds before the core reports a real state.
+    // A subsequent state change (Connected / Error / Disconnected) overrides it.
+    if (!m_connecting) {
+        m_connecting = true;
+        emit stateChanged();
     }
     // Log the endpoint we're dialing (host, address:port, protocol, transport)
     // so the log is useful even before the core chimes in.
@@ -471,7 +483,15 @@ void Backend::connectVpn() {
     m_inConnect = false;
 }
 
-void Backend::disconnectVpn() { m_client.disconnectVpn(); }
+void Backend::disconnectVpn() {
+    if (!m_connected && !m_connecting)
+        return; // nothing to disconnect or cancel
+    // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
+    m_connecting = false;
+    m_disconnecting = true;
+    emit stateChanged();
+    m_client.disconnectVpn(); // aborts a pending startup, or stops a live tunnel
+}
 
 void Backend::handleControl(const QString &command) {
     using freetunnel::ControlAction;
@@ -732,18 +752,30 @@ bool Backend::createConfig(const QVariantMap &f) {
     file.close();
 
     QStringList stored = loadStoredConfigs();
+    const bool editing = editIndex >= 0;
+    const int storedIdx = oldPath.isEmpty() ? -1 : stored.indexOf(oldPath);
+    const bool wasActive = !oldPath.isEmpty() && m_activePath == oldPath;
     if (!oldPath.isEmpty() && oldPath != target) { // edit + rename
         QFile::remove(oldPath);
-        stored.removeAll(oldPath);
-        if (m_activePath == oldPath) m_activePath = target;
+        if (wasActive) m_activePath = target;
     }
-    if (!stored.contains(target))
-        stored << target;
+    if (storedIdx >= 0) {
+        stored[storedIdx] = target; // keep the list position when editing
+        stored.removeDuplicates();
+    } else if (!stored.contains(target)) {
+        stored << target; // a brand-new config is appended
+    }
     saveStoredConfigs(stored);
     reloadConfigs();
-    m_activePath = target;
-    m_settings.last_config_path = target;
-    persistSettings();
+    if (!editing) {
+        // A newly created config becomes the active selection.
+        m_activePath = target;
+        m_settings.last_config_path = target;
+        persistSettings();
+    } else if (wasActive) {
+        m_settings.last_config_path = m_activePath;
+        persistSettings();
+    }
     emit configChanged();
     return true;
 }

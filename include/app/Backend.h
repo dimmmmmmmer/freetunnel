@@ -23,6 +23,7 @@ class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY stateChanged) // connecting/reconnecting
+    Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY stateChanged) // tearing the tunnel down
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
@@ -63,6 +64,7 @@ public:
 
     bool connected() const { return m_connected; }
     bool connecting() const { return m_connecting; }
+    bool disconnecting() const { return m_disconnecting; }
     QString statusText() const;
     QString sessionTime() const;
     QString downSpeed() const;
@@ -191,6 +193,7 @@ private:
     QString m_activePath;
     bool m_connected = false;
     bool m_connecting = false; // Connecting / Reconnecting / WaitingForNetwork
+    bool m_disconnecting = false; // Disconnecting (tearing down / cancelling)
     QVariantList m_log;
 
     QElapsedTimer m_session;

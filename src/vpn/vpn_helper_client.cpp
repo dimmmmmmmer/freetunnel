@@ -95,8 +95,26 @@ void VpnHelperClient::connectVpn() {
 }
 
 void VpnHelperClient::disconnectVpn() {
+    // Cancelling before the helper has finished coming up (elevation prompt /
+    // handshake still pending): tear the startup down instead of waiting it out.
+    if (!m_helloAcked) {
+        abortStartup();
+        if (m_state != State::Disconnected) setState(State::Disconnected);
+        return;
+    }
     if (!m_sock) return;
     QJsonObject c; c["cmd"] = "disconnect"; send(c);
+}
+
+// Stop a half-finished connect: kill the retry timer, drop the socket, and kill
+// the (possibly still-prompting) elevated helper process.
+void VpnHelperClient::abortStartup() {
+    m_connectPending = false;
+    m_starting = false;
+    m_helloAcked = false;
+    if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; }
+    if (m_sock) { m_sock->abort(); m_sock->deleteLater(); m_sock = nullptr; }
+    if (m_proc) { m_proc->kill(); m_proc->deleteLater(); m_proc = nullptr; }
 }
 
 bool VpnHelperClient::ensureHelper() {
@@ -135,22 +153,26 @@ bool VpnHelperClient::ensureHelper() {
         if (m_state != State::Disconnected) setState(State::Disconnected);
     });
 
-    // The elevated helper needs a moment to come up; retry the connect.
-    auto *attempt = new QTimer(this);
-    auto *tries = new int(0);
-    connect(attempt, &QTimer::timeout, this, [this, attempt, tries]() {
+    // The elevated helper needs a moment to come up; retry the connect. The
+    // timer is a member so disconnectVpn() can cancel a pending attempt.
+    if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); }
+    m_attempt = new QTimer(this);
+    m_tries = 0;
+    connect(m_attempt, &QTimer::timeout, this, [this]() {
+        if (!m_sock) { if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; } return; }
         if (m_sock->state() == QAbstractSocket::ConnectedState) {
-            attempt->stop(); attempt->deleteLater(); delete tries; return;
+            m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; return;
         }
-        if (++(*tries) > 40) { // ~10s
-            attempt->stop(); attempt->deleteLater(); delete tries;
-            fail(tr("VPN helper did not start (authorization cancelled?)"));
+        if (++m_tries > 40) { // ~10s
+            m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr;
+            fail(tr("The VPN helper didn't start — authorization may have been "
+                    "declined, or polkit (pkexec) isn't available."));
             return;
         }
         m_sock->abort();
         m_sock->connectToHost(QHostAddress::LocalHost, m_port);
     });
-    attempt->start(250);
+    m_attempt->start(250);
     m_sock->connectToHost(QHostAddress::LocalHost, m_port);
     return true;
 }
@@ -187,9 +209,22 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QS
     return true;
 #else // Linux + others: prefer pkexec (graphical polkit prompt)
     m_proc = new QProcess(this);
-    m_proc->start(QStringLiteral("pkexec"),
-                  {exe, QStringLiteral("--helper"), QStringLiteral("--port"), p,
-                   QStringLiteral("--token"), token});
+    QStringList args;
+    const QByteArray appImage = qgetenv("APPIMAGE");
+    if (!appImage.isEmpty()) {
+        // Launched from an AppImage: applicationFilePath() points inside the
+        // per-user FUSE mount, which root (via pkexec) cannot read. Run the
+        // .AppImage file itself (root can read it) and force extract-and-run,
+        // since the elevated session may not have FUSE available.
+        args << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
+             << QString::fromLocal8Bit(appImage)
+             << QStringLiteral("--helper") << QStringLiteral("--port") << p
+             << QStringLiteral("--token") << token;
+    } else {
+        args << exe << QStringLiteral("--helper") << QStringLiteral("--port") << p
+             << QStringLiteral("--token") << token;
+    }
+    m_proc->start(QStringLiteral("pkexec"), args);
     if (!m_proc->waitForStarted(5000)) {
         if (err) *err = tr("Could not run pkexec (is polkit installed?)");
         return false;

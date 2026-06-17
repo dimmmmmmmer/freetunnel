@@ -1,5 +1,7 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
+import QtQuick.Effects
 import Qt.labs.platform as Platform
 
 // FreeTunnel main window: centered top nav + pages, plus back-arrow sub-screens.
@@ -14,6 +16,11 @@ Window {
     minimumHeight: 480
     color: theme.bg
     title: "FreeTunnel"
+
+    // macOS keeps its native (unified) title bar; Linux/Windows go frameless
+    // with our own window controls + drag/resize, so the chrome matches macOS.
+    readonly property bool isMac: Qt.platform.os === "osx"
+    flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // Closing the window hides to tray instead of quitting (quitOnLastWindowClosed
     // is off in main.cpp). Quit explicitly from the tray menu.
@@ -36,7 +43,8 @@ Window {
         menu: Platform.Menu {
             // Plain connect/disconnect action button.
             Platform.MenuItem {
-                text: backend.connecting ? qsTr("Connecting…")
+                text: backend.disconnecting ? qsTr("Disconnecting…")
+                      : backend.connecting ? qsTr("Connecting…")
                       : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
                 enabled: backend.configs.length > 0
                 onTriggered: backend.toggle()
@@ -154,6 +162,68 @@ Window {
         onPressed: backend.startWindowDrag(win)
     }
 
+    // ---------- custom window controls (Linux/Windows) ----------
+    // macOS keeps its native traffic lights; elsewhere we draw our own so the
+    // frameless window can still minimize / maximize / close.
+    Row {
+        visible: !win.isMac
+        z: 60
+        anchors.top: parent.top; anchors.right: parent.right
+        anchors.topMargin: 9; anchors.rightMargin: 9
+        spacing: 3
+        // minimize
+        Rectangle { width: 30; height: 24; radius: 6
+            color: minMa.containsMouse ? theme.surface : "transparent"
+            Behavior on color { ColorAnimation { duration: 100 } }
+            Rectangle { anchors.centerIn: parent; width: 11; height: 1.6; radius: 1; color: theme.textDim }
+            MouseArea { id: minMa; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor; onClicked: win.showMinimized() }
+        }
+        // maximize / restore
+        Rectangle { width: 30; height: 24; radius: 6
+            color: maxMa.containsMouse ? theme.surface : "transparent"
+            Behavior on color { ColorAnimation { duration: 100 } }
+            Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2
+                        color: "transparent"; border.color: theme.textDim; border.width: 1.4 }
+            MouseArea { id: maxMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized) }
+        }
+        // close (hides to tray, like the macOS red button)
+        Rectangle { width: 30; height: 24; radius: 6
+            color: closeMa.containsMouse ? theme.danger : "transparent"
+            Behavior on color { ColorAnimation { duration: 100 } }
+            Item { anchors.centerIn: parent; width: 12; height: 12
+                Rectangle { anchors.centerIn: parent; width: 13; height: 1.6; radius: 1; rotation: 45
+                            color: closeMa.containsMouse ? "white" : theme.textDim }
+                Rectangle { anchors.centerIn: parent; width: 13; height: 1.6; radius: 1; rotation: -45
+                            color: closeMa.containsMouse ? "white" : theme.textDim }
+            }
+            MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor; onClicked: win.close() }
+        }
+    }
+
+    // ---------- resize grips (frameless Linux/Windows) ----------
+    Item {
+        visible: !win.isMac; anchors.fill: parent; z: 55
+        MouseArea { height: 5; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            cursorShape: Qt.SizeVerCursor; onPressed: win.startSystemResize(Qt.TopEdge) }
+        MouseArea { height: 5; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            cursorShape: Qt.SizeVerCursor; onPressed: win.startSystemResize(Qt.BottomEdge) }
+        MouseArea { width: 5; anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.left: parent.left
+            cursorShape: Qt.SizeHorCursor; onPressed: win.startSystemResize(Qt.LeftEdge) }
+        MouseArea { width: 5; anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
+            cursorShape: Qt.SizeHorCursor; onPressed: win.startSystemResize(Qt.RightEdge) }
+        MouseArea { width: 11; height: 11; anchors.top: parent.top; anchors.left: parent.left
+            cursorShape: Qt.SizeFDiagCursor; onPressed: win.startSystemResize(Qt.TopEdge | Qt.LeftEdge) }
+        MouseArea { width: 11; height: 11; anchors.top: parent.top; anchors.right: parent.right
+            cursorShape: Qt.SizeBDiagCursor; onPressed: win.startSystemResize(Qt.TopEdge | Qt.RightEdge) }
+        MouseArea { width: 11; height: 11; anchors.bottom: parent.bottom; anchors.left: parent.left
+            cursorShape: Qt.SizeBDiagCursor; onPressed: win.startSystemResize(Qt.BottomEdge | Qt.LeftEdge) }
+        MouseArea { width: 11; height: 11; anchors.bottom: parent.bottom; anchors.right: parent.right
+            cursorShape: Qt.SizeFDiagCursor; onPressed: win.startSystemResize(Qt.BottomEdge | Qt.RightEdge) }
+    }
+
     // ---------- main content (nav + page) ----------
     // Stays visible behind the create popup (dimmed by its backdrop).
     ColumnLayout {
@@ -162,9 +232,10 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            // Leave room for the macOS traffic-light buttons (the title bar is
-            // transparent and the content flows under it).
-            Layout.topMargin: Qt.platform.os === "osx" ? 26 : 12
+            // Leave room for the window controls overlay: the macOS traffic
+            // lights (native, top-left) or our own buttons (top-right) on the
+            // frameless Linux/Windows chrome.
+            Layout.topMargin: Qt.platform.os === "osx" ? 26 : 36
             Layout.bottomMargin: 6
             spacing: 8
             Item { Layout.fillWidth: true }
@@ -292,6 +363,11 @@ Window {
             width: 200
             height: spCol.implicitHeight + 12
             radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true; shadowColor: "#000000"
+                shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
+            }
             Column {
                 id: spCol; width: parent.width - 10; x: 5; y: 6
                 Repeater {
@@ -332,14 +408,23 @@ Window {
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
 
-    // Reusable chip delete "✕": tightly centred, red on hover, generous hit area.
+    // Reusable chip delete "✕": drawn from two strokes (not a glyph) so size and
+    // vertical centring are identical on every platform. Red on hover, generous
+    // hit area.
     component ChipX: Item {
         id: cx
         property bool onAccent: false
         signal clicked()
-        implicitWidth: 15; implicitHeight: 15
-        Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14
-               color: cxMa.containsMouse ? theme.danger : (cx.onAccent ? "white" : theme.textDim) }
+        implicitWidth: 16; implicitHeight: 16
+        property color strokeColor: cxMa.containsMouse ? theme.danger
+                                    : (cx.onAccent ? "white" : theme.textDim)
+        Item {
+            anchors.centerIn: parent; width: 11; height: 11
+            Rectangle { anchors.centerIn: parent; width: 12; height: 1.8; radius: 1
+                        rotation: 45; antialiasing: true; color: cx.strokeColor }
+            Rectangle { anchors.centerIn: parent; width: 12; height: 1.8; radius: 1
+                        rotation: -45; antialiasing: true; color: cx.strokeColor }
+        }
         MouseArea { id: cxMa; anchors.fill: parent; anchors.margins: -6
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cx.clicked() }
     }
@@ -501,6 +586,9 @@ Window {
             id: homeRoot
             ColumnLayout {
                 anchors.centerIn: parent
+                // Sit a little above centre so the config picker that drops below
+                // the selector still fits inside the minimum window height.
+                anchors.verticalCenterOffset: -26
                 width: parent.width
                 spacing: 18
                 // The logo IS the connect button. Centered when off; on connect
@@ -514,22 +602,22 @@ Window {
                         anchors.horizontalCenter: parent.horizontalCenter
                         source: "qrc:/assets/logo.svg"; width: 132; height: 132
                         sourceSize: Qt.size(264, 264)
-                        opacity: backend.connected ? 1.0 : (backend.connecting ? 0.7 : 0.5)
+                        opacity: backend.connected ? 1.0 : ((backend.connecting || backend.disconnecting) ? 0.7 : 0.5)
                         Behavior on opacity { NumberAnimation { duration: 220 } }
-                        y: (backend.connected || backend.connecting) ? hero.height / 2 - height / 2 - 24
+                        y: (backend.connected || backend.connecting || backend.disconnecting) ? hero.height / 2 - height / 2 - 24
                                                                       : hero.height / 2 - height / 2
                         Behavior on y { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
-                        // Subtle breathing while connecting — driven by scale, not
-                        // opacity, so it never fights the opacity binding (which
-                        // caused a flash on connect).
-                        scale: (heroMa.pressed ? 0.96 : 1.0) * (backend.connecting ? pulse.value : 1.0)
+                        // Subtle breathing while connecting/disconnecting — driven by
+                        // scale, not opacity, so it never fights the opacity binding
+                        // (which caused a flash on connect).
+                        scale: (heroMa.pressed ? 0.96 : 1.0) * ((backend.connecting || backend.disconnecting) ? pulse.value : 1.0)
                         Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                         QtObject {
                             id: pulse; property real value: 1.0
                             // (animated below)
                         }
                         SequentialAnimation {
-                            running: backend.connecting; loops: Animation.Infinite
+                            running: backend.connecting || backend.disconnecting; loops: Animation.Infinite
                             NumberAnimation { target: pulse; property: "value"; to: 1.05; duration: 750; easing.type: Easing.InOutSine }
                             NumberAnimation { target: pulse; property: "value"; to: 0.97; duration: 750; easing.type: Easing.InOutSine }
                         }
@@ -537,12 +625,13 @@ Window {
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: heroLogo.bottom; anchors.topMargin: 8
-                        opacity: (backend.connected || backend.connecting) ? 1.0 : 0.0
+                        opacity: (backend.connected || backend.connecting || backend.disconnecting) ? 1.0 : 0.0
                         Behavior on opacity { NumberAnimation { duration: 220 } }
-                        text: backend.connecting ? qsTr("Connecting…")
+                        text: backend.disconnecting ? qsTr("Disconnecting…")
+                              : backend.connecting ? qsTr("Connecting…")
                               : (backend.connected ? backend.sessionTime : "")
                         color: theme.textDim
-                        font.pixelSize: backend.connecting ? 14 : 18; font.weight: Font.Medium
+                        font.pixelSize: (backend.connecting || backend.disconnecting) ? 14 : 18; font.weight: Font.Medium
                     }
                     MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
@@ -607,6 +696,11 @@ Window {
                 width: 250
                 height: picker.height + addRow.height + 22 // rows + separator + margins
                 radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
+                layer.enabled: true
+                layer.effect: MultiEffect {
+                    shadowEnabled: true; shadowColor: "#000000"
+                    shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
+                }
                 Column {
                     anchors.fill: parent; anchors.margins: 5
                     ListView {
@@ -651,6 +745,7 @@ Window {
           TapHandler { onTapped: splitRoot.forceActiveFocus() }
           Flickable {
             anchors.fill: parent
+            contentWidth: width // pin content to the viewport so margins stay symmetric
             contentHeight: scol.height; clip: true
             interactive: contentHeight > height // don't steal clicks from inputs when it fits
             ColumnLayout {
@@ -679,7 +774,7 @@ Window {
                             property bool isActive: modelData === backend.activeProfile
                             property bool isDefault: modelData === "Default"
                             radius: 13; height: 28
-                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 42)
+                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 37)
                             color: isActive ? theme.accent : (chipMa.containsMouse ? theme.border : theme.surface)
                             Behavior on color { ColorAnimation { duration: 120 } }
                             MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
@@ -719,6 +814,7 @@ Window {
                         onActiveFocusChanged: if (!activeFocus) { text = ""; npRow.visible = false }
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                           anchors.right: parent.right; anchors.rightMargin: 12; elide: Text.ElideRight
                            text: qsTr("profile name, then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: npInput.text.length === 0 }
                 }
@@ -799,10 +895,11 @@ Window {
                     width: 40; height: 32; radius: 8
                     color: addMa.containsMouse ? theme.surface : theme.bg
                     Behavior on color { ColorAnimation { duration: 120 } }
-                    // Drawn plus (same size/weight as the speedometer icon, perfectly centred).
+                    // Drawn plus — strokes kept thin so its weight matches the
+                    // (stroked) speedometer icon instead of looking heavier/darker.
                     Item { anchors.centerIn: parent; width: 22; height: 22
-                        Rectangle { anchors.centerIn: parent; width: 16; height: 2.2; radius: 1.1; color: theme.accent }
-                        Rectangle { anchors.centerIn: parent; width: 2.2; height: 16; radius: 1.1; color: theme.accent }
+                        Rectangle { anchors.centerIn: parent; width: 16; height: 1.8; radius: 1; antialiasing: true; color: theme.accent }
+                        Rectangle { anchors.centerIn: parent; width: 1.8; height: 16; radius: 1; antialiasing: true; color: theme.accent }
                     }
                     MouseArea { id: addMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: importMenu.open = !importMenu.open }
@@ -882,6 +979,11 @@ Window {
                 anchors.top: parent.top; anchors.topMargin: 44; anchors.horizontalCenter: parent.horizontalCenter
                 width: 240; height: menuCol.height + 12; radius: 10; color: theme.bg
                 border.color: theme.border; border.width: 1
+                layer.enabled: true
+                layer.effect: MultiEffect {
+                    shadowEnabled: true; shadowColor: "#000000"
+                    shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
+                }
                 Column { id: menuCol; width: parent.width - 10; x: 5; y: 6; spacing: 1
                     component MenuRow: Rectangle {
                         property alias text: mrLbl.text
@@ -920,6 +1022,7 @@ Window {
           TapHandler { onTapped: settingsRoot.forceActiveFocus() }
           Flickable {
             anchors.fill: parent
+            contentWidth: width // pin content to the viewport so margins stay symmetric
             contentHeight: setcol.height; clip: true
             ColumnLayout {
                 id: setcol; anchors.left: parent.left; anchors.right: parent.right
@@ -996,6 +1099,7 @@ Window {
                         Keys.onEscapePressed: focus = false
                     }
                     Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                           anchors.right: parent.right; anchors.rightMargin: 12; elide: Text.ElideRight
                            text: qsTr("IP or subnet (e.g. 10.0.0.0/8), then Enter"); color: theme.textFaint; font.pixelSize: 13
                            visible: rtInput.text.length === 0 && !rtInput.activeFocus }
                 }
@@ -1194,7 +1298,7 @@ Window {
             }
             Flickable {
                 anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                anchors.leftMargin: 18; anchors.rightMargin: 18; contentHeight: fcol.height; clip: true
+                anchors.leftMargin: 18; anchors.rightMargin: 18; contentWidth: width; contentHeight: fcol.height; clip: true
                 Column {
                     id: fcol; width: parent.width; spacing: 10
                     Field { id: fName; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }

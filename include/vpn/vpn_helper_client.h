@@ -13,6 +13,7 @@
 
 class QProcess;
 class QTcpSocket;
+class QTimer;
 class QJsonObject;
 
 class VpnHelperClient : public QObject {
@@ -53,6 +54,7 @@ signals:
 private:
     bool ensureHelper();              // spawn elevated helper + open socket
     bool spawnElevatedHelper(quint16 port, const QString &token, QString *err);
+    void abortStartup();              // cancel a pending elevation/handshake
     void send(const QJsonObject &obj);
     void onReadyRead();
     void onSocketConnected();
@@ -73,5 +75,7 @@ private:
     bool m_helloAcked = false;
     bool m_connectPending = false;
     bool m_starting = false; // helper spawn in progress (avoids re-prompting)
+    QTimer *m_attempt = nullptr; // retries the socket connect while the helper boots
+    int m_tries = 0;
     QByteArray m_buf;
 };

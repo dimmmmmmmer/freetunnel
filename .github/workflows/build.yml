@@ -362,6 +362,68 @@ jobs:
           set -e
           ls -la out
 
+      # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: it ships the same bundled
+      # runtime (binary + Qt libs/plugins/qml) that linuxdeploy assembled in
+      # AppDir, installed under /opt/freetunnel, so it doesn't depend on the
+      # distro's Qt version. A /usr/bin symlink + .desktop entry integrate it
+      # into the launcher; the privileged VPN helper runs via pkexec (polkit).
+      - name: Package .deb (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -eux
+          if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
+            echo "::warning::AppDir missing — skipping .deb (AppImage step failed)"
+            exit 0
+          fi
+          ver="${{ steps.ver.outputs.version }}"
+          root=debpkg
+          rm -rf "$root"
+          mkdir -p "$root/opt/freetunnel" "$root/usr/bin" \
+                   "$root/usr/share/applications" \
+                   "$root/usr/share/icons/hicolor/256x256/apps" \
+                   "$root/DEBIAN"
+          # Bundled runtime (binary + Qt libs/plugins/qml + qt.conf).
+          cp -a AppDir/usr/. "$root/opt/freetunnel/"
+          # Launcher on PATH (rpath is $ORIGIN/../lib, so the symlink works).
+          ln -sf /opt/freetunnel/bin/FreeTunnel "$root/usr/bin/freetunnel"
+          # Menu entry + icon.
+          cp client/assets/logo-256.png \
+            "$root/usr/share/icons/hicolor/256x256/apps/freetunnel.png"
+          printf '%s\n' \
+            '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
+            'Exec=freetunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
+            > "$root/usr/share/applications/freetunnel.desktop"
+          installed_kb=$(du -sk "$root" | cut -f1)
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: freetunnel
+          Version: ${ver}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: FreeTunnel <noreply@freetunnel.app>
+          Installed-Size: ${installed_kb}
+          Depends: libc6, libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Description: FreeTunnel VPN client
+           A simple, modern desktop client for the TrustTunnel VPN core.
+           Bundles its own Qt runtime; the privileged VPN helper is started on
+           demand via pkexec (polkit).
+          EOF
+          cat > "$root/DEBIAN/postinst" <<'EOF'
+          #!/bin/sh
+          set -e
+          command -v update-desktop-database >/dev/null 2>&1 && \
+            update-desktop-database -q /usr/share/applications || true
+          command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+            gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+          exit 0
+          EOF
+          chmod 0755 "$root/DEBIAN/postinst"
+          dpkg-deb --build --root-owner-group "$root" \
+            "out/${{ matrix.artifact }}.deb" \
+            || echo "::warning::.deb build failed (other Linux artifacts still available)"
+          ls -la out
+
       - name: Build & package universal (macOS)
         if: matrix.platform == 'macos'
         run: |
@@ -453,6 +515,10 @@ jobs:
           body: |
             Unsigned builds.
 
+            - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
+              (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
+              own Qt and integrates into the app menu. The **AppImage** and
+              **tar.gz** are portable alternatives. The VPN needs polkit/pkexec.
             - **macOS**: the app is ad-hoc signed but not notarized. On first launch
               right-click the app → Open (or run
               `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
