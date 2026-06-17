@@ -21,6 +21,55 @@
 #include <shellapi.h>
 #endif
 
+#ifndef Q_OS_MACOS
+#ifndef Q_OS_WIN
+namespace {
+
+QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
+                               const QString &tokenPath)
+{
+    QStringList cmd;
+    const QByteArray appImage = qgetenv("APPIMAGE");
+    if (!appImage.isEmpty()) {
+        cmd << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
+            << QString::fromLocal8Bit(appImage);
+    } else {
+        cmd << exe;
+    }
+    cmd << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
+        << QStringLiteral("--token-file") << tokenPath;
+    return cmd;
+}
+
+bool linuxElevationOutputLooksLikePolkitFailure(const QProcess &proc)
+{
+    const QString text = QString::fromLocal8Bit(proc.readAllStandardError())
+            + QString::fromLocal8Bit(proc.readAllStandardOutput());
+    return text.contains(QStringLiteral("NameHasNoOwner"), Qt::CaseInsensitive)
+            || text.contains(QStringLiteral("unit is masked"), Qt::CaseInsensitive)
+            || text.contains(QStringLiteral("Cannot launch"), Qt::CaseInsensitive);
+}
+
+bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringList &helperCmd)
+{
+    QStringList args;
+    if (elevator == QLatin1String("sudo"))
+        args << QStringLiteral("--");
+    args += helperCmd;
+    proc->start(elevator, args);
+    if (!proc->waitForStarted(5000))
+        return false;
+    // pkexec exits immediately when polkit/dbus is broken (e.g. masked unit).
+    // If it is still running after a short wait, the auth dialog or helper is up.
+    if (elevator == QLatin1String("pkexec") && proc->waitForFinished(1000))
+        return false;
+    return true;
+}
+
+} // namespace
+#endif
+#endif
+
 VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent) {}
 
 VpnHelperClient::~VpnHelperClient() {
@@ -193,7 +242,7 @@ bool VpnHelperClient::ensureHelper() {
         if (++m_tries > 40) { // ~10s
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr;
             fail(tr("The VPN helper didn't start — authorization may have been "
-                    "declined, or polkit (pkexec) isn't available."));
+                    "declined, polkit (pkexec) may be disabled, or sudo is unavailable."));
             return;
         }
         m_sock->abort();
@@ -239,29 +288,32 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
         return false;
     }
     return true;
-#else // Linux + others: prefer pkexec (graphical polkit prompt)
+#else // Linux + others: pkexec (polkit), then sudo if polkit is broken/masked
     m_proc = new QProcess(this);
-    QStringList args;
-    const QByteArray appImage = qgetenv("APPIMAGE");
-    if (!appImage.isEmpty()) {
-        // Launched from an AppImage: applicationFilePath() points inside the
-        // per-user FUSE mount, which root (via pkexec) cannot read. Run the
-        // .AppImage file itself (root can read it) and force extract-and-run,
-        // since the elevated session may not have FUSE available.
-        args << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
-             << QString::fromLocal8Bit(appImage)
-             << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
-             << QStringLiteral("--token-file") << tokenPath;
-    } else {
-        args << exe << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
-             << QStringLiteral("--token-file") << tokenPath;
+    const QStringList helperCmd = linuxHelperCommand(exe, socketName, tokenPath);
+
+    if (startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
+        return true;
+
+    const bool polkitBroken = linuxElevationOutputLooksLikePolkitFailure(*m_proc);
+    m_proc->deleteLater();
+    m_proc = new QProcess(this);
+
+    if (startLinuxElevation(m_proc, QStringLiteral("sudo"), helperCmd))
+        return true;
+
+    if (err) {
+        if (polkitBroken || linuxElevationOutputLooksLikePolkitFailure(*m_proc)) {
+            *err = tr("Polkit is disabled or masked on this system, and sudo elevation "
+                      "also failed. Install/enable polkit, or run in a terminal:\n"
+                      "  sudo systemctl unmask polkit && sudo systemctl start polkit\n"
+                      "To install the .deb when the GUI fails:\n"
+                      "  sudo apt install ./freetunnel-linux-x86_64.deb");
+        } else {
+            *err = tr("Could not run pkexec or sudo to start the VPN helper");
+        }
     }
-    m_proc->start(QStringLiteral("pkexec"), args);
-    if (!m_proc->waitForStarted(5000)) {
-        if (err) *err = tr("Could not run pkexec (is polkit installed?)");
-        return false;
-    }
-    return true;
+    return false;
 #endif
 }
 

@@ -22,6 +22,21 @@
 - **Windows**: SmartScreen → **Подробнее** → **Выполнить в любом случае**.
 - **Linux (AppImage)**: `chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage`.
 
+**Ошибка `unit is masked` / `NameHasNoOwner` при установке .deb или подключении VPN** — в
+системе отключён или «замаскирован» polkit (его используют pkexec и многие установщики .deb):
+
+```sh
+# установка .deb, если GUI-установщик не работает
+sudo apt install ./freetunnel-linux-x86_64.deb
+
+# включить polkit
+sudo systemctl unmask polkit polkit.service 2>/dev/null || true
+sudo systemctl enable --now polkit.service 2>/dev/null || sudo systemctl start polkit
+```
+
+FreeTunnel при подключении сначала пробует `pkexec`, затем `sudo`. AppImage — альтернатива
+без установщика.
+
 ### Проверка загрузки
 
 На каждом релизе лежит `SHA256SUMS.txt` — сверьте хеш скачанного файла:
