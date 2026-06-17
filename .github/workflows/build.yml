@@ -41,8 +41,42 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
+  # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
+  # every platform build, so the dock/taskbar/Finder icons match the in-app
+  # monochrome logo. Best-effort: the builds fall back to the committed icons.
+  icons:
+    name: Render bundle icons
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install rasterizers
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+      - name: Render icons from logo.svg
+        run: |
+          set -eux
+          svg=assets/logo.svg
+          out=icons-out; mkdir -p "$out"
+          tmp=$(mktemp -d)
+          for s in 16 32 48 64 128 256 512 1024; do
+            rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/logo-$s.png"
+          done
+          cp "$tmp/logo-256.png" "$out/logo-256.png"
+          cp "$tmp/logo-256.png" "$out/logo.png"
+          png2icns "$out/logo.icns" \
+            "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
+          convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
+          ls -la "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-icons
+          path: icons-out/
+
   build:
     name: Build (${{ matrix.artifact }})
+    needs: icons
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +109,15 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: client
+
+      # Drop the freshly-rendered neutral icons over the committed ones before
+      # the client is injected into the upstream tree. Best-effort.
+      - name: Use rendered bundle icons
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-icons
+          path: client/assets
 
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
         uses: actions/checkout@v5
