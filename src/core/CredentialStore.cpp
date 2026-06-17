@@ -82,6 +82,8 @@ bool macDeletePassword(CFStringRef account)
 }
 #endif
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+// File-backed fallback (Linux/other): only these helpers need a path on disk.
 QString credentialDir()
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
@@ -96,7 +98,6 @@ QString filePathForKey(const QString &key)
     return QDir(credentialDir()).filePath(QString::fromLatin1(hash));
 }
 
-#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 bool storePasswordFile(const QString &key, const QString &password)
 {
     QFile f(filePathForKey(key));
