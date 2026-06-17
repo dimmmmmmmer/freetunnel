@@ -34,7 +34,14 @@ AppSettings loadAppSettings() {
     out.custom_dns_servers = s.value("dns/custom_servers", QStringList{"1.1.1.1", "8.8.8.8"}).toStringList();
     out.domain_bypass_enabled = s.value("bypass/enabled", false).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
-    out.excluded_routes = s.value("routing/excluded_routes", QStringList{}).toStringList();
+    // Default excluded routes: private/special-use ranges that should never be
+    // tunnelled (RFC1918/CGNAT/link-local/etc.). Used on first run.
+    const QStringList kDefaultExcludedRoutes = {
+        QStringLiteral("10.0.0.0/8"),       QStringLiteral("100.64.0.0/10"),
+        QStringLiteral("169.254.0.0/16"),   QStringLiteral("172.16.0.0/12"),
+        QStringLiteral("192.0.0.0/24"),     QStringLiteral("192.168.0.0/16"),
+        QStringLiteral("255.255.255.255/32")};
+    out.excluded_routes = s.value("routing/excluded_routes", kDefaultExcludedRoutes).toStringList();
     // Split-tunnel profiles.
     const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
     out.profiles.clear();
@@ -62,13 +69,11 @@ AppSettings loadAppSettings() {
     if (!order.contains(QStringLiteral("Default")))
         order.prepend(QStringLiteral("Default"));
     out.profile_order = order;
-    out.scan_adapter_conflicts = s.value("net/scan_adapter_conflicts", true).toBool();
-    out.ssh_bypass_enabled = s.value("bypass/ssh_enabled", false).toBool();
-    out.p2p_bypass_enabled = s.value("bypass/p2p_enabled", false).toBool();
     out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
     out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
     out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
     out.hotkey_disconnect = s.value("hotkeys/disconnect", "Ctrl+Shift+D").toString();
+    out.last_config_path = s.value("vpn/last_config_path", "").toString();
     if (out.log_path.isEmpty()) {
         out.log_path = defaultLogPath();
     }
@@ -103,11 +108,9 @@ void saveAppSettings(const AppSettings &cfg) {
     s.remove("bypass/profile"); // drop stale per-profile entries, then rewrite
     for (auto it = cfg.profiles.constBegin(); it != cfg.profiles.constEnd(); ++it)
         s.setValue("bypass/profile/" + it.key(), it.value());
-    s.setValue("net/scan_adapter_conflicts", cfg.scan_adapter_conflicts);
-    s.setValue("bypass/ssh_enabled", cfg.ssh_bypass_enabled);
-    s.setValue("bypass/p2p_enabled", cfg.p2p_bypass_enabled);
     s.setValue("hotkeys/enabled", cfg.hotkeys_enabled);
     s.setValue("hotkeys/toggle", cfg.hotkey_toggle);
     s.setValue("hotkeys/connect", cfg.hotkey_connect);
     s.setValue("hotkeys/disconnect", cfg.hotkey_disconnect);
+    s.setValue("vpn/last_config_path", cfg.last_config_path);
 }

@@ -15,6 +15,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTcpSocket>
+#include <QWindow>
 #include <QTime>
 #include <QUrl>
 #include <QVariantMap>
@@ -49,6 +50,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     m_session.restart();
                 }
                 m_connected = nowConnected;
+                m_connecting = st == VpnHelperClient::State::Connecting
+                               || st == VpnHelperClient::State::Reconnecting
+                               || st == VpnHelperClient::State::WaitingForNetwork;
                 emit stateChanged();
                 appendLog(QStringLiteral("INFO"), statusText());
             });
@@ -60,14 +64,27 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     connect(&m_client, &VpnHelperClient::connectionInfo, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
     connect(&m_client, &VpnHelperClient::vpnError, this, [this](const QString &m) {
-        appendLog(QStringLiteral("ERROR"), m); // always logged
+        appendLog(QStringLiteral("ERROR"), m); // raw message always logged
+        // While we're intentionally tearing the tunnel down to switch config or
+        // re-apply rules, suppress the scary "disconnected" pop-up.
+        if (m_reapplying || m_inConnect)
+            return;
+        // Turn low-level core messages into something a user can act on.
+        const QString lower = m.toLower();
+        QString friendly = m;
+        if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+            friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
+        else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+            friendly = tr("Server isn't responding (timed out).");
+        else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
+            friendly = tr("Authentication failed — check the username and password.");
         // Throttle toasts: a flaky connection can spit the same error every few
         // seconds — show it once, then stay quiet for a while unless it changes.
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (m != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
-            m_lastErrorMsg = m;
+        if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
+            m_lastErrorMsg = friendly;
             m_lastErrorAt = now;
-            emit errorOccurred(m);
+            emit errorOccurred(friendly);
         }
     });
 
@@ -215,6 +232,13 @@ void Backend::openLatestRelease() {
 
 void Backend::openUrl(const QString &url) {
     QDesktopServices::openUrl(QUrl(url));
+}
+
+void Backend::startWindowDrag(QObject *window) {
+    // The QQuickWindow content view eats mouse events, so AppKit's
+    // movableByWindowBackground never fires; drive the native move directly.
+    if (auto *w = qobject_cast<QWindow *>(window))
+        w->startSystemMove();
 }
 
 // ---------- misc: log path, autostart, ping, clipboard import ----------
@@ -436,10 +460,12 @@ void Backend::connectVpn() {
         }
     }
     // The helper handles elevation; just hand it the config + rules.
+    m_inConnect = true; // applySplitRules() below must not trigger a reconnect
     m_client.loadConfigFromFile(m_activePath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.connectVpn();
+    m_inConnect = false;
 }
 
 void Backend::disconnectVpn() { m_client.disconnectVpn(); }
@@ -463,10 +489,8 @@ void Backend::selectConfig(int index) {
     m_settings.last_config_path = m_activePath;
     persistSettings();
     emit configChanged();
-    if (m_connected) { // switch live
-        m_client.loadConfigFromFile(m_activePath);
-        m_client.connectVpn();
-    }
+    if (m_connected) // switch live — reconnect to the new server (shows "reconnecting")
+        connectVpn();
 }
 
 void Backend::removeConfig(int index) {
@@ -491,6 +515,19 @@ bool Backend::importFile(const QString &path) {
     if (!QFileInfo::exists(p)) {
         emit errorOccurred(tr("File not found: %1").arg(p));
         return false;
+    }
+    // Validate it's a usable config TOML before importing.
+    {
+        QFile vf(p);
+        if (!vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            emit errorOccurred(tr("Could not read the file"));
+            return false;
+        }
+        const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(vf.readAll()));
+        if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
+            emit errorOccurred(tr("Not a valid TrustTunnel config (missing address or credentials)"));
+            return false;
+        }
     }
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(p)) {
@@ -576,12 +613,23 @@ bool Backend::createConfig(const QVariantMap &f) {
     ct.dns = f.value(QStringLiteral("dns")).toString();
     ct.customSni = f.value(QStringLiteral("customSni")).toString();
     ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
-    // DNS servers (when given) must be valid IPs.
+    // DNS servers (when given): plain IP, or an encrypted-DNS URL
+    // (tls://, https://, quic://, h3://, sdns://, udp://, tcp://).
     const QStringList dnsList = ct.dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
                                             Qt::SkipEmptyParts);
-    for (const QString &d : dnsList) {
-        if (QHostAddress(d.trimmed()).isNull()) {
-            emit errorOccurred(tr("DNS must be IP addresses, e.g. 1.1.1.1, 8.8.8.8"));
+    static const QRegularExpression dnsScheme(
+        QStringLiteral("^(tls|https|quic|h3|sdns|udp|tcp)://"), QRegularExpression::CaseInsensitiveOption);
+    for (const QString &raw : dnsList) {
+        const QString d = raw.trimmed();
+        if (dnsScheme.match(d).hasMatch())
+            continue; // an encrypted-DNS endpoint URL — accept as-is
+        // Otherwise a bare IP (optionally with :port).
+        QString host = d;
+        const int colon = host.lastIndexOf(QLatin1Char(':'));
+        if (colon > 0 && !host.contains(QLatin1Char('[')) && host.count(QLatin1Char(':')) == 1)
+            host = host.left(colon);
+        if (QHostAddress(host).isNull()) {
+            emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
             return false;
         }
     }
@@ -834,7 +882,7 @@ void Backend::applySplitRules() {
 // connected, seamlessly rebuild it so edits apply immediately rather than only
 // after a manual reconnect. No-op (and no re-elevation) when disconnected.
 void Backend::reapplyIfConnected() {
-    if (!m_connected || m_reapplying)
+    if (!m_connected || m_reapplying || m_inConnect)
         return;
     m_reapplying = true; // connectVpn() below calls applySplitRules() again — don't recurse
     m_client.disconnectVpn();
@@ -871,6 +919,7 @@ void Backend::setKillSwitch(bool v) {
     if (m_settings.killswitch_enabled == v) return;
     m_settings.killswitch_enabled = v; persistSettings();
     m_client.setKillSwitch(v);
+    reapplyIfConnected(); // apply on the live tunnel
     emit settingsChanged();
 }
 

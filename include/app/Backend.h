@@ -22,6 +22,7 @@ class UpdateChecker;
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
+    Q_PROPERTY(bool connecting READ connecting NOTIFY stateChanged) // connecting/reconnecting
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
@@ -61,6 +62,7 @@ public:
     explicit Backend(QObject *parent = nullptr);
 
     bool connected() const { return m_connected; }
+    bool connecting() const { return m_connecting; }
     QString statusText() const;
     QString sessionTime() const;
     QString downSpeed() const;
@@ -133,6 +135,8 @@ public:
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestRelease();
     Q_INVOKABLE void openUrl(const QString &url);
+    // Begin a native window move (drag). `window` is the QML Window root.
+    Q_INVOKABLE void startWindowDrag(QObject *window);
 
     QString logPath() const;
     bool autoStart() const;
@@ -178,6 +182,7 @@ private:
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;
     bool m_connected = false;
+    bool m_connecting = false; // Connecting / Reconnecting / WaitingForNetwork
     QVariantList m_log;
 
     QElapsedTimer m_session;
@@ -188,4 +193,5 @@ private:
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
+    bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
 };

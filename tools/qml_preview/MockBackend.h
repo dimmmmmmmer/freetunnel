@@ -11,6 +11,7 @@
 class MockBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY changed)
+    Q_PROPERTY(bool connecting READ connecting NOTIFY changed)
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY changed)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY changed)
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY changed)
@@ -52,6 +53,7 @@ public:
     }
     Q_INVOKABLE void openLatestRelease() {}
     Q_INVOKABLE void openUrl(const QString &) {}
+    Q_INVOKABLE void startWindowDrag(QObject *) {}
     QString logPath() const { return QStringLiteral("/Users/me/Library/Application Support/FreeTunnel/freetunnel.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v) { m_autoStart = v; emit changed(); }
@@ -102,6 +104,7 @@ public:
     Q_INVOKABLE void clearLogs() { m_logCleared = true; emit changed(); }
     Q_INVOKABLE void openLogFolder() {}
     bool connected() const { return m_on; }
+    bool connecting() const { return false; }
     QString sessionTime() const { return QStringLiteral("01:24:36"); }
     QString downSpeed() const { return QStringLiteral("12.4"); }
     QString upSpeed() const { return QStringLiteral("1.2"); }

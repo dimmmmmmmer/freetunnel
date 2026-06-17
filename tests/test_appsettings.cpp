@@ -37,9 +37,11 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.language, QStringLiteral("en"));
     QCOMPARE(s.theme_mode, QStringLiteral("system"));
     QCOMPARE(s.auto_connect_on_start, false);
+    QCOMPARE(s.hotkeys_enabled, true);
     QCOMPARE(s.hotkey_toggle, QStringLiteral("Ctrl+Shift+T"));
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
     QCOMPARE(s.hotkey_disconnect, QStringLiteral("Ctrl+Shift+D"));
+    QVERIFY(s.last_config_path.isEmpty());
 }
 
 void TestAppSettings::roundTrip() {
@@ -51,9 +53,11 @@ void TestAppSettings::roundTrip() {
     in.domain_bypass_enabled = true;
     in.domain_bypass_rules = {QStringLiteral("github.com"), QStringLiteral("*.gov.ru")};
     in.excluded_routes = {QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
+    in.hotkeys_enabled = false;
     in.hotkey_toggle = QStringLiteral("Ctrl+Alt+T");
     in.hotkey_connect = QStringLiteral("Ctrl+Alt+C");
     in.hotkey_disconnect = QStringLiteral("Ctrl+Alt+D");
+    in.last_config_path = QStringLiteral("/tmp/configs/germany.toml");
     saveAppSettings(in);
 
     AppSettings out = loadAppSettings();
@@ -64,9 +68,11 @@ void TestAppSettings::roundTrip() {
     QCOMPARE(out.domain_bypass_enabled, true);
     QCOMPARE(out.domain_bypass_rules, in.domain_bypass_rules);
     QCOMPARE(out.excluded_routes, in.excluded_routes);
+    QCOMPARE(out.hotkeys_enabled, false);
     QCOMPARE(out.hotkey_toggle, in.hotkey_toggle);
     QCOMPARE(out.hotkey_connect, in.hotkey_connect);
     QCOMPARE(out.hotkey_disconnect, in.hotkey_disconnect);
+    QCOMPARE(out.last_config_path, in.last_config_path);
 }
 
 void TestAppSettings::profilesPreserveOrder() {

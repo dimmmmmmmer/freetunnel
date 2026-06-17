@@ -44,14 +44,6 @@ struct AppSettings {
     QMap<QString, QStringList> profiles{{"Default", {}}};
     QStringList profile_order{"Default"};
 
-    // Adapter conflict scanning
-    bool scan_adapter_conflicts = true;
-
-    // SSH / P2P traffic bypass: when enabled, SSH (port 22) and P2P
-    // (BitTorrent, etc.) traffic bypasses the VPN tunnel.
-    bool ssh_bypass_enabled = false;
-    bool p2p_bypass_enabled = false;
-
     // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
     // Empty string = unbound. hotkeys_enabled is the master switch.
     bool hotkeys_enabled = true;
