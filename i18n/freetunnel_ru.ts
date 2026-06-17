@@ -469,6 +469,10 @@
         <translation>Не удалось запустить VPN-помощник</translation>
     </message>
     <message>
+        <source>Could not create the VPN helper token file</source>
+        <translation>Не удалось создать файл токена VPN-помощника</translation>
+    </message>
+    <message>
         <source>Could not launch osascript</source>
         <translation>Не удалось запустить osascript</translation>
     </message>

@@ -53,8 +53,9 @@ signals:
 
 private:
     bool ensureHelper();              // spawn elevated helper + open socket
-    bool spawnElevatedHelper(quint16 port, const QString &token, QString *err);
+    bool spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err);
     void abortStartup();              // cancel a pending elevation/handshake
+    void clearTokenFile();            // remove the on-disk auth token (best-effort)
     void send(const QJsonObject &obj);
     void onReadyRead();
     void onSocketConnected();
@@ -66,6 +67,7 @@ private:
     QTcpSocket *m_sock = nullptr;
     quint16 m_port = 0;
     QString m_token;
+    QString m_tokenPath; // 0600 file used to hand the token to the elevated helper
     QString m_configPath;
     std::vector<std::string> m_exclusions;
     std::vector<std::string> m_excludedRoutes;

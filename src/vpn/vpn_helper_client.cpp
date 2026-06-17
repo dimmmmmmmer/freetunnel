@@ -1,14 +1,18 @@
 #include "vpn/vpn_helper_client.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QStandardPaths>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTemporaryFile>
 #include <QTimer>
 
 #include "core/AppUiUtils.h" // shellEscape / appleScriptEscape (macOS)
@@ -27,6 +31,14 @@ VpnHelperClient::~VpnHelperClient() {
     }
     if (m_proc)
         m_proc->kill();
+    clearTokenFile();
+}
+
+void VpnHelperClient::clearTokenFile() {
+    if (m_tokenPath.isEmpty())
+        return;
+    QFile::remove(m_tokenPath);
+    m_tokenPath.clear();
 }
 
 static VpnHelperClient::State stateFromString(const QString &s) {
@@ -115,6 +127,7 @@ void VpnHelperClient::abortStartup() {
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; }
     if (m_sock) { m_sock->abort(); m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->kill(); m_proc->deleteLater(); m_proc = nullptr; }
+    clearTokenFile();
 }
 
 bool VpnHelperClient::ensureHelper() {
@@ -138,8 +151,27 @@ bool VpnHelperClient::ensureHelper() {
     m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
             + QString::number(QRandomGenerator::system()->generate64(), 16);
 
+    // Hand the token to the elevated helper via a 0600 file rather than argv, so
+    // it can't be read by other local users through /proc/<pid>/cmdline (Linux)
+    // or `ps`. QTemporaryFile creates it atomically (O_EXCL) with owner-only
+    // permissions; the helper reads it once and deletes it.
+    clearTokenFile();
+    {
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+        QDir().mkpath(dir);
+        QTemporaryFile tf(dir + QStringLiteral("/.fthelper-XXXXXX"));
+        tf.setAutoRemove(false);
+        if (!tf.open()) {
+            fail(tr("Could not create the VPN helper token file"));
+            return false;
+        }
+        tf.write(m_token.toUtf8());
+        tf.close();
+        m_tokenPath = tf.fileName();
+    }
+
     QString err;
-    if (!spawnElevatedHelper(m_port, m_token, &err)) {
+    if (!spawnElevatedHelper(m_port, m_tokenPath, &err)) {
         fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
         return false;
     }
@@ -177,7 +209,7 @@ bool VpnHelperClient::ensureHelper() {
     return true;
 }
 
-bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QString *err) {
+bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
     const QString exe = QCoreApplication::applicationFilePath();
     const QString p = QString::number(port);
 
@@ -185,9 +217,11 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QS
     // Log into the (per-user, non-world-writable) temp dir with an unpredictable
     // name instead of a fixed /tmp path, so a local attacker can't pre-plant a
     // symlink there and have the elevated (root) helper clobber an arbitrary file.
-    const QString inner = QStringLiteral("exec %1 --helper --port %2 --token %3 "
+    // The token path is shell-escaped (it lives under "Application Support", which
+    // contains a space).
+    const QString inner = QStringLiteral("exec %1 --helper --port %2 --token-file %3 "
                                          ">\"${TMPDIR:-/tmp}/freetunnel-helper.$$.log\" 2>&1 &")
-                                  .arg(shellEscape(exe), p, token);
+                                  .arg(shellEscape(exe), p, shellEscape(tokenPath));
     const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
                                    .arg(appleScriptEscape(inner));
     m_proc = new QProcess(this);
@@ -195,7 +229,7 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QS
     if (!m_proc->waitForStarted(5000)) { if (err) *err = tr("Could not launch osascript"); return false; }
     return true;
 #elif defined(Q_OS_WIN)
-    const QString args = QStringLiteral("--helper --port %1 --token %2").arg(p, token);
+    const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"").arg(p, tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -222,10 +256,10 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QS
         args << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
              << QString::fromLocal8Bit(appImage)
              << QStringLiteral("--helper") << QStringLiteral("--port") << p
-             << QStringLiteral("--token") << token;
+             << QStringLiteral("--token-file") << tokenPath;
     } else {
         args << exe << QStringLiteral("--helper") << QStringLiteral("--port") << p
-             << QStringLiteral("--token") << token;
+             << QStringLiteral("--token-file") << tokenPath;
     }
     m_proc->start(QStringLiteral("pkexec"), args);
     if (!m_proc->waitForStarted(5000)) {
@@ -262,6 +296,9 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     const QString type = ev.value("ev").toString();
     if (type == "ready") {
         m_helloAcked = true;
+        // The helper has read (and deleted) the token file; drop our reference
+        // and remove it too if anything lingered.
+        clearTokenFile();
         // Push any pending routing config, then connect if requested.
         setVpnMode(m_selective);
         setKillSwitch(m_killSwitch);
@@ -288,6 +325,7 @@ void VpnHelperClient::setState(State s) {
 
 void VpnHelperClient::fail(const QString &msg) {
     m_starting = false;
+    clearTokenFile(); // startup failed — don't leave the token on disk
     emit vpnError(msg);
     setState(State::Error);
     setState(State::Disconnected);

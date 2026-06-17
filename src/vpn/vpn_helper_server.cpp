@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QFile>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -153,10 +154,23 @@ int runVpnHelper(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     quint16 port = 0;
     QString token;
+    QString tokenFile;
     const QStringList args = QCoreApplication::arguments();
     for (int i = 1; i < args.size() - 1; ++i) {
         if (args[i] == QLatin1String("--port")) port = args[i + 1].toUShort();
-        else if (args[i] == QLatin1String("--token")) token = args[i + 1];
+        else if (args[i] == QLatin1String("--token")) token = args[i + 1]; // legacy/fallback
+        else if (args[i] == QLatin1String("--token-file")) tokenFile = args[i + 1];
+    }
+    // Preferred path: the GUI passes the token in a 0600 file (kept off argv so
+    // other local users can't read it via /proc/<pid>/cmdline). Read it once and
+    // delete it immediately so the secret doesn't linger on disk.
+    if (!tokenFile.isEmpty()) {
+        QFile f(tokenFile);
+        if (f.open(QIODevice::ReadOnly)) {
+            token = QString::fromUtf8(f.readAll()).trimmed();
+            f.close();
+        }
+        QFile::remove(tokenFile);
     }
     if (port == 0 || token.isEmpty())
         return 2;
