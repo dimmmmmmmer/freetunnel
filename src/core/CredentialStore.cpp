@@ -54,8 +54,10 @@ bool macStorePassword(CFStringRef account, CFDataRef secret)
 
 QString macLoadPassword(CFStringRef account)
 {
+    CFDictionaryRef base = macLookupQuery(account);
     CFMutableDictionaryRef query =
-            CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, macLookupQuery(account));
+            CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, base);
+    CFRelease(base);
     CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
     CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
 

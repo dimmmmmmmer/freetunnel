@@ -21,8 +21,7 @@
 #include <shellapi.h>
 #endif
 
-#ifndef Q_OS_MACOS
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 namespace {
 
 QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
@@ -67,7 +66,6 @@ bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringL
 }
 
 } // namespace
-#endif
 #endif
 
 VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent) {}
