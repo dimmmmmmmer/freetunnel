@@ -523,13 +523,16 @@ jobs:
       # manifest independently of GitHub (set GPG_PRIVATE_KEY + GPG_PASSPHRASE
       # repository secrets; GPG_KEY_ID optional if the imported key is unique).
       - name: Sign checksums
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           set -eux
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "GPG_PRIVATE_KEY not configured — skipping checksum signature"
+            exit 0
+          fi
           cd artifacts
           install -d -m 700 "$HOME/.gnupg"
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
