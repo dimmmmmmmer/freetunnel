@@ -22,7 +22,8 @@ Window {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        icon.source: "qrc:/assets/logo.svg"
+        // Bright mark when connected, dimmed when off.
+        icon.source: backend.connected ? "qrc:/assets/logo.svg" : "qrc:/assets/logo-dim.svg"
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
         // Click opens the menu (below). Double-click brings the window forward.

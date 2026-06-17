@@ -2,6 +2,7 @@
     <qresource prefix="/assets">
         <file>logo.png</file>
         <file>logo.svg</file>
+        <file>logo-dim.svg</file>
         <file alias="LICENSE">../LICENSE</file>
     </qresource>
     <qresource prefix="/icons">

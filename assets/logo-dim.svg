@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
+  <!-- Dimmed FreeTunnel mark for the tray when disconnected: lower contrast,
+       muted greys. -->
+  <path d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z" fill="#8a8a8a"/>
+  <path d="M24 86 L24 50 A26 26 0 0 1 76 50 L76 86 Z" fill="#787878"/>
+  <path d="M36 86 L36 55 A14 14 0 0 1 64 55 L64 86 Z" fill="#666666"/>
+  <path d="M46 86 L46 60 A4 4 0 0 1 54 60 L54 86 Z" fill="#555555"/>
+</svg>
