@@ -147,6 +147,14 @@ if (WIN32)
     target_link_libraries(FreeTunnel PRIVATE shell32)
 endif()
 
+# OpenSSL (already a transitive core dep) for in-app Ed25519 verification of the
+# update manifest signature in UpdateChecker. Linked explicitly so the EVP
+# symbols are guaranteed on the GUI target's link line.
+find_package(OpenSSL QUIET)
+if (OpenSSL_FOUND)
+    target_link_libraries(FreeTunnel PRIVATE OpenSSL::Crypto)
+endif()
+
 if (APPLE)
     # Place macOS icon into the bundle Resources dir
     set_source_files_properties(assets/logo.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")

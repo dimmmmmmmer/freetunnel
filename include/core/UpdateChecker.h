@@ -25,6 +25,7 @@ public:
         QString installerUrl; ///< direct download URL for the platform asset
         QString assetName;    ///< filename of the installer asset
         QString checksumsUrl; ///< SHA256SUMS.txt download URL (when published)
+        QString signatureUrl; ///< SHA256SUMS.txt.sig (Ed25519) URL (when published)
     };
 
     /**
@@ -63,8 +64,10 @@ private slots:
 private:
     bool isNewerVersion(const QString &remote) const;
     void fetchChecksumsThenInstaller();
+    void fetchSignature();
     void fetchInstaller();
     void onChecksumsFetched(QNetworkReply *reply);
+    void onSignatureFetched(QNetworkReply *reply);
     void onInstallerFetched(QNetworkReply *reply);
 
     QString m_githubRepo;
@@ -72,5 +75,6 @@ private:
     QNetworkAccessManager *m_nam = nullptr;
     ReleaseInfo m_latest;
     QByteArray m_checksumsData;
+    QByteArray m_signatureData;
     QString m_downloadPath;
 };

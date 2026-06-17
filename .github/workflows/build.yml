@@ -548,6 +548,24 @@ jobs:
           fi
           ls -la SHA256SUMS.txt*
 
+      # In-app verification: sign the manifest with the Ed25519 release key so the
+      # updater can verify it against the public key compiled into the binary.
+      # Set the ED25519_SIGNING_KEY repo secret to a PEM private key to enable.
+      - name: Sign checksums (Ed25519, for in-app verify)
+        env:
+          ED25519_SIGNING_KEY: ${{ secrets.ED25519_SIGNING_KEY }}
+        run: |
+          set -eux
+          if [ -z "${ED25519_SIGNING_KEY:-}" ]; then
+            echo "ED25519_SIGNING_KEY not configured — skipping in-app signature"
+            exit 0
+          fi
+          cd artifacts
+          printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem
+          openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS.txt -out SHA256SUMS.txt.sig
+          rm -f ed25519.pem
+          ls -la SHA256SUMS.txt.sig
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v3
         with:

@@ -13,6 +13,54 @@
 #include "ReleaseVerify.h"
 #include "VersionCompare.h"
 
+#if __has_include(<openssl/evp.h>)
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#define FT_HAVE_OPENSSL 1
+#endif
+
+namespace {
+// Ed25519 public key (SubjectPublicKeyInfo PEM) used to verify SHA256SUMS.txt.sig.
+// Empty => signature verification is OFF and updates rely on the SHA-256 match
+// against SHA256SUMS.txt fetched over HTTPS. To enable supply-chain verification:
+//   1. openssl genpkey -algorithm ed25519 -out ed25519.pem
+//   2. openssl pkey -in ed25519.pem -pubout      → paste the PEM below
+//   3. add ed25519.pem as the ED25519_SIGNING_KEY repo secret (CI signs releases)
+const char *kUpdateSigningPublicKeyPem = "";
+
+bool signatureVerificationConfigured() {
+    return kUpdateSigningPublicKeyPem && kUpdateSigningPublicKeyPem[0] != '\0';
+}
+
+#ifdef FT_HAVE_OPENSSL
+bool verifyEd25519(const QByteArray &data, const QByteArray &sig, const QByteArray &pubPem) {
+    if (pubPem.isEmpty() || sig.isEmpty())
+        return false;
+    BIO *bio = BIO_new_mem_buf(pubPem.constData(), static_cast<int>(pubPem.size()));
+    if (!bio)
+        return false;
+    EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+    if (!pkey)
+        return false;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    bool ok = false;
+    if (ctx && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, pkey) == 1) {
+        ok = EVP_DigestVerify(ctx,
+                              reinterpret_cast<const unsigned char *>(sig.constData()),
+                              static_cast<size_t>(sig.size()),
+                              reinterpret_cast<const unsigned char *>(data.constData()),
+                              static_cast<size_t>(data.size())) == 1;
+    }
+    if (ctx)
+        EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    return ok;
+}
+#endif
+} // namespace
+
 UpdateChecker::UpdateChecker(const QString &githubRepo,
                              const QString &currentVersion,
                              QObject *parent)
@@ -82,6 +130,10 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
             m_latest.checksumsUrl = asset.value("browser_download_url").toString();
             continue;
         }
+        if (name == QLatin1String("SHA256SUMS.txt.sig")) {
+            m_latest.signatureUrl = asset.value("browser_download_url").toString();
+            continue;
+        }
 #ifdef _WIN32
         if (name.endsWith(".exe", Qt::CaseInsensitive)) {
 #elif defined(__APPLE__)
@@ -147,7 +199,47 @@ void UpdateChecker::onChecksumsFetched(QNetworkReply *reply)
         return;
     }
     m_checksumsData = reply->readAll();
+
+    if (signatureVerificationConfigured()) {
+        if (m_latest.signatureUrl.isEmpty()) {
+            emit downloadFailed(QStringLiteral("This release is not signed — refusing to update."));
+            return;
+        }
+        fetchSignature();
+        return;
+    }
     fetchInstaller();
+}
+
+void UpdateChecker::fetchSignature()
+{
+    QNetworkRequest req(m_latest.signatureUrl);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { onSignatureFetched(reply); });
+}
+
+void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
+{
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+        emit downloadFailed(QStringLiteral("Could not download the signature: %1").arg(reply->errorString()));
+        return;
+    }
+    m_signatureData = reply->readAll();
+
+#ifdef FT_HAVE_OPENSSL
+    const QByteArray pub(kUpdateSigningPublicKeyPem);
+    if (!verifyEd25519(m_checksumsData, m_signatureData, pub)) {
+        emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
+        return;
+    }
+    fetchInstaller();
+#else
+    // A signing key is configured but this build can't verify it — fail closed.
+    emit downloadFailed(QStringLiteral("This build cannot verify update signatures."));
+#endif
 }
 
 void UpdateChecker::fetchInstaller()
