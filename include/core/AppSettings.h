@@ -5,24 +5,11 @@
 #include <QMap>
 
 struct AppSettings {
-    bool save_logs = true;
-    QString log_level = "info";
     QString log_path = "";
     QString theme_mode = "system";
     QString language = "en";
     bool auto_connect_on_start = false;
-    bool show_logs_panel = true;
-    bool show_traffic_in_status = true;
-    bool show_traffic_graph = true;
-    bool notify_on_state = true;
-    bool notify_only_errors = false;
     bool killswitch_enabled = false;
-    bool strict_certificate_check = true;
-    bool first_run_checked = false;
-
-    // Custom DNS servers (override config dns_upstreams when non-empty)
-    bool custom_dns_enabled = false;
-    QStringList custom_dns_servers = {"1.1.1.1", "8.8.8.8"};
 
     // Domain bypass rules: domains matching these patterns skip the VPN tunnel.
     // Supports wildcards: *.example.com, exact: example.com. domain_bypass_rules
@@ -53,9 +40,6 @@ struct AppSettings {
 
     // Last used config
     QString last_config_path = "";
-
-    // Notifications
-    bool enable_notifications = true;
 };
 
 AppSettings loadAppSettings();
