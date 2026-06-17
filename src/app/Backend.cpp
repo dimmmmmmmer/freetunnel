@@ -582,6 +582,9 @@ void Backend::appendLog(const QString &level, const QString &msg) {
     // Persist to disk so the log survives restarts and shows up in the folder.
     const QString lp = logPath();
     QDir().mkpath(QFileInfo(lp).absolutePath());
+    // The log can contain connection/domain info — keep it owner-only. Set perms
+    // only when first creating the file to avoid a syscall on every line.
+    const bool logExisted = QFileInfo::exists(lp);
     QFile f(lp);
     if (f.open(QIODevice::Append | QIODevice::Text)) {
         const QString line = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd"))
@@ -589,6 +592,8 @@ void Backend::appendLog(const QString &level, const QString &msg) {
                 + QLatin1Char('\n');
         f.write(line.toUtf8());
         f.close();
+        if (!logExisted)
+            QFile::setPermissions(lp, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     }
     emit logChanged();
 }
@@ -750,6 +755,10 @@ bool Backend::createConfig(const QVariantMap &f) {
     }
     file.write(t.toUtf8());
     file.close();
+    // The config holds VPN credentials in plaintext; restrict it to the owner so
+    // other local users can't read them. The elevated helper runs as root and
+    // can still read it. Best-effort (ignored on filesystems without perms).
+    QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 
     QStringList stored = loadStoredConfigs();
     const bool editing = editIndex >= 0;
@@ -1057,6 +1066,8 @@ bool Backend::importDeepLink(const QString &link) {
     }
     f.write(prepared->tomlContent.toUtf8());
     f.close();
+    // Imported config carries credentials in plaintext — owner-only (see createConfig).
+    QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
         stored << target;

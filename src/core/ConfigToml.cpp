@@ -6,8 +6,17 @@
 namespace freetunnel {
 
 static QString tomlEsc(const QString &s) {
-    QString o = s;
-    o.replace('\\', "\\\\").replace('"', "\\\"");
+    // Escape backslash/quote and strip C0 control characters (newlines, tabs, …)
+    // and DEL so a field value can't break out of its quoted TOML string.
+    QString o;
+    o.reserve(s.size());
+    for (const QChar &c : s) {
+        if (c < QChar(0x20) || c == QChar(0x7F))
+            continue;
+        if (c == QLatin1Char('\\') || c == QLatin1Char('"'))
+            o += QLatin1Char('\\');
+        o += c;
+    }
     return o;
 }
 

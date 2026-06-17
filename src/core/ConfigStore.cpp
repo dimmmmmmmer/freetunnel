@@ -37,8 +37,12 @@ void saveStoredConfigs(const QStringList &configs) {
     for (const QString &c : configs) {
         arr.append(c);
     }
-    QFile f(storagePath());
+    const QString path = storagePath();
+    QFile f(path);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
+        f.close();
+        // Index of config paths — keep owner-only to match the configs themselves.
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     }
 }

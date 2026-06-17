@@ -134,6 +134,10 @@ int main(int argc, char *argv[]) {
     }
     QLocalServer::removeServer(kInstanceKey);
     auto *server = new QLocalServer(&app);
+    // Only the same user may connect to the single-instance socket, so another
+    // local user can't push control commands (toggle/connect/import) into a
+    // running session.
+    server->setSocketOptions(QLocalServer::UserAccessOption);
     server->listen(kInstanceKey);
 
     UrlOpenFilter urlFilter;

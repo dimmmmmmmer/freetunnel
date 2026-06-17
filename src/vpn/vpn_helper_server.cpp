@@ -65,8 +65,16 @@ private:
         if (m_sock) { s->close(); s->deleteLater(); return; } // single GUI client
         m_sock = s;
         connect(m_sock, &QTcpSocket::readyRead, this, &HelperServer::onReadyRead);
-        connect(m_sock, &QTcpSocket::disconnected, this, []() {
-            QCoreApplication::quit(); // GUI gone -> tear down the privileged helper
+        connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
+            // Only the authenticated GUI dropping tears the privileged helper
+            // down. An unauthenticated/stray local connection going away must
+            // not kill it (trivial DoS) — just free the slot for the real GUI.
+            if (m_authed) {
+                QCoreApplication::quit();
+                return;
+            }
+            if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
+            m_buf.clear();
         });
     }
 
@@ -77,6 +85,13 @@ private:
 
     void onReadyRead() {
         m_buf += m_sock->readAll();
+        // Commands are tiny single-line JSON objects. Bound the buffer so a local
+        // client can't exhaust memory in the privileged process by streaming a
+        // huge line without a newline.
+        if (m_buf.size() > 65536) {
+            m_sock->close();
+            return;
+        }
         int nl;
         while ((nl = m_buf.indexOf('\n')) >= 0) {
             const QByteArray line = m_buf.left(nl);

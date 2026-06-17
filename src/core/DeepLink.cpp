@@ -85,8 +85,20 @@ QStringList decodeStringList(const QByteArray &value, bool *ok) {
 }
 
 QString tomlEscape(const QString &s) {
-    QString out = s;
-    out.replace('\\', "\\\\").replace('"', "\\\"");
+    // Escape backslash/quote AND drop C0 control characters (newlines, tabs, …)
+    // and DEL. TOML basic strings forbid raw control chars, and leaving them in
+    // would let a crafted deep-link field (e.g. a username containing "\n key =
+    // value") break out of its quoted value and inject arbitrary TOML keys into
+    // the generated config.
+    QString out;
+    out.reserve(s.size());
+    for (const QChar &c : s) {
+        if (c < QChar(0x20) || c == QChar(0x7F))
+            continue;
+        if (c == QLatin1Char('\\') || c == QLatin1Char('"'))
+            out += QLatin1Char('\\');
+        out += c;
+    }
     return out;
 }
 

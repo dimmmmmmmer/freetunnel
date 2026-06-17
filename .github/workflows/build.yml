@@ -507,13 +507,28 @@ jobs:
         with:
           path: artifacts
 
+      # Publish SHA256 checksums so users can verify the (unsigned) downloads.
+      # Names match the release asset names (basenames), which is what GitHub
+      # exposes once the nested artifact folders are flattened.
+      - name: Generate checksums
+        run: |
+          set -eux
+          cd artifacts
+          find . -type f ! -name 'SHA256SUMS.txt' -exec sha256sum {} + \
+            | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
+            | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            artifacts/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            Unsigned builds.
+            Unsigned builds. Verify your download against `SHA256SUMS.txt`
+            (e.g. `sha256sum -c SHA256SUMS.txt` / `shasum -a 256 -c SHA256SUMS.txt`).
 
             - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
               (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its

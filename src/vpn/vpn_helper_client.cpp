@@ -182,8 +182,11 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &token, QS
     const QString p = QString::number(port);
 
 #if defined(Q_OS_MACOS)
+    // Log into the (per-user, non-world-writable) temp dir with an unpredictable
+    // name instead of a fixed /tmp path, so a local attacker can't pre-plant a
+    // symlink there and have the elevated (root) helper clobber an arbitrary file.
     const QString inner = QStringLiteral("exec %1 --helper --port %2 --token %3 "
-                                         ">/tmp/freetunnel-helper.log 2>&1 &")
+                                         ">\"${TMPDIR:-/tmp}/freetunnel-helper.$$.log\" 2>&1 &")
                                   .arg(shellEscape(exe), p, token);
     const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
                                    .arg(appleScriptEscape(inner));
