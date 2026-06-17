@@ -11,6 +11,65 @@ static QString defaultLogPath() {
 #endif
 }
 
+QStringList defaultExcludedRoutes() {
+    // Private / special-use IPv4 ranges that should never be tunnelled
+    // (RFC1918 / CGNAT / link-local / etc.).
+    return {
+        QStringLiteral("10.0.0.0/8"),       QStringLiteral("100.64.0.0/10"),
+        QStringLiteral("169.254.0.0/16"),   QStringLiteral("172.16.0.0/12"),
+        QStringLiteral("192.0.0.0/24"),     QStringLiteral("192.168.0.0/16"),
+        QStringLiteral("255.255.255.255/32")};
+}
+
+QStringList recommendedRussiaDomains() {
+    // Curated set of RU services that work best routed through the VPN. Mirrors
+    // the preset shipped by the native client.
+    return {
+        QStringLiteral("*.ru"), QStringLiteral(".ru"), QStringLiteral("*.рф"), QStringLiteral(".рф"),
+        QStringLiteral("*.su"), QStringLiteral(".su"),
+        QStringLiteral("yandex.ru"), QStringLiteral("*.yandex.ru"), QStringLiteral("ya.ru"),
+        QStringLiteral("*.ya.ru"), QStringLiteral("yastatic.net"), QStringLiteral("*.yastatic.net"),
+        QStringLiteral("yandex.net"), QStringLiteral("*.yandex.net"),
+        QStringLiteral("vk.com"), QStringLiteral("*.vk.com"), QStringLiteral("vk.ru"),
+        QStringLiteral("*.vk.ru"), QStringLiteral("vkontakte.ru"), QStringLiteral("*.vkontakte.ru"),
+        QStringLiteral("mail.ru"), QStringLiteral("*.mail.ru"), QStringLiteral("list.ru"),
+        QStringLiteral("*.list.ru"), QStringLiteral("bk.ru"), QStringLiteral("*.bk.ru"),
+        QStringLiteral("inbox.ru"), QStringLiteral("*.inbox.ru"),
+        QStringLiteral("ok.ru"), QStringLiteral("*.ok.ru"),
+        QStringLiteral("rambler.ru"), QStringLiteral("*.rambler.ru"), QStringLiteral("lenta.ru"),
+        QStringLiteral("*.lenta.ru"), QStringLiteral("ria.ru"), QStringLiteral("*.ria.ru"),
+        QStringLiteral("tass.ru"), QStringLiteral("*.tass.ru"),
+        QStringLiteral("gosuslugi.ru"), QStringLiteral("*.gosuslugi.ru"), QStringLiteral("mos.ru"),
+        QStringLiteral("*.mos.ru"), QStringLiteral("api.mos.ru"), QStringLiteral("parking.mos.ru"),
+        QStringLiteral("avito.ru"), QStringLiteral("*.avito.ru"), QStringLiteral("cian.ru"),
+        QStringLiteral("*.cian.ru"),
+        QStringLiteral("ozon.ru"), QStringLiteral("*.ozon.ru"), QStringLiteral("wildberries.ru"),
+        QStringLiteral("*.wildberries.ru"),
+        QStringLiteral("nalog.gov.ru"), QStringLiteral("*.nalog.gov.ru"), QStringLiteral("*.gov.ru"),
+        QStringLiteral("pfr.gov.ru"), QStringLiteral("*.pfr.gov.ru"), QStringLiteral("fss.ru"),
+        QStringLiteral("*.fss.ru"), QStringLiteral("rosreestr.gov.ru"), QStringLiteral("*.rosreestr.gov.ru"),
+        QStringLiteral("gibdd.ru"), QStringLiteral("*.gibdd.ru"), QStringLiteral("мвд.рф"),
+        QStringLiteral("*.мвд.рф"),
+        QStringLiteral("cbr.ru"), QStringLiteral("*.cbr.ru"), QStringLiteral("minfin.gov.ru"),
+        QStringLiteral("*.minfin.gov.ru"),
+        QStringLiteral("government.ru"), QStringLiteral("*.government.ru"), QStringLiteral("kremlin.ru"),
+        QStringLiteral("*.kremlin.ru"),
+        QStringLiteral("rospotrebnadzor.ru"), QStringLiteral("*.rospotrebnadzor.ru"),
+        QStringLiteral("tbank.ru"), QStringLiteral("*.tbank.ru"), QStringLiteral("tinkoff.ru"),
+        QStringLiteral("*.tinkoff.ru"), QStringLiteral("tinkoff.com"), QStringLiteral("*.tinkoff.com"),
+        QStringLiteral("sberbank.ru"), QStringLiteral("*.sberbank.ru"), QStringLiteral("sber.ru"),
+        QStringLiteral("*.sber.ru"),
+        QStringLiteral("vtb.ru"), QStringLiteral("*.vtb.ru"),
+        QStringLiteral("alfabank.ru"), QStringLiteral("*.alfabank.ru"), QStringLiteral("alfabank.com"),
+        QStringLiteral("*.alfabank.com"),
+        QStringLiteral("raiffeisen.ru"), QStringLiteral("*.raiffeisen.ru"),
+        QStringLiteral("gazprombank.ru"), QStringLiteral("*.gazprombank.ru"),
+        QStringLiteral("open.ru"), QStringLiteral("*.open.ru"),
+        QStringLiteral("psbank.ru"), QStringLiteral("*.psbank.ru"),
+        QStringLiteral("rosselkhozbank.ru"), QStringLiteral("*.rosselkhozbank.ru"),
+        QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")};
+}
+
 AppSettings loadAppSettings() {
     // Uses QCoreApplication's organization/application name (set to "FreeTunnel"
     // in main()), so tests can redirect the store to an isolated domain.
@@ -34,14 +93,7 @@ AppSettings loadAppSettings() {
     out.custom_dns_servers = s.value("dns/custom_servers", QStringList{"1.1.1.1", "8.8.8.8"}).toStringList();
     out.domain_bypass_enabled = s.value("bypass/enabled", false).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
-    // Default excluded routes: private/special-use ranges that should never be
-    // tunnelled (RFC1918/CGNAT/link-local/etc.). Used on first run.
-    const QStringList kDefaultExcludedRoutes = {
-        QStringLiteral("10.0.0.0/8"),       QStringLiteral("100.64.0.0/10"),
-        QStringLiteral("169.254.0.0/16"),   QStringLiteral("172.16.0.0/12"),
-        QStringLiteral("192.0.0.0/24"),     QStringLiteral("192.168.0.0/16"),
-        QStringLiteral("255.255.255.255/32")};
-    out.excluded_routes = s.value("routing/excluded_routes", kDefaultExcludedRoutes).toStringList();
+    out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
     // Split-tunnel profiles.
     const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
     out.profiles.clear();

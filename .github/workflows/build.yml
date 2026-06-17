@@ -82,6 +82,10 @@ jobs:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ env.UPSTREAM_REF }}
           path: upstream
+          # Full history + tags so `git describe --tags` can resolve the core to
+          # a version tag (not just the short commit) for the About footer.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Inject client into upstream tree
         shell: bash
@@ -140,6 +144,9 @@ jobs:
           # Target macOS 11 (Big Sur, first Apple-Silicon release) for broad
           # compatibility. Set early so conan-built deps and the app share it.
           echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          # The runner ships preinstalled aws/azure taps that Homebrew now warns
+          # are "not trusted"; we don't use them, so drop them to silence it.
+          brew untap aws/tap azure/bicep 2>/dev/null || true
           # ninja is preinstalled on the macOS runner; only install if missing.
           brew list ninja >/dev/null 2>&1 || brew install ninja
           pip install -r upstream/requirements.txt
@@ -281,6 +288,11 @@ jobs:
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
           wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
           chmod +x "$ld" "$ldqt"
+          # Use the static type2 runtime (bundles libfuse) so the AppImage mounts
+          # itself without system libfuse2 — needed on Ubuntu 22.04 / Pop!_OS etc.
+          wget -q -O runtime-x86_64 \
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64" \
+            && chmod +x runtime-x86_64 && export LDAI_RUNTIME_FILE="$PWD/runtime-x86_64" || true
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
           cp client/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png

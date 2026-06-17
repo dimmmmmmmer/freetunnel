@@ -96,6 +96,9 @@ public:
     QVariantList logEntries() const { return m_log; }
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE void openLogFolder();
+    Q_INVOKABLE QString logText() const; // whole log as plain text (for Copy)
+    Q_INVOKABLE void copyToClipboard(const QString &text) const;
+    Q_INVOKABLE QString readTextFile(const QString &pathOrUrl) const; // for cert load
 
     bool splitEnabled() const { return m_settings.domain_bypass_enabled; }
     QStringList domains() const { return m_settings.domain_bypass_rules; }
@@ -110,6 +113,10 @@ public:
     Q_INVOKABLE bool addExcludedRoute(const QString &route);
     Q_INVOKABLE void removeExcludedRoute(int index);
     Q_INVOKABLE void clearExcludedRoutes();
+    Q_INVOKABLE void restoreDefaultExcludedRoutes();
+
+    // Add the built-in "Recommended for Russia" domain set to the active profile.
+    Q_INVOKABLE void addRecommendedRussia();
 
     QStringList profiles() const;
     QString activeProfile() const { return m_settings.active_profile; }
@@ -165,6 +172,7 @@ private:
     void applySplitRules(); // push active profile's domain-bypass list to the core
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void trimLogFile();     // cap the log file size so it never grows unbounded
+    void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;

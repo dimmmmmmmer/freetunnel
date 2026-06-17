@@ -29,8 +29,12 @@ Column {
         }
         Text {
             text: placeholder; color: placeholderColor; font.pixelSize: 14
-            anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            elide: Text.ElideRight
             visible: input.text.length === 0 && !input.activeFocus
         }
+        // I-beam cursor on hover (NoButton so it never steals clicks from the input).
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor }
     }
 }

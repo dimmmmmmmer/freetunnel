@@ -164,6 +164,17 @@ int main(int argc, char *argv[]) {
     if (!controlArg.isEmpty())
         backend.handleControl(controlArg);
 
+    // macOS: after the window is hidden (red button), a Dock-icon click
+    // reactivates the app — re-show the window then.
+    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
+                     [win](Qt::ApplicationState s) {
+                         if (s == Qt::ApplicationActive && win && !win->isVisible()) {
+                             win->show();
+                             win->raise();
+                             win->requestActivate();
+                         }
+                     });
+
     // A second instance forwards its command here.
     QObject::connect(server, &QLocalServer::newConnection, &app, [server, &backend, win]() {
         QLocalSocket *c = server->nextPendingConnection();

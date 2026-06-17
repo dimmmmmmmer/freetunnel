@@ -60,3 +60,8 @@ struct AppSettings {
 
 AppSettings loadAppSettings();
 void saveAppSettings(const AppSettings &cfg);
+
+// Private/special-use IPv4 ranges that should bypass the tunnel by default.
+QStringList defaultExcludedRoutes();
+// Built-in "Recommended for Russia" domain bypass set.
+QStringList recommendedRussiaDomains();

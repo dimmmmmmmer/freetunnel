@@ -83,6 +83,11 @@ public:
     Q_INVOKABLE bool addExcludedRoute(const QString &r) { if (!r.trimmed().isEmpty()) m_excludedRoutes << r.trimmed(); emit changed(); return true; }
     Q_INVOKABLE void removeExcludedRoute(int i) { if (i >= 0 && i < m_excludedRoutes.size()) m_excludedRoutes.removeAt(i); emit changed(); }
     Q_INVOKABLE void clearExcludedRoutes() { m_excludedRoutes.clear(); emit changed(); }
+    Q_INVOKABLE void restoreDefaultExcludedRoutes() { m_excludedRoutes = {"10.0.0.0/8","192.168.0.0/16"}; emit changed(); }
+    Q_INVOKABLE void addRecommendedRussia() { m_profiles[m_activeProfile] << "*.ru" << "*.рф"; emit changed(); }
+    Q_INVOKABLE void copyToClipboard(const QString &) {}
+    Q_INVOKABLE QString logText() const { return QStringLiteral("preview log"); }
+    Q_INVOKABLE QString readTextFile(const QString &) const { return QString(); }
     QStringList profiles() const { return m_profileOrder; }
     QString activeProfile() const { return m_activeProfile; }
     Q_INVOKABLE void selectProfile(const QString &n) { if (m_profiles.contains(n)) m_activeProfile = n; emit changed(); }
