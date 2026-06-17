@@ -100,6 +100,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     registerHotkeys();
     trimLogFile();
     loadLogTail(); // show previous session's log instead of starting blank
+    appendLog(QStringLiteral("INFO"),
+              tr("FreeTunnel %1 started").arg(appVersion())); // also ensures the log file exists
 
     // Connect on startup if requested (deferred so the window shows first).
     if (m_settings.auto_connect_on_start && !m_activePath.isEmpty())
@@ -558,8 +560,9 @@ void Backend::appendLog(const QString &level, const QString &msg) {
     if (m_log.size() > 500)
         m_log.removeFirst();
     // Persist to disk so the log survives restarts and shows up in the folder.
-    QFile f(logPath());
-    QDir().mkpath(QFileInfo(f).absolutePath());
+    const QString lp = logPath();
+    QDir().mkpath(QFileInfo(lp).absolutePath());
+    QFile f(lp);
     if (f.open(QIODevice::Append | QIODevice::Text)) {
         const QString line = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd"))
                 + QLatin1Char(' ') + time + QLatin1Char('\t') + level + QLatin1Char('\t') + msg

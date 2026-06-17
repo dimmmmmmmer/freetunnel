@@ -295,7 +295,8 @@ jobs:
             && chmod +x runtime-x86_64 && export LDAI_RUNTIME_FILE="$PWD/runtime-x86_64" || true
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
-          cp client/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
+          # linuxdeploy requires icon pixel size to match the hicolor/NxN folder (256 here).
+          cp client/assets/logo-256.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
             'Exec=FreeTunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
@@ -310,7 +311,11 @@ jobs:
             --library "$(g++-13 -print-file-name=libgcc_s.so.1)" \
             --output appimage
           img=$(ls FreeTunnel*.AppImage 2>/dev/null | head -1)
-          [ -n "$img" ] && mv "$img" out/${{ matrix.artifact }}.AppImage || echo "AppImage build skipped/failed"
+          if [ -n "$img" ]; then
+            mv "$img" out/${{ matrix.artifact }}.AppImage
+          else
+            echo "::warning::AppImage build failed (tar.gz artifact is still available)"
+          fi
           set -e
           ls -la out
 

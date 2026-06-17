@@ -7,8 +7,9 @@ import Qt.labs.platform as Platform
 Window {
     id: win
     visible: true
-    width: 420
-    height: 620
+    // Default to the smallest comfortable size.
+    width: 360
+    height: 520
     minimumWidth: 360
     minimumHeight: 480
     color: theme.bg
@@ -277,10 +278,10 @@ Window {
             transform: Translate { y: selectPopup.open ? 0 : -8
                                    Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
             width: 200
-            height: spCol.implicitHeight + 6
+            height: spCol.implicitHeight + 12
             radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
             Column {
-                id: spCol; width: parent.width; y: 3
+                id: spCol; width: parent.width - 10; x: 5; y: 6
                 Repeater {
                     model: selectPopup.model
                     Rectangle {
@@ -324,8 +325,8 @@ Window {
         id: cx
         property bool onAccent: false
         signal clicked()
-        implicitWidth: 13; implicitHeight: 13
-        Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 11
+        implicitWidth: 15; implicitHeight: 15
+        Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14
                color: cxMa.containsMouse ? theme.danger : (cx.onAccent ? "white" : theme.textDim) }
         MouseArea { id: cxMa; anchors.fill: parent; anchors.margins: -6
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cx.clicked() }
@@ -376,20 +377,15 @@ Window {
             anchors.fill: parent
             Text { text: dd.label; color: theme.text; font.pixelSize: 14 }
             Item { Layout.fillWidth: true }
-            // A bordered select box (matches the protocol/hotkey controls) so it
-            // clearly reads as a dropdown.
-            Rectangle {
-                id: ddVal
-                Layout.preferredHeight: 30
-                Layout.preferredWidth: ddRow.width + 22
-                radius: 8; color: theme.inputBg
-                border.width: 1; border.color: ddMa.containsMouse ? theme.accent : theme.inputBorder
-                Behavior on border.color { ColorAnimation { duration: 120 } }
-                Row { id: ddRow; anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+            // Plain value + arrow (no box); brightens on hover.
+            Item {
+                id: ddVal; Layout.preferredWidth: ddRow.width; Layout.fillHeight: true
+                Row { id: ddRow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                     Text { anchors.verticalCenter: parent.verticalCenter
-                           text: dd.labelFor(dd.value); color: theme.text; font.pixelSize: 14 }
+                           text: dd.labelFor(dd.value)
+                           color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 14 }
                     Text { anchors.verticalCenter: parent.verticalCenter; text: "▾"
-                           color: theme.textDim; font.pixelSize: 15 }
+                           color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 16 }
                 }
                 MouseArea { id: ddMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: win.showSelect(ddVal, dd.model, dd.value, function(v){ dd.picked(v) }) }
@@ -671,7 +667,7 @@ Window {
                             property bool isActive: modelData === backend.activeProfile
                             property bool isDefault: modelData === "Default"
                             radius: 13; height: 28
-                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 11 + 5 + 13 + 9)
+                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 42)
                             color: isActive ? theme.accent : (chipMa.containsMouse ? theme.border : theme.surface)
                             Behavior on color { ColorAnimation { duration: 120 } }
                             MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
@@ -715,15 +711,18 @@ Window {
                            visible: npInput.text.length === 0 }
                 }
                 Item { Layout.preferredHeight: 14 }
-                RowLayout { Layout.fillWidth: true; spacing: 12
-                    SectionLabel { text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
-                    Item { Layout.fillWidth: true }
+                RowLayout { Layout.fillWidth: true; spacing: 10
+                    SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight
+                        text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
                     Text { text: qsTr("Recommended for Russia"); font.pixelSize: 12
                            color: recMa.containsMouse ? theme.text : theme.accent; font.underline: recMa.containsMouse
                         MouseArea { id: recMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor; onClicked: backend.addRecommendedRussia() } }
-                    Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12; visible: backend.domains.length > 0
-                        MouseArea { anchors.fill: parent; anchors.margins: -4; onClicked: win.showConfirm(qsTr("Clear all domains?"),
+                    Text { text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
+                           color: clrDomMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
+                           font.underline: clrDomMa.containsMouse
+                        MouseArea { id: clrDomMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor; onClicked: win.showConfirm(qsTr("Clear all domains?"),
                             qsTr("Clear"), function(){ backend.clearDomains() }) } }
                 }
                 Flow {
@@ -738,7 +737,7 @@ Window {
                             required property string modelData
                             required property int index
                             radius: 13; color: theme.surface
-                            implicitWidth: dlabel.width + 14 + 11 + 6; implicitHeight: 28
+                            implicitWidth: dlabel.width + 37; implicitHeight: 28
                             Text { id: dlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                    anchors.verticalCenter: parent.verticalCenter; text: domChip.modelData
                                    width: Math.min(implicitWidth, 190); elide: Text.ElideRight
@@ -777,6 +776,8 @@ Window {
     Component {
         id: configsPage
         Item {
+            // Cmd/Ctrl+V tries to import a config from the clipboard.
+            Shortcut { sequences: [StandardKey.Paste]; onActivated: backend.importFromClipboard() }
             // Header: Add (+) opens the import/create menu, Ping (speedometer).
             RowLayout {
                 id: cfgHdr
@@ -786,7 +787,11 @@ Window {
                     width: 40; height: 32; radius: 8
                     color: addMa.containsMouse ? theme.surface : theme.bg
                     Behavior on color { ColorAnimation { duration: 120 } }
-                    Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 22 }
+                    // Drawn plus (same size/weight as the speedometer icon, perfectly centred).
+                    Item { anchors.centerIn: parent; width: 22; height: 22
+                        Rectangle { anchors.centerIn: parent; width: 16; height: 2.2; radius: 1.1; color: theme.accent }
+                        Rectangle { anchors.centerIn: parent; width: 2.2; height: 16; radius: 1.1; color: theme.accent }
+                    }
                     MouseArea { id: addMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: importMenu.open = !importMenu.open }
                 }
@@ -931,16 +936,18 @@ Window {
                 Item { Layout.preferredHeight: 16 }
 
                 // ----- Excluded routes (subnets that bypass the tunnel) -----
-                RowLayout { Layout.fillWidth: true; spacing: 12
-                    SectionLabel { text: qsTr("Excluded routes") }
-                    Item { Layout.fillWidth: true }
+                RowLayout { Layout.fillWidth: true; spacing: 10
+                    SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; text: qsTr("Excluded routes") }
                     Text { text: qsTr("Restore defaults"); font.pixelSize: 12
                            color: rdMa.containsMouse ? theme.text : theme.accent; font.underline: rdMa.containsMouse
                         MouseArea { id: rdMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor; onClicked: backend.restoreDefaultExcludedRoutes() } }
-                    Text { text: qsTr("Clear all"); color: theme.danger; font.pixelSize: 12
+                    Text { text: qsTr("Clear all"); font.pixelSize: 12
                         visible: backend.excludedRoutes.length > 0
-                        MouseArea { anchors.fill: parent; anchors.margins: -4; onClicked: win.showConfirm(qsTr("Clear all excluded routes?"),
+                        color: clrRtMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
+                        font.underline: clrRtMa.containsMouse
+                        MouseArea { id: clrRtMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor; onClicked: win.showConfirm(qsTr("Clear all excluded routes?"),
                             qsTr("Clear"), function(){ backend.clearExcludedRoutes() }) } }
                 }
                 Flow {
@@ -954,7 +961,7 @@ Window {
                             required property string modelData
                             required property int index
                             radius: 13; color: theme.surface
-                            implicitWidth: rlabel.width + 14 + 11 + 6; implicitHeight: 28
+                            implicitWidth: rlabel.width + 37; implicitHeight: 28
                             Text { id: rlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                    anchors.verticalCenter: parent.verticalCenter; text: rtChip.modelData
                                    width: Math.min(implicitWidth, 190); elide: Text.ElideRight
@@ -1074,21 +1081,37 @@ Window {
                     anchors.centerIn: parent; visible: backend.logEntries.length === 0
                     text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
                 }
-                ListView {
-                    id: logList
-                    anchors.fill: parent; anchors.margins: 12; spacing: 3
-                    model: backend.logEntries
-                    clip: true
+                Flickable {
+                    id: logFlick
+                    anchors.fill: parent; anchors.margins: 12; clip: true
+                    contentWidth: width; contentHeight: logView.implicitHeight
                     property bool autoScroll: true
-                    onCountChanged: if (autoScroll) positionViewAtEnd()
-                    delegate: Row {
-                        required property var modelData
-                        width: logList.width; spacing: 6
-                        Text { text: modelData.time; color: theme.textFaint; font.pixelSize: 11; font.family: "Menlo" }
-                        Text { text: modelData.level; font.pixelSize: 11; font.family: "Menlo"
-                               color: modelData.level === "ERROR" ? theme.danger : modelData.level === "WARN" ? theme.warn : theme.textDim }
-                        Text { text: modelData.msg; color: theme.text; font.pixelSize: 11; font.family: "Menlo"
-                               width: parent.width - 116; elide: Text.ElideRight }
+                    function toBottom() { if (autoScroll) contentY = Math.max(0, contentHeight - height) }
+                    // Colour-coded, selectable log. RichText keeps per-level colour;
+                    // selectByMouse lets the user copy snippets by hand.
+                    TextEdit {
+                        id: logView
+                        width: logFlick.width
+                        readOnly: true; selectByMouse: true; persistentSelection: true
+                        wrapMode: TextEdit.Wrap
+                        textFormat: TextEdit.RichText
+                        font.family: "Menlo"; font.pixelSize: 11
+                        color: theme.text; selectionColor: theme.accent
+                        text: {
+                            function esc(s){ return (""+s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") }
+                            var out = ""
+                            var es = backend.logEntries
+                            for (var i = 0; i < es.length; i++) {
+                                var e = es[i]
+                                var lc = e.level === "ERROR" ? theme.danger
+                                       : e.level === "WARN" ? theme.warn : theme.textDim
+                                out += "<font color='" + theme.textFaint + "'>" + e.time + "</font> "
+                                     + "<font color='" + lc + "'>" + e.level + "</font> "
+                                     + "<font color='" + theme.text + "'>" + esc(e.msg) + "</font><br>"
+                            }
+                            return out
+                        }
+                        onTextChanged: Qt.callLater(logFlick.toBottom)
                     }
                 }
             }
@@ -1099,8 +1122,8 @@ Window {
                        MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
                                    cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
                 Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
-                Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: logList.autoScroll; implicitWidth: 34; implicitHeight: 20
-                         onToggled: function(v){ logList.autoScroll = v } }
+                Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: logFlick.autoScroll; implicitWidth: 34; implicitHeight: 20
+                         onToggled: function(v){ logFlick.autoScroll = v } }
             }
         }
         }
@@ -1198,12 +1221,13 @@ Window {
                                  onToggled: function(v){ cform.ipv6 = v } }
                     }
                     Column { width: parent.width; spacing: 4
-                        Item { width: parent.width; height: certLbl.implicitHeight
-                            Text { id: certLbl; anchors.left: parent.left; text: qsTr("Certificate (PEM) · optional"); color: theme.textDim; font.pixelSize: 13 }
-                            Text { anchors.right: parent.right; text: qsTr("Load from file…"); font.pixelSize: 12
+                        Item { width: parent.width; height: certLoad.implicitHeight
+                            Text { id: certLoad; anchors.right: parent.right; text: qsTr("Load from file…"); font.pixelSize: 12
                                    color: certLoadMa.containsMouse ? theme.text : theme.accent; font.underline: certLoadMa.containsMouse
                                 MouseArea { id: certLoadMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor; onClicked: certFileDlg.open() } }
+                            Text { id: certLbl; anchors.left: parent.left; anchors.right: certLoad.left; anchors.rightMargin: 10
+                                   elide: Text.ElideRight; text: qsTr("Certificate (PEM) · optional"); color: theme.textDim; font.pixelSize: 13 }
                         }
                         Rectangle { width: parent.width; height: 70; radius: 8; color: theme.inputBg; border.color: fCert.activeFocus ? theme.accent : theme.inputBorder; border.width: 1
                             Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true

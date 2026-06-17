@@ -38,9 +38,11 @@ if (GIT_FOUND)
         ERROR_QUIET
     )
     # The TrustTunnel core lives in the parent (upstream) checkout. Prefer the
-    # nearest tag (a version) and fall back to a short commit.
+    # nearest *stable* release tag (skip beta/rc/alpha pre-releases), falling
+    # back to a short commit when no stable tag is reachable.
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" describe --tags --always
+                --exclude "*beta*" --exclude "*rc*" --exclude "*alpha*" --exclude "*-dev*"
         OUTPUT_VARIABLE FREETUNNEL_CORE_REF
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
