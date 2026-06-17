@@ -11,6 +11,10 @@
 
 #if defined(Q_OS_MACOS)
 #include <Security/Security.h>
+// SecKeychain* generic-password APIs are deprecated since macOS 10.10 but remain
+// the simplest way to read/write a login-keychain secret without a code-signed,
+// entitled app. We use them knowingly; silence the deprecation under -Werror.
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #elif defined(Q_OS_WIN)
 #include <windows.h>
 #include <wincred.h>
@@ -78,9 +82,9 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
     const QByteArray secret = password.toUtf8();
 
     SecKeychainItemRef existing = nullptr;
-    OSStatus find = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
-                                                   account.size(), account.constData(),
-                                                   nullptr, nullptr, &existing);
+    SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
+                                   account.size(), account.constData(),
+                                   nullptr, nullptr, &existing);
     if (existing)
         SecKeychainItemDelete(existing);
 
