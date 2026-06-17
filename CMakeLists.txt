@@ -81,6 +81,10 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/UpdateChecker.h
     src/core/VersionCompare.cpp
     include/core/VersionCompare.h
+    src/core/CredentialStore.cpp
+    include/core/CredentialStore.h
+    src/core/ReleaseVerify.cpp
+    include/core/ReleaseVerify.h
     src/vpn/qt_trusttunnel_client.cpp
     include/vpn/qt_trusttunnel_client.h
     src/vpn/vpn_helper_client.cpp
@@ -150,7 +154,7 @@ if (APPLE)
     # Unified title bar (transparent bar + full-size content) needs a tiny bit of
     # Objective-C++ talking to AppKit.
     target_sources(FreeTunnel PRIVATE src/app/MacWindow.mm include/app/MacWindow.h)
-    target_link_libraries(FreeTunnel PRIVATE "-framework AppKit")
+    target_link_libraries(FreeTunnel PRIVATE "-framework AppKit" "-framework Security")
 endif()
 
 # Bundle assets

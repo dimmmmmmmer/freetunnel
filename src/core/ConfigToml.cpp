@@ -41,7 +41,8 @@ QString buildConfigToml(const ConfigToml &c) {
     t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEsc(c.hostname));
     t += QStringLiteral("addresses = [%1]\n").arg(csvToTomlArray(c.addresses));
     t += QStringLiteral("username = \"%1\"\n").arg(tomlEsc(c.username));
-    t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(c.password));
+    if (!c.password.isEmpty())
+        t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(c.password));
     t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEsc(c.clientRandom));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEsc(c.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(c.allowIpv6 ? "true" : "false");

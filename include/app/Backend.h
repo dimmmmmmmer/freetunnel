@@ -142,6 +142,7 @@ public:
     QString updateMessage() const { return m_updateMessage; }
     QString latestVersion() const { return m_latestVersion; }
     Q_INVOKABLE void checkForUpdates();
+    Q_INVOKABLE void downloadUpdate();
     Q_INVOKABLE void openLatestRelease();
     Q_INVOKABLE void openUrl(const QString &url);
     // Begin a native window move (drag). `window` is the QML Window root.
@@ -187,6 +188,7 @@ private:
 
     UpdateChecker *m_updater = nullptr;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    QString m_materializedConfigPath;
     QVariantList m_pings;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths

@@ -3,15 +3,14 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
-#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QStandardPaths>
-#include <QTcpServer>
-#include <QTcpSocket>
 #include <QTemporaryFile>
 #include <QTimer>
 
@@ -131,7 +130,7 @@ void VpnHelperClient::abortStartup() {
 }
 
 bool VpnHelperClient::ensureHelper() {
-    if (m_sock && m_sock->state() == QAbstractSocket::ConnectedState)
+    if (m_sock && m_sock->state() == QLocalSocket::ConnectedState)
         return true;
     if (m_starting) // spawn already in progress — don't prompt again
         return true;
@@ -139,15 +138,11 @@ bool VpnHelperClient::ensureHelper() {
     if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->deleteLater(); m_proc = nullptr; }
 
-    // Pick a free loopback port and a random auth token.
-    {
-        QTcpServer probe;
-        if (!probe.listen(QHostAddress::LocalHost, 0)) {
-            fail(tr("Could not allocate a local port for the VPN helper"));
-            return false;
-        }
-        m_port = probe.serverPort();
-    }
+    m_socketName = QStringLiteral("freetunnel-helper-%1%2")
+                           .arg(QString::number(QRandomGenerator::system()->generate64(), 16),
+                                QString::number(QRandomGenerator::system()->generate64(), 16));
+    QLocalServer::removeServer(m_socketName);
+
     m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
             + QString::number(QRandomGenerator::system()->generate64(), 16);
 
@@ -171,15 +166,15 @@ bool VpnHelperClient::ensureHelper() {
     }
 
     QString err;
-    if (!spawnElevatedHelper(m_port, m_tokenPath, &err)) {
+    if (!spawnElevatedHelper(m_socketName, m_tokenPath, &err)) {
         fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
         return false;
     }
 
-    m_sock = new QTcpSocket(this);
-    connect(m_sock, &QTcpSocket::connected, this, &VpnHelperClient::onSocketConnected);
-    connect(m_sock, &QTcpSocket::readyRead, this, &VpnHelperClient::onReadyRead);
-    connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
+    m_sock = new QLocalSocket(this);
+    connect(m_sock, &QLocalSocket::connected, this, &VpnHelperClient::onSocketConnected);
+    connect(m_sock, &QLocalSocket::readyRead, this, &VpnHelperClient::onReadyRead);
+    connect(m_sock, &QLocalSocket::disconnected, this, [this]() {
         m_helloAcked = false;
         m_starting = false;
         if (m_state != State::Disconnected) setState(State::Disconnected);
@@ -192,7 +187,7 @@ bool VpnHelperClient::ensureHelper() {
     m_tries = 0;
     connect(m_attempt, &QTimer::timeout, this, [this]() {
         if (!m_sock) { if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; } return; }
-        if (m_sock->state() == QAbstractSocket::ConnectedState) {
+        if (m_sock->state() == QLocalSocket::ConnectedState) {
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; return;
         }
         if (++m_tries > 40) { // ~10s
@@ -202,16 +197,15 @@ bool VpnHelperClient::ensureHelper() {
             return;
         }
         m_sock->abort();
-        m_sock->connectToHost(QHostAddress::LocalHost, m_port);
+        m_sock->connectToServer(m_socketName);
     });
     m_attempt->start(250);
-    m_sock->connectToHost(QHostAddress::LocalHost, m_port);
+    m_sock->connectToServer(m_socketName);
     return true;
 }
 
-bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
+bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QString &tokenPath, QString *err) {
     const QString exe = QCoreApplication::applicationFilePath();
-    const QString p = QString::number(port);
 
 #if defined(Q_OS_MACOS)
     // Log into the (per-user, non-world-writable) temp dir with an unpredictable
@@ -219,9 +213,9 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
     // symlink there and have the elevated (root) helper clobber an arbitrary file.
     // The token path is shell-escaped (it lives under "Application Support", which
     // contains a space).
-    const QString inner = QStringLiteral("exec %1 --helper --port %2 --token-file %3 "
+    const QString inner = QStringLiteral("exec %1 --helper --socket %2 --token-file %3 "
                                          ">\"${TMPDIR:-/tmp}/freetunnel-helper.$$.log\" 2>&1 &")
-                                  .arg(shellEscape(exe), p, shellEscape(tokenPath));
+                                  .arg(shellEscape(exe), shellEscape(socketName), shellEscape(tokenPath));
     const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
                                    .arg(appleScriptEscape(inner));
     m_proc = new QProcess(this);
@@ -229,7 +223,8 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
     if (!m_proc->waitForStarted(5000)) { if (err) *err = tr("Could not launch osascript"); return false; }
     return true;
 #elif defined(Q_OS_WIN)
-    const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"").arg(p, tokenPath);
+    const QString args = QStringLiteral("--helper --socket \"%1\" --token-file \"%2\"")
+                                 .arg(socketName, tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -255,10 +250,10 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
         // since the elevated session may not have FUSE available.
         args << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
              << QString::fromLocal8Bit(appImage)
-             << QStringLiteral("--helper") << QStringLiteral("--port") << p
+             << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
              << QStringLiteral("--token-file") << tokenPath;
     } else {
-        args << exe << QStringLiteral("--helper") << QStringLiteral("--port") << p
+        args << exe << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
              << QStringLiteral("--token-file") << tokenPath;
     }
     m_proc->start(QStringLiteral("pkexec"), args);

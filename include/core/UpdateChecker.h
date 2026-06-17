@@ -22,8 +22,9 @@ public:
         QString version;      ///< tag without leading 'v', e.g. "0.6b"
         QString htmlUrl;      ///< browser URL to the release page
         QString body;         ///< release notes / changelog (markdown)
-        QString installerUrl; ///< direct download URL for the .exe asset (Windows)
+        QString installerUrl; ///< direct download URL for the platform asset
         QString assetName;    ///< filename of the installer asset
+        QString checksumsUrl; ///< SHA256SUMS.txt download URL (when published)
     };
 
     /**
@@ -38,6 +39,10 @@ public:
     /// Trigger an update check immediately.
     void checkNow();
 
+    /// Download the latest release installer after updateAvailable, verifying
+    /// against SHA256SUMS.txt when available.
+    void downloadLatest();
+
     /// Latest release info (valid after updateAvailable signal).
     const ReleaseInfo &latestRelease() const { return m_latest; }
 
@@ -48,14 +53,24 @@ signals:
     /// Emitted when the check completes with no update (or on error).
     void noUpdateAvailable(const QString &message);
 
+    void downloadProgress(qint64 received, qint64 total);
+    void downloadReady(const QString &localPath);
+    void downloadFailed(const QString &message);
+
 private slots:
     void onCheckFinished(QNetworkReply *reply);
 
 private:
     bool isNewerVersion(const QString &remote) const;
+    void fetchChecksumsThenInstaller();
+    void fetchInstaller();
+    void onChecksumsFetched(QNetworkReply *reply);
+    void onInstallerFetched(QNetworkReply *reply);
 
     QString m_githubRepo;
     QString m_currentVersion;
     QNetworkAccessManager *m_nam = nullptr;
     ReleaseInfo m_latest;
+    QByteArray m_checksumsData;
+    QString m_downloadPath;
 };

@@ -1,0 +1,235 @@
+#include "CredentialStore.h"
+
+#include "ConfigToml.h"
+
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QTemporaryFile>
+
+#if defined(Q_OS_MACOS)
+#include <Security/Security.h>
+#elif defined(Q_OS_WIN)
+#include <windows.h>
+#include <wincred.h>
+#endif
+
+namespace freetunnel {
+
+namespace {
+
+QString credentialDir()
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+            + QStringLiteral("/credentials");
+    QDir().mkpath(dir);
+    return dir;
+}
+
+QString filePathForKey(const QString &key)
+{
+    const QByteArray hash = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex();
+    return QDir(credentialDir()).filePath(QString::fromLatin1(hash));
+}
+
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+bool storePasswordFile(const QString &key, const QString &password)
+{
+    QFile f(filePathForKey(key));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    f.write(password.toUtf8());
+    f.close();
+    QFile::setPermissions(f.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
+}
+
+QString loadPasswordFile(const QString &key)
+{
+    QFile f(filePathForKey(key));
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(f.readAll());
+}
+
+bool deletePasswordFile(const QString &key)
+{
+    return QFile::remove(filePathForKey(key));
+}
+#endif
+
+} // namespace
+
+QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
+{
+    return QFileInfo(absoluteConfigPath).absoluteFilePath();
+}
+
+bool CredentialStore::storePassword(const QString &key, const QString &password)
+{
+    if (key.isEmpty())
+        return false;
+
+#if defined(Q_OS_MACOS)
+    const QByteArray service = QByteArray("com.freetunnel.app");
+    const QByteArray account = key.toUtf8();
+    const QByteArray secret = password.toUtf8();
+
+    SecKeychainItemRef existing = nullptr;
+    OSStatus find = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
+                                                   account.size(), account.constData(),
+                                                   nullptr, nullptr, &existing);
+    if (existing)
+        SecKeychainItemDelete(existing);
+
+    return SecKeychainAddGenericPassword(nullptr, service.size(), service.constData(),
+                                         account.size(), account.constData(),
+                                         secret.size(), secret.constData(), nullptr) == errSecSuccess;
+#elif defined(Q_OS_WIN)
+    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    const QByteArray secret = password.toUtf8();
+    CREDENTIALW cred{};
+    cred.Type = CRED_TYPE_GENERIC;
+    cred.TargetName = const_cast<LPWSTR>(target.c_str());
+    cred.CredentialBlobSize = static_cast<DWORD>(secret.size());
+    cred.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char *>(secret.constData()));
+    cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    cred.UserName = const_cast<LPWSTR>(L"FreeTunnel");
+    return CredWriteW(&cred, 0) != FALSE;
+#else
+    return storePasswordFile(key, password);
+#endif
+}
+
+QString CredentialStore::loadPassword(const QString &key)
+{
+    if (key.isEmpty())
+        return QString();
+
+#if defined(Q_OS_MACOS)
+    const QByteArray service = QByteArray("com.freetunnel.app");
+    const QByteArray account = key.toUtf8();
+    void *data = nullptr;
+    UInt32 len = 0;
+    OSStatus st = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
+                                                 account.size(), account.constData(),
+                                                 &len, &data, nullptr);
+    if (st != errSecSuccess || !data)
+        return QString();
+    const QString out = QString::fromUtf8(static_cast<const char *>(data), static_cast<int>(len));
+    SecKeychainItemFreeContent(nullptr, data);
+    return out;
+#elif defined(Q_OS_WIN)
+    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    PCREDENTIALW cred = nullptr;
+    if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &cred) || !cred)
+        return QString();
+    const QString out = QString::fromUtf8(reinterpret_cast<const char *>(cred->CredentialBlob),
+                                          static_cast<int>(cred->CredentialBlobSize));
+    CredFree(cred);
+    return out;
+#else
+    return loadPasswordFile(key);
+#endif
+}
+
+bool CredentialStore::deletePassword(const QString &key)
+{
+    if (key.isEmpty())
+        return false;
+
+#if defined(Q_OS_MACOS)
+    const QByteArray service = QByteArray("com.freetunnel.app");
+    const QByteArray account = key.toUtf8();
+    SecKeychainItemRef item = nullptr;
+    OSStatus st = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
+                                                 account.size(), account.constData(),
+                                                 nullptr, nullptr, &item);
+    if (st != errSecSuccess || !item)
+        return true;
+    st = SecKeychainItemDelete(item);
+    return st == errSecSuccess;
+#elif defined(Q_OS_WIN)
+    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
+#else
+    return deletePasswordFile(key);
+#endif
+}
+
+static QString readConfigText(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QString();
+    return QString::fromUtf8(f.readAll());
+}
+
+static bool writeConfigText(const QString &path, const QString &toml)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    f.write(toml.toUtf8());
+    f.close();
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
+}
+
+bool migrateConfigPassword(const QString &configPath)
+{
+    const QString abs = QFileInfo(configPath).absoluteFilePath();
+    const QString key = CredentialStore::keyForConfigPath(abs);
+    ConfigToml c = parseConfigToml(readConfigText(abs));
+    if (c.password.isEmpty())
+        return true;
+
+    if (!CredentialStore::storePassword(key, c.password))
+        return false;
+
+    c.password.clear();
+    return writeConfigText(abs, buildConfigToml(c));
+}
+
+QString materializeConfigForConnect(const QString &configPath)
+{
+    const QString abs = QFileInfo(configPath).absoluteFilePath();
+    migrateConfigPassword(abs);
+
+    ConfigToml c = parseConfigToml(readConfigText(abs));
+    if (!c.password.isEmpty())
+        return abs;
+
+    const QString key = CredentialStore::keyForConfigPath(abs);
+    const QString stored = CredentialStore::loadPassword(key);
+    if (stored.isEmpty())
+        return QString();
+    c.password = stored;
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(dir);
+    QTemporaryFile tf(dir + QStringLiteral("/.connect-XXXXXX.toml"));
+    tf.setAutoRemove(false);
+    if (!tf.open())
+        return QString();
+    tf.write(buildConfigToml(c).toUtf8());
+    tf.close();
+    QFile::setPermissions(tf.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return tf.fileName();
+}
+
+void removeMaterializedConfig(const QString &materializedPath)
+{
+    if (materializedPath.isEmpty())
+        return;
+    const QString absConfigDir = QFileInfo(
+            QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).absoluteFilePath();
+    if (!QFileInfo(materializedPath).absoluteFilePath().startsWith(absConfigDir))
+        return;
+    if (materializedPath.contains(QStringLiteral(".connect-")))
+        QFile::remove(materializedPath);
+}
+
+} // namespace freetunnel

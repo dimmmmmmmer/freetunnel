@@ -41,6 +41,10 @@ gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
 > Для подписи checksums в CI нужны секреты репозитория `GPG_PRIVATE_KEY` и
 > `GPG_PASSPHRASE` (опционально `GPG_KEY_ID`).
 
+Пароли VPN-конфигов хранятся в системном хранилище (Keychain / Credential Manager /
+файл с правами `0600` на Linux), а не в TOML. При обновлении приложение может
+скачать релиз, проверить SHA-256 по `SHA256SUMS.txt` и открыть установщик.
+
 > Для TUN-интерфейса VPN нужны повышенные права: на Windows установщик запрашивает
 > UAC, на Linux/macOS приложение поднимает права при подключении.
 

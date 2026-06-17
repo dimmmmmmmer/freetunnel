@@ -28,6 +28,7 @@
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/ControlCommand.h"
+#include "core/CredentialStore.h"
 #include "core/UpdateChecker.h"
 
 #ifndef _WIN32
@@ -56,6 +57,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 // Don't surface "Disconnecting…" during a silent live re-apply
                 // (rule changes briefly tear the tunnel down and back up).
                 m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
+                if (st == VpnHelperClient::State::Disconnected || st == VpnHelperClient::State::Error) {
+                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+                    m_materializedConfigPath.clear();
+                }
                 emit stateChanged();
                 appendLog(QStringLiteral("INFO"), statusText());
             });
@@ -215,6 +220,40 @@ void Backend::checkForUpdates() {
                     m_updateMessage = tr("Version %1 is available").arg(info.version);
                     emit updateChanged();
                 });
+        connect(m_updater, &UpdateChecker::downloadProgress, this,
+                [this](qint64 received, qint64 total) {
+                    m_updateState = QStringLiteral("downloading");
+                    if (total > 0)
+                        m_updateMessage = tr("Downloading… %1%").arg(received * 100 / total);
+                    else
+                        m_updateMessage = tr("Downloading…");
+                    emit updateChanged();
+                });
+        connect(m_updater, &UpdateChecker::downloadReady, this,
+                [this](const QString &path) {
+                    m_updateState = QStringLiteral("ready");
+                    m_updateMessage = tr("Update downloaded — opening installer");
+                    emit updateChanged();
+#if defined(Q_OS_WIN)
+                    QProcess::startDetached(path, {});
+#elif defined(Q_OS_MACOS)
+                    QProcess::startDetached(QStringLiteral("open"), {path});
+#else
+                    if (path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
+                        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                         | QFileDevice::ExeOwner);
+                        QProcess::startDetached(path, {});
+                    } else {
+                        QProcess::startDetached(QStringLiteral("xdg-open"), {path});
+                    }
+#endif
+                });
+        connect(m_updater, &UpdateChecker::downloadFailed, this,
+                [this](const QString &msg) {
+                    m_updateState = QStringLiteral("error");
+                    m_updateMessage = msg;
+                    emit updateChanged();
+                });
         connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
                 [this](const QString &) {
                     // No newer release (incl. 404 when no releases exist yet).
@@ -230,10 +269,23 @@ void Backend::checkForUpdates() {
 }
 
 void Backend::openLatestRelease() {
-    const QString url = m_latestUrl.isEmpty()
-            ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
-            : m_latestUrl;
-    openHttpUrl(url);
+    if (m_updateState == QLatin1String("available") || m_updateState == QLatin1String("error"))
+        downloadUpdate();
+    else {
+        const QString url = m_latestUrl.isEmpty()
+                ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
+                : m_latestUrl;
+        openHttpUrl(url);
+    }
+}
+
+void Backend::downloadUpdate() {
+    if (!m_updater || m_updateState == QLatin1String("downloading"))
+        return;
+    m_updateState = QStringLiteral("downloading");
+    m_updateMessage = tr("Downloading…");
+    emit updateChanged();
+    m_updater->downloadLatest();
 }
 
 void Backend::openUrl(const QString &url) {
@@ -474,9 +526,17 @@ void Backend::connectVpn() {
                                h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
         }
     }
-    // The helper handles elevation; just hand it the config + rules.
+    // The helper handles elevation; materialize a config the core can read.
+    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+    m_materializedConfigPath = freetunnel::materializeConfigForConnect(m_activePath);
+    if (m_materializedConfigPath.isEmpty()) {
+        m_connecting = false;
+        emit stateChanged();
+        emit errorOccurred(tr("Config has no password — edit it and try again"));
+        return;
+    }
     m_inConnect = true; // applySplitRules() below must not trigger a reconnect
-    m_client.loadConfigFromFile(m_activePath);
+    m_client.loadConfigFromFile(m_materializedConfigPath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.connectVpn();
@@ -522,6 +582,7 @@ void Backend::removeConfig(int index) {
     if (index < 0 || index >= m_paths.size())
         return;
     const QString path = m_paths.at(index);
+    freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(path));
     QStringList stored = loadStoredConfigs();
     stored.removeAll(path);
     saveStoredConfigs(stored);
@@ -561,6 +622,7 @@ bool Backend::importFile(const QString &path) {
     }
     const bool hadNoActive = m_activePath.isEmpty();
     reloadConfigs();
+    freetunnel::migrateConfigPassword(p);
     if (hadNoActive) { // first config in an empty list — make it the active one
         m_activePath = p;
         m_settings.last_config_path = p;
@@ -731,6 +793,8 @@ bool Backend::createConfig(const QVariantMap &f) {
         emit errorOccurred(tr("Client random must be hexadecimal"));
         return false;
     }
+    const QString password = ct.password;
+    ct.password.clear();
     const QString t = freetunnel::buildConfigToml(ct);
     const QString hostname = ct.hostname;
 
@@ -755,10 +819,12 @@ bool Backend::createConfig(const QVariantMap &f) {
     }
     file.write(t.toUtf8());
     file.close();
-    // The config holds VPN credentials in plaintext; restrict it to the owner so
-    // other local users can't read them. The elevated helper runs as root and
-    // can still read it. Best-effort (ignored on filesystems without perms).
+    // Restrict the config to the owner. Passwords live in the OS credential store.
     QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForConfigPath(target),
+                                               password);
+    if (!oldPath.isEmpty() && oldPath != target)
+        freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(oldPath));
 
     QStringList stored = loadStoredConfigs();
     const bool editing = editIndex >= 0;
@@ -797,11 +863,16 @@ QVariantMap Backend::configFields(int index) const {
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return f;
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
-    f[QStringLiteral("name")] = nameForPath(m_paths.at(index));
+    const QString configPath = m_paths.at(index);
+    QString password = freetunnel::CredentialStore::loadPassword(
+            freetunnel::CredentialStore::keyForConfigPath(configPath));
+    if (password.isEmpty())
+        password = c.password;
+    f[QStringLiteral("name")] = nameForPath(configPath);
     f[QStringLiteral("hostname")] = c.hostname;
     f[QStringLiteral("addresses")] = c.addresses;
     f[QStringLiteral("username")] = c.username;
-    f[QStringLiteral("password")] = c.password;
+    f[QStringLiteral("password")] = password;
     f[QStringLiteral("protocol")] = c.protocol;
     f[QStringLiteral("dns")] = c.dns;
     f[QStringLiteral("customSni")] = c.customSni;
@@ -1066,8 +1137,9 @@ bool Backend::importDeepLink(const QString &link) {
     }
     f.write(prepared->tomlContent.toUtf8());
     f.close();
-    // Imported config carries credentials in plaintext — owner-only (see createConfig).
+    // Imported config carries credentials — owner-only (see createConfig).
     QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    freetunnel::migrateConfigPassword(target);
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
         stored << target;

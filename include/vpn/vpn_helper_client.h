@@ -1,7 +1,7 @@
 #pragma once
 
 // GUI-side proxy for the VPN. Spawns the privileged helper (the same binary run
-// with --helper, elevated once per session) and drives it over a localhost
+// with --helper, elevated once per session) and drives it over a user-local
 // socket. Exposes the same signal/slot surface the Backend expects, so the GUI
 // never runs the VPN core (or root) in-process.
 
@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
+class QLocalSocket;
 class QProcess;
-class QTcpSocket;
 class QTimer;
 class QJsonObject;
 
@@ -53,7 +53,7 @@ signals:
 
 private:
     bool ensureHelper();              // spawn elevated helper + open socket
-    bool spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err);
+    bool spawnElevatedHelper(const QString &socketName, const QString &tokenPath, QString *err);
     void abortStartup();              // cancel a pending elevation/handshake
     void clearTokenFile();            // remove the on-disk auth token (best-effort)
     void send(const QJsonObject &obj);
@@ -64,8 +64,8 @@ private:
     void fail(const QString &msg);
 
     QProcess *m_proc = nullptr;
-    QTcpSocket *m_sock = nullptr;
-    quint16 m_port = 0;
+    QLocalSocket *m_sock = nullptr;
+    QString m_socketName;
     QString m_token;
     QString m_tokenPath; // 0600 file used to hand the token to the elevated helper
     QString m_configPath;

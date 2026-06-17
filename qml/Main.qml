@@ -1138,17 +1138,23 @@ Window {
                            font.underline: updMa.containsMouse }
                     Text { id: updStatus; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                            text: backend.updateState === "checking" ? "…"
-                                 : backend.updateState === "available" ? qsTr("Download ›") : backend.appVersion
-                           color: backend.updateState === "available" ? theme.accent : theme.textFaint
+                                 : backend.updateState === "downloading" ? qsTr("Downloading…")
+                                 : backend.updateState === "available" ? qsTr("Download ›")
+                                 : backend.updateState === "ready" ? qsTr("Ready")
+                                 : backend.appVersion
+                           color: (backend.updateState === "available" || backend.updateState === "downloading")
+                                  ? theme.accent : theme.textFaint
                            font.pixelSize: 13 }
                     Text { anchors.left: updTxt.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
                            anchors.right: updStatus.left; anchors.rightMargin: 8; elide: Text.ElideRight
                            visible: backend.updateMessage.length > 0; text: backend.updateMessage
                            horizontalAlignment: Text.AlignRight
-                           color: backend.updateState === "available" ? theme.accent : theme.textFaint; font.pixelSize: 12 }
+                           color: (backend.updateState === "available" || backend.updateState === "downloading")
+                                  ? theme.accent : theme.textFaint; font.pixelSize: 12 }
                     MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: backend.updateState === "available" ? backend.openLatestRelease()
-                                                                       : backend.checkForUpdates() } }
+                        onClicked: (backend.updateState === "available" || backend.updateState === "error")
+                                   ? backend.openLatestRelease()
+                                   : backend.checkForUpdates() } }
                 Item { Layout.preferredHeight: 14 }
                 // Footer: project names link to their repos.
                 Row { Layout.alignment: Qt.AlignHCenter; spacing: 0

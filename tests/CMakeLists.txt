@@ -68,3 +68,20 @@ add_executable(test_versioncompare
 target_include_directories(test_versioncompare PRIVATE ../include ../include/core)
 target_link_libraries(test_versioncompare PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME versioncompare COMMAND test_versioncompare)
+
+add_executable(test_releaseverify
+    test_releaseverify.cpp
+    ../src/core/ReleaseVerify.cpp
+)
+target_include_directories(test_releaseverify PRIVATE ../include ../include/core)
+target_link_libraries(test_releaseverify PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME releaseverify COMMAND test_releaseverify)
+
+add_executable(test_credentialstore
+    test_credentialstore.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/core/ConfigToml.cpp
+)
+target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
+target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME credentialstore COMMAND test_credentialstore)
