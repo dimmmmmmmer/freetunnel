@@ -6,8 +6,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QRegularExpression>
-#include <QVersionNumber>
+
+#include "VersionCompare.h"
 
 UpdateChecker::UpdateChecker(const QString &githubRepo,
                              const QString &currentVersion,
@@ -87,7 +87,7 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         }
     }
 
-    if (isNewerVersion(remoteVersion)) {
+    if (isVersionNewer(m_currentVersion, remoteVersion)) {
         emit updateAvailable(m_latest);
     } else {
         emit noUpdateAvailable(QStringLiteral("You are running the latest version (%1)").arg(m_currentVersion));
@@ -96,38 +96,5 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 
 bool UpdateChecker::isNewerVersion(const QString &remote) const
 {
-    // Normalize version strings for comparison.
-    // Versions can be like "0.5b", "1.2.3", "0.6-beta".
-    // Strategy: extract numeric parts, compare with QVersionNumber,
-    // then fall back to string comparison for pre-release suffixes.
-
-    static const QRegularExpression rxNum(QStringLiteral(R"((\d+(?:\.\d+)*))"));
-    static const QRegularExpression rxSuffix(QStringLiteral(R"(\d+(?:\.\d+)*(.*)$)"));
-
-    auto extractParts = [&](const QString &v) -> std::pair<QVersionNumber, QString> {
-        QVersionNumber vn;
-        QString suffix;
-        auto m = rxNum.match(v);
-        if (m.hasMatch()) {
-            vn = QVersionNumber::fromString(m.captured(1));
-        }
-        auto ms = rxSuffix.match(v);
-        if (ms.hasMatch()) {
-            suffix = ms.captured(1).trimmed();
-        }
-        return {vn, suffix};
-    };
-
-    auto [remoteVn, remoteSuffix] = extractParts(remote);
-    auto [currentVn, currentSuffix] = extractParts(m_currentVersion);
-
-    int cmp = QVersionNumber::compare(remoteVn, currentVn);
-    if (cmp > 0) return true;
-    if (cmp < 0) return false;
-
-    // Same numeric version — compare suffix lexicographically.
-    // Empty suffix (release) > any suffix (beta/rc).
-    if (currentSuffix.isEmpty() && !remoteSuffix.isEmpty()) return false; // current is release
-    if (!currentSuffix.isEmpty() && remoteSuffix.isEmpty()) return true;  // remote is release
-    return remoteSuffix > currentSuffix;
+    return isVersionNewer(m_currentVersion, remote);
 }

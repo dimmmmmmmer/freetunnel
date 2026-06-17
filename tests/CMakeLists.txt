@@ -60,3 +60,11 @@ add_executable(test_configtoml
 target_include_directories(test_configtoml PRIVATE ../include ../include/core)
 target_link_libraries(test_configtoml PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME configtoml COMMAND test_configtoml)
+
+add_executable(test_versioncompare
+    test_versioncompare.cpp
+    ../src/core/VersionCompare.cpp
+)
+target_include_directories(test_versioncompare PRIVATE ../include ../include/core)
+target_link_libraries(test_versioncompare PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME versioncompare COMMAND test_versioncompare)

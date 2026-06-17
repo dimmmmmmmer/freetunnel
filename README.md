@@ -22,6 +22,25 @@
 - **Windows**: SmartScreen → **Подробнее** → **Выполнить в любом случае**.
 - **Linux (AppImage)**: `chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage`.
 
+### Проверка загрузки
+
+На каждом релизе лежит `SHA256SUMS.txt` — сверьте хеш скачанного файла:
+
+```sh
+sha256sum -c SHA256SUMS.txt          # Linux
+shasum -a 256 -c SHA256SUMS.txt      # macOS
+```
+
+Если приложен `SHA256SUMS.txt.asc`, можно проверить и сам манифест (независимо от
+GitHub):
+
+```sh
+gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+```
+
+> Для подписи checksums в CI нужны секреты репозитория `GPG_PRIVATE_KEY` и
+> `GPG_PASSPHRASE` (опционально `GPG_KEY_ID`).
+
 > Для TUN-интерфейса VPN нужны повышенные права: на Windows установщик запрашивает
 > UAC, на Linux/macOS приложение поднимает права при подключении.
 

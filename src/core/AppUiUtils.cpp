@@ -1,6 +1,7 @@
 #include "AppUiUtils.h"
 
 #include <QColor>
+#include <QDesktopServices>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPen>
@@ -9,7 +10,18 @@
 #include <QStandardPaths>
 #include <QCoreApplication>
 #include <QFile>
-#include <QCoreApplication>
+#include <QUrl>
+
+bool openHttpUrl(const QString &urlStr)
+{
+    const QUrl url(urlStr);
+    if (!url.isValid())
+        return false;
+    const auto scheme = url.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        return false;
+    return QDesktopServices::openUrl(url);
+}
 
 QString shellEscape(QString s) {
     s.replace("'", "'\"'\"'");

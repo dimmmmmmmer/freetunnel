@@ -69,7 +69,7 @@ jobs:
           convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
             "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
           ls -la "$out"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bundle-icons
           path: icons-out/
@@ -114,7 +114,7 @@ jobs:
       # the client is injected into the upstream tree. Best-effort.
       - name: Use rendered bundle icons
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bundle-icons
           path: client/assets
@@ -519,6 +519,32 @@ jobs:
             | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # Optional: sign checksums with the repo GPG key so users can verify the
+      # manifest independently of GitHub (set GPG_PRIVATE_KEY + GPG_PASSPHRASE
+      # repository secrets; GPG_KEY_ID optional if the imported key is unique).
+      - name: Sign checksums
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -eux
+          cd artifacts
+          install -d -m 700 "$HOME/.gnupg"
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          sign_args=(--batch --yes --detach-sign --armor)
+          if [ -n "${GPG_KEY_ID:-}" ]; then
+            sign_args+=(--local-user "$GPG_KEY_ID")
+          fi
+          if [ -n "${GPG_PASSPHRASE:-}" ]; then
+            echo "$GPG_PASSPHRASE" | gpg --pinentry-mode loopback --passphrase-fd 0 \
+              "${sign_args[@]}" SHA256SUMS.txt
+          else
+            gpg "${sign_args[@]}" SHA256SUMS.txt
+          fi
+          ls -la SHA256SUMS.txt*
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
@@ -529,6 +555,9 @@ jobs:
           body: |
             Unsigned builds. Verify your download against `SHA256SUMS.txt`
             (e.g. `sha256sum -c SHA256SUMS.txt` / `shasum -a 256 -c SHA256SUMS.txt`).
+            When `SHA256SUMS.txt.asc` is attached, verify the manifest with GPG:
+            `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt` (import the release
+            signing key from the repo owner first).
 
             - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
               (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its

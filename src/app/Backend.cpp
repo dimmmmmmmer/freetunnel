@@ -233,11 +233,11 @@ void Backend::openLatestRelease() {
     const QString url = m_latestUrl.isEmpty()
             ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
             : m_latestUrl;
-    QDesktopServices::openUrl(QUrl(url));
+    openHttpUrl(url);
 }
 
 void Backend::openUrl(const QString &url) {
-    QDesktopServices::openUrl(QUrl(url));
+    openHttpUrl(url);
 }
 
 void Backend::startWindowDrag(QObject *window) {

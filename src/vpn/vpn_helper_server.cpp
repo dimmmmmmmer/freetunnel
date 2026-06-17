@@ -17,6 +17,18 @@
 
 namespace {
 
+bool tokensEqual(const QString &a, const QString &b)
+{
+    const QByteArray ba = a.toUtf8();
+    const QByteArray bb = b.toUtf8();
+    if (ba.size() != bb.size())
+        return false;
+    char diff = 0;
+    for (int i = 0; i < ba.size(); ++i)
+        diff |= static_cast<char>(ba[i] ^ bb[i]);
+    return diff == 0;
+}
+
 QString stateName(QtTrustTunnelClient::State s) {
     switch (s) {
     case QtTrustTunnelClient::State::Connecting: return QStringLiteral("Connecting");
@@ -105,7 +117,7 @@ private:
     void handle(const QJsonObject &c) {
         const QString cmd = c.value("cmd").toString();
         if (!m_authed) {
-            if (cmd == "hello" && c.value("token").toString() == m_token) {
+            if (cmd == "hello" && tokensEqual(c.value("token").toString(), m_token)) {
                 m_authed = true;
                 QJsonObject e; e["ev"] = "ready"; m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
             } else {
