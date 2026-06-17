@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryFile>
 
@@ -123,6 +124,56 @@ bool deletePasswordFile(const QString &key)
 {
     return QFile::remove(filePathForKey(key));
 }
+
+// Preferred Linux store: the desktop Secret Service (GNOME Keyring, KWallet's
+// Secret Service bridge, …) via secret-tool. Falls back to the 0600 file when
+// secret-tool or a running service isn't available.
+QString secretToolPath()
+{
+    return QStandardPaths::findExecutable(QStringLiteral("secret-tool"));
+}
+
+bool secretServiceStore(const QString &key, const QString &password)
+{
+    const QString tool = secretToolPath();
+    if (tool.isEmpty())
+        return false;
+    QProcess p;
+    p.start(tool, {QStringLiteral("store"), QStringLiteral("--label=FreeTunnel"),
+                   QStringLiteral("service"), QStringLiteral("com.freetunnel.app"),
+                   QStringLiteral("account"), key});
+    if (!p.waitForStarted(3000))
+        return false;
+    p.write(password.toUtf8());
+    p.closeWriteChannel();
+    return p.waitForFinished(5000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+}
+
+QString secretServiceLookup(const QString &key, bool *ok)
+{
+    *ok = false;
+    const QString tool = secretToolPath();
+    if (tool.isEmpty())
+        return QString();
+    QProcess p;
+    p.start(tool, {QStringLiteral("lookup"), QStringLiteral("service"),
+                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"), key});
+    if (!p.waitForFinished(5000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0)
+        return QString();
+    *ok = true;
+    return QString::fromUtf8(p.readAllStandardOutput()); // secret-tool emits no trailing newline
+}
+
+bool secretServiceClear(const QString &key)
+{
+    const QString tool = secretToolPath();
+    if (tool.isEmpty())
+        return false;
+    QProcess p;
+    p.start(tool, {QStringLiteral("clear"), QStringLiteral("service"),
+                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"), key});
+    return p.waitForFinished(5000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+}
 #endif
 
 } // namespace
@@ -161,6 +212,10 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
     cred.UserName = const_cast<LPWSTR>(L"FreeTunnel");
     return CredWriteW(&cred, 0) != FALSE;
 #else
+    if (secretServiceStore(key, password)) {
+        deletePasswordFile(key); // don't leave a plaintext-ish copy on disk
+        return true;
+    }
     return storePasswordFile(key, password);
 #endif
 }
@@ -187,7 +242,11 @@ QString CredentialStore::loadPassword(const QString &key)
     CredFree(cred);
     return out;
 #else
-    return loadPasswordFile(key);
+    bool ok = false;
+    const QString fromService = secretServiceLookup(key, &ok);
+    if (ok && !fromService.isEmpty())
+        return fromService;
+    return loadPasswordFile(key); // fallback (or pre-Secret-Service migration)
 #endif
 }
 
@@ -207,7 +266,9 @@ bool CredentialStore::deletePassword(const QString &key)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
     return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
 #else
-    return deletePasswordFile(key);
+    const bool fromService = secretServiceClear(key);
+    const bool fromFile = deletePasswordFile(key);
+    return fromService || fromFile;
 #endif
 }
 
