@@ -176,8 +176,20 @@ Window {
                     required property string modelData
                     property bool active: index === win.currentPage
                     width: 46; height: 38; radius: 8
-                    color: active ? theme.infoBg : (nma.containsMouse ? theme.surface : theme.bg)
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    color: theme.bg
+                    // Hover and active highlights are separate opacity-faded layers
+                    // so switching tabs never interpolates one shade through another
+                    // (which made the old tab flash hover→active→off).
+                    Rectangle {
+                        anchors.fill: parent; radius: parent.radius; color: theme.surface
+                        opacity: (nma.containsMouse && !navItem.active) ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent; radius: parent.radius; color: theme.infoBg
+                        opacity: navItem.active ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                    }
                     scale: nma.containsMouse && !active ? 1.08 : 1.0
                     Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                     // Home shows our (colourful) logo; other tabs use tinted glyphs.
