@@ -11,9 +11,9 @@ Window {
     visible: true
     // Default to the smallest comfortable size.
     width: 360
-    height: 520
+    height: 480
     minimumWidth: 360
-    minimumHeight: 480
+    minimumHeight: 460
     color: theme.bg
     title: "FreeTunnel"
 
@@ -415,14 +415,16 @@ Window {
         id: cx
         property bool onAccent: false
         signal clicked()
-        implicitWidth: 16; implicitHeight: 16
+        implicitWidth: 18; implicitHeight: 18
         property color strokeColor: cxMa.containsMouse ? theme.danger
                                     : (cx.onAccent ? "white" : theme.textDim)
+        // Sized to match the config list's ✕ (17px glyph) so every cross reads the
+        // same; drawn (not a glyph) so it stays centered & identical across platforms.
         Item {
-            anchors.centerIn: parent; width: 11; height: 11
-            Rectangle { anchors.centerIn: parent; width: 12; height: 1.8; radius: 1
+            anchors.centerIn: parent; width: 13; height: 13
+            Rectangle { anchors.centerIn: parent; width: 15; height: 2.0; radius: 1
                         rotation: 45; antialiasing: true; color: cx.strokeColor }
-            Rectangle { anchors.centerIn: parent; width: 12; height: 1.8; radius: 1
+            Rectangle { anchors.centerIn: parent; width: 15; height: 2.0; radius: 1
                         rotation: -45; antialiasing: true; color: cx.strokeColor }
         }
         MouseArea { id: cxMa; anchors.fill: parent; anchors.margins: -6
@@ -588,7 +590,7 @@ Window {
                 anchors.centerIn: parent
                 // Sit a little above centre so the config picker that drops below
                 // the selector still fits inside the minimum window height.
-                anchors.verticalCenterOffset: -26
+                anchors.verticalCenterOffset: -40
                 width: parent.width
                 spacing: 18
                 // The logo IS the connect button. Centered when off; on connect
@@ -668,7 +670,7 @@ Window {
                                  { v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
                         Rectangle {
                             required property var modelData
-                            width: 116; height: 44; radius: 8; color: theme.tile
+                            Layout.preferredWidth: 116; Layout.preferredHeight: 44; radius: 8; color: theme.tile
                             Row {
                                 anchors.centerIn: parent; spacing: 5
                                 Text { anchors.verticalCenter: parent.verticalCenter
@@ -774,7 +776,7 @@ Window {
                             property bool isActive: modelData === backend.activeProfile
                             property bool isDefault: modelData === "Default"
                             radius: 13; height: 28
-                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 37)
+                            implicitWidth: plabel.width + (chip.isDefault ? 22 : 39)
                             color: isActive ? theme.accent : (chipMa.containsMouse ? theme.border : theme.surface)
                             Behavior on color { ColorAnimation { duration: 120 } }
                             MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
@@ -845,7 +847,7 @@ Window {
                             required property string modelData
                             required property int index
                             radius: 13; color: theme.surface
-                            implicitWidth: dlabel.width + 37; implicitHeight: 28
+                            implicitWidth: dlabel.width + 39; implicitHeight: 28
                             Text { id: dlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                    anchors.verticalCenter: parent.verticalCenter; text: domChip.modelData
                                    width: Math.min(implicitWidth, 190); elide: Text.ElideRight
@@ -892,7 +894,7 @@ Window {
                 anchors.top: parent.top; anchors.topMargin: 8
                 anchors.horizontalCenter: parent.horizontalCenter; spacing: 16
                 Rectangle {
-                    width: 40; height: 32; radius: 8
+                    Layout.preferredWidth: 40; Layout.preferredHeight: 32; radius: 8
                     color: addMa.containsMouse ? theme.surface : theme.bg
                     Behavior on color { ColorAnimation { duration: 120 } }
                     // Drawn plus — strokes kept thin so its weight matches the
@@ -906,7 +908,7 @@ Window {
                 }
                 Rectangle {
                     visible: backend.configs.length > 0
-                    width: 40; height: 32; radius: 8
+                    Layout.preferredWidth: 40; Layout.preferredHeight: 32; radius: 8
                     color: pingMa.containsMouse ? theme.surface : theme.bg
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: theme.accent }
@@ -1076,7 +1078,7 @@ Window {
                             required property string modelData
                             required property int index
                             radius: 13; color: theme.surface
-                            implicitWidth: rlabel.width + 37; implicitHeight: 28
+                            implicitWidth: rlabel.width + 39; implicitHeight: 28
                             Text { id: rlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                    anchors.verticalCenter: parent.verticalCenter; text: rtChip.modelData
                                    width: Math.min(implicitWidth, 190); elide: Text.ElideRight
