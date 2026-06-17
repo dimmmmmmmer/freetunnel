@@ -843,6 +843,9 @@ bool Backend::createConfig(const QVariantMap &f) {
     }
     saveStoredConfigs(stored);
     reloadConfigs();
+    // Move the just-written password into the keychain immediately so it never
+    // lingers as plaintext in the .toml (imports already do this).
+    freetunnel::migrateConfigPassword(target);
     if (!editing) {
         // A newly created config becomes the active selection.
         m_activePath = target;
