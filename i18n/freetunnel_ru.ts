@@ -360,11 +360,6 @@
         <translation>Горячие клавиши</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="994"/>
-        <source>Enable hotkeys</source>
-        <translation>Горячие клавиши</translation>
-    </message>
-    <message>
         <location filename="../qml/Main.qml" line="1004"/>
         <source>Toggle VPN</source>
         <translation>Переключить VPN</translation>
@@ -446,6 +441,11 @@
         <location filename="../qml/Main.qml" line="927"/>
         <source>Connect on startup</source>
         <translation>Подключаться при запуске</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="994"/>
+        <source>Enable</source>
+        <translation>Включить</translation>
     </message>
     <message>
         <location filename="../qml/Main.qml" line="1069"/>

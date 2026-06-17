@@ -991,7 +991,7 @@ Window {
 
                 SectionLabel { text: qsTr("Hotkeys") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Enable hotkeys"); color: theme.text; font.pixelSize: 14 }
+                    Text { text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
                     Item { Layout.fillWidth: true }
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.hotkeysEnabled
                              onToggled: function(v){ backend.hotkeysEnabled = v } } }
