@@ -10,11 +10,8 @@
 #include <QTemporaryFile>
 
 #if defined(Q_OS_MACOS)
+#include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
-// SecKeychain* generic-password APIs are deprecated since macOS 10.10 but remain
-// the simplest way to read/write a login-keychain secret without a code-signed,
-// entitled app. We use them knowingly; silence the deprecation under -Werror.
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #elif defined(Q_OS_WIN)
 #include <windows.h>
 #include <wincred.h>
@@ -23,6 +20,67 @@
 namespace freetunnel {
 
 namespace {
+
+#if defined(Q_OS_MACOS)
+CFStringRef macServiceName()
+{
+    return CFSTR("com.freetunnel.app");
+}
+
+CFDictionaryRef macLookupQuery(CFStringRef account)
+{
+    const void *keys[] = { kSecClass, kSecAttrService, kSecAttrAccount };
+    const void *values[] = { kSecClassGenericPassword, macServiceName(), account };
+    return CFDictionaryCreate(kCFAllocatorDefault, keys, values, 3,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+}
+
+bool macStorePassword(CFStringRef account, CFDataRef secret)
+{
+    CFDictionaryRef lookup = macLookupQuery(account);
+    SecItemDelete(lookup);
+
+    const void *keys[] = { kSecClass, kSecAttrService, kSecAttrAccount, kSecValueData };
+    const void *values[] = { kSecClassGenericPassword, macServiceName(), account, secret };
+    CFDictionaryRef add = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 4,
+                                           &kCFTypeDictionaryKeyCallBacks,
+                                           &kCFTypeDictionaryValueCallBacks);
+    const OSStatus st = SecItemAdd(add, nullptr);
+    CFRelease(add);
+    CFRelease(lookup);
+    return st == errSecSuccess;
+}
+
+QString macLoadPassword(CFStringRef account)
+{
+    CFMutableDictionaryRef query =
+            CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, macLookupQuery(account));
+    CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+
+    CFDataRef data = nullptr;
+    const OSStatus st = SecItemCopyMatching(query, reinterpret_cast<CFTypeRef *>(&data));
+    CFRelease(query);
+    if (st != errSecSuccess || !data)
+        return QString();
+
+    const auto *bytes = CFDataGetBytePtr(data);
+    const CFIndex len = CFDataGetLength(data);
+    const QString out = QString::fromUtf8(reinterpret_cast<const char *>(bytes),
+                                          static_cast<int>(len));
+    CFRelease(data);
+    return out;
+}
+
+bool macDeletePassword(CFStringRef account)
+{
+    CFDictionaryRef lookup = macLookupQuery(account);
+    const OSStatus st = SecItemDelete(lookup);
+    CFRelease(lookup);
+    return st == errSecSuccess || st == errSecItemNotFound;
+}
+#endif
 
 QString credentialDir()
 {
@@ -77,20 +135,17 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
         return false;
 
 #if defined(Q_OS_MACOS)
-    const QByteArray service = QByteArray("com.freetunnel.app");
-    const QByteArray account = key.toUtf8();
-    const QByteArray secret = password.toUtf8();
-
-    SecKeychainItemRef existing = nullptr;
-    SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
-                                   account.size(), account.constData(),
-                                   nullptr, nullptr, &existing);
-    if (existing)
-        SecKeychainItemDelete(existing);
-
-    return SecKeychainAddGenericPassword(nullptr, service.size(), service.constData(),
-                                         account.size(), account.constData(),
-                                         secret.size(), secret.constData(), nullptr) == errSecSuccess;
+    const QByteArray secretBytes = password.toUtf8();
+    CFStringRef account = CFStringCreateWithCString(kCFAllocatorDefault,
+                                                    key.toUtf8().constData(),
+                                                    kCFStringEncodingUTF8);
+    CFDataRef secret = CFDataCreate(kCFAllocatorDefault,
+                                     reinterpret_cast<const UInt8 *>(secretBytes.constData()),
+                                     secretBytes.size());
+    const bool ok = macStorePassword(account, secret);
+    CFRelease(secret);
+    CFRelease(account);
+    return ok;
 #elif defined(Q_OS_WIN)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
     const QByteArray secret = password.toUtf8();
@@ -113,17 +168,11 @@ QString CredentialStore::loadPassword(const QString &key)
         return QString();
 
 #if defined(Q_OS_MACOS)
-    const QByteArray service = QByteArray("com.freetunnel.app");
-    const QByteArray account = key.toUtf8();
-    void *data = nullptr;
-    UInt32 len = 0;
-    OSStatus st = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
-                                                 account.size(), account.constData(),
-                                                 &len, &data, nullptr);
-    if (st != errSecSuccess || !data)
-        return QString();
-    const QString out = QString::fromUtf8(static_cast<const char *>(data), static_cast<int>(len));
-    SecKeychainItemFreeContent(nullptr, data);
+    CFStringRef account = CFStringCreateWithCString(kCFAllocatorDefault,
+                                                    key.toUtf8().constData(),
+                                                    kCFStringEncodingUTF8);
+    const QString out = macLoadPassword(account);
+    CFRelease(account);
     return out;
 #elif defined(Q_OS_WIN)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
@@ -145,16 +194,12 @@ bool CredentialStore::deletePassword(const QString &key)
         return false;
 
 #if defined(Q_OS_MACOS)
-    const QByteArray service = QByteArray("com.freetunnel.app");
-    const QByteArray account = key.toUtf8();
-    SecKeychainItemRef item = nullptr;
-    OSStatus st = SecKeychainFindGenericPassword(nullptr, service.size(), service.constData(),
-                                                 account.size(), account.constData(),
-                                                 nullptr, nullptr, &item);
-    if (st != errSecSuccess || !item)
-        return true;
-    st = SecKeychainItemDelete(item);
-    return st == errSecSuccess;
+    CFStringRef account = CFStringCreateWithCString(kCFAllocatorDefault,
+                                                    key.toUtf8().constData(),
+                                                    kCFStringEncodingUTF8);
+    const bool ok = macDeletePassword(account);
+    CFRelease(account);
+    return ok;
 #elif defined(Q_OS_WIN)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
     return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
