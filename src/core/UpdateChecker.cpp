@@ -118,12 +118,15 @@ void UpdateChecker::downloadLatest()
     QDir().mkpath(dir);
     m_downloadPath = QDir(dir).filePath(m_latest.assetName);
 
-    m_checksumsData.clear();
-    if (!m_latest.checksumsUrl.isEmpty()) {
-        fetchChecksumsThenInstaller();
-    } else {
-        fetchInstaller();
+    // Never install an asset we can't integrity-check. A release without a
+    // SHA256SUMS.txt manifest is treated as untrusted.
+    if (m_latest.checksumsUrl.isEmpty()) {
+        emit downloadFailed(QStringLiteral("This release has no SHA256SUMS.txt — refusing to "
+                                           "download an unverifiable update."));
+        return;
     }
+    m_checksumsData.clear();
+    fetchChecksumsThenInstaller();
 }
 
 void UpdateChecker::fetchChecksumsThenInstaller()
@@ -178,8 +181,10 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
     out.write(reply->readAll());
     out.close();
 
-    if (!m_checksumsData.isEmpty()
-        && !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
+    // Mandatory integrity check: the manifest must be present and the asset's
+    // SHA-256 must match before we hand the file off to be executed.
+    if (m_checksumsData.isEmpty()
+        || !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
         QFile::remove(m_downloadPath);
         emit downloadFailed(QStringLiteral("Download failed integrity check (SHA-256 mismatch)"));
         return;

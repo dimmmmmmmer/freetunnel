@@ -20,5 +20,7 @@ bool migrateConfigPassword(const QString &configPath);
 // Build a helper-readable config path (temp file with password injected when needed).
 QString materializeConfigForConnect(const QString &configPath);
 void removeMaterializedConfig(const QString &materializedPath);
+// Delete any leftover materialized configs (e.g. from a crash) — call at startup.
+void sweepStaleMaterializedConfigs();
 
 } // namespace freetunnel

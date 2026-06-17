@@ -284,4 +284,16 @@ void removeMaterializedConfig(const QString &materializedPath)
         QFile::remove(materializedPath);
 }
 
+void sweepStaleMaterializedConfigs()
+{
+    // A crash mid-connection can leave a .connect-XXXXXX.toml (which holds the
+    // injected password) behind. None should exist at startup, so clear them.
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir d(dir);
+    const QStringList stale = d.entryList({QStringLiteral(".connect-*.toml")},
+                                          QDir::Files | QDir::Hidden);
+    for (const QString &name : stale)
+        QFile::remove(d.filePath(name));
+}
+
 } // namespace freetunnel
