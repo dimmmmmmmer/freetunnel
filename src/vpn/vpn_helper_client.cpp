@@ -40,7 +40,7 @@ QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
     return cmd;
 }
 
-bool linuxElevationOutputLooksLikePolkitFailure(const QProcess &proc)
+bool linuxElevationOutputLooksLikePolkitFailure(QProcess &proc)
 {
     const QString text = QString::fromLocal8Bit(proc.readAllStandardError())
             + QString::fromLocal8Bit(proc.readAllStandardOutput());
