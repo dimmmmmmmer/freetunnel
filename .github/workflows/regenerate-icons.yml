@@ -1,0 +1,55 @@
+name: Regenerate icons
+
+# Rasterizes the bundle icons (.icns / .ico / .png) from the source
+# assets/logo.svg so they stay in sync with the neutral monochrome logo.
+# Manual only — run it after changing logo.svg, then it commits the results.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  icons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install rasterizers
+        run: |
+          sudo apt-get update
+          # rsvg-convert (SVG->PNG), png2icns (.icns), ImageMagick (.ico)
+          sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+
+      - name: Render PNGs + .icns + .ico from logo.svg
+        run: |
+          set -eux
+          svg=assets/logo.svg
+          tmp=$(mktemp -d)
+          for s in 16 32 48 64 128 256 512 1024; do
+            rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/logo-$s.png"
+          done
+          # In-app / AppImage raster icons
+          cp "$tmp/logo-256.png" assets/logo-256.png
+          cp "$tmp/logo-256.png" assets/logo.png
+          # macOS .icns (icnsutils)
+          png2icns assets/logo.icns \
+            "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
+          # Windows .ico (multi-resolution)
+          convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" assets/logo.ico
+
+      - name: Commit if changed
+        run: |
+          set -eux
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/logo.icns assets/logo.ico assets/logo.png assets/logo-256.png
+          if git diff --cached --quiet; then
+            echo "Icons already up to date."
+          else
+            git commit -m "Regenerate bundle icons from logo.svg (neutral monochrome)"
+            git push
+          fi
