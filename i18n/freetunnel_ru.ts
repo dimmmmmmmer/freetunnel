@@ -721,9 +721,9 @@
         <translation>Не удалось создать файл токена VPN-помощника</translation>
     </message>
     <message>
-        <location filename="../src/vpn/vpn_helper_client.cpp" line="244"/>
-        <source>The VPN helper didn&apos;t start — authorization may have been declined, polkit (pkexec) may be disabled, or sudo is unavailable.</source>
-        <translation>VPN-помощник не запустился — возможно, авторизация отклонена, polkit (pkexec) отключён или sudo недоступен.</translation>
+        <location filename="../src/vpn/vpn_helper_client.cpp" line="249"/>
+        <source>The VPN helper didn&apos;t start — authorization may have been declined, or the elevated helper could not be reached.</source>
+        <translation>VPN-помощник не запустился — возможно, авторизация отменена или повышенный помощник недоступен.</translation>
     </message>
     <message>
         <location filename="../src/vpn/vpn_helper_client.cpp" line="272"/>

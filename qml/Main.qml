@@ -133,6 +133,15 @@ Window {
 
     // Truncate a long string with an ellipsis (used in confirm messages).
     function elide(s, n) { return s.length > n ? s.substring(0, n - 1) + "…" : s }
+    // Keep both ends of a long name visible inside quoted confirm text.
+    function elideMiddle(s, n) {
+        if (s.length <= n) return s
+        if (n <= 1) return "…"
+        var keep = n - 1
+        var head = Math.ceil(keep / 2)
+        var tail = Math.floor(keep / 2)
+        return s.substring(0, head) + "…" + s.substring(s.length - tail)
+    }
 
     // Render a portable shortcut ("Ctrl+Alt+T") with OS-native modifier glyphs.
     function keyGlyphs(seq) {
@@ -408,24 +417,18 @@ Window {
     }
     component Sep: Rectangle { Layout.preferredHeight: 1; color: theme.border; Layout.fillWidth: true }
 
-    // Reusable chip delete "✕": drawn from two strokes (not a glyph) so size and
-    // vertical centring are identical on every platform. Red on hover, generous
-    // hit area.
+    // Reusable chip delete "✕" — same glyph/size as the config list delete control.
     component ChipX: Item {
         id: cx
         property bool onAccent: false
         signal clicked()
         implicitWidth: 18; implicitHeight: 18
-        property color strokeColor: cxMa.containsMouse ? theme.danger
-                                    : (cx.onAccent ? "white" : theme.textDim)
-        // Sized to match the config list's ✕ (17px glyph) so every cross reads the
-        // same; drawn (not a glyph) so it stays centered & identical across platforms.
-        Item {
-            anchors.centerIn: parent; width: 13; height: 13
-            Rectangle { anchors.centerIn: parent; width: 15; height: 2.0; radius: 1
-                        rotation: 45; antialiasing: true; color: cx.strokeColor }
-            Rectangle { anchors.centerIn: parent; width: 15; height: 2.0; radius: 1
-                        rotation: -45; antialiasing: true; color: cx.strokeColor }
+        Text {
+            anchors.centerIn: parent
+            text: "✕"
+            font.pixelSize: 17
+            color: cxMa.containsMouse ? theme.danger
+                  : (cx.onAccent ? "white" : theme.textDim)
         }
         MouseArea { id: cxMa; anchors.fill: parent; anchors.margins: -6
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cx.clicked() }
@@ -474,13 +477,21 @@ Window {
         }
         RowLayout {
             anchors.fill: parent
-            Text { text: dd.label; color: theme.text; font.pixelSize: 14 }
-            Item { Layout.fillWidth: true }
-            // Plain value + arrow (no box); brightens on hover.
+            spacing: 8
+            Text {
+                text: dd.label; color: theme.text; font.pixelSize: 14
+                Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+            }
+            // Cap the value column so long labels (e.g. on Settings) don't shove
+            // the row past the page margin on narrow windows.
             Item {
-                id: ddVal; Layout.preferredWidth: ddRow.width; Layout.fillHeight: true
+                id: ddVal
+                Layout.preferredWidth: Math.min(ddRow.implicitWidth, 132)
+                Layout.maximumWidth: 132
+                Layout.fillHeight: true
                 Row { id: ddRow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                     Text { anchors.verticalCenter: parent.verticalCenter
+                           width: Math.min(implicitWidth, 112); elide: Text.ElideRight
                            text: dd.labelFor(dd.value)
                            color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 14 }
                     Text { anchors.verticalCenter: parent.verticalCenter; text: "▾"
@@ -507,13 +518,15 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
         Rectangle {
             anchors.centerIn: parent
-            // Fit the text (names are elided by callers) — no wider than needed.
-            width: Math.min(parent.width - 56, Math.max(196, cdText.implicitWidth + 36))
+            // Fixed max width so long names elide instead of stretching the card.
+            width: Math.min(parent.width - 56, 300)
             height: cdCol.implicitHeight + 24
             radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
             Column {
                 id: cdCol; width: parent.width - 28; anchors.centerIn: parent; spacing: 14
-                Text { id: cdText; width: parent.width; wrapMode: Text.WordWrap; text: cd.text
+                Text { id: cdText; width: parent.width
+                       wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
+                       text: cd.text
                        color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
                 Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
                     Rectangle { width: Math.max(76, c1t.implicitWidth + 26); height: 32; radius: 8
@@ -588,11 +601,10 @@ Window {
             id: homeRoot
             ColumnLayout {
                 anchors.centerIn: parent
-                // Sit a little above centre so the config picker that drops below
-                // the selector still fits inside the minimum window height.
-                anchors.verticalCenterOffset: -40
+                // Sit above centre so the config picker dropdown fits at min height.
+                anchors.verticalCenterOffset: -54
                 width: parent.width
-                spacing: 18
+                spacing: 12
                 // The logo IS the connect button. Centered when off; on connect
                 // it eases upward and the session timer fades in below it.
                 Item {
@@ -633,7 +645,7 @@ Window {
                               : backend.connecting ? qsTr("Connecting…")
                               : (backend.connected ? backend.sessionTime : "")
                         color: theme.textDim
-                        font.pixelSize: (backend.connecting || backend.disconnecting) ? 14 : 18; font.weight: Font.Medium
+                        font.pixelSize: 18; font.weight: Font.Medium
                     }
                     MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
@@ -642,14 +654,21 @@ Window {
                     Layout.alignment: Qt.AlignHCenter
                     implicitWidth: cfgRow.width; implicitHeight: cfgRow.height
                     Row { id: cfgRow; anchors.centerIn: parent; spacing: 6
-                        Text { anchors.verticalCenter: parent.verticalCenter
-                               text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                               width: Math.min(implicitWidth, 260); elide: Text.ElideRight
-                               color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                        Text {
+                            id: cfgLabel
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
+                            width: Math.min(implicitWidth, 260); elide: Text.ElideRight
+                            color: backend.configs.length > 0 ? theme.text
+                                  : (cfgSelMa.containsMouse ? theme.accent : theme.text)
+                            font.underline: backend.configs.length === 0 && cfgSelMa.containsMouse
+                            font.pixelSize: 15; font.weight: Font.Medium
+                        }
                         Text { anchors.verticalCenter: parent.verticalCenter
                                visible: backend.configs.length > 0; text: "▾"; color: theme.textDim; font.pixelSize: 15 }
                     }
-                    MouseArea { anchors.fill: parent
+                    MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: backend.configs.length === 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: {
                             if (backend.configs.length === 0) { win.currentPage = 1; return }
                             if (!cfgPopup.open) {
@@ -788,7 +807,7 @@ Window {
                             ChipX { visible: !chip.isDefault; onAccent: chip.isActive
                                     anchors.left: plabel.right; anchors.leftMargin: 5
                                     anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: win.showConfirm(qsTr("Delete profile “%1”?").arg(win.elide(chip.modelData, 24)),
+                                    onClicked: win.showConfirm(qsTr("Delete profile “%1”?").arg(win.elideMiddle(chip.modelData, 36)),
                                         qsTr("Delete"), function(){ backend.removeProfile(chip.modelData) }) }
                         }
                     }
@@ -962,7 +981,7 @@ Window {
                             Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 17
                                    color: delMa.containsMouse ? theme.danger : theme.textDim }
                             MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
-                                        onClicked: win.showConfirm(qsTr("Delete config “%1”?").arg(modelData),
+                                        onClicked: win.showConfirm(qsTr("Delete config “%1”?").arg(win.elideMiddle(modelData, 36)),
                                             qsTr("Delete"), function(){ backend.removeConfig(index) }) } }
                     }
                 }
@@ -1026,6 +1045,7 @@ Window {
             anchors.fill: parent
             contentWidth: width // pin content to the viewport so margins stay symmetric
             contentHeight: setcol.height; clip: true
+            interactive: contentHeight > height
             ColumnLayout {
                 id: setcol; anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
@@ -1039,28 +1059,39 @@ Window {
                     model: [{v:"system",t:qsTr("System")},{v:"light",t:qsTr("Light")},{v:"dark",t:qsTr("Dark")}]
                     onPicked: function(v){ backend.themeMode = v } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true } Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                           text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 }
+                    Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
                 Sep {}
-                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; Text { text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 } Item { Layout.fillWidth: true }
+                RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                           text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 }
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Security") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
-                    Text { text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12; leftPadding: 6 }
-                    Item { Layout.fillWidth: true }
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                        Text { Layout.fillWidth: true; elide: Text.ElideRight
+                               text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
+                        Text { Layout.fillWidth: true; elide: Text.ElideRight
+                               text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12 }
+                    }
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
                 Item { Layout.preferredHeight: 16 }
 
                 // ----- Excluded routes (subnets that bypass the tunnel) -----
                 RowLayout { Layout.fillWidth: true; spacing: 10
-                    SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; text: qsTr("Excluded routes") }
-                    Text { text: qsTr("Restore defaults"); font.pixelSize: 12
+                    SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; text: qsTr("Excluded routes") }
+                    Text { Layout.maximumWidth: 120; elide: Text.ElideRight
+                           text: qsTr("Restore defaults"); font.pixelSize: 12
                            color: rdMa.containsMouse ? theme.text : theme.accent; font.underline: rdMa.containsMouse
                         MouseArea { id: rdMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor; onClicked: backend.restoreDefaultExcludedRoutes() } }
-                    Text { text: qsTr("Clear all"); font.pixelSize: 12
+                    Text { Layout.maximumWidth: 80; elide: Text.ElideRight
                         visible: backend.excludedRoutes.length > 0
+                        text: qsTr("Clear all"); font.pixelSize: 12
                         color: clrRtMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                         font.underline: clrRtMa.containsMouse
                         MouseArea { id: clrRtMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
@@ -1109,8 +1140,8 @@ Window {
 
                 SectionLabel { text: qsTr("Hotkeys") }
                 RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
-                    Item { Layout.fillWidth: true }
+                    Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                           text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
                     Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.hotkeysEnabled
                              onToggled: function(v){ backend.hotkeysEnabled = v } } }
                 // The shortcut fields dim out while the feature is off.
@@ -1131,26 +1162,31 @@ Window {
                 }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
-                Item { Layout.fillWidth: true; Layout.preferredHeight: 42
-                    Text { id: updTxt; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                           text: qsTr("Check for updates"); font.pixelSize: 14
-                           color: updMa.containsMouse ? theme.accent : theme.text
-                           font.underline: updMa.containsMouse }
-                    Text { id: updStatus; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                           text: backend.updateState === "checking" ? "…"
-                                 : backend.updateState === "downloading" ? qsTr("Downloading…")
-                                 : backend.updateState === "available" ? qsTr("Download ›")
-                                 : backend.updateState === "ready" ? qsTr("Ready")
-                                 : backend.appVersion
-                           color: (backend.updateState === "available" || backend.updateState === "downloading")
-                                  ? theme.accent : theme.textFaint
-                           font.pixelSize: 13 }
-                    Text { anchors.left: updTxt.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                           anchors.right: updStatus.left; anchors.rightMargin: 8; elide: Text.ElideRight
-                           visible: backend.updateMessage.length > 0; text: backend.updateMessage
-                           horizontalAlignment: Text.AlignRight
-                           color: (backend.updateState === "available" || backend.updateState === "downloading")
-                                  ? theme.accent : theme.textFaint; font.pixelSize: 12 }
+                Item { Layout.fillWidth: true; Layout.preferredHeight: updBlock.implicitHeight
+                    ColumnLayout {
+                        id: updBlock; anchors.left: parent.left; anchors.right: parent.right; spacing: 2
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { id: updTxt; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                                   text: qsTr("Check for updates"); font.pixelSize: 14
+                                   color: updMa.containsMouse ? theme.accent : theme.text
+                                   font.underline: updMa.containsMouse }
+                            Text { id: updStatus
+                                   text: backend.updateState === "checking" ? "…"
+                                         : backend.updateState === "downloading" ? qsTr("Downloading…")
+                                         : backend.updateState === "available" ? qsTr("Download ›")
+                                         : backend.updateState === "ready" ? qsTr("Ready")
+                                         : backend.appVersion
+                                   color: (backend.updateState === "available" || backend.updateState === "downloading")
+                                          ? theme.accent : theme.textFaint
+                                   font.pixelSize: 13 }
+                        }
+                        Text { Layout.fillWidth: true; Layout.alignment: Qt.AlignRight
+                               visible: backend.updateMessage.length > 0; text: backend.updateMessage
+                               horizontalAlignment: Text.AlignRight; elide: Text.ElideLeft
+                               color: (backend.updateState === "available" || backend.updateState === "downloading")
+                                      ? theme.accent : theme.textFaint; font.pixelSize: 12 }
+                    }
                     MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: (backend.updateState === "available" || backend.updateState === "error")
                                    ? backend.openLatestRelease()

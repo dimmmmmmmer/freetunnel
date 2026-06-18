@@ -62,7 +62,12 @@ public:
     }
 
     bool listen() {
-        m_server.setSocketOptions(QLocalServer::UserAccessOption);
+        // The helper runs elevated (root/admin) but the GUI connects as the normal
+        // user. UserAccessOption would restrict the socket to the helper's uid and
+        // break cross-privilege IPC; WorldAccessOption + a path under the user's
+        // temp dir (passed on the command line) keeps both ends on the same file.
+        // Authentication is still enforced by the one-time token handshake.
+        m_server.setSocketOptions(QLocalServer::WorldAccessOption);
         if (!m_server.listen(m_socketName))
             return false;
         connect(&m_server, &QLocalServer::newConnection, this, &HelperServer::onConnection);

@@ -185,9 +185,16 @@ bool VpnHelperClient::ensureHelper() {
     if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->deleteLater(); m_proc = nullptr; }
 
+#if defined(Q_OS_WIN)
     m_socketName = QStringLiteral("freetunnel-helper-%1%2")
                            .arg(QString::number(QRandomGenerator::system()->generate64(), 16),
                                 QString::number(QRandomGenerator::system()->generate64(), 16));
+#else
+    m_socketName = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                           .filePath(QStringLiteral("freetunnel-helper-%1%2.sock")
+                                             .arg(QString::number(QRandomGenerator::system()->generate64(), 16),
+                                                  QString::number(QRandomGenerator::system()->generate64(), 16)));
+#endif
     QLocalServer::removeServer(m_socketName);
 
     m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
@@ -239,8 +246,8 @@ bool VpnHelperClient::ensureHelper() {
         }
         if (++m_tries > 40) { // ~10s
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr;
-            fail(tr("The VPN helper didn't start — authorization may have been "
-                    "declined, polkit (pkexec) may be disabled, or sudo is unavailable."));
+            fail(tr("The VPN helper didn't start — authorization may have been declined, "
+                    "or the elevated helper could not be reached."));
             return;
         }
         m_sock->abort();
@@ -258,8 +265,7 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
     // Log into the (per-user, non-world-writable) temp dir with an unpredictable
     // name instead of a fixed /tmp path, so a local attacker can't pre-plant a
     // symlink there and have the elevated (root) helper clobber an arbitrary file.
-    // The token path is shell-escaped (it lives under "Application Support", which
-    // contains a space).
+    // socketPath is an absolute path under the GUI user's temp dir (shell-escaped).
     const QString inner = QStringLiteral("exec %1 --helper --socket %2 --token-file %3 "
                                          ">\"${TMPDIR:-/tmp}/freetunnel-helper.$$.log\" 2>&1 &")
                                   .arg(shellEscape(exe), shellEscape(socketName), shellEscape(tokenPath));
