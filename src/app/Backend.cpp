@@ -203,9 +203,7 @@ void Backend::disconnectVpn() {
 }
 
 void Backend::prepareQuit() {
-    delete m_hkToggle;     m_hkToggle = nullptr;
-    delete m_hkConnect;    m_hkConnect = nullptr;
-    delete m_hkDisconnect; m_hkDisconnect = nullptr;
+    unregisterHotkeys();
     m_client.shutdown();
     freetunnel::removeMaterializedConfig(m_materializedConfigPath);
     m_materializedConfigPath.clear();

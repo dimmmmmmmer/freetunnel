@@ -18,6 +18,10 @@
 
 namespace {
 
+// Always bind/connect on IPv4 loopback — QHostAddress::LocalHost can prefer
+// ::1 on some hosts while the peer listens on 127.0.0.1 only.
+const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
+
 QString stateName(QtTrustTunnelClient::State s) {
     switch (s) {
     case QtTrustTunnelClient::State::Connecting: return QStringLiteral("Connecting");
@@ -55,7 +59,11 @@ public:
         // Loopback TCP works across uid boundaries (GUI user ↔ elevated helper).
         // Authentication is enforced by the one-time token handshake.
         connect(&m_server, &QTcpServer::newConnection, this, &HelperServer::onConnection);
-        return m_server.listen(QHostAddress::LocalHost, m_port);
+        if (m_server.listen(kLoopback, m_port))
+            return true;
+        qWarning("HelperServer: listen(127.0.0.1:%u) failed: %s",
+                 m_port, qPrintable(m_server.errorString()));
+        return false;
     }
 
     bool authed() const { return m_authed; }

@@ -4,11 +4,14 @@
 
 #include <QHotkey>
 
-void Backend::registerHotkeys() {
+void Backend::unregisterHotkeys() {
     delete m_hkToggle;     m_hkToggle = nullptr;
     delete m_hkConnect;    m_hkConnect = nullptr;
     delete m_hkDisconnect; m_hkDisconnect = nullptr;
+}
 
+void Backend::registerHotkeys() {
+    unregisterHotkeys();
     if (!m_settings.hotkeys_enabled) // master switch off — leave everything unbound
         return;
     auto make = [this](const QString &seq, void (Backend::*slot)()) -> QHotkey * {

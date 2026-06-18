@@ -16,6 +16,12 @@
 
 #include "core/AppUiUtils.h" // shellEscape / appleScriptEscape (macOS)
 
+namespace {
+
+const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
+
+} // namespace
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
@@ -229,7 +235,7 @@ bool VpnHelperClient::ensureHelper() {
     });
 
     if (testHelper) {
-        m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
+        m_sock->connectToHost(kLoopback, m_tcpPort);
         return true;
     }
 
@@ -241,17 +247,20 @@ bool VpnHelperClient::ensureHelper() {
         if (m_sock->state() == QAbstractSocket::ConnectedState) {
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; return;
         }
-        if (++m_tries > 40) {
+        // 80 × 250 ms = 20 s — enough for a slow elevation/password prompt.
+        if (++m_tries > 80) {
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr;
+            const QString detail = m_sock ? m_sock->errorString() : QString();
             fail(tr("The VPN helper didn't start — authorization may have been declined, "
-                    "or the elevated helper could not be reached."));
+                    "or the elevated helper could not be reached.%1")
+                         .arg(detail.isEmpty() ? QString() : QStringLiteral(" (") + detail + QLatin1Char(')')));
             return;
         }
         m_sock->abort();
-        m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
+        m_sock->connectToHost(kLoopback, m_tcpPort);
     });
     m_attempt->start(250);
-    m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
+    m_sock->connectToHost(kLoopback, m_tcpPort);
     return true;
 }
 

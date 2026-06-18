@@ -178,6 +178,7 @@ private:
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings
+    void unregisterHotkeys();
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
 
