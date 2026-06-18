@@ -28,6 +28,10 @@ void TestIntegrationBackendVpn::initTestCase()
     AppSettings settings = loadAppSettings();
     settings.hotkeys_enabled = false;
     settings.auto_connect_on_start = false;
+    settings.killswitch_enabled = false;
+    settings.domain_bypass_enabled = false;
+    settings.domain_bypass_rules.clear();
+    settings.profiles[QStringLiteral("Default")] = {};
     saveAppSettings(settings);
 }
 
