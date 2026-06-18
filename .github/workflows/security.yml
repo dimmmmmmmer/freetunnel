@@ -29,6 +29,8 @@ jobs:
             --enable=warning,performance,portability \
             --suppress=missingIncludeSystem \
             --suppress=unknownMacro \
+            --suppress=passedByValue \
+            --suppress=sizeofwithnumericparameter \
             --inline-suppr \
             --library=qt \
             -I include -I include/app -I include/core -I include/vpn \

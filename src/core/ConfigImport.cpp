@@ -6,7 +6,7 @@
 
 namespace freetunnel {
 
-static QString sanitizeFileName(QString name) {
+static QString sanitizeFileName(const QString &name) {
     QString safe;
     for (const QChar &c : name) {
         safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
