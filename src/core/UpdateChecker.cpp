@@ -24,8 +24,12 @@ bool signatureVerificationConfigured()
 
 bool signatureVerificationActive()
 {
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Test-only escape hatch: compiled out of release builds so a shipped binary
+    // can never be told to skip update-signature verification via the environment.
     if (qEnvironmentVariableIsSet("FT_TEST_SKIP_UPDATE_SIG"))
         return false;
+#endif
     return signatureVerificationConfigured();
 }
 

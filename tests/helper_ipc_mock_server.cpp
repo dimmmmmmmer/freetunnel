@@ -1,7 +1,9 @@
 #include "helper_ipc_mock_server.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRandomGenerator>
 
 #include "vpn/vpn_helper_protocol.h"
 
@@ -10,7 +12,7 @@ MockHelperServer::MockHelperServer(const QString &token, QObject *parent)
     , m_token(token)
 {
     m_server.setParent(this);
-    connect(&m_server, &QTcpServer::newConnection, this, [this]() {
+    connect(&m_server, &QLocalServer::newConnection, this, [this]() {
         while (m_server.hasPendingConnections())
             adoptSocket(m_server.nextPendingConnection());
     });
@@ -30,12 +32,11 @@ MockHelperServer::~MockHelperServer()
 
 bool MockHelperServer::listen()
 {
-    return m_server.listen(QHostAddress(QStringLiteral("127.0.0.1")));
-}
-
-quint16 MockHelperServer::port() const
-{
-    return m_server.serverPort();
+    m_name = QStringLiteral("ft-test-helper-%1-%2")
+                     .arg(QCoreApplication::applicationPid())
+                     .arg(QRandomGenerator::global()->generate(), 0, 16);
+    QLocalServer::removeServer(m_name);
+    return m_server.listen(m_name);
 }
 
 void MockHelperServer::acceptPending(int timeoutMs)
@@ -68,7 +69,7 @@ bool MockHelperServer::waitForClientData(int timeoutMs)
     return true;
 }
 
-void MockHelperServer::adoptSocket(QTcpSocket *s)
+void MockHelperServer::adoptSocket(QLocalSocket *s)
 {
     if (!s)
         return;
@@ -80,8 +81,8 @@ void MockHelperServer::adoptSocket(QTcpSocket *s)
     }
     s->setParent(this);
     m_sock = s;
-    connect(m_sock, &QTcpSocket::readyRead, this, [this]() { onReadyRead(); });
-    connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
+    connect(m_sock, &QLocalSocket::readyRead, this, [this]() { onReadyRead(); });
+    connect(m_sock, &QLocalSocket::disconnected, this, [this]() {
         if (m_sock) {
             m_sock->deleteLater();
             m_sock = nullptr;

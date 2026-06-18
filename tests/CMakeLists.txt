@@ -201,7 +201,7 @@ set(BACKEND_TEST_SOURCES
 add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})
 target_include_directories(test_integration_backend_vpn PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
-target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test")
+target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_integration_backend_vpn PRIVATE
     Qt6::Core Qt6::Test Qt6::Network QHotkey::QHotkey)
 if(WIN32)
@@ -225,6 +225,7 @@ add_executable(test_update_checker_e2e
     ../include/core/UpdateChecker.h
 )
 target_include_directories(test_update_checker_e2e PRIVATE . ../include ../include/core)
+target_compile_definitions(test_update_checker_e2e PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_update_checker_e2e PRIVATE Qt6::Core Qt6::Test Qt6::Network)
 if(OpenSSL_FOUND)
     target_link_libraries(test_update_checker_e2e PRIVATE OpenSSL::Crypto)

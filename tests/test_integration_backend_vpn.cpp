@@ -58,7 +58,7 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     MockHelperServer server(token);
     QVERIFY(server.listen());
 
-    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_SOCKET", server.serverName().toUtf8());
     qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
 
     Backend backend;
@@ -71,7 +71,7 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
 
-    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_SOCKET");
     qunsetenv("FT_TEST_HELPER_TOKEN");
 }
 

@@ -99,29 +99,55 @@ bool Backend::importFile(const QString &path) {
         return false;
     }
     // Validate it's a usable config TOML before importing.
+    QString content;
     {
         QFile vf(p);
         if (!vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
             emit errorOccurred(tr("Could not read the file"));
             return false;
         }
-        const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(vf.readAll()));
+        content = QString::fromUtf8(vf.readAll());
+        const freetunnel::ConfigToml c = freetunnel::parseConfigToml(content);
         if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
             emit errorOccurred(tr("Not a valid TrustTunnel config (missing address or credentials)"));
             return false;
         }
     }
+    // Copy the config into our owner-only config dir rather than tracking the
+    // external path: the original file may live in a world-readable location
+    // and we can't guarantee its permissions. The password is then migrated
+    // into the OS credential store, stripping it from the on-disk copy.
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QString safe;
+    for (const QChar &c : QFileInfo(p).completeBaseName())
+        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
+    if (safe.isEmpty())
+        safe = QStringLiteral("imported-%1").arg(QDateTime::currentSecsSinceEpoch());
+    QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
+    if (QFileInfo::exists(target) && QFileInfo(target).absoluteFilePath() != QFileInfo(p).absoluteFilePath())
+        target = QDir(base).filePath(QStringLiteral("%1-%2.toml").arg(safe).arg(QDateTime::currentSecsSinceEpoch()));
+    {
+        QFile out(target);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            emit errorOccurred(tr("Could not write config"));
+            return false;
+        }
+        out.write(content.toUtf8());
+        out.close();
+        QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    }
     QStringList stored = loadStoredConfigs();
-    if (!stored.contains(p)) {
-        stored << p;
+    if (!stored.contains(target)) {
+        stored << target;
         saveStoredConfigs(stored);
     }
     const bool hadNoActive = m_activePath.isEmpty();
     reloadConfigs();
-    freetunnel::migrateConfigPassword(p);
+    freetunnel::migrateConfigPassword(target);
     if (hadNoActive) { // first config in an empty list — make it the active one
-        m_activePath = p;
-        m_settings.last_config_path = p;
+        m_activePath = target;
+        m_settings.last_config_path = target;
         persistSettings();
         emit configChanged();
     }

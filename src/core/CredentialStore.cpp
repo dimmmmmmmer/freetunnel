@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLoggingCategory>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryFile>
@@ -216,6 +217,12 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
         deletePasswordFile(key); // don't leave a plaintext-ish copy on disk
         return true;
     }
+    // No desktop Secret Service (GNOME Keyring / KWallet) available — the
+    // password can only be persisted as a 0600 plaintext file. Warn loudly so
+    // the user understands the credential is not OS-encrypted at rest.
+    qWarning("CredentialStore: no Secret Service available (install gnome-keyring "
+             "or kwallet + secret-tool); storing VPN password as a plaintext "
+             "0600 file. It is NOT encrypted at rest.");
     return storePasswordFile(key, password);
 #endif
 }
@@ -339,9 +346,13 @@ void removeMaterializedConfig(const QString &materializedPath)
         return;
     const QString absConfigDir = QFileInfo(
             QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).absoluteFilePath();
-    if (!QFileInfo(materializedPath).absoluteFilePath().startsWith(absConfigDir))
+    const QFileInfo fi(materializedPath);
+    // Exact parent-directory match (not a prefix) so a sibling like
+    // "<config>-evil/.connect-x.toml" can't be coaxed into removal, and only
+    // remove the password temp files we ourselves materialize.
+    if (fi.absolutePath() != absConfigDir)
         return;
-    if (materializedPath.contains(QStringLiteral(".connect-")))
+    if (fi.fileName().startsWith(QStringLiteral(".connect-")))
         QFile::remove(materializedPath);
 }
 

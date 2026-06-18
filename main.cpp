@@ -100,7 +100,12 @@ static void raise_fd_limit() {} // no-op on Windows
 
 int main(int argc, char *argv[]) {
     raise_fd_limit();
-    qputenv("QML_XHR_ALLOW_FILE_READ", "1"); // Icon recolors bundled SVGs via XHR
+    // Required so Icon.qml can XHR-GET the bundled SVGs (qrc:/icons/*) and
+    // recolor them — Qt denies XMLHttpRequest reads of local *and* qrc schemes
+    // without this. Safe here because every QML document and every XHR URL is a
+    // hardcoded qrc: path baked into the binary: no remote/untrusted QML is ever
+    // loaded, so there is no attacker-controlled local-file read path.
+    qputenv("QML_XHR_ALLOW_FILE_READ", "1");
 
     // Privileged helper mode: headless process that runs the VPN core for the
     // user-level GUI (spawned elevated via VpnHelperClient). No GUI here.
