@@ -10,20 +10,15 @@
 #include <QNetworkRequest>
 #include <QStandardPaths>
 
+#include "ReleaseSigning.h"
 #include "ReleaseVerify.h"
 #include "VersionCompare.h"
 
 namespace {
-// Ed25519 public key (SubjectPublicKeyInfo PEM) used to verify SHA256SUMS.txt.sig.
-// Empty => signature verification is OFF and updates rely on the SHA-256 match
-// against SHA256SUMS.txt fetched over HTTPS. To enable supply-chain verification:
-//   1. openssl genpkey -algorithm ed25519 -out ed25519.pem
-//   2. openssl pkey -in ed25519.pem -pubout      → paste the PEM below
-//   3. add ed25519.pem as the ED25519_SIGNING_KEY repo secret (CI signs releases)
-const char *kUpdateSigningPublicKeyPem = "";
 
 bool signatureVerificationConfigured() {
-    return kUpdateSigningPublicKeyPem && kUpdateSigningPublicKeyPem[0] != '\0';
+    return freetunnel::kReleaseSigningPublicKeyPem
+           && freetunnel::kReleaseSigningPublicKeyPem[0] != '\0';
 }
 } // namespace
 
@@ -201,7 +196,7 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
     }
     m_signatureData = reply->readAll();
 
-    const QByteArray pub(kUpdateSigningPublicKeyPem);
+    const QByteArray pub(freetunnel::kReleaseSigningPublicKeyPem);
     if (!verifyEd25519Signature(m_checksumsData, m_signatureData, pub)) {
         emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
         return;

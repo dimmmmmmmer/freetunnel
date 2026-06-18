@@ -128,6 +128,27 @@ This runs `lupdate` (extract new/changed strings) and `lrelease` (compile
 Edit `i18n/freetunnel_ru.ts` in Qt Linguist or by hand, then run the script
 again to refresh `freetunnel_ru.qm`.
 
+## Signed updates (Ed25519)
+
+Release manifests (`SHA256SUMS.txt`) can be signed so the in-app updater
+verifies them against the public key in `include/core/ReleaseSigning.h`.
+
+1. Generate a key pair (or rotate keys):
+
+   ```bash
+   ./scripts/gen-release-signing-key.sh release-signing.pem
+   ```
+
+2. Paste the printed public PEM into `include/core/ReleaseSigning.h`
+   (`kReleaseSigningPublicKeyPem`).
+
+3. Add the **private** PEM file as the `ED25519_SIGNING_KEY` repository secret
+   in GitHub (Settings → Secrets → Actions). CI uses it in the release job to
+   produce `SHA256SUMS.txt.sig`.
+
+Never commit the private key. If the public key in the repo changes, rotate the
+GitHub secret to the matching private key.
+
 ## Deep links
 
 See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
@@ -138,7 +159,7 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 | --- | --- |
 | `.github/workflows/build.yml` | Release builds (HTTP/2), Linux/macOS/Windows |
 | `.github/workflows/build-http3.yml` | Optional HTTP/3 variant (quiche enabled) |
-| `.github/workflows/tests.yml` | Fast unit tests |
+| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS)
 
 Upstream ref is pinned in workflow `env.UPSTREAM_REF`. Bump it with the patch
 script re-verified.

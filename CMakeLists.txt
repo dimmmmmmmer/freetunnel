@@ -61,6 +61,12 @@ endif ()
 add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
     src/app/Backend.cpp
+    src/app/BackendHotkeys.cpp
+    src/app/BackendUpdates.cpp
+    src/app/BackendSettings.cpp
+    src/app/BackendLogs.cpp
+    src/app/BackendConfig.cpp
+    src/app/BackendSplit.cpp
     include/app/Backend.h
     src/core/AppSettings.cpp
     include/core/AppSettings.h

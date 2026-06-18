@@ -15,15 +15,28 @@ concurrency:
 
 jobs:
   unit:
-    name: Unit tests (Linux)
-    runs-on: ubuntu-latest
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Qt
+      - name: Install Qt (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev
+
+      - name: Install Qt (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          brew list qt >/dev/null 2>&1 || brew install qt
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
 
       - name: Configure
         run: cmake -S tests -B build-tests -G Ninja
