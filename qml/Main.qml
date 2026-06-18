@@ -24,8 +24,24 @@ Window {
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // Closing the window hides to tray instead of quitting (quitOnLastWindowClosed
-    // is off in main.cpp). Quit explicitly from the tray menu.
-    onClosing: function(close) { close.accepted = false; win.hide() }
+    // is off in main.cpp). Quit explicitly from the tray menu or ⌘Q.
+    property bool shuttingDown: false
+    onClosing: function(close) {
+        if (shuttingDown) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
+        win.hide()
+    }
+
+    Connections {
+        target: backend
+        function onAboutToShutdown() {
+            shuttingDown = true
+            tray.visible = false
+        }
+    }
 
     // ---------- system tray ----------
     Platform.SystemTrayIcon {

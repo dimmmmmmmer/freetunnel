@@ -58,6 +58,19 @@ protected:
     }
 };
 
+// ⌘Q / tray Quit posts QEvent::Quit before window close events. Run cleanup
+// then so Main.qml onClosing sees shuttingDown and accepts the close.
+class QuitFilter : public QObject {
+public:
+    Backend *backend = nullptr;
+protected:
+    bool eventFilter(QObject *, QEvent *e) override {
+        if (e->type() == QEvent::Quit && backend)
+            backend->prepareQuit();
+        return false;
+    }
+};
+
 // Pull a control argument (deep link) out of argv, if present.
 static QString controlArgFrom(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
@@ -106,6 +119,10 @@ int main(int argc, char *argv[]) {
     // hardcoded qrc: path baked into the binary: no remote/untrusted QML is ever
     // loaded, so there is no attacker-controlled local-file read path.
     qputenv("QML_XHR_ALLOW_FILE_READ", "1");
+    // After an in-place upgrade the on-disk QML cache can disagree with the
+    // embedded qrc timestamps and leave stale/broken bindings (blank pages,
+    // wrong icon colours). Always compile from the bundled qrc.
+    qputenv("QML_DISABLE_DISK_CACHE", "1");
 
     // Privileged helper mode: headless process that runs the VPN core for the
     // user-level GUI (spawned elevated via VpnHelperClient). No GUI here.
@@ -150,6 +167,14 @@ int main(int argc, char *argv[]) {
 
     Backend backend;
 
+    QuitFilter quitFilter;
+    quitFilter.backend = &backend;
+    app.installEventFilter(&quitFilter);
+
+    bool appQuitting = false;
+    QObject::connect(&backend, &Backend::aboutToShutdown, &app, [&appQuitting]() {
+        appQuitting = true;
+    });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
 
     QQmlApplicationEngine engine;
@@ -176,9 +201,12 @@ int main(int argc, char *argv[]) {
         backend.handleControl(controlArg);
 
     // macOS: after the window is hidden (red button), a Dock-icon click
-    // reactivates the app — re-show the window then.
+    // reactivates the app — re-show the window then. Skip during quit: a
+    // late ApplicationActive event would resurrect the UI after Quit/⌘Q.
     QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
-                     [win](Qt::ApplicationState s) {
+                     [win, &appQuitting](Qt::ApplicationState s) {
+                         if (appQuitting)
+                             return;
                          if (s == Qt::ApplicationActive && win && !win->isVisible()) {
                              win->show();
                              win->raise();

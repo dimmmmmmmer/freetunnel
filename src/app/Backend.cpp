@@ -203,6 +203,10 @@ void Backend::disconnectVpn() {
 }
 
 void Backend::prepareQuit() {
+    if (m_quitting)
+        return;
+    m_quitting = true;
+    emit aboutToShutdown();
     unregisterHotkeys();
     m_client.shutdown();
     freetunnel::removeMaterializedConfig(m_materializedConfigPath);

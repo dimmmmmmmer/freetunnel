@@ -169,6 +169,7 @@ signals:
     void pingsChanged();
     void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
+    void aboutToShutdown();
 
 private:
     void reloadConfigs();
@@ -209,4 +210,5 @@ private:
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
     bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
+    bool m_quitting = false;      // prepareQuit() already ran — don't re-show the window
 };

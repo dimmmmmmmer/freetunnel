@@ -130,6 +130,7 @@ public:
     Q_INVOKABLE void startWindowDrag(QObject *) {}
     Q_INVOKABLE void pingConfigs() {}
     Q_INVOKABLE bool importFromClipboard() { return false; }
+    Q_INVOKABLE void prepareQuit() { emit aboutToShutdown(); }
 
 signals:
     void stateChanged();
@@ -144,6 +145,7 @@ signals:
     void pingsChanged();
     void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
+    void aboutToShutdown();
 
 private:
     bool m_connected = false;
