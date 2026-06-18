@@ -84,8 +84,7 @@ Window {
 
     // Active palette: light/dark, or follow the OS when themeMode === "system".
     readonly property bool systemDark: Application.styleHints.colorScheme === Qt.Dark
-    QtObject {
-        id: theme
+    readonly property QtObject theme: QtObject {
         readonly property bool dark: backend.themeMode === "dark"
                                      || (backend.themeMode === "system" && win.systemDark)
         // Pure neutral gray ramp — true monochrome (R = G = B), no tint.
@@ -116,6 +115,18 @@ Window {
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
     // nav order: Home, Configs, Split, Settings, Logs (configs before split)
     readonly property var navIcons: ["connection", "configs", "network", "settings", "log"]
+    readonly property var pagePaths: ["pages/HomePage.qml", "pages/ConfigsPage.qml",
+                                      "pages/SplitPage.qml", "pages/SettingsPage.qml",
+                                      "pages/LogsPage.qml"]
+
+    // Pages/overlay get shell+backend+theme as *initial* properties via
+    // Loader.setSource so their `required` properties are satisfied at creation.
+    // Setting them later in onLoaded runs after the component is built, which
+    // breaks the required-property contract and leaves the page blank.
+    function pageProps() { return { shell: win, backend: backend, theme: win.theme } }
+    onCurrentPageChanged: pageLoader.setSource(pagePaths[currentPage], pageProps())
+    onOverlayChanged: overlayLoader.setSource(overlay === "create" ? "CreateConfigOverlay.qml" : "",
+                                              overlay === "create" ? pageProps() : {})
 
     // Map a Qt key code to a portable QKeySequence name (used by HotkeyField).
     function keyName(key, text) {
@@ -286,7 +297,7 @@ Window {
                     Icon {
                         visible: navItem.modelData !== "connection"
                         anchors.centerIn: parent; width: 22; height: 22
-                        theme: theme
+                        theme: win.theme
                         svg: navItem.modelData === "configs" ? "qrc:/icons/connection.svg"
                                                              : "qrc:/icons/" + navItem.modelData + ".svg"
                         color: navItem.active ? theme.accent : theme.textDim
@@ -302,29 +313,15 @@ Window {
             id: pageLoader
             Layout.fillWidth: true
             Layout.fillHeight: true
-            source: ["pages/HomePage.qml","pages/ConfigsPage.qml","pages/SplitPage.qml","pages/SettingsPage.qml","pages/LogsPage.qml"][win.currentPage]
-            onLoaded: {
-                if (item) {
-                    item.shell = win
-                    item.backend = backend
-                    item.theme = theme
-                }
-            }
+            Component.onCompleted: setSource(win.pagePaths[win.currentPage], win.pageProps())
         }
     }
 
     // ---------- sub-screen overlay ----------
+    // Loaded on demand by win.onOverlayChanged via setSource (see above).
     Loader {
+        id: overlayLoader
         anchors.fill: parent
-        active: win.overlay !== ""
-        source: win.overlay === "create" ? "CreateConfigOverlay.qml" : ""
-        onLoaded: {
-            if (item) {
-                item.shell = win
-                item.backend = backend
-                item.theme = theme
-            }
-        }
     }
 
     // ---------- toast (errors/notices) ----------
@@ -427,7 +424,7 @@ Window {
         win.confirmCb = cb
         winConfirm.open()
     }
-    ConfirmDialog { id: winConfirm; z: 2500; theme: theme
+    ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
         onConfirmed: if (win.confirmCb) win.confirmCb() }
 
 }

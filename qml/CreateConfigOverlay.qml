@@ -5,6 +5,7 @@ import Qt.labs.platform as Platform
 import "components"
 
 Item {
+    id: createRoot
     required property var shell
     required property var backend
     required property var theme
@@ -139,7 +140,7 @@ Item {
     }
     ConfirmDialog {
         id: discardConfirm
-        theme: theme
+        theme: createRoot.theme
         text: qsTr("Discard unsaved changes?")
         confirmText: qsTr("Discard")
         onConfirmed: cform.close()

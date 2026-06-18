@@ -5,6 +5,7 @@ import Qt.labs.platform as Platform
 import "../components"
 
 Item {
+    id: cfgRoot
     required property var shell
     required property var backend
     required property var theme
@@ -34,7 +35,7 @@ Item {
             Layout.preferredWidth: 40; Layout.preferredHeight: 32; radius: 8
             color: pingMa.containsMouse ? theme.surface : theme.bg
             Behavior on color { ColorAnimation { duration: 120 } }
-            Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: theme.accent; theme: theme }
+            Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: cfgRoot.theme.accent; theme: cfgRoot.theme }
             MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: backend.pingConfigs() }
         }
     }

@@ -20,26 +20,26 @@ Item {
             id: setcol; anchors.left: parent.left; anchors.right: parent.right
             anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
             Item { Layout.preferredHeight: 6 }
-            SectionLabel { text: qsTr("General"); theme: theme }
-            Dropdown { label: qsTr("Language"); value: backend.language; shell: shell; theme: theme
+            SectionLabel { text: qsTr("General"); theme: settingsRoot.theme }
+            Dropdown { label: qsTr("Language"); value: backend.language; shell: settingsRoot.shell; theme: settingsRoot.theme
                 model: [{v:"en",t:"English"},{v:"ru",t:"Русский"}]
                 onPicked: function(v){ backend.language = v } }
-            Sep { theme: theme }
-            Dropdown { label: qsTr("Theme"); value: backend.themeMode; shell: shell; theme: theme
+            Sep { theme: settingsRoot.theme }
+            Dropdown { label: qsTr("Theme"); value: backend.themeMode; shell: settingsRoot.shell; theme: settingsRoot.theme
                 model: [{v:"system",t:qsTr("System")},{v:"light",t:qsTr("Light")},{v:"dark",t:qsTr("Dark")}]
                 onPicked: function(v){ backend.themeMode = v } }
-            Sep { theme: theme }
+            Sep { theme: settingsRoot.theme }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
                        text: qsTr("Launch at system startup"); color: theme.text; font.pixelSize: 14 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoStart; onToggled: function(v){ backend.autoStart = v } } }
-            Sep { theme: theme }
+            Sep { theme: settingsRoot.theme }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
                        text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
             Item { Layout.preferredHeight: 16 }
-            SectionLabel { text: qsTr("Security"); theme: theme }
+            SectionLabel { text: qsTr("Security"); theme: settingsRoot.theme }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
@@ -53,7 +53,7 @@ Item {
 
             // ----- Excluded routes (subnets that bypass the tunnel) -----
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: theme; text: qsTr("Excluded routes") }
+                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: settingsRoot.theme; text: qsTr("Excluded routes") }
                 Text { Layout.maximumWidth: 120; elide: Text.ElideRight
                        text: qsTr("Restore defaults"); font.pixelSize: 12
                        color: rdMa.containsMouse ? theme.text : theme.accent; font.underline: rdMa.containsMouse
@@ -84,7 +84,7 @@ Item {
                                anchors.verticalCenter: parent.verticalCenter; text: rtChip.modelData
                                width: Math.min(implicitWidth, 190); elide: Text.ElideRight
                                color: theme.text; font.pixelSize: 13 }
-                        ChipX { theme: theme; anchors.left: rlabel.right; anchors.leftMargin: 5
+                        ChipX { theme: settingsRoot.theme; anchors.left: rlabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
                                 onClicked: backend.removeExcludedRoute(rtChip.index) }
                     }
@@ -108,7 +108,7 @@ Item {
             }
             Item { Layout.preferredHeight: 16 }
 
-            SectionLabel { text: qsTr("Hotkeys"); theme: theme }
+            SectionLabel { text: qsTr("Hotkeys"); theme: settingsRoot.theme }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
                        text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
@@ -120,18 +120,18 @@ Item {
                 Behavior on opacity { NumberAnimation { duration: 150 } }
                 enabled: backend.hotkeysEnabled
                 ColumnLayout { id: hkCol; anchors.left: parent.left; anchors.right: parent.right; spacing: 0
-                    HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle; shell: shell; theme: theme
+                    HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle; shell: settingsRoot.shell; theme: settingsRoot.theme
                         onCaptured: function(s){ backend.hotkeyToggle = s } }
-                    Sep { theme: theme }
-                    HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect; shell: shell; theme: theme
+                    Sep { theme: settingsRoot.theme }
+                    HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect; shell: settingsRoot.shell; theme: settingsRoot.theme
                         onCaptured: function(s){ backend.hotkeyConnect = s } }
-                    Sep { theme: theme }
-                    HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect; shell: shell; theme: theme
+                    Sep { theme: settingsRoot.theme }
+                    HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect; shell: settingsRoot.shell; theme: settingsRoot.theme
                         onCaptured: function(s){ backend.hotkeyDisconnect = s } }
                 }
             }
             Item { Layout.preferredHeight: 16 }
-            SectionLabel { text: qsTr("Maintenance"); theme: theme }
+            SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
             Item { Layout.preferredHeight: 10 }
             Item { Layout.fillWidth: true; Layout.preferredHeight: 42
                 RowLayout {

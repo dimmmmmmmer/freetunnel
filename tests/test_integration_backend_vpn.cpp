@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryFile>
@@ -73,14 +74,24 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
 
     qunsetenv("FT_TEST_HELPER_SOCKET");
     qunsetenv("FT_TEST_HELPER_TOKEN");
+
+    // The keychain service name is hardcoded and not affected by test mode, so
+    // drop the entry we created to avoid leaving it in the real OS credential store.
+    freetunnel::CredentialStore::deletePassword(configPath);
 }
 
 int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
+    // Keep the test fully hermetic so ctest never touches the real "FreeTunnel"
+    // config store (configs.json) or settings scope. A unique org/app name plus
+    // IniFormat (macOS NativeFormat goes through cfprefsd, which ignores the test
+    // paths) plus test-mode standard paths isolate both configs.json and QSettings.
+    QStandardPaths::setTestModeEnabled(true);
+    QSettings::setDefaultFormat(QSettings::IniFormat);
     QGuiApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("FreeTunnel"));
-    app.setOrganizationName(QStringLiteral("FreeTunnel"));
+    app.setApplicationName(QStringLiteral("BackendVpnTest"));
+    app.setOrganizationName(QStringLiteral("FreeTunnelTest"));
     TestIntegrationBackendVpn tc;
     return QTest::qExec(&tc, argc, argv);
 }

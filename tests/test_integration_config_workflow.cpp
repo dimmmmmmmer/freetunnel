@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
@@ -16,8 +17,17 @@ class TestIntegrationConfigWorkflow : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void deepLinkToStoredConfigRoundTrip();
 };
+
+void TestIntegrationConfigWorkflow::initTestCase()
+{
+    // Hermetic: keep configs.json / standard paths off the real user scope.
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("ConfigWorkflowTest"));
+    QStandardPaths::setTestModeEnabled(true);
+}
 
 void TestIntegrationConfigWorkflow::deepLinkToStoredConfigRoundTrip()
 {

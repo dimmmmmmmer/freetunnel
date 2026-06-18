@@ -28,11 +28,11 @@ Item {
                 Item { Layout.fillWidth: true }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.splitEnabled; onToggled: function(v){ backend.splitEnabled = v } }
             }
-            Dropdown { label: qsTr("Mode"); value: backend.vpnMode; shell: shell; theme: theme
+            Dropdown { label: qsTr("Mode"); value: backend.vpnMode; shell: splitRoot.shell; theme: splitRoot.theme
                 model: [{v:"general",t:qsTr("Bypass VPN")},{v:"selective",t:qsTr("Through VPN")}]
                 onPicked: function(v){ backend.vpnMode = v } }
             Item { Layout.preferredHeight: 6 }
-            SectionLabel { text: qsTr("Profile"); theme: theme }
+            SectionLabel { text: qsTr("Profile"); theme: splitRoot.theme }
             Flow {
                 Layout.fillWidth: true; Layout.topMargin: 2; spacing: 6
                 Repeater {
@@ -52,7 +52,7 @@ Item {
                                anchors.verticalCenter: parent.verticalCenter; text: chip.modelData
                                width: Math.min(implicitWidth, 130); elide: Text.ElideRight
                                color: chip.isActive ? "white" : theme.text; font.pixelSize: 13 }
-                        ChipX { visible: !chip.isDefault; onAccent: chip.isActive; theme: theme
+                        ChipX { visible: !chip.isDefault; onAccent: chip.isActive; theme: splitRoot.theme
                                 anchors.left: plabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
                                 onClicked: shell.showConfirm(qsTr("Delete profile “%1”?").arg(shell.elideMiddle(chip.modelData, 36)),
@@ -89,7 +89,7 @@ Item {
             }
             Item { Layout.preferredHeight: 14 }
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: theme
+                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
                 Text { text: qsTr("Recommended for Russia"); font.pixelSize: 12
                        color: recMa.containsMouse ? theme.text : theme.accent; font.underline: recMa.containsMouse
@@ -119,7 +119,7 @@ Item {
                                anchors.verticalCenter: parent.verticalCenter; text: domChip.modelData
                                width: Math.min(implicitWidth, 190); elide: Text.ElideRight
                                color: theme.text; font.pixelSize: 13 }
-                        ChipX { theme: theme; anchors.left: dlabel.right; anchors.leftMargin: 5
+                        ChipX { theme: splitRoot.theme; anchors.left: dlabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
                                 onClicked: backend.removeDomain(domChip.index) }
                     }

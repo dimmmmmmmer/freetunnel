@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
@@ -21,6 +22,12 @@ private slots:
 
 void TestCredentialStore::init()
 {
+    // Hermetic file-fallback path: redirect standard paths away from the real
+    // user scope (the OS keychain service name is hardcoded, so each test still
+    // deletes the entries it creates).
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("CredentialStoreTest"));
+    QStandardPaths::setTestModeEnabled(true);
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir credDir(dir + QStringLiteral("/credentials"));
     if (credDir.exists()) {
