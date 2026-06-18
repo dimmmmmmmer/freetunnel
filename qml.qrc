@@ -3,5 +3,18 @@
     <file alias="Main.qml">qml/Main.qml</file>
     <file alias="Toggle.qml">qml/Toggle.qml</file>
     <file alias="Field.qml">qml/Field.qml</file>
+    <file alias="CreateConfigOverlay.qml">qml/CreateConfigOverlay.qml</file>
+    <file alias="pages/HomePage.qml">qml/pages/HomePage.qml</file>
+    <file alias="pages/ConfigsPage.qml">qml/pages/ConfigsPage.qml</file>
+    <file alias="pages/SplitPage.qml">qml/pages/SplitPage.qml</file>
+    <file alias="pages/SettingsPage.qml">qml/pages/SettingsPage.qml</file>
+    <file alias="pages/LogsPage.qml">qml/pages/LogsPage.qml</file>
+    <file alias="components/Icon.qml">qml/components/Icon.qml</file>
+    <file alias="components/Dropdown.qml">qml/components/Dropdown.qml</file>
+    <file alias="components/ConfirmDialog.qml">qml/components/ConfirmDialog.qml</file>
+    <file alias="components/HotkeyField.qml">qml/components/HotkeyField.qml</file>
+    <file alias="components/ChipX.qml">qml/components/ChipX.qml</file>
+    <file alias="components/SectionLabel.qml">qml/components/SectionLabel.qml</file>
+    <file alias="components/Sep.qml">qml/components/Sep.qml</file>
   </qresource>
 </RCC>

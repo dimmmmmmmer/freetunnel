@@ -14,20 +14,9 @@
 #include <vector>
 
 #include "vpn/qt_trusttunnel_client.h"
+#include "vpn/vpn_helper_protocol.h"
 
 namespace {
-
-bool tokensEqual(const QString &a, const QString &b)
-{
-    const QByteArray ba = a.toUtf8();
-    const QByteArray bb = b.toUtf8();
-    if (ba.size() != bb.size())
-        return false;
-    char diff = 0;
-    for (int i = 0; i < ba.size(); ++i)
-        diff |= static_cast<char>(ba[i] ^ bb[i]);
-    return diff == 0;
-}
 
 QString stateName(QtTrustTunnelClient::State s) {
     switch (s) {
@@ -95,7 +84,7 @@ private:
 
     void onReadyRead() {
         m_buf += m_sock->readAll();
-        if (m_buf.size() > 65536) {
+        if (m_buf.size() > vpn_helper::kMaxReadBuffer) {
             m_sock->close();
             return;
         }
@@ -111,7 +100,7 @@ private:
     void handle(const QJsonObject &c) {
         const QString cmd = c.value("cmd").toString();
         if (!m_authed) {
-            if (cmd == "hello" && tokensEqual(c.value("token").toString(), m_token)) {
+            if (cmd == "hello" && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
                 m_authed = true;
                 QJsonObject e; e["ev"] = "ready"; m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
             } else {

@@ -11,6 +11,9 @@ compile_commands.json
 cmake_install.cmake
 CTestTestfile.cmake
 _testing/
+tests/_verify/
+tests/_audit_build/
+tests/_commit_build/
 
 # Qt Creator / qmake
 *.pro.user*

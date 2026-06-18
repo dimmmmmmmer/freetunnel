@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 COMPONENTS Core Test REQUIRED)
+find_package(Qt6 COMPONENTS Core Test Network REQUIRED)
 
 enable_testing()
 
@@ -89,3 +89,12 @@ add_executable(test_credentialstore
 target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
 target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME credentialstore COMMAND test_credentialstore)
+
+add_executable(test_helper_ipc
+    test_helper_ipc.cpp
+    helper_ipc_mock_server.cpp
+    helper_ipc_mock_server.h
+)
+target_include_directories(test_helper_ipc PRIVATE ../include ../include/vpn)
+target_link_libraries(test_helper_ipc PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+add_test(NAME helper_ipc COMMAND test_helper_ipc)
