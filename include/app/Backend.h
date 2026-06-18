@@ -85,6 +85,7 @@ public:
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void connectVpn();
     Q_INVOKABLE void disconnectVpn();
+    Q_INVOKABLE void prepareQuit();
     // Handle a control command from a deep link / second instance:
     // "freetunnel://toggle|connect|disconnect" or a "tt://" config import.
     void handleControl(const QString &command);

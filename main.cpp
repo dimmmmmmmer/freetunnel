@@ -150,6 +150,8 @@ int main(int argc, char *argv[]) {
 
     Backend backend;
 
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));

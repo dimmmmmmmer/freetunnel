@@ -202,6 +202,15 @@ void Backend::disconnectVpn() {
     m_client.disconnectVpn(); // aborts a pending startup, or stops a live tunnel
 }
 
+void Backend::prepareQuit() {
+    delete m_hkToggle;     m_hkToggle = nullptr;
+    delete m_hkConnect;    m_hkConnect = nullptr;
+    delete m_hkDisconnect; m_hkDisconnect = nullptr;
+    m_client.shutdown();
+    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+    m_materializedConfigPath.clear();
+}
+
 void Backend::handleControl(const QString &command) {
     using freetunnel::ControlAction;
     const auto cmd = freetunnel::parseControlCommand(command);

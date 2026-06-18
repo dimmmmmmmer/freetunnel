@@ -1,8 +1,9 @@
 #include <QtTest>
 
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalSocket>
+#include <QTcpSocket>
 
 #include "helper_ipc_mock_server.h"
 
@@ -20,8 +21,8 @@ void TestIntegrationHelperClient::clientHandshakeAndConnectFlow()
     MockHelperServer server(token);
     QVERIFY(server.listen());
 
-    QLocalSocket sock;
-    sock.connectToServer(server.serverName());
+    QTcpSocket sock;
+    sock.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(sock.waitForConnected(3000));
     server.acceptPending();
 

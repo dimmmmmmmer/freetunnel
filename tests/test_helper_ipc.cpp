@@ -1,10 +1,12 @@
 #include <QtTest>
 
 #include <QEventLoop>
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalSocket>
+#include <QTcpSocket>
 #include <QTimer>
+#include <QAbstractSocket>
 
 #include "helper_ipc_mock_server.h"
 #include "vpn/vpn_helper_protocol.h"
@@ -35,8 +37,8 @@ void TestHelperIpc::authSuccess()
     MockHelperServer server(token);
     QVERIFY(server.listen());
 
-    QLocalSocket client;
-    client.connectToServer(server.serverName());
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
@@ -60,8 +62,8 @@ void TestHelperIpc::authRejectsBadToken()
     MockHelperServer server(QStringLiteral("correct"));
     QVERIFY(server.listen());
 
-    QLocalSocket client;
-    client.connectToServer(server.serverName());
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
@@ -80,13 +82,13 @@ void TestHelperIpc::rejectsSecondClient()
     MockHelperServer server(QStringLiteral("tok"));
     QVERIFY(server.listen());
 
-    QLocalSocket first;
-    first.connectToServer(server.serverName());
+    QTcpSocket first;
+    first.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(first.waitForConnected(3000));
     server.acceptPending();
 
-    QLocalSocket second;
-    second.connectToServer(server.serverName());
+    QTcpSocket second;
+    second.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(second.waitForConnected(3000));
     server.acceptPending();
     QVERIFY(second.waitForDisconnected(1000));
@@ -99,8 +101,8 @@ void TestHelperIpc::oversizedBufferClosesConnection()
     MockHelperServer server(QStringLiteral("tok"));
     QVERIFY(server.listen());
 
-    QLocalSocket client;
-    client.connectToServer(server.serverName());
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
@@ -108,11 +110,11 @@ void TestHelperIpc::oversizedBufferClosesConnection()
     client.flush();
     QVERIFY(server.waitForClientData(3000));
     for (int i = 0; i < 300; ++i) {
-        if (client.state() == QLocalSocket::UnconnectedState)
+        if (client.state() == QAbstractSocket::UnconnectedState)
             break;
         QTest::qWait(10);
     }
-    QCOMPARE(client.state(), QLocalSocket::UnconnectedState);
+    QCOMPARE(client.state(), QAbstractSocket::UnconnectedState);
 }
 
 void TestHelperIpc::connectDisconnectFlow()
@@ -121,8 +123,8 @@ void TestHelperIpc::connectDisconnectFlow()
     MockHelperServer server(token);
     QVERIFY(server.listen());
 
-    QLocalSocket client;
-    client.connectToServer(server.serverName());
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
@@ -190,8 +192,8 @@ void TestHelperIpc::preAuthCommandsRejected()
     MockHelperServer server(QStringLiteral("tok"));
     QVERIFY(server.listen());
 
-    QLocalSocket client;
-    client.connectToServer(server.serverName());
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 

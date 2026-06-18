@@ -77,7 +77,7 @@ Window {
             }
             Platform.MenuItem {
                 text: qsTr("Quit")
-                onTriggered: Qt.quit()
+                onTriggered: { backend.prepareQuit(); Qt.quit() }
             }
         }
     }
