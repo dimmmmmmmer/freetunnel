@@ -2,70 +2,70 @@
 
 <img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
 
-Графический клиент для [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient) на Qt — для Linux, macOS и Windows.
+A Qt GUI client for [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient) on Linux, macOS, and Windows.
 
-## Установка
+## Installation
 
-Скачайте готовую сборку под свою систему со страницы
+Download a build for your platform from
 [**Releases**](https://github.com/enrvate/freetunnel/releases/latest):
 
-| Система | Файл |
+| Platform | File |
 | --- | --- |
-| **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` (установщик) или `…​.zip` (портативная) |
+| **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` (installer) or `…​.zip` (portable) |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
-| **Linux** | `freetunnel-linux-x86_64.AppImage` (универсальная) или `…​.tar.gz` |
+| **Linux** | `freetunnel-linux-x86_64.AppImage` (universal) or `…​.tar.gz` |
 
-Сборки **не подписаны** (нет сертификатов), поэтому при первом запуске система может предупредить:
+Builds are **unsigned** (no code-signing certificates), so the OS may warn on first launch:
 
-- **macOS**: правый клик по приложению → **Открыть** (или
+- **macOS**: right-click the app → **Open** (or
   `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
-- **Windows**: SmartScreen → **Подробнее** → **Выполнить в любом случае**.
+- **Windows**: SmartScreen → **More info** → **Run anyway**.
 - **Linux (AppImage)**: `chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage`.
 
-Для VPN нужны повышенные права: Windows запросит UAC, на Linux/macOS — пароль
-администратора при первом подключении в сессии.
+VPN requires elevated privileges: Windows shows UAC; on Linux/macOS you enter an
+admin password the first time you connect in a session.
 
-## Быстрый старт
+## Quick start
 
-1. На вкладке **Конфиги** (＋) создайте конфиг или импортируйте его (см. ниже).
-2. На главном экране выберите конфиг и нажмите **логотип** — подключение /
-   отключение.
-3. В **Настройках**: автоподключение при старте, kill switch, тема, язык,
-   горячие клавиши и проверка обновлений.
+1. On the **Configs** tab (＋), create a config or import one (see below).
+2. On the home screen, pick a config and click the **logo** to connect /
+   disconnect.
+3. In **Settings**: auto-connect on startup, kill switch, theme, language,
+   hotkeys, and update checks.
 
-## Импорт конфигурации
+## Importing a configuration
 
-- **Конфиги → ＋** — создать новый TOML, импортировать из файла или вставить
-  `tt://`-ссылку из буфера обмена.
-- Официальный формат TrustTunnel `tt://?<base64url>` (тот же, что в QR-кодах и
-  мобильных клиентах).
+- **Configs → ＋** — create a new TOML, import from file, or paste a `tt://`
+  link from the clipboard.
+- Official TrustTunnel format: `tt://?<base64url>` (same as QR codes and mobile
+  clients).
 
-## Управление снаружи
+## External control
 
-- **Диплинки**: `freetunnel://toggle`, `freetunnel://connect`,
-  `freetunnel://disconnect`, плюс `tt://…` для импорта. Приложение
-  одно-экземплярное — повторный запуск со ссылкой передаёт команду уже открытому
-  окну.
-- **Глобальные горячие клавиши** — настраиваются в Настройках (переключить /
-  подключить / отключить); работают, даже когда окно свёрнуто.
-- **Системный трей** — быстрые действия и сворачивание в трей вместо закрытия.
+- **Deep links**: `freetunnel://toggle`, `freetunnel://connect`,
+  `freetunnel://disconnect`, plus `tt://…` for import. The app is
+  single-instance — launching again with a link forwards the command to the
+  running window.
+- **Global hotkeys** — configured in Settings (toggle / connect / disconnect);
+  work even when the window is minimized.
+- **System tray** — quick actions; closing the window hides to tray instead of
+  quitting.
 
-## Совместимость
+## Compatibility
 
 - **Windows**: 10/11 (x64).
-- **macOS**: 11 Big Sur и новее — **universal** (Apple Silicon и Intel в одном `.dmg`).
-- **Linux**: AppImage запускается на большинстве актуальных дистрибутивов;
-  `.tar.gz` требует системного Qt 6.
+- **macOS**: 11 Big Sur or newer — **universal** (Apple Silicon and Intel in one `.dmg`).
+- **Linux**: AppImage runs on most current distros; `.tar.gz` requires system Qt 6.
 
-## Для разработчиков
+## For developers
 
-Сборка полностью автоматизирована в GitHub Actions
-([`.github/workflows/build.yml`](.github/workflows/build.yml)): клиент линкуется
-с C++-ядром [`TrustTunnel/TrustTunnelClient`](https://github.com/TrustTunnel/TrustTunnelClient),
-HTTP/3 в релизных сборках отключён. Юнит-тесты —
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml). Релиз публикуется
-автоматически по тегу `v*`.
+Builds are fully automated in GitHub Actions
+([`.github/workflows/build.yml`](.github/workflows/build.yml)): the client links
+against the C++ core [`TrustTunnel/TrustTunnelClient`](https://github.com/TrustTunnel/TrustTunnelClient);
+HTTP/3 is disabled in release builds. Unit tests —
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml). Releases are
+published automatically on `v*` tags.
 
-## Лицензия
+## License
 
-См. [LICENSE](LICENSE).
+See [LICENSE](LICENSE).

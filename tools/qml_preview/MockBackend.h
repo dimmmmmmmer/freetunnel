@@ -12,6 +12,7 @@ class MockBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY changed)
     Q_PROPERTY(bool connecting READ connecting NOTIFY changed)
+    Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY changed)
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY changed)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY changed)
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY changed)
@@ -49,17 +50,51 @@ public:
     QString latestVersion() const { return m_latestVersion; }
     Q_INVOKABLE void checkForUpdates() {
         m_updateState = QStringLiteral("available"); m_latestVersion = QStringLiteral("1.1.0");
-        m_updateMessage = QStringLiteral("Доступна версия 1.1.0"); emit changed();
+        m_updateMessage = QStringLiteral("Version 1.1.0 available"); emit changed();
     }
     Q_INVOKABLE void openLatestRelease() {}
     Q_INVOKABLE void openUrl(const QString &) {}
     Q_INVOKABLE void startWindowDrag(QObject *) {}
+    // empty | config | connecting | disconnecting | connected
+    Q_INVOKABLE void applyPreviewScenario(const QString &scenario) {
+        auto withConfig = [&]() {
+            m_configs = {QStringLiteral("Germany · Frankfurt")};
+            m_active = 0;
+        };
+        auto idle = [&]() {
+            m_on = false;
+            m_connecting = false;
+            m_disconnecting = false;
+        };
+        if (scenario == QLatin1String("empty")) {
+            m_configs.clear();
+            m_active = -1;
+            idle();
+        } else if (scenario == QLatin1String("config")) {
+            withConfig();
+            idle();
+        } else if (scenario == QLatin1String("connecting")) {
+            withConfig();
+            idle();
+            m_connecting = true;
+        } else if (scenario == QLatin1String("disconnecting")) {
+            withConfig();
+            idle();
+            m_disconnecting = true;
+        } else if (scenario == QLatin1String("connected")) {
+            withConfig();
+            m_on = true;
+            m_connecting = false;
+            m_disconnecting = false;
+        }
+        emit changed();
+    }
     QString logPath() const { return QStringLiteral("/Users/me/Library/Application Support/FreeTunnel/freetunnel.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v) { m_autoStart = v; emit changed(); }
     QVariantList pings() const { return m_pings; }
     Q_INVOKABLE void pingConfigs() {
-        m_pings = QVariantList{QStringLiteral("38 мс"), QStringLiteral("52 мс"), QStringLiteral("—")};
+        m_pings = QVariantList{QStringLiteral("38 ms"), QStringLiteral("52 ms"), QStringLiteral("—")};
         emit changed();
     }
     Q_INVOKABLE bool importFromClipboard() { return true; }
@@ -109,7 +144,8 @@ public:
     Q_INVOKABLE void clearLogs() { m_logCleared = true; emit changed(); }
     Q_INVOKABLE void openLogFolder() {}
     bool connected() const { return m_on; }
-    bool connecting() const { return false; }
+    bool connecting() const { return m_connecting; }
+    bool disconnecting() const { return m_disconnecting; }
     QString sessionTime() const { return QStringLiteral("01:24:36"); }
     QString downSpeed() const { return QStringLiteral("12.4"); }
     QString upSpeed() const { return QStringLiteral("1.2"); }
@@ -117,7 +153,7 @@ public:
     int activeIndex() const { return m_active; }
     QString activeConfig() const {
         return m_active >= 0 && m_active < m_configs.size() ? m_configs.at(m_active)
-                                                            : QStringLiteral("Нет конфига");
+                                                            : QStringLiteral("No config");
     }
     QString language() const { return m_lang; }
     QString themeMode() const { return m_theme; }
@@ -151,9 +187,11 @@ signals:
     void errorOccurred(const QString &msg);
 private:
     bool m_on = true;
-    QStringList m_configs{QStringLiteral("Германия · Франкфурт"),
-                          QStringLiteral("Нидерланды · Амстердам"),
-                          QStringLiteral("США · Нью-Йорк")};
+    bool m_connecting = false;
+    bool m_disconnecting = false;
+    QStringList m_configs{QStringLiteral("Germany · Frankfurt"),
+                          QStringLiteral("Netherlands · Amsterdam"),
+                          QStringLiteral("USA · New York")};
     int m_active = 0;
     QString m_lang = QStringLiteral("en");
     QString m_theme = QStringLiteral("system");
@@ -163,11 +201,11 @@ private:
     bool m_split = true;
     QString m_vpnMode = QStringLiteral("general");
     QString m_activeProfile = QStringLiteral("Default");
-    QStringList m_profileOrder{QStringLiteral("Default"), QStringLiteral("Работа")};
+    QStringList m_profileOrder{QStringLiteral("Default"), QStringLiteral("Work")};
     QMap<QString, QStringList> m_profiles{
         {QStringLiteral("Default"), {QStringLiteral("github.com"), QStringLiteral("*.gov.ru"),
                                      QStringLiteral("netflix.com")}},
-        {QStringLiteral("Работа"), {QStringLiteral("intranet.corp")}}};
+        {QStringLiteral("Work"), {QStringLiteral("intranet.corp")}}};
     QStringList m_excludedRoutes{QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
     bool m_hkEnabled = true;
     QString m_hkToggle = QStringLiteral("Ctrl+Alt+T");

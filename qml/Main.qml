@@ -9,10 +9,10 @@ import Qt.labs.platform as Platform
 Window {
     id: win
     visible: true
-    // Default to the smallest comfortable size.
-    width: 360
-    height: 480
-    minimumWidth: 360
+    // Default size; 400px min keeps frameless nav clear of window controls on Linux/Windows.
+    width: 400
+    height: 460
+    minimumWidth: 400
     minimumHeight: 460
     color: theme.bg
     title: "FreeTunnel"
@@ -245,6 +245,7 @@ Window {
             // lights (native, top-left) or our own buttons (top-right) on the
             // frameless Linux/Windows chrome.
             Layout.topMargin: Qt.platform.os === "osx" ? 26 : 36
+            Layout.rightMargin: win.isMac ? 0 : 105
             Layout.bottomMargin: 6
             spacing: 8
             Item { Layout.fillWidth: true }
@@ -594,132 +595,144 @@ Window {
         }
     }
 
-    // ===================== Home (Подключение) =====================
+    // ===================== Home =====================
     Component {
         id: homePage
         Item {
             id: homeRoot
-            ColumnLayout {
-                anchors.centerIn: parent
-                anchors.verticalCenterOffset: -48
-                width: parent.width
-                spacing: 0
-                // Block 1: logo + session / status line
-                Item {
-                    id: hero
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: 200; Layout.preferredHeight: 196
-                    Image {
-                        id: heroLogo
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        source: "qrc:/assets/logo.svg"; width: 132; height: 132
-                        sourceSize: Qt.size(264, 264)
-                        opacity: backend.connected ? 1.0 : ((backend.connecting || backend.disconnecting) ? 0.7 : 0.5)
-                        Behavior on opacity { NumberAnimation { duration: 220 } }
-                        y: (backend.connected || backend.connecting || backend.disconnecting)
-                           ? hero.height / 2 - height / 2 - 10
-                           : hero.height / 2 - height / 2 + 10
-                        Behavior on y { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
-                        // Subtle breathing while connecting/disconnecting — driven by
-                        // scale, not opacity, so it never fights the opacity binding
-                        // (which caused a flash on connect).
-                        scale: (heroMa.pressed ? 0.96 : 1.0) * ((backend.connecting || backend.disconnecting) ? pulse.value : 1.0)
-                        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                        QtObject {
-                            id: pulse; property real value: 1.0
-                            // (animated below)
-                        }
-                        SequentialAnimation {
-                            running: backend.connecting || backend.disconnecting; loops: Animation.Infinite
-                            NumberAnimation { target: pulse; property: "value"; to: 1.05; duration: 750; easing.type: Easing.InOutSine }
-                            NumberAnimation { target: pulse; property: "value"; to: 0.97; duration: 750; easing.type: Easing.InOutSine }
+            // Speed badges pinned to the bottom — independent of the logo/config block.
+            RowLayout {
+                id: speedRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 44
+                spacing: 12
+                Repeater {
+                    model: [ { v: backend.downSpeed, c: theme.success, a: "↓" },
+                             { v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
+                    Rectangle {
+                        required property var modelData
+                        Layout.preferredWidth: 116; Layout.preferredHeight: 44; radius: 8; color: theme.tile
+                        Row {
+                            anchors.centerIn: parent; spacing: 5
+                            Text { anchors.verticalCenter: parent.verticalCenter
+                                   text: parent.parent.modelData.a; color: parent.parent.modelData.c; font.pixelSize: 14 }
+                            Text { anchors.verticalCenter: parent.verticalCenter
+                                   text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                         }
                     }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.top: heroLogo.bottom; anchors.topMargin: 8
-                        opacity: (backend.connected || backend.connecting || backend.disconnecting) ? 1.0 : 0.0
-                        Behavior on opacity { NumberAnimation { duration: 220 } }
-                        text: backend.disconnecting ? qsTr("Disconnecting…")
-                              : backend.connecting ? qsTr("Connecting…")
-                              : (backend.connected ? backend.sessionTime : "")
-                        color: theme.textDim
-                        font.pixelSize: 15; font.weight: Font.Medium
-                    }
-                    MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
-                Item { Layout.preferredHeight: 22 }
-                // Block 2: active config + add button
-                Item {
-                    id: cfgSel
-                    Layout.alignment: Qt.AlignHCenter
-                    implicitWidth: cfgRow.implicitWidth; implicitHeight: cfgRow.implicitHeight
-                    Row { id: cfgRow; spacing: 6
-                        Item {
-                            id: cfgLabelBlock
-                            implicitHeight: 24
-                            implicitWidth: cfgLabelRow.implicitWidth
-                            Row {
-                                id: cfgLabelRow; spacing: 6
-                                anchors.verticalCenter: parent.verticalCenter
-                                Text {
-                                    id: cfgLabel
-                                    property color labelColor: cfgSelMa.containsMouse ? theme.accent : theme.text
-                                    text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                                    width: backend.configs.length > 0 ? Math.min(implicitWidth, 260) : implicitWidth
-                                    elide: Text.ElideRight
-                                    color: labelColor
-                                    font.underline: cfgSelMa.containsMouse
-                                    font.pixelSize: 15; font.weight: Font.Medium
+            }
+            // Logo + status + config sit above the badges; hero height follows content.
+            Item {
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: speedRow.top; anchors.bottomMargin: 22
+                ColumnLayout {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 6
+                    width: parent.width
+                    spacing: 0
+                    Item {
+                        id: hero
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: 200
+                        Layout.preferredHeight: heroCol.height
+                        readonly property bool sessionActive: backend.connected || backend.connecting || backend.disconnecting
+                        Column {
+                            id: heroCol
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: 6
+                            Item {
+                                width: 132; height: 132
+                                Image {
+                                    id: heroLogo
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    y: hero.sessionActive ? 0 : 12
+                                    Behavior on y { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                                    source: "qrc:/assets/logo.svg"; width: 132; height: 132
+                                    sourceSize: Qt.size(264, 264)
+                                    opacity: backend.connected ? 1.0 : ((backend.connecting || backend.disconnecting) ? 0.7 : 0.5)
+                                    Behavior on opacity { NumberAnimation { duration: 220 } }
+                                    scale: (heroMa.pressed ? 0.96 : 1.0) * ((backend.connecting || backend.disconnecting) ? pulse.value : 1.0)
+                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                                    QtObject {
+                                        id: pulse; property real value: 1.0
+                                    }
+                                    SequentialAnimation {
+                                        running: backend.connecting || backend.disconnecting; loops: Animation.Infinite
+                                        NumberAnimation { target: pulse; property: "value"; to: 1.05; duration: 750; easing.type: Easing.InOutSine }
+                                        NumberAnimation { target: pulse; property: "value"; to: 0.97; duration: 750; easing.type: Easing.InOutSine }
+                                    }
                                 }
-                                Text { id: cfgArrow
-                                       visible: backend.configs.length > 0; text: "▾"
-                                       color: cfgLabel.labelColor; font.pixelSize: 15 }
                             }
-                            MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (backend.configs.length === 0) { win.currentPage = 1; return }
-                                            if (!cfgPopup.open) {
-                                                var p = cfgSel.mapToItem(homeRoot, 0, 0)
-                                                cfgPopup.x = p.x + cfgSel.width / 2 - cfgPopup.width / 2
-                                                cfgPopup.y = p.y + cfgSel.height + 6
-                                            }
-                                            cfgPopup.open = !cfgPopup.open
-                                        } }
-                        }
-                        Rectangle {
-                            visible: backend.configs.length > 0
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 22; height: 22; radius: 6
-                            color: addCfgMa.containsMouse ? theme.surface : "transparent"
-                            Behavior on color { ColorAnimation { duration: 120 } }
-                            Item { anchors.centerIn: parent; width: 14; height: 14
-                                Rectangle { anchors.centerIn: parent; width: 10; height: 1.6; radius: 1; color: theme.accent }
-                                Rectangle { anchors.centerIn: parent; width: 1.6; height: 10; radius: 1; color: theme.accent }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: hero.sessionActive
+                                opacity: hero.sessionActive ? 1.0 : 0.0
+                                Behavior on opacity { NumberAnimation { duration: 220 } }
+                                text: backend.disconnecting ? qsTr("Disconnecting…")
+                                      : backend.connecting ? qsTr("Connecting…")
+                                      : (backend.connected ? backend.sessionTime : "")
+                                color: theme.textDim
+                                font.pixelSize: 15; font.weight: Font.Medium
                             }
-                            MouseArea { id: addCfgMa; anchors.fill: parent; hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: win.currentPage = 1 }
                         }
+                        MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                     }
-                }
-                Item { Layout.preferredHeight: 34 }
-                // Block 3: speed tiles
-                RowLayout {
-                    Layout.alignment: Qt.AlignHCenter; spacing: 12
-                    Repeater {
-                        model: [ { v: backend.downSpeed, c: theme.success, a: "↓" },
-                                 { v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
-                        Rectangle {
-                            required property var modelData
-                            Layout.preferredWidth: 116; Layout.preferredHeight: 44; radius: 8; color: theme.tile
-                            Row {
-                                anchors.centerIn: parent; spacing: 5
-                                Text { anchors.verticalCenter: parent.verticalCenter
-                                       text: parent.parent.modelData.a; color: parent.parent.modelData.c; font.pixelSize: 14 }
-                                Text { anchors.verticalCenter: parent.verticalCenter
-                                       text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                    Item { Layout.preferredHeight: 10 }
+                    Item {
+                        id: cfgSel
+                        Layout.alignment: Qt.AlignHCenter
+                        implicitWidth: cfgRow.implicitWidth; implicitHeight: cfgRow.implicitHeight
+                        Row { id: cfgRow; spacing: 6
+                            Item {
+                                id: cfgLabelBlock
+                                implicitHeight: 24
+                                implicitWidth: cfgLabelRow.implicitWidth
+                                Row {
+                                    id: cfgLabelRow; spacing: 6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        id: cfgLabel
+                                        property color labelColor: cfgSelMa.containsMouse ? theme.accent : theme.text
+                                        text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
+                                        width: backend.configs.length > 0 ? Math.min(implicitWidth, 260) : implicitWidth
+                                        elide: Text.ElideRight
+                                        color: labelColor
+                                        font.underline: cfgSelMa.containsMouse
+                                        font.pixelSize: 15; font.weight: Font.Medium
+                                    }
+                                    Text { id: cfgArrow
+                                           visible: backend.configs.length > 0; text: "▾"
+                                           color: cfgLabel.labelColor; font.pixelSize: 15 }
+                                }
+                                MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (backend.configs.length === 0) { win.currentPage = 1; return }
+                                                if (!cfgPopup.open) {
+                                                    var p = cfgSel.mapToItem(homeRoot, 0, 0)
+                                                    cfgPopup.x = p.x + cfgSel.width / 2 - cfgPopup.width / 2
+                                                    cfgPopup.y = p.y + cfgSel.height + 6
+                                                }
+                                                cfgPopup.open = !cfgPopup.open
+                                            } }
+                            }
+                            Rectangle {
+                                visible: backend.configs.length > 0
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 22; height: 22; radius: 6
+                                color: addCfgMa.containsMouse ? theme.surface : "transparent"
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Item { anchors.centerIn: parent; width: 14; height: 14
+                                    Rectangle { anchors.centerIn: parent; width: 10; height: 1.6; radius: 1; color: theme.accent }
+                                    Rectangle { anchors.centerIn: parent; width: 1.6; height: 10; radius: 1; color: theme.accent }
+                                }
+                                MouseArea { id: addCfgMa; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.currentPage = 1 }
                             }
                         }
                     }
