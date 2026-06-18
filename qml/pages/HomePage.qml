@@ -90,7 +90,7 @@ Item {
                 }
                 MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
             }
-            Item { Layout.preferredHeight: 10 }
+            Item { Layout.preferredHeight: 22 }
             Item {
                 id: cfgSel
                 Layout.alignment: Qt.AlignHCenter

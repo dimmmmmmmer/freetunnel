@@ -132,7 +132,6 @@ Item {
             }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
-            Item { Layout.preferredHeight: 10 }
             Item { Layout.fillWidth: true; Layout.preferredHeight: 42
                 RowLayout {
                     anchors.fill: parent

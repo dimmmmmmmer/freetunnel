@@ -199,12 +199,12 @@ bool VpnHelperClient::ensureHelper() {
         }
 
         // Local socket the elevated helper will create and we connect to. On
-        // Unix it's an absolute path inside the user-owned config dir (the
-        // helper chowns it to us + 0600); on Windows it's a named-pipe name.
+        // Unix it's an absolute path in the user's temp dir (root can create
+        // and chown it to us + 0600); on Windows it's a named-pipe name.
 #if defined(Q_OS_WIN)
         m_socketName = QStringLiteral("freetunnel-helper-%1").arg(rnd);
 #else
-        m_socketName = dir + QStringLiteral("/.fthelper-%1.sock").arg(rnd);
+        m_socketName = QDir::tempPath() + QStringLiteral("/.fthelper-%1.sock").arg(rnd);
         QLocalServer::removeServer(m_socketName); // clear any stale socket file
 #endif
 

@@ -333,17 +333,26 @@ Window {
         id: toast
         z: 1000
         property string message: ""
-        function show(m) { message = m; opacity = 0.97; toastTimer.restart() }
+        TextMetrics { id: toastMetrics; font.pixelSize: 13 }
+        function show(m) {
+            toastMetrics.text = m
+            message = m
+            opacity = 0.97
+            toastTimer.restart()
+        }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom; anchors.bottomMargin: 26
-        width: Math.min(parent.width - 36, tmsg.implicitWidth + 32)
-        height: Math.max(40, tmsg.implicitHeight + 18)
+        // Size to the message text (TextMetrics), not tmsg.implicitWidth — binding
+        // tmsg.width to toast.width made implicitWidth inflate and left empty margins.
+        width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastMetrics.boundingRect.width) + 24))
+        height: Math.max(40, tmsg.contentHeight + 18)
         radius: 9; color: theme.surface; border.color: theme.border; border.width: 1
         opacity: 0; visible: opacity > 0
         Text {
             id: tmsg; anchors.centerIn: parent; width: toast.width - 24
             text: toast.message; color: theme.text; font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+            maximumLineCount: 3; elide: Text.ElideRight
         }
         Behavior on opacity { NumberAnimation { duration: 180 } }
         Timer { id: toastTimer; interval: 3200; onTriggered: toast.opacity = 0 }

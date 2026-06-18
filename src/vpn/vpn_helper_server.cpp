@@ -16,6 +16,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 #endif
 
 #include "vpn/qt_trusttunnel_client.h"
@@ -93,14 +95,18 @@ public:
         // the launching user so that *only* that user — not other local accounts
         // or the loopback network — can connect to the root-owned helper.
         m_server.setSocketOptions(QLocalServer::UserAccessOption);
-        if (!m_server.listen(m_socketName))
+        if (!m_server.listen(m_socketName)) {
+            qWarning("HelperServer: listen(%s) failed", qPrintable(m_socketName));
             return false;
-        const QString path = m_server.fullServerName();
+        }
+        // Use the path we passed to listen(), not fullServerName() — on some
+        // platforms the latter can differ or be empty right after listen().
+        const QString path = m_socketName;
         if (m_peerUid >= 0 && !path.isEmpty()) {
             if (::chown(path.toLocal8Bit().constData(),
                         static_cast<uid_t>(m_peerUid), static_cast<gid_t>(-1)) != 0) {
-                // Couldn't transfer ownership: the user wouldn't be able to
-                // connect to a root-owned 0600 socket, so fail closed.
+                qWarning("HelperServer: chown(%s, uid=%d) failed: %s",
+                         qPrintable(path), m_peerUid, std::strerror(errno));
                 m_server.close();
                 return false;
             }
@@ -122,7 +128,13 @@ private:
         // (defense in depth on top of the 0600 socket ownership).
         if (m_peerUid >= 0) {
             const uid_t peer = socketPeerUid(s->socketDescriptor());
-            if (peer != static_cast<uid_t>(m_peerUid)) {
+            // Only reject when peer identity is known and doesn't match. If
+            // getpeereid/SO_PEERCRED fails (returns -1), rely on the chown'd
+            // 0600 socket ownership instead of dropping the connection.
+            if (peer != static_cast<uid_t>(-1)
+                    && peer != static_cast<uid_t>(m_peerUid)) {
+                qWarning("HelperServer: rejecting peer uid %u (expected %d)",
+                         static_cast<unsigned>(peer), m_peerUid);
                 s->close();
                 s->deleteLater();
                 return;

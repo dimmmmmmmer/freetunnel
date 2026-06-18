@@ -3,7 +3,7 @@
 // GUI-side proxy for the VPN. Spawns the privileged helper (the same binary run
 // with --helper, elevated once per session) and drives it over a local socket
 // (Unix-domain socket / Windows named pipe). On Unix the socket lives in the
-// GUI user's config dir and is chowned to that user (0600), so the elevated
+// user's temp dir and is chowned to that user (0600), so the elevated helper
 // helper is reachable only by the launching user — not by other local accounts.
 // Exposes the same signal/slot surface the Backend expects, so the GUI never
 // runs the VPN core (or root) in-process.
