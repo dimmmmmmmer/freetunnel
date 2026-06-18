@@ -518,8 +518,8 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
         Rectangle {
             anchors.centerIn: parent
-            // Fixed max width so long names elide instead of stretching the card.
-            width: Math.min(parent.width - 56, 300)
+            // Narrow card: elide long names instead of stretching edge-to-edge.
+            width: Math.min(parent.width - 56, 252)
             height: cdCol.implicitHeight + 24
             radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
             Column {
@@ -645,7 +645,7 @@ Window {
                               : backend.connecting ? qsTr("Connecting…")
                               : (backend.connected ? backend.sessionTime : "")
                         color: theme.textDim
-                        font.pixelSize: 18; font.weight: Font.Medium
+                        font.pixelSize: 15; font.weight: Font.Medium
                     }
                     MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
@@ -654,34 +654,55 @@ Window {
                     Layout.alignment: Qt.AlignHCenter
                     implicitWidth: cfgRow.width; implicitHeight: cfgRow.height
                     Row { id: cfgRow; anchors.centerIn: parent; spacing: 6
-                        Text {
-                            id: cfgLabel
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                            width: Math.min(implicitWidth, 260); elide: Text.ElideRight
-                            color: backend.configs.length > 0 ? theme.text
-                                  : (cfgSelMa.containsMouse ? theme.accent : theme.text)
-                            font.underline: backend.configs.length === 0 && cfgSelMa.containsMouse
-                            font.pixelSize: 15; font.weight: Font.Medium
-                        }
-                        Text { anchors.verticalCenter: parent.verticalCenter
-                               visible: backend.configs.length > 0; text: "▾"; color: theme.textDim; font.pixelSize: 15 }
-                    }
-                    MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
-                                cursorShape: backend.configs.length === 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: {
-                            if (backend.configs.length === 0) { win.currentPage = 1; return }
-                            if (!cfgPopup.open) {
-                                // Position under the selector at click time (a mapToItem
-                                // binding wouldn't track the centered layout).
-                                var p = cfgSel.mapToItem(homeRoot, 0, 0)
-                                cfgPopup.x = p.x + cfgSel.width / 2 - cfgPopup.width / 2
-                                cfgPopup.y = p.y + cfgSel.height + 6
+                        Item {
+                            id: cfgLabelBlock
+                            height: cfgRow.height
+                            width: cfgLabel.width + (backend.configs.length > 0 ? cfgArrow.width + 6 : 0)
+                            Row { anchors.centerIn: parent; spacing: 6
+                                Text {
+                                    id: cfgLabel
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
+                                    width: Math.min(implicitWidth, 260); elide: Text.ElideRight
+                                    color: backend.configs.length > 0
+                                          ? (cfgSelMa.containsMouse ? theme.accent : theme.text)
+                                          : (cfgSelMa.containsMouse ? theme.accent : theme.text)
+                                    font.underline: cfgSelMa.containsMouse
+                                    font.pixelSize: 15; font.weight: Font.Medium
+                                }
+                                Text { id: cfgArrow; anchors.verticalCenter: parent.verticalCenter
+                                       visible: backend.configs.length > 0; text: "▾"
+                                       color: cfgSelMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 15 }
                             }
-                            cfgPopup.open = !cfgPopup.open
+                            MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (backend.configs.length === 0) { win.currentPage = 1; return }
+                                            if (!cfgPopup.open) {
+                                                var p = cfgSel.mapToItem(homeRoot, 0, 0)
+                                                cfgPopup.x = p.x + cfgSel.width / 2 - cfgPopup.width / 2
+                                                cfgPopup.y = p.y + cfgSel.height + 6
+                                            }
+                                            cfgPopup.open = !cfgPopup.open
+                                        } }
+                        }
+                        Rectangle {
+                            visible: backend.configs.length > 0
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 22; height: 22; radius: 6
+                            color: addCfgMa.containsMouse ? theme.surface : "transparent"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Item { anchors.centerIn: parent; width: 14; height: 14
+                                Rectangle { anchors.centerIn: parent; width: 10; height: 1.6; radius: 1; color: theme.accent }
+                                Rectangle { anchors.centerIn: parent; width: 1.6; height: 10; radius: 1; color: theme.accent }
+                            }
+                            MouseArea { id: addCfgMa; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: win.currentPage = 1 }
                         }
                     }
                 }
+                Item { Layout.preferredHeight: 10 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12
                     Repeater {
@@ -715,7 +736,7 @@ Window {
                 transform: Translate { y: cfgPopup.open ? 0 : -8
                                        Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
                 width: 250
-                height: picker.height + addRow.height + 22 // rows + separator + margins
+                height: picker.height + 12
                 radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
                 layer.enabled: true
                 layer.effect: MultiEffect {
@@ -741,16 +762,6 @@ Window {
                             MouseArea { id: pma; anchors.fill: parent; hoverEnabled: true
                                         onClicked: { backend.selectConfig(parent.index); cfgPopup.open = false } }
                         }
-                    }
-                    Item { width: parent.width; height: 11
-                        Rectangle { anchors.centerIn: parent; width: parent.width - 16; height: 1; color: theme.border } }
-                    Rectangle {
-                        id: addRow; width: parent.width; height: 40; radius: 6
-                        color: ama.containsMouse ? theme.surface : theme.bg
-                        Text { anchors.verticalCenter: parent.verticalCenter; x: 10
-                               text: qsTr("Add a config…"); color: theme.accent; font.pixelSize: 14 }
-                        MouseArea { id: ama; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { cfgPopup.open = false; win.currentPage = 1 } }
                     }
                 }
             }
@@ -1162,6 +1173,7 @@ Window {
                 }
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
+                Item { Layout.preferredHeight: 10 }
                 Item { Layout.fillWidth: true; Layout.preferredHeight: updBlock.implicitHeight
                     ColumnLayout {
                         id: updBlock; anchors.left: parent.left; anchors.right: parent.right; spacing: 2

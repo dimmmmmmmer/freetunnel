@@ -3,14 +3,14 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalServer>
-#include <QLocalSocket>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QStandardPaths>
+#include <QTcpSocket>
 #include <QTemporaryFile>
 #include <QTimer>
 
@@ -24,8 +24,7 @@
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 namespace {
 
-QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
-                               const QString &tokenPath)
+QStringList linuxHelperCommand(const QString &exe, quint16 port, const QString &tokenPath)
 {
     QStringList cmd;
     const QByteArray appImage = qgetenv("APPIMAGE");
@@ -35,7 +34,7 @@ QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
     } else {
         cmd << exe;
     }
-    cmd << QStringLiteral("--helper") << QStringLiteral("--socket") << socketName
+    cmd << QStringLiteral("--helper") << QStringLiteral("--port") << QString::number(port)
         << QStringLiteral("--token-file") << tokenPath;
     return cmd;
 }
@@ -49,8 +48,6 @@ bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringL
     proc->start(elevator, args);
     if (!proc->waitForStarted(5000))
         return false;
-    // pkexec exits immediately when polkit/dbus is broken (e.g. masked unit).
-    // If it is still running after a short wait, the auth dialog or helper is up.
     if (elevator == QLatin1String("pkexec") && proc->waitForFinished(1000))
         return false;
     return true;
@@ -91,7 +88,7 @@ static VpnHelperClient::State stateFromString(const QString &s) {
 
 bool VpnHelperClient::loadConfigFromFile(const QString &path) {
     m_configPath = path;
-    return true; // helper validates; errors surface via vpnError
+    return true;
 }
 
 void VpnHelperClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
@@ -136,7 +133,7 @@ void VpnHelperClient::connectVpn() {
     if (!ensureHelper())
         return;
     if (!m_helloAcked) {
-        m_connectPending = true; // sent once the helper handshake completes
+        m_connectPending = true;
         return;
     }
     QJsonObject c; c["cmd"] = "connect"; c["configPath"] = m_configPath;
@@ -144,8 +141,6 @@ void VpnHelperClient::connectVpn() {
 }
 
 void VpnHelperClient::disconnectVpn() {
-    // Cancelling before the helper has finished coming up (elevation prompt /
-    // handshake still pending): tear the startup down instead of waiting it out.
     if (!m_helloAcked) {
         abortStartup();
         if (m_state != State::Disconnected) setState(State::Disconnected);
@@ -155,8 +150,6 @@ void VpnHelperClient::disconnectVpn() {
     QJsonObject c; c["cmd"] = "disconnect"; send(c);
 }
 
-// Stop a half-finished connect: kill the retry timer, drop the socket, and kill
-// the (possibly still-prompting) elevated helper process.
 void VpnHelperClient::abortStartup() {
     m_connectPending = false;
     m_starting = false;
@@ -168,33 +161,19 @@ void VpnHelperClient::abortStartup() {
 }
 
 bool VpnHelperClient::ensureHelper() {
-    if (m_sock && m_sock->state() == QLocalSocket::ConnectedState)
+    if (m_sock && m_sock->state() == QAbstractSocket::ConnectedState)
         return true;
-    if (m_starting) // spawn already in progress — don't prompt again
+    if (m_starting)
         return true;
     m_starting = true;
     if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->deleteLater(); m_proc = nullptr; }
 
-#if defined(Q_OS_WIN)
-    m_socketName = QStringLiteral("freetunnel-helper-%1%2")
-                           .arg(QString::number(QRandomGenerator::system()->generate64(), 16),
-                                QString::number(QRandomGenerator::system()->generate64(), 16));
-#else
-    m_socketName = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-                           .filePath(QStringLiteral("freetunnel-helper-%1%2.sock")
-                                             .arg(QString::number(QRandomGenerator::system()->generate64(), 16),
-                                                  QString::number(QRandomGenerator::system()->generate64(), 16)));
-#endif
-    QLocalServer::removeServer(m_socketName);
+    m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16383));
 
     m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
             + QString::number(QRandomGenerator::system()->generate64(), 16);
 
-    // Hand the token to the elevated helper via a 0600 file rather than argv, so
-    // it can't be read by other local users through /proc/<pid>/cmdline (Linux)
-    // or `ps`. QTemporaryFile creates it atomically (O_EXCL) with owner-only
-    // permissions; the helper reads it once and deletes it.
     clearTokenFile();
     {
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -211,55 +190,49 @@ bool VpnHelperClient::ensureHelper() {
     }
 
     QString err;
-    if (!spawnElevatedHelper(m_socketName, m_tokenPath, &err)) {
+    if (!spawnElevatedHelper(m_tcpPort, m_tokenPath, &err)) {
         fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
         return false;
     }
 
-    m_sock = new QLocalSocket(this);
-    connect(m_sock, &QLocalSocket::connected, this, &VpnHelperClient::onSocketConnected);
-    connect(m_sock, &QLocalSocket::readyRead, this, &VpnHelperClient::onReadyRead);
-    connect(m_sock, &QLocalSocket::disconnected, this, [this]() {
+    m_sock = new QTcpSocket(this);
+    connect(m_sock, &QTcpSocket::connected, this, &VpnHelperClient::onSocketConnected);
+    connect(m_sock, &QTcpSocket::readyRead, this, &VpnHelperClient::onReadyRead);
+    connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
         m_helloAcked = false;
         m_starting = false;
         if (m_state != State::Disconnected) setState(State::Disconnected);
     });
 
-    // The elevated helper needs a moment to come up; retry the connect. The
-    // timer is a member so disconnectVpn() can cancel a pending attempt.
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); }
     m_attempt = new QTimer(this);
     m_tries = 0;
     connect(m_attempt, &QTimer::timeout, this, [this]() {
         if (!m_sock) { if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; } return; }
-        if (m_sock->state() == QLocalSocket::ConnectedState) {
+        if (m_sock->state() == QAbstractSocket::ConnectedState) {
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; return;
         }
-        if (++m_tries > 40) { // ~10s
+        if (++m_tries > 40) {
             m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr;
             fail(tr("The VPN helper didn't start — authorization may have been declined, "
                     "or the elevated helper could not be reached."));
             return;
         }
         m_sock->abort();
-        m_sock->connectToServer(m_socketName);
+        m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
     });
     m_attempt->start(250);
-    m_sock->connectToServer(m_socketName);
+    m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
     return true;
 }
 
-bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QString &tokenPath, QString *err) {
+bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
     const QString exe = QCoreApplication::applicationFilePath();
 
 #if defined(Q_OS_MACOS)
-    // Log into the (per-user, non-world-writable) temp dir with an unpredictable
-    // name instead of a fixed /tmp path, so a local attacker can't pre-plant a
-    // symlink there and have the elevated (root) helper clobber an arbitrary file.
-    // socketPath is an absolute path under the GUI user's temp dir (shell-escaped).
-    const QString inner = QStringLiteral("exec %1 --helper --socket %2 --token-file %3 "
+    const QString inner = QStringLiteral("exec %1 --helper --port %2 --token-file %3 "
                                          ">\"${TMPDIR:-/tmp}/freetunnel-helper.$$.log\" 2>&1 &")
-                                  .arg(shellEscape(exe), shellEscape(socketName), shellEscape(tokenPath));
+                                  .arg(shellEscape(exe), QString::number(port), shellEscape(tokenPath));
     const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
                                    .arg(appleScriptEscape(inner));
     m_proc = new QProcess(this);
@@ -267,12 +240,12 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
     if (!m_proc->waitForStarted(5000)) { if (err) *err = tr("Could not launch osascript"); return false; }
     return true;
 #elif defined(Q_OS_WIN)
-    const QString args = QStringLiteral("--helper --socket \"%1\" --token-file \"%2\"")
-                                 .arg(socketName, tokenPath);
+    const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"")
+                                 .arg(QString::number(port), tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas"; // UAC elevation
+    sei.lpVerb = L"runas";
     std::wstring wexe = exe.toStdWString();
     std::wstring wargs = args.toStdWString();
     sei.lpFile = wexe.c_str();
@@ -283,9 +256,9 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
         return false;
     }
     return true;
-#else // Linux + others: pkexec (polkit), then sudo if polkit is broken/masked
+#else
     m_proc = new QProcess(this);
-    const QStringList helperCmd = linuxHelperCommand(exe, socketName, tokenPath);
+    const QStringList helperCmd = linuxHelperCommand(exe, port, tokenPath);
 
     if (startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
         return true;
@@ -330,10 +303,7 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     const QString type = ev.value("ev").toString();
     if (type == "ready") {
         m_helloAcked = true;
-        // The helper has read (and deleted) the token file; drop our reference
-        // and remove it too if anything lingered.
         clearTokenFile();
-        // Push any pending routing config, then connect if requested.
         setVpnMode(m_selective);
         setKillSwitch(m_killSwitch);
         setExtraExclusions(m_exclusions);
@@ -358,8 +328,7 @@ void VpnHelperClient::setState(State s) {
 }
 
 void VpnHelperClient::fail(const QString &msg) {
-    m_starting = false;
-    clearTokenFile(); // startup failed — don't leave the token on disk
+    abortStartup();
     emit vpnError(msg);
     setState(State::Error);
     setState(State::Disconnected);

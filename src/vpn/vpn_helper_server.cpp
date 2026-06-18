@@ -3,12 +3,13 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QFile>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStringList>
-#include <QLocalServer>
-#include <QLocalSocket>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTimer>
 #include <vector>
 
@@ -44,8 +45,8 @@ QString stateName(QtTrustTunnelClient::State s) {
 // disconnects, so the elevated helper never lingers.
 class HelperServer : public QObject {
 public:
-    HelperServer(QString socketName, QString token)
-        : m_socketName(std::move(socketName)), m_token(std::move(token)) {
+    HelperServer(quint16 port, QString token)
+        : m_port(port), m_token(std::move(token)) {
         connect(&m_client, &QtTrustTunnelClient::stateChanged, this,
                 [this](QtTrustTunnelClient::State s) {
                     QJsonObject e; e["ev"] = "state"; e["state"] = stateName(s); send(e);
@@ -62,31 +63,22 @@ public:
     }
 
     bool listen() {
-        // The helper runs elevated (root/admin) but the GUI connects as the normal
-        // user. UserAccessOption would restrict the socket to the helper's uid and
-        // break cross-privilege IPC; WorldAccessOption + a path under the user's
-        // temp dir (passed on the command line) keeps both ends on the same file.
-        // Authentication is still enforced by the one-time token handshake.
-        m_server.setSocketOptions(QLocalServer::WorldAccessOption);
-        if (!m_server.listen(m_socketName))
-            return false;
-        connect(&m_server, &QLocalServer::newConnection, this, &HelperServer::onConnection);
-        return true;
+        // Loopback TCP works across uid boundaries (GUI user ↔ elevated helper).
+        // Authentication is enforced by the one-time token handshake.
+        connect(&m_server, &QTcpServer::newConnection, this, &HelperServer::onConnection);
+        return m_server.listen(QHostAddress::LocalHost, m_port);
     }
 
     bool authed() const { return m_authed; }
 
 private:
     void onConnection() {
-        QLocalSocket *s = m_server.nextPendingConnection();
+        QTcpSocket *s = m_server.nextPendingConnection();
         if (!s) return;
         if (m_sock) { s->close(); s->deleteLater(); return; } // single GUI client
         m_sock = s;
-        connect(m_sock, &QLocalSocket::readyRead, this, &HelperServer::onReadyRead);
-        connect(m_sock, &QLocalSocket::disconnected, this, [this]() {
-            // Only the authenticated GUI dropping tears the privileged helper
-            // down. An unauthenticated/stray local connection going away must
-            // not kill it (trivial DoS) — just free the slot for the real GUI.
+        connect(m_sock, &QTcpSocket::readyRead, this, &HelperServer::onReadyRead);
+        connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
             if (m_authed) {
                 QCoreApplication::quit();
                 return;
@@ -103,9 +95,6 @@ private:
 
     void onReadyRead() {
         m_buf += m_sock->readAll();
-        // Commands are tiny single-line JSON objects. Bound the buffer so a local
-        // client can't exhaust memory in the privileged process by streaming a
-        // huge line without a newline.
         if (m_buf.size() > 65536) {
             m_sock->close();
             return;
@@ -156,10 +145,10 @@ private:
         }
     }
 
-    QString m_socketName;
+    quint16 m_port = 0;
     QString m_token;
-    QLocalServer m_server;
-    QLocalSocket *m_sock = nullptr;
+    QTcpServer m_server;
+    QTcpSocket *m_sock = nullptr;
     QByteArray m_buf;
     bool m_authed = false;
     QtTrustTunnelClient m_client;
@@ -169,17 +158,14 @@ private:
 
 int runVpnHelper(int argc, char **argv) {
     QCoreApplication app(argc, argv);
-    QString socketName;
+    quint16 port = 0;
     QString token;
     QString tokenFile;
     const QStringList args = QCoreApplication::arguments();
     for (int i = 1; i < args.size() - 1; ++i) {
-        if (args[i] == QLatin1String("--socket")) socketName = args[i + 1];
+        if (args[i] == QLatin1String("--port")) port = args[i + 1].toUShort();
         else if (args[i] == QLatin1String("--token-file")) tokenFile = args[i + 1];
     }
-    // The GUI passes the token only in a 0600 file (never on argv, so other local
-    // users can't read it via /proc/<pid>/cmdline). Read it once and delete it
-    // immediately so the secret doesn't linger on disk.
     if (!tokenFile.isEmpty()) {
         QFile f(tokenFile);
         if (f.open(QIODevice::ReadOnly)) {
@@ -188,14 +174,13 @@ int runVpnHelper(int argc, char **argv) {
         }
         QFile::remove(tokenFile);
     }
-    if (socketName.isEmpty() || token.isEmpty())
+    if (port == 0 || token.isEmpty())
         return 2;
 
-    HelperServer server(std::move(socketName), token);
+    HelperServer server(port, token);
     if (!server.listen())
         return 3;
 
-    // Safety net: if no GUI authenticates within 60s, don't linger as root.
     QTimer::singleShot(60000, &app, [&server]() {
         if (!server.authed())
             QCoreApplication::quit();
