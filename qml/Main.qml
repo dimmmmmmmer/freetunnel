@@ -21,18 +21,26 @@ Window {
     // macOS keeps its native (unified) title bar; Linux/Windows go frameless
     // with our own window controls + drag/resize, so the chrome matches macOS.
     readonly property bool isMac: Qt.platform.os === "osx"
+    // Custom min/max/close on frameless Linux/Windows (must match nav offset below).
+    readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
-    // Closing the window hides to tray instead of quitting (quitOnLastWindowClosed
-    // is off in main.cpp). Quit explicitly from the tray menu or ⌘Q.
+    // macOS red button hides to tray; Linux/Windows custom ✕ calls hide()
+    // directly. onClosing then means a real quit (panel Quit, Ctrl+Q, Alt+F4).
     property bool shuttingDown: false
     onClosing: function(close) {
         if (shuttingDown) {
             close.accepted = true
             return
         }
-        close.accepted = false
-        win.hide()
+        if (win.isMac) {
+            close.accepted = false
+            win.hide()
+            return
+        }
+        backend.prepareQuit()
+        close.accepted = true
+        Qt.quit()
     }
 
     Connections {
@@ -238,7 +246,7 @@ Window {
                             color: closeMa.containsMouse ? "white" : theme.textDim }
             }
             MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: win.close() }
+                        cursorShape: Qt.PointingHandCursor; onClicked: win.hide() }
         }
     }
 
@@ -271,58 +279,65 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            // Leave room for the window controls overlay: the macOS traffic
-            // lights (native, top-left) or our own buttons (top-right) on the
-            // frameless Linux/Windows chrome.
             Layout.topMargin: Qt.platform.os === "osx" ? 26 : 36
-            Layout.rightMargin: win.isMac ? 0 : 105
             Layout.bottomMargin: 6
-            spacing: 8
-            Item { Layout.fillWidth: true }
-            Repeater {
-                model: win.navIcons
-                Rectangle {
-                    id: navItem
-                    required property int index
-                    required property string modelData
-                    property bool active: index === win.currentPage
-                    width: 46; height: 38; radius: 8
-                    color: theme.bg
-                    // Hover and active highlights are separate opacity-faded layers
-                    // so switching tabs never interpolates one shade through another
-                    // (which made the old tab flash hover→active→off).
-                    Rectangle {
-                        anchors.fill: parent; radius: parent.radius; color: theme.surface
-                        opacity: (nma.containsMouse && !navItem.active) ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: 120 } }
+            spacing: 0
+
+            // Mirror the top-right window controls on the left so the nav sits
+            // in the true horizontal centre of the title bar (Linux/Windows).
+            Item { Layout.preferredWidth: win.isMac ? 0 : win.framelessChromeWidth
+                   Layout.maximumWidth: win.isMac ? 0 : win.framelessChromeWidth }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 38
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
+                    Repeater {
+                        model: win.navIcons
+                        Rectangle {
+                            id: navItem
+                            required property int index
+                            required property string modelData
+                            property bool active: index === win.currentPage
+                            width: 46; height: 38; radius: 8
+                            color: theme.bg
+                            Rectangle {
+                                anchors.fill: parent; radius: parent.radius; color: theme.surface
+                                opacity: (nma.containsMouse && !navItem.active) ? 1 : 0
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                            }
+                            Rectangle {
+                                anchors.fill: parent; radius: parent.radius; color: theme.infoBg
+                                opacity: navItem.active ? 1 : 0
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                            }
+                            scale: nma.containsMouse && !active ? 1.08 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                            Image {
+                                visible: navItem.modelData === "connection"
+                                anchors.centerIn: parent; width: 22; height: 22
+                                source: "qrc:/assets/logo.svg"; sourceSize: Qt.size(44, 44)
+                                opacity: navItem.active ? 1.0 : 0.8
+                            }
+                            Icon {
+                                visible: navItem.modelData !== "connection"
+                                anchors.centerIn: parent; width: 22; height: 22
+                                theme: win.theme
+                                svg: navItem.modelData === "configs" ? "qrc:/icons/connection.svg"
+                                                                     : "qrc:/icons/" + navItem.modelData + ".svg"
+                                color: navItem.active ? theme.accent : theme.textDim
+                            }
+                            MouseArea { id: nma; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: win.currentPage = navItem.index }
+                        }
                     }
-                    Rectangle {
-                        anchors.fill: parent; radius: parent.radius; color: theme.infoBg
-                        opacity: navItem.active ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                    }
-                    scale: nma.containsMouse && !active ? 1.08 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                    // Home shows our (colourful) logo; other tabs use tinted glyphs.
-                    Image {
-                        visible: navItem.modelData === "connection"
-                        anchors.centerIn: parent; width: 22; height: 22
-                        source: "qrc:/assets/logo.svg"; sourceSize: Qt.size(44, 44)
-                        opacity: navItem.active ? 1.0 : 0.8
-                    }
-                    Icon {
-                        visible: navItem.modelData !== "connection"
-                        anchors.centerIn: parent; width: 22; height: 22
-                        theme: win.theme
-                        svg: navItem.modelData === "configs" ? "qrc:/icons/connection.svg"
-                                                             : "qrc:/icons/" + navItem.modelData + ".svg"
-                        color: navItem.active ? theme.accent : theme.textDim
-                    }
-                    MouseArea { id: nma; anchors.fill: parent; hoverEnabled: true
-                                onClicked: win.currentPage = navItem.index }
                 }
             }
-            Item { Layout.fillWidth: true }
+
+            Item { Layout.preferredWidth: win.isMac ? 0 : win.framelessChromeWidth
+                   Layout.maximumWidth: win.isMac ? 0 : win.framelessChromeWidth }
         }
 
         Loader {

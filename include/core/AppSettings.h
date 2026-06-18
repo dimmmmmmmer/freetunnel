@@ -9,12 +9,12 @@ struct AppSettings {
     QString theme_mode = "system";
     QString language = "en";
     bool auto_connect_on_start = false;
-    bool killswitch_enabled = false;
+    bool killswitch_enabled = true;
 
     // Domain bypass rules: domains matching these patterns skip the VPN tunnel.
     // Supports wildcards: *.example.com, exact: example.com. domain_bypass_rules
     // mirrors the active profile's list (this is what the core consumes).
-    bool domain_bypass_enabled = false;
+    bool domain_bypass_enabled = true;
     QStringList domain_bypass_rules;
     // "general" = route everything except the rules (bypass); "selective" =
     // route only the rules through the VPN. Maps to the core's vpn_mode.

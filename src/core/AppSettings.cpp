@@ -79,19 +79,31 @@ AppSettings loadAppSettings() {
     out.theme_mode = s.value("ui/theme_mode", "system").toString();
     out.language = s.value("ui/language", "en").toString();
     out.auto_connect_on_start = s.value("vpn/auto_connect_on_start", false).toBool();
-    out.killswitch_enabled = s.value("vpn/killswitch_enabled", false).toBool();
-    out.domain_bypass_enabled = s.value("bypass/enabled", false).toBool();
+    out.killswitch_enabled = s.value("vpn/killswitch_enabled", true).toBool();
+    out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
     // Split-tunnel profiles.
     const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
-    out.profiles.clear();
-    for (const QString &n : names)
-        out.profiles.insert(n, s.value("bypass/profile/" + n, QStringList{}).toStringList());
-    if (out.profiles.isEmpty())
-        out.profiles.insert(QStringLiteral("Default"), {});
-    // Migrate a pre-profiles single rule list into Default.
     const QStringList legacy = s.value("bypass/rules", QStringList{}).toStringList();
+    out.profiles.clear();
+    for (const QString &n : names) {
+        const QString key = QStringLiteral("bypass/profile/") + n;
+        if (s.contains(key))
+            out.profiles.insert(n, s.value(key).toStringList());
+        else if (n == QStringLiteral("Default")) {
+            // Pre-profile installs stored rules under bypass/rules only.
+            if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
+                out.profiles.insert(n, legacy);
+            else
+                out.profiles.insert(n, recommendedRussiaDomains());
+        } else
+            out.profiles.insert(n, {});
+    }
+    if (out.profiles.isEmpty())
+        out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
+    // Migrate a pre-profiles single rule list into Default when the profile
+    // entry exists but is still empty.
     if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
             && names == QStringList{QStringLiteral("Default")})
         out.profiles[QStringLiteral("Default")] = legacy;

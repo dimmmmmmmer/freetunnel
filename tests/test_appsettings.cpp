@@ -37,6 +37,9 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.language, QStringLiteral("en"));
     QCOMPARE(s.theme_mode, QStringLiteral("system"));
     QCOMPARE(s.auto_connect_on_start, false);
+    QCOMPARE(s.killswitch_enabled, true);
+    QCOMPARE(s.domain_bypass_enabled, true);
+    QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
     QCOMPARE(s.hotkeys_enabled, true);
     QCOMPARE(s.hotkey_toggle, QStringLiteral("Ctrl+Shift+T"));
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));

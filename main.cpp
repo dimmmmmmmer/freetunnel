@@ -58,8 +58,9 @@ protected:
     }
 };
 
-// ⌘Q / tray Quit posts QEvent::Quit before window close events. Run cleanup
-// then so Main.qml onClosing sees shuttingDown and accepts the close.
+// macOS ⌘Q posts QEvent::Quit before window close; prepare cleanup early so
+// Main.qml onClosing sees shuttingDown. Linux/Windows DE Quit usually sends a
+// close event instead — handled in Main.qml onClosing (custom ✕ uses hide()).
 class QuitFilter : public QObject {
 public:
     Backend *backend = nullptr;
