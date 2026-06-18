@@ -601,16 +601,14 @@ Window {
             id: homeRoot
             ColumnLayout {
                 anchors.centerIn: parent
-                // Sit above centre so the config picker dropdown fits at min height.
-                anchors.verticalCenterOffset: -54
+                anchors.verticalCenterOffset: -48
                 width: parent.width
-                spacing: 12
-                // The logo IS the connect button. Centered when off; on connect
-                // it eases upward and the session timer fades in below it.
+                spacing: 0
+                // Block 1: logo + session / status line
                 Item {
                     id: hero
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: 200; Layout.preferredHeight: 200
+                    Layout.preferredWidth: 200; Layout.preferredHeight: 196
                     Image {
                         id: heroLogo
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -618,8 +616,9 @@ Window {
                         sourceSize: Qt.size(264, 264)
                         opacity: backend.connected ? 1.0 : ((backend.connecting || backend.disconnecting) ? 0.7 : 0.5)
                         Behavior on opacity { NumberAnimation { duration: 220 } }
-                        y: (backend.connected || backend.connecting || backend.disconnecting) ? hero.height / 2 - height / 2 - 24
-                                                                      : hero.height / 2 - height / 2
+                        y: (backend.connected || backend.connecting || backend.disconnecting)
+                           ? hero.height / 2 - height / 2 - 10
+                           : hero.height / 2 - height / 2 + 10
                         Behavior on y { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
                         // Subtle breathing while connecting/disconnecting — driven by
                         // scale, not opacity, so it never fights the opacity binding
@@ -649,30 +648,33 @@ Window {
                     }
                     MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
                 }
+                Item { Layout.preferredHeight: 22 }
+                // Block 2: active config + add button
                 Item {
                     id: cfgSel
                     Layout.alignment: Qt.AlignHCenter
-                    implicitWidth: cfgRow.width; implicitHeight: cfgRow.height
-                    Row { id: cfgRow; anchors.centerIn: parent; spacing: 6
+                    implicitWidth: cfgRow.implicitWidth; implicitHeight: cfgRow.implicitHeight
+                    Row { id: cfgRow; spacing: 6
                         Item {
                             id: cfgLabelBlock
-                            height: cfgRow.height
-                            width: cfgLabel.width + (backend.configs.length > 0 ? cfgArrow.width + 6 : 0)
-                            Row { anchors.centerIn: parent; spacing: 6
+                            implicitHeight: 24
+                            implicitWidth: cfgLabelRow.implicitWidth
+                            Row {
+                                id: cfgLabelRow; spacing: 6
+                                anchors.verticalCenter: parent.verticalCenter
                                 Text {
                                     id: cfgLabel
-                                    anchors.verticalCenter: parent.verticalCenter
+                                    property color labelColor: cfgSelMa.containsMouse ? theme.accent : theme.text
                                     text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                                    width: Math.min(implicitWidth, 260); elide: Text.ElideRight
-                                    color: backend.configs.length > 0
-                                          ? (cfgSelMa.containsMouse ? theme.accent : theme.text)
-                                          : (cfgSelMa.containsMouse ? theme.accent : theme.text)
+                                    width: backend.configs.length > 0 ? Math.min(implicitWidth, 260) : implicitWidth
+                                    elide: Text.ElideRight
+                                    color: labelColor
                                     font.underline: cfgSelMa.containsMouse
                                     font.pixelSize: 15; font.weight: Font.Medium
                                 }
-                                Text { id: cfgArrow; anchors.verticalCenter: parent.verticalCenter
+                                Text { id: cfgArrow
                                        visible: backend.configs.length > 0; text: "▾"
-                                       color: cfgSelMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 15 }
+                                       color: cfgLabel.labelColor; font.pixelSize: 15 }
                             }
                             MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
@@ -702,7 +704,8 @@ Window {
                         }
                     }
                 }
-                Item { Layout.preferredHeight: 10 }
+                Item { Layout.preferredHeight: 34 }
+                // Block 3: speed tiles
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter; spacing: 12
                     Repeater {
@@ -1174,35 +1177,50 @@ Window {
                 Item { Layout.preferredHeight: 16 }
                 SectionLabel { text: qsTr("Maintenance") }
                 Item { Layout.preferredHeight: 10 }
-                Item { Layout.fillWidth: true; Layout.preferredHeight: updBlock.implicitHeight
-                    ColumnLayout {
-                        id: updBlock; anchors.left: parent.left; anchors.right: parent.right; spacing: 2
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text { id: updTxt; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
-                                   text: qsTr("Check for updates"); font.pixelSize: 14
-                                   color: updMa.containsMouse ? theme.accent : theme.text
-                                   font.underline: updMa.containsMouse }
-                            Text { id: updStatus
-                                   text: backend.updateState === "checking" ? "…"
-                                         : backend.updateState === "downloading" ? qsTr("Downloading…")
-                                         : backend.updateState === "available" ? qsTr("Download ›")
-                                         : backend.updateState === "ready" ? qsTr("Ready")
-                                         : backend.appVersion
-                                   color: (backend.updateState === "available" || backend.updateState === "downloading")
-                                          ? theme.accent : theme.textFaint
-                                   font.pixelSize: 13 }
+                Item { Layout.fillWidth: true; Layout.preferredHeight: 42
+                    RowLayout {
+                        anchors.fill: parent
+                        Text { id: updTxt; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                               text: qsTr("Check for updates"); font.pixelSize: 14
+                               color: updTxtMa.containsMouse ? theme.accent : theme.text
+                               font.underline: updTxtMa.containsMouse
+                            MouseArea { id: updTxtMa; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.checkForUpdates() } }
+                        Row {
+                            spacing: 5
+                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                            Text {
+                                visible: backend.updateState === "current"
+                                text: "✓"; font.pixelSize: 14; color: theme.success
+                            }
+                            Text {
+                                visible: backend.updateState === "checking"
+                                       || backend.updateState === "downloading"
+                                text: "…"; font.pixelSize: 14; color: theme.textDim
+                            }
+                            Text {
+                                id: updIcon
+                                visible: backend.updateState === "available"
+                                       || backend.updateState === "error"
+                                       || backend.updateState === "ready"
+                                text: "↻"
+                                font.pixelSize: 17
+                                color: updIconMa.containsMouse ? theme.text : theme.accent
+                                rotation: updIconMa.containsMouse ? -30 : 0
+                                Behavior on rotation { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                                MouseArea { id: updIconMa; anchors.fill: parent; anchors.margins: -6
+                                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: backend.openLatestRelease() }
+                            }
+                            Text {
+                                visible: backend.updateState === "" || backend.updateState === "current"
+                                text: backend.appVersion
+                                color: theme.textFaint; font.pixelSize: 13
+                            }
                         }
-                        Text { Layout.fillWidth: true; Layout.alignment: Qt.AlignRight
-                               visible: backend.updateMessage.length > 0; text: backend.updateMessage
-                               horizontalAlignment: Text.AlignRight; elide: Text.ElideLeft
-                               color: (backend.updateState === "available" || backend.updateState === "downloading")
-                                      ? theme.accent : theme.textFaint; font.pixelSize: 12 }
                     }
-                    MouseArea { id: updMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: (backend.updateState === "available" || backend.updateState === "error")
-                                   ? backend.openLatestRelease()
-                                   : backend.checkForUpdates() } }
+                }
                 Item { Layout.preferredHeight: 14 }
                 // Footer: project names link to their repos.
                 Row { Layout.alignment: Qt.AlignHCenter; spacing: 0
