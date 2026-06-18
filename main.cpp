@@ -1,4 +1,4 @@
-#include <QApplication>
+#include <QGuiApplication>
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QIcon>
@@ -17,7 +17,7 @@
 
 // Install/replace the UI translation for `lang` ("ru" loads the bundled .qm;
 // anything else falls back to the English source strings). Retranslates live.
-static void applyLanguage(QApplication &app, QQmlApplicationEngine &engine,
+static void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
                           QTranslator *&tr, const QString &lang) {
     if (tr) {
         app.removeTranslator(tr);
@@ -108,13 +108,13 @@ int main(int argc, char *argv[]) {
         if (QString::fromLocal8Bit(argv[i]) == QLatin1String("--helper"))
             return runVpnHelper(argc, argv);
 
-    QApplication app(argc, argv);
+    QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
     app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
     // Keep running in the tray when the window is closed.
-    QApplication::setQuitOnLastWindowClosed(false);
+    QGuiApplication::setQuitOnLastWindowClosed(false);
 
     const QString controlArg = controlArgFrom(argc, argv);
     const QString kInstanceKey = QStringLiteral("FreeTunnelInstance");
