@@ -11,6 +11,10 @@ private slots:
     void parseSums();
     void verifyMatch();
     void verifyMismatch();
+#if __has_include(<openssl/evp.h>)
+    void ed25519Valid();
+    void ed25519Invalid();
+#endif
 };
 
 void TestReleaseVerify::parseSums()
@@ -45,6 +49,34 @@ void TestReleaseVerify::verifyMismatch()
     const QByteArray sums = "deadbeef  test.bin\n";
     QVERIFY(!verifyFileAgainstSums(tf.fileName(), sums, QStringLiteral("test.bin")));
 }
+
+#if __has_include(<openssl/evp.h>)
+void TestReleaseVerify::ed25519Valid()
+{
+    static const char kPubPem[] =
+        "-----BEGIN PUBLIC KEY-----\n"
+        "MCowBQYDK2VwAyEAdSdq79YO2Q2DAi/R23X7qCa5qsL3EVwG3Kb064ajl38=\n"
+        "-----END PUBLIC KEY-----\n";
+    const QByteArray manifest("abc123  test.AppImage\n");
+    const QByteArray sig = QByteArray::fromHex(
+        "d57a0fcaee75b77602433ee06e0f8b55cacd9113fe5969068b24211a0f11ec4"
+        "fdf3503b8c06c3b4be0fcd547d773250c634ca96df804b15f5336f355a6563008");
+    QVERIFY(verifyEd25519Signature(manifest, sig, kPubPem));
+}
+
+void TestReleaseVerify::ed25519Invalid()
+{
+    static const char kPubPem[] =
+        "-----BEGIN PUBLIC KEY-----\n"
+        "MCowBQYDK2VwAyEAdSdq79YO2Q2DAi/R23X7qCa5qsL3EVwG3Kb064ajl38=\n"
+        "-----END PUBLIC KEY-----\n";
+    const QByteArray manifest("tampered  test.AppImage\n");
+    const QByteArray sig = QByteArray::fromHex(
+        "d57a0fcaee75b77602433ee06e0f8b55cacd9113fe5969068b24211a0f11ec4"
+        "fdf3503b8c06c3b4be0fcd547d773250c634ca96df804b15f5336f355a6563008");
+    QVERIFY(!verifyEd25519Signature(manifest, sig, kPubPem));
+}
+#endif
 
 QTEST_MAIN(TestReleaseVerify)
 #include "test_releaseverify.moc"

@@ -13,13 +13,6 @@
 #include "ReleaseVerify.h"
 #include "VersionCompare.h"
 
-#if __has_include(<openssl/evp.h>)
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#define FT_HAVE_OPENSSL 1
-#endif
-
 namespace {
 // Ed25519 public key (SubjectPublicKeyInfo PEM) used to verify SHA256SUMS.txt.sig.
 // Empty => signature verification is OFF and updates rely on the SHA-256 match
@@ -32,33 +25,6 @@ const char *kUpdateSigningPublicKeyPem = "";
 bool signatureVerificationConfigured() {
     return kUpdateSigningPublicKeyPem && kUpdateSigningPublicKeyPem[0] != '\0';
 }
-
-#ifdef FT_HAVE_OPENSSL
-bool verifyEd25519(const QByteArray &data, const QByteArray &sig, const QByteArray &pubPem) {
-    if (pubPem.isEmpty() || sig.isEmpty())
-        return false;
-    BIO *bio = BIO_new_mem_buf(pubPem.constData(), static_cast<int>(pubPem.size()));
-    if (!bio)
-        return false;
-    EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
-    BIO_free(bio);
-    if (!pkey)
-        return false;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-    bool ok = false;
-    if (ctx && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, pkey) == 1) {
-        ok = EVP_DigestVerify(ctx,
-                              reinterpret_cast<const unsigned char *>(sig.constData()),
-                              static_cast<size_t>(sig.size()),
-                              reinterpret_cast<const unsigned char *>(data.constData()),
-                              static_cast<size_t>(data.size())) == 1;
-    }
-    if (ctx)
-        EVP_MD_CTX_free(ctx);
-    EVP_PKEY_free(pkey);
-    return ok;
-}
-#endif
 } // namespace
 
 UpdateChecker::UpdateChecker(const QString &githubRepo,
@@ -187,7 +153,9 @@ void UpdateChecker::fetchChecksumsThenInstaller()
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::downloadProgress, this,
-            [this](qint64 received, qint64 total) { emit downloadProgress(received / 20, total / 20); });
+            [this](qint64 received, qint64 total) {
+                emit downloadProgress(received * 5 / qMax<qint64>(total, 1), 100);
+            });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onChecksumsFetched(reply); });
 }
 
@@ -217,6 +185,10 @@ void UpdateChecker::fetchSignature()
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                emit downloadProgress(5 + received * 5 / qMax<qint64>(total, 1), 100);
+            });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onSignatureFetched(reply); });
 }
 
@@ -229,17 +201,12 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
     }
     m_signatureData = reply->readAll();
 
-#ifdef FT_HAVE_OPENSSL
     const QByteArray pub(kUpdateSigningPublicKeyPem);
-    if (!verifyEd25519(m_checksumsData, m_signatureData, pub)) {
+    if (!verifyEd25519Signature(m_checksumsData, m_signatureData, pub)) {
         emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
         return;
     }
     fetchInstaller();
-#else
-    // A signing key is configured but this build can't verify it — fail closed.
-    emit downloadFailed(QStringLiteral("This build cannot verify update signatures."));
-#endif
 }
 
 void UpdateChecker::fetchInstaller()
@@ -251,8 +218,8 @@ void UpdateChecker::fetchInstaller()
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
-                const qint64 base = m_checksumsData.isEmpty() ? 0 : 5;
-                emit downloadProgress(base + received * 95 / qMax<qint64>(total, 1), 100);
+                const qint64 base = signatureVerificationConfigured() ? 10 : 5;
+                emit downloadProgress(base + received * (100 - base) / qMax<qint64>(total, 1), 100);
             });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onInstallerFetched(reply); });
 }

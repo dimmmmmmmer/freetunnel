@@ -3,6 +3,13 @@
 #include <QCryptographicHash>
 #include <QFile>
 
+#if __has_include(<openssl/evp.h>)
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#define FT_HAVE_OPENSSL 1
+#endif
+
 QString expectedSha256FromSums(const QByteArray &sumsContent, const QString &assetName)
 {
     for (const QByteArray &line : sumsContent.split('\n')) {
@@ -34,4 +41,38 @@ bool verifyFileAgainstSums(const QString &filePath, const QByteArray &sumsConten
     if (expected.isEmpty())
         return false;
     return sha256HexOfFile(filePath).toLower() == expected;
+}
+
+bool verifyEd25519Signature(const QByteArray &data, const QByteArray &signature,
+                            const QByteArray &publicKeyPem)
+{
+#ifdef FT_HAVE_OPENSSL
+    if (publicKeyPem.isEmpty() || signature.isEmpty())
+        return false;
+    BIO *bio = BIO_new_mem_buf(publicKeyPem.constData(), static_cast<int>(publicKeyPem.size()));
+    if (!bio)
+        return false;
+    EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+    if (!pkey)
+        return false;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    bool ok = false;
+    if (ctx && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, pkey) == 1) {
+        ok = EVP_DigestVerify(ctx,
+                              reinterpret_cast<const unsigned char *>(signature.constData()),
+                              static_cast<size_t>(signature.size()),
+                              reinterpret_cast<const unsigned char *>(data.constData()),
+                              static_cast<size_t>(data.size())) == 1;
+    }
+    if (ctx)
+        EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    return ok;
+#else
+    Q_UNUSED(data);
+    Q_UNUSED(signature);
+    Q_UNUSED(publicKeyPem);
+    return false;
+#endif
 }

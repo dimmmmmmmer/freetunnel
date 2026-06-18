@@ -23,7 +23,7 @@ jobs:
       - name: Install Qt
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev
+          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev
 
       - name: Configure
         run: cmake -S tests -B build-tests -G Ninja

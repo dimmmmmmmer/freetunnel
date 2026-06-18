@@ -707,10 +707,6 @@
 <context>
     <name>VpnHelperClient</name>
     <message>
-        <source>Could not allocate a local port for the VPN helper</source>
-        <translation type="vanished">Не удалось выделить локальный порт для VPN-помощника</translation>
-    </message>
-    <message>
         <location filename="../src/vpn/vpn_helper_client.cpp" line="219"/>
         <source>Could not start the VPN helper</source>
         <translation>Не удалось запустить VPN-помощник</translation>
@@ -736,28 +732,9 @@
         <translation>Повышение прав отменено или не удалось</translation>
     </message>
     <message>
-        <location filename="../src/vpn/vpn_helper_client.cpp" line="307"/>
-        <source>Polkit is disabled or masked on this system, and sudo elevation also failed. Install/enable polkit, or run in a terminal:
-  sudo systemctl unmask polkit &amp;&amp; sudo systemctl start polkit
-To install the .deb when the GUI fails:
-  sudo apt install ./freetunnel-linux-x86_64.deb</source>
-        <translation>Polkit отключён или замаскирован, а sudo тоже не сработал. Включите polkit или выполните в терминале:
-  sudo systemctl unmask polkit &amp;&amp; sudo systemctl start polkit
-Если GUI-установщик .deb не работает:
-  sudo apt install ./freetunnel-linux-x86_64.deb</translation>
-    </message>
-    <message>
-        <location filename="../src/vpn/vpn_helper_client.cpp" line="313"/>
-        <source>Could not run pkexec or sudo to start the VPN helper</source>
-        <translation>Не удалось запустить VPN-помощник через pkexec или sudo</translation>
-    </message>
-    <message>
-        <source>Could not run pkexec (is polkit installed?)</source>
-        <translation type="vanished">Не удалось запустить pkexec (установлен ли polkit?)</translation>
-    </message>
-    <message>
-        <source>The VPN helper didn&apos;t start — authorization may have been declined, or polkit (pkexec) isn&apos;t available.</source>
-        <translation type="vanished">VPN-помощник не запустился — возможно, авторизация отклонена или polkit (pkexec) недоступен.</translation>
+        <location filename="../src/vpn/vpn_helper_client.cpp" line="298"/>
+        <source>Could not start the VPN helper — authorization may have been declined, or pkexec/sudo elevation failed.</source>
+        <translation>Не удалось запустить VPN-помощник — возможно, авторизация отменена или не сработали pkexec/sudo.</translation>
     </message>
 </context>
 </TS>

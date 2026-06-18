@@ -75,6 +75,10 @@ add_executable(test_releaseverify
 )
 target_include_directories(test_releaseverify PRIVATE ../include ../include/core)
 target_link_libraries(test_releaseverify PRIVATE Qt6::Core Qt6::Test)
+find_package(OpenSSL QUIET)
+if (OpenSSL_FOUND)
+    target_link_libraries(test_releaseverify PRIVATE OpenSSL::Crypto)
+endif()
 add_test(NAME releaseverify COMMAND test_releaseverify)
 
 add_executable(test_credentialstore

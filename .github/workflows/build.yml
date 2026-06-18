@@ -519,39 +519,10 @@ jobs:
             | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      # Optional: sign checksums with the repo GPG key so users can verify the
-      # manifest independently of GitHub (set GPG_PRIVATE_KEY + GPG_PASSPHRASE
-      # repository secrets; GPG_KEY_ID optional if the imported key is unique).
-      - name: Sign checksums
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-        run: |
-          set -eux
-          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
-            echo "GPG_PRIVATE_KEY not configured — skipping checksum signature"
-            exit 0
-          fi
-          cd artifacts
-          install -d -m 700 "$HOME/.gnupg"
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          sign_args=(--batch --yes --detach-sign --armor)
-          if [ -n "${GPG_KEY_ID:-}" ]; then
-            sign_args+=(--local-user "$GPG_KEY_ID")
-          fi
-          if [ -n "${GPG_PASSPHRASE:-}" ]; then
-            echo "$GPG_PASSPHRASE" | gpg --pinentry-mode loopback --passphrase-fd 0 \
-              "${sign_args[@]}" SHA256SUMS.txt
-          else
-            gpg "${sign_args[@]}" SHA256SUMS.txt
-          fi
-          ls -la SHA256SUMS.txt*
-
-      # In-app verification: sign the manifest with the Ed25519 release key so the
-      # updater can verify it against the public key compiled into the binary.
+      # Sign the manifest with the Ed25519 release key so the in-app updater can
+      # verify it against the public key compiled into the binary.
       # Set the ED25519_SIGNING_KEY repo secret to a PEM private key to enable.
-      - name: Sign checksums (Ed25519, for in-app verify)
+      - name: Sign checksums
         env:
           ED25519_SIGNING_KEY: ${{ secrets.ED25519_SIGNING_KEY }}
         run: |
@@ -574,16 +545,12 @@ jobs:
             artifacts/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            Unsigned builds. Verify your download against `SHA256SUMS.txt`
-            (e.g. `sha256sum -c SHA256SUMS.txt` / `shasum -a 256 -c SHA256SUMS.txt`).
-            When `SHA256SUMS.txt.asc` is attached, verify the manifest with GPG:
-            `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt` (import the release
-            signing key from the repo owner first).
+            Builds are unsigned (see README for first-run notes).
 
             - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
               (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
               own Qt and integrates into the app menu. The **AppImage** and
-              **tar.gz** are portable alternatives. The VPN needs polkit/pkexec.
+              **tar.gz** are portable alternatives.
             - **macOS**: the app is ad-hoc signed but not notarized. On first launch
               right-click the app → Open (or run
               `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).

@@ -40,15 +40,6 @@ QStringList linuxHelperCommand(const QString &exe, const QString &socketName,
     return cmd;
 }
 
-bool linuxElevationOutputLooksLikePolkitFailure(QProcess &proc)
-{
-    const QString text = QString::fromLocal8Bit(proc.readAllStandardError())
-            + QString::fromLocal8Bit(proc.readAllStandardOutput());
-    return text.contains(QStringLiteral("NameHasNoOwner"), Qt::CaseInsensitive)
-            || text.contains(QStringLiteral("unit is masked"), Qt::CaseInsensitive)
-            || text.contains(QStringLiteral("Cannot launch"), Qt::CaseInsensitive);
-}
-
 bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringList &helperCmd)
 {
     QStringList args;
@@ -299,7 +290,6 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
     if (startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
         return true;
 
-    const bool polkitBroken = linuxElevationOutputLooksLikePolkitFailure(*m_proc);
     m_proc->deleteLater();
     m_proc = new QProcess(this);
 
@@ -307,15 +297,8 @@ bool VpnHelperClient::spawnElevatedHelper(const QString &socketName, const QStri
         return true;
 
     if (err) {
-        if (polkitBroken || linuxElevationOutputLooksLikePolkitFailure(*m_proc)) {
-            *err = tr("Polkit is disabled or masked on this system, and sudo elevation "
-                      "also failed. Install/enable polkit, or run in a terminal:\n"
-                      "  sudo systemctl unmask polkit && sudo systemctl start polkit\n"
-                      "To install the .deb when the GUI fails:\n"
-                      "  sudo apt install ./freetunnel-linux-x86_64.deb");
-        } else {
-            *err = tr("Could not run pkexec or sudo to start the VPN helper");
-        }
+        *err = tr("Could not start the VPN helper — authorization may have been "
+                  "declined, or pkexec/sudo elevation failed.");
     }
     return false;
 #endif
