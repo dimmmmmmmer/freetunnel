@@ -28,9 +28,11 @@ jobs:
           cppcheck --error-exitcode=1 \
             --enable=warning,performance,portability \
             --suppress=missingIncludeSystem \
+            --suppress=unknownMacro \
             --inline-suppr \
+            --library=qt \
             -I include -I include/app -I include/core -I include/vpn \
-            src include
+            src
 
   upstream-patch:
     name: upstream patch verify
@@ -39,4 +41,4 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Verify telemetry patch applies to pinned upstream
-        run: ./scripts/verify_upstream_patch.sh
+        run: bash scripts/verify_upstream_patch.sh

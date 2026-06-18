@@ -145,17 +145,20 @@ void TestHelperIpc::connectDisconnectFlow()
     QVERIFY(server.waitForClientData(3000));
 
     QString lastState;
-    QVERIFY(client.waitForReadyRead(3000));
-    while (client.canReadLine()) {
-        const auto doc = QJsonDocument::fromJson(client.readLine());
-        if (!doc.isObject())
-            continue;
-        const QJsonObject ev = doc.object();
-        if (ev.value("ev").toString() == QLatin1String("state"))
-            lastState = ev.value("state").toString();
-        if (ev.value("ev").toString() == QLatin1String("stats")) {
-            QCOMPARE(ev.value("up").toDouble(), 1024.0);
-            QCOMPARE(ev.value("down").toDouble(), 2048.0);
+    for (int attempt = 0; attempt < 10 && lastState != QLatin1String("Connected"); ++attempt) {
+        if (client.bytesAvailable() == 0 && !client.waitForReadyRead(3000))
+            break;
+        while (client.canReadLine()) {
+            const auto doc = QJsonDocument::fromJson(client.readLine());
+            if (!doc.isObject())
+                continue;
+            const QJsonObject ev = doc.object();
+            if (ev.value("ev").toString() == QLatin1String("state"))
+                lastState = ev.value("state").toString();
+            if (ev.value("ev").toString() == QLatin1String("stats")) {
+                QCOMPARE(ev.value("up").toDouble(), 1024.0);
+                QCOMPARE(ev.value("down").toDouble(), 2048.0);
+            }
         }
     }
     QCOMPARE(lastState, QStringLiteral("Connected"));

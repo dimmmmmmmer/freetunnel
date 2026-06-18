@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryFile>
@@ -74,5 +75,14 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     qunsetenv("FT_TEST_HELPER_TOKEN");
 }
 
-QTEST_MAIN(TestIntegrationBackendVpn)
+int main(int argc, char *argv[])
+{
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+    QGuiApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("FreeTunnel"));
+    app.setOrganizationName(QStringLiteral("FreeTunnel"));
+    TestIntegrationBackendVpn tc;
+    return QTest::qExec(&tc, argc, argv);
+}
+
 #include "test_integration_backend_vpn.moc"
