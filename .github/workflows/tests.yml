@@ -5,7 +5,7 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/qml]
   pull_request:
   workflow_dispatch:
 
@@ -19,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: [ubuntu-latest, macos-15, windows-latest]
+
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -29,7 +30,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev
+          sudo apt-get install -y cmake ninja-build qt6-base-dev qt6-declarative-dev libssl-dev
 
       - name: Install Qt (macOS)
         if: runner.os == 'macOS'
@@ -37,6 +38,22 @@ jobs:
           brew list ninja >/dev/null 2>&1 || brew install ninja
           brew list qt >/dev/null 2>&1 || brew install qt
           echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
 
       - name: Configure
         run: cmake -S tests -B build-tests -G Ninja

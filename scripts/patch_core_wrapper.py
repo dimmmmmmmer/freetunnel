@@ -7,9 +7,9 @@ deltas) is received by the wrapper's dispatcher but dropped, so the Qt client's
 TrafficGraph has no data source.
 
 This script adds a `tunnel_stats_handler` to `VpnCallbacks` and routes the event
-to it. It is applied in CI after the client is injected into the upstream tree,
-and is safe because the upstream core is pinned to a fixed ref (see build.yml).
-Each replacement asserts its anchor exists and is idempotent.
+to it. It is applied in CI after the client is injected into the upstream tree.
+The upstream ref is pinned in scripts/upstream_ref.txt and verified by
+scripts/verify_upstream_patch.sh on every PR.
 
 Usage: patch_core_wrapper.py <upstream_dir>
 """

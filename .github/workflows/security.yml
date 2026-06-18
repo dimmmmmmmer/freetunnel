@@ -1,0 +1,42 @@
+name: Security
+
+# Static analysis and dependency hygiene. Keeps feedback fast — no VPN core build.
+
+on:
+  push:
+    branches: [main, feat/qml]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cppcheck:
+    name: cppcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          set -eux
+          cppcheck --error-exitcode=1 \
+            --enable=warning,performance,portability \
+            --suppress=missingIncludeSystem \
+            --inline-suppr \
+            -I include -I include/app -I include/core -I include/vpn \
+            src include
+
+  upstream-patch:
+    name: upstream patch verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify telemetry patch applies to pinned upstream
+        run: ./scripts/verify_upstream_patch.sh

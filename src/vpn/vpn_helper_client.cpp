@@ -169,30 +169,40 @@ bool VpnHelperClient::ensureHelper() {
     if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->deleteLater(); m_proc = nullptr; }
 
-    m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16383));
+    const bool testHelper = qEnvironmentVariableIsSet("FT_TEST_HELPER_PORT");
+    if (!testHelper) {
+        m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16383));
 
-    m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
-            + QString::number(QRandomGenerator::system()->generate64(), 16);
+        m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
+                + QString::number(QRandomGenerator::system()->generate64(), 16);
 
-    clearTokenFile();
-    {
-        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-        QDir().mkpath(dir);
-        QTemporaryFile tf(dir + QStringLiteral("/.fthelper-XXXXXX"));
-        tf.setAutoRemove(false);
-        if (!tf.open()) {
-            fail(tr("Could not create the VPN helper token file"));
+        clearTokenFile();
+        {
+            const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+            QDir().mkpath(dir);
+            QTemporaryFile tf(dir + QStringLiteral("/.fthelper-XXXXXX"));
+            tf.setAutoRemove(false);
+            if (!tf.open()) {
+                fail(tr("Could not create the VPN helper token file"));
+                return false;
+            }
+            tf.write(m_token.toUtf8());
+            tf.close();
+            m_tokenPath = tf.fileName();
+        }
+
+        QString err;
+        if (!spawnElevatedHelper(m_tcpPort, m_tokenPath, &err)) {
+            fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
             return false;
         }
-        tf.write(m_token.toUtf8());
-        tf.close();
-        m_tokenPath = tf.fileName();
-    }
-
-    QString err;
-    if (!spawnElevatedHelper(m_tcpPort, m_tokenPath, &err)) {
-        fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
-        return false;
+    } else {
+        m_tcpPort = static_cast<quint16>(qEnvironmentVariableIntValue("FT_TEST_HELPER_PORT"));
+        m_token = QString::fromUtf8(qgetenv("FT_TEST_HELPER_TOKEN"));
+        if (m_token.isEmpty()) {
+            fail(tr("FT_TEST_HELPER_TOKEN is required when FT_TEST_HELPER_PORT is set"));
+            return false;
+        }
     }
 
     m_sock = new QTcpSocket(this);
@@ -203,6 +213,11 @@ bool VpnHelperClient::ensureHelper() {
         m_starting = false;
         if (m_state != State::Disconnected) setState(State::Disconnected);
     });
+
+    if (testHelper) {
+        m_sock->connectToHost(QHostAddress::LocalHost, m_tcpPort);
+        return true;
+    }
 
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); }
     m_attempt = new QTimer(this);

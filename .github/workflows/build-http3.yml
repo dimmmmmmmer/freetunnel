@@ -15,7 +15,6 @@ concurrency:
 
 env:
   UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
-  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
   CONAN_VER: '2.12'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -84,10 +83,14 @@ jobs:
           name: bundle-icons-http3
           path: client/assets
 
+      - name: Read pinned upstream ref
+        id: upstream_ref
+        run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v5
         with:
           repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ env.UPSTREAM_REF }}
+          ref: ${{ steps.upstream_ref.outputs.value }}
           path: upstream
           fetch-depth: 0
           fetch-tags: true

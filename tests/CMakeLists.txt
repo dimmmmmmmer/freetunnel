@@ -7,8 +7,30 @@ project(freetunnel-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 COMPONENTS Core Test Network REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network REQUIRED)
+
+include(FetchContent)
+set(QHOTKEY_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+FetchContent_Declare(
+    QHotkey
+    GIT_REPOSITORY https://github.com/Skycoder42/QHotkey.git
+    GIT_TAG 1.5.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(QHotkey)
+
+find_package(OpenSSL QUIET)
+
+# macOS SDKs may ship AGL.framework without a linkable binary; Qt still requests it.
+if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+    set_property(
+        TARGET WrapOpenGL::WrapOpenGL
+        PROPERTY INTERFACE_LINK_LIBRARIES "OpenGL::GL")
+endif()
 
 enable_testing()
 
@@ -88,6 +110,11 @@ add_executable(test_credentialstore
 )
 target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
 target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
+if(APPLE)
+    target_link_libraries(test_credentialstore PRIVATE "-framework Security")
+elseif(WIN32)
+    target_link_libraries(test_credentialstore PRIVATE advapi32)
+endif()
 add_test(NAME credentialstore COMMAND test_credentialstore)
 
 add_executable(test_helper_ipc
@@ -98,3 +125,108 @@ add_executable(test_helper_ipc
 target_include_directories(test_helper_ipc PRIVATE ../include ../include/vpn)
 target_link_libraries(test_helper_ipc PRIVATE Qt6::Core Qt6::Test Qt6::Network)
 add_test(NAME helper_ipc COMMAND test_helper_ipc)
+
+add_executable(test_qml_ui
+    test_qml_ui.cpp
+    ui/MockBackend.cpp
+    ui/MockShell.cpp
+    ui/UiTheme.cpp
+    ../qml.qrc
+    ../assets/app.qrc
+    ../i18n/i18n.qrc
+)
+target_include_directories(test_qml_ui PRIVATE . ui)
+target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
+add_test(NAME qml_ui COMMAND test_qml_ui)
+
+add_executable(test_integration_config_workflow
+    test_integration_config_workflow.cpp
+    ../src/core/ConfigImport.cpp
+    ../src/core/DeepLink.cpp
+    ../src/core/ConfigStore.cpp
+    ../src/core/ConfigToml.cpp
+    ../src/core/CredentialStore.cpp
+)
+target_include_directories(test_integration_config_workflow PRIVATE ../include ../include/core)
+target_link_libraries(test_integration_config_workflow PRIVATE Qt6::Core Qt6::Test)
+if(APPLE)
+    target_link_libraries(test_integration_config_workflow PRIVATE "-framework Security")
+elseif(WIN32)
+    target_link_libraries(test_integration_config_workflow PRIVATE advapi32)
+endif()
+add_test(NAME integration_config_workflow COMMAND test_integration_config_workflow)
+
+add_executable(test_integration_single_instance
+    test_integration_single_instance.cpp
+)
+target_link_libraries(test_integration_single_instance PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+add_test(NAME integration_single_instance COMMAND test_integration_single_instance)
+
+add_executable(test_integration_helper_client
+    test_integration_helper_client.cpp
+    helper_ipc_mock_server.cpp
+    helper_ipc_mock_server.h
+)
+target_include_directories(test_integration_helper_client PRIVATE ../include ../include/vpn)
+target_link_libraries(test_integration_helper_client PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+add_test(NAME integration_helper_client COMMAND test_integration_helper_client)
+
+set(BACKEND_TEST_SOURCES
+    test_integration_backend_vpn.cpp
+    helper_ipc_mock_server.cpp
+    helper_ipc_mock_server.h
+    ../src/app/Backend.cpp
+    ../src/app/BackendHotkeys.cpp
+    ../src/app/BackendUpdates.cpp
+    ../src/app/BackendSettings.cpp
+    ../src/app/BackendLogs.cpp
+    ../src/app/BackendConfig.cpp
+    ../src/app/BackendSplit.cpp
+    ../src/core/AppSettings.cpp
+    ../src/core/ConfigStore.cpp
+    ../src/core/DeepLink.cpp
+    ../src/core/ConfigImport.cpp
+    ../src/core/ControlCommand.cpp
+    ../src/core/ConfigToml.cpp
+    ../src/core/AppUiUtils.cpp
+    ../src/core/UpdateChecker.cpp
+    ../src/core/VersionCompare.cpp
+    ../src/core/ReleaseVerify.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/vpn/vpn_helper_client.cpp
+    ../include/app/Backend.h
+    ../include/core/UpdateChecker.h
+    ../include/vpn/vpn_helper_client.h
+)
+add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})
+target_include_directories(test_integration_backend_vpn PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test")
+target_link_libraries(test_integration_backend_vpn PRIVATE
+    Qt6::Core Qt6::Test Qt6::Network QHotkey::QHotkey)
+if(WIN32)
+    target_link_libraries(test_integration_backend_vpn PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_integration_backend_vpn PRIVATE "-framework Security")
+endif()
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    target_link_libraries(test_integration_backend_vpn PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME integration_backend_vpn COMMAND test_integration_backend_vpn)
+
+add_executable(test_update_checker_e2e
+    test_update_checker_e2e.cpp
+    mock_http_server.cpp
+    mock_http_server.h
+    ../src/core/UpdateChecker.cpp
+    ../src/core/VersionCompare.cpp
+    ../src/core/ReleaseVerify.cpp
+    ../include/core/UpdateChecker.h
+)
+target_include_directories(test_update_checker_e2e PRIVATE . ../include ../include/core)
+target_link_libraries(test_update_checker_e2e PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+if(OpenSSL_FOUND)
+    target_link_libraries(test_update_checker_e2e PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e)

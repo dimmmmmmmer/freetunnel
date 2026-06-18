@@ -108,8 +108,14 @@ ctest --test-dir build-tests --output-on-failure
 
 CI runs this on every push/PR via `.github/workflows/tests.yml`.
 
-Test suites: deep links, config import, settings, TOML, credentials, release
-verify, control commands, **helper IPC protocol** (`test_helper_ipc`).
+Test suites: deep links, config import, settings, TOML, credentials (Keychain /
+Cred Manager on macOS/Windows), release verify, control commands, helper IPC,
+QML UI smoke tests, integration tests (config workflow, Backend+mock VPN,
+single-instance socket, helper client), UpdateChecker E2E (mock HTTP).
+
+Security CI (`.github/workflows/security.yml`): cppcheck on `src/` + upstream
+patch verification (`scripts/verify_upstream_patch.sh` against
+`scripts/upstream_ref.txt`).
 
 ## Translations (i18n)
 

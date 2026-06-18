@@ -16,9 +16,28 @@
 
 namespace {
 
-bool signatureVerificationConfigured() {
+bool signatureVerificationConfigured()
+{
     return freetunnel::kReleaseSigningPublicKeyPem
            && freetunnel::kReleaseSigningPublicKeyPem[0] != '\0';
+}
+
+bool signatureVerificationActive()
+{
+    if (qEnvironmentVariableIsSet("FT_TEST_SKIP_UPDATE_SIG"))
+        return false;
+    return signatureVerificationConfigured();
+}
+
+QString githubApiUrl(const QString &path)
+{
+    const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
+    if (base.isEmpty())
+        return QStringLiteral("https://api.github.com") + path;
+    const QString root = QString::fromUtf8(base);
+    if (root.endsWith(QLatin1Char('/')))
+        return root.left(root.size() - 1) + path;
+    return root + path;
 }
 } // namespace
 
@@ -35,8 +54,7 @@ UpdateChecker::UpdateChecker(const QString &githubRepo,
 void UpdateChecker::checkNow()
 {
     // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
-    const QString url = QStringLiteral("https://api.github.com/repos/%1/releases/latest")
-                            .arg(m_githubRepo);
+    const QString url = githubApiUrl(QStringLiteral("/repos/%1/releases/latest").arg(m_githubRepo));
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
@@ -163,7 +181,7 @@ void UpdateChecker::onChecksumsFetched(QNetworkReply *reply)
     }
     m_checksumsData = reply->readAll();
 
-    if (signatureVerificationConfigured()) {
+    if (signatureVerificationActive()) {
         if (m_latest.signatureUrl.isEmpty()) {
             emit downloadFailed(QStringLiteral("This release is not signed — refusing to update."));
             return;
@@ -213,7 +231,7 @@ void UpdateChecker::fetchInstaller()
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
-                const qint64 base = signatureVerificationConfigured() ? 10 : 5;
+                const qint64 base = signatureVerificationActive() ? 10 : 5;
                 emit downloadProgress(base + received * (100 - base) / qMax<qint64>(total, 1), 100);
             });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onInstallerFetched(reply); });

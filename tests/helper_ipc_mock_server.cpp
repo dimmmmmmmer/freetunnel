@@ -10,6 +10,10 @@ MockHelperServer::MockHelperServer(const QString &token, QObject *parent)
     , m_token(token)
 {
     m_server.setParent(this);
+    connect(&m_server, &QTcpServer::newConnection, this, [this]() {
+        while (m_server.hasPendingConnections())
+            adoptSocket(m_server.nextPendingConnection());
+    });
 }
 
 

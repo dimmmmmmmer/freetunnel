@@ -31,10 +31,7 @@ concurrency:
 
 env:
   UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
-  # Pinned for reproducible builds and so the wrapper telemetry patch
-  # (scripts/patch_core_wrapper.py) applies against a known source. Bump
-  # deliberately and re-verify the patch.
-  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
+  # Pinned ref in scripts/upstream_ref.txt (verified by scripts/verify_upstream_patch.sh).
   CONAN_VER: '2.12'
   # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
   # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
@@ -119,11 +116,15 @@ jobs:
           name: bundle-icons
           path: client/assets
 
+      - name: Read pinned upstream ref
+        id: upstream_ref
+        run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
         uses: actions/checkout@v5
         with:
           repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ env.UPSTREAM_REF }}
+          ref: ${{ steps.upstream_ref.outputs.value }}
           path: upstream
           # Full history + tags so `git describe --tags` can resolve the core to
           # a version tag (not just the short commit) for the About footer.

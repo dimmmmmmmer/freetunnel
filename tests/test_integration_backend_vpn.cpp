@@ -1,0 +1,78 @@
+#include <QtTest>
+
+#include <QDir>
+#include <QFile>
+#include <QSignalSpy>
+#include <QStandardPaths>
+#include <QTemporaryFile>
+
+#include "app/Backend.h"
+#include "core/AppSettings.h"
+#include "core/ConfigStore.h"
+#include "core/ConfigToml.h"
+#include "core/CredentialStore.h"
+#include "helper_ipc_mock_server.h"
+
+class TestIntegrationBackendVpn : public QObject {
+    Q_OBJECT
+
+private slots:
+    void initTestCase();
+    void backendConnectsThroughMockHelper();
+};
+
+void TestIntegrationBackendVpn::initTestCase()
+{
+    AppSettings settings = loadAppSettings();
+    settings.hotkeys_enabled = false;
+    settings.auto_connect_on_start = false;
+    saveAppSettings(settings);
+}
+
+void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+
+    QTemporaryFile configFile(QDir(base).filePath(QStringLiteral("backend-vpn-XXXXXX.toml")));
+    configFile.setAutoRemove(true);
+    QVERIFY(configFile.open());
+
+    freetunnel::ConfigToml cfg;
+    cfg.hostname = QStringLiteral("backend.example.com");
+    cfg.addresses = QStringLiteral("203.0.113.50:443");
+    cfg.username = QStringLiteral("user");
+    configFile.write(freetunnel::buildConfigToml(cfg).toUtf8());
+    configFile.close();
+    const QString configPath = configFile.fileName();
+
+    QVERIFY(freetunnel::CredentialStore::storePassword(configPath, QStringLiteral("secret")));
+
+    saveStoredConfigs({configPath});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = configPath;
+    saveAppSettings(settings);
+
+    const QString token = QStringLiteral("backend-integration-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    Backend backend;
+    QSignalSpy stateSpy(&backend, &Backend::stateChanged);
+
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QVERIFY(stateSpy.count() > 0);
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+QTEST_MAIN(TestIntegrationBackendVpn)
+#include "test_integration_backend_vpn.moc"
