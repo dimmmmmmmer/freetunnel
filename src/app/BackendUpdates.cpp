@@ -13,7 +13,7 @@ QString Backend::appVersion() const {
 #ifdef FREETUNNEL_VERSION
     return QStringLiteral(FREETUNNEL_VERSION);
 #else
-    return QStringLiteral("1.0.0");
+    return QStringLiteral("1.0.1");
 #endif
 }
 
