@@ -346,6 +346,7 @@ jobs:
           rm -rf "$root"
           mkdir -p "$root/opt/freetunnel" "$root/usr/bin" \
                    "$root/usr/share/applications" \
+                   "$root/usr/share/pixmaps" \
                    "$root/usr/share/icons/hicolor/256x256/apps" \
                    "$root/DEBIAN"
           # Bundled runtime (binary + Qt libs/plugins/qml + qt.conf).
