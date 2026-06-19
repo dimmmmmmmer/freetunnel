@@ -13,6 +13,7 @@
 
 #include "app/Backend.h"
 #include "app/MacWindow.h"
+#include "core/InstanceControl.h"
 #include "vpn/vpn_helper_server.h"
 
 // Install/replace the UI translation for `lang` ("ru" loads the bundled .qm;
@@ -144,18 +145,13 @@ int main(int argc, char *argv[]) {
 
     // Single instance: if one is already running, hand it our control command
     // (e.g. freetunnel://toggle) and exit instead of opening a second window.
-    {
-        QLocalSocket probe;
-        probe.connectToServer(kInstanceKey);
-        if (probe.waitForConnected(250)) {
-            probe.write((controlArg.isEmpty() ? QStringLiteral("focus") : controlArg).toUtf8());
-            probe.flush();
-            probe.waitForBytesWritten(300);
-            probe.disconnectFromServer();
-            return 0;
-        }
-    }
+    if (freetunnel::forwardToRunningInstance(kInstanceKey, controlArg))
+        return 0;
+
     QLocalServer::removeServer(kInstanceKey);
+    QString instanceToken;
+    if (!freetunnel::writeInstanceAuthToken(&instanceToken))
+        instanceToken.clear();
     auto *server = new QLocalServer(&app);
     // Only the same user may connect to the single-instance socket, so another
     // local user can't push control commands (toggle/connect/import) into a
@@ -177,6 +173,9 @@ int main(int argc, char *argv[]) {
         appQuitting = true;
     });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, &app, []() {
+        freetunnel::removeInstanceAuthToken();
+    });
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
@@ -215,13 +214,21 @@ int main(int argc, char *argv[]) {
                          }
                      });
 
-    // A second instance forwards its command here.
-    QObject::connect(server, &QLocalServer::newConnection, &app, [server, &backend, win]() {
+    // A second instance forwards its command here (token-authenticated).
+    QObject::connect(server, &QLocalServer::newConnection, &app,
+                     [server, &backend, win, instanceToken]() {
         QLocalSocket *c = server->nextPendingConnection();
         if (!c)
             return;
         c->waitForReadyRead(250);
-        const QString cmd = QString::fromUtf8(c->readAll());
+        QString recvToken;
+        QString cmd;
+        if (!freetunnel::parseInstanceMessage(c->readAll(), &recvToken, &cmd)
+                || instanceToken.isEmpty()
+                || !freetunnel::instanceTokensEqual(recvToken, instanceToken)) {
+            c->deleteLater();
+            return;
+        }
         c->deleteLater();
         backend.handleControl(cmd);
         if (win) {

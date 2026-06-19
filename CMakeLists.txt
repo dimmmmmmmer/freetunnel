@@ -78,6 +78,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/ConfigImport.h
     src/core/ControlCommand.cpp
     include/core/ControlCommand.h
+    src/core/InstanceControl.cpp
+    include/core/InstanceControl.h
     src/core/ConfigToml.cpp
     include/core/ConfigToml.h
     src/core/AppUiUtils.cpp

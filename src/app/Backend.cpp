@@ -26,6 +26,12 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 if (nowConnected && !m_connected) {
                     m_session.restart();
                 }
+                if (nowConnected && !m_materializedConfigPath.isEmpty()) {
+                    // Core reads the config once at connect; drop the temp copy
+                    // with the injected password as soon as the tunnel is up.
+                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+                    m_materializedConfigPath.clear();
+                }
                 m_connected = nowConnected;
                 m_connecting = st == VpnHelperClient::State::Connecting
                                || st == VpnHelperClient::State::Reconnecting

@@ -85,6 +85,14 @@ target_include_directories(test_control PRIVATE ../include ../include/core)
 target_link_libraries(test_control PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME control COMMAND test_control)
 
+add_executable(test_instance_control
+    test_instance_control.cpp
+    ../src/core/InstanceControl.cpp
+)
+target_include_directories(test_instance_control PRIVATE ../include ../include/core)
+target_link_libraries(test_instance_control PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME instance_control COMMAND test_instance_control)
+
 add_executable(test_configtoml
     test_configtoml.cpp
     ../src/core/ConfigToml.cpp
