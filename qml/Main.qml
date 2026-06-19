@@ -329,6 +329,14 @@ Window {
                                                                      : "qrc:/icons/" + navItem.modelData + ".svg"
                                 color: navItem.active ? theme.accent : theme.textDim
                             }
+                            // Dot on Settings when a newer release was found at startup.
+                            Rectangle {
+                                visible: navItem.index === 3 && backend.updateState === "available"
+                                width: 7; height: 7; radius: 3.5
+                                color: theme.warn
+                                anchors.top: parent.top; anchors.right: parent.right
+                                anchors.topMargin: 5; anchors.rightMargin: 8
+                            }
                             MouseArea { id: nma; anchors.fill: parent; hoverEnabled: true
                                         onClicked: win.currentPage = navItem.index }
                         }
@@ -359,6 +367,10 @@ Window {
     Connections {
         target: backend
         function onErrorOccurred(msg) { toast.show(msg) }
+        function onUpdateChanged() {
+            if (backend.updateState === "available")
+                toast.show(qsTr("Update available: %1").arg(backend.latestVersion))
+        }
     }
     Rectangle {
         id: toast

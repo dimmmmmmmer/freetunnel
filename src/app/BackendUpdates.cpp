@@ -25,64 +25,75 @@ QString Backend::coreVersion() const {
 #endif
 }
 
-void Backend::checkForUpdates() {
+void Backend::ensureUpdater()
+{
+    if (m_updater)
+        return;
+    m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
+    connect(m_updater, &UpdateChecker::updateAvailable, this,
+            [this](const UpdateChecker::ReleaseInfo &info) {
+                m_updateState = QStringLiteral("available");
+                m_latestVersion = info.version;
+                m_latestUrl = info.htmlUrl;
+                m_updateMessage = tr("Version %1 is available").arg(info.version);
+                emit updateChanged();
+            });
+    connect(m_updater, &UpdateChecker::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                m_updateState = QStringLiteral("downloading");
+                if (total > 0)
+                    m_updateMessage = tr("Downloading… %1%").arg(received * 100 / total);
+                else
+                    m_updateMessage = tr("Downloading…");
+                emit updateChanged();
+            });
+    connect(m_updater, &UpdateChecker::downloadReady, this,
+            [this](const QString &path) {
+                m_updateState = QStringLiteral("ready");
+                m_updateMessage = tr("Update downloaded — opening installer");
+                emit updateChanged();
+#if defined(Q_OS_WIN)
+                QProcess::startDetached(path, {});
+#elif defined(Q_OS_MACOS)
+                QProcess::startDetached(QStringLiteral("open"), {path});
+#else
+                if (path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
+                    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                     | QFileDevice::ExeOwner);
+                    QProcess::startDetached(path, {});
+                } else {
+                    QProcess::startDetached(QStringLiteral("xdg-open"), {path});
+                }
+#endif
+            });
+    connect(m_updater, &UpdateChecker::downloadFailed, this,
+            [this](const QString &msg) {
+                m_updateState = QStringLiteral("error");
+                m_updateMessage = msg;
+                emit updateChanged();
+            });
+    connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
+            [this](const QString &) {
+                if (!m_updateCheckUserInitiated)
+                    return;
+                // No newer release (incl. 404 when no releases exist yet).
+                m_updateState = QStringLiteral("current");
+                m_updateMessage = tr("You have the latest version");
+                emit updateChanged();
+            });
+}
+
+void Backend::checkForUpdates(bool userInitiated)
+{
     if (m_updateState == QLatin1String("checking"))
         return;
-    if (!m_updater) {
-        m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
-        connect(m_updater, &UpdateChecker::updateAvailable, this,
-                [this](const UpdateChecker::ReleaseInfo &info) {
-                    m_updateState = QStringLiteral("available");
-                    m_latestVersion = info.version;
-                    m_latestUrl = info.htmlUrl;
-                    m_updateMessage = tr("Version %1 is available").arg(info.version);
-                    emit updateChanged();
-                });
-        connect(m_updater, &UpdateChecker::downloadProgress, this,
-                [this](qint64 received, qint64 total) {
-                    m_updateState = QStringLiteral("downloading");
-                    if (total > 0)
-                        m_updateMessage = tr("Downloading… %1%").arg(received * 100 / total);
-                    else
-                        m_updateMessage = tr("Downloading…");
-                    emit updateChanged();
-                });
-        connect(m_updater, &UpdateChecker::downloadReady, this,
-                [this](const QString &path) {
-                    m_updateState = QStringLiteral("ready");
-                    m_updateMessage = tr("Update downloaded — opening installer");
-                    emit updateChanged();
-#if defined(Q_OS_WIN)
-                    QProcess::startDetached(path, {});
-#elif defined(Q_OS_MACOS)
-                    QProcess::startDetached(QStringLiteral("open"), {path});
-#else
-                    if (path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
-                        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                                                         | QFileDevice::ExeOwner);
-                        QProcess::startDetached(path, {});
-                    } else {
-                        QProcess::startDetached(QStringLiteral("xdg-open"), {path});
-                    }
-#endif
-                });
-        connect(m_updater, &UpdateChecker::downloadFailed, this,
-                [this](const QString &msg) {
-                    m_updateState = QStringLiteral("error");
-                    m_updateMessage = msg;
-                    emit updateChanged();
-                });
-        connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
-                [this](const QString &) {
-                    // No newer release (incl. 404 when no releases exist yet).
-                    m_updateState = QStringLiteral("current");
-                    m_updateMessage = tr("You have the latest version");
-                    emit updateChanged();
-                });
+    ensureUpdater();
+    m_updateCheckUserInitiated = userInitiated;
+    if (userInitiated) {
+        m_updateState = QStringLiteral("checking");
+        m_updateMessage = tr("Checking…");
+        emit updateChanged();
     }
-    m_updateState = QStringLiteral("checking");
-    m_updateMessage = tr("Checking…");
-    emit updateChanged();
     m_updater->checkNow();
 }
 

@@ -91,6 +91,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     appendLog(QStringLiteral("INFO"),
               tr("FreeTunnel %1 started").arg(appVersion())); // also ensures the log file exists
 
+    // Background update check: badge Settings when a newer release exists.
+    QTimer::singleShot(1200, this, [this] { checkForUpdates(false); });
+
     // Connect on startup if requested (deferred so the window shows first).
     if (m_settings.auto_connect_on_start && !m_activePath.isEmpty())
         QTimer::singleShot(600, this, [this] { connectVpn(); });

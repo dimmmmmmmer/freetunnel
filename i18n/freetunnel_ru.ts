@@ -352,6 +352,10 @@
         <source>Disconnecting…</source>
         <translation>Отключение…</translation>
     </message>
+    <message>
+        <source>Update available: %1</source>
+        <translation>Доступно обновление: %1</translation>
+    </message>
 </context>
 <context>
     <name>QtTrustTunnelClient</name>

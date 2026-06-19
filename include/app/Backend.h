@@ -142,7 +142,7 @@ public:
     QString updateState() const { return m_updateState; }
     QString updateMessage() const { return m_updateMessage; }
     QString latestVersion() const { return m_latestVersion; }
-    Q_INVOKABLE void checkForUpdates();
+    Q_INVOKABLE void checkForUpdates(bool userInitiated = true);
     Q_INVOKABLE void downloadUpdate();
     Q_INVOKABLE void openLatestRelease();
     Q_INVOKABLE void openUrl(const QString &url);
@@ -183,6 +183,7 @@ private:
     void unregisterHotkeys();
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
+    void ensureUpdater();
 
     VpnHelperClient m_client;
     AppSettings m_settings;
@@ -191,6 +192,7 @@ private:
     QHotkey *m_hkDisconnect = nullptr;
 
     UpdateChecker *m_updater = nullptr;
+    bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
     QString m_materializedConfigPath;
     QVariantList m_pings;
