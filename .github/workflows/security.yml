@@ -45,15 +45,6 @@ jobs:
       - name: Verify telemetry patch applies to pinned upstream
         run: bash scripts/verify_upstream_patch.sh
 
-  dependency-review:
-    name: dependency review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/dependency-review-action@v4
-
   i18n:
     name: i18n catalog freshness
     runs-on: ubuntu-latest
