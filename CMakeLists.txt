@@ -137,7 +137,7 @@ set_target_properties(FreeTunnel PROPERTIES
     OUTPUT_NAME "FreeTunnel"
     MACOSX_BUNDLE_BUNDLE_NAME "FreeTunnel"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.freetunnel.app"
-    MACOSX_BUNDLE_ICON_FILE "logo.icns"
+    MACOSX_BUNDLE_ICON_FILE "logo"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     # Custom Info.plist adds CFBundleURLTypes so macOS routes freetunnel:// and

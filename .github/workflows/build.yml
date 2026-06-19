@@ -50,22 +50,7 @@ jobs:
       - name: Install rasterizers
         run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
       - name: Render icons from logo.svg
-        run: |
-          set -eux
-          svg=assets/logo.svg
-          out=icons-out; mkdir -p "$out"
-          tmp=$(mktemp -d)
-          for s in 16 32 48 64 128 256 512 1024; do
-            rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/logo-$s.png"
-          done
-          cp "$tmp/logo-256.png" "$out/logo-256.png"
-          cp "$tmp/logo-256.png" "$out/logo.png"
-          png2icns "$out/logo.icns" \
-            "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-            "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
-          convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-            "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
-          ls -la "$out"
+        run: bash scripts/render-icons.sh icons-out
       - uses: actions/upload-artifact@v7
         with:
           name: bundle-icons
@@ -115,6 +100,10 @@ jobs:
         with:
           name: bundle-icons
           path: client/assets
+
+      - name: Build macOS .icns with iconutil
+        if: matrix.platform == 'macos'
+        run: iconutil -c icns client/assets/icon.iconset -o client/assets/logo.icns
 
       - name: Read pinned upstream ref
         id: upstream_ref
@@ -363,9 +352,14 @@ jobs:
           cp -a AppDir/usr/. "$root/opt/freetunnel/"
           # Launcher on PATH (rpath is $ORIGIN/../lib, so the symlink works).
           ln -sf /opt/freetunnel/bin/FreeTunnel "$root/usr/bin/freetunnel"
-          # Menu entry + icon.
+          # Menu entry + icons (multiple sizes for launchers / software centers).
+          for s in 48 128 256 512; do
+            mkdir -p "$root/usr/share/icons/hicolor/${s}x${s}/apps"
+            cp "client/assets/logo-${s}.png" \
+              "$root/usr/share/icons/hicolor/${s}x${s}/apps/freetunnel.png"
+          done
           cp client/assets/logo-256.png \
-            "$root/usr/share/icons/hicolor/256x256/apps/freetunnel.png"
+            "$root/usr/share/pixmaps/freetunnel.png"
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
             'Exec=freetunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
@@ -430,12 +424,21 @@ jobs:
           lipo -info "$APP/Contents/MacOS/FreeTunnel"
 
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
+          cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
           # Ad-hoc sign so the bundle launches once the user approves it in
           # Gatekeeper (no Developer ID available for full signing/notarization).
           codesign --force --deep --sign - "$APP" || true
           mkdir -p out
-          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -ov -format UDZO \
-            out/${{ matrix.artifact }}.dmg
+          RW=out/rw.dmg
+          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m -ov -format UDRW "$RW"
+          MOUNT=$(hdiutil attach -readwrite -noverify -noautofsck "$RW" | awk '/\/Volumes\// {print $NF; exit}')
+          cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
+          SetFile -a C "$MOUNT/.VolumeIcon.icns"
+          ln -sf /Applications "$MOUNT/Applications"
+          bless --folder "$MOUNT" --openfolder "$MOUNT" --icon "$MOUNT/.VolumeIcon.icns" || true
+          hdiutil detach "$MOUNT"
+          hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o out/${{ matrix.artifact }}.dmg
+          rm -f "$RW"
 
       - name: Package (Windows)
         if: matrix.platform == 'windows'
@@ -448,6 +451,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist, out | Out-Null
           Copy-Item $exe.FullName dist\
           if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
+          New-Item -ItemType Directory -Force -Path dist\assets | Out-Null
+          Copy-Item client\assets\logo.ico dist\assets\ -Force
+          Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
           & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
 
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"

@@ -35,6 +35,9 @@ SetCompressor /SOLID lzma
 
 !define MUI_ICON   "..\assets\logo.ico"
 !define MUI_UNICON "..\assets\logo.ico"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "..\assets\installer-header.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "..\assets\installer-welcome.bmp"
 !define MUI_ABORTWARNING
 
 ;--------------------------------
@@ -81,6 +84,7 @@ Section "Install"
   ; Assets
   SetOutPath "$INSTDIR\assets"
   File /nonfatal "${BUILD_DIR}\assets\logo.png"
+  File /nonfatal "${BUILD_DIR}\assets\logo.ico"
   File /nonfatal "${BUILD_DIR}\assets\LICENSE"
 
   SetOutPath "$INSTDIR"
@@ -90,17 +94,17 @@ Section "Install"
 
   ; Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_EXE}"
-  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"       "$INSTDIR\Uninstall.exe"
+  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\assets\logo.ico"
+  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"       "$INSTDIR\Uninstall.exe" "" "$INSTDIR\assets\logo.ico"
 
   ; Desktop shortcut
-  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_EXE}"
+  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\assets\logo.ico"
 
   ; Add/Remove Programs registry entry
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayName"     "${PRODUCT_NAME}"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayIcon"     "$INSTDIR\${PRODUCT_EXE}"
+  WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayIcon"     "$INSTDIR\assets\logo.ico"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "Publisher"       "${PRODUCT_PUBLISHER}"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayVersion"  "${PRODUCT_VERSION}"
   WriteRegDWORD HKLM "${PRODUCT_UNINST_KEY}" "NoModify" 1
