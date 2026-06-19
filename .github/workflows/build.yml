@@ -481,10 +481,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
           path: artifacts
+          pattern: freetunnel-*
+          merge-multiple: true
 
       # Publish SHA256 checksums so users can verify the (unsigned) downloads.
       # Names match the release asset names (basenames), which is what GitHub
@@ -493,7 +495,8 @@ jobs:
         run: |
           set -eux
           cd artifacts
-          find . -type f ! -name 'SHA256SUMS.txt' -exec sha256sum {} + \
+          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' \) \
+            -exec sha256sum {} + \
             | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
             | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -520,8 +523,11 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            artifacts/**/*
+            artifacts/**/*.deb
+            artifacts/**/*.dmg
+            artifacts/**/*-Setup.exe
             artifacts/SHA256SUMS.txt
+            artifacts/SHA256SUMS.txt.sig
           generate_release_notes: true
           body: |
             Builds are unsigned (see README for first-run notes).
