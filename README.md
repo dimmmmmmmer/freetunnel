@@ -11,16 +11,16 @@ Download a build for your platform from
 
 | Platform | File |
 | --- | --- |
-| **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` (installer) or `…​.zip` (portable) |
+| **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
-| **Linux** | `freetunnel-linux-x86_64.AppImage` (universal) or `…​.tar.gz` |
+| **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
 
 Builds are **unsigned** (no code-signing certificates), so the OS may warn on first launch:
 
 - **macOS**: right-click the app → **Open** (or
   `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
 - **Windows**: SmartScreen → **More info** → **Run anyway**.
-- **Linux (AppImage)**: `chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage`.
+- **Linux (.deb)**: `sudo apt install ./freetunnel-linux-x86_64.deb`
 
 VPN requires elevated privileges: Windows shows UAC; on Linux/macOS you enter an
 admin password the first time you connect in a session.
@@ -55,7 +55,7 @@ admin password the first time you connect in a session.
 
 - **Windows**: 10/11 (x64).
 - **macOS**: 11 Big Sur or newer — **universal** (Apple Silicon and Intel in one `.dmg`).
-- **Linux**: AppImage runs on most current distros; `.tar.gz` requires system Qt 6.
+- **Linux**: Debian/Ubuntu/Pop!_OS amd64 (`.deb` bundles its own Qt).
 
 ## For developers
 

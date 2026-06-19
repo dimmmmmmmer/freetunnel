@@ -78,7 +78,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Built on ubuntu-22.04 (glibc 2.35) so the AppImage runs on most
+          # Built on ubuntu-22.04 (glibc 2.35) so the .deb runs on most
           # current distros (Ubuntu 22.04+, Debian 12+, recent Fedora). Qt and a
           # modern clang come from aqt/llvm.sh, not the distro's old packages.
           - os: ubuntu-22.04
@@ -172,8 +172,8 @@ jobs:
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
           sudo apt-get install -y g++-13
-          # ninja, FUSE for AppImage, and the X/GL libs Qt's platform plugin needs
-          # so linuxdeploy can find and bundle them.
+          # ninja and the X/GL libs Qt's platform plugin needs so linuxdeploy
+          # can find and bundle them into the .deb.
           sudo apt-get install -y ninja-build libfuse2 libbsd-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
@@ -206,7 +206,7 @@ jobs:
 
       # Qt via aqt for all platforms: Linux (gcc_64), macOS (universal clang_64),
       # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
-      # AppImage bundle a modern Qt regardless of the distro.
+      # .deb bundle a modern Qt regardless of the distro.
       - name: Install Qt (aqt)
         uses: jurplel/install-qt-action@v4
         with:
@@ -314,68 +314,44 @@ jobs:
           fi
 
       # ------------------------------------------------------------- Package
-      - name: Package (Linux)
+      - name: Prepare Linux bundle
         if: matrix.platform == 'linux'
         run: |
           set -eux
-          mkdir -p out staging
-          cp build/FreeTunnel/FreeTunnel staging/
-          cp -a build/FreeTunnel/assets staging/assets 2>/dev/null || true
-          tar -C staging -czf out/${{ matrix.artifact }}.tar.gz .
-
-          # AppImage (best-effort: never block the tar.gz artifact). Qt is the
-          # aqt install, so point linuxdeploy-plugin-qt at its qmake.
-          set +e
+          mkdir -p out
           export ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 QMAKE="$QT_ROOT_DIR/bin/qmake"
-          export QML_SOURCES_PATHS="$PWD/client/qml" # let the qt plugin deploy Qt Quick
+          export QML_SOURCES_PATHS="$PWD/client/qml"
           ld=linuxdeploy-x86_64.AppImage
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
           wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
           chmod +x "$ld" "$ldqt"
-          # Use the static type2 runtime (bundles libfuse) so the AppImage mounts
-          # itself without system libfuse2 — needed on Ubuntu 22.04 / Pop!_OS etc.
-          wget -q -O runtime-x86_64 \
-            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64" \
-            && chmod +x runtime-x86_64 && export LDAI_RUNTIME_FILE="$PWD/runtime-x86_64" || true
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
-          # linuxdeploy requires icon pixel size to match the hicolor/NxN folder (256 here).
           cp client/assets/logo-256.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
             'Exec=FreeTunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
             'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > AppDir/usr/share/applications/freetunnel.desktop
-          # Bundle the gcc-13 libstdc++/libgcc we built against, so the AppImage
-          # also runs on distros that ship an older libstdc++.
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --plugin qt \
             --desktop-file AppDir/usr/share/applications/freetunnel.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png \
             --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
             --library "$(g++-13 -print-file-name=libgcc_s.so.1)" \
-            --output appimage
-          img=$(ls FreeTunnel*.AppImage 2>/dev/null | head -1)
-          if [ -n "$img" ]; then
-            mv "$img" out/${{ matrix.artifact }}.AppImage
-          else
-            echo "::warning::AppImage build failed (tar.gz artifact is still available)"
-          fi
-          set -e
-          ls -la out
+            --output appdir
 
-      # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: it ships the same bundled
-      # runtime (binary + Qt libs/plugins/qml) that linuxdeploy assembled in
-      # AppDir, installed under /opt/freetunnel, so it doesn't depend on the
-      # distro's Qt version. A /usr/bin symlink + .desktop entry integrate it
-      # into the launcher; the privileged VPN helper runs via pkexec (polkit).
+      # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
+      # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
+      # /opt/freetunnel. A /usr/bin symlink + .desktop entry integrate it into
+      # the launcher; the privileged VPN helper runs via pkexec (polkit).
       - name: Package .deb (Linux)
         if: matrix.platform == 'linux'
         run: |
           set -eux
           if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
-            echo "::warning::AppDir missing — skipping .deb (AppImage step failed)"
-            exit 0
+            echo "::error::AppDir missing — cannot build .deb"
+            exit 1
           fi
           ver="${{ steps.ver.outputs.version }}"
           root=debpkg
@@ -422,8 +398,7 @@ jobs:
           EOF
           chmod 0755 "$root/DEBIAN/postinst"
           dpkg-deb --build --root-owner-group "$root" \
-            "out/${{ matrix.artifact }}.deb" \
-            || echo "::warning::.deb build failed (other Linux artifacts still available)"
+            "out/${{ matrix.artifact }}.deb"
           ls -la out
 
       - name: Build & package universal (macOS)
@@ -475,26 +450,22 @@ jobs:
           Copy-Item $exe.FullName dist\
           if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
           & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
-          Compress-Archive -Path dist\* -DestinationPath out\${{ matrix.artifact }}.zip -Force
 
-          # NSIS installer (best-effort). NSIS resolves relative File paths
-          # against the .nsi directory, so pass an ABSOLUTE build dir.
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (Test-Path $nsis) {
-            $distAbs = (Resolve-Path dist).Path
-            & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
-            $setup = Get-ChildItem -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
-            if ($setup) { Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" }
-          } else {
-            Write-Host "NSIS not found; skipping installer"
-          }
+          if (-not (Test-Path $nsis)) { throw "NSIS not found at $nsis" }
+          $distAbs = (Resolve-Path dist).Path
+          & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
+          $setup = Get-ChildItem -Path "client\win" -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS did not produce FreeTunnel-*-Setup.exe" }
+          Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" -Force
+          ls out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: out/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Publish release
@@ -551,8 +522,7 @@ jobs:
 
             - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
               (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
-              own Qt and integrates into the app menu. The **AppImage** and
-              **tar.gz** are portable alternatives.
+              own Qt and integrates into the app menu.
             - **macOS**: the app is ad-hoc signed but not notarized. On first launch
               right-click the app → Open (or run
               `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
