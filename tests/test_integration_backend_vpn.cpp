@@ -7,6 +7,7 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryFile>
+#include <QTemporaryDir>
 
 #include "app/Backend.h"
 #include "core/AppSettings.h"
@@ -20,19 +21,39 @@ class TestIntegrationBackendVpn : public QObject {
 
 private slots:
     void initTestCase();
+    void init();
     void backendConnectsThroughMockHelper();
 };
 
-void TestIntegrationBackendVpn::initTestCase()
+static AppSettings hermeticSettings(const QString &logPath)
 {
-    AppSettings settings = loadAppSettings();
+    AppSettings settings;
     settings.hotkeys_enabled = false;
     settings.auto_connect_on_start = false;
     settings.killswitch_enabled = false;
     settings.domain_bypass_enabled = false;
     settings.domain_bypass_rules.clear();
-    settings.profiles[QStringLiteral("Default")] = {};
-    saveAppSettings(settings);
+    settings.profiles.clear();
+    settings.profiles.insert(QStringLiteral("Default"), {});
+    settings.profile_order = {QStringLiteral("Default")};
+    settings.active_profile = QStringLiteral("Default");
+    settings.log_path = logPath;
+    settings.excluded_routes = defaultExcludedRoutes();
+    return settings;
+}
+
+void TestIntegrationBackendVpn::initTestCase()
+{
+    QSettings().clear();
+    saveAppSettings(hermeticSettings(
+        QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+        + QStringLiteral("/backend-vpn-test.log")));
+}
+
+void TestIntegrationBackendVpn::init()
+{
+    freetunnel::sweepStaleMaterializedConfigs();
+    saveStoredConfigs({});
 }
 
 void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
@@ -76,6 +97,7 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
 
+    backend.prepareQuit();
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");
 
@@ -87,12 +109,13 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
 int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
-    // Keep the test fully hermetic so ctest never touches the real "FreeTunnel"
-    // config store (configs.json) or settings scope. A unique org/app name plus
-    // IniFormat (macOS NativeFormat goes through cfprefsd, which ignores the test
-    // paths) plus test-mode standard paths isolate both configs.json and QSettings.
     QStandardPaths::setTestModeEnabled(true);
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    QTemporaryDir iniDir;
+    if (!iniDir.isValid())
+        return 1;
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, iniDir.path());
+
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("BackendVpnTest"));
     app.setOrganizationName(QStringLiteral("FreeTunnelTest"));

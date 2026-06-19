@@ -15,6 +15,7 @@
 #include <QTimer>
 
 #include "core/AppUiUtils.h" // shellEscape / appleScriptEscape (macOS)
+#include "vpn/vpn_helper_protocol.h"
 
 namespace {
 
@@ -330,6 +331,10 @@ void VpnHelperClient::send(const QJsonObject &obj) {
 
 void VpnHelperClient::onReadyRead() {
     m_buf += m_sock->readAll();
+    if (m_buf.size() > vpn_helper::kMaxReadBuffer) {
+        fail(tr("VPN helper sent too much data"));
+        return;
+    }
     int nl;
     while ((nl = m_buf.indexOf('\n')) >= 0) {
         const QByteArray line = m_buf.left(nl);
