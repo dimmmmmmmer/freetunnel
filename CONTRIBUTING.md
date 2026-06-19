@@ -24,7 +24,7 @@ cd trusttunnel
 git checkout fa033c08ec332e44cc3590d62145bce8623a8014   # CI pin — bump deliberately
 
 rm -rf FreeTunnel
-git clone https://github.com/enrvate/freetunnel.git FreeTunnel   # or symlink your fork
+git clone https://github.com/dimmmmmmmer/freetunnel.git FreeTunnel   # or symlink your fork
 
 # Ensure upstream CMakeLists.txt adds the subdirectory when BUILD_TRUSTTUNNEL_QT=ON
 ```

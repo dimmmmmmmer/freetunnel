@@ -7,7 +7,7 @@ A Qt GUI client for [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClie
 ## Installation
 
 Download a build for your platform from
-[**Releases**](https://github.com/enrvate/freetunnel/releases/latest):
+[**Releases**](https://github.com/dimmmmmmmer/freetunnel/releases/latest):
 
 | Platform | File |
 | --- | --- |
