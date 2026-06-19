@@ -1,6 +1,7 @@
 #include "CredentialStore.h"
 
 #include "ConfigToml.h"
+#include "CredentialStoreLibsecret.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -88,59 +89,6 @@ bool macDeletePassword(CFStringRef account)
 
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 // File-backed fallback (Linux/other): only these helpers need a path on disk.
-
-#if defined(FT_HAVE_LIBSECRET)
-#include <libsecret/secret.h>
-
-static const SecretSchema kLibsecretSchema = {
-    "com.freetunnel.app",
-    SECRET_SCHEMA_NONE,
-    {
-        {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
-        {nullptr, SecretSchemaAttributeType(0)},
-    },
-};
-
-bool libsecretStore(const QString &key, const QString &password)
-{
-    GError *error = nullptr;
-    const bool ok = secret_password_store_sync(
-            &kLibsecretSchema, SECRET_COLLECTION_DEFAULT, "FreeTunnel",
-            password.toUtf8().constData(), nullptr, &error, "account",
-            key.toUtf8().constData(), nullptr);
-    if (error)
-        g_error_free(error);
-    return ok;
-}
-
-QString libsecretLookup(const QString &key, bool *ok)
-{
-    *ok = false;
-    GError *error = nullptr;
-    gchar *pw = secret_password_lookup_sync(&kLibsecretSchema, nullptr, &error, "account",
-                                            key.toUtf8().constData(), nullptr);
-    if (error) {
-        g_error_free(error);
-        return QString();
-    }
-    if (!pw)
-        return QString();
-    *ok = true;
-    const QString out = QString::fromUtf8(pw);
-    secret_password_free(pw);
-    return out;
-}
-
-bool libsecretClear(const QString &key)
-{
-    GError *error = nullptr;
-    const bool ok = secret_password_clear_sync(&kLibsecretSchema, nullptr, &error, "account",
-                                               key.toUtf8().constData(), nullptr);
-    if (error)
-        g_error_free(error);
-    return ok;
-}
-#endif
 
 QString credentialDir()
 {
