@@ -23,25 +23,11 @@ jobs:
     name: Render bundle icons
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install rasterizers
         run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
       - name: Render icons from logo.svg
-        run: |
-          set -eux
-          svg=assets/logo.svg
-          out=icons-out; mkdir -p "$out"
-          tmp=$(mktemp -d)
-          for s in 16 32 48 64 128 256 512 1024; do
-            rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/logo-$s.png"
-          done
-          cp "$tmp/logo-256.png" "$out/logo-256.png"
-          cp "$tmp/logo-256.png" "$out/logo.png"
-          png2icns "$out/logo.icns" \
-            "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-            "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
-          convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-            "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
+        run: bash scripts/render-icons.sh icons-out
       - uses: actions/upload-artifact@v7
         with:
           name: bundle-icons-http3
@@ -72,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: client
 
@@ -83,12 +69,16 @@ jobs:
           name: bundle-icons-http3
           path: client/assets
 
+      - name: Build macOS .icns with iconutil
+        if: matrix.platform == 'macos'
+        run: iconutil -c icns client/assets/icon.iconset -o client/assets/logo.icns
+
       - name: Read pinned upstream ref
         id: upstream_ref
         shell: bash
         run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ steps.upstream_ref.outputs.value }}

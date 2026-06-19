@@ -152,13 +152,23 @@ if (WIN32)
     target_link_libraries(FreeTunnel PRIVATE shell32)
 endif()
 
-# OpenSSL (already a transitive core dep) for in-app Ed25519 verification of the
-# update manifest signature in UpdateChecker. Linked explicitly so the EVP
-# symbols are guaranteed on the GUI target's link line.
-find_package(OpenSSL QUIET)
-if (OpenSSL_FOUND)
-    target_link_libraries(FreeTunnel PRIVATE OpenSSL::Crypto)
-endif()
+# OpenSSL for in-app Ed25519 verification (UpdateChecker). On Linux the VPN
+# core links Conan BoringSSL statically; FindOpenSSL would pick distro libcrypto
+# and break HTTP/3 builds (ECH/HPKE live in BoringSSL libssl.a, not in 22.04's
+# OpenSSL 3.0). macOS/Windows use the system/Homebrew/MSVC package explicitly.
+if (UNIX AND NOT APPLE)
+    if (NOT DISABLE_HTTP3)
+        # Upstream lists libcrypto before libssl; ECH needs libssl→libcrypto refs.
+        target_link_options(FreeTunnel PRIVATE "LINKER:--start-group")
+        target_link_libraries(FreeTunnel PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_link_options(FreeTunnel PRIVATE "LINKER:--end-group")
+    endif ()
+else ()
+    find_package(OpenSSL QUIET)
+    if (OpenSSL_FOUND)
+        target_link_libraries(FreeTunnel PRIVATE OpenSSL::Crypto)
+    endif ()
+endif ()
 
 if (APPLE)
     # Place macOS icon into the bundle Resources dir
