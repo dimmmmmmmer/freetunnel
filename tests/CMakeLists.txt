@@ -25,6 +25,8 @@ FetchContent_MakeAvailable(QHotkey)
 
 find_package(OpenSSL QUIET)
 
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FreetunnelDeps.cmake)
+
 # macOS SDKs may ship AGL.framework without a linkable binary; Qt still requests it.
 if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
     set_property(
@@ -41,6 +43,14 @@ add_executable(test_deeplink
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME deeplink COMMAND test_deeplink)
+
+add_executable(test_safe_fileread
+    test_safe_fileread.cpp
+    ../src/core/AppUiUtils.cpp
+)
+target_include_directories(test_safe_fileread PRIVATE ../include ../include/core)
+target_link_libraries(test_safe_fileread PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME safe_fileread COMMAND test_safe_fileread)
 
 add_executable(test_configimport
     test_configimport.cpp
@@ -110,6 +120,7 @@ add_executable(test_credentialstore
 )
 target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
 target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
+freetunnel_link_linux_secrets(test_credentialstore)
 if(APPLE)
     target_link_libraries(test_credentialstore PRIVATE "-framework Security")
 elseif(WIN32)
@@ -149,6 +160,7 @@ add_executable(test_integration_config_workflow
 )
 target_include_directories(test_integration_config_workflow PRIVATE ../include ../include/core)
 target_link_libraries(test_integration_config_workflow PRIVATE Qt6::Core Qt6::Test)
+freetunnel_link_linux_secrets(test_integration_config_workflow)
 if(APPLE)
     target_link_libraries(test_integration_config_workflow PRIVATE "-framework Security")
 elseif(WIN32)
@@ -204,6 +216,7 @@ target_include_directories(test_integration_backend_vpn PRIVATE
 target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_integration_backend_vpn PRIVATE
     Qt6::Core Qt6::Gui Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_integration_backend_vpn)
 if(WIN32)
     target_link_libraries(test_integration_backend_vpn PRIVATE shell32 advapi32)
 elseif(APPLE)

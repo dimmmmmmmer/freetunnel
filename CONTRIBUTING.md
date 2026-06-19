@@ -134,6 +134,28 @@ This runs `lupdate` (extract new/changed strings) and `lrelease` (compile
 Edit `i18n/freetunnel_ru.ts` in Qt Linguist or by hand, then run the script
 again to refresh `freetunnel_ru.qm`.
 
+CI runs `scripts/i18n-verify.sh` on every push/PR (see
+`.github/workflows/security.yml`) to ensure the catalog matches the current
+QML/C++ sources. The script scans only `qml/`, `src/`, `include/`, and
+`main.cpp` — not test trees or FetchContent dependencies.
+
+## Code signing (distribution)
+
+Release builds from `.github/workflows/build.yml` are **unsigned** by design
+(no Apple Developer ID or Authenticode certificate in CI). Users must approve
+first launch manually (see README).
+
+For production distribution:
+
+| Platform | Recommendation |
+| --- | --- |
+| **macOS** | Sign with Developer ID Application + notarize with `notarytool`; staple the ticket on the `.dmg`. |
+| **Windows** | Sign the installer and bundled binaries with an Authenticode cert (EV recommended for SmartScreen reputation). |
+| **Linux** | Optional GPG signatures on release assets; `.deb` maintainer scripts as needed. |
+
+Code signing is orthogonal to the in-app **update manifest** signing
+(Ed25519 on `SHA256SUMS.txt`) documented below.
+
 ## Signed updates (Ed25519)
 
 Release manifests (`SHA256SUMS.txt`) can be signed so the in-app updater
@@ -165,7 +187,8 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 | --- | --- |
 | `.github/workflows/build.yml` | Release builds (HTTP/2), Linux/macOS/Windows |
 | `.github/workflows/build-http3.yml` | Optional HTTP/3 variant (quiche enabled) |
-| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS)
+| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows) |
+| `.github/workflows/security.yml` | cppcheck, upstream patch verify, i18n freshness, PR dependency review |
 
 Upstream ref is pinned in workflow `env.UPSTREAM_REF`. Bump it with the patch
 script re-verified.

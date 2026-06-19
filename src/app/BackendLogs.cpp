@@ -1,5 +1,7 @@
 #include "app/Backend.h"
 
+#include "core/AppUiUtils.h"
+
 #include <QClipboard>
 #include <QDateTime>
 #include <QFile>
@@ -90,13 +92,7 @@ void Backend::copyToClipboard(const QString &text) const {
 }
 
 QString Backend::readTextFile(const QString &pathOrUrl) const {
-    QString p = pathOrUrl;
-    if (p.startsWith(QStringLiteral("file://")))
-        p = QUrl(p).toLocalFile();
-    QFile f(p);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-        return QString();
-    return QString::fromUtf8(f.readAll());
+    return safeReadUserTextFile(pathOrUrl);
 }
 
 QString Backend::logText() const {

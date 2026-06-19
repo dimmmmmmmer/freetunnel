@@ -125,6 +125,8 @@ if (NOT TARGET vpnlibs_trusttunnel)
         "so the VPN core library is available to link against.")
 endif()
 target_link_libraries(FreeTunnel PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Network Qt6::Svg QHotkey::QHotkey vpnlibs_trusttunnel)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/FreetunnelDeps.cmake)
+freetunnel_link_linux_secrets(FreeTunnel)
 target_include_directories(FreeTunnel PRIVATE
     ${TRUSTTUNNEL_REPO_ROOT}/trusttunnel/include
     ${TRUSTTUNNEL_REPO_ROOT}/common/include

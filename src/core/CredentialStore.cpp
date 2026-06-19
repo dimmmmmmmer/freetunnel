@@ -88,6 +88,60 @@ bool macDeletePassword(CFStringRef account)
 
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 // File-backed fallback (Linux/other): only these helpers need a path on disk.
+
+#if defined(FT_HAVE_LIBSECRET)
+#include <libsecret/secret.h>
+
+static const SecretSchema kLibsecretSchema = {
+    "com.freetunnel.app",
+    SECRET_SCHEMA_NONE,
+    {
+        {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
+        {nullptr, SecretSchemaAttributeType(0)},
+    },
+};
+
+bool libsecretStore(const QString &key, const QString &password)
+{
+    GError *error = nullptr;
+    const bool ok = secret_password_store_sync(
+            &kLibsecretSchema, SECRET_COLLECTION_DEFAULT, "FreeTunnel",
+            password.toUtf8().constData(), nullptr, &error, "account",
+            key.toUtf8().constData(), nullptr);
+    if (error)
+        g_error_free(error);
+    return ok;
+}
+
+QString libsecretLookup(const QString &key, bool *ok)
+{
+    *ok = false;
+    GError *error = nullptr;
+    gchar *pw = secret_password_lookup_sync(&kLibsecretSchema, nullptr, &error, "account",
+                                            key.toUtf8().constData(), nullptr);
+    if (error) {
+        g_error_free(error);
+        return QString();
+    }
+    if (!pw)
+        return QString();
+    *ok = true;
+    const QString out = QString::fromUtf8(pw);
+    secret_password_free(pw);
+    return out;
+}
+
+bool libsecretClear(const QString &key)
+{
+    GError *error = nullptr;
+    const bool ok = secret_password_clear_sync(&kLibsecretSchema, nullptr, &error, "account",
+                                               key.toUtf8().constData(), nullptr);
+    if (error)
+        g_error_free(error);
+    return ok;
+}
+#endif
+
 QString credentialDir()
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
@@ -213,6 +267,12 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
     cred.UserName = const_cast<LPWSTR>(L"FreeTunnel");
     return CredWriteW(&cred, 0) != FALSE;
 #else
+#if defined(FT_HAVE_LIBSECRET)
+    if (libsecretStore(key, password)) {
+        deletePasswordFile(key);
+        return true;
+    }
+#endif
     if (secretServiceStore(key, password)) {
         deletePasswordFile(key); // don't leave a plaintext-ish copy on disk
         return true;
@@ -250,6 +310,12 @@ QString CredentialStore::loadPassword(const QString &key)
     return out;
 #else
     bool ok = false;
+#if defined(FT_HAVE_LIBSECRET)
+    const QString fromLibsecret = libsecretLookup(key, &ok);
+    if (ok && !fromLibsecret.isEmpty())
+        return fromLibsecret;
+    ok = false;
+#endif
     const QString fromService = secretServiceLookup(key, &ok);
     if (ok && !fromService.isEmpty())
         return fromService;
@@ -273,9 +339,16 @@ bool CredentialStore::deletePassword(const QString &key)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
     return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
 #else
+#if defined(FT_HAVE_LIBSECRET)
+    const bool fromLibsecret = libsecretClear(key);
+#endif
     const bool fromService = secretServiceClear(key);
     const bool fromFile = deletePasswordFile(key);
+#if defined(FT_HAVE_LIBSECRET)
+    return fromLibsecret || fromService || fromFile;
+#else
     return fromService || fromFile;
+#endif
 #endif
 }
 

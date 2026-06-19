@@ -18,7 +18,12 @@ fi
 echo "lupdate: $LUPDATE"
 echo "lrelease: $LRELEASE"
 
-"$LUPDATE" "$ROOT" \
+# Scan only app sources — not tests/ or FetchContent deps (QHotkey HotTestWidget, …).
+"$LUPDATE" \
+  "$ROOT/qml" \
+  "$ROOT/src" \
+  "$ROOT/include" \
+  "$ROOT/main.cpp" \
   -I "$ROOT/include" \
   -ts "$TS" \
   -locations none \

@@ -32,7 +32,7 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList configs READ configs NOTIFY configsChanged)
     Q_PROPERTY(int activeIndex READ activeIndex NOTIFY configChanged)
     // settings (read/write; persisted on set)
-    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY settingsChanged)
+    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
