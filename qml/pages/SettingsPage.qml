@@ -182,7 +182,7 @@ Item {
                 Text { text: "FreeTunnel " + backend.appVersion; font.pixelSize: 12
                        color: ftMa.containsMouse ? theme.accent : theme.textFaint
                        MouseArea { id: ftMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                           onClicked: backend.openUrl("https://github.com/enrvate/freetunnel") } }
+                           onClicked: backend.openUrl("https://github.com/dimmmmmmmer/freetunnel") } }
                 Text { text: "  ·  "; color: theme.textFaint; font.pixelSize: 12 }
                 Text { text: qsTr("TrustTunnel core ") + backend.coreVersion; font.pixelSize: 12
                        color: ttMa.containsMouse ? theme.accent : theme.textFaint

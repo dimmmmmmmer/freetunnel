@@ -38,6 +38,8 @@ private:
     bool m_authed = false;
     QString m_lastCmd;
     int m_connectionCount = 0;
+    int m_connectCount = 0;
+    bool m_tunnelUp = false;
 
 signals:
     void quitRequested();

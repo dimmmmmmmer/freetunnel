@@ -13,7 +13,7 @@ QString Backend::appVersion() const {
 #ifdef FREETUNNEL_VERSION
     return QStringLiteral(FREETUNNEL_VERSION);
 #else
-    return QStringLiteral("1.0.0");
+    return QStringLiteral("1.0.1");
 #endif
 }
 
@@ -29,7 +29,7 @@ void Backend::checkForUpdates() {
     if (m_updateState == QLatin1String("checking"))
         return;
     if (!m_updater) {
-        m_updater = new UpdateChecker(QStringLiteral("enrvate/freetunnel"), appVersion(), this);
+        m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
         connect(m_updater, &UpdateChecker::updateAvailable, this,
                 [this](const UpdateChecker::ReleaseInfo &info) {
                     m_updateState = QStringLiteral("available");
@@ -91,7 +91,7 @@ void Backend::openLatestRelease() {
         downloadUpdate();
     else {
         const QString url = m_latestUrl.isEmpty()
-                ? QStringLiteral("https://github.com/enrvate/freetunnel/releases/latest")
+                ? QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/latest")
                 : m_latestUrl;
         openHttpUrl(url);
     }

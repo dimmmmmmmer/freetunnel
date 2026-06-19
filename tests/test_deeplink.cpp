@@ -17,6 +17,8 @@ private slots:
     void longValuesUseMultiByteVarint();
     void tomlContainsKeyFields();
     void tomlInjectionStripped();
+    void malformedPayloadsNeverCrash();
+    void acceptsTrustTunnelQrFragment();
 };
 
 void TestDeepLink::roundTrip() {
@@ -177,6 +179,37 @@ void TestDeepLink::tomlInjectionStripped() {
     QVERIFY(toml.contains(QStringLiteral("skip_verification = false")));
     // The newline is stripped, so the value collapses onto its own (single) line.
     QVERIFY(toml.contains(QStringLiteral("username = \"uskip_verification = true")));
+}
+
+void TestDeepLink::malformedPayloadsNeverCrash()
+{
+    for (int seed = 0; seed < 500; ++seed) {
+        QByteArray p;
+        p.resize(seed % 256);
+        for (int i = 0; i < p.size(); ++i)
+            p[i] = static_cast<char>((seed * 31 + i * 17) & 0xFF);
+        const QString uri = QStringLiteral("tt://?")
+                + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding));
+        QString err;
+        (void)parseDeepLink(uri, &err);
+    }
+    QVERIFY(true);
+}
+
+void TestDeepLink::acceptsTrustTunnelQrFragment()
+{
+    DeepLinkConfig in;
+    in.hostname = "vpn.example.com";
+    in.addresses = {"1.2.3.4:443"};
+    in.username = "user";
+    in.password = "pass";
+    const QString uri = encodeDeepLink(in);
+    const QString payload = uri.mid(QStringLiteral("tt://?").size());
+    const QString qr = QStringLiteral("https://trusttunnel.org/qr.html#tt=") + payload;
+    QString err;
+    auto out = parseDeepLink(qr, &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(out->hostname, in.hostname);
 }
 
 QTEST_MAIN(TestDeepLink)

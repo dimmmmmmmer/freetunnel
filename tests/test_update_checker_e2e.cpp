@@ -78,9 +78,9 @@ void TestUpdateCheckerE2e::checkNowFindsNewerRelease()
             makeReleaseJson(QStringLiteral("v2.0.0"), base, QStringLiteral("freetunnel-test.AppImage"));
     MockHttpServer::Route route;
     route.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
-    http.setRoute(QStringLiteral("/repos/enrvate/freetunnel/releases/latest"), route);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), route);
 
-    UpdateChecker checker(QStringLiteral("enrvate/freetunnel"), QStringLiteral("1.0.0"));
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
     QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
     QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
 
@@ -102,9 +102,9 @@ void TestUpdateCheckerE2e::checkNowNoUpdateWhenCurrent()
             makeReleaseJson(QStringLiteral("v1.0.0"), base, QStringLiteral("freetunnel-test.AppImage"));
     MockHttpServer::Route route;
     route.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
-    http.setRoute(QStringLiteral("/repos/enrvate/freetunnel/releases/latest"), route);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), route);
 
-    UpdateChecker checker(QStringLiteral("enrvate/freetunnel"), QStringLiteral("1.0.0"));
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
     QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
     checker.checkNow();
     QVERIFY(QTest::qWaitFor([&]() { return none.count() > 0; }, 5000));
@@ -128,7 +128,7 @@ void TestUpdateCheckerE2e::downloadVerifiesChecksum()
     const QJsonObject release = makeReleaseJson(QStringLiteral("v2.0.0"), base, installerName);
     MockHttpServer::Route releaseRoute;
     releaseRoute.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
-    http.setRoute(QStringLiteral("/repos/enrvate/freetunnel/releases/latest"), releaseRoute);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), releaseRoute);
 
     MockHttpServer::Route sumsRoute;
     sumsRoute.body = sums;
@@ -140,7 +140,7 @@ void TestUpdateCheckerE2e::downloadVerifiesChecksum()
     installerRoute.contentType = QByteArrayLiteral("application/octet-stream");
     http.setRoute(QStringLiteral("/installer"), installerRoute);
 
-    UpdateChecker checker(QStringLiteral("enrvate/freetunnel"), QStringLiteral("1.0.0"));
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
     QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
     checker.checkNow();
     QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
@@ -171,7 +171,7 @@ void TestUpdateCheckerE2e::downloadRejectsBadChecksum()
     const QJsonObject release = makeReleaseJson(QStringLiteral("v2.0.0"), base, installerName);
     MockHttpServer::Route releaseRoute;
     releaseRoute.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
-    http.setRoute(QStringLiteral("/repos/enrvate/freetunnel/releases/latest"), releaseRoute);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), releaseRoute);
 
     MockHttpServer::Route sumsRoute;
     sumsRoute.body = sums;
@@ -183,7 +183,7 @@ void TestUpdateCheckerE2e::downloadRejectsBadChecksum()
     installerRoute.contentType = QByteArrayLiteral("application/octet-stream");
     http.setRoute(QStringLiteral("/installer"), installerRoute);
 
-    UpdateChecker checker(QStringLiteral("enrvate/freetunnel"), QStringLiteral("1.0.0"));
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
     QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
     checker.checkNow();
     QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));

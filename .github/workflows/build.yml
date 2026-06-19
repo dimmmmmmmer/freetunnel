@@ -158,7 +158,11 @@ jobs:
           # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
           # transitive includes the core relies on (e.g. <algorithm>); clang-18
           # auto-selects the newest GCC, matching what works on ubuntu-24.04.
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          for attempt in 1 2 3; do
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test && break
+            echo "add-apt-repository failed (attempt $attempt), retrying…"
+            sleep 20
+          done
           sudo apt-get update
           sudo apt-get install -y g++-13
           # ninja and the X/GL libs Qt's platform plugin needs so linuxdeploy
