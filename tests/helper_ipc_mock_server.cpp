@@ -144,12 +144,17 @@ void MockHelperServer::handle(const QJsonObject &c)
         return;
     }
     if (cmd == QLatin1String("connect")) {
+        if (m_connectCount++ > 0) {
+            send(QJsonObject{{"ev", "error"}, {"msg", QStringLiteral("core disconnected")}});
+        }
         send(QJsonObject{{"ev", "state"}, {"state", "Connecting"}});
         send(QJsonObject{{"ev", "state"}, {"state", "Connected"}});
         send(QJsonObject{{"ev", "stats"}, {"up", 1024.0}, {"down", 2048.0}});
+        m_tunnelUp = true;
     } else if (cmd == QLatin1String("disconnect")) {
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnecting"}});
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnected"}});
+        m_tunnelUp = false;
     } else if (cmd == QLatin1String("quit")) {
         emit quitRequested();
     }

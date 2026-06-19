@@ -30,6 +30,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 m_connecting = st == VpnHelperClient::State::Connecting
                                || st == VpnHelperClient::State::Reconnecting
                                || st == VpnHelperClient::State::WaitingForNetwork;
+                if (m_reapplying
+                    && (nowConnected || st == VpnHelperClient::State::Error)) {
+                    m_reapplying = false;
+                }
                 // Don't surface "Disconnecting…" during a silent live re-apply
                 // (rule changes briefly tear the tunnel down and back up).
                 m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
@@ -195,6 +199,7 @@ void Backend::connectVpn() {
 void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
+    m_reapplying = false;
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
     m_connecting = false;
     m_disconnecting = true;
@@ -234,8 +239,8 @@ void Backend::selectConfig(int index) {
     m_settings.last_config_path = m_activePath;
     persistSettings();
     emit configChanged();
-    if (m_connected) // switch live — reconnect to the new server (shows "reconnecting")
-        connectVpn();
+    if (m_connected || m_connecting)
+        reconnectActiveConfig();
 }
 
 void Backend::removeConfig(int index) {

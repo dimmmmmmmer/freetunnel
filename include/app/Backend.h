@@ -175,6 +175,7 @@ private:
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(); // push active profile's domain-bypass list to the core
+    void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void loadLogTail();     // restore recent on-disk log lines into the view at startup

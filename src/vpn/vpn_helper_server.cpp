@@ -130,11 +130,28 @@ private:
             m_client.setKillSwitch(c.value("enabled").toBool());
         } else if (cmd == "connect") {
             const QString path = c.value("configPath").toString();
-            if (!m_client.loadConfigFromFile(path)) {
-                QJsonObject e; e["ev"]="error"; e["msg"]=QStringLiteral("Failed to load config"); send(e);
-                return;
+            const auto st = m_client.state();
+            const bool needsTeardown =
+                    st != QtTrustTunnelClient::State::Disconnected
+                    && st != QtTrustTunnelClient::State::Error;
+            auto startConnect = [this, path]() {
+                if (!m_client.loadConfigFromFile(path)) {
+                    QJsonObject e;
+                    e["ev"] = "error";
+                    e["msg"] = QStringLiteral("Failed to load config");
+                    send(e);
+                    return;
+                }
+                m_client.connectVpn();
+            };
+            if (needsTeardown) {
+                m_client.disconnectVpn();
+                // Let queued core DISCONNECTED callbacks drain while
+                // m_stopRequested is still true before starting a new session.
+                QTimer::singleShot(150, this, startConnect);
+            } else {
+                startConnect();
             }
-            m_client.connectVpn();
         } else if (cmd == "disconnect") {
             m_client.disconnectVpn();
         } else if (cmd == "quit") {
