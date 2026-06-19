@@ -338,8 +338,7 @@ jobs:
             --desktop-file AppDir/usr/share/applications/freetunnel.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png \
             --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
-            --library "$(g++-13 -print-file-name=libgcc_s.so.1)" \
-            --output appdir
+            --library "$(g++-13 -print-file-name=libgcc_s.so.1)"
 
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
