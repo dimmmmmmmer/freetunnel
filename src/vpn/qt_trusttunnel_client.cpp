@@ -1,5 +1,5 @@
 #include "qt_trusttunnel_client.h"
-#include <QApplication>
+#include <QCoreApplication>
 #include <QMetaObject>
 #include <QRandomGenerator>
 #include <QThread>
@@ -20,6 +20,7 @@ struct iovec {
 
 #include "vpn/vpn.h" // for ag::iovec on Windows
 #include "net/network_manager.h" // for vpn_network_manager_get_outbound_interface
+#include "net/tls.h" // for ag::tls_verify_cert (server certificate validation)
 
 #ifdef _WIN32
 #include "net/os_tunnel.h" // for vpn_win_socket_protect
@@ -137,6 +138,21 @@ void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
         }
         m_config->exclusions.append(ex);
     }
+    // Routing policy: general = bypass the exclusions, selective = route only them.
+    m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+    m_config->killswitch_enabled = m_killSwitch;
+}
+
+void QtTrustTunnelClient::setVpnMode(bool selective) {
+    m_selectiveMode = selective;
+    if (m_config.has_value())
+        m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+}
+
+void QtTrustTunnelClient::setKillSwitch(bool enabled) {
+    m_killSwitch = enabled;
+    if (m_config.has_value())
+        m_config->killswitch_enabled = enabled;
 }
 
 bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
@@ -430,9 +446,16 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
 #endif
     };
     callbacks.verify_handler = [](ag::VpnVerifyCertificateEvent *event) {
-        if (event) {
-            event->result = 0;
-        }
+        if (!event) return;
+        // Verify the server certificate chain against the system CA store, exactly
+        // like the upstream reference client (trusttunnel_client.cpp). The core
+        // already handles the pinned-certificate and skip_verification cases
+        // itself and only delegates here when neither applies (and always for
+        // DNS upstream certs), so an unconditional accept (result = 0) would
+        // silently disable TLS authentication for any config without a pinned
+        // cert. result: 0 = verified/accepted, non-zero = reject.
+        const char *err = ag::tls_verify_cert(event->cert, event->chain, nullptr);
+        event->result = (err == nullptr) ? 0 : -1;
     };
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
         ag::VpnSessionState state = event ? event->state : ag::VPN_SS_DISCONNECTED;

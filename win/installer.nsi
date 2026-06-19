@@ -1,4 +1,4 @@
-; TrustTunnel Qt Client — NSIS Installer Script
+; FreeTunnel — NSIS Installer Script
 ; Installs to Program Files, requests admin elevation, creates uninstaller,
 ; Start Menu shortcut, and optional Desktop shortcut.
 
@@ -35,6 +35,9 @@ SetCompressor /SOLID lzma
 
 !define MUI_ICON   "..\assets\logo.ico"
 !define MUI_UNICON "..\assets\logo.ico"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "..\assets\installer-header.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "..\assets\installer-welcome.bmp"
 !define MUI_ABORTWARNING
 
 ;--------------------------------
@@ -81,6 +84,7 @@ Section "Install"
   ; Assets
   SetOutPath "$INSTDIR\assets"
   File /nonfatal "${BUILD_DIR}\assets\logo.png"
+  File /nonfatal "${BUILD_DIR}\assets\logo.ico"
   File /nonfatal "${BUILD_DIR}\assets\LICENSE"
 
   SetOutPath "$INSTDIR"
@@ -90,17 +94,17 @@ Section "Install"
 
   ; Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_EXE}"
-  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"       "$INSTDIR\Uninstall.exe"
+  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\assets\logo.ico"
+  CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"       "$INSTDIR\Uninstall.exe" "" "$INSTDIR\assets\logo.ico"
 
   ; Desktop shortcut
-  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_EXE}"
+  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\assets\logo.ico"
 
   ; Add/Remove Programs registry entry
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayName"     "${PRODUCT_NAME}"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayIcon"     "$INSTDIR\${PRODUCT_EXE}"
+  WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayIcon"     "$INSTDIR\assets\logo.ico"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "Publisher"       "${PRODUCT_PUBLISHER}"
   WriteRegStr   HKLM "${PRODUCT_UNINST_KEY}" "DisplayVersion"  "${PRODUCT_VERSION}"
   WriteRegDWORD HKLM "${PRODUCT_UNINST_KEY}" "NoModify" 1
@@ -115,6 +119,17 @@ Section "Install"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="${PRODUCT_NAME}"'
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=in action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=out action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
+
+  ; URL protocol handlers: route freetunnel:// and tt:// links to the app
+  ; (e.g. freetunnel://toggle, or a tt:// config-import link).
+  WriteRegStr HKLM "Software\Classes\freetunnel" "" "URL:FreeTunnel Protocol"
+  WriteRegStr HKLM "Software\Classes\freetunnel" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\freetunnel\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
+  WriteRegStr HKLM "Software\Classes\freetunnel\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
+  WriteRegStr HKLM "Software\Classes\tt" "" "URL:FreeTunnel Protocol"
+  WriteRegStr HKLM "Software\Classes\tt" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\tt\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
+  WriteRegStr HKLM "Software\Classes\tt\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
 
 SectionEnd
 
@@ -148,5 +163,7 @@ Section "Uninstall"
 
   ; Remove registry keys
   DeleteRegKey HKLM "${PRODUCT_UNINST_KEY}"
+  DeleteRegKey HKLM "Software\Classes\freetunnel"
+  DeleteRegKey HKLM "Software\Classes\tt"
 
 SectionEnd

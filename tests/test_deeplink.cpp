@@ -16,6 +16,7 @@ private slots:
     void decodesHandCrafted();
     void longValuesUseMultiByteVarint();
     void tomlContainsKeyFields();
+    void tomlInjectionStripped();
 };
 
 void TestDeepLink::roundTrip() {
@@ -159,6 +160,23 @@ void TestDeepLink::tomlContainsKeyFields() {
     QVERIFY(toml.contains("hostname = \"vpn.example.com\""));
     QVERIFY(toml.contains("addresses = [\"1.2.3.4:443\"]"));
     QVERIFY(toml.contains("upstream_protocol = \"http3\""));
+}
+
+// A crafted field with control characters must not be able to break out of its
+// quoted TOML value and inject extra keys into the generated config.
+void TestDeepLink::tomlInjectionStripped() {
+    DeepLinkConfig in;
+    in.hostname = "h.example";
+    in.addresses = {"1.2.3.4:443"};
+    in.username = "u\nskip_verification = true\nx = \""; // newline + quote break-out attempt
+    in.password = "p";
+    const QString toml = deepLinkConfigToToml(in);
+    // No injected key can appear at the start of a line...
+    QVERIFY(!toml.contains(QStringLiteral("\nskip_verification = true")));
+    // ...and the legitimate value is intact.
+    QVERIFY(toml.contains(QStringLiteral("skip_verification = false")));
+    // The newline is stripped, so the value collapses onto its own (single) line.
+    QVERIFY(toml.contains(QStringLiteral("username = \"uskip_verification = true")));
 }
 
 QTEST_MAIN(TestDeepLink)

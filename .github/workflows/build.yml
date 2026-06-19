@@ -15,6 +15,9 @@ name: Build
 # Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
 # signed so it launches after the user approves it in Gatekeeper; see the README.
 
+# The repo is public, so Actions on standard runners are free — run the full
+# Mac/Win/Linux matrix on PRs and main for continuous validation, plus on
+# release tags (which also publish artifacts) and manual dispatch.
 on:
   push:
     branches: [main]
@@ -28,23 +31,39 @@ concurrency:
 
 env:
   UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
-  # Pinned for reproducible builds and so the wrapper telemetry patch
-  # (scripts/patch_core_wrapper.py) applies against a known source. Bump
-  # deliberately and re-verify the patch.
-  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
+  # Pinned ref in scripts/upstream_ref.txt (verified by scripts/verify_upstream_patch.sh).
   CONAN_VER: '2.12'
   # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
   # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
+  # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
+  # every platform build, so the dock/taskbar/Finder icons match the in-app
+  # monochrome logo. Best-effort: the builds fall back to the committed icons.
+  icons:
+    name: Render bundle icons
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install rasterizers
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+      - name: Render icons from logo.svg
+        run: bash scripts/render-icons.sh icons-out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-icons
+          path: icons-out/
+
   build:
     name: Build (${{ matrix.artifact }})
+    needs: icons
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Built on ubuntu-22.04 (glibc 2.35) so the AppImage runs on most
+          # Built on ubuntu-22.04 (glibc 2.35) so the .deb runs on most
           # current distros (Ubuntu 22.04+, Debian 12+, recent Fedora). Qt and a
           # modern clang come from aqt/llvm.sh, not the distro's old packages.
           - os: ubuntu-22.04
@@ -73,12 +92,34 @@ jobs:
         with:
           path: client
 
+      # Drop the freshly-rendered neutral icons over the committed ones before
+      # the client is injected into the upstream tree. Best-effort.
+      - name: Use rendered bundle icons
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: bundle-icons
+          path: client/assets
+
+      - name: Build macOS .icns with iconutil
+        if: matrix.platform == 'macos'
+        run: iconutil -c icns client/assets/icon.iconset -o client/assets/logo.icns
+
+      - name: Read pinned upstream ref
+        id: upstream_ref
+        shell: bash
+        run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
         uses: actions/checkout@v5
         with:
           repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ env.UPSTREAM_REF }}
+          ref: ${{ steps.upstream_ref.outputs.value }}
           path: upstream
+          # Full history + tags so `git describe --tags` can resolve the core to
+          # a version tag (not just the short commit) for the About footer.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Inject client into upstream tree
         shell: bash
@@ -120,12 +161,13 @@ jobs:
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
           sudo apt-get install -y g++-13
-          # ninja, FUSE for AppImage, and the X/GL libs Qt's platform plugin needs
-          # so linuxdeploy can find and bundle them.
+          # ninja and the X/GL libs Qt's platform plugin needs so linuxdeploy
+          # can find and bundle them into the .deb.
           sudo apt-get install -y ninja-build libfuse2 libbsd-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey builds against xcb/X11
           pip install -r upstream/requirements.txt
           pip install "conan~=${CONAN_VER}"
 
@@ -136,6 +178,9 @@ jobs:
           # Target macOS 11 (Big Sur, first Apple-Silicon release) for broad
           # compatibility. Set early so conan-built deps and the app share it.
           echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          # The runner ships preinstalled aws/azure taps that Homebrew now warns
+          # are "not trusted"; we don't use them, so drop them to silence it.
+          brew untap aws/tap azure/bicep 2>/dev/null || true
           # ninja is preinstalled on the macOS runner; only install if missing.
           brew list ninja >/dev/null 2>&1 || brew install ninja
           pip install -r upstream/requirements.txt
@@ -150,7 +195,7 @@ jobs:
 
       # Qt via aqt for all platforms: Linux (gcc_64), macOS (universal clang_64),
       # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
-      # AppImage bundle a modern Qt regardless of the distro.
+      # .deb bundle a modern Qt regardless of the distro.
       - name: Install Qt (aqt)
         uses: jurplel/install-qt-action@v4
         with:
@@ -258,19 +303,13 @@ jobs:
           fi
 
       # ------------------------------------------------------------- Package
-      - name: Package (Linux)
+      - name: Prepare Linux bundle
         if: matrix.platform == 'linux'
         run: |
           set -eux
-          mkdir -p out staging
-          cp build/FreeTunnel/FreeTunnel staging/
-          cp -a build/FreeTunnel/assets staging/assets 2>/dev/null || true
-          tar -C staging -czf out/${{ matrix.artifact }}.tar.gz .
-
-          # AppImage (best-effort: never block the tar.gz artifact). Qt is the
-          # aqt install, so point linuxdeploy-plugin-qt at its qmake.
-          set +e
+          mkdir -p out
           export ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export QML_SOURCES_PATHS="$PWD/client/qml"
           ld=linuxdeploy-x86_64.AppImage
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
@@ -278,22 +317,82 @@ jobs:
           chmod +x "$ld" "$ldqt"
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
-          cp client/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
+          cp client/assets/logo-256.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
-            'Exec=FreeTunnel' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'Exec=FreeTunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > AppDir/usr/share/applications/freetunnel.desktop
-          # Bundle the gcc-13 libstdc++/libgcc we built against, so the AppImage
-          # also runs on distros that ship an older libstdc++.
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --plugin qt \
             --desktop-file AppDir/usr/share/applications/freetunnel.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png \
             --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
-            --library "$(g++-13 -print-file-name=libgcc_s.so.1)" \
-            --output appimage
-          img=$(ls FreeTunnel*.AppImage 2>/dev/null | head -1)
-          [ -n "$img" ] && mv "$img" out/${{ matrix.artifact }}.AppImage || echo "AppImage build skipped/failed"
+            --library "$(g++-13 -print-file-name=libgcc_s.so.1)"
+
+      # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
+      # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
+      # /opt/freetunnel. A /usr/bin symlink + .desktop entry integrate it into
+      # the launcher; the privileged VPN helper runs via pkexec (polkit).
+      - name: Package .deb (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -eux
+          if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
+            echo "::error::AppDir missing — cannot build .deb"
+            exit 1
+          fi
+          ver="${{ steps.ver.outputs.version }}"
+          root=debpkg
+          rm -rf "$root"
+          mkdir -p "$root/opt/freetunnel" "$root/usr/bin" \
+                   "$root/usr/share/applications" \
+                   "$root/usr/share/pixmaps" \
+                   "$root/usr/share/icons/hicolor/256x256/apps" \
+                   "$root/DEBIAN"
+          # Bundled runtime (binary + Qt libs/plugins/qml + qt.conf).
+          cp -a AppDir/usr/. "$root/opt/freetunnel/"
+          # Launcher on PATH (rpath is $ORIGIN/../lib, so the symlink works).
+          ln -sf /opt/freetunnel/bin/FreeTunnel "$root/usr/bin/freetunnel"
+          # Menu entry + icons (multiple sizes for launchers / software centers).
+          for s in 48 128 256 512; do
+            mkdir -p "$root/usr/share/icons/hicolor/${s}x${s}/apps"
+            cp "client/assets/logo-${s}.png" \
+              "$root/usr/share/icons/hicolor/${s}x${s}/apps/freetunnel.png"
+          done
+          cp client/assets/logo-256.png \
+            "$root/usr/share/pixmaps/freetunnel.png"
+          printf '%s\n' \
+            '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
+            'Exec=freetunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
+            > "$root/usr/share/applications/freetunnel.desktop"
+          installed_kb=$(du -sk "$root" | cut -f1)
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: freetunnel
+          Version: ${ver}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: FreeTunnel <noreply@freetunnel.app>
+          Installed-Size: ${installed_kb}
+          Depends: libc6, libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Description: FreeTunnel VPN client
+           A simple, modern desktop client for the TrustTunnel VPN core.
+           Bundles its own Qt runtime; the privileged VPN helper is started on
+           demand via pkexec (polkit).
+          EOF
+          cat > "$root/DEBIAN/postinst" <<'EOF'
+          #!/bin/sh
           set -e
+          command -v update-desktop-database >/dev/null 2>&1 && \
+            update-desktop-database -q /usr/share/applications || true
+          command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+            gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+          exit 0
+          EOF
+          chmod 0755 "$root/DEBIAN/postinst"
+          dpkg-deb --build --root-owner-group "$root" \
+            "out/${{ matrix.artifact }}.deb"
           ls -la out
 
       - name: Build & package universal (macOS)
@@ -325,13 +424,22 @@ jobs:
             -output "$APP/Contents/MacOS/FreeTunnel"
           lipo -info "$APP/Contents/MacOS/FreeTunnel"
 
-          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
+          cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
           # Ad-hoc sign so the bundle launches once the user approves it in
           # Gatekeeper (no Developer ID available for full signing/notarization).
           codesign --force --deep --sign - "$APP" || true
           mkdir -p out
-          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -ov -format UDZO \
-            out/${{ matrix.artifact }}.dmg
+          RW=out/rw.dmg
+          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m -ov -format UDRW "$RW"
+          MOUNT=$(hdiutil attach -readwrite -noverify -noautofsck "$RW" | awk '/\/Volumes\// {print $NF; exit}')
+          cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
+          SetFile -a C "$MOUNT/.VolumeIcon.icns"
+          ln -sf /Applications "$MOUNT/Applications"
+          bless --folder "$MOUNT" --openfolder "$MOUNT" --icon "$MOUNT/.VolumeIcon.icns" || true
+          hdiutil detach "$MOUNT"
+          hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o out/${{ matrix.artifact }}.dmg
+          rm -f "$RW"
 
       - name: Package (Windows)
         if: matrix.platform == 'windows'
@@ -344,27 +452,26 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist, out | Out-Null
           Copy-Item $exe.FullName dist\
           if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
-          & $deploy --release --no-translations dist\FreeTunnel.exe
-          Compress-Archive -Path dist\* -DestinationPath out\${{ matrix.artifact }}.zip -Force
+          New-Item -ItemType Directory -Force -Path dist\assets | Out-Null
+          Copy-Item client\assets\logo.ico dist\assets\ -Force
+          Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
+          & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
 
-          # NSIS installer (best-effort). NSIS resolves relative File paths
-          # against the .nsi directory, so pass an ABSOLUTE build dir.
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (Test-Path $nsis) {
-            $distAbs = (Resolve-Path dist).Path
-            & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
-            $setup = Get-ChildItem -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
-            if ($setup) { Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" }
-          } else {
-            Write-Host "NSIS not found; skipping installer"
-          }
+          if (-not (Test-Path $nsis)) { throw "NSIS not found at $nsis" }
+          $distAbs = (Resolve-Path dist).Path
+          & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
+          $setup = Get-ChildItem -Path "client\win" -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS did not produce FreeTunnel-*-Setup.exe" }
+          Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" -Force
+          ls out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: out/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Publish release
@@ -379,14 +486,49 @@ jobs:
         with:
           path: artifacts
 
+      # Publish SHA256 checksums so users can verify the (unsigned) downloads.
+      # Names match the release asset names (basenames), which is what GitHub
+      # exposes once the nested artifact folders are flattened.
+      - name: Generate checksums
+        run: |
+          set -eux
+          cd artifacts
+          find . -type f ! -name 'SHA256SUMS.txt' -exec sha256sum {} + \
+            | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
+            | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Sign the manifest with the Ed25519 release key so the in-app updater can
+      # verify it against the public key compiled into the binary.
+      # Set the ED25519_SIGNING_KEY repo secret to a PEM private key to enable.
+      - name: Sign checksums
+        env:
+          ED25519_SIGNING_KEY: ${{ secrets.ED25519_SIGNING_KEY }}
+        run: |
+          set -eux
+          if [ -z "${ED25519_SIGNING_KEY:-}" ]; then
+            echo "ED25519_SIGNING_KEY not configured — skipping in-app signature"
+            exit 0
+          fi
+          cd artifacts
+          printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem
+          openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS.txt -out SHA256SUMS.txt.sig
+          rm -f ed25519.pem
+          ls -la SHA256SUMS.txt.sig
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            artifacts/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            Unsigned builds.
+            Builds are unsigned (see README for first-run notes).
 
+            - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
+              (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
+              own Qt and integrates into the app menu.
             - **macOS**: the app is ad-hoc signed but not notarized. On first launch
               right-click the app → Open (or run
               `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).

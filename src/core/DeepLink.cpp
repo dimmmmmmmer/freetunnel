@@ -85,8 +85,20 @@ QStringList decodeStringList(const QByteArray &value, bool *ok) {
 }
 
 QString tomlEscape(const QString &s) {
-    QString out = s;
-    out.replace('\\', "\\\\").replace('"', "\\\"");
+    // Escape backslash/quote AND drop C0 control characters (newlines, tabs, …)
+    // and DEL. TOML basic strings forbid raw control chars, and leaving them in
+    // would let a crafted deep-link field (e.g. a username containing "\n key =
+    // value") break out of its quoted value and inject arbitrary TOML keys into
+    // the generated config.
+    QString out;
+    out.reserve(s.size());
+    for (const QChar &c : s) {
+        if (c < QChar(0x20) || c == QChar(0x7F))
+            continue;
+        if (c == QLatin1Char('\\') || c == QLatin1Char('"'))
+            out += QLatin1Char('\\');
+        out += c;
+    }
     return out;
 }
 
@@ -111,6 +123,12 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     };
 
     QString s = uri.trimmed();
+    // Also accept share links like https://trusttunnel.org/qr.html#tt=<base64>
+    // (or ?tt=<base64>): the payload after tt= is the same base64url body.
+    const int ttIdx = s.indexOf(QLatin1String("tt="));
+    if (ttIdx >= 0 && !s.startsWith(QLatin1String("tt://")))
+        s = QStringLiteral("tt://?") + s.mid(ttIdx + 3);
+
     // Scheme is case-sensitive `tt`; payload lives in the query part.
     if (s.startsWith(QLatin1String("tt://?"))) {
         s = s.mid(6);

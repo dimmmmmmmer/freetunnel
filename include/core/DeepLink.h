@@ -1,7 +1,7 @@
 #pragma once
 
 // Official TrustTunnel deep link support: `tt://?<base64url>` with a binary
-// TLV payload (QUIC/TLS varint encoding), per the project DEEP_LINK.md spec.
+// TLV payload (QUIC/TLS varint encoding). See DEEP_LINK.md in the repo root.
 //
 // This module is intentionally self-contained (depends only on Qt Core, not on
 // the VPN core), so it can be unit-tested without the native toolchain.
@@ -44,7 +44,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error =
 QString encodeDeepLink(const DeepLinkConfig &cfg);
 
 // Render the config as TrustTunnel client TOML so the normal import path can
-// consume it. Mirrors the schema produced by ConfigWizard.
+// consume it. Mirrors the schema produced by the create-config form.
 QString deepLinkConfigToToml(const DeepLinkConfig &cfg);
 
 } // namespace freetunnel

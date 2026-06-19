@@ -1,18 +1,12 @@
-name: Build (HTTP/3 variant)
+name: Build HTTP/3
 
-# Optional build with HTTP/3 (QUIC) enabled. This pulls quiche, which adds a
-# Rust toolchain to the build and can break on the yanked `boring` crate — so it
-# is kept separate from the main release builds and is non-blocking.
-#
-# Run manually (workflow_dispatch) or observe it on PRs without it gating them.
+# Optional HTTP/3 (QUIC/quiche) variant of the FreeTunnel client. Same upstream
+# injection strategy as build.yml, but quiche is enabled (requires Rust in CI).
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/build-http3.yml'
-      - 'src/**'
-      - 'include/**'
-      - 'CMakeLists.txt'
+  push:
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -21,71 +15,176 @@ concurrency:
 
 env:
   UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
-  UPSTREAM_REF: fa033c08ec332e44cc3590d62145bce8623a8014
   CONAN_VER: '2.12'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  http3:
-    name: Linux HTTP/3
+  icons:
+    name: Render bundle icons
     runs-on: ubuntu-latest
-    # Non-blocking: HTTP/3 is experimental for this client.
-    continue-on-error: true
     steps:
-      - name: Checkout client
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+      - name: Install rasterizers
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+      - name: Render icons from logo.svg
+        run: |
+          set -eux
+          svg=assets/logo.svg
+          out=icons-out; mkdir -p "$out"
+          tmp=$(mktemp -d)
+          for s in 16 32 48 64 128 256 512 1024; do
+            rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/logo-$s.png"
+          done
+          cp "$tmp/logo-256.png" "$out/logo-256.png"
+          cp "$tmp/logo-256.png" "$out/logo.png"
+          png2icns "$out/logo.icns" \
+            "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
+          convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
+            "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-icons-http3
+          path: icons-out/
+
+  build:
+    name: Build HTTP/3 (${{ matrix.artifact }})
+    needs: icons
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            qt_host: linux
+            qt_arch: linux_gcc_64
+            artifact: freetunnel-linux-x86_64-http3
+          - os: macos-15
+            platform: macos
+            qt_host: mac
+            qt_arch: clang_64
+            artifact: freetunnel-macos-universal-http3
+          - os: windows-latest
+            platform: windows
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
+            artifact: freetunnel-windows-x86_64-http3
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
         with:
           path: client
 
-      - name: Checkout upstream core
-        uses: actions/checkout@v5
+      - name: Use rendered bundle icons
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: bundle-icons-http3
+          path: client/assets
+
+      - name: Read pinned upstream ref
+        id: upstream_ref
+        shell: bash
+        run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
         with:
           repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ env.UPSTREAM_REF }}
+          ref: ${{ steps.upstream_ref.outputs.value }}
           path: upstream
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Inject client into upstream tree
         shell: bash
         run: |
           set -eux
-          rm -rf upstream/FreeTunnel && mkdir -p upstream/FreeTunnel
+          rm -rf upstream/FreeTunnel
+          mkdir -p upstream/FreeTunnel
           (cd client && tar --exclude='./.git' -cf - .) | (cd upstream/FreeTunnel && tar -xf -)
           {
-            printf '\nif (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")\n'
+            printf '\n# --- injected by FreeTunnel CI ---\n'
+            printf 'if (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")\n'
             printf '    add_subdirectory(FreeTunnel)\n'
             printf 'endif ()\n'
           } >> upstream/CMakeLists.txt
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
-      - name: Set up Rust (needed by quiche)
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Patch core wrapper (surface tunnel stats)
-        shell: bash
         run: python3 client/scripts/patch_core_wrapper.py upstream
 
-      - name: Install dependencies
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build clang \
-            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev qt6-svg-dev
+          wget -q https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 18
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y g++-13 ninja-build libfuse2 libbsd-dev \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb1-dev libx11-dev libx11-xcb-dev
           pip install -r upstream/requirements.txt
           pip install "conan~=${CONAN_VER}"
 
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: http3-ccache
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          brew untap aws/tap azure/bicep 2>/dev/null || true
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          pip install -r upstream/requirements.txt
+          pip install "conan~=${CONAN_VER}"
 
-      - name: Conan cache
-        uses: actions/cache@v5
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        if: matrix.platform == 'windows'
+        with:
+          arch: x64
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: ${{ matrix.qt_host }}
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          choco install -y strawberryperl nasm nsis
+          pip install -r upstream/requirements.txt
+          pip install "conan~=$env:CONAN_VER"
+
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        if: matrix.platform != 'windows'
+        with:
+          key: ${{ matrix.os }}-${{ matrix.artifact }}-http3-ccache
+
+      - uses: actions/cache@v5
         with:
           path: ~/.conan2
-          key: http3-conan2-${{ hashFiles('upstream/conanfile.py') }}
-          restore-keys: http3-conan2-
+          key: ${{ matrix.os }}-${{ matrix.artifact }}-http3-conan2-${{ hashFiles('upstream/conanfile.py') }}
+          restore-keys: ${{ matrix.os }}-${{ matrix.artifact }}-http3-conan2-
+
+      - name: Patch bootstrap for Windows (run .sh via sh)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          sed -i 's/subprocess\.run(\[os\.path\.join(/subprocess.run(["sh", os.path.join(/g' \
+            upstream/scripts/bootstrap_conan_deps.py
 
       - name: Bootstrap conan dependencies
         working-directory: upstream
@@ -99,19 +198,89 @@ jobs:
           conan profile detect --force
           DNS_VER=$(grep -oE 'dns-libs/[0-9]+\.[0-9]+\.[0-9]+@adguard/oss' \
             upstream/conanfile.py | head -1 | sed -E 's#dns-libs/([0-9.]+)@.*#\1#')
+          rm -rf _dnslibs
           git clone --depth 1 --branch "v${DNS_VER}" \
             https://github.com/AdguardTeam/DnsLibs.git _dnslibs
           conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
           rm -rf _dnslibs
 
-      - name: Configure (HTTP/3 enabled)
+      - name: Configure (Linux)
+        if: matrix.platform == 'linux'
         run: |
           cmake -S upstream -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF \
-            -DBUILD_TRUSTTUNNEL_QT=ON
+            -DBUILD_TRUSTTUNNEL_QT=ON \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries"
+
+      - name: Configure (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cmake -S upstream -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF `
+            -DBUILD_TRUSTTUNNEL_QT=ON `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build
-        run: cmake --build build --target FreeTunnel -j 4
+        if: matrix.platform != 'macos'
+        run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
+
+      - name: Build & package universal (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          set -eux
+          common=(-S upstream -G Ninja
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF
+            -DBUILD_TRUSTTUNNEL_QT=ON
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR")
+          rustup target add x86_64-apple-darwin
+          cmake "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build-arm64 --target FreeTunnel -j3
+          cmake "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build build-x64 --target FreeTunnel -j3
+          APP=build-arm64/FreeTunnel/FreeTunnel.app
+          lipo -create \
+            build-arm64/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel \
+            build-x64/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel \
+            -output "$APP/Contents/MacOS/FreeTunnel"
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
+          codesign --force --deep --sign - "$APP" || true
+          mkdir -p out
+          hdiutil create -volname "FreeTunnel HTTP3" -srcfolder "$APP" -ov -format UDZO \
+            out/${{ matrix.artifact }}.dmg
+
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -eux
+          mkdir -p out staging
+          cp build/FreeTunnel/FreeTunnel staging/
+          cp -a build/FreeTunnel/assets staging/assets 2>/dev/null || true
+          tar -C staging -czf out/${{ matrix.artifact }}.tar.gz .
+
+      - name: Package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $bin = "build\FreeTunnel"
+          $exe = Get-ChildItem -Path $bin -Recurse -Filter FreeTunnel.exe | Select-Object -First 1
+          $deploy = Join-Path $env:QT_ROOT_DIR "bin\windeployqt.exe"
+          New-Item -ItemType Directory -Force -Path dist, out | Out-Null
+          Copy-Item $exe.FullName dist\
+          if (Test-Path "$bin\assets") { Copy-Item "$bin\assets" dist\assets -Recurse }
+          & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
+          Compress-Archive -Path dist\* -DestinationPath out\${{ matrix.artifact }}.zip -Force
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+          if-no-files-found: warn

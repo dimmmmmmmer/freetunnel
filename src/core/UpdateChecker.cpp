@@ -1,13 +1,49 @@
 #include "UpdateChecker.h"
 
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QRegularExpression>
-#include <QVersionNumber>
+#include <QStandardPaths>
+
+#include "ReleaseSigning.h"
+#include "ReleaseVerify.h"
+#include "VersionCompare.h"
+
+namespace {
+
+bool signatureVerificationConfigured()
+{
+    return freetunnel::kReleaseSigningPublicKeyPem
+           && freetunnel::kReleaseSigningPublicKeyPem[0] != '\0';
+}
+
+bool signatureVerificationActive()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Test-only escape hatch: compiled out of release builds so a shipped binary
+    // can never be told to skip update-signature verification via the environment.
+    if (qEnvironmentVariableIsSet("FT_TEST_SKIP_UPDATE_SIG"))
+        return false;
+#endif
+    return signatureVerificationConfigured();
+}
+
+QString githubApiUrl(const QString &path)
+{
+    const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
+    if (base.isEmpty())
+        return QStringLiteral("https://api.github.com") + path;
+    const QString root = QString::fromUtf8(base);
+    if (root.endsWith(QLatin1Char('/')))
+        return root.left(root.size() - 1) + path;
+    return root + path;
+}
+} // namespace
 
 UpdateChecker::UpdateChecker(const QString &githubRepo,
                              const QString &currentVersion,
@@ -22,8 +58,7 @@ UpdateChecker::UpdateChecker(const QString &githubRepo,
 void UpdateChecker::checkNow()
 {
     // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
-    const QString url = QStringLiteral("https://api.github.com/repos/%1/releases/latest")
-                            .arg(m_githubRepo);
+    const QString url = githubApiUrl(QStringLiteral("/repos/%1/releases/latest").arg(m_githubRepo));
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
@@ -64,16 +99,24 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         remoteVersion = remoteVersion.mid(1);
     }
 
+    m_latest = ReleaseInfo{};
     m_latest.tagName = tagName;
     m_latest.version = remoteVersion;
     m_latest.htmlUrl = obj.value("html_url").toString();
     m_latest.body = obj.value("body").toString();
 
-    // Find installer asset (*.exe for Windows, *.dmg for macOS)
     const QJsonArray assets = obj.value("assets").toArray();
     for (const QJsonValue &val : assets) {
         const QJsonObject asset = val.toObject();
         const QString name = asset.value("name").toString();
+        if (name == QLatin1String("SHA256SUMS.txt")) {
+            m_latest.checksumsUrl = asset.value("browser_download_url").toString();
+            continue;
+        }
+        if (name == QLatin1String("SHA256SUMS.txt.sig")) {
+            m_latest.signatureUrl = asset.value("browser_download_url").toString();
+            continue;
+        }
 #ifdef _WIN32
         if (name.endsWith(".exe", Qt::CaseInsensitive)) {
 #elif defined(__APPLE__)
@@ -83,11 +126,10 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 #endif
             m_latest.installerUrl = asset.value("browser_download_url").toString();
             m_latest.assetName = name;
-            break;
         }
     }
 
-    if (isNewerVersion(remoteVersion)) {
+    if (isVersionNewer(m_currentVersion, remoteVersion)) {
         emit updateAvailable(m_latest);
     } else {
         emit noUpdateAvailable(QStringLiteral("You are running the latest version (%1)").arg(m_currentVersion));
@@ -96,38 +138,133 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 
 bool UpdateChecker::isNewerVersion(const QString &remote) const
 {
-    // Normalize version strings for comparison.
-    // Versions can be like "0.5b", "1.2.3", "0.6-beta".
-    // Strategy: extract numeric parts, compare with QVersionNumber,
-    // then fall back to string comparison for pre-release suffixes.
+    return isVersionNewer(m_currentVersion, remote);
+}
 
-    static const QRegularExpression rxNum(QStringLiteral(R"((\d+(?:\.\d+)*))"));
-    static const QRegularExpression rxSuffix(QStringLiteral(R"(\d+(?:\.\d+)*(.*)$)"));
+void UpdateChecker::downloadLatest()
+{
+    if (m_latest.installerUrl.isEmpty()) {
+        emit downloadFailed(QStringLiteral("No installer asset found for this platform"));
+        return;
+    }
 
-    auto extractParts = [&](const QString &v) -> std::pair<QVersionNumber, QString> {
-        QVersionNumber vn;
-        QString suffix;
-        auto m = rxNum.match(v);
-        if (m.hasMatch()) {
-            vn = QVersionNumber::fromString(m.captured(1));
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+            + QStringLiteral("/freetunnel-update");
+    QDir().mkpath(dir);
+    m_downloadPath = QDir(dir).filePath(m_latest.assetName);
+
+    // Never install an asset we can't integrity-check. A release without a
+    // SHA256SUMS.txt manifest is treated as untrusted.
+    if (m_latest.checksumsUrl.isEmpty()) {
+        emit downloadFailed(QStringLiteral("This release has no SHA256SUMS.txt — refusing to "
+                                           "download an unverifiable update."));
+        return;
+    }
+    m_checksumsData.clear();
+    fetchChecksumsThenInstaller();
+}
+
+void UpdateChecker::fetchChecksumsThenInstaller()
+{
+    QNetworkRequest req(m_latest.checksumsUrl);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                emit downloadProgress(received * 5 / qMax<qint64>(total, 1), 100);
+            });
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { onChecksumsFetched(reply); });
+}
+
+void UpdateChecker::onChecksumsFetched(QNetworkReply *reply)
+{
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+        emit downloadFailed(QStringLiteral("Could not download SHA256SUMS.txt: %1").arg(reply->errorString()));
+        return;
+    }
+    m_checksumsData = reply->readAll();
+
+    if (signatureVerificationActive()) {
+        if (m_latest.signatureUrl.isEmpty()) {
+            emit downloadFailed(QStringLiteral("This release is not signed — refusing to update."));
+            return;
         }
-        auto ms = rxSuffix.match(v);
-        if (ms.hasMatch()) {
-            suffix = ms.captured(1).trimmed();
-        }
-        return {vn, suffix};
-    };
+        fetchSignature();
+        return;
+    }
+    fetchInstaller();
+}
 
-    auto [remoteVn, remoteSuffix] = extractParts(remote);
-    auto [currentVn, currentSuffix] = extractParts(m_currentVersion);
+void UpdateChecker::fetchSignature()
+{
+    QNetworkRequest req(m_latest.signatureUrl);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                emit downloadProgress(5 + received * 5 / qMax<qint64>(total, 1), 100);
+            });
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { onSignatureFetched(reply); });
+}
 
-    int cmp = QVersionNumber::compare(remoteVn, currentVn);
-    if (cmp > 0) return true;
-    if (cmp < 0) return false;
+void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
+{
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+        emit downloadFailed(QStringLiteral("Could not download the signature: %1").arg(reply->errorString()));
+        return;
+    }
+    m_signatureData = reply->readAll();
 
-    // Same numeric version — compare suffix lexicographically.
-    // Empty suffix (release) > any suffix (beta/rc).
-    if (currentSuffix.isEmpty() && !remoteSuffix.isEmpty()) return false; // current is release
-    if (!currentSuffix.isEmpty() && remoteSuffix.isEmpty()) return true;  // remote is release
-    return remoteSuffix > currentSuffix;
+    const QByteArray pub(freetunnel::kReleaseSigningPublicKeyPem);
+    if (!verifyEd25519Signature(m_checksumsData, m_signatureData, pub)) {
+        emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
+        return;
+    }
+    fetchInstaller();
+}
+
+void UpdateChecker::fetchInstaller()
+{
+    QNetworkRequest req(m_latest.installerUrl);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                const qint64 base = signatureVerificationActive() ? 10 : 5;
+                emit downloadProgress(base + received * (100 - base) / qMax<qint64>(total, 1), 100);
+            });
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { onInstallerFetched(reply); });
+}
+
+void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
+{
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+        emit downloadFailed(QStringLiteral("Download failed: %1").arg(reply->errorString()));
+        return;
+    }
+
+    QFile out(m_downloadPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
+        return;
+    }
+    out.write(reply->readAll());
+    out.close();
+
+    // Mandatory integrity check: the manifest must be present and the asset's
+    // SHA-256 must match before we hand the file off to be executed.
+    if (m_checksumsData.isEmpty()
+        || !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
+        QFile::remove(m_downloadPath);
+        emit downloadFailed(QStringLiteral("Download failed integrity check (SHA-256 mismatch)"));
+        return;
+    }
+
+    emit downloadReady(m_downloadPath);
 }

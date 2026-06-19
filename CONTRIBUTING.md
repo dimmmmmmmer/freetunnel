@@ -1,0 +1,182 @@
+# Contributing to FreeTunnel
+
+Thank you for helping improve FreeTunnel. This guide covers local development,
+testing, translations, and CI.
+
+## Prerequisites
+
+- **TrustTunnelClient** upstream checkout ([TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient))
+- CMake 3.16+, C++20 compiler (clang recommended for Linux)
+- Qt 6.8+ (Gui, Qml, Quick, Network, Svg)
+- Python 3 + Conan 2.12 (for upstream native deps)
+- Ninja (recommended)
+
+FreeTunnel is **not standalone**: it must be built as a subdirectory of the
+upstream CMake tree so the `vpnlibs_trusttunnel` target exists.
+
+## Local build
+
+### 1. Clone upstream and inject FreeTunnel
+
+```bash
+git clone https://github.com/TrustTunnel/TrustTunnelClient.git trusttunnel
+cd trusttunnel
+git checkout fa033c08ec332e44cc3590d62145bce8623a8014   # CI pin — bump deliberately
+
+rm -rf FreeTunnel
+git clone https://github.com/enrvate/freetunnel.git FreeTunnel   # or symlink your fork
+
+# Ensure upstream CMakeLists.txt adds the subdirectory when BUILD_TRUSTTUNNEL_QT=ON
+```
+
+If `add_subdirectory(FreeTunnel)` is not present, append:
+
+```cmake
+if (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")
+    add_subdirectory(FreeTunnel)
+endif ()
+```
+
+### 2. Patch upstream (tunnel stats)
+
+```bash
+python3 FreeTunnel/scripts/patch_core_wrapper.py .
+```
+
+Required for live upload/download stats in the UI.
+
+### 3. Bootstrap Conan deps
+
+```bash
+pip install -r requirements.txt "conan~=2.12"
+./scripts/bootstrap_conan_deps.py
+```
+
+### 4. Configure and build
+
+From the **upstream root** (not `FreeTunnel/`):
+
+```bash
+export QT_ROOT_DIR=/path/to/Qt/6.8.x/gcc_64   # or macOS/Windows Qt prefix
+
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DBUILD_TRUSTTUNNEL_QT=ON \
+  -DDISABLE_HTTP3=ON \
+  -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON \
+  -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+
+cmake --build build --target FreeTunnel -j8
+```
+
+**HTTP/3 builds** (optional, requires Rust/quiche via upstream):
+
+```bash
+cmake -S . -B build-http3 -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DBUILD_TRUSTTUNNEL_QT=ON \
+  -DDISABLE_HTTP3=OFF \
+  -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+```
+
+Or use the Makefile inside `FreeTunnel/` when already configured from upstream:
+
+```bash
+cd FreeTunnel
+make QT_DISABLE_HTTP3=OFF CMAKE_PREFIX_PATH="$QT_ROOT_DIR" build
+```
+
+### 5. Run
+
+| Platform | Binary |
+| --- | --- |
+| Linux | `build/FreeTunnel/FreeTunnel` |
+| macOS | `build/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel` |
+| Windows | `build\FreeTunnel\FreeTunnel.exe` |
+
+VPN connect requires elevation (UAC / sudo / macOS admin prompt).
+
+## Unit tests (fast, no VPN core)
+
+From `FreeTunnel/tests/`:
+
+```bash
+cmake -S . -B build-tests -G Ninja
+cmake --build build-tests -j
+ctest --test-dir build-tests --output-on-failure
+```
+
+CI runs this on every push/PR via `.github/workflows/tests.yml`.
+
+Test suites: deep links, config import, settings, TOML, credentials (Keychain /
+Cred Manager on macOS/Windows), release verify, control commands, helper IPC,
+QML UI smoke tests, integration tests (config workflow, Backend+mock VPN,
+single-instance socket, helper client), UpdateChecker E2E (mock HTTP).
+
+Security CI (`.github/workflows/security.yml`): cppcheck on `src/` + upstream
+patch verification (`scripts/verify_upstream_patch.sh` against
+`scripts/upstream_ref.txt`).
+
+## Translations (i18n)
+
+Strings use `qsTr()` in QML and `tr()` in C++. Russian is in `i18n/freetunnel_ru.ts`.
+
+### Update translations
+
+```bash
+./scripts/i18n-update.sh
+```
+
+This runs `lupdate` (extract new/changed strings) and `lrelease` (compile
+`.qm`). Requires Qt linguist tools (`lupdate`, `lrelease`) on PATH — typically
+`$QT_ROOT_DIR/bin/lupdate` and `lupdate`.
+
+Edit `i18n/freetunnel_ru.ts` in Qt Linguist or by hand, then run the script
+again to refresh `freetunnel_ru.qm`.
+
+## Signed updates (Ed25519)
+
+Release manifests (`SHA256SUMS.txt`) can be signed so the in-app updater
+verifies them against the public key in `include/core/ReleaseSigning.h`.
+
+1. Generate a key pair (or rotate keys):
+
+   ```bash
+   ./scripts/gen-release-signing-key.sh release-signing.pem
+   ```
+
+2. Paste the printed public PEM into `include/core/ReleaseSigning.h`
+   (`kReleaseSigningPublicKeyPem`).
+
+3. Add the **private** PEM file as the `ED25519_SIGNING_KEY` repository secret
+   in GitHub (Settings → Secrets → Actions). CI uses it in the release job to
+   produce `SHA256SUMS.txt.sig`.
+
+Never commit the private key. If the public key in the repo changes, rotate the
+GitHub secret to the matching private key.
+
+## Deep links
+
+See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
+
+## CI workflows
+
+| Workflow | Purpose |
+| --- | --- |
+| `.github/workflows/build.yml` | Release builds (HTTP/2), Linux/macOS/Windows |
+| `.github/workflows/build-http3.yml` | Optional HTTP/3 variant (quiche enabled) |
+| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS)
+
+Upstream ref is pinned in workflow `env.UPSTREAM_REF`. Bump it with the patch
+script re-verified.
+
+## Pull requests
+
+- Keep changes focused; match existing code style.
+- Run unit tests locally before pushing.
+- Unsigned release binaries are expected; do not commit secrets or signing keys.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the
+Apache License 2.0 (see [LICENSE](LICENSE)).
