@@ -8,9 +8,8 @@ name: Build
 # `upstream/FreeTunnel/`, then configure CMake from the upstream root so the
 # upstream conan bootstrap runs and the `vpnlibs_trusttunnel` target exists.
 #
-# HTTP3/QUIC (quiche) is disabled for the release builds, which removes the Rust
-# dependency from the core build. An optional HTTP/3 variant lives in
-# build-http3.yml.
+# HTTP3/QUIC (quiche) is enabled, so the per-config HTTP/3 transport works in
+# the shipped binaries. This pulls Rust into the core build (quiche is Rust).
 #
 # Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
 # signed so it launches after the user approves it in Gatekeeper; see the README.
@@ -146,6 +145,14 @@ jobs:
         shell: bash
         run: python3 client/scripts/patch_core_wrapper.py upstream
 
+      # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
+      # every runner (macOS/Windows ship one, but install to be safe + on PATH).
+      - name: Install Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
         if: matrix.platform == 'linux'
@@ -273,8 +280,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON \
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF \
+            -DBUILD_TRUSTTUNNEL_QT=ON \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries"
 
@@ -287,8 +294,8 @@ jobs:
           cmake -S upstream -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
-            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON `
-            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON `
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF `
+            -DBUILD_TRUSTTUNNEL_QT=ON `
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       # --------------------------------------------------------------- Build
@@ -406,8 +413,8 @@ jobs:
           common=(-S upstream -G Ninja
             -DCMAKE_BUILD_TYPE=RelWithDebInfo
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=ON
-            -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON -DBUILD_TRUSTTUNNEL_QT=ON
+            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF
+            -DBUILD_TRUSTTUNNEL_QT=ON
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR")
 
           # The core deps include quiche (Rust); cross-building the x86_64 slice
