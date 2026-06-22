@@ -82,6 +82,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/InstanceControl.h
     src/core/ConfigToml.cpp
     include/core/ConfigToml.h
+    src/core/NetBind.cpp
+    include/core/NetBind.h
     src/core/AppUiUtils.cpp
     include/core/AppUiUtils.h
     src/core/UpdateChecker.cpp

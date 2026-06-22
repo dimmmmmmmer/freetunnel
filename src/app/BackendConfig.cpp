@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHostAddress>
+#include <QHostInfo>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTcpSocket>
@@ -19,6 +20,7 @@
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+#include "core/NetBind.h"
 
 // Read the first endpoint "host:port" out of a config TOML.
 static QString firstAddress(const QString &path) {
@@ -37,17 +39,10 @@ void Backend::pingConfigs() {
         m_pings << QStringLiteral("…");
     emit pingsChanged();
 
-    for (int i = 0; i < m_paths.size(); ++i) {
-        const QString addr = firstAddress(m_paths.at(i));
-        const int colon = addr.lastIndexOf(':');
-        if (colon < 0) {
-            m_pings[i] = QStringLiteral("—");
-            emit pingsChanged();
-            continue;
-        }
-        const QString host = addr.left(colon);
-        const quint16 port = addr.mid(colon + 1).toUShort();
-        auto *sock = new QTcpSocket(this);
+    // Connect to ip:port over the physical interface (bypassing the VPN) and
+    // record the connect time. Bound per-protocol so it takes the original path.
+    auto pingOne = [this](int i, const QHostAddress &ip, quint16 port) {
+        QTcpSocket *sock = freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
         const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
         connect(sock, &QTcpSocket::connected, this, [this, i, sock, t0]() {
             if (i < m_pings.size())
@@ -74,7 +69,33 @@ void Backend::pingConfigs() {
                 sock->deleteLater();
             }
         });
-        sock->connectToHost(host, port);
+        sock->connectToHost(ip, port);
+    };
+    auto markDash = [this](int i) {
+        if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…"))
+            m_pings[i] = QStringLiteral("—");
+        emit pingsChanged();
+    };
+
+    for (int i = 0; i < m_paths.size(); ++i) {
+        const QString addr = firstAddress(m_paths.at(i));
+        const int colon = addr.lastIndexOf(':');
+        if (colon < 0) { markDash(i); continue; }
+        const QString host = addr.left(colon);
+        const quint16 port = addr.mid(colon + 1).toUShort();
+        const QHostAddress literal(host);
+        if (!literal.isNull()) {
+            pingOne(i, literal, port);
+        } else {
+            // Hostname endpoint — resolve first so the bound socket uses the
+            // right address family, then ping the first resolved address.
+            QHostInfo::lookupHost(host, this, [pingOne, markDash, i, port](const QHostInfo &hi) {
+                if (hi.addresses().isEmpty())
+                    markDash(i);
+                else
+                    pingOne(i, hi.addresses().first(), port);
+            });
+        }
     }
 }
 

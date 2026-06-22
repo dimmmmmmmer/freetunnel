@@ -208,6 +208,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigImport.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/VersionCompare.cpp
