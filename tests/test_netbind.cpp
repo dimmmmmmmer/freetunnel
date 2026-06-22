@@ -40,7 +40,10 @@ void TestNetBind::boundSocketIsUsable()
     for (auto proto : {QAbstractSocket::IPv4Protocol, QAbstractSocket::IPv6Protocol}) {
         QTcpSocket *s = freetunnel::makePhysicalBoundTcpSocket(this, proto);
         QVERIFY(s != nullptr);
-        QCOMPARE(s->state(), QAbstractSocket::UnconnectedState);
+        // Ready to connect: unbound (mac IP_BOUND_IF / no iface) or source-bound
+        // (Linux bind() leaves it in BoundState) — never already connected.
+        QVERIFY(s->state() == QAbstractSocket::UnconnectedState
+                || s->state() == QAbstractSocket::BoundState);
         delete s;
     }
 }
