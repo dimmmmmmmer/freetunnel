@@ -272,6 +272,10 @@
         <source>Discard</source>
         <translation>Отменить</translation>
     </message>
+    <message>
+        <source>Split profile</source>
+        <translation>Профиль раздельного туннеля</translation>
+    </message>
 </context>
 <context>
     <name>HomePage</name>

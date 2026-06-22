@@ -24,12 +24,15 @@ struct AppSettings {
     // level (the core's excluded_routes), independent of the domain rules above.
     QStringList excluded_routes;
 
-    // Split-tunnel profiles: named sets of domain-bypass rules. The active
-    // profile's rules are mirrored into domain_bypass_rules above. profile_order
-    // preserves creation order (QMap would sort alphabetically).
+    // Split-tunnel profiles: named sets of domain-bypass rules. active_profile is
+    // the profile currently being *edited* on the Split page; its rules mirror
+    // into domain_bypass_rules above. profile_order preserves creation order.
     QString active_profile = "Default";
     QMap<QString, QStringList> profiles{{"Default", {}}};
     QStringList profile_order{"Default"};
+    // Which split profile each config uses (config path -> profile name). A
+    // config not listed (or pointing at a deleted profile) uses "Default".
+    QMap<QString, QString> config_profiles;
 
     // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
     // Empty string = unbound. hotkeys_enabled is the master switch.

@@ -26,11 +26,13 @@ Item {
         TapHandler { onTapped: cform.forceActiveFocus() }
         property string protocol: "http2"
         property bool ipv6: true
+        property string splitProfile: "Default"
         property string snap: ""
         readonly property bool editing: shell.editIndex >= 0
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
-                    protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6].join("")
+                    protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
+                    splitProfile].join("")
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
@@ -45,6 +47,7 @@ Item {
                 fCert.text = f.certificate || ""
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
+                cform.splitProfile = f.splitProfile || "Default"
             }
             snap = snapshot()
         }
@@ -90,6 +93,21 @@ Item {
                     Field { id: fSni; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: "Custom SNI"; width: (parent.width - 10) / 2 }
                     Field { id: fRandom; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: "Client random (hex)"; width: (parent.width - 10) / 2 }
                 }
+                Column { width: parent.width; spacing: 4
+                    Text { text: qsTr("Split profile"); color: theme.textDim; font.pixelSize: 13 }
+                    Rectangle { id: profBox; width: parent.width; height: 34; radius: 8; color: theme.inputBg
+                        border.color: profMa.containsMouse ? theme.accent : theme.inputBorder; border.width: 1
+                        Behavior on border.color { ColorAnimation { duration: 120 } }
+                        Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: profArrow.left; anchors.rightMargin: 6
+                               anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+                               text: cform.splitProfile; color: theme.text; font.pixelSize: 14 }
+                        Text { id: profArrow; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                               text: "▾"; color: theme.textDim; font.pixelSize: 16 }
+                        MouseArea { id: profMa; anchors.fill: parent; hoverEnabled: true
+                            onClicked: shell.showSelect(profBox,
+                                backend.profiles.map(function(p){ return {v:p, t:p} }),
+                                cform.splitProfile, function(v){ cform.splitProfile = v }) } }
+                }
                 Item { width: parent.width; height: 32
                     Text { text: qsTr("Allow IPv6"); color: theme.textDim; font.pixelSize: 13
                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
@@ -126,7 +144,8 @@ Item {
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
-                                allowIpv6: cform.ipv6, certificate: fCert.text, editIndex: shell.editIndex });
+                                allowIpv6: cform.ipv6, certificate: fCert.text,
+                                splitProfile: cform.splitProfile, editIndex: shell.editIndex });
                             if (ok) cform.close()
                         } } }
                     Rectangle { width: 88; height: 32; radius: 8

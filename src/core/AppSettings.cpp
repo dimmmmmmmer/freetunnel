@@ -122,6 +122,10 @@ AppSettings loadAppSettings() {
     if (!order.contains(QStringLiteral("Default")))
         order.prepend(QStringLiteral("Default"));
     out.profile_order = order;
+    // Per-config profile assignments (config path -> profile name).
+    const QVariantMap cp = s.value("bypass/config_profiles").toMap();
+    for (auto it = cp.constBegin(); it != cp.constEnd(); ++it)
+        out.config_profiles.insert(it.key(), it.value().toString());
     out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
     out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
     out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
@@ -150,6 +154,10 @@ void saveAppSettings(const AppSettings &cfg) {
     s.remove("bypass/profile"); // drop stale per-profile entries, then rewrite
     for (auto it = cfg.profiles.constBegin(); it != cfg.profiles.constEnd(); ++it)
         s.setValue("bypass/profile/" + it.key(), it.value());
+    QVariantMap cp;
+    for (auto it = cfg.config_profiles.constBegin(); it != cfg.config_profiles.constEnd(); ++it)
+        cp.insert(it.key(), it.value());
+    s.setValue("bypass/config_profiles", cp);
     s.setValue("hotkeys/enabled", cfg.hotkeys_enabled);
     s.setValue("hotkeys/toggle", cfg.hotkey_toggle);
     s.setValue("hotkeys/connect", cfg.hotkey_connect);

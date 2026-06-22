@@ -174,9 +174,11 @@ signals:
 private:
     void reloadConfigs();
     void persistSettings();
-    void applySplitRules(); // push active profile's domain-bypass list to the core
+    void applySplitRules(); // push the active CONFIG's profile rules to the core
+    QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
+    void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings

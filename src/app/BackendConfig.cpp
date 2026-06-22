@@ -270,7 +270,27 @@ bool Backend::createConfig(const QVariantMap &f) {
         m_settings.last_config_path = m_activePath;
         persistSettings();
     }
+
+    // Per-config split profile assignment (Default is the implicit, unstored value).
+    {
+        QString prof = f.value(QStringLiteral("splitProfile"), QStringLiteral("Default")).toString();
+        if (!m_settings.profiles.contains(prof))
+            prof = QStringLiteral("Default");
+        if (!oldPath.isEmpty() && oldPath != target)
+            m_settings.config_profiles.remove(oldPath);
+        if (prof == QLatin1String("Default"))
+            m_settings.config_profiles.remove(target);
+        else
+            m_settings.config_profiles[target] = prof;
+        persistSettings();
+    }
+
     emit configChanged();
+    // If the edited config is the live one, its profile may have changed.
+    if (editing && m_activePath == target) {
+        applySplitRules();
+        reapplyIfConnected();
+    }
     return true;
 }
 
@@ -298,6 +318,10 @@ QVariantMap Backend::configFields(int index) const {
     f[QStringLiteral("clientRandom")] = c.clientRandom;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("certificate")] = c.certificate;
+    // Which split-tunnel profile this config uses (Default when unassigned).
+    const QString prof = m_settings.config_profiles.value(configPath);
+    f[QStringLiteral("splitProfile")] =
+            (prof.isEmpty() || !m_settings.profiles.contains(prof)) ? QStringLiteral("Default") : prof;
     return f;
 }
 

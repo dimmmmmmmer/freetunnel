@@ -7,7 +7,8 @@
 
 void Backend::setSplitEnabled(bool v) {
     if (m_settings.domain_bypass_enabled == v) return;
-    m_settings.domain_bypass_enabled = v; persistSettings(); applySplitRules(); emit splitChanged();
+    m_settings.domain_bypass_enabled = v;
+    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 // A bypass rule is valid if it's a domain (optionally wildcard "*.x.y"), or an
 // IP / CIDR subnet.
@@ -49,20 +50,20 @@ bool Backend::addDomain(const QString &domain) {
         return false;
     m_settings.domain_bypass_rules << added;
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
     return true;
 }
 void Backend::removeDomain(int index) {
     if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
     m_settings.domain_bypass_rules.removeAt(index);
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
 }
 void Backend::clearDomains() {
     if (m_settings.domain_bypass_rules.isEmpty()) return;
     m_settings.domain_bypass_rules.clear();
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
 }
 
 // ---------- excluded routes (subnets that bypass the tunnel) ----------
@@ -97,25 +98,25 @@ bool Backend::addExcludedRoute(const QString &route) {
     if (added.isEmpty())
         return false;
     m_settings.excluded_routes << added;
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
     return true;
 }
 
 void Backend::removeExcludedRoute(int index) {
     if (index < 0 || index >= m_settings.excluded_routes.size()) return;
     m_settings.excluded_routes.removeAt(index);
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
 void Backend::clearExcludedRoutes() {
     if (m_settings.excluded_routes.isEmpty()) return;
     m_settings.excluded_routes.clear();
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
 void Backend::restoreDefaultExcludedRoutes() {
     m_settings.excluded_routes = defaultExcludedRoutes();
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
 void Backend::addRecommendedRussia() {
@@ -128,7 +129,14 @@ void Backend::addRecommendedRussia() {
         return;
     m_settings.domain_bypass_rules = rules;
     m_settings.profiles[m_settings.active_profile] = rules;
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+}
+
+// Live-apply a profile edit only when the edited profile is the one the active
+// config actually uses — editing some other profile shouldn't reconnect.
+void Backend::reapplyIfEditingActiveProfile() {
+    if (m_settings.active_profile == activeConfigProfile())
+        reapplyIfConnected();
 }
 
 // ---------- split-tunnel profiles ----------
@@ -137,11 +145,13 @@ QStringList Backend::profiles() const {
     return m_settings.profile_order; // creation order, Default first
 }
 
+// Selecting a profile only changes which one the Split page edits — it does not
+// change what any config uses, so no re-apply.
 void Backend::selectProfile(const QString &name) {
     if (!m_settings.profiles.contains(name) || m_settings.active_profile == name) return;
     m_settings.active_profile = name;
     m_settings.domain_bypass_rules = m_settings.profiles.value(name);
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); emit splitChanged();
 }
 
 void Backend::addProfile(const QString &name) {
@@ -149,20 +159,28 @@ void Backend::addProfile(const QString &name) {
     if (n.isEmpty() || m_settings.profiles.contains(n)) return;
     m_settings.profiles.insert(n, {});
     m_settings.profile_order << n;
-    m_settings.active_profile = n;
+    m_settings.active_profile = n; // edit the newly created profile
     m_settings.domain_bypass_rules.clear();
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings(); emit splitChanged();
 }
 
 void Backend::removeProfile(const QString &name) {
     if (name == QLatin1String("Default") || !m_settings.profiles.contains(name)) return;
+    const bool affectedActiveConfig = (activeConfigProfile() == name);
     m_settings.profiles.remove(name);
     m_settings.profile_order.removeAll(name);
+    // Any config that used this profile falls back to Default.
+    for (auto it = m_settings.config_profiles.begin(); it != m_settings.config_profiles.end(); ++it)
+        if (it.value() == name)
+            it.value() = QStringLiteral("Default");
     if (m_settings.active_profile == name) {
         m_settings.active_profile = QStringLiteral("Default");
         m_settings.domain_bypass_rules = m_settings.profiles.value(QStringLiteral("Default"));
     }
-    persistSettings(); applySplitRules(); emit splitChanged();
+    persistSettings();
+    if (affectedActiveConfig) { applySplitRules(); reapplyIfConnected(); }
+    emit splitChanged();
+    emit configChanged(); // a config's effective profile may have changed
 }
 
 void Backend::renameProfile(const QString &oldName, const QString &newName) {
@@ -175,16 +193,30 @@ void Backend::renameProfile(const QString &oldName, const QString &newName) {
     if (i >= 0) m_settings.profile_order[i] = n;
     if (m_settings.active_profile == oldName)
         m_settings.active_profile = n;
+    for (auto it = m_settings.config_profiles.begin(); it != m_settings.config_profiles.end(); ++it)
+        if (it.value() == oldName)
+            it.value() = n;
     persistSettings(); emit splitChanged();
 }
 
-// Push the active profile's domain-bypass list to the core (C2). Applied on
-// connect and whenever rules change; takes effect on the next (re)connect.
+// The split profile assigned to the active config (falls back to "Default" when
+// unassigned or pointing at a deleted profile).
+QString Backend::activeConfigProfile() const {
+    const QString p = m_settings.config_profiles.value(m_activePath);
+    if (p.isEmpty() || !m_settings.profiles.contains(p))
+        return QStringLiteral("Default");
+    return p;
+}
+
+// Push the active CONFIG's profile domain-bypass list to the core (C2). Applied
+// on connect and whenever the relevant rules change. Does NOT reconnect on its
+// own — callers decide whether the change warrants a live rebuild.
 void Backend::applySplitRules() {
     const bool on = m_settings.domain_bypass_enabled;
+    const QStringList domains = m_settings.profiles.value(activeConfigProfile());
     std::vector<std::string> ex;
     if (on)
-        for (const QString &d : m_settings.domain_bypass_rules)
+        for (const QString &d : domains)
             ex.push_back(d.toStdString());
     m_client.setExtraExclusions(ex);
     // When split is off, force general mode (route everything) — otherwise a
@@ -195,7 +227,6 @@ void Backend::applySplitRules() {
     for (const QString &r : m_settings.excluded_routes)
         routes.push_back(r.toStdString());
     m_client.setExcludedRoutes(routes);
-    reapplyIfConnected(); // make the change take effect on a live tunnel
 }
 
 // Routing/exclusion changes only bind when the tunnel is (re)built. If we're

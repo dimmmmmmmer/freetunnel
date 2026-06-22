@@ -260,6 +260,8 @@ void Backend::removeConfig(int index) {
     QStringList stored = loadStoredConfigs();
     stored.removeAll(path);
     saveStoredConfigs(stored);
+    if (m_settings.config_profiles.remove(path) > 0)
+        persistSettings();
     if (m_activePath == path)
         m_activePath.clear();
     reloadConfigs();
