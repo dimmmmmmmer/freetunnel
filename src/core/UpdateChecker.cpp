@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -125,7 +126,8 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         if (name.endsWith(".AppImage", Qt::CaseInsensitive) || name.endsWith(".deb", Qt::CaseInsensitive)) {
 #endif
             m_latest.installerUrl = asset.value("browser_download_url").toString();
-            m_latest.assetName = name;
+            // Basename only — never let a crafted asset name escape the temp dir.
+            m_latest.assetName = QFileInfo(name).fileName();
         }
     }
 

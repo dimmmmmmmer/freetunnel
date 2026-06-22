@@ -14,6 +14,7 @@
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
+#include "core/DeepLink.h"
 #include "helper_ipc_mock_server.h"
 
 class TestIntegrationBackendVpn : public QObject {
@@ -24,6 +25,7 @@ private slots:
     void init();
     void backendConnectsThroughMockHelper();
     void configSwitchSuppressesCoreDisconnectToast();
+    void exportRoundTrips();
 };
 
 static AppSettings hermeticSettings(const QString &logPath)
@@ -170,6 +172,51 @@ void TestIntegrationBackendVpn::configSwitchSuppressesCoreDisconnectToast()
     freetunnel::CredentialStore::deletePassword(configB);
     QFile::remove(configA);
     QFile::remove(configB);
+}
+
+void TestIntegrationBackendVpn::exportRoundTrips()
+{
+    Backend backend;
+    QVariantMap f;
+    f[QStringLiteral("name")] = QStringLiteral("Export Test");
+    f[QStringLiteral("hostname")] = QStringLiteral("vpn.export.test");
+    f[QStringLiteral("addresses")] = QStringLiteral("203.0.113.7:443");
+    f[QStringLiteral("username")] = QStringLiteral("exp-user");
+    f[QStringLiteral("password")] = QStringLiteral("exp-pass");
+    f[QStringLiteral("protocol")] = QStringLiteral("http2");
+    QVERIFY(backend.createConfig(f));
+    QCOMPARE(backend.configs().size(), 1);
+
+    // Deep link round-trips through the parser with credentials intact.
+    const QString link = backend.configDeepLink(0);
+    QVERIFY(link.startsWith(QLatin1String("tt://")));
+    QString err;
+    const auto dl = freetunnel::parseDeepLink(link, &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->hostname, QStringLiteral("vpn.export.test"));
+    QVERIFY(dl->addresses.contains(QStringLiteral("203.0.113.7:443")));
+    QCOMPARE(dl->username, QStringLiteral("exp-user"));
+    QCOMPARE(dl->password, QStringLiteral("exp-pass"));
+
+    // TOML export writes a usable file (password injected from the keychain).
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString out = dir.filePath(QStringLiteral("exported.toml"));
+    QVERIFY(backend.exportConfigToml(0, out));
+    QFile g(out);
+    QVERIFY(g.open(QIODevice::ReadOnly | QIODevice::Text));
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(g.readAll()));
+    QCOMPARE(c.hostname, QStringLiteral("vpn.export.test"));
+    QCOMPARE(c.username, QStringLiteral("exp-user"));
+    QCOMPARE(c.password, QStringLiteral("exp-pass"));
+
+    // Clean up the keychain entry + file the config created.
+    backend.prepareQuit();
+    for (const QString &path : loadStoredConfigs()) {
+        freetunnel::CredentialStore::deletePassword(
+                freetunnel::CredentialStore::keyForConfigPath(path));
+        QFile::remove(path);
+    }
 }
 
 int main(int argc, char *argv[])

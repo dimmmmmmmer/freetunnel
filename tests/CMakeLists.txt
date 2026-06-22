@@ -109,6 +109,14 @@ target_include_directories(test_versioncompare PRIVATE ../include ../include/cor
 target_link_libraries(test_versioncompare PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME versioncompare COMMAND test_versioncompare)
 
+add_executable(test_netbind
+    test_netbind.cpp
+    ../src/core/NetBind.cpp
+)
+target_include_directories(test_netbind PRIVATE ../include ../include/core)
+target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME netbind COMMAND test_netbind)
+
 add_executable(test_releaseverify
     test_releaseverify.cpp
     ../src/core/ReleaseVerify.cpp
