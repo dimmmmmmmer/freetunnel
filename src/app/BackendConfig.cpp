@@ -205,22 +205,6 @@ bool Backend::createConfig(const QVariantMap &f) {
     ct.dns = f.value(QStringLiteral("dns")).toString();
     ct.customSni = f.value(QStringLiteral("customSni")).toString();
     ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
-    ct.socks5 = f.value(QStringLiteral("socks5"), false).toBool();
-    ct.socksListen = f.value(QStringLiteral("socksListen")).toString().trimmed();
-    ct.socksUser = f.value(QStringLiteral("socksUser")).toString().trimmed();
-    ct.socksPass = f.value(QStringLiteral("socksPass")).toString();
-    if (ct.socks5) {
-        // SOCKS listen must be host:port; default the whole thing if left blank.
-        if (ct.socksListen.isEmpty())
-            ct.socksListen = QStringLiteral("127.0.0.1:1080");
-        const int colon = ct.socksListen.lastIndexOf(QLatin1Char(':'));
-        bool portOk = false;
-        const int port = colon >= 0 ? ct.socksListen.mid(colon + 1).toInt(&portOk) : 0;
-        if (colon <= 0 || !portOk || port < 1 || port > 65535) {
-            emit errorOccurred(tr("SOCKS listen must be host:port, e.g. 127.0.0.1:1080"));
-            return false;
-        }
-    }
     // DNS servers (when given): plain IP, or an encrypted-DNS URL
     // (tls://, https://, quic://, h3://, sdns://, udp://, tcp://).
     const QStringList dnsList = ct.dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
@@ -356,10 +340,6 @@ QVariantMap Backend::configFields(int index) const {
     f[QStringLiteral("clientRandom")] = c.clientRandom;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("certificate")] = c.certificate;
-    f[QStringLiteral("socks5")] = c.socks5;
-    f[QStringLiteral("socksListen")] = c.socksListen;
-    f[QStringLiteral("socksUser")] = c.socksUser;
-    f[QStringLiteral("socksPass")] = c.socksPass;
     // Which split-tunnel profile this config uses (Default when unassigned).
     const QString prof = m_settings.config_profiles.value(configPath);
     f[QStringLiteral("splitProfile")] =

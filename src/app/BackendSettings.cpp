@@ -95,7 +95,7 @@ void Backend::setAutoConnect(bool v) {
 void Backend::setKillSwitch(bool v) {
     if (m_settings.killswitch_enabled == v) return;
     m_settings.killswitch_enabled = v; persistSettings();
-    m_active->setKillSwitch(v);
+    m_client.setKillSwitch(v);
     reapplyIfConnected(); // apply on the live tunnel
     emit settingsChanged();
 }

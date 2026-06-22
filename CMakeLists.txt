@@ -96,9 +96,6 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/ReleaseVerify.h
     src/vpn/qt_trusttunnel_client.cpp
     include/vpn/qt_trusttunnel_client.h
-    src/vpn/socks_vpn_client.cpp
-    include/vpn/socks_vpn_client.h
-    include/vpn/vpn_client.h
     src/vpn/vpn_helper_client.cpp
     include/vpn/vpn_helper_client.h
     src/vpn/vpn_helper_server.cpp
@@ -113,7 +110,6 @@ target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_VERSION="${PROJECT_VERSION}"
     FREETUNNEL_GIT_VERSION="${FREETUNNEL_GIT_VERSION}"
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
-    FT_HAVE_INPROCESS_VPN  # in-process SOCKS5 backend (core present in this target)
 )
 
 target_include_directories(FreeTunnel PRIVATE

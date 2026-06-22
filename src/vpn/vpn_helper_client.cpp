@@ -63,10 +63,10 @@ bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringL
 } // namespace
 #endif
 
-VpnHelperClient::VpnHelperClient(QObject *parent) : IVpnClient(parent) {}
+VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent) {}
 
 VpnHelperClient::~VpnHelperClient() {
-    VpnHelperClient::shutdown(); // qualified: no virtual dispatch from a dtor
+    shutdown();
 }
 
 void VpnHelperClient::shutdown() {

@@ -141,7 +141,7 @@ void Backend::reapplyIfEditingActiveProfile() {
 
 // ---------- split-tunnel profiles ----------
 
-QStringList Backend::profiles() const {
+const QStringList &Backend::profiles() const {
     return m_settings.profile_order; // creation order, Default first
 }
 
@@ -218,15 +218,15 @@ void Backend::applySplitRules() {
     if (on)
         for (const QString &d : domains)
             ex.push_back(d.toStdString());
-    m_active->setExtraExclusions(ex);
+    m_client.setExtraExclusions(ex);
     // When split is off, force general mode (route everything) — otherwise a
     // leftover "selective" mode with no rules would route NOTHING through the VPN.
-    m_active->setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
+    m_client.setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
     // Excluded routes (subnets) are a separate, always-on routing rule.
     std::vector<std::string> routes;
     for (const QString &r : m_settings.excluded_routes)
         routes.push_back(r.toStdString());
-    m_active->setExcludedRoutes(routes);
+    m_client.setExcludedRoutes(routes);
 }
 
 // Routing/exclusion changes only bind when the tunnel is (re)built. If we're
@@ -239,7 +239,7 @@ void Backend::reconnectActiveConfig() {
         return;
     m_reapplying = true;
     m_connecting = false;
-    m_active->disconnectVpn();
+    m_client.disconnectVpn();
     QTimer::singleShot(400, this, [this]() {
         if (!m_activePath.isEmpty())
             connectVpn();

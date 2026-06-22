@@ -14,7 +14,6 @@
 #include <QVariantMap>
 
 #include "core/AppSettings.h"
-#include "vpn/vpn_client.h"
 #include "vpn/vpn_helper_client.h"
 
 class QHotkey;
@@ -71,11 +70,11 @@ public:
     QString downSpeed() const;
     QString upSpeed() const;
     QString activeConfig() const;
-    QStringList configs() const { return m_names; }
+    const QStringList &configs() const { return m_names; }
     int activeIndex() const { return m_paths.indexOf(m_activePath); }
 
-    QString language() const { return m_settings.language; }
-    QString themeMode() const { return m_settings.theme_mode; }
+    const QString &language() const { return m_settings.language; }
+    const QString &themeMode() const { return m_settings.theme_mode; }
     bool autoConnect() const { return m_settings.auto_connect_on_start; }
     bool killSwitch() const { return m_settings.killswitch_enabled; }
     void setLanguage(const QString &v);
@@ -109,15 +108,15 @@ public:
     Q_INVOKABLE QString readTextFile(const QString &pathOrUrl) const; // for cert load
 
     bool splitEnabled() const { return m_settings.domain_bypass_enabled; }
-    QStringList domains() const { return m_settings.domain_bypass_rules; }
+    const QStringList &domains() const { return m_settings.domain_bypass_rules; }
     void setSplitEnabled(bool v);
-    QString vpnMode() const { return m_settings.vpn_mode; }
+    const QString &vpnMode() const { return m_settings.vpn_mode; }
     void setVpnMode(const QString &mode);
     Q_INVOKABLE bool addDomain(const QString &domain); // accepts a list; true if any added
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
 
-    QStringList excludedRoutes() const { return m_settings.excluded_routes; }
+    const QStringList &excludedRoutes() const { return m_settings.excluded_routes; }
     Q_INVOKABLE bool addExcludedRoute(const QString &route);
     Q_INVOKABLE void removeExcludedRoute(int index);
     Q_INVOKABLE void clearExcludedRoutes();
@@ -126,8 +125,8 @@ public:
     // Add the built-in "Recommended for Russia" domain set to the active profile.
     Q_INVOKABLE void addRecommendedRussia();
 
-    QStringList profiles() const;
-    QString activeProfile() const { return m_settings.active_profile; }
+    const QStringList &profiles() const;
+    const QString &activeProfile() const { return m_settings.active_profile; }
     Q_INVOKABLE void selectProfile(const QString &name);
     Q_INVOKABLE void addProfile(const QString &name);
     Q_INVOKABLE void removeProfile(const QString &name);
@@ -135,18 +134,18 @@ public:
 
     bool hotkeysEnabled() const { return m_settings.hotkeys_enabled; }
     void setHotkeysEnabled(bool v);
-    QString hotkeyToggle() const { return m_settings.hotkey_toggle; }
-    QString hotkeyConnect() const { return m_settings.hotkey_connect; }
-    QString hotkeyDisconnect() const { return m_settings.hotkey_disconnect; }
+    const QString &hotkeyToggle() const { return m_settings.hotkey_toggle; }
+    const QString &hotkeyConnect() const { return m_settings.hotkey_connect; }
+    const QString &hotkeyDisconnect() const { return m_settings.hotkey_disconnect; }
     void setHotkeyToggle(const QString &v);
     void setHotkeyConnect(const QString &v);
     void setHotkeyDisconnect(const QString &v);
 
     QString appVersion() const;
     QString coreVersion() const;
-    QString updateState() const { return m_updateState; }
-    QString updateMessage() const { return m_updateMessage; }
-    QString latestVersion() const { return m_latestVersion; }
+    const QString &updateState() const { return m_updateState; }
+    const QString &updateMessage() const { return m_updateMessage; }
+    const QString &latestVersion() const { return m_latestVersion; }
     Q_INVOKABLE void checkForUpdates(bool userInitiated = true);
     Q_INVOKABLE void downloadUpdate();
     Q_INVOKABLE void openLatestRelease();
@@ -179,8 +178,6 @@ signals:
 private:
     void reloadConfigs();
     void persistSettings();
-    void wireClient(IVpnClient *c); // hook a backend's signals up to this Backend
-    IVpnClient *backendForActiveConfig(); // pick TUN (helper) vs SOCKS (in-process)
     void applySplitRules(); // push the active CONFIG's profile rules to the core
     QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
@@ -194,9 +191,7 @@ private:
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
 
-    VpnHelperClient m_client;       // TUN backend (spawns the elevated helper)
-    IVpnClient *m_socks = nullptr;  // in-process SOCKS5 backend, created on demand
-    IVpnClient *m_active = nullptr; // backend driving the current/next connection
+    VpnHelperClient m_client;
     AppSettings m_settings;
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;

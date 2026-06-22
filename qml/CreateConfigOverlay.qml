@@ -27,13 +27,12 @@ Item {
         property string protocol: "http2"
         property bool ipv6: true
         property string splitProfile: "Default"
-        property bool socks5: false
         property string snap: ""
         readonly property bool editing: shell.editIndex >= 0
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
                     protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
-                    splitProfile, socks5, fListen.text, fSUser.text, fSPass.text].join("")
+                    splitProfile].join("")
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
@@ -49,10 +48,6 @@ Item {
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
                 cform.splitProfile = f.splitProfile || "Default"
-                cform.socks5 = f.socks5 === true
-                fListen.text = f.socksListen || ""
-                fSUser.text = f.socksUser || ""
-                fSPass.text = f.socksPass || ""
             }
             snap = snapshot()
         }
@@ -121,32 +116,6 @@ Item {
                              onToggled: function(v){ cform.ipv6 = v } }
                 }
                 Column { width: parent.width; spacing: 4
-                    Text { text: qsTr("Mode"); color: theme.textDim; font.pixelSize: 13 }
-                    Rectangle { id: modeBox; width: parent.width; height: 34; radius: 8; color: theme.inputBg
-                        border.color: modeMa.containsMouse ? theme.accent : theme.inputBorder; border.width: 1
-                        Behavior on border.color { ColorAnimation { duration: 120 } }
-                        Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: modeArrow.left; anchors.rightMargin: 6
-                               anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-                               text: cform.socks5 ? qsTr("SOCKS5 proxy · local, no admin")
-                                                  : qsTr("VPN tunnel · system-wide")
-                               color: theme.text; font.pixelSize: 14 }
-                        Text { id: modeArrow; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
-                               text: "▾"; color: theme.textDim; font.pixelSize: 16 }
-                        MouseArea { id: modeMa; anchors.fill: parent; hoverEnabled: true
-                            onClicked: shell.showSelect(modeBox,
-                                [{v:"tun",t:qsTr("VPN tunnel · system-wide")},
-                                 {v:"socks",t:qsTr("SOCKS5 proxy · local, no admin")}],
-                                cform.socks5 ? "socks" : "tun",
-                                function(v){ cform.socks5 = (v === "socks") }) } }
-                }
-                Column { width: parent.width; spacing: 10; visible: cform.socks5
-                    Field { id: fListen; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("SOCKS listen · host:port"); placeholder: "127.0.0.1:1080" }
-                    Row { width: parent.width; spacing: 10
-                        Field { id: fSUser; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("SOCKS user · optional"); width: (parent.width - 10) / 2 }
-                        Field { id: fSPass; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("SOCKS password · optional"); password: true; width: (parent.width - 10) / 2 }
-                    }
-                }
-                Column { width: parent.width; spacing: 4
                     Item { width: parent.width; height: certLoad.implicitHeight
                         Text { id: certLoad; anchors.right: parent.right; text: qsTr("Load from file…"); font.pixelSize: 12
                                color: certLoadMa.containsMouse ? theme.text : theme.accent; font.underline: certLoadMa.containsMouse
@@ -176,9 +145,7 @@ Item {
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
                                 allowIpv6: cform.ipv6, certificate: fCert.text,
-                                splitProfile: cform.splitProfile, socks5: cform.socks5,
-                                socksListen: fListen.text, socksUser: fSUser.text, socksPass: fSPass.text,
-                                editIndex: shell.editIndex });
+                                splitProfile: cform.splitProfile, editIndex: shell.editIndex });
                             if (ok) cform.close()
                         } } }
                     Rectangle { width: 88; height: 32; radius: 8

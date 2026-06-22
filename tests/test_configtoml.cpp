@@ -14,9 +14,6 @@ private slots:
     void escapesQuotes();
     void emptyCertificate();
     void defaultsProtocol();
-    void tunListenerByDefault();
-    void socksRoundTrip();
-    void socksDefaultsAndNoEndpointBleed();
 };
 
 void TestConfigToml::roundTrip() {
@@ -72,56 +69,6 @@ void TestConfigToml::defaultsProtocol() {
     // Unknown protocol falls back to http2.
     in.protocol = "weird";
     QVERIFY(buildConfigToml(in).contains("upstream_protocol = \"http2\""));
-}
-
-void TestConfigToml::tunListenerByDefault() {
-    ConfigToml in;
-    in.hostname = "h"; in.addresses = "1.2.3.4:443"; in.username = "u"; in.password = "p";
-    const QString toml = buildConfigToml(in);
-    QVERIFY(toml.contains("[listener.tun]"));
-    QVERIFY(!toml.contains("[listener.socks]"));
-    QCOMPARE(parseConfigToml(toml).socks5, false);
-}
-
-void TestConfigToml::socksRoundTrip() {
-    ConfigToml in;
-    in.hostname = "vpn.example.com";
-    in.addresses = "1.2.3.4:443";
-    in.username = "premium";   // endpoint creds
-    in.password = "s3cret";
-    in.socks5 = true;
-    in.socksListen = "127.0.0.1:9050";
-    in.socksUser = "proxyuser"; // distinct from endpoint creds
-    in.socksPass = "proxypass";
-
-    const QString toml = buildConfigToml(in);
-    QVERIFY(toml.contains("[listener.socks]"));
-    QVERIFY(!toml.contains("[listener.tun]"));
-
-    const ConfigToml out = parseConfigToml(toml);
-    QCOMPARE(out.socks5, true);
-    QCOMPARE(out.socksListen, QStringLiteral("127.0.0.1:9050"));
-    QCOMPARE(out.socksUser, QStringLiteral("proxyuser"));
-    QCOMPARE(out.socksPass, QStringLiteral("proxypass"));
-    // Endpoint creds must still parse to the endpoint, not the socks section.
-    QCOMPARE(out.username, QStringLiteral("premium"));
-    QCOMPARE(out.password, QStringLiteral("s3cret"));
-}
-
-void TestConfigToml::socksDefaultsAndNoEndpointBleed() {
-    // SOCKS with no explicit listen address / auth: address defaults, auth empty.
-    ConfigToml in;
-    in.hostname = "h"; in.addresses = "1.2.3.4:443";
-    in.username = "u"; in.password = "p";
-    in.socks5 = true;
-    in.socksListen = "";
-    const QString toml = buildConfigToml(in);
-    QVERIFY(toml.contains("address = \"127.0.0.1:1080\""));
-    QVERIFY(!toml.contains("[listener.socks]\nusername")); // no empty auth keys
-    const ConfigToml out = parseConfigToml(toml);
-    QCOMPARE(out.socksListen, QStringLiteral("127.0.0.1:1080"));
-    QVERIFY(out.socksUser.isEmpty());
-    QVERIFY(out.socksPass.isEmpty());
 }
 
 QTEST_MAIN(TestConfigToml)

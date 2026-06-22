@@ -9,9 +9,6 @@
 #include "core/ConfigToml.h"
 #include "core/ControlCommand.h"
 #include "core/CredentialStore.h"
-#ifdef FT_HAVE_INPROCESS_VPN
-#include "vpn/socks_vpn_client.h"
-#endif
 
 Backend::Backend(QObject *parent) : QObject(parent) {
     freetunnel::sweepStaleMaterializedConfigs(); // clear any password temp files left by a crash
@@ -23,8 +20,67 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         m_activePath = m_paths.first();
     }
 
-    m_active = &m_client; // TUN backend by default; SOCKS configs swap this in
-    wireClient(&m_client);
+    connect(&m_client, &VpnHelperClient::stateChanged, this,
+            [this](VpnHelperClient::State st) {
+                const bool nowConnected = st == VpnHelperClient::State::Connected;
+                if (nowConnected && !m_connected) {
+                    m_session.restart();
+                }
+                if (nowConnected && !m_materializedConfigPath.isEmpty()) {
+                    // Core reads the config once at connect; drop the temp copy
+                    // with the injected password as soon as the tunnel is up.
+                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+                    m_materializedConfigPath.clear();
+                }
+                m_connected = nowConnected;
+                m_connecting = st == VpnHelperClient::State::Connecting
+                               || st == VpnHelperClient::State::Reconnecting
+                               || st == VpnHelperClient::State::WaitingForNetwork;
+                if (m_reapplying
+                    && (nowConnected || st == VpnHelperClient::State::Error)) {
+                    m_reapplying = false;
+                }
+                // Don't surface "Disconnecting…" during a silent live re-apply
+                // (rule changes briefly tear the tunnel down and back up).
+                m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
+                if (st == VpnHelperClient::State::Disconnected || st == VpnHelperClient::State::Error) {
+                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
+                    m_materializedConfigPath.clear();
+                }
+                emit stateChanged();
+                appendLog(QStringLiteral("INFO"), statusText());
+            });
+    connect(&m_client, &VpnHelperClient::tunnelStats, this,
+            [this](quint64 up, quint64 down) {
+                m_accUp += up;
+                m_accDown += down;
+            });
+    connect(&m_client, &VpnHelperClient::connectionInfo, this,
+            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
+    connect(&m_client, &VpnHelperClient::vpnError, this, [this](const QString &m) {
+        appendLog(QStringLiteral("ERROR"), m); // raw message always logged
+        // While we're intentionally tearing the tunnel down to switch config or
+        // re-apply rules, suppress the scary "disconnected" pop-up.
+        if (m_reapplying || m_inConnect)
+            return;
+        // Turn low-level core messages into something a user can act on.
+        const QString lower = m.toLower();
+        QString friendly = m;
+        if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+            friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
+        else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+            friendly = tr("Server isn't responding (timed out).");
+        else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
+            friendly = tr("Authentication failed — check the username and password.");
+        // Throttle toasts: a flaky connection can spit the same error every few
+        // seconds — show it once, then stay quiet for a while unless it changes.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
+            m_lastErrorMsg = friendly;
+            m_lastErrorAt = now;
+            emit errorOccurred(friendly);
+        }
+    });
 
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() {
@@ -49,101 +105,14 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         QTimer::singleShot(600, this, [this] { connectVpn(); });
 }
 
-// Hook a backend's signals into this Backend. Called for each backend we own;
-// only one is ever the active driver at a time, so wiring both is harmless.
-void Backend::wireClient(IVpnClient *c) {
-    connect(c, &IVpnClient::stateChanged, this,
-            [this](IVpnClient::State st) {
-                const bool nowConnected = st == IVpnClient::State::Connected;
-                if (nowConnected && !m_connected) {
-                    m_session.restart();
-                }
-                if (nowConnected && !m_materializedConfigPath.isEmpty()) {
-                    // Core reads the config once at connect; drop the temp copy
-                    // with the injected password as soon as the tunnel is up.
-                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
-                    m_materializedConfigPath.clear();
-                }
-                m_connected = nowConnected;
-                m_connecting = st == IVpnClient::State::Connecting
-                               || st == IVpnClient::State::Reconnecting
-                               || st == IVpnClient::State::WaitingForNetwork;
-                if (m_reapplying
-                    && (nowConnected || st == IVpnClient::State::Error)) {
-                    m_reapplying = false;
-                }
-                // Don't surface "Disconnecting…" during a silent live re-apply
-                // (rule changes briefly tear the tunnel down and back up).
-                m_disconnecting = st == IVpnClient::State::Disconnecting && !m_reapplying;
-                if (st == IVpnClient::State::Disconnected || st == IVpnClient::State::Error) {
-                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
-                    m_materializedConfigPath.clear();
-                }
-                emit stateChanged();
-                appendLog(QStringLiteral("INFO"), statusText());
-            });
-    connect(c, &IVpnClient::tunnelStats, this,
-            [this](quint64 up, quint64 down) {
-                m_accUp += up;
-                m_accDown += down;
-            });
-    connect(c, &IVpnClient::connectionInfo, this,
-            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
-    connect(c, &IVpnClient::vpnError, this, [this](const QString &m) {
-        appendLog(QStringLiteral("ERROR"), m); // raw message always logged
-        // While we're intentionally tearing the tunnel down to switch config or
-        // re-apply rules, suppress the scary "disconnected" pop-up.
-        if (m_reapplying || m_inConnect)
-            return;
-        // Turn low-level core messages into something a user can act on.
-        const QString lower = m.toLower();
-        QString friendly = m;
-        if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
-            friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
-        else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
-            friendly = tr("Server isn't responding (timed out).");
-        else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
-            friendly = tr("Authentication failed — check the username and password.");
-        // Throttle toasts: a flaky connection can spit the same error every few
-        // seconds — show it once, then stay quiet for a while unless it changes.
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
-            m_lastErrorMsg = friendly;
-            m_lastErrorAt = now;
-            emit errorOccurred(friendly);
-        }
-    });
-}
-
-// Choose the backend for the active config: the in-process SOCKS5 proxy when the
-// config is a SOCKS listener (no elevation), otherwise the elevated TUN helper.
-IVpnClient *Backend::backendForActiveConfig() {
-    bool socks = false;
-    QFile f(m_activePath);
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text))
-        socks = freetunnel::parseConfigToml(QString::fromUtf8(f.readAll())).socks5;
-#ifdef FT_HAVE_INPROCESS_VPN
-    if (socks) {
-        if (!m_socks) {
-            m_socks = new SocksVpnClient(this);
-            wireClient(m_socks);
-        }
-        return m_socks;
-    }
-#else
-    Q_UNUSED(socks);
-#endif
-    return &m_client;
-}
-
 QString Backend::statusText() const {
-    switch (m_active->state()) {
-    case IVpnClient::State::Connected: return tr("Connected");
-    case IVpnClient::State::Connecting: return tr("Connecting…");
-    case IVpnClient::State::Reconnecting: return tr("Reconnecting…");
-    case IVpnClient::State::WaitingForNetwork: return tr("Waiting for network…");
-    case IVpnClient::State::Disconnecting: return tr("Disconnecting…");
-    case IVpnClient::State::Error: return tr("Error");
+    switch (m_client.state()) {
+    case VpnHelperClient::State::Connected: return tr("Connected");
+    case VpnHelperClient::State::Connecting: return tr("Connecting…");
+    case VpnHelperClient::State::Reconnecting: return tr("Reconnecting…");
+    case VpnHelperClient::State::WaitingForNetwork: return tr("Waiting for network…");
+    case VpnHelperClient::State::Disconnecting: return tr("Disconnecting…");
+    case VpnHelperClient::State::Error: return tr("Error");
     default: return tr("Off");
     }
 }
@@ -228,14 +197,11 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Config has no password — edit it and try again"));
         return;
     }
-    // Pick the backend for this config: SOCKS5 runs in-process (no elevation),
-    // TUN goes through the elevated helper.
-    m_active = backendForActiveConfig();
     m_inConnect = true; // applySplitRules() below must not trigger a reconnect
-    m_active->loadConfigFromFile(m_materializedConfigPath);
+    m_client.loadConfigFromFile(m_materializedConfigPath);
     applySplitRules(); // push domain-bypass rules to the core before connecting
-    m_active->setKillSwitch(m_settings.killswitch_enabled);
-    m_active->connectVpn();
+    m_client.setKillSwitch(m_settings.killswitch_enabled);
+    m_client.connectVpn();
     m_inConnect = false;
 }
 
@@ -247,7 +213,7 @@ void Backend::disconnectVpn() {
     m_connecting = false;
     m_disconnecting = true;
     emit stateChanged();
-    m_active->disconnectVpn(); // aborts a pending startup, or stops a live tunnel
+    m_client.disconnectVpn(); // aborts a pending startup, or stops a live tunnel
 }
 
 void Backend::prepareQuit() {
@@ -257,8 +223,6 @@ void Backend::prepareQuit() {
     emit aboutToShutdown();
     unregisterHotkeys();
     m_client.shutdown();
-    if (m_socks)
-        m_socks->shutdown();
     freetunnel::removeMaterializedConfig(m_materializedConfigPath);
     m_materializedConfigPath.clear();
 }

@@ -20,13 +20,6 @@ struct ConfigToml {
     QString clientRandom;
     QString certificate; // PEM body, optional
     bool allowIpv6 = true;
-
-    // Listener: false = TUN (system-wide VPN, needs the elevated helper);
-    // true = SOCKS5 (a local proxy on socksListen, no elevation needed).
-    bool socks5 = false;
-    QString socksListen = QStringLiteral("127.0.0.1:1080"); // host:port to bind
-    QString socksUser;   // optional SOCKS auth username
-    QString socksPass;   // optional SOCKS auth password
 };
 
 // Render a ConfigToml to the client TOML format.

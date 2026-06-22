@@ -160,9 +160,5 @@ QVariantMap MockBackend::configFields(int index) const
     f[QStringLiteral("protocol")] = QStringLiteral("http2");
     f[QStringLiteral("allowIpv6")] = true;
     f[QStringLiteral("splitProfile")] = QStringLiteral("Default");
-    f[QStringLiteral("socks5")] = false;
-    f[QStringLiteral("socksListen")] = QStringLiteral("127.0.0.1:1080");
-    f[QStringLiteral("socksUser")] = QString();
-    f[QStringLiteral("socksPass")] = QString();
     return f;
 }
