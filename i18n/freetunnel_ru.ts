@@ -186,6 +186,34 @@
         <source>All files (*)</source>
         <translation>Все файлы (*)</translation>
     </message>
+    <message>
+        <source>Export .toml…</source>
+        <translation>Экспорт .toml…</translation>
+    </message>
+    <message>
+        <source>Copy deep-link</source>
+        <translation>Скопировать deep-link</translation>
+    </message>
+    <message>
+        <source>Deep-link copied</source>
+        <translation>Deep-link скопирован</translation>
+    </message>
+    <message>
+        <source>Couldn’t build deep-link</source>
+        <translation>Не удалось собрать deep-link</translation>
+    </message>
+    <message>
+        <source>Export config</source>
+        <translation>Экспорт конфига</translation>
+    </message>
+    <message>
+        <source>Config exported</source>
+        <translation>Конфиг экспортирован</translation>
+    </message>
+    <message>
+        <source>Export failed</source>
+        <translation>Не удалось экспортировать</translation>
+    </message>
 </context>
 <context>
     <name>ConfirmDialog</name>

@@ -10,6 +10,10 @@ Item {
     required property var backend
     required property var theme
 
+    // Which config the export "Save .toml" dialog is acting on.
+    property int exportIndex: -1
+    property string exportName: ""
+
     // Cmd/Ctrl+V tries to import a config from the clipboard.
     Shortcut { sequences: [StandardKey.Paste]; onActivated: backend.importFromClipboard() }
     // Header: Add (+) opens the import/create menu, Ping (speedometer).
@@ -59,7 +63,7 @@ Item {
             Rectangle { anchors.fill: parent; anchors.topMargin: 4; anchors.bottomMargin: 4; radius: 8
                 // Stay highlighted as a single block even when the cursor is
                 // over the ⋯/✕ buttons (their hover would otherwise drop it).
-                color: (rowMa.containsMouse || dotsMa.containsMouse || delMa.containsMouse)
+                color: (rowMa.containsMouse || expMa.containsMouse || dotsMa.containsMouse || delMa.containsMouse)
                        ? theme.surface : theme.bg
                 Behavior on color { ColorAnimation { duration: 120 } } }
             MouseArea { id: rowMa; anchors.fill: parent; hoverEnabled: true
@@ -77,6 +81,20 @@ Item {
                 Rectangle { visible: index === backend.activeIndex && backend.connected
                     radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
                     Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                Item { Layout.preferredWidth: 30; Layout.fillHeight: true
+                    Icon { anchors.centerIn: parent; width: 17; height: 17; svg: "qrc:/icons/export.svg"
+                           color: expMa.containsMouse ? cfgRoot.theme.text : cfgRoot.theme.textDim; theme: cfgRoot.theme }
+                    MouseArea { id: expMa; anchors.fill: parent; hoverEnabled: true
+                        onClicked: shell.showSelect(parent,
+                            [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
+                            function(v) {
+                                if (v === "toml") { cfgRoot.exportIndex = index; cfgRoot.exportName = modelData; tomlSaveDlg.open() }
+                                else if (v === "link") {
+                                    var lnk = backend.configDeepLink(index)
+                                    if (lnk && lnk.length > 0) { backend.copyToClipboard(lnk); shell.showToast(qsTr("Deep-link copied")) }
+                                    else shell.showToast(qsTr("Couldn’t build deep-link"))
+                                }
+                            }) } }
                 Item { Layout.preferredWidth: 30; Layout.fillHeight: true
                     Text { anchors.centerIn: parent; text: "⋯"; font.pixelSize: 20
                            color: dotsMa.containsMouse ? theme.text : theme.textDim }
@@ -136,5 +154,13 @@ Item {
         id: fileDlg; title: qsTr("Select a config")
         nameFilters: ["TOML (*.toml)", qsTr("All files (*)")]
         onAccepted: backend.importFile(fileDlg.file.toString())
+    }
+    Platform.FileDialog {
+        id: tomlSaveDlg; title: qsTr("Export config")
+        fileMode: Platform.FileDialog.SaveFile
+        nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
+        currentFile: "file:" + (cfgRoot.exportName.length ? cfgRoot.exportName : "config") + ".toml"
+        onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.file.toString())
+                                    ? qsTr("Config exported") : qsTr("Export failed"))
     }
 }

@@ -106,6 +106,8 @@ public:
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
+    Q_INVOKABLE QString configDeepLink(int) const { return QStringLiteral("tt://?mock"); }
+    Q_INVOKABLE bool exportConfigToml(int, const QString &) const { return true; }
     Q_INVOKABLE void clearLogs() {}
     Q_INVOKABLE void openLogFolder() {}
     Q_INVOKABLE QString logText() const { return QString(); }

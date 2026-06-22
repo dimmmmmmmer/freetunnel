@@ -18,6 +18,7 @@
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
+#include "core/DeepLink.h"
 
 // Read the first endpoint "host:port" out of a config TOML.
 static QString firstAddress(const QString &path) {
@@ -343,6 +344,81 @@ QVariantMap Backend::configFields(int index) const {
     f[QStringLiteral("splitProfile")] =
             (prof.isEmpty() || !m_settings.profiles.contains(prof)) ? QStringLiteral("Default") : prof;
     return f;
+}
+
+// Decode every PEM CERTIFICATE block into concatenated DER (deep links carry
+// raw DER; our stored TOML keeps PEM).
+static QByteArray pemCertsToDer(const QString &pem) {
+    QByteArray der;
+    static const QRegularExpression block(
+            QStringLiteral("-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----"),
+            QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression ws(QStringLiteral("\\s"));
+    auto it = block.globalMatch(pem);
+    while (it.hasNext()) {
+        QString b64 = it.next().captured(1);
+        b64.remove(ws);
+        der += QByteArray::fromBase64(b64.toLatin1());
+    }
+    return der;
+}
+
+QString Backend::configDeepLink(int index) const {
+    if (index < 0 || index >= m_paths.size())
+        return QString();
+    const QString path = m_paths.at(index);
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QString();
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
+    freetunnel::DeepLinkConfig dl;
+    dl.version = freetunnel::kDeepLinkMaxVersion;
+    dl.hostname = c.hostname;
+    for (const QString &a : c.addresses.split(QLatin1Char(','), Qt::SkipEmptyParts))
+        dl.addresses << a.trimmed();
+    dl.customSni = c.customSni;
+    dl.hasIpv6 = c.allowIpv6;
+    dl.username = c.username;
+    dl.password = freetunnel::CredentialStore::loadPassword(
+            freetunnel::CredentialStore::keyForConfigPath(path));
+    if (dl.password.isEmpty())
+        dl.password = c.password;
+    dl.certificate = pemCertsToDer(c.certificate);
+    dl.upstreamProtocol = c.protocol == QLatin1String("http3")
+            ? freetunnel::UpstreamProtocol::Http3 : freetunnel::UpstreamProtocol::Http2;
+    dl.clientRandomPrefix = c.clientRandom;
+    dl.name = nameForPath(path);
+    for (const QString &d : c.dns.split(QLatin1Char(','), Qt::SkipEmptyParts))
+        dl.dnsUpstreams << d.trimmed();
+    return freetunnel::encodeDeepLink(dl);
+    // Note: the SOCKS listener is a local-only setting and is not part of the
+    // tt:// schema, so a SOCKS config exports as a plain (TUN) endpoint link.
+}
+
+bool Backend::exportConfigToml(int index, const QString &fileUrl) const {
+    if (index < 0 || index >= m_paths.size())
+        return false;
+    const QString src = m_paths.at(index);
+    QFile in(src);
+    if (!in.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(in.readAll()));
+    // Inject the password so the exported file is usable on its own.
+    if (c.password.isEmpty())
+        c.password = freetunnel::CredentialStore::loadPassword(
+                freetunnel::CredentialStore::keyForConfigPath(src));
+    const QString dest = fileUrl.startsWith(QLatin1String("file:"))
+            ? QUrl(fileUrl).toLocalFile() : fileUrl;
+    if (dest.isEmpty())
+        return false;
+    QFile out(dest);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    out.write(freetunnel::buildConfigToml(c).toUtf8());
+    out.close();
+    // The file carries credentials — owner-only.
+    QFile::setPermissions(dest, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
 }
 
 bool Backend::importDeepLink(const QString &link) {

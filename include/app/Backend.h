@@ -96,6 +96,10 @@ public:
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
+    // Export: a shareable tt:// deep link, or a full .toml written to disk
+    // (both carry the password — pulled from the OS keychain).
+    Q_INVOKABLE QString configDeepLink(int index) const;
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
 
     QVariantList logEntries() const { return m_log; }
     Q_INVOKABLE void clearLogs();
