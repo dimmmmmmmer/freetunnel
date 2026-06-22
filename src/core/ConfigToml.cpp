@@ -53,11 +53,22 @@ QString buildConfigToml(const ConfigToml &c) {
         t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n").arg(c.certificate.trimmed());
     else
         t += QStringLiteral("certificate = \"\"\n");
-    t += QStringLiteral("\n[listener.tun]\n");
-    t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
-    t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
-    t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
-                        "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    if (c.socks5) {
+        const QString addr = c.socksListen.trimmed().isEmpty()
+                ? QStringLiteral("127.0.0.1:1080") : c.socksListen.trimmed();
+        t += QStringLiteral("\n[listener.socks]\n");
+        t += QStringLiteral("address = \"%1\"\n").arg(tomlEsc(addr));
+        if (!c.socksUser.isEmpty())
+            t += QStringLiteral("username = \"%1\"\n").arg(tomlEsc(c.socksUser));
+        if (!c.socksPass.isEmpty())
+            t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(c.socksPass));
+    } else {
+        t += QStringLiteral("\n[listener.tun]\n");
+        t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
+        t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
+        t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
+                            "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    }
     return t;
 }
 
@@ -97,6 +108,29 @@ ConfigToml parseConfigToml(const QString &toml) {
             QRegularExpression::DotMatchesEverythingOption);
     const auto cm = certRe.match(toml);
     c.certificate = cm.hasMatch() ? cm.captured(1) : QString();
+
+    // Listener type: a [listener.socks] section means SOCKS5, otherwise TUN.
+    const int socksIdx = toml.indexOf(QStringLiteral("[listener.socks]"));
+    c.socks5 = socksIdx >= 0;
+    if (c.socks5) {
+        // Restrict key lookups to the socks section so they don't pick up the
+        // endpoint's username/password.
+        QString section = toml.mid(socksIdx);
+        const int nextSection = section.indexOf(QStringLiteral("\n["), 1);
+        if (nextSection >= 0)
+            section = section.left(nextSection);
+        auto sstr = [&](const char *key) -> QString {
+            QRegularExpression re(QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+                                          .arg(QLatin1String(key)));
+            const auto m = re.match(section);
+            return m.hasMatch() ? unesc(m.captured(1)) : QString();
+        };
+        c.socksListen = sstr("address");
+        if (c.socksListen.isEmpty())
+            c.socksListen = QStringLiteral("127.0.0.1:1080");
+        c.socksUser = sstr("username");
+        c.socksPass = sstr("password");
+    }
     return c;
 }
 

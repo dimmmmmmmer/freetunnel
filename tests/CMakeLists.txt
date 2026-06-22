@@ -216,6 +216,7 @@ set(BACKEND_TEST_SOURCES
     ../src/vpn/vpn_helper_client.cpp
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
+    ../include/vpn/vpn_client.h
     ../include/vpn/vpn_helper_client.h
 )
 add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})

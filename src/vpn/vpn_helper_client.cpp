@@ -63,7 +63,7 @@ bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringL
 } // namespace
 #endif
 
-VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent) {}
+VpnHelperClient::VpnHelperClient(QObject *parent) : IVpnClient(parent) {}
 
 VpnHelperClient::~VpnHelperClient() {
     shutdown();

@@ -14,6 +14,7 @@
 #include <QVariantMap>
 
 #include "core/AppSettings.h"
+#include "vpn/vpn_client.h"
 #include "vpn/vpn_helper_client.h"
 
 class QHotkey;
@@ -174,6 +175,8 @@ signals:
 private:
     void reloadConfigs();
     void persistSettings();
+    void wireClient(IVpnClient *c); // hook a backend's signals up to this Backend
+    IVpnClient *backendForActiveConfig(); // pick TUN (helper) vs SOCKS (in-process)
     void applySplitRules(); // push the active CONFIG's profile rules to the core
     QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
@@ -187,7 +190,9 @@ private:
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
 
-    VpnHelperClient m_client;
+    VpnHelperClient m_client;       // TUN backend (spawns the elevated helper)
+    IVpnClient *m_socks = nullptr;  // in-process SOCKS5 backend, created on demand
+    IVpnClient *m_active = nullptr; // backend driving the current/next connection
     AppSettings m_settings;
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;

@@ -143,6 +143,10 @@
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
+    <message>
+        <source>SOCKS listen must be host:port, e.g. 127.0.0.1:1080</source>
+        <translation>Адрес SOCKS должен быть host:port, напр. 127.0.0.1:1080</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -275,6 +279,30 @@
     <message>
         <source>Split profile</source>
         <translation>Профиль раздельного туннеля</translation>
+    </message>
+    <message>
+        <source>Mode</source>
+        <translation>Режим</translation>
+    </message>
+    <message>
+        <source>SOCKS5 proxy · local, no admin</source>
+        <translation>SOCKS5-прокси · локально, без админа</translation>
+    </message>
+    <message>
+        <source>VPN tunnel · system-wide</source>
+        <translation>VPN-туннель · для всей системы</translation>
+    </message>
+    <message>
+        <source>SOCKS listen · host:port</source>
+        <translation>SOCKS-адрес · host:port</translation>
+    </message>
+    <message>
+        <source>SOCKS user · optional</source>
+        <translation>SOCKS-логин · необязательно</translation>
+    </message>
+    <message>
+        <source>SOCKS password · optional</source>
+        <translation>SOCKS-пароль · необязательно</translation>
     </message>
 </context>
 <context>

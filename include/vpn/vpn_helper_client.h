@@ -6,49 +6,33 @@
 // runs the VPN core (or root) in-process.
 
 #include <QByteArray>
-#include <QObject>
 #include <QString>
 #include <string>
 #include <vector>
+
+#include "vpn/vpn_client.h"
 
 class QTcpSocket;
 class QProcess;
 class QTimer;
 class QJsonObject;
 
-class VpnHelperClient : public QObject {
+class VpnHelperClient : public IVpnClient {
     Q_OBJECT
 public:
-    enum class State {
-        Disconnected,
-        Connecting,
-        Connected,
-        Reconnecting,
-        WaitingForNetwork,
-        Disconnecting,
-        Error,
-    };
-    Q_ENUM(State)
-
     explicit VpnHelperClient(QObject *parent = nullptr);
     ~VpnHelperClient() override;
 
-    bool loadConfigFromFile(const QString &path);
-    void setExtraExclusions(const std::vector<std::string> &exclusions);
-    void setExcludedRoutes(const std::vector<std::string> &routes);
-    void setVpnMode(bool selective);
-    void setKillSwitch(bool enabled);
+    bool loadConfigFromFile(const QString &path) override;
+    void setExtraExclusions(const std::vector<std::string> &exclusions) override;
+    void setExcludedRoutes(const std::vector<std::string> &routes) override;
+    void setVpnMode(bool selective) override;
+    void setKillSwitch(bool enabled) override;
 
-    void connectVpn();
-    void disconnectVpn();
-    void shutdown();
-    State state() const { return m_state; }
-
-signals:
-    void stateChanged(VpnHelperClient::State state);
-    void tunnelStats(quint64 upload, quint64 download);
-    void connectionInfo(const QString &msg);
-    void vpnError(const QString &msg);
+    void connectVpn() override;
+    void disconnectVpn() override;
+    void shutdown() override;
+    State state() const override { return m_state; }
 
 private:
     bool ensureHelper();
