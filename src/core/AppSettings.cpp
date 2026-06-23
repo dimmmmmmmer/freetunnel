@@ -4,11 +4,15 @@
 #include <QStandardPaths>
 
 static QString defaultLogPath() {
-#ifdef _WIN32
+    // Keep the log in the per-user app data dir (owner-only). A predictable,
+    // world-writable path like /tmp/freetunnel.log lets another local user
+    // pre-create a symlink that we'd then append to (and chmod 0600).
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/freetunnel.log";
-#else
-    return "/tmp/freetunnel.log";
-#endif
+}
+
+// The pre-1.0.5 default on macOS/Linux. Migrated to defaultLogPath() on load.
+static QString legacyTmpLogPath() {
+    return QStringLiteral("/tmp/freetunnel.log");
 }
 
 QStringList defaultExcludedRoutes() {
@@ -76,6 +80,9 @@ AppSettings loadAppSettings() {
     QSettings s;
     AppSettings out;
     out.log_path = s.value("logs/path", defaultLogPath()).toString();
+    // Migrate the old insecure /tmp default to the per-user app data dir.
+    if (out.log_path == legacyTmpLogPath())
+        out.log_path = defaultLogPath();
     out.theme_mode = s.value("ui/theme_mode", "system").toString();
     out.language = s.value("ui/language", "en").toString();
     out.auto_connect_on_start = s.value("vpn/auto_connect_on_start", false).toBool();

@@ -36,13 +36,18 @@ bool signatureVerificationActive()
 
 QString githubApiUrl(const QString &path)
 {
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Test-only redirect of the update endpoint. Compiled out of release builds
+    // so a shipped binary always talks to GitHub and can't be pointed at a
+    // server that suppresses updates (freezing the user on a vulnerable build).
     const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
-    if (base.isEmpty())
-        return QStringLiteral("https://api.github.com") + path;
-    const QString root = QString::fromUtf8(base);
-    if (root.endsWith(QLatin1Char('/')))
-        return root.left(root.size() - 1) + path;
-    return root + path;
+    if (!base.isEmpty()) {
+        const QString root = QString::fromUtf8(base);
+        return root.endsWith(QLatin1Char('/')) ? root.left(root.size() - 1) + path
+                                               : root + path;
+    }
+#endif
+    return QStringLiteral("https://api.github.com") + path;
 }
 } // namespace
 

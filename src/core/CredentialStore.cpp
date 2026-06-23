@@ -95,6 +95,10 @@ QString credentialDir()
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
             + QStringLiteral("/credentials");
     QDir().mkpath(dir);
+    // Owner-only: the files inside are already 0600, but a 0700 dir also keeps
+    // other local users from listing/stat-ing the per-config credential entries.
+    QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                       | QFileDevice::ExeOwner);
     return dir;
 }
 
