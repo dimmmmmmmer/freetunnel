@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QGuiApplication>
+#include <QStandardPaths>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
@@ -125,9 +126,12 @@ void TestQmlUi::mainWindowPageNavigation()
 int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
+    // Isolate from the real app's on-disk state: never read or clobber the
+    // user's configs.json / settings under the production app/org names.
+    QStandardPaths::setTestModeEnabled(true);
     QGuiApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("FreeTunnel"));
-    app.setOrganizationName(QStringLiteral("FreeTunnel"));
+    app.setApplicationName(QStringLiteral("QmlUiTest"));
+    app.setOrganizationName(QStringLiteral("FreeTunnelTest"));
     TestQmlUi tc;
     return QTest::qExec(&tc, argc, argv);
 }

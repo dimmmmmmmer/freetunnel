@@ -404,6 +404,7 @@ Window {
 
     // ---------- window-level select popup (used by Dropdown) ----------
     TextMetrics { id: spMetrics; font.pixelSize: 14 }
+    readonly property int spRowH: 36
     function showSelect(anchorItem, model, value, cb) {
         selectPopup.model = model
         selectPopup.value = value
@@ -416,10 +417,32 @@ Window {
             w = Math.max(w, spMetrics.advanceWidth + 56)
         }
         selectPopup.width = Math.min(w, overlayLayer.width - 16)
+
+        // Vertical placement: always keep the whole popup inside the window.
+        // Prefer opening just under the anchor; flip above it when there isn't
+        // room below; and when neither side can show every row (many profiles,
+        // or an export menu on the bottom config row) cap the height and let the
+        // list scroll — same as the config list on the home page.
+        var below = anchorItem.mapToItem(overlayLayer, anchorItem.width, anchorItem.height + 4)
+        var above = anchorItem.mapToItem(overlayLayer, anchorItem.width, -4)
+        var spaceBelow = overlayLayer.height - below.y - 8
+        var spaceAbove = above.y - 8
+        var minH = spRowH + 12
+        // A sanity cap so a long list never becomes a full-height wall on big screens.
+        var natural = Math.min(model.length, 8) * spRowH + 12
+
+        var h, y
+        if (natural <= spaceBelow)        { h = natural; y = below.y }
+        else if (natural <= spaceAbove)   { h = natural; y = above.y - natural }
+        else if (spaceBelow >= spaceAbove) { h = Math.max(minH, spaceBelow); y = below.y }
+        else                               { h = Math.max(minH, spaceAbove); y = above.y - h }
+        // Final clamp guards rounding and very short windows on both edges.
+        y = Math.max(8, Math.min(y, overlayLayer.height - h - 8))
+        selectPopup.height = h
+        selectPopup.y = y
+
         // Anchor under the right edge of the value (so it opens where the choice is).
-        var p = anchorItem.mapToItem(overlayLayer, anchorItem.width, anchorItem.height + 4)
-        selectPopup.x = Math.max(8, Math.min(p.x - selectPopup.width, overlayLayer.width - selectPopup.width - 8))
-        selectPopup.y = p.y
+        selectPopup.x = Math.max(8, Math.min(below.x - selectPopup.width, overlayLayer.width - selectPopup.width - 8))
         selectPopup.open = true
     }
     Item {
@@ -439,30 +462,34 @@ Window {
             transform: Translate { y: selectPopup.open ? 0 : -8
                                    Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
             width: 200
-            height: spCol.implicitHeight + 12
+            // height is set imperatively in showSelect() so the popup can flip /
+            // scroll to stay inside the window.
             radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true; shadowColor: "#000000"
                 shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
             }
-            Column {
-                id: spCol; width: parent.width - 10; x: 5; y: 6
-                Repeater {
-                    model: selectPopup.model
-                    Rectangle {
-                        required property var modelData
-                        width: parent.width; height: 36; radius: 6
-                        color: spMa.containsMouse ? theme.surface : theme.bg
-                        Text { anchors.verticalCenter: parent.verticalCenter; x: 12
-                               text: parent.modelData.t
-                               color: parent.modelData.v === selectPopup.value ? theme.accent : theme.text
-                               font.pixelSize: 14 }
-                        Text { visible: parent.modelData.v === selectPopup.value; text: "✓"; color: theme.accent
-                               anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
-                        MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(parent.modelData.v) } }
-                    }
+            ListView {
+                id: spList
+                anchors.fill: parent; anchors.margins: 6
+                clip: true
+                model: selectPopup.model
+                // Scroll only when the rows don't all fit (e.g. many profiles).
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                delegate: Rectangle {
+                    required property var modelData
+                    width: spList.width; height: win.spRowH; radius: 6
+                    color: spMa.containsMouse ? theme.surface : theme.bg
+                    Text { anchors.verticalCenter: parent.verticalCenter; x: 12
+                           text: modelData.t
+                           color: modelData.v === selectPopup.value ? theme.accent : theme.text
+                           font.pixelSize: 14 }
+                    Text { visible: modelData.v === selectPopup.value; text: "✓"; color: theme.accent
+                           anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
+                    MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true
+                                onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(modelData.v) } }
                 }
             }
         }
