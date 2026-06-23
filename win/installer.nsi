@@ -64,28 +64,14 @@ SetCompressor /SOLID lzma
 Section "Install"
   SetOutPath "$INSTDIR"
 
-  ; Main executable and assets
-  File "${BUILD_DIR}\${PRODUCT_EXE}"
-  File /nonfatal "${BUILD_DIR}\*.dll"
-
-  ; Qt plugins required at runtime
-  SetOutPath "$INSTDIR\platforms"
-  File /nonfatal "${BUILD_DIR}\platforms\*.dll"
-
-  SetOutPath "$INSTDIR\styles"
-  File /nonfatal "${BUILD_DIR}\styles\*.dll"
-
-  SetOutPath "$INSTDIR\tls"
-  File /nonfatal "${BUILD_DIR}\tls\*.dll"
-
-  SetOutPath "$INSTDIR\imageformats"
-  File /nonfatal "${BUILD_DIR}\imageformats\*.dll"
-
-  ; Assets
-  SetOutPath "$INSTDIR\assets"
-  File /nonfatal "${BUILD_DIR}\assets\logo.png"
-  File /nonfatal "${BUILD_DIR}\assets\logo.ico"
-  File /nonfatal "${BUILD_DIR}\assets\LICENSE"
+  ; Install the entire windeployqt output tree: the exe, every Qt DLL, and all
+  ; plugin subdirectories. This MUST include qml/ — the QtQuick framework modules
+  ; the UI imports at runtime (QtQuick, QtQuick.Controls, QtQuick.Layouts,
+  ; QtQuick.Effects, Qt.labs.platform). Cherry-picking a fixed list of subdirs
+  ; previously dropped qml/, so the QML engine couldn't load its imports, no
+  ; window was created, and the app appeared not to launch. Recursing over the
+  ; whole build dir also future-proofs against windeployqt adding new plugin dirs.
+  File /r "${BUILD_DIR}\*"
 
   SetOutPath "$INSTDIR"
 
@@ -145,12 +131,8 @@ Section "Uninstall"
   Delete "$INSTDIR\*.dll"
   Delete "$INSTDIR\Uninstall.exe"
 
-  RMDir /r "$INSTDIR\platforms"
-  RMDir /r "$INSTDIR\styles"
-  RMDir /r "$INSTDIR\tls"
-  RMDir /r "$INSTDIR\imageformats"
-  RMDir /r "$INSTDIR\assets"
-  RMDir    "$INSTDIR"
+  ; Remove every installed plugin/qml subdirectory and the install root.
+  RMDir /r "$INSTDIR"
 
   ; Remove shortcuts
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
