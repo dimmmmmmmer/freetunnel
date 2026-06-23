@@ -97,8 +97,21 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
     QVERIFY(stateSpy.count() > 0);
 
+    // Regression: the materialized password temp file (.connect-*.toml) must
+    // survive for the whole session. The core re-reads the config *path* on its
+    // own internal reconnects ("full reconnect to avoid fd leak"); deleting it on
+    // Connected used to make those reconnects fail with "config could not be
+    // opened for reading".
+    auto connectTemps = [&]() {
+        return QDir(base).entryList({QStringLiteral(".connect-*.toml")},
+                                    QDir::Files | QDir::Hidden).size();
+    };
+    QVERIFY(connectTemps() >= 1);
+
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    // …and is cleaned up once the tunnel is truly down.
+    QVERIFY(QTest::qWaitFor([&]() { return connectTemps() == 0; }, 5000));
 
     backend.prepareQuit();
     qunsetenv("FT_TEST_HELPER_PORT");

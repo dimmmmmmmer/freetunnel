@@ -355,7 +355,8 @@ QString materializeConfigForConnect(const QString &configPath)
 
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(dir);
-    // Password-bearing temp file (0600). Removed once Connected; swept at startup.
+    // Password-bearing temp file (0600). Kept for the whole session (the core
+    // re-reads it on internal reconnects), removed on Disconnect; swept at startup.
     // memfd is not used because the elevated helper reads the path in another process.
     QTemporaryFile tf(dir + QStringLiteral("/.connect-XXXXXX.toml"));
     tf.setAutoRemove(false);
