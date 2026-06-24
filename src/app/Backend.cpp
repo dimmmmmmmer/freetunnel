@@ -37,17 +37,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 // Don't surface "Disconnecting…" during a silent live re-apply
                 // (rule changes briefly tear the tunnel down and back up).
                 m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
-                // Keep the password temp file alive for the whole session: the
-                // core re-reads the config *path* on its own internal reconnects
-                // (e.g. "full reconnect to avoid fd leak"), so dropping it on
-                // Connected or on a transient Error makes those reconnects fail
-                // with "config file could not be opened". Remove it only once the
-                // tunnel is truly down (Disconnected); a terminal Error is cleaned
-                // up by the next connect (connectVpn), quit, or the startup sweep.
-                if (st == VpnHelperClient::State::Disconnected) {
-                    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
-                    m_materializedConfigPath.clear();
-                }
+                // Never delete the password temp config in response to a state
+                // change. The core re-reads the config *path* during its own
+                // recovery — after a dropped link it cycles through Disconnected /
+                // Error / Reconnecting and reopens the file — so removing it here
+                // makes the reconnect fail with "config could not be opened".
+                // It is cleaned up deterministically instead: connectVpn() removes
+                // the previous one before materializing the next, prepareQuit()
+                // removes it on exit, and sweepStaleMaterializedConfigs() clears
+                // any orphan at startup.
                 emit stateChanged();
                 appendLog(QStringLiteral("INFO"), statusText());
             });

@@ -98,10 +98,10 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
     QVERIFY(stateSpy.count() > 0);
 
     // Regression: the materialized password temp file (.connect-*.toml) must
-    // survive for the whole session. The core re-reads the config *path* on its
-    // own internal reconnects ("full reconnect to avoid fd leak"); deleting it on
-    // Connected used to make those reconnects fail with "config could not be
-    // opened for reading".
+    // survive the whole session — including a disconnect — because the core
+    // re-reads the config *path* during its own recovery after a dropped link.
+    // Deleting it on a state change made those reconnects fail with "config could
+    // not be opened for reading".
     auto connectTemps = [&]() {
         return QDir(base).entryList({QStringLiteral(".connect-*.toml")},
                                     QDir::Files | QDir::Hidden).size();
@@ -110,10 +110,12 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
 
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
-    // …and is cleaned up once the tunnel is truly down.
-    QVERIFY(QTest::qWaitFor([&]() { return connectTemps() == 0; }, 5000));
+    // It is NOT removed on disconnect — a reconnect could still need it.
+    QVERIFY(connectTemps() >= 1);
 
     backend.prepareQuit();
+    // prepareQuit() is the deterministic cleanup point.
+    QVERIFY(connectTemps() == 0);
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");
 
