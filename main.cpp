@@ -136,12 +136,14 @@ int main(int argc, char *argv[]) {
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
-#ifndef Q_OS_MACOS
-    // macOS already shows the bundle's logo.icns in the Dock and is authoritative;
-    // calling setWindowIcon there overrides it with a re-rendered copy, which is
-    // the icon that visibly "changes" when the window opens/closes — so skip it.
-    // Windows/Linux need it: use the multi-size .ico (the same one embedded in the
-    // .exe) so the taskbar icon matches the launcher. logo.png is a raster fallback.
+#ifdef Q_OS_MACOS
+    // The bundle's logo.icns is the launcher/Dock icon; set a matching window icon
+    // so a stale Dock icon cache (left by earlier installs with the same bundle id)
+    // is refreshed to the current artwork when the window first appears.
+    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
+#else
+    // Match the multi-size icon embedded in the .exe so the taskbar icon doesn't
+    // differ from the launcher icon. logo.png is a raster fallback.
     QIcon appIcon(QStringLiteral(":/assets/logo.ico"));
     appIcon.addFile(QStringLiteral(":/assets/logo.png"));
     app.setWindowIcon(appIcon);
