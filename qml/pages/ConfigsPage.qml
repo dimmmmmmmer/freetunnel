@@ -100,6 +100,9 @@ Item {
                 onPressed: (mouse) => { pressInList = mapToItem(cfgList, 0, mouse.y).y
                                         moved = false; cfgDelegate.dragY = 0 }
                 onPositionChanged: (mouse) => {
+                    // hoverEnabled fires this on plain hover too — only react while
+                    // the button is actually held, or rows drift around on hover.
+                    if (!(mouse.buttons & Qt.LeftButton)) return
                     var dy = mapToItem(cfgList, 0, mouse.y).y - pressInList
                     if (!moved && Math.abs(dy) < 6) return
                     moved = true
