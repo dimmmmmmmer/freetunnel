@@ -393,8 +393,6 @@ QString Backend::configDeepLink(int index) const {
     for (const QString &d : c.dns.split(QLatin1Char(','), Qt::SkipEmptyParts))
         dl.dnsUpstreams << d.trimmed();
     return freetunnel::encodeDeepLink(dl);
-    // Note: the SOCKS listener is a local-only setting and is not part of the
-    // tt:// schema, so a SOCKS config exports as a plain (TUN) endpoint link.
 }
 
 bool Backend::exportConfigToml(int index, const QString &fileUrl) const {
