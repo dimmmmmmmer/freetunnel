@@ -191,10 +191,6 @@
         <translation>Скопировать deep-link</translation>
     </message>
     <message>
-        <source>Deep-link copied</source>
-        <translation>Deep-link скопирован</translation>
-    </message>
-    <message>
         <source>Couldn’t build deep-link</source>
         <translation>Не удалось собрать deep-link</translation>
     </message>
@@ -203,12 +199,16 @@
         <translation>Экспорт конфига</translation>
     </message>
     <message>
-        <source>Config exported</source>
-        <translation>Конфиг экспортирован</translation>
-    </message>
-    <message>
         <source>Export failed</source>
         <translation>Не удалось экспортировать</translation>
+    </message>
+    <message>
+        <source>Deep-link copied — it contains the password, share it carefully</source>
+        <translation>Deep-link скопирован — он содержит пароль, делитесь осторожно</translation>
+    </message>
+    <message>
+        <source>Config exported — the file contains the password</source>
+        <translation>Конфиг экспортирован — файл содержит пароль</translation>
     </message>
 </context>
 <context>
