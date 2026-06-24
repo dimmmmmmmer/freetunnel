@@ -56,26 +56,77 @@ Item {
         anchors.leftMargin: 18; anchors.rightMargin: 18
         clip: true; spacing: 0
         model: backend.configs
+        // Active drag-reorder state, shared across delegates.
+        property int dragFrom: -1
+        property int dragTo: -1
         delegate: Item {
             id: cfgDelegate
             required property int index
             required property string modelData
             width: cfgList.width; height: 56
-            // Drag-to-reorder: the grip handle drives these; the Translate moves
-            // the row visually while dragging, moveConfig() persists on release.
-            property bool dragging: false
+
+            // Drag-to-reorder by the row body: the dragged row follows the cursor
+            // while every other row slides to open a gap at the drop slot, so it's
+            // obvious where it will land. moveConfig() persists the order on drop.
+            readonly property bool dragging: cfgList.dragFrom === index
             property real dragY: 0
+            readonly property real slotShift: {
+                if (cfgList.dragFrom < 0 || dragging) return 0
+                if (cfgList.dragFrom < cfgList.dragTo
+                        && index > cfgList.dragFrom && index <= cfgList.dragTo) return -height
+                if (cfgList.dragFrom > cfgList.dragTo
+                        && index < cfgList.dragFrom && index >= cfgList.dragTo) return height
+                return 0
+            }
             z: dragging ? 2 : 1
-            transform: Translate { y: cfgDelegate.dragging ? cfgDelegate.dragY : 0 }
+            transform: Translate {
+                y: cfgDelegate.dragging ? cfgDelegate.dragY : cfgDelegate.slotShift
+                // The dragged row tracks the cursor instantly; the rest animate
+                // the gap open and closed.
+                Behavior on y { enabled: !cfgDelegate.dragging
+                                NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+            }
             Rectangle { anchors.fill: parent; anchors.topMargin: 4; anchors.bottomMargin: 4; radius: 8
-                // Stay highlighted as a single block even when the cursor is
-                // over the ⋯/✕ buttons (their hover would otherwise drop it).
+                // Stay highlighted as a single block even over the ⋯/✕ buttons.
                 color: (cfgDelegate.dragging || rowMa.containsMouse || expMa.containsMouse
-                        || dotsMa.containsMouse || delMa.containsMouse || gripMa.containsMouse)
+                        || dotsMa.containsMouse || delMa.containsMouse)
                        ? theme.surface : theme.bg
                 Behavior on color { ColorAnimation { duration: 120 } } }
-            MouseArea { id: rowMa; anchors.fill: parent; hoverEnabled: true
-                        onClicked: backend.selectConfig(index) }
+            // Whole-row handler: a plain click selects, a vertical drag reorders.
+            MouseArea {
+                id: rowMa; anchors.fill: parent; hoverEnabled: true; preventStealing: true
+                property real pressInList: 0
+                property bool moved: false
+                onPressed: (mouse) => { pressInList = mapToItem(cfgList, 0, mouse.y).y
+                                        moved = false; cfgDelegate.dragY = 0 }
+                onPositionChanged: (mouse) => {
+                    var dy = mapToItem(cfgList, 0, mouse.y).y - pressInList
+                    if (!moved && Math.abs(dy) < 6) return
+                    moved = true
+                    if (cfgList.dragFrom < 0) {
+                        cfgList.dragFrom = index; cfgList.dragTo = index; cfgList.interactive = false
+                    }
+                    cfgDelegate.dragY = dy
+                    cfgList.dragTo = Math.max(0, Math.min(backend.configs.length - 1,
+                                                          index + Math.round(dy / cfgDelegate.height)))
+                }
+                onReleased: {
+                    if (cfgList.dragFrom === index) {
+                        var from = cfgList.dragFrom, to = cfgList.dragTo
+                        cfgList.dragFrom = -1; cfgList.dragTo = -1; cfgList.interactive = true
+                        cfgDelegate.dragY = 0
+                        if (to !== from) backend.moveConfig(from, to)
+                    } else if (!moved) {
+                        backend.selectConfig(index)
+                    }
+                }
+                onCanceled: {
+                    if (cfgList.dragFrom === index) {
+                        cfgList.dragFrom = -1; cfgList.dragTo = -1; cfgList.interactive = true
+                    }
+                    cfgDelegate.dragY = 0; moved = false
+                }
+            }
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 6; spacing: 10
                 Image { source: "qrc:/assets/logo.svg"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
@@ -114,38 +165,6 @@ Item {
                     MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
                                     qsTr("Delete"), function(){ backend.removeConfig(index) }) } }
-                // Drag handle (⠿) — press and drag vertically to reorder.
-                Item { Layout.preferredWidth: 24; Layout.fillHeight: true
-                    Column { anchors.centerIn: parent; spacing: 3
-                        Repeater { model: 3
-                            Rectangle { width: 12; height: 1.6; radius: 1
-                                        color: gripMa.containsMouse || cfgDelegate.dragging
-                                               ? cfgRoot.theme.text : cfgRoot.theme.textDim } } }
-                    MouseArea {
-                        id: gripMa; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.SizeVerCursor; preventStealing: true
-                        property real startInList: 0
-                        onPressed: (mouse) => {
-                            cfgDelegate.dragY = 0
-                            cfgDelegate.dragging = true
-                            startInList = mapToItem(cfgList, 0, mouse.y).y
-                        }
-                        onPositionChanged: (mouse) => {
-                            if (cfgDelegate.dragging)
-                                cfgDelegate.dragY = mapToItem(cfgList, 0, mouse.y).y - startInList
-                        }
-                        onReleased: {
-                            if (!cfgDelegate.dragging) return
-                            var rows = Math.round(cfgDelegate.dragY / cfgDelegate.height)
-                            var to = Math.max(0, Math.min(backend.configs.length - 1, cfgDelegate.index + rows))
-                            cfgDelegate.dragging = false
-                            cfgDelegate.dragY = 0
-                            if (to !== cfgDelegate.index)
-                                backend.moveConfig(cfgDelegate.index, to)
-                        }
-                        onCanceled: { cfgDelegate.dragging = false; cfgDelegate.dragY = 0 }
-                    }
-                }
             }
         }
     }
