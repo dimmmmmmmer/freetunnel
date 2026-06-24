@@ -57,13 +57,21 @@ Item {
         clip: true; spacing: 0
         model: backend.configs
         delegate: Item {
+            id: cfgDelegate
             required property int index
             required property string modelData
             width: cfgList.width; height: 56
+            // Drag-to-reorder: the grip handle drives these; the Translate moves
+            // the row visually while dragging, moveConfig() persists on release.
+            property bool dragging: false
+            property real dragY: 0
+            z: dragging ? 2 : 1
+            transform: Translate { y: cfgDelegate.dragging ? cfgDelegate.dragY : 0 }
             Rectangle { anchors.fill: parent; anchors.topMargin: 4; anchors.bottomMargin: 4; radius: 8
                 // Stay highlighted as a single block even when the cursor is
                 // over the ⋯/✕ buttons (their hover would otherwise drop it).
-                color: (rowMa.containsMouse || expMa.containsMouse || dotsMa.containsMouse || delMa.containsMouse)
+                color: (cfgDelegate.dragging || rowMa.containsMouse || expMa.containsMouse
+                        || dotsMa.containsMouse || delMa.containsMouse || gripMa.containsMouse)
                        ? theme.surface : theme.bg
                 Behavior on color { ColorAnimation { duration: 120 } } }
             MouseArea { id: rowMa; anchors.fill: parent; hoverEnabled: true
@@ -106,6 +114,38 @@ Item {
                     MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
                                     qsTr("Delete"), function(){ backend.removeConfig(index) }) } }
+                // Drag handle (⠿) — press and drag vertically to reorder.
+                Item { Layout.preferredWidth: 24; Layout.fillHeight: true
+                    Column { anchors.centerIn: parent; spacing: 3
+                        Repeater { model: 3
+                            Rectangle { width: 12; height: 1.6; radius: 1
+                                        color: gripMa.containsMouse || cfgDelegate.dragging
+                                               ? cfgRoot.theme.text : cfgRoot.theme.textDim } } }
+                    MouseArea {
+                        id: gripMa; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.SizeVerCursor; preventStealing: true
+                        property real startInList: 0
+                        onPressed: (mouse) => {
+                            cfgDelegate.dragY = 0
+                            cfgDelegate.dragging = true
+                            startInList = mapToItem(cfgList, 0, mouse.y).y
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (cfgDelegate.dragging)
+                                cfgDelegate.dragY = mapToItem(cfgList, 0, mouse.y).y - startInList
+                        }
+                        onReleased: {
+                            if (!cfgDelegate.dragging) return
+                            var rows = Math.round(cfgDelegate.dragY / cfgDelegate.height)
+                            var to = Math.max(0, Math.min(backend.configs.length - 1, cfgDelegate.index + rows))
+                            cfgDelegate.dragging = false
+                            cfgDelegate.dragY = 0
+                            if (to !== cfgDelegate.index)
+                                backend.moveConfig(cfgDelegate.index, to)
+                        }
+                        onCanceled: { cfgDelegate.dragging = false; cfgDelegate.dragY = 0 }
+                    }
+                }
             }
         }
     }

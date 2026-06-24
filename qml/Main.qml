@@ -370,6 +370,7 @@ Window {
     Connections {
         target: backend
         function onErrorOccurred(msg) { toast.show(msg) }
+        function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
         function onUpdateChanged() {
             if (backend.updateState === "available")
                 toast.show(qsTr("Update available: %1").arg(backend.latestVersion))

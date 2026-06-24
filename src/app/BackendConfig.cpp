@@ -161,7 +161,7 @@ bool Backend::importFile(const QString &path) {
     }
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
-        stored << target;
+        stored.prepend(target); // a newly added config goes to the top of the list
         saveStoredConfigs(stored);
     }
     const bool hadNoActive = m_activePath.isEmpty();
@@ -173,6 +173,7 @@ bool Backend::importFile(const QString &path) {
         persistSettings();
         emit configChanged();
     }
+    emit configImported(nameForPath(target));
     return true;
 }
 
@@ -276,7 +277,7 @@ bool Backend::createConfig(const QVariantMap &f) {
         stored[storedIdx] = target; // keep the list position when editing
         stored.removeDuplicates();
     } else if (!stored.contains(target)) {
-        stored << target; // a brand-new config is appended
+        stored.prepend(target); // a brand-new config goes to the top (edits keep their place above)
     }
     saveStoredConfigs(stored);
     reloadConfigs();
@@ -444,7 +445,7 @@ bool Backend::importDeepLink(const QString &link) {
     freetunnel::migrateConfigPassword(target);
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
-        stored << target;
+        stored.prepend(target); // a newly added config goes to the top of the list
         saveStoredConfigs(stored);
     }
     const bool hadNoActive = m_activePath.isEmpty();
@@ -455,5 +456,16 @@ bool Backend::importDeepLink(const QString &link) {
         persistSettings();
         emit configChanged();
     }
+    emit configImported(nameForPath(target));
     return true;
+}
+
+void Backend::moveConfig(int from, int to) {
+    QStringList stored = loadStoredConfigs();
+    if (from < 0 || to < 0 || from >= stored.size() || to >= stored.size() || from == to)
+        return;
+    stored.move(from, to);
+    saveStoredConfigs(stored);
+    reloadConfigs();      // m_paths mirrors the stored order; rebuild names/pings
+    emit configChanged(); // activeIndex follows the active path to its new row
 }

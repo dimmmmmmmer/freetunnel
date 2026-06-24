@@ -388,6 +388,10 @@
         <source>Update available: %1</source>
         <translation>Доступно обновление: %1</translation>
     </message>
+    <message>
+        <source>Config added: %1</source>
+        <translation>Конфиг добавлен: %1</translation>
+    </message>
 </context>
 <context>
     <name>QtTrustTunnelClient</name>

@@ -91,6 +91,7 @@ public:
     void handleControl(const QString &command);
     Q_INVOKABLE void selectConfig(int index);
     Q_INVOKABLE void removeConfig(int index);
+    Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
@@ -173,6 +174,7 @@ signals:
     void pingsChanged();
     void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
+    void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
 private:
