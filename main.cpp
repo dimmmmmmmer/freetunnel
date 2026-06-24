@@ -220,10 +220,19 @@ int main(int argc, char *argv[]) {
         QLocalSocket *c = server->nextPendingConnection();
         if (!c)
             return;
-        c->waitForReadyRead(250);
+        // The peer writes "token\npayload" then disconnects; the payload (e.g. a
+        // tt:// import link) can span several reads. Accumulate until it closes
+        // the connection or a short deadline, so a fragmented message isn't
+        // truncated. Cap the buffer so a rogue same-user client can't grow it.
+        QByteArray buf = c->readAll();
+        while (c->state() == QLocalSocket::ConnectedState
+               && buf.size() < 64 * 1024
+               && c->waitForReadyRead(200))
+            buf += c->readAll();
+        buf += c->readAll();
         QString recvToken;
         QString cmd;
-        if (!freetunnel::parseInstanceMessage(c->readAll(), &recvToken, &cmd)
+        if (!freetunnel::parseInstanceMessage(buf, &recvToken, &cmd)
                 || instanceToken.isEmpty()
                 || !freetunnel::instanceTokensEqual(recvToken, instanceToken)) {
             c->deleteLater();

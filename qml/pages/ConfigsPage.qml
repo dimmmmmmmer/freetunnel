@@ -91,7 +91,7 @@ Item {
                                 if (v === "toml") { cfgRoot.exportIndex = index; cfgRoot.exportName = modelData; tomlSaveDlg.open() }
                                 else if (v === "link") {
                                     var lnk = backend.configDeepLink(index)
-                                    if (lnk && lnk.length > 0) { backend.copyToClipboard(lnk); shell.showToast(qsTr("Deep-link copied")) }
+                                    if (lnk && lnk.length > 0) { backend.copyToClipboard(lnk); shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully")) }
                                     else shell.showToast(qsTr("Couldn’t build deep-link"))
                                 }
                             }) } }
@@ -161,6 +161,6 @@ Item {
         nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
         currentFile: "file:" + (cfgRoot.exportName.length ? cfgRoot.exportName : "config") + ".toml"
         onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.file.toString())
-                                    ? qsTr("Config exported") : qsTr("Export failed"))
+                                    ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
     }
 }
