@@ -220,7 +220,10 @@ Window {
         spacing: 3
         // minimize
         Rectangle { width: 30; height: 24; radius: 6
-            color: minMa.containsMouse ? theme.surface : "transparent"
+            // Fade out to a *transparent surface* (same RGB, 0 alpha), not to
+            // "transparent" (= transparent black): a ColorAnimation to/from black
+            // lerps the RGB channels and flashes dark before reaching the light hue.
+            color: minMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
             Rectangle { anchors.centerIn: parent; width: 11; height: 1.6; radius: 1; color: theme.textDim }
             MouseArea { id: minMa; anchors.fill: parent; hoverEnabled: true
@@ -228,7 +231,7 @@ Window {
         }
         // maximize / restore
         Rectangle { width: 30; height: 24; radius: 6
-            color: maxMa.containsMouse ? theme.surface : "transparent"
+            color: maxMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
             Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2
                         color: "transparent"; border.color: theme.textDim; border.width: 1.4 }
@@ -237,7 +240,7 @@ Window {
         }
         // close (hides to tray, like the macOS red button)
         Rectangle { width: 30; height: 24; radius: 6
-            color: closeMa.containsMouse ? theme.danger : "transparent"
+            color: closeMa.containsMouse ? theme.danger : Qt.rgba(theme.danger.r, theme.danger.g, theme.danger.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
             Item { anchors.centerIn: parent; width: 12; height: 12
                 Rectangle { anchors.centerIn: parent; width: 13; height: 1.6; radius: 1; rotation: 45

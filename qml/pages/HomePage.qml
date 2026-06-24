@@ -133,7 +133,9 @@ Item {
                         visible: backend.configs.length > 0
                         anchors.verticalCenter: parent.verticalCenter
                         width: 22; height: 22; radius: 6
-                        color: addCfgMa.containsMouse ? theme.surface : "transparent"
+                        // Fade out to a transparent surface (same RGB, 0 alpha) so the
+                        // hover animation doesn't flash dark by lerping from black.
+                        color: addCfgMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Item { anchors.centerIn: parent; width: 14; height: 14
                             Rectangle { anchors.centerIn: parent; width: 10; height: 1.6; radius: 1; color: theme.accent }
