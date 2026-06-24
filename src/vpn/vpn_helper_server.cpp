@@ -16,11 +16,36 @@
 #include "vpn/qt_trusttunnel_client.h"
 #include "vpn/vpn_helper_protocol.h"
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
 
 // Always bind/connect on IPv4 loopback — QHostAddress::LocalHost can prefer
 // ::1 on some hosts while the peer listens on 127.0.0.1 only.
 const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
+
+// Whether this (helper) process is actually running elevated. A failed
+// "create listener" from the core almost always means it is not, so we report
+// it to the GUI log to make the cause obvious.
+bool helperIsElevated() {
+#if defined(Q_OS_WIN)
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    TOKEN_ELEVATION elev{};
+    DWORD len = 0;
+    const bool ok = GetTokenInformation(token, TokenElevation, &elev, sizeof(elev), &len)
+            && elev.TokenIsElevated != 0;
+    CloseHandle(token);
+    return ok;
+#else
+    return ::geteuid() == 0;
+#endif
+}
 
 QString stateName(QtTrustTunnelClient::State s) {
     switch (s) {
@@ -111,6 +136,13 @@ private:
             if (cmd == "hello" && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
                 m_authed = true;
                 QJsonObject e; e["ev"] = "ready"; m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
+                // Tell the GUI whether we actually came up elevated so a failed
+                // "create listener" can be diagnosed from the app's own log.
+                QJsonObject pe; pe["ev"] = "info";
+                pe["msg"] = helperIsElevated()
+                        ? QStringLiteral("VPN helper started with admin privileges")
+                        : QStringLiteral("VPN helper started WITHOUT admin privileges — connecting will fail");
+                m_sock->write(QJsonDocument(pe).toJson(QJsonDocument::Compact) + '\n');
             } else {
                 m_sock->close();
             }
