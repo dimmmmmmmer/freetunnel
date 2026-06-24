@@ -14,8 +14,14 @@ void Backend::setSplitEnabled(bool v) {
 // IP / CIDR subnet.
 static bool isValidBypassRule(const QString &rule) {
     QString r = rule;
-    if (r.startsWith(QLatin1String("*.")))
-        r = r.mid(2);
+    // Wildcard forms cover a whole suffix: "*.example.com", a bare TLD "*.ru",
+    // or the leading-dot shorthand ".ru" / ".рф". Only these may end in a single
+    // label; a plain hostname still needs at least one dot.
+    bool wildcard = false;
+    if (r.startsWith(QLatin1String("*."))) { r = r.mid(2); wildcard = true; }
+    else if (r.startsWith(QLatin1Char('.'))) { r = r.mid(1); wildcard = true; }
+    if (r.isEmpty())
+        return false;
     // IP or subnet?
     const int slash = r.indexOf(QLatin1Char('/'));
     const QString addr = slash >= 0 ? r.left(slash) : r;
@@ -25,11 +31,17 @@ static bool isValidBypassRule(const QString &rule) {
         const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
         return ok && p >= 0 && p <= max;
     }
-    // Otherwise a hostname: labels of [A-Za-z0-9-], at least one dot.
-    static const QRegularExpression re(
-        QStringLiteral("^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+"
-                       "[A-Za-z]{2,63}$"));
-    return re.match(r).hasMatch();
+    // Hostname. Unicode-aware so IDN domains validate (e.g. рф, мвд.рф). A bare
+    // TLD label ("ru", "рф") is accepted only under a wildcard ("*.ru" / ".ru").
+    static const QRegularExpression tld(
+        QStringLiteral("^[\\p{L}]{2,63}$"), QRegularExpression::UseUnicodePropertiesOption);
+    if (wildcard && tld.match(r).hasMatch())
+        return true;
+    static const QRegularExpression fqdn(
+        QStringLiteral("^(?=.{1,253}$)([\\p{L}\\p{N}]([\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?\\.)+"
+                       "[\\p{L}]{2,63}$"),
+        QRegularExpression::UseUnicodePropertiesOption);
+    return fqdn.match(r).hasMatch();
 }
 
 bool Backend::addDomain(const QString &domain) {

@@ -26,6 +26,7 @@ private slots:
     void backendConnectsThroughMockHelper();
     void configSwitchSuppressesCoreDisconnectToast();
     void exportRoundTrips();
+    void domainRulesAcceptTldWildcardsAndIdn();
 };
 
 static AppSettings hermeticSettings(const QString &logPath)
@@ -232,6 +233,23 @@ void TestIntegrationBackendVpn::exportRoundTrips()
                 freetunnel::CredentialStore::keyForConfigPath(path));
         QFile::remove(path);
     }
+}
+
+void TestIntegrationBackendVpn::domainRulesAcceptTldWildcardsAndIdn()
+{
+    Backend backend;
+    // TLD-level wildcards and IDN domains from the RU preset must be addable by
+    // hand (addDomain returns true only when the rule passes validation).
+    QVERIFY(backend.addDomain(QStringLiteral("*.ru")));
+    QVERIFY(backend.addDomain(QStringLiteral(".su")));
+    QVERIFY(backend.addDomain(QStringLiteral("*.рф")));   // *.рф
+    QVERIFY(backend.addDomain(QStringLiteral("мвд.рф"))); // мвд.рф
+    QVERIFY(backend.addDomain(QStringLiteral("yandex.ru")));
+    QVERIFY(backend.addDomain(QStringLiteral("192.168.0.0/16")));
+    // A bare TLD without a wildcard, and malformed labels, stay rejected.
+    QVERIFY(!backend.addDomain(QStringLiteral("ru")));
+    QVERIFY(!backend.addDomain(QStringLiteral("foo_bar.com")));
+    QVERIFY(!backend.addDomain(QStringLiteral("-bad.com")));
 }
 
 int main(int argc, char *argv[])

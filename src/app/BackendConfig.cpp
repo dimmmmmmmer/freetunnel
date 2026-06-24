@@ -248,6 +248,21 @@ bool Backend::createConfig(const QVariantMap &f) {
     const QString oldPath = (editIndex >= 0 && editIndex < m_paths.size())
             ? m_paths.at(editIndex) : QString();
 
+    // Snapshot the config being edited so a true no-op save (identical content,
+    // password and split profile) doesn't tear down a live tunnel further down.
+    const bool editingSame = editIndex >= 0 && !oldPath.isEmpty();
+    QString oldContent, oldPassword, oldProfile;
+    if (editingSame) {
+        QFile of(oldPath);
+        if (of.open(QIODevice::ReadOnly | QIODevice::Text))
+            oldContent = QString::fromUtf8(of.readAll());
+        oldPassword = freetunnel::CredentialStore::loadPassword(
+                freetunnel::CredentialStore::keyForConfigPath(oldPath));
+        oldProfile = m_settings.config_profiles.value(oldPath);
+        if (oldProfile.isEmpty() || !m_settings.profiles.contains(oldProfile))
+            oldProfile = QStringLiteral("Default");
+    }
+
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
     const QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
@@ -295,22 +310,26 @@ bool Backend::createConfig(const QVariantMap &f) {
     }
 
     // Per-config split profile assignment (Default is the implicit, unstored value).
+    QString newProfile = f.value(QStringLiteral("splitProfile"), QStringLiteral("Default")).toString();
+    if (!m_settings.profiles.contains(newProfile))
+        newProfile = QStringLiteral("Default");
     {
-        QString prof = f.value(QStringLiteral("splitProfile"), QStringLiteral("Default")).toString();
-        if (!m_settings.profiles.contains(prof))
-            prof = QStringLiteral("Default");
         if (!oldPath.isEmpty() && oldPath != target)
             m_settings.config_profiles.remove(oldPath);
-        if (prof == QLatin1String("Default"))
+        if (newProfile == QLatin1String("Default"))
             m_settings.config_profiles.remove(target);
         else
-            m_settings.config_profiles[target] = prof;
+            m_settings.config_profiles[target] = newProfile;
         persistSettings();
     }
 
     emit configChanged();
-    // If the edited config is the live one, its profile may have changed.
-    if (editing && m_activePath == target) {
+    // Re-apply rules and reconnect only when the live config actually changed.
+    // Saving an edit that changed nothing — same content, password and profile —
+    // must not tear the tunnel down and reconnect.
+    const bool noChange = editingSame && oldPath == target
+            && t == oldContent && password == oldPassword && newProfile == oldProfile;
+    if (editing && m_activePath == target && !noChange) {
         applySplitRules();
         reapplyIfConnected();
     }
