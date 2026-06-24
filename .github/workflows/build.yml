@@ -447,6 +447,10 @@ jobs:
             -output "$APP/Contents/MacOS/FreeTunnel"
           lipo -info "$APP/Contents/MacOS/FreeTunnel"
 
+          # macdeployqt aborts (exit 16) trying to deploy Qt's SQL driver plugins,
+          # which link Homebrew libs (libpq/libiodbc/libmimerapi) that aren't on the
+          # runner image. The app uses no SQL, so drop those plugins first.
+          rm -rf "$QT_ROOT_DIR/plugins/sqldrivers"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
           cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
           # Ad-hoc sign so the bundle launches once the user approves it in
@@ -479,6 +483,18 @@ jobs:
           Copy-Item client\assets\logo.ico dist\assets\ -Force
           Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
           & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
+
+          # Bundle Wintun: the VPN core creates its tunnel adapter via wintun.dll
+          # (loaded at runtime). Without it the core fails with "Failed to create
+          # listener" even when elevated. Pin the official release and verify it.
+          Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile wintun.zip
+          $wtHash = (Get-FileHash wintun.zip -Algorithm SHA256).Hash
+          if ($wtHash -ne "07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51") {
+              throw "Wintun checksum mismatch: $wtHash"
+          }
+          Expand-Archive -Path wintun.zip -DestinationPath wintun_extract -Force
+          Copy-Item "wintun_extract\wintun\bin\amd64\wintun.dll" dist\ -Force
+          if (-not (Test-Path "dist\wintun.dll")) { throw "wintun.dll was not bundled" }
 
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
           if (-not (Test-Path $nsis)) { throw "NSIS not found at $nsis" }
