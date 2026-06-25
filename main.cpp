@@ -4,9 +4,15 @@
 #include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QOperatingSystemVersion>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QString>
+#include <QStyleHints>
+#include <QSvgRenderer>
 #include <QTranslator>
 #include <QUrl>
 #include <QWindow>
@@ -136,22 +142,14 @@ int main(int argc, char *argv[]) {
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
-#ifdef Q_OS_MACOS
-    // macOS 26 (Tahoe) masks the *bundle* .icns into a rounded square and fills
-    // the transparent area with a default light background. Overriding the
-    // running app's Dock icon at runtime with the bare transparent mark bypasses
-    // that masking, so the Dock shows the floating logo with no background —
-    // matching Windows/Linux — while the app is open. (The launcher tile shown
-    // when the app isn't running is still the OS-masked .icns; that's unavoidable
-    // on Tahoe.) Now that the bundle icon is rendered at the same size, there's
-    // no size jump when this kicks in on launch.
-    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
-#else
+#ifndef Q_OS_MACOS
     // Windows/Linux: use the multi-size .ico that matches the one embedded in the
-    // .exe (no OS-imposed icon mask there). logo.png is a raster fallback.
-    QIcon appIcon(QStringLiteral(":/assets/logo.ico"));
-    appIcon.addFile(QStringLiteral(":/assets/logo.png"));
-    app.setWindowIcon(appIcon);
+    // .exe (no OS-imposed icon mask there). logo.png is a raster fallback. (macOS
+    // is set up below, after the backend exists, so the Dock icon can follow the
+    // app's theme.)
+    QIcon winLinuxIcon(QStringLiteral(":/assets/logo.ico"));
+    winLinuxIcon.addFile(QStringLiteral(":/assets/logo.png"));
+    app.setWindowIcon(winLinuxIcon);
 #endif
     // Keep running in the tray when the window is closed.
     QGuiApplication::setQuitOnLastWindowClosed(false);
@@ -179,6 +177,44 @@ int main(int argc, char *argv[]) {
     app.installEventFilter(&urlFilter); // catch macOS URL opens early
 
     Backend backend;
+
+#ifdef Q_OS_MACOS
+    // Dock icon on macOS. macOS 26 (Tahoe) masks the bundle .icns into a rounded
+    // square and fills the transparent background with a default light colour —
+    // an app can't opt out of the masking for the launcher tile. So on Tahoe we
+    // draw our own rounded tile in the app's current theme colour at runtime
+    // (runtime-set icons are NOT OS-masked) and refresh it whenever the theme
+    // changes. On older macOS, where transparent icons render as-is, keep the
+    // bare floating logo.
+    if (QOperatingSystemVersion::current().majorVersion() >= 26) {
+        auto renderDockIcon = [&app, &backend]() {
+            const QString m = backend.themeMode();
+            const bool dark = m == QLatin1String("dark")
+                    || (m == QLatin1String("system")
+                        && app.styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+            QPixmap pm(1024, 1024);
+            pm.fill(Qt::transparent);
+            QPainter painter(&pm);
+            painter.setRenderHint(QPainter::Antialiasing);
+            QPainterPath tile;
+            tile.addRoundedRect(QRectF(40, 40, 944, 944), 230, 230);
+            painter.fillPath(tile, QColor(dark ? QStringLiteral("#181818")
+                                               : QStringLiteral("#ececec")));
+            QSvgRenderer logo(QStringLiteral(":/assets/logo.svg"));
+            logo.render(&painter, QRectF(162, 162, 700, 700));
+            painter.end();
+            app.setWindowIcon(QIcon(pm));
+        };
+        renderDockIcon();
+        // Theme switches arrive as settingsChanged; "system" mode also tracks the
+        // OS appearance via colorSchemeChanged.
+        QObject::connect(&backend, &Backend::settingsChanged, &app, renderDockIcon);
+        QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &app,
+                         [renderDockIcon](Qt::ColorScheme) { renderDockIcon(); });
+    } else {
+        app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
+    }
+#endif
 
     QuitFilter quitFilter;
     quitFilter.backend = &backend;
