@@ -15,7 +15,11 @@ pad_png() {
   local size=$1 dest=$2
   local inner=$((size * 82 / 100))
   rsvg-convert -w "$inner" -h "$inner" "$svg" -o "$tmp/mark.png"
-  convert -size "${size}x${size}" xc:none "$tmp/mark.png" -gravity center -composite "$dest"
+  # Force RGBA (TrueColorAlpha): the mark is pure grey, so without this
+  # ImageMagick stores grayscale PNGs and drops the alpha channel on the .ico's
+  # 256px layer — which then renders with a white background at large sizes.
+  convert -size "${size}x${size}" xc:none "$tmp/mark.png" -gravity center -composite \
+    -type TrueColorAlpha "$dest"
 }
 
 for s in 16 32 48 64 128 256 512 1024; do
@@ -35,7 +39,8 @@ png2icns "$out/logo.icns" \
   "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
 
 convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-  "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" "$out/logo.ico"
+  "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" \
+  -type TrueColorAlpha "$out/logo.ico"
 
 # Apple iconset for iconutil (proper Finder/Dock .icns on macOS).
 ic=$out/icon.iconset
