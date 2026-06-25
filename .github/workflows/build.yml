@@ -143,7 +143,7 @@ jobs:
 
       - name: Patch core wrapper (surface tunnel stats)
         shell: bash
-        run: python3 client/scripts/patch_core_wrapper.py upstream
+        run: patch -p1 -d upstream < client/vendor/trusttunnel/tunnel-stats-handler.patch
 
       # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
       # every runner (macOS/Windows ship one, but install to be safe + on PATH).

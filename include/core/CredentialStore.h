@@ -21,6 +21,8 @@ public:
 // Move inline passwords into the credential store and strip them from TOML.
 bool migrateConfigPassword(const QString &configPath);
 
+// Build a helper-readable config TOML with password injected (in-memory only).
+QString buildConnectConfigToml(const QString &configPath);
 // Build a helper-readable config path (temp file with password injected when needed).
 QString materializeConfigForConnect(const QString &configPath);
 void removeMaterializedConfig(const QString &materializedPath);

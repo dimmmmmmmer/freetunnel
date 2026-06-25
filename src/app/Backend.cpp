@@ -81,6 +81,13 @@ void Backend::onVpnErrorReceived(const QString &m)
     appendLog(QStringLiteral("ERROR"), m); // raw message always logged
     if (m_reapplying || m_inConnect)
         return;
+    // Internal reconnect reasons from the helper/core — logged above, not shown as toasts.
+    const QString lowerInternal = m.toLower();
+    if (lowerInternal.contains(QLatin1String("recovery:"))
+        || lowerInternal.contains(QLatin1String("fd watchdog:"))
+        || lowerInternal.contains(QLatin1String("network wait timeout:"))) {
+        return;
+    }
     const QString lower = m.toLower();
     QString friendly = m;
     if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
@@ -188,17 +195,16 @@ void Backend::connectVpn() {
                                h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
         }
     }
-    // Materialize a config the core can read (password injected from the keychain).
-    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
-    m_materializedConfigPath = freetunnel::materializeConfigForConnect(m_activePath);
-    if (m_materializedConfigPath.isEmpty()) {
+    // Materialize config in memory only — send to the elevated helper over loopback IPC.
+    const QString connectToml = freetunnel::buildConnectConfigToml(m_activePath);
+    if (connectToml.isEmpty()) {
         m_connecting = false;
         emit stateChanged();
         emit errorOccurred(tr("Config has no password — edit it and try again"));
         return;
     }
-    m_inConnect = true; // applySplitRules() below must not trigger a reconnect
-    m_client.loadConfigFromFile(m_materializedConfigPath);
+    m_inConnect = true;
+    m_client.loadConfigFromToml(connectToml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.connectVpn();
@@ -223,8 +229,7 @@ void Backend::prepareQuit() {
     emit aboutToShutdown();
     unregisterHotkeys();
     m_client.shutdown();
-    freetunnel::removeMaterializedConfig(m_materializedConfigPath);
-    m_materializedConfigPath.clear();
+    freetunnel::sweepStaleMaterializedConfigs();
 }
 
 QString Backend::credentialStorageWarning() const

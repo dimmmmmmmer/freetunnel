@@ -215,7 +215,6 @@ private:
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
-    QString m_materializedConfigPath;
     QVariantList m_pings;
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths

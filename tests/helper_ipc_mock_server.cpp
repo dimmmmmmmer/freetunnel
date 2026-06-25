@@ -104,7 +104,7 @@ void MockHelperServer::onReadyRead()
     if (!m_sock)
         return;
     m_buf += m_sock->readAll();
-    if (m_buf.size() > vpn_helper::kMaxReadBuffer) {
+    if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
         m_sock->abort();
         return;
     }

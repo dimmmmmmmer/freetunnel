@@ -7,8 +7,8 @@
 #
 # This script adds a `tunnel_stats_handler` to `VpnCallbacks` and routes the event
 # to it. It is applied in CI after the client is injected into the upstream tree.
-# The upstream ref is pinned in scripts/upstream_ref.txt and verified by
-# scripts/verify_upstream_patch.sh on every PR.
+# Prefer the vendored patch: vendor/trusttunnel/tunnel-stats-handler.patch
+# (applied via `patch -p1` — see scripts/verify_upstream_patch.sh).
 #
 # Usage: patch_core_wrapper.py <upstream_dir>
 

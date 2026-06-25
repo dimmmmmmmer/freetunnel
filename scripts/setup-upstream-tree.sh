@@ -31,5 +31,5 @@ endif ()
 EOF
 fi
 
-python3 "$CLIENT/scripts/patch_core_wrapper.py" "$UPSTREAM"
+patch -p1 -d "$UPSTREAM" < "$CLIENT/vendor/trusttunnel/tunnel-stats-handler.patch"
 echo "Upstream tree ready at ${UPSTREAM}"

@@ -387,31 +387,32 @@ bool migrateConfigPassword(const QString &configPath)
     return writeConfigText(abs, buildConfigToml(c));
 }
 
-QString materializeConfigForConnect(const QString &configPath)
+QString buildConnectConfigToml(const QString &configPath)
 {
     const QString abs = QFileInfo(configPath).absoluteFilePath();
     migrateConfigPassword(abs);
 
     ConfigToml c = parseConfigToml(readConfigText(abs));
-    if (!c.password.isEmpty())
-        return abs;
-
-    const QString key = CredentialStore::keyForConfigPath(abs);
-    const QString stored = CredentialStore::loadPassword(key);
-    if (stored.isEmpty())
+    if (c.password.isEmpty())
+        c.password = CredentialStore::loadPassword(CredentialStore::keyForConfigPath(abs));
+    if (c.password.isEmpty())
         return QString();
-    c.password = stored;
+    return buildConfigToml(c);
+}
+
+QString materializeConfigForConnect(const QString &configPath)
+{
+    const QString toml = buildConnectConfigToml(configPath);
+    if (toml.isEmpty())
+        return QString();
 
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(dir);
-    // Password-bearing temp file (0600). Kept for the whole session (the core
-    // re-reads it on internal reconnects), removed on Disconnect; swept at startup.
-    // memfd is not used because the elevated helper reads the path in another process.
     QTemporaryFile tf(dir + QStringLiteral("/.connect-XXXXXX.toml"));
     tf.setAutoRemove(false);
     if (!tf.open())
         return QString();
-    tf.write(buildConfigToml(c).toUtf8());
+    tf.write(toml.toUtf8());
     tf.close();
     QFile::setPermissions(tf.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return tf.fileName();

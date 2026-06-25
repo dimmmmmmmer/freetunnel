@@ -35,6 +35,7 @@ public:
     ~VpnHelperClient() override;
 
     bool loadConfigFromFile(const QString &path);
+    bool loadConfigFromToml(const QString &tomlContent);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setExcludedRoutes(const std::vector<std::string> &routes);
     void setVpnMode(bool selective);
@@ -74,6 +75,7 @@ private:
     QString m_token;
     QString m_tokenPath;
     QString m_configPath;
+    QString m_configToml;
     std::vector<std::string> m_exclusions;
     std::vector<std::string> m_excludedRoutes;
     bool m_selective = false;

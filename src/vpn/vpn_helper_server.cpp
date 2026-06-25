@@ -118,7 +118,7 @@ private:
 
     void onReadyRead() {
         m_buf += m_sock->readAll();
-        if (m_buf.size() > vpn_helper::kMaxReadBuffer) {
+        if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
             m_sock->close();
             return;
         }
@@ -166,7 +166,7 @@ private:
         if (cmd == "setKillSwitch")
             return m_client.setKillSwitch(c.value("enabled").toBool());
         if (cmd == "connect")
-            return handleConnect(c.value("configPath").toString());
+            return handleConnect(c);
         if (cmd == "disconnect")
             return m_client.disconnectVpn();
         if (cmd == "quit")
@@ -187,13 +187,17 @@ private:
         m_client.setRoutingRules({}, routes);
     }
 
-    void handleConnect(const QString &path) {
+    void handleConnect(const QJsonObject &c) {
+        const QString toml = c.value(QStringLiteral("configToml")).toString();
+        const QString path = c.value(QStringLiteral("configPath")).toString();
         const auto st = m_client.state();
         const bool needsTeardown =
                 st != QtTrustTunnelClient::State::Disconnected
                 && st != QtTrustTunnelClient::State::Error;
-        auto startConnect = [this, path]() {
-            if (!m_client.loadConfigFromFile(path)) {
+        auto startConnect = [this, toml, path]() {
+            const bool loaded = !toml.isEmpty() ? m_client.loadConfigFromToml(toml)
+                                                : m_client.loadConfigFromFile(path);
+            if (!loaded) {
                 QJsonObject e;
                 e["ev"] = "error";
                 e["msg"] = QStringLiteral("Failed to load config");

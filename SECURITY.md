@@ -40,8 +40,9 @@ the app **refuses to save new passwords** and shows a warning in Settings.
 Legacy plaintext files (0600 credential files, `instance-auth`) are **migrated
 into the OS store automatically** when secure storage becomes available.
 
-Temporary `.connect-*.toml` files (password injected for the helper) are removed on
-disconnect, quit, and swept at startup.
+During connect, the GUI builds the helper config **in memory** and sends it over
+authenticated loopback IPC (`configToml`). Legacy `.connect-*.toml` temp files from
+older builds are swept at startup.
 
 ## Updates
 

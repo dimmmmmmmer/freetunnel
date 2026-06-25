@@ -30,7 +30,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config
+          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
+            dbus-x11 gnome-keyring
 
       - name: Install Qt (Linux)
         if: runner.os == 'Linux'
@@ -74,7 +75,17 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build-tests -j1 --output-on-failure
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            dbus-run-session -- bash -c '
+              eval "$(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null || true)"
+              eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
+              ctest --test-dir build-tests -j1 --output-on-failure
+            '
+          else
+            ctest --test-dir build-tests -j1 --output-on-failure
+          fi
 
   coverage:
     name: Coverage (Linux)
@@ -86,7 +97,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config lcov \
-            libfuse2 libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 git python3-pip
+            libfuse2 libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 git python3-pip \
+            dbus-x11 gnome-keyring
           wget -q https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 18
@@ -142,7 +154,8 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config
+          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
+            dbus-x11 gnome-keyring
 
       - name: Install Qt
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
@@ -164,4 +177,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           ASAN_OPTIONS: detect_leaks=0:allocator_may_return_null=1
           UBSAN_OPTIONS: print_stacktrace=1
-        run: ctest --test-dir build-asan -j1 --output-on-failure
+        shell: bash
+        run: |
+          dbus-run-session -- bash -c '
+            eval "$(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null || true)"
+            eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
+            ctest --test-dir build-asan -j1 --output-on-failure
+          '

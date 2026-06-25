@@ -242,6 +242,36 @@ bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
     }
 
     m_lastConfigPath = path;
+    m_lastConfigToml.clear();
+    setConfig(std::move(*config));
+    setState(State::Disconnected);
+    return true;
+}
+
+bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
+    if (tomlContent.isEmpty()) {
+        setState(State::Error);
+        emit vpnError(QStringLiteral("Empty config"));
+        return false;
+    }
+    toml::parse_result parsed = toml::parse(tomlContent.toStdString());
+    if (!parsed) {
+        const std::string_view descrView = parsed.error().description();
+        setState(State::Error);
+        emit vpnError(QString("Failed parsing config: %1")
+                              .arg(QString::fromStdString(std::string{descrView})));
+        return false;
+    }
+
+    auto config = ag::TrustTunnelConfig::build_config(parsed.table());
+    if (!config.has_value()) {
+        setState(State::Error);
+        emit vpnError(QStringLiteral("Invalid TrustTunnel config structure"));
+        return false;
+    }
+
+    m_lastConfigPath.clear();
+    m_lastConfigToml = tomlContent;
     setConfig(std::move(*config));
     setState(State::Disconnected);
     return true;
@@ -335,11 +365,12 @@ void QtTrustTunnelClient::doConnectAttempt() {
             // cannot copy it.  If m_config was already consumed by a previous
             // client session, reload it from the saved file path.
             if (!m_config.has_value()) {
-                if (!m_lastConfigPath.isEmpty()) {
-                    if (!loadConfigFromFile(m_lastConfigPath)) {
-                        // loadConfigFromFile already emits vpnError / sets Error state.
+                if (!m_lastConfigToml.isEmpty()) {
+                    if (!loadConfigFromToml(m_lastConfigToml))
                         return;
-                    }
+                } else if (!m_lastConfigPath.isEmpty()) {
+                    if (!loadConfigFromFile(m_lastConfigPath))
+                        return;
                 } else {
                     setState(State::Error);
                     emit vpnError(QStringLiteral("TrustTunnel config is not set"));
@@ -560,6 +591,7 @@ void QtTrustTunnelClient::handleCoreConnected()
     m_reconnectTimer.stop();
     m_networkWaitTimer.stop();
     m_everConnected = true;
+    m_fdBaseline = countOpenFds();
     setState(State::Connected);
     emit vpnConnected();
 }
@@ -607,10 +639,10 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState state) {
         handleCoreConnecting();
         break;
     case ag::VPN_SS_RECOVERING:
-        handleCoreRecovery(QStringLiteral("recovery: full reconnect to avoid fd leak"));
+        handleCoreRecovery(QStringLiteral("recovery: reconnecting"));
         break;
     case ag::VPN_SS_WAITING_RECOVERY:
-        handleCoreRecovery(QStringLiteral("waiting recovery: full reconnect to avoid fd leak"));
+        handleCoreRecovery(QStringLiteral("waiting recovery: reconnecting"));
         break;
     case ag::VPN_SS_WAITING_FOR_NETWORK:
         handleCoreWaitingForNetwork();
@@ -664,19 +696,33 @@ void QtTrustTunnelClient::checkFdHealth() {
         return;
     }
     const int openFds = countOpenFds();
-    const int fdLimit = getFdLimit();
-    if (openFds < 0 || fdLimit < 0) {
-        return; // platform doesn't support fd counting
+    if (openFds < 0) {
+        return;
     }
 
-    // If we're using more than 70% of the fd limit, force a clean reconnect
-    // to release leaked sockets from the VPN core.
+    // Prefer growth since connect over absolute fd-limit percentage — the baseline
+    // varies with Qt/runtime and would false-positive on busy desktops.
+    constexpr int kFdGrowthThreshold = 64;
+    if (m_fdBaseline >= 0 && openFds - m_fdBaseline >= kFdGrowthThreshold) {
+        qWarning("[fd watchdog] Open fds grew by %d since connect (%d -> %d) — forcing clean reconnect",
+                openFds - m_fdBaseline, m_fdBaseline, openFds);
+        emit vpnError(QStringLiteral("fd watchdog: reconnecting after fd growth"));
+        teardownClient();
+        if (!m_stopRequested && m_autoReconnect) {
+            scheduleReconnect(QStringLiteral("fd watchdog: too many open files, clean reconnect"));
+        }
+        return;
+    }
+
+    const int fdLimit = getFdLimit();
+    if (fdLimit < 0) {
+        return;
+    }
     const double usage = static_cast<double>(openFds) / static_cast<double>(fdLimit);
-    if (usage > 0.70) {
+    if (usage > 0.85) {
         qWarning("[fd watchdog] Open fds: %d / %d (%.0f%%) — forcing clean reconnect",
                 openFds, fdLimit, usage * 100.0);
-        emit vpnError(QString("fd watchdog: %1/%2 fds used, reconnecting...")
-                .arg(openFds).arg(fdLimit));
+        emit vpnError(QStringLiteral("fd watchdog: reconnecting near fd limit"));
         teardownClient();
         if (!m_stopRequested && m_autoReconnect) {
             scheduleReconnect(QStringLiteral("fd watchdog: too many open files, clean reconnect"));

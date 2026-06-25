@@ -39,11 +39,14 @@ endif ()
 
 ### 2. Patch upstream (tunnel stats)
 
+From the upstream root:
+
 ```bash
-python3 FreeTunnel/scripts/patch_core_wrapper.py .
+patch -p1 < FreeTunnel/vendor/trusttunnel/tunnel-stats-handler.patch
 ```
 
-Required for live upload/download stats in the UI.
+Required for live upload/download stats in the UI. Verified in CI via
+`FreeTunnel/scripts/verify_upstream_patch.sh`.
 
 ### 3. Bootstrap Conan deps
 

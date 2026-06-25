@@ -44,6 +44,7 @@ public:
 
     void setConfig(ag::TrustTunnelConfig config);
     bool loadConfigFromFile(const QString &path);
+    bool loadConfigFromToml(const QString &tomlContent);
     void setAutoReconnectEnabled(bool enabled);
     void setReconnectBoundsMs(int initialDelayMs, int maxDelayMs);
 
@@ -92,6 +93,7 @@ private:
     std::unique_ptr<ag::AutoNetworkMonitor> m_networkMonitor;
     std::optional<ag::TrustTunnelConfig> m_config;
     QString m_lastConfigPath; // stored so we can reload config after disconnect
+    QString m_lastConfigToml; // in-memory config for reconnect without on-disk secrets
     std::vector<std::string> m_extraIncludedRoutes;
     std::vector<std::string> m_extraExcludedRoutes;
     std::vector<std::string> m_customDns;
@@ -101,6 +103,7 @@ private:
     bool m_killSwitch = false;
     QTimer m_reconnectTimer;
     QTimer m_fdWatchdogTimer;
+    int m_fdBaseline = -1; // open fd count right after connect (for leak detection)
     QTimer m_networkWaitTimer;   // fires if we stay in WaitingForNetwork too long
     QThread m_connectThread;
     State m_state = State::Disconnected;

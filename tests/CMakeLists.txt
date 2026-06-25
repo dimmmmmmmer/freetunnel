@@ -8,8 +8,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-# Allow plaintext credential fallback in unit tests (CI runners may lack a keyring).
-add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
+# Allow plaintext credential fallback only for local dev without a keyring.
+# CI starts gnome-keyring via dbus-run-session (see .github/workflows/tests.yml).
+if (NOT DEFINED ENV{CI})
+    add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
+endif()
 set(CMAKE_AUTORCC ON)
 
 option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)

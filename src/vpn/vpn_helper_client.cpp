@@ -104,7 +104,14 @@ static VpnHelperClient::State stateFromString(const QString &s) {
 
 bool VpnHelperClient::loadConfigFromFile(const QString &path) {
     m_configPath = path;
-    return true;
+    m_configToml.clear();
+    return !path.isEmpty();
+}
+
+bool VpnHelperClient::loadConfigFromToml(const QString &toml) {
+    m_configToml = toml;
+    m_configPath.clear();
+    return !toml.isEmpty();
 }
 
 void VpnHelperClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
@@ -152,7 +159,12 @@ void VpnHelperClient::connectVpn() {
         m_connectPending = true;
         return;
     }
-    QJsonObject c; c["cmd"] = "connect"; c["configPath"] = m_configPath;
+    QJsonObject c;
+    c["cmd"] = "connect";
+    if (!m_configToml.isEmpty())
+        c["configToml"] = m_configToml;
+    else
+        c["configPath"] = m_configPath;
     send(c);
 }
 
@@ -378,7 +390,7 @@ void VpnHelperClient::send(const QJsonObject &obj) {
 
 void VpnHelperClient::onReadyRead() {
     m_buf += m_sock->readAll();
-    if (m_buf.size() > vpn_helper::kMaxReadBuffer) {
+    if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
         fail(tr("VPN helper sent too much data"));
         return;
     }

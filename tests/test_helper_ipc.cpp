@@ -106,7 +106,7 @@ void TestHelperIpc::oversizedBufferClosesConnection()
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
-    client.write(QByteArray(vpn_helper::kMaxReadBuffer + 1, 'A'));
+    client.write(QByteArray(vpn_helper::kMaxIpcLineBytes + 1, 'A'));
     client.flush();
     QVERIFY(server.waitForClientData(3000));
     for (int i = 0; i < 300; ++i) {
