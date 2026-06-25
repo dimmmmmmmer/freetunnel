@@ -126,6 +126,31 @@ checks (`scripts/check-pinned-deps.sh`).
 
 See [SECURITY.md](SECURITY.md) for the threat model and known limitations.
 
+## Codacy (code quality dashboard)
+
+FreeTunnel uses [Codacy](https://www.codacy.com/) for static analysis and optional
+coverage tracking on the repository page (badges in [README.md](README.md)).
+
+### One-time setup
+
+1. Sign in at [app.codacy.com](https://app.codacy.com/) with GitHub.
+2. **Add project** → `dimmmmmmmer/freetunnel` (or your fork, then update badge URLs).
+3. Codacy reads [`.codacy.yml`](.codacy.yml) for exclude paths and analyzes each push.
+
+If the Codacy badge stays gray, open the project on Codacy and re-copy the badge
+markdown from **Settings → General → Badges** (it embeds your project UUID).
+
+### Coverage badge (optional)
+
+CI uploads lcov from the Linux coverage job when the secret is set:
+
+1. Codacy → project **Settings → Coverage** → copy the **Project API token**.
+2. Add it as GitHub secret `CODACY_PROJECT_TOKEN`.
+3. The next push to `main` uploads `coverage.filtered.info` from
+   [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
+Local coverage report: `bash scripts/coverage-report.sh`.
+
 ## Translations (i18n)
 
 Strings use `qsTr()` in QML and `tr()` in C++. Russian is in `i18n/freetunnel_ru.ts`.

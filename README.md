@@ -1,8 +1,39 @@
 # FreeTunnel
 
+[![Codacy Badge](https://img.shields.io/codacy/grade/git/github/dimmmmmmmer/freetunnel?label=quality)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![Codacy coverage](https://img.shields.io/codacy/coverage/git/github/dimmmmmmmer/freetunnel?label=coverage)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
+[![latest version](https://img.shields.io/github/v/release/dimmmmmmmer/freetunnel)](https://github.com/dimmmmmmmer/freetunnel/releases)
+[![Tests](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml)
+[![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
+[![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
 <img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
 
-A Qt GUI client for [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient) on Linux, macOS, and Windows.
+**FreeTunnel** — a free, open-source desktop VPN client with a modern Qt interface,
+built on the [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient) core.
+
+Linux · macOS · Windows
+
+## About
+
+FreeTunnel wraps TrustTunnel in a lightweight GUI: connect with one click, manage
+configs, split tunneling, kill switch, system tray, and global hotkeys. Passwords
+stay in the OS credential store (Keychain / Credential Manager / libsecret), not in
+plain config files.
+
+Updates are verified with SHA-256 manifests and Ed25519 signatures before install.
+Release builds are unsigned (no paid code-signing certs) — see [Installation](#installation)
+for first-run notes.
+
+## Features
+
+- ✅ **Cross-platform** — `.deb`, universal `.dmg`, Windows installer
+- ✅ **TrustTunnel core** — HTTP/2 and HTTP/3 (QUIC) in release builds
+- ✅ **Configs** — create, import TOML, paste `tt://` links (same as mobile / QR)
+- ✅ **External control** — `freetunnel://toggle|connect|disconnect`, hotkeys, tray
+- ✅ **Split tunneling** — per-config profiles, domain bypass, excluded routes
+- ✅ **Security** — kill switch, signed updates, [SECURITY.md](SECURITY.md)
+- ✅ **i18n** — English + Russian
 
 ## Installation
 
@@ -59,15 +90,15 @@ admin password the first time you connect in a session.
 
 ## For developers
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local build instructions, tests, and
-translations. Builds are fully automated in GitHub Actions
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local build instructions, tests,
+translations, and Codacy setup. Builds are fully automated in GitHub Actions
 ([`.github/workflows/build.yml`](.github/workflows/build.yml)): the client links
 against the C++ core [`TrustTunnel/TrustTunnelClient`](https://github.com/TrustTunnel/TrustTunnelClient).
-HTTP/3 (QUIC) builds are enabled in CI (`.github/workflows/build.yml`, `DISABLE_HTTP3=OFF`).
+HTTP/3 (QUIC) builds are enabled in CI (`DISABLE_HTTP3=OFF`).
 Unit tests — [`.github/workflows/tests.yml`](.github/workflows/tests.yml). Security checks —
 [`.github/workflows/security.yml`](.github/workflows/security.yml) and [SECURITY.md](SECURITY.md).
 Releases are published automatically on `v*` tags.
 
 ## License
 
-See [LICENSE](LICENSE).
+[Apache-2.0](LICENSE)

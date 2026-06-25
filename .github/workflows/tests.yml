@@ -107,6 +107,17 @@ jobs:
           path: coverage-out/
           if-no-files-found: error
 
+      - name: Upload coverage to Codacy
+        env:
+          CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+        run: |
+          if [ -z "${CODACY_PROJECT_TOKEN:-}" ]; then
+            echo "CODACY_PROJECT_TOKEN not configured — skipping Codacy coverage upload"
+            exit 0
+          fi
+          bash <(curl -Ls https://coverage.codacy.com/get.sh) report \
+            -r coverage-out/coverage.filtered.info
+
   sanitizers:
     name: ASan+UBSan (Linux)
     runs-on: ubuntu-latest

@@ -1,0 +1,8 @@
+---
+# Codacy static analysis settings (https://app.codacy.com).
+# Add the repository via GitHub at app.codacy.com → Add project → dimmmmmmmer/freetunnel
+exclude_paths:
+  - 'ci-artifacts-latest/**'
+  - 'tests/**'
+  - '**/_deps/**'
+  - '**/build*/**'
