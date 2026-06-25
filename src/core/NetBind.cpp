@@ -17,6 +17,8 @@
 
 #include <optional>
 
+#include <algorithm>
+
 #if defined(Q_OS_LINUX)
 #include <QFile>
 #include <QRegularExpression>
@@ -43,11 +45,8 @@ bool interfaceIsVirtual(const QString &name) {
                                       QStringLiteral("ipsec"), QStringLiteral("wg"),
                                       QStringLiteral("gpd"),  QStringLiteral("zt"),
                                       QStringLiteral("ham")};
-    for (const QString &p : kVirt) {
-        if (name.startsWith(p))
-            return true;
-    }
-    return false;
+    return std::any_of(kVirt.cbegin(), kVirt.cend(),
+                       [&name](const QString &p) { return name.startsWith(p); });
 }
 
 freetunnel::PhysicalRoute routeFromInterface(const QNetworkInterface &ni) {

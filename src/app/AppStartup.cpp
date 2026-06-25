@@ -48,6 +48,7 @@ void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
     engine.retranslate();
 }
 
+// cppcheck-suppress constParameter
 QString controlArgFrom(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i) {

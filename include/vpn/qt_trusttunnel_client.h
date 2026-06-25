@@ -78,7 +78,7 @@ private:
     void doConnectAttempt();
     void scheduleReconnect(const QString &reason);
     void setState(State s);
-    void handleCoreStateChanged(ag::VpnSessionState state);
+    void handleCoreStateChanged(ag::VpnSessionState coreState);
     void handleCoreConnected();
     void handleCoreConnecting();
     void handleCoreRecovery(const QString &reason);

@@ -48,11 +48,10 @@ void writeVarint(QByteArray &buf, quint64 v) {
         buf.append(static_cast<char>(v & 0xFF));
     } else {
         for (int shift = 56; shift >= 0; shift -= 8) {
-            char b = static_cast<char>((v >> shift) & 0xFF);
-            if (shift == 56) {
-                b = static_cast<char>(0xC0 | (static_cast<quint8>(b) & 0x3F));
-            }
-            buf.append(b);
+            if (shift == 56)
+                buf.append(static_cast<char>(0xC0 | ((v >> shift) & 0x3F)));
+            else
+                buf.append(static_cast<char>((v >> shift) & 0xFF));
         }
     }
 }

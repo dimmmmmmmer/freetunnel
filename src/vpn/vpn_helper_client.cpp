@@ -286,7 +286,7 @@ void VpnHelperClient::startHelperConnectRetry()
             m_attempt->stop();
             m_attempt->deleteLater();
             m_attempt = nullptr;
-            const QString detail = m_sock ? m_sock->errorString() : QString();
+            const QString detail = m_sock->errorString();
             fail(tr("The VPN helper didn't start — authorization may have been declined, "
                     "or the elevated helper could not be reached.%1")
                          .arg(detail.isEmpty() ? QString()
@@ -308,19 +308,17 @@ bool VpnHelperClient::ensureHelper() {
     m_starting = true;
     resetHelperTransport();
 
-#ifdef FT_ENABLE_TEST_HOOKS
-    const bool testHelper = qEnvironmentVariableIsSet("FT_TEST_HELPER_PORT");
-#else
-    const bool testHelper = false;
-#endif
-    if (testHelper) {
+#if defined(FT_ENABLE_TEST_HOOKS)
+    if (qEnvironmentVariableIsSet("FT_TEST_HELPER_PORT")) {
         if (!configureTestHelper())
             return false;
-    } else if (!configureProductionHelper()) {
-        return false;
+        wireHelperSocket(true);
+        return true;
     }
-
-    wireHelperSocket(testHelper);
+#endif
+    if (!configureProductionHelper())
+        return false;
+    wireHelperSocket(false);
     return true;
 }
 

@@ -50,8 +50,8 @@ static QWindow *loadMainWindow(QQmlApplicationEngine &engine, Backend &backend)
     return qobject_cast<QWindow *>(engine.rootObjects().first());
 }
 
-static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &engine, Backend &backend,
-                                QTranslator *&translator)
+static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &engine,
+                                const Backend &backend, QTranslator *&translator)
 {
     applyLanguage(app, engine, translator, backend.language());
     QObject::connect(&backend, &Backend::languageChanged, &app,

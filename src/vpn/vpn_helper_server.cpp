@@ -13,6 +13,9 @@
 #include <QTimer>
 #include <vector>
 
+#include <algorithm>
+#include <iterator>
+
 #include "vpn/qt_trusttunnel_client.h"
 #include "vpn/vpn_helper_launch.h"
 #include "vpn/vpn_helper_protocol.h"
@@ -58,6 +61,15 @@ QString stateName(QtTrustTunnelClient::State s) {
     case QtTrustTunnelClient::State::Error: return QStringLiteral("Error");
     default: return QStringLiteral("Disconnected");
     }
+}
+
+std::vector<std::string> jsonArrayToStdStrings(const QJsonArray &arr)
+{
+    std::vector<std::string> out;
+    out.reserve(static_cast<size_t>(arr.size()));
+    std::transform(arr.begin(), arr.end(), std::back_inserter(out),
+                   [](const QJsonValue &v) { return v.toString().toStdString(); });
+    return out;
 }
 
 // Bridges one GUI connection to the VPN core. Quits the process when the GUI
@@ -174,17 +186,11 @@ private:
     }
 
     void applyExclusions(const QJsonObject &c) {
-        std::vector<std::string> ex;
-        for (const auto v : c.value("domains").toArray())
-            ex.push_back(v.toString().toStdString());
-        m_client.setExtraExclusions(ex);
+        m_client.setExtraExclusions(jsonArrayToStdStrings(c.value(QStringLiteral("domains")).toArray()));
     }
 
     void applyRoutes(const QJsonObject &c) {
-        std::vector<std::string> routes;
-        for (const auto v : c.value("excluded").toArray())
-            routes.push_back(v.toString().toStdString());
-        m_client.setRoutingRules({}, routes);
+        m_client.setRoutingRules({}, jsonArrayToStdStrings(c.value(QStringLiteral("excluded")).toArray()));
     }
 
     void handleConnect(const QJsonObject &c) {

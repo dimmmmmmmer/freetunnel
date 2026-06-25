@@ -542,8 +542,9 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     callbacks.protect_handler = protectOutboundSocket;
     callbacks.verify_handler = verifyServerCertificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
-        ag::VpnSessionState state = event ? event->state : ag::VPN_SS_DISCONNECTED;
-        QMetaObject::invokeMethod(this, [this, state]() { handleCoreStateChanged(state); }, Qt::QueuedConnection);
+        ag::VpnSessionState sessionState = event ? event->state : ag::VPN_SS_DISCONNECTED;
+        QMetaObject::invokeMethod(this, [this, sessionState]() { handleCoreStateChanged(sessionState); },
+                Qt::QueuedConnection);
     };
     callbacks.client_output_handler = [this](ag::VpnClientOutputEvent *event) {
         size_t bytes = 0;
@@ -653,11 +654,11 @@ void QtTrustTunnelClient::handleCoreDisconnected()
         scheduleReconnect(QStringLiteral("core disconnected"));
 }
 
-void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState state) {
+void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState) {
     if (m_stopRequested)
         return;
 
-    switch (state) {
+    switch (coreState) {
     case ag::VPN_SS_CONNECTED:
         handleCoreConnected();
         break;

@@ -6,6 +6,9 @@
 
 #include "core/AppSettings.h"
 
+#include <algorithm>
+#include <iterator>
+
 void Backend::setSplitEnabled(bool v) {
     if (m_settings.domain_bypass_enabled == v) return;
     m_settings.domain_bypass_enabled = v;
@@ -233,19 +236,19 @@ QString Backend::activeConfigProfile() const {
 // own — callers decide whether the change warrants a live rebuild.
 void Backend::applySplitRules() {
     const bool on = m_settings.domain_bypass_enabled;
-    const QStringList domains = m_settings.profiles.value(activeConfigProfile());
+    const QStringList profileDomains = m_settings.profiles.value(activeConfigProfile());
     std::vector<std::string> ex;
-    if (on)
-        for (const QString &d : domains)
-            ex.push_back(d.toStdString());
+    if (on) {
+        ex.reserve(static_cast<size_t>(profileDomains.size()));
+        std::transform(profileDomains.cbegin(), profileDomains.cend(), std::back_inserter(ex),
+                       [](const QString &d) { return d.toStdString(); });
+    }
     m_client.setExtraExclusions(ex);
-    // When split is off, force general mode (route everything) — otherwise a
-    // leftover "selective" mode with no rules would route NOTHING through the VPN.
     m_client.setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
-    // Excluded routes (subnets) are a separate, always-on routing rule.
     std::vector<std::string> routes;
-    for (const QString &r : m_settings.excluded_routes)
-        routes.push_back(r.toStdString());
+    routes.reserve(static_cast<size_t>(m_settings.excluded_routes.size()));
+    std::transform(m_settings.excluded_routes.cbegin(), m_settings.excluded_routes.cend(),
+                    std::back_inserter(routes), [](const QString &r) { return r.toStdString(); });
     m_client.setExcludedRoutes(routes);
 }
 

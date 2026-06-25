@@ -13,6 +13,7 @@ QString Backend::logPath() const {
             + QStringLiteral("/freetunnel.log");
 }
 
+// cppcheck-suppress functionStatic
 bool Backend::autoStart() const {
     return freetunnel::platformAutoStartEnabled();
 }

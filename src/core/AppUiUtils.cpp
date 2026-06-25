@@ -8,6 +8,8 @@
 #include <QStandardPaths>
 #include <QUrl>
 
+#include <algorithm>
+
 namespace {
 
 bool pathUnderRoot(const QString &canonical, const QString &root)
@@ -36,11 +38,8 @@ bool isAllowedUserFile(const QFileInfo &fi)
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
         QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
     };
-    for (const QString &root : roots) {
-        if (pathUnderRoot(canonical, root))
-            return true;
-    }
-    return false;
+    return std::any_of(roots.cbegin(), roots.cend(),
+                       [&](const QString &root) { return pathUnderRoot(canonical, root); });
 }
 
 } // namespace

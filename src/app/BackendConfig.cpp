@@ -13,8 +13,11 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTcpSocket>
+#include <QElapsedTimer>
 #include <QUrl>
 #include <QVariantMap>
+
+#include <algorithm>
 
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
@@ -24,20 +27,21 @@
 #include "core/DeepLink.h"
 #include "core/NetBind.h"
 
+#include <algorithm>
+#include <iterator>
+
 namespace {
 
 bool validateAddressList(const QString &addresses)
 {
     const QStringList addrs = addresses.split(QLatin1Char(','), Qt::SkipEmptyParts);
-    for (const QString &raw : addrs) {
+    return std::all_of(addrs.cbegin(), addrs.cend(), [](const QString &raw) {
         const QString a = raw.trimmed();
         const int colon = a.lastIndexOf(QLatin1Char(':'));
         bool portOk = false;
         const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
-        if (colon <= 0 || !portOk || port < 1 || port > 65535)
-            return false;
-    }
-    return true;
+        return colon > 0 && portOk && port >= 1 && port <= 65535;
+    });
 }
 
 bool validateDnsList(const QString &dns)
@@ -46,18 +50,16 @@ bool validateDnsList(const QString &dns)
         QStringLiteral("^(tls|https|quic|h3|sdns|udp|tcp)://"), QRegularExpression::CaseInsensitiveOption);
     const QStringList dnsList = dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
                                          Qt::SkipEmptyParts);
-    for (const QString &raw : dnsList) {
+    return std::all_of(dnsList.cbegin(), dnsList.cend(), [&](const QString &raw) {
         const QString d = raw.trimmed();
         if (dnsScheme.match(d).hasMatch())
-            continue;
+            return true;
         QString host = d;
         const int colon = host.lastIndexOf(QLatin1Char(':'));
         if (colon > 0 && !host.contains(QLatin1Char('[')) && host.count(QLatin1Char(':')) == 1)
             host = host.left(colon);
-        if (QHostAddress(host).isNull())
-            return false;
-    }
-    return true;
+        return !QHostAddress(host).isNull();
+    });
 }
 
 struct EditSnapshot {
@@ -255,10 +257,12 @@ void Backend::markConfigPingFailed(int index)
 void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
 {
     QTcpSocket *sock = freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
-    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
-    connect(sock, &QTcpSocket::connected, this, [this, index, sock, t0]() {
+    auto *elapsed = new QElapsedTimer();
+    elapsed->start();
+    connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed]() {
         if (index < m_pings.size())
-            m_pings[index] = QString::number(QDateTime::currentMSecsSinceEpoch() - t0) + tr(" ms");
+            m_pings[index] = QString::number(elapsed->elapsed()) + tr(" ms");
+        delete elapsed;
         sock->abort();
         sock->deleteLater();
         emit pingsChanged();
