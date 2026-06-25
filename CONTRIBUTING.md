@@ -110,7 +110,8 @@ ctest --test-dir build-tests --output-on-failure
 
 CI runs this on every push/PR via `.github/workflows/tests.yml` (matrix: Linux,
 macOS, Windows). Additional Linux-only jobs: **gcov/lcov coverage**
-(`scripts/coverage-report.sh`) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
+(`scripts/coverage-upstream-report.sh`, merges unit tests + upstream instrumented
+build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
 Test suites: deep links (incl. structured fuzz), config import, settings, TOML,
 credentials (Keychain / Cred Manager on macOS/Windows), release verify, control
@@ -153,7 +154,8 @@ shows **0%** until the report is uploaded with the correct token.
 3. Re-run **Coverage (Linux)** or push to `main`.
 
 The upload step is in [`.github/workflows/tests.yml`](.github/workflows/tests.yml). Local report:
-`bash scripts/coverage-report.sh`.
+`bash scripts/coverage-upstream-report.sh` (unit tests only locally if conan is
+absent: `FT_SKIP_UPSTREAM_COVERAGE=1 bash scripts/coverage-report.sh`).
 
 ### Branch protection and Codacy status checks
 

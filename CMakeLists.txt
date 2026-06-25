@@ -60,6 +60,8 @@ endif ()
 
 add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
+    src/app/AppStartup.cpp
+    include/app/AppStartup.h
     src/app/Backend.cpp
     src/app/BackendHotkeys.cpp
     src/app/BackendUpdates.cpp
@@ -98,6 +100,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/vpn/qt_trusttunnel_client.h
     src/vpn/vpn_helper_client.cpp
     include/vpn/vpn_helper_client.h
+    src/vpn/vpn_helper_launch.cpp
+    include/vpn/vpn_helper_launch.h
     src/vpn/vpn_helper_server.cpp
     include/vpn/vpn_helper_server.h
     assets/app.qrc

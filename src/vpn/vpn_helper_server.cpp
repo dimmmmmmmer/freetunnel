@@ -3,7 +3,6 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
-#include <QFile>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "vpn/qt_trusttunnel_client.h"
+#include "vpn/vpn_helper_launch.h"
 #include "vpn/vpn_helper_protocol.h"
 
 #if defined(Q_OS_WIN)
@@ -132,63 +132,81 @@ private:
     }
 
     void handle(const QJsonObject &c) {
+        if (!m_authed)
+            return handlePreAuth(c);
+        handleAuthed(c);
+    }
+
+    void handlePreAuth(const QJsonObject &c) {
         const QString cmd = c.value("cmd").toString();
-        if (!m_authed) {
-            if (cmd == "hello" && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
-                m_authed = true;
-                QJsonObject e; e["ev"] = "ready"; m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
-                // Tell the GUI whether we actually came up elevated so a failed
-                // "create listener" can be diagnosed from the app's own log.
-                QJsonObject pe; pe["ev"] = "info";
-                pe["msg"] = helperIsElevated()
-                        ? QStringLiteral("VPN helper started with admin privileges")
-                        : QStringLiteral("VPN helper started WITHOUT admin privileges — connecting will fail");
-                m_sock->write(QJsonDocument(pe).toJson(QJsonDocument::Compact) + '\n');
-            } else {
-                m_sock->close();
-            }
+        if (cmd == "hello" && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
+            m_authed = true;
+            QJsonObject e;
+            e["ev"] = "ready";
+            m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
+            QJsonObject pe;
+            pe["ev"] = "info";
+            pe["msg"] = helperIsElevated()
+                    ? QStringLiteral("VPN helper started with admin privileges")
+                    : QStringLiteral("VPN helper started WITHOUT admin privileges — connecting will fail");
+            m_sock->write(QJsonDocument(pe).toJson(QJsonDocument::Compact) + '\n');
             return;
         }
-        if (cmd == "setExclusions") {
-            std::vector<std::string> ex;
-            for (const auto v : c.value("domains").toArray()) ex.push_back(v.toString().toStdString());
-            m_client.setExtraExclusions(ex);
-        } else if (cmd == "setRoutes") {
-            std::vector<std::string> routes;
-            for (const auto v : c.value("excluded").toArray()) routes.push_back(v.toString().toStdString());
-            m_client.setRoutingRules({}, routes);
-        } else if (cmd == "setMode") {
-            m_client.setVpnMode(c.value("selective").toBool());
-        } else if (cmd == "setKillSwitch") {
-            m_client.setKillSwitch(c.value("enabled").toBool());
-        } else if (cmd == "connect") {
-            const QString path = c.value("configPath").toString();
-            const auto st = m_client.state();
-            const bool needsTeardown =
-                    st != QtTrustTunnelClient::State::Disconnected
-                    && st != QtTrustTunnelClient::State::Error;
-            auto startConnect = [this, path]() {
-                if (!m_client.loadConfigFromFile(path)) {
-                    QJsonObject e;
-                    e["ev"] = "error";
-                    e["msg"] = QStringLiteral("Failed to load config");
-                    send(e);
-                    return;
-                }
-                m_client.connectVpn();
-            };
-            if (needsTeardown) {
-                m_client.disconnectVpn();
-                // Let queued core DISCONNECTED callbacks drain while
-                // m_stopRequested is still true before starting a new session.
-                QTimer::singleShot(150, this, startConnect);
-            } else {
-                startConnect();
-            }
-        } else if (cmd == "disconnect") {
-            m_client.disconnectVpn();
-        } else if (cmd == "quit") {
+        m_sock->close();
+    }
+
+    void handleAuthed(const QJsonObject &c) {
+        const QString cmd = c.value("cmd").toString();
+        if (cmd == "setExclusions")
+            return applyExclusions(c);
+        if (cmd == "setRoutes")
+            return applyRoutes(c);
+        if (cmd == "setMode")
+            return m_client.setVpnMode(c.value("selective").toBool());
+        if (cmd == "setKillSwitch")
+            return m_client.setKillSwitch(c.value("enabled").toBool());
+        if (cmd == "connect")
+            return handleConnect(c.value("configPath").toString());
+        if (cmd == "disconnect")
+            return m_client.disconnectVpn();
+        if (cmd == "quit")
             QCoreApplication::quit();
+    }
+
+    void applyExclusions(const QJsonObject &c) {
+        std::vector<std::string> ex;
+        for (const auto v : c.value("domains").toArray())
+            ex.push_back(v.toString().toStdString());
+        m_client.setExtraExclusions(ex);
+    }
+
+    void applyRoutes(const QJsonObject &c) {
+        std::vector<std::string> routes;
+        for (const auto v : c.value("excluded").toArray())
+            routes.push_back(v.toString().toStdString());
+        m_client.setRoutingRules({}, routes);
+    }
+
+    void handleConnect(const QString &path) {
+        const auto st = m_client.state();
+        const bool needsTeardown =
+                st != QtTrustTunnelClient::State::Disconnected
+                && st != QtTrustTunnelClient::State::Error;
+        auto startConnect = [this, path]() {
+            if (!m_client.loadConfigFromFile(path)) {
+                QJsonObject e;
+                e["ev"] = "error";
+                e["msg"] = QStringLiteral("Failed to load config");
+                send(e);
+                return;
+            }
+            m_client.connectVpn();
+        };
+        if (needsTeardown) {
+            m_client.disconnectVpn();
+            QTimer::singleShot(150, this, startConnect);
+        } else {
+            startConnect();
         }
     }
 
@@ -205,26 +223,12 @@ private:
 
 int runVpnHelper(int argc, char **argv) {
     QCoreApplication app(argc, argv);
-    quint16 port = 0;
-    QString token;
-    QString tokenFile;
-    const QStringList args = QCoreApplication::arguments();
-    for (int i = 1; i < args.size() - 1; ++i) {
-        if (args[i] == QLatin1String("--port")) port = args[i + 1].toUShort();
-        else if (args[i] == QLatin1String("--token-file")) tokenFile = args[i + 1];
-    }
-    if (!tokenFile.isEmpty()) {
-        QFile f(tokenFile);
-        if (f.open(QIODevice::ReadOnly)) {
-            token = QString::fromUtf8(f.readAll()).trimmed();
-            f.close();
-        }
-        QFile::remove(tokenFile);
-    }
-    if (port == 0 || token.isEmpty())
+    const freetunnel::HelperLaunchConfig cfg =
+            freetunnel::parseHelperLaunchArgs(QCoreApplication::arguments());
+    if (!cfg.ok())
         return 2;
 
-    HelperServer server(port, token);
+    HelperServer server(cfg.port, cfg.token);
     if (!server.listen())
         return 3;
 

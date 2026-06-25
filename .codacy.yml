@@ -28,21 +28,9 @@ engines:
   lizard:
     exclude_paths:
       - 'i18n/**'
-      - 'src/vpn/**'
-      - 'main.cpp'
-      - 'src/app/**'
-      - 'src/core/DeepLink.cpp'
-      - 'src/core/NetBind.cpp'
-      - 'src/core/AppSettings.cpp'
-      - 'src/core/CredentialStore.cpp'
-      - 'src/core/ReleaseVerify.cpp'
-      - 'src/core/VersionCompare.cpp'
   metric:
     exclude_paths:
       - 'i18n/**'
-      - 'src/vpn/**'
-      - 'main.cpp'
-      - 'src/app/BackendConfig.cpp'
   duplication:
     exclude_paths:
       - 'i18n/**'

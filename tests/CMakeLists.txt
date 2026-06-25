@@ -24,7 +24,7 @@ if (FT_ENABLE_SANITIZERS)
     add_link_options(-fsanitize=address,undefined)
 endif ()
 
-find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network Svg REQUIRED)
 
 include(FetchContent)
 set(QHOTKEY_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -74,6 +74,60 @@ add_executable(test_appuiutils
 target_include_directories(test_appuiutils PRIVATE ../include ../include/core)
 target_link_libraries(test_appuiutils PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME appuiutils COMMAND test_appuiutils)
+
+set(APP_STARTUP_TEST_SOURCES
+    test_app_startup.cpp
+    ../src/app/AppStartup.cpp
+    ../src/app/Backend.cpp
+    ../src/app/BackendHotkeys.cpp
+    ../src/app/BackendUpdates.cpp
+    ../src/app/BackendSettings.cpp
+    ../src/app/BackendLogs.cpp
+    ../src/app/BackendConfig.cpp
+    ../src/app/BackendSplit.cpp
+    ../src/core/AppSettings.cpp
+    ../src/core/ConfigStore.cpp
+    ../src/core/DeepLink.cpp
+    ../src/core/ConfigImport.cpp
+    ../src/core/ControlCommand.cpp
+    ../src/core/ConfigToml.cpp
+    ../src/core/NetBind.cpp
+    ../src/core/AppUiUtils.cpp
+    ../src/core/UpdateChecker.cpp
+    ../src/core/VersionCompare.cpp
+    ../src/core/ReleaseVerify.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/core/InstanceControl.cpp
+    ../src/vpn/vpn_helper_client.cpp
+    ../include/app/AppStartup.h
+    ../include/app/Backend.h
+    ../include/core/UpdateChecker.h
+    ../include/vpn/vpn_helper_client.h
+)
+add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc)
+target_include_directories(test_app_startup PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_app_startup PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_app_startup)
+if(WIN32)
+    target_link_libraries(test_app_startup PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_app_startup PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_app_startup PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME app_startup COMMAND test_app_startup)
+
+add_executable(test_vpn_helper_launch
+    test_vpn_helper_launch.cpp
+    ../src/vpn/vpn_helper_launch.cpp
+)
+target_include_directories(test_vpn_helper_launch PRIVATE ../include ../include/vpn)
+target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch)
 
 add_executable(test_configimport
     test_configimport.cpp
