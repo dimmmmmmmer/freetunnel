@@ -196,16 +196,24 @@ private:
             return applyExclusions(c);
         if (cmd == "setRoutes")
             return applyRoutes(c);
-        if (cmd == "setMode")
-            return QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
-                                             Q_ARG(bool, c.value("selective").toBool()));
-        if (cmd == "setKillSwitch")
-            return QMetaObject::invokeMethod(&m_client, "setKillSwitch", Qt::QueuedConnection,
-                                             Q_ARG(bool, c.value("enabled").toBool()));
-        if (cmd == "connect")
-            return handleConnect(c);
-        if (cmd == "disconnect")
-            return QMetaObject::invokeMethod(&m_client, "disconnectVpn", Qt::QueuedConnection);
+        if (cmd == "setMode") {
+            QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
+                                      Q_ARG(bool, c.value("selective").toBool()));
+            return;
+        }
+        if (cmd == "setKillSwitch") {
+            QMetaObject::invokeMethod(&m_client, "setKillSwitch", Qt::QueuedConnection,
+                                      Q_ARG(bool, c.value("enabled").toBool()));
+            return;
+        }
+        if (cmd == "connect") {
+            handleConnect(c);
+            return;
+        }
+        if (cmd == "disconnect") {
+            QMetaObject::invokeMethod(&m_client, "disconnectVpn", Qt::QueuedConnection);
+            return;
+        }
         if (cmd == "quit")
             QCoreApplication::quit();
     }

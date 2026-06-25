@@ -9,6 +9,12 @@ exclude_paths:
   - 'i18n/**'
   - 'SECURITY.md'
 
+languages:
+  typescript:
+    enabled: false
+  javascript:
+    enabled: false
+
 engines:
   cppcheck:
     language: c++
@@ -21,6 +27,7 @@ engines:
       - "--suppress=unusedStructMember"
       - "--suppress=functionStatic"
       - "--suppress=constParameter"
+      - "--suppress=useStlAlgorithm"
       - "--inline-suppr"
       - "--library=qt"
       - "-D__linux__"

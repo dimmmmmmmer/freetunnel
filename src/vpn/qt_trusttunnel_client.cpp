@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <iterator>
 #include <toml++/toml.h>
 
 #ifdef _WIN32
@@ -365,8 +366,8 @@ void QtTrustTunnelClient::setExtraExclusionDomains(const QStringList &domains)
 {
     std::vector<std::string> exclusions;
     exclusions.reserve(static_cast<size_t>(domains.size()));
-    for (const QString &d : domains)
-        exclusions.push_back(d.toStdString());
+    std::transform(domains.cbegin(), domains.cend(), std::back_inserter(exclusions),
+                   [](const QString &d) { return d.toStdString(); });
     setExtraExclusions(exclusions);
 }
 
@@ -374,8 +375,8 @@ void QtTrustTunnelClient::setExcludedRouteStrings(const QStringList &routes)
 {
     std::vector<std::string> excluded;
     excluded.reserve(static_cast<size_t>(routes.size()));
-    for (const QString &r : routes)
-        excluded.push_back(r.toStdString());
+    std::transform(routes.cbegin(), routes.cend(), std::back_inserter(excluded),
+                     [](const QString &r) { return r.toStdString(); });
     setRoutingRules({}, excluded);
 }
 
