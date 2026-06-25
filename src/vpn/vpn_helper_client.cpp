@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -350,16 +351,19 @@ static bool launchMacElevatedHelper(QProcess **procOut, QObject *parent, const Q
 static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QString &tokenPath,
                                     QString *err)
 {
+    const QString exeDir = QFileInfo(exe).absolutePath();
     const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"")
                                  .arg(QString::number(port), tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     sei.lpVerb = L"runas";
-    std::wstring wexe = exe.toStdWString();
-    std::wstring wargs = args.toStdWString();
+    const std::wstring wexe = exe.toStdWString();
+    const std::wstring wargs = args.toStdWString();
+    const std::wstring wdir = exeDir.toStdWString();
     sei.lpFile = wexe.c_str();
     sei.lpParameters = wargs.c_str();
+    sei.lpDirectory = wdir.c_str();
     sei.nShow = SW_HIDE;
     if (!ShellExecuteExW(&sei)) {
         if (err)
@@ -441,6 +445,8 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
                          static_cast<quint64>(ev.value("down").toDouble()));
     } else if (type == "info") {
         emit connectionInfo(ev.value("msg").toString());
+    } else if (type == "progress") {
+        emit connectProgress(ev.value("msg").toString());
     } else if (type == "error") {
         emit vpnError(ev.value("msg").toString());
     }

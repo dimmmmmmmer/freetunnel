@@ -137,7 +137,7 @@ static QString connectionInfoLine(ag::VpnConnectionInfoEvent *event)
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     : QObject(parent) {
     m_reconnectTimer.setSingleShot(true);
-    connect(&m_reconnectTimer, &QTimer::timeout, this, &QtTrustTunnelClient::doConnectAttemptInThread);
+    connect(&m_reconnectTimer, &QTimer::timeout, this, &QtTrustTunnelClient::startConnectAttempt);
 
     // Periodically check open fd count and force clean reconnect if leaking.
     m_fdWatchdogTimer.setInterval(10000); // every 10 seconds
@@ -324,7 +324,59 @@ void QtTrustTunnelClient::connectVpn() {
     m_reconnectTimer.stop();
     m_fdWatchdogTimer.start(); // start fd health monitoring
     setState(State::Connecting);
+    startConnectAttempt();
+}
+
+void QtTrustTunnelClient::startConnectAttempt()
+{
+    // When the client object lives on a dedicated VPN thread (elevated helper),
+    // run connect() on that thread. Spawning a second worker thread leaves the
+    // core on the wrong thread — Winsock/Wintun on Windows require thread affinity.
+    if (thread() != QCoreApplication::instance()->thread()) {
+        doConnectAttempt();
+        return;
+    }
     doConnectAttemptInThread();
+}
+
+void QtTrustTunnelClient::beginConnect(const QString &configToml, const QString &configPath)
+{
+    const auto st = state();
+    const bool needsTeardown =
+            st != State::Disconnected && st != State::Error;
+    auto startConnect = [this, configToml, configPath]() {
+        const bool loaded = !configToml.isEmpty() ? loadConfigFromToml(configToml)
+                                                  : loadConfigFromFile(configPath);
+        if (!loaded) {
+            emit vpnError(QStringLiteral("Failed to load config"));
+            return;
+        }
+        connectVpn();
+    };
+    if (needsTeardown) {
+        disconnectVpn();
+        QTimer::singleShot(150, this, startConnect);
+    } else {
+        startConnect();
+    }
+}
+
+void QtTrustTunnelClient::setExtraExclusionDomains(const QStringList &domains)
+{
+    std::vector<std::string> exclusions;
+    exclusions.reserve(static_cast<size_t>(domains.size()));
+    for (const QString &d : domains)
+        exclusions.push_back(d.toStdString());
+    setExtraExclusions(exclusions);
+}
+
+void QtTrustTunnelClient::setExcludedRouteStrings(const QStringList &routes)
+{
+    std::vector<std::string> excluded;
+    excluded.reserve(static_cast<size_t>(routes.size()));
+    for (const QString &r : routes)
+        excluded.push_back(r.toStdString());
+    setRoutingRules({}, excluded);
 }
 
 void QtTrustTunnelClient::doConnectAttemptInThread() {

@@ -3,6 +3,8 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -10,11 +12,8 @@
 #include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QThread>
 #include <QTimer>
-#include <vector>
-
-#include <algorithm>
-#include <iterator>
 
 #include "vpn/qt_trusttunnel_client.h"
 #include "vpn/vpn_helper_launch.h"
@@ -24,6 +23,24 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#endif
+
+#if defined(Q_OS_WIN)
+static bool prepareWindowsHelperRuntime(QString *errOut)
+{
+    const QString dir = QCoreApplication::applicationDirPath();
+    QDir::setCurrent(dir);
+    SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dir.utf16()));
+    if (!QFile::exists(dir + QStringLiteral("/wintun.dll"))) {
+        if (errOut) {
+            *errOut = QObject::tr("wintun.dll is missing next to FreeTunnel.exe (%1). "
+                                  "Reinstall from the official installer.")
+                              .arg(dir);
+        }
+        return false;
+    }
+    return true;
+}
 #endif
 
 namespace {
@@ -63,34 +80,40 @@ QString stateName(QtTrustTunnelClient::State s) {
     }
 }
 
-std::vector<std::string> jsonArrayToStdStrings(const QJsonArray &arr)
-{
-    std::vector<std::string> out;
-    out.reserve(static_cast<size_t>(arr.size()));
-    std::transform(arr.begin(), arr.end(), std::back_inserter(out),
-                   [](const QJsonValue &v) { return v.toString().toStdString(); });
-    return out;
-}
-
 // Bridges one GUI connection to the VPN core. Quits the process when the GUI
 // disconnects, so the elevated helper never lingers.
 class HelperServer : public QObject {
 public:
     HelperServer(quint16 port, QString token)
         : m_port(port), m_token(std::move(token)) {
+        m_client.moveToThread(&m_vpnThread);
+        m_vpnThread.start();
         connect(&m_client, &QtTrustTunnelClient::stateChanged, this,
                 [this](QtTrustTunnelClient::State s) {
                     QJsonObject e; e["ev"] = "state"; e["state"] = stateName(s); send(e);
-                });
+                }, Qt::QueuedConnection);
         connect(&m_client, &QtTrustTunnelClient::tunnelStats, this,
                 [this](quint64 up, quint64 down) {
                     QJsonObject e; e["ev"] = "stats";
                     e["up"] = double(up); e["down"] = double(down); send(e);
-                });
+                }, Qt::QueuedConnection);
         connect(&m_client, &QtTrustTunnelClient::connectionInfo, this,
-                [this](const QString &m) { QJsonObject e; e["ev"]="info"; e["msg"]=m; send(e); });
+                [this](const QString &m) { QJsonObject e; e["ev"]="info"; e["msg"]=m; send(e); },
+                Qt::QueuedConnection);
+        connect(&m_client, &QtTrustTunnelClient::connectProgress, this,
+                [this](const QString &m) { QJsonObject e; e["ev"]="progress"; e["msg"]=m; send(e); },
+                Qt::QueuedConnection);
         connect(&m_client, &QtTrustTunnelClient::vpnError, this,
-                [this](const QString &m) { QJsonObject e; e["ev"]="error"; e["msg"]=m; send(e); });
+                [this](const QString &m) { QJsonObject e; e["ev"]="error"; e["msg"]=m; send(e); },
+                Qt::QueuedConnection);
+    }
+
+    ~HelperServer() override {
+        if (m_vpnThread.isRunning()) {
+            QMetaObject::invokeMethod(&m_client, "disconnectVpn", Qt::BlockingQueuedConnection);
+            m_vpnThread.quit();
+            m_vpnThread.wait();
+        }
     }
 
     bool listen() {
@@ -174,50 +197,50 @@ private:
         if (cmd == "setRoutes")
             return applyRoutes(c);
         if (cmd == "setMode")
-            return m_client.setVpnMode(c.value("selective").toBool());
+            return QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
+                                             Q_ARG(bool, c.value("selective").toBool()));
         if (cmd == "setKillSwitch")
-            return m_client.setKillSwitch(c.value("enabled").toBool());
+            return QMetaObject::invokeMethod(&m_client, "setKillSwitch", Qt::QueuedConnection,
+                                             Q_ARG(bool, c.value("enabled").toBool()));
         if (cmd == "connect")
             return handleConnect(c);
         if (cmd == "disconnect")
-            return m_client.disconnectVpn();
+            return QMetaObject::invokeMethod(&m_client, "disconnectVpn", Qt::QueuedConnection);
         if (cmd == "quit")
             QCoreApplication::quit();
     }
 
     void applyExclusions(const QJsonObject &c) {
-        m_client.setExtraExclusions(jsonArrayToStdStrings(c.value(QStringLiteral("domains")).toArray()));
+        QStringList domains;
+        for (const QJsonValue &v : c.value(QStringLiteral("domains")).toArray())
+            domains.append(v.toString());
+        QMetaObject::invokeMethod(&m_client, "setExtraExclusionDomains", Qt::QueuedConnection,
+                                  Q_ARG(QStringList, domains));
     }
 
     void applyRoutes(const QJsonObject &c) {
-        m_client.setRoutingRules({}, jsonArrayToStdStrings(c.value(QStringLiteral("excluded")).toArray()));
+        QStringList routes;
+        for (const QJsonValue &v : c.value(QStringLiteral("excluded")).toArray())
+            routes.append(v.toString());
+        QMetaObject::invokeMethod(&m_client, "setExcludedRouteStrings", Qt::QueuedConnection,
+                                  Q_ARG(QStringList, routes));
     }
 
     void handleConnect(const QJsonObject &c) {
+#if defined(Q_OS_WIN)
+        QString wintunErr;
+        if (!prepareWindowsHelperRuntime(&wintunErr)) {
+            QJsonObject e;
+            e["ev"] = "error";
+            e["msg"] = wintunErr;
+            send(e);
+            return;
+        }
+#endif
         const QString toml = c.value(QStringLiteral("configToml")).toString();
         const QString path = c.value(QStringLiteral("configPath")).toString();
-        const auto st = m_client.state();
-        const bool needsTeardown =
-                st != QtTrustTunnelClient::State::Disconnected
-                && st != QtTrustTunnelClient::State::Error;
-        auto startConnect = [this, toml, path]() {
-            const bool loaded = !toml.isEmpty() ? m_client.loadConfigFromToml(toml)
-                                                : m_client.loadConfigFromFile(path);
-            if (!loaded) {
-                QJsonObject e;
-                e["ev"] = "error";
-                e["msg"] = QStringLiteral("Failed to load config");
-                send(e);
-                return;
-            }
-            m_client.connectVpn();
-        };
-        if (needsTeardown) {
-            m_client.disconnectVpn();
-            QTimer::singleShot(150, this, startConnect);
-        } else {
-            startConnect();
-        }
+        QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
+                                  Q_ARG(QString, toml), Q_ARG(QString, path));
     }
 
     quint16 m_port = 0;
@@ -226,6 +249,7 @@ private:
     QTcpSocket *m_sock = nullptr;
     QByteArray m_buf;
     bool m_authed = false;
+    QThread m_vpnThread;
     QtTrustTunnelClient m_client;
 };
 

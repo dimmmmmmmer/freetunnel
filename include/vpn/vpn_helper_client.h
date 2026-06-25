@@ -50,6 +50,7 @@ signals:
     void stateChanged(VpnHelperClient::State state);
     void tunnelStats(quint64 upload, quint64 download);
     void connectionInfo(const QString &msg);
+    void connectProgress(const QString &step);
     void vpnError(const QString &msg);
 
 private:

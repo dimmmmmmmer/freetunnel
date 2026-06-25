@@ -2,6 +2,7 @@
 #pragma once
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QThread>
 #include <memory>
@@ -49,6 +50,7 @@ public:
     void setReconnectBoundsMs(int initialDelayMs, int maxDelayMs);
 
     Q_INVOKABLE void connectVpn();
+    Q_INVOKABLE void beginConnect(const QString &configToml, const QString &configPath);
     Q_INVOKABLE void disconnectVpn();
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
@@ -56,9 +58,11 @@ public:
     void setRoutingRules(const std::vector<std::string> &includeRoutes,
             const std::vector<std::string> &excludeRoutes);
     void setCustomDns(const std::vector<std::string> &dnsServers);
+    Q_INVOKABLE void setExtraExclusionDomains(const QStringList &domains);
+    Q_INVOKABLE void setExcludedRouteStrings(const QStringList &routes);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
-    void setVpnMode(bool selective); // selective = route only the exclusions list
-    void setKillSwitch(bool enabled);
+    Q_INVOKABLE void setVpnMode(bool selective); // selective = route only the exclusions list
+    Q_INVOKABLE void setKillSwitch(bool enabled);
 
 signals:
     void stateChanged(QtTrustTunnelClient::State state);
@@ -76,6 +80,7 @@ private slots:
 private:
     ag::VpnCallbacks makeCallbacks();
     void doConnectAttempt();
+    void startConnectAttempt();
     void scheduleReconnect(const QString &reason);
     void setState(State s);
     void handleCoreStateChanged(ag::VpnSessionState coreState);

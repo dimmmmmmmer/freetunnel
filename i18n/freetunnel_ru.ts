@@ -411,6 +411,10 @@
         <source>Elevation was cancelled or failed</source>
         <translation>Повышение прав отменено или не удалось</translation>
     </message>
+    <message>
+        <source>wintun.dll is missing next to FreeTunnel.exe (%1). Reinstall from the official installer.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QtTrustTunnelClient</name>
