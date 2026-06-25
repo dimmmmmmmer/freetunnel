@@ -23,6 +23,12 @@ lcov --quiet --remove "$OUT/coverage.info" \
   '*/tests/*' '*/_deps/*' '*/Qt/*' '/usr/*' \
   --output-file "$OUT/coverage.filtered.info"
 
+# Codacy matches lcov SF: entries to repository paths — use paths relative to repo root.
+if grep -q "^SF:${ROOT}/" "$OUT/coverage.filtered.info" 2>/dev/null; then
+  sed -i.bak "s|^SF:${ROOT}/|SF:|g" "$OUT/coverage.filtered.info"
+  rm -f "$OUT/coverage.filtered.info.bak"
+fi
+
 lcov --summary "$OUT/coverage.filtered.info"
 if command -v genhtml >/dev/null 2>&1; then
   genhtml --quiet "$OUT/coverage.filtered.info" --output-directory "$OUT/html"

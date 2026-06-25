@@ -108,15 +108,17 @@ jobs:
           if-no-files-found: error
 
       - name: Upload coverage to Codacy
+        if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
         env:
           CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
         run: |
           if [ -z "${CODACY_PROJECT_TOKEN:-}" ]; then
-            echo "CODACY_PROJECT_TOKEN not configured — skipping Codacy coverage upload"
+            echo "::notice title=Codacy coverage::CODACY_PROJECT_TOKEN is not set — coverage stays at 0% on Codacy. Add the Project API token from Codacy → Settings → Coverage as a GitHub Actions secret."
             exit 0
           fi
           bash <(curl -Ls https://coverage.codacy.com/get.sh) report \
-            -r coverage-out/coverage.filtered.info
+            -r coverage-out/coverage.filtered.info \
+            --commit-uuid "${GITHUB_SHA}"
 
   sanitizers:
     name: ASan+UBSan (Linux)

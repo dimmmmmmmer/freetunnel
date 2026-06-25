@@ -140,16 +140,19 @@ coverage tracking on the repository page (badges in [README.md](README.md)).
 If the Codacy badge stays gray, open the project on Codacy and re-copy the badge
 markdown from **Settings → General → Badges** (it embeds your project UUID).
 
-### Coverage badge (optional)
+### Coverage badge (required for non-zero Codacy coverage)
 
-CI uploads lcov from the Linux coverage job when the secret is set:
+CI generates lcov from unit tests (~49% of instrumented `src/`/`include/` today). Codacy
+shows **0%** until the report is uploaded with a project token.
 
 1. Codacy → project **Settings → Coverage** → copy the **Project API token**.
-2. Add it as GitHub secret `CODACY_PROJECT_TOKEN`.
-3. The next push to `main` uploads `coverage.filtered.info` from
-   [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+2. GitHub → **Settings → Secrets and variables → Actions** → **New repository secret**:
+   name `CODACY_PROJECT_TOKEN`, paste the token.
+3. Re-run the **Coverage (Linux)** job (or push any commit to `main`).
 
-Local coverage report: `bash scripts/coverage-report.sh`.
+The upload step is in [`.github/workflows/tests.yml`](.github/workflows/tests.yml). Until the
+secret exists, CI prints a notice and skips upload — local coverage still works via
+`bash scripts/coverage-report.sh`.
 
 ### Branch protection and Codacy status checks
 
