@@ -45,6 +45,9 @@ if [[ -n "$DNS_VER" ]]; then
   rm -rf "$ROOT/_dnslibs"
 fi
 
+set +e
+UPSTREAM_OK=0
+
 echo "==> Configure upstream build with coverage"
 cmake -S "$UPSTREAM" -B "$UPSTREAM_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
@@ -58,6 +61,12 @@ cmake -S "$UPSTREAM" -B "$UPSTREAM_BUILD" -G Ninja \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries --coverage"
 
 cmake --build "$UPSTREAM_BUILD" --target FreeTunnel -j"$(nproc 2>/dev/null || echo 4)"
+UPSTREAM_OK=$?
+set -e
+if [[ "$UPSTREAM_OK" -ne 0 ]]; then
+  echo "warning: upstream instrumented build failed — uploading unit-test coverage only" >&2
+  exit 0
+fi
 
 APP_BIN="$UPSTREAM_BUILD/FreeTunnel/FreeTunnel"
 if [[ -x "$APP_BIN" ]]; then

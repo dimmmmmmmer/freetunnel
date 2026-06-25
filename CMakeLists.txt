@@ -61,7 +61,10 @@ endif ()
 add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
     src/app/AppStartup.cpp
+    src/app/AppGuiMain.cpp
     include/app/AppStartup.h
+    src/app/PlatformAutoStart.cpp
+    include/app/PlatformAutoStart.h
     src/app/Backend.cpp
     src/app/BackendHotkeys.cpp
     src/app/BackendUpdates.cpp
@@ -78,6 +81,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/DeepLink.h
     src/core/ConfigImport.cpp
     include/core/ConfigImport.h
+    src/core/ConfigPaths.cpp
+    include/core/ConfigPaths.h
     src/core/ControlCommand.cpp
     include/core/ControlCommand.h
     src/core/InstanceControl.cpp

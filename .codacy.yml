@@ -6,6 +6,7 @@ exclude_paths:
   - '**/_deps/**'
   - '**/build*/**'
   - 'docs/**'
+  - 'SECURITY.md'
 
 engines:
   cppcheck:

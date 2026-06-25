@@ -82,6 +82,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
+    ../src/app/PlatformAutoStart.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
     ../src/app/BackendSplit.cpp
@@ -89,6 +90,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/ConfigStore.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigImport.cpp
+    ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
     ../src/core/NetBind.cpp
@@ -129,9 +131,18 @@ target_include_directories(test_vpn_helper_launch PRIVATE ../include ../include/
 target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch)
 
+add_executable(test_configpaths
+    test_configpaths.cpp
+    ../src/core/ConfigPaths.cpp
+)
+target_include_directories(test_configpaths PRIVATE ../include ../include/core)
+target_link_libraries(test_configpaths PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME configpaths COMMAND test_configpaths)
+
 add_executable(test_configimport
     test_configimport.cpp
     ../src/core/ConfigImport.cpp
+    ../src/core/ConfigPaths.cpp
     ../src/core/DeepLink.cpp
 )
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
@@ -254,6 +265,7 @@ add_test(NAME qml_ui COMMAND test_qml_ui)
 add_executable(test_integration_config_workflow
     test_integration_config_workflow.cpp
     ../src/core/ConfigImport.cpp
+    ../src/core/ConfigPaths.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/ConfigToml.cpp
@@ -292,6 +304,7 @@ set(BACKEND_TEST_SOURCES
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
+    ../src/app/PlatformAutoStart.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
     ../src/app/BackendSplit.cpp
@@ -299,6 +312,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigStore.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigImport.cpp
+    ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
     ../src/core/NetBind.cpp

@@ -17,6 +17,7 @@
 #include <QVariantMap>
 
 #include "core/ConfigImport.h"
+#include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
@@ -142,14 +143,10 @@ bool Backend::importFile(const QString &path) {
     // into the OS credential store, stripping it from the on-disk copy.
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    QString safe;
-    for (const QChar &c : QFileInfo(p).completeBaseName())
-        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
-    if (safe.isEmpty())
-        safe = QStringLiteral("imported-%1").arg(QDateTime::currentSecsSinceEpoch());
-    QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
-    if (QFileInfo::exists(target) && QFileInfo(target).absoluteFilePath() != QFileInfo(p).absoluteFilePath())
-        target = QDir(base).filePath(QStringLiteral("%1-%2.toml").arg(safe).arg(QDateTime::currentSecsSinceEpoch()));
+    const QString stem = freetunnel::sanitizeConfigBaseName(QFileInfo(p).completeBaseName());
+    QString target = freetunnel::uniqueOwnerConfigPath(stem);
+    if (QFileInfo(target).absoluteFilePath() == QFileInfo(p).absoluteFilePath())
+        target = freetunnel::uniqueOwnerConfigPath(stem + QStringLiteral("-copy"));
     {
         QFile out(target);
         if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -245,12 +242,8 @@ bool Backend::createConfig(const QVariantMap &f) {
     const QString t = freetunnel::buildConfigToml(ct);
     const QString hostname = ct.hostname;
 
-    QString safe;
     const QString src = name.isEmpty() ? hostname : name;
-    for (const QChar &c : src)
-        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
-    if (safe.isEmpty())
-        safe = QStringLiteral("config-%1").arg(QDateTime::currentSecsSinceEpoch());
+    const QString safe = freetunnel::sanitizeConfigBaseName(src, QStringLiteral("config"));
 
     const int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
     const QString oldPath = (editIndex >= 0 && editIndex < m_paths.size())
@@ -273,7 +266,7 @@ bool Backend::createConfig(const QVariantMap &f) {
 
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    const QString target = QDir(base).filePath(safe + QStringLiteral(".toml"));
+    const QString target = freetunnel::uniqueOwnerConfigPath(safe);
     QFile file(target);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         emit errorOccurred(tr("Could not write config"));

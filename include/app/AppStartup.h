@@ -28,6 +28,8 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
 
 void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
 
+int runGuiApplication(int argc, char *argv[]);
+
 } // namespace freetunnel
 
 class UrlOpenFilter : public QObject {

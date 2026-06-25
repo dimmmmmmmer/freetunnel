@@ -3,22 +3,13 @@
 
 #include <QDateTime>
 
+#include "core/ConfigPaths.h"
 #include "core/DeepLink.h"
 
 namespace freetunnel {
 
 static QString sanitizeFileName(const QString &name) {
-    QString safe;
-    for (const QChar &c : name) {
-        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
-    }
-    if (safe.isEmpty()) {
-        safe = QStringLiteral("imported-%1").arg(QDateTime::currentSecsSinceEpoch());
-    }
-    if (!safe.endsWith(QLatin1String(".toml"))) {
-        safe += QLatin1String(".toml");
-    }
-    return safe;
+    return sanitizeConfigBaseName(name.isEmpty() ? QString() : name, QStringLiteral("imported"));
 }
 
 std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString *error) {
@@ -31,7 +22,7 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
         name = cfg->hostname.trimmed();
     }
     PreparedImport out;
-    out.fileName = sanitizeFileName(name);
+    out.fileName = sanitizeFileName(name) + QStringLiteral(".toml");
     out.tomlContent = deepLinkConfigToToml(*cfg);
     return out;
 }

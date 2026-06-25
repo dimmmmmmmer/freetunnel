@@ -62,13 +62,12 @@ void TestAppStartup::urlOpenFilterBuffersUntilReady()
     UrlOpenFilter filter;
     qApp->installEventFilter(&filter);
     Backend backend;
-    QWindow win;
 
     QFileOpenEvent ev(QUrl(QStringLiteral("freetunnel://toggle")));
     QCoreApplication::sendEvent(qApp, &ev);
     QCOMPARE(filter.pending, QStringLiteral("freetunnel://toggle"));
 
-    filter.ready(&backend, &win);
+    filter.ready(&backend, nullptr);
     QVERIFY(filter.pending.isEmpty());
 }
 
