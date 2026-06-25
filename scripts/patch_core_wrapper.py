@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Patch the injected TrustTunnelClient C++ wrapper to surface telemetry events.
-
-The public `ag::VpnCallbacks` wrapper exposes only 5 of the core's ~11 events.
-In particular `VPN_EVENT_TUNNEL_CONNECTION_STATS` (per-connection upload/download
-deltas) is received by the wrapper's dispatcher but dropped, so the Qt client's
-TrafficGraph has no data source.
-
-This script adds a `tunnel_stats_handler` to `VpnCallbacks` and routes the event
-to it. It is applied in CI after the client is injected into the upstream tree.
-The upstream ref is pinned in scripts/upstream_ref.txt and verified by
-scripts/verify_upstream_patch.sh on every PR.
-
-Usage: patch_core_wrapper.py <upstream_dir>
-"""
+"""Patch the injected TrustTunnelClient C++ wrapper to surface telemetry events."""
+# The public `ag::VpnCallbacks` wrapper exposes only 5 of the core's ~11 events.
+# In particular `VPN_EVENT_TUNNEL_CONNECTION_STATS` (per-connection upload/download
+# deltas) is received by the wrapper's dispatcher but dropped, so the Qt client's
+# TrafficGraph has no data source.
+#
+# This script adds a `tunnel_stats_handler` to `VpnCallbacks` and routes the event
+# to it. It is applied in CI after the client is injected into the upstream tree.
+# The upstream ref is pinned in scripts/upstream_ref.txt and verified by
+# scripts/verify_upstream_patch.sh on every PR.
+#
+# Usage: patch_core_wrapper.py <upstream_dir>
 
 import sys
 from pathlib import Path

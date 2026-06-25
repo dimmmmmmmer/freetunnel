@@ -20,8 +20,8 @@ FreeTunnel splits privileges:
 | Helper (`--helper`) | Elevated (User Account Control on Windows / sudo on Unix / pkexec on Linux) | Virtual private network (VPN) tunnel via TrustTunnel core |
 
 The GUI talks to the helper over **loopback** (local-only) Transmission Control
-Protocol (TCP, `127.0.0.1`) with a one-time random token and a 64 kilobyte (KB)
-read cap.
+Protocol (TCP) on the Internet Protocol version 4 (IPv4) loopback address
+`127.0.0.1` with a one-time random token and a 64 kilobyte (KB) read cap.
 
 ## Credential storage
 
@@ -34,8 +34,8 @@ Tom's Obvious Minimal Language (TOML)** config files under normal operation:
 | Windows | Credential Manager |
 | Linux | libsecret / Secret Service (`secret-tool`) |
 
-On Linux, if no Secret Service (D-Bus secrets API) is available (no GNOME Keyring
-or KWallet bridge),
+On Linux, if no Secret Service (D-Bus secrets API) is available (no GNOME
+Keyring (Linux desktop secrets daemon) or KWallet (KDE wallet) bridge),
 the app **refuses to save new passwords** and shows a warning in Settings. Existing
 passwords saved in an older plaintext fallback (0600 files) can still be loaded
 until migrated.
@@ -50,11 +50,13 @@ The in-app updater requires:
 1. `SHA256SUMS.txt` on the GitHub Release
 2. Ed25519 (Edwards-curve digital signature) signature (`SHA256SUMS.txt.sig`) —
    verified by the in-app updater
-3. SHA-256 (Secure Hash Algorithm 256-bit) match of the downloaded installer against the manifest
+3. Secure Hash Algorithm 256-bit (SHA-256) match of the downloaded installer
+   against the published checksum list (`SHA256SUMS.txt`)
 
 The release job signs `SHA256SUMS.txt` with the `ED25519_SIGNING_KEY` GitHub
-Actions secret (OpenSSL Ed25519 Privacy-Enhanced Mail (PEM) private key,
-**not** Open Pretty Good Privacy (OpenPGP) / GNU Privacy Guard (GPG)).
+Actions secret (OpenSSL (open-source TLS and cryptography toolkit) Ed25519
+Privacy-Enhanced Mail (PEM) private key, **not** Open Pretty Good Privacy
+(OpenPGP) / GNU Privacy Guard (GPG)).
 Public key: `include/core/ReleaseSigning.h`.
 
 Release binaries are **not code-signed** (no Apple Developer ID / Authenticode).
