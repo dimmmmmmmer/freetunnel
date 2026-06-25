@@ -321,6 +321,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
     ../src/core/CredentialStore.cpp
+    ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h

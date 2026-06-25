@@ -72,6 +72,12 @@ void removeInstanceAuthToken()
     QFile::remove(instanceAuthFilePath());
 }
 
+void sweepLegacyInstanceAuthFile()
+{
+    if (!CredentialStore::loadPassword(kInstanceAuthKey).isEmpty())
+        QFile::remove(instanceAuthFilePath());
+}
+
 bool readInstanceAuthToken(QString *tokenOut)
 {
     if (!tokenOut)
@@ -79,15 +85,22 @@ bool readInstanceAuthToken(QString *tokenOut)
     const QString fromStore = CredentialStore::loadPassword(kInstanceAuthKey);
     if (!fromStore.isEmpty()) {
         *tokenOut = fromStore;
+        QFile::remove(instanceAuthFilePath()); // drop stale legacy file
         return true;
     }
     // Legacy plaintext file from builds before credential-store migration.
-    QFile f(instanceAuthFilePath());
+    const QString path = instanceAuthFilePath();
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return false;
     const QString token = QString::fromUtf8(f.readAll()).trimmed();
+    f.close();
     if (token.isEmpty())
         return false;
+    if (CredentialStore::secureStorageAvailable()
+            && CredentialStore::storePassword(kInstanceAuthKey, token)) {
+        QFile::remove(path);
+    }
     *tokenOut = token;
     return true;
 }

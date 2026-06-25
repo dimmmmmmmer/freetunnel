@@ -4,6 +4,7 @@
 #include <QTemporaryDir>
 
 #include "core/InstanceControl.h"
+#include "core/CredentialStore.h"
 
 class TestInstanceControl : public QObject {
     Q_OBJECT
@@ -12,6 +13,7 @@ private slots:
     void roundTripMessage();
     void rejectsBadMessage();
     void tokenFileRoundTrip();
+    void legacyInstanceAuthFileMigratesWhenSecure();
     void rejectsMismatchedToken();
 };
 
@@ -51,6 +53,36 @@ void TestInstanceControl::tokenFileRoundTrip()
 
     freetunnel::removeInstanceAuthToken();
     QVERIFY(!freetunnel::readInstanceAuthToken(&read));
+}
+
+void TestInstanceControl::legacyInstanceAuthFileMigratesWhenSecure()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    if (!freetunnel::CredentialStore::secureStorageAvailable())
+        QSKIP("Secure storage required to verify legacy instance-auth migration");
+
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+
+    const QString legacyToken = QStringLiteral("legacy-token-abc");
+    const QString path = freetunnel::instanceAuthFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    {
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(legacyToken.toUtf8());
+        f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    }
+
+    QString read;
+    QVERIFY(freetunnel::readInstanceAuthToken(&read));
+    QCOMPARE(read, legacyToken);
+    QVERIFY(!QFileInfo::exists(path));
+
+    freetunnel::removeInstanceAuthToken();
 }
 
 void TestInstanceControl::rejectsMismatchedToken()

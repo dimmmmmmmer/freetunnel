@@ -36,9 +36,9 @@ Tom's Obvious Minimal Language (TOML)** config files under normal operation:
 
 On Linux, if no Secret Service (D-Bus secrets API) is available (no GNOME
 Keyring (Linux desktop secrets daemon) or KWallet (KDE wallet) bridge),
-the app **refuses to save new passwords** and shows a warning in Settings. Existing
-passwords saved in an older plaintext fallback (0600 files) can still be loaded
-until migrated.
+the app **refuses to save new passwords** and shows a warning in Settings.
+Legacy plaintext files (0600 credential files, `instance-auth`) are **migrated
+into the OS store automatically** when secure storage becomes available.
 
 Temporary `.connect-*.toml` files (password injected for the helper) are removed on
 disconnect, quit, and swept at startup.

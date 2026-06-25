@@ -14,6 +14,9 @@ bool writeInstanceAuthToken(QString *tokenOut);
 
 void removeInstanceAuthToken();
 
+/// Remove legacy on-disk instance token when the credential store already holds it.
+void sweepLegacyInstanceAuthFile();
+
 bool readInstanceAuthToken(QString *tokenOut);
 
 QByteArray formatInstanceMessage(const QString &token, const QString &payload);

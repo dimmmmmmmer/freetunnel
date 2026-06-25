@@ -17,6 +17,11 @@
 
 #include <optional>
 
+#if defined(Q_OS_LINUX)
+#include <QFile>
+#include <QRegularExpression>
+#endif
+
 #if !defined(Q_OS_WIN)
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -179,11 +184,49 @@ bool bindSocketToRouteIndex(int fd, const freetunnel::PhysicalRoute &r, bool v6)
 }
 #endif
 
+#if defined(Q_OS_LINUX)
+QString defaultRouteInterfaceName()
+{
+    QFile f(QStringLiteral("/proc/net/route"));
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    while (!f.atEnd()) {
+        const QStringList fields =
+                QString::fromUtf8(f.readLine()).trimmed().split(QRegularExpression(QStringLiteral("\\s+")),
+                                                                Qt::SkipEmptyParts);
+        if (fields.size() < 2)
+            continue;
+        if (fields.at(1) == QStringLiteral("00000000"))
+            return fields.first();
+    }
+    return {};
+}
+
+std::optional<freetunnel::PhysicalRoute> routeForDefaultGateway()
+{
+    const QString ifName = defaultRouteInterfaceName();
+    if (ifName.isEmpty())
+        return std::nullopt;
+    for (const QNetworkInterface &ni : QNetworkInterface::allInterfaces()) {
+        if (ni.name() != ifName || !interfaceEligibleForRoute(ni, false))
+            continue;
+        const freetunnel::PhysicalRoute r = routeFromInterface(ni);
+        if (r.index > 0)
+            return r;
+    }
+    return std::nullopt;
+}
+#endif
+
 } // namespace
 
 namespace freetunnel {
 
 PhysicalRoute physicalOutboundRoute() {
+#if defined(Q_OS_LINUX)
+    if (const auto routed = routeForDefaultGateway())
+        return *routed;
+#endif
     for (bool v6 : {false, true}) {
         const QHostAddress src = osRouteSourceAddress(v6);
         if (src.isNull())

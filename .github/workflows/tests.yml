@@ -115,7 +115,6 @@ jobs:
 
       - name: Upload coverage to Codacy
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
-        continue-on-error: true
         env:
           CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
         run: |

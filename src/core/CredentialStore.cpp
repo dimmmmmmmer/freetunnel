@@ -305,7 +305,22 @@ QString CredentialStore::loadPassword(const QString &key)
     const QString fromService = secretServiceLookup(key, &ok);
     if (ok && !fromService.isEmpty())
         return fromService;
-    return loadPasswordFile(key); // fallback (or pre-Secret-Service migration)
+    const QString fromFile = loadPasswordFile(key);
+    if (fromFile.isEmpty())
+        return QString();
+    if (secureStorageAvailable()) {
+#if defined(FT_HAVE_LIBSECRET)
+        if (libsecretStore(key, fromFile)) {
+            deletePasswordFile(key);
+            return fromFile;
+        }
+#endif
+        if (secretServiceStore(key, fromFile)) {
+            deletePasswordFile(key);
+            return fromFile;
+        }
+    }
+    return fromFile;
 #endif
 }
 
@@ -428,6 +443,11 @@ void sweepStaleMaterializedConfigs()
                                           QDir::Files | QDir::Hidden);
     for (const QString &name : stale)
         QFile::remove(d.filePath(name));
+}
+
+void sweepLegacyPlaintextStorage()
+{
+    sweepStaleMaterializedConfigs();
 }
 
 } // namespace freetunnel

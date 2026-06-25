@@ -26,5 +26,7 @@ QString materializeConfigForConnect(const QString &configPath);
 void removeMaterializedConfig(const QString &materializedPath);
 // Delete any leftover materialized configs (e.g. from a crash) — call at startup.
 void sweepStaleMaterializedConfigs();
+// Migrate/remove legacy plaintext credential files when secure storage is available.
+void sweepLegacyPlaintextStorage();
 
 } // namespace freetunnel

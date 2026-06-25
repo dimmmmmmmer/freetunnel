@@ -10,9 +10,11 @@
 #include "core/ConfigToml.h"
 #include "core/ControlCommand.h"
 #include "core/CredentialStore.h"
+#include "core/InstanceControl.h"
 
 Backend::Backend(QObject *parent) : QObject(parent) {
-    freetunnel::sweepStaleMaterializedConfigs(); // clear any password temp files left by a crash
+    freetunnel::sweepLegacyPlaintextStorage();
+    freetunnel::sweepLegacyInstanceAuthFile();
     m_settings = loadAppSettings();
     reloadConfigs();
     if (!m_settings.last_config_path.isEmpty() && m_paths.contains(m_settings.last_config_path)) {

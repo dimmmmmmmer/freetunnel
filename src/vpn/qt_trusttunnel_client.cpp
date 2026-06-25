@@ -6,6 +6,7 @@
 #include <QThread>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <toml++/toml.h>
 
 #ifdef _WIN32
@@ -22,6 +23,11 @@ struct iovec {
 #include "vpn/vpn.h" // for ag::iovec on Windows
 #include "net/network_manager.h" // for vpn_network_manager_get_outbound_interface
 #include "net/tls.h" // for ag::tls_verify_cert (server certificate validation)
+
+#if defined(__linux__)
+#include <net/if.h>
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include "net/os_tunnel.h" // for vpn_win_socket_protect
@@ -67,7 +73,19 @@ static void protectOutboundSocket(ag::SocketProtectEvent *event)
     }
 #endif
 #ifdef __linux__
-    (void) event;
+    if (geteuid() == 0) {
+        const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
+        if (idx != 0) {
+            char ifname[IFNAMSIZ]{};
+            if (if_indextoname(static_cast<unsigned int>(idx), ifname) != nullptr
+                    && setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, ifname,
+                                  static_cast<socklen_t>(strlen(ifname) + 1))
+                           == 0)
+                return;
+        }
+        event->result = -1;
+        return;
+    }
 #endif
 #ifdef _WIN32
     if (!ag::vpn_win_socket_protect(event->fd, event->peer))
