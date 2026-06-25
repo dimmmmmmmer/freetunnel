@@ -1,12 +1,23 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
+#ifdef _WIN32
+#ifndef IOVEC_DEFINED_QT
+#define IOVEC_DEFINED_QT
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+};
+#endif
+#endif
+
 #include "vpn/trusttunnel/client.h"
 #include "vpn/vpn.h"
 
 #include <QByteArray>
 #include <QString>
 
+#include <cstddef>
 #include <chrono>
 #include <functional>
 
