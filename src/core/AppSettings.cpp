@@ -75,26 +75,27 @@ QStringList recommendedRussiaDomains() {
         QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")};
 }
 
+static QStringList domainsForProfileName(const QSettings &s, const QString &n,
+                                         const QStringList &names, const QStringList &legacy)
+{
+    const QString key = QStringLiteral("bypass/profile/") + n;
+    if (s.contains(key))
+        return s.value(key).toStringList();
+    if (n == QStringLiteral("Default")) {
+        if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
+            return legacy;
+        return recommendedRussiaDomains();
+    }
+    return {};
+}
+
 static void loadProfileMap(const QSettings &s, AppSettings &out)
 {
     const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
     const QStringList legacy = s.value("bypass/rules", QStringList{}).toStringList();
     out.profiles.clear();
-    for (const QString &n : names) {
-        const QString key = QStringLiteral("bypass/profile/") + n;
-        if (s.contains(key)) {
-            out.profiles.insert(n, s.value(key).toStringList());
-            continue;
-        }
-        if (n == QStringLiteral("Default")) {
-            if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
-                out.profiles.insert(n, legacy);
-            else
-                out.profiles.insert(n, recommendedRussiaDomains());
-        } else {
-            out.profiles.insert(n, {});
-        }
-    }
+    for (const QString &n : names)
+        out.profiles.insert(n, domainsForProfileName(s, n, names, legacy));
     if (out.profiles.isEmpty())
         out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
     if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
@@ -102,14 +103,9 @@ static void loadProfileMap(const QSettings &s, AppSettings &out)
         out.profiles[QStringLiteral("Default")] = legacy;
 }
 
-static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
+static QStringList mergedProfileOrder(const QSettings &s, const QStringList &names,
+                                      const AppSettings &out)
 {
-    out.active_profile = s.value("bypass/active_profile", QStringLiteral("Default")).toString();
-    if (!out.profiles.contains(out.active_profile))
-        out.active_profile = out.profiles.firstKey();
-    out.domain_bypass_rules = out.profiles.value(out.active_profile);
-
-    const QStringList names = out.profiles.keys();
     QStringList order;
     for (const QString &n : s.value("bypass/profile_order", names).toStringList()) {
         if (out.profiles.contains(n) && !order.contains(n))
@@ -121,11 +117,26 @@ static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
     }
     if (!order.contains(QStringLiteral("Default")))
         order.prepend(QStringLiteral("Default"));
-    out.profile_order = order;
+    return order;
+}
 
+static void loadConfigProfileAssignments(const QSettings &s, AppSettings &out)
+{
     const QVariantMap cp = s.value("bypass/config_profiles").toMap();
     for (auto it = cp.constBegin(); it != cp.constEnd(); ++it)
         out.config_profiles.insert(it.key(), it.value().toString());
+}
+
+static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
+{
+    out.active_profile = s.value("bypass/active_profile", QStringLiteral("Default")).toString();
+    if (!out.profiles.contains(out.active_profile))
+        out.active_profile = out.profiles.firstKey();
+    out.domain_bypass_rules = out.profiles.value(out.active_profile);
+
+    const QStringList names = out.profiles.keys();
+    out.profile_order = mergedProfileOrder(s, names, out);
+    loadConfigProfileAssignments(s, out);
 }
 
 static void loadBypassProfiles(const QSettings &s, AppSettings &out)

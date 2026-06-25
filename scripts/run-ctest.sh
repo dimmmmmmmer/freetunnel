@@ -9,11 +9,8 @@ shift
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
 
 if [[ "$(uname -s)" == "Linux" ]] && [[ -n "${CI:-}" ]]; then
-  dbus-run-session -- bash -c '
-    eval "$(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null || true)"
-    eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
-    exec ctest --test-dir "$1" -j1 --output-on-failure "${@:2}"
-  ' _ "$BUILD_DIR" "$@"
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  dbus-run-session -- bash "$ROOT/scripts/run-ctest-keyring.sh" "$BUILD_DIR" "$@"
 else
   ctest --test-dir "$BUILD_DIR" -j1 --output-on-failure "$@"
 fi

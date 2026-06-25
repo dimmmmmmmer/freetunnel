@@ -1,5 +1,6 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "qt_trusttunnel_client.h"
+#include "qt_trusttunnel_platform.h"
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QRandomGenerator>
@@ -11,7 +12,6 @@
 #include <toml++/toml.h>
 
 #ifdef _WIN32
-// Windows SDK doesn't define POSIX iovec; define a minimal version before vpn.h uses it.
 #ifndef IOVEC_DEFINED_QT
 #define IOVEC_DEFINED_QT
 struct iovec {
@@ -21,119 +21,9 @@ struct iovec {
 #endif
 #endif
 
-#include "vpn/vpn.h" // for ag::iovec on Windows
-#include "net/network_manager.h" // for vpn_network_manager_get_outbound_interface
-#include "net/tls.h" // for ag::tls_verify_cert (server certificate validation)
-
-#if defined(__linux__)
-#include <net/if.h>
-#include <unistd.h>
-#endif
-
-#ifdef _WIN32
-#include "net/os_tunnel.h" // for vpn_win_socket_protect
-#include <windows.h>
-
-static bool is_process_elevated() {
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-        return false;
-    }
-    TOKEN_ELEVATION elevation{};
-    DWORD size = 0;
-    const BOOL ok = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
-    CloseHandle(token);
-    return ok && elevation.TokenIsElevated;
-}
-#endif
-
-static ag::LogLevel parse_log_level(const QString &level) {
-    const QString l = level.toLower();
-    if (l == "error") return ag::LOG_LEVEL_ERROR;
-    if (l == "warn" || l == "warning") return ag::LOG_LEVEL_WARN;
-    if (l == "debug") return ag::LOG_LEVEL_DEBUG;
-    if (l == "trace") return ag::LOG_LEVEL_TRACE;
-    return ag::LOG_LEVEL_INFO;
-}
-
-#if defined(__APPLE__)
-static void protectOutboundSocketApple(ag::SocketProtectEvent *event)
-{
-    const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-    if (idx == 0)
-        return;
-    const int level = event->peer->sa_family == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP;
-    const int opt = event->peer->sa_family == AF_INET6 ? IPV6_BOUND_IF : IP_BOUND_IF;
-    if (setsockopt(event->fd, level, opt, &idx, sizeof(idx)) != 0)
-        event->result = -1;
-}
-#endif
-
-#if defined(__linux__)
-static void protectOutboundSocketLinux(ag::SocketProtectEvent *event)
-{
-    if (geteuid() != 0) {
-        event->result = -1;
-        return;
-    }
-    const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-    if (idx == 0) {
-        event->result = -1;
-        return;
-    }
-    char ifname[IFNAMSIZ]{};
-    if (if_indextoname(static_cast<unsigned int>(idx), ifname) == nullptr
-            || setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, ifname,
-                          static_cast<socklen_t>(strlen(ifname) + 1))
-                    != 0)
-        event->result = -1;
-}
-#endif
-
-#ifdef _WIN32
-static void protectOutboundSocketWin(ag::SocketProtectEvent *event)
-{
-    if (!ag::vpn_win_socket_protect(event->fd, event->peer))
-        event->result = -1;
-}
-#endif
-
-static void protectOutboundSocket(ag::SocketProtectEvent *event)
-{
-    if (!event)
-        return;
-    event->result = 0;
-#if defined(__APPLE__)
-    protectOutboundSocketApple(event);
-#elif defined(__linux__)
-    protectOutboundSocketLinux(event);
-#elif defined(_WIN32)
-    protectOutboundSocketWin(event);
-#endif
-}
-
-static void verifyServerCertificate(ag::VpnVerifyCertificateEvent *event)
-{
-    if (!event)
-        return;
-    const char *err = ag::tls_verify_cert(event->cert, event->chain, nullptr);
-    event->result = (err == nullptr) ? 0 : -1;
-}
-
-static QString connectionInfoLine(ag::VpnConnectionInfoEvent *event)
-{
-    if (!event)
-        return QStringLiteral("connection info");
-    QString action;
-    switch (event->action) {
-    case ag::VPN_FCA_BYPASS: action = QStringLiteral("bypass"); break;
-    case ag::VPN_FCA_TUNNEL: action = QStringLiteral("tunnel"); break;
-    case ag::VPN_FCA_REJECT: action = QStringLiteral("reject"); break;
-    default: action = QStringLiteral("unknown"); break;
-    }
-    const QString domain = event->domain ? QString::fromUtf8(event->domain) : QStringLiteral("-");
-    return QStringLiteral("%1 %2").arg(action, domain);
-}
+#include "vpn/vpn.h"
+#include "net/network_manager.h"
+#include "net/tls.h"
 
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     : QObject(parent) {
@@ -305,63 +195,6 @@ void QtTrustTunnelClient::setReconnectBoundsMs(int initialDelayMs, int maxDelayM
     m_reconnectMaxMs = std::max(m_reconnectDelayMs, maxDelayMs);
 }
 
-void QtTrustTunnelClient::connectVpn() {
-    if (m_state == State::Connecting || m_state == State::Connected
-            || m_state == State::Reconnecting || m_state == State::WaitingForNetwork) {
-        return;
-    }
-#ifndef _WIN32
-    if (::geteuid() != 0) {
-        emit vpnError(QStringLiteral("Root permissions are required to initialize VPN (run app with sudo)."));
-        return;
-    }
-#else
-    if (!is_process_elevated()) {
-        emit vpnError(QStringLiteral("Administrator privileges are required to initialize VPN. Restart the app as Administrator."));
-        return;
-    }
-#endif
-    m_stopRequested = false;
-    m_reconnectTimer.stop();
-    m_fdWatchdogTimer.start(); // start fd health monitoring
-    setState(State::Connecting);
-    startConnectAttempt();
-}
-
-void QtTrustTunnelClient::startConnectAttempt()
-{
-    // When the client object lives on a dedicated VPN thread (elevated helper),
-    // run connect() on that thread. Spawning a second worker thread leaves the
-    // core on the wrong thread — Winsock/Wintun on Windows require thread affinity.
-    if (thread() != QCoreApplication::instance()->thread()) {
-        doConnectAttempt();
-        return;
-    }
-    doConnectAttemptInThread();
-}
-
-void QtTrustTunnelClient::beginConnect(const QString &configToml, const QString &configPath)
-{
-    const auto st = state();
-    const bool needsTeardown =
-            st != State::Disconnected && st != State::Error;
-    auto startConnect = [this, configToml, configPath]() {
-        const bool loaded = !configToml.isEmpty() ? loadConfigFromToml(configToml)
-                                                  : loadConfigFromFile(configPath);
-        if (!loaded) {
-            emit vpnError(QStringLiteral("Failed to load config"));
-            return;
-        }
-        connectVpn();
-    };
-    if (needsTeardown) {
-        disconnectVpn();
-        QTimer::singleShot(150, this, startConnect);
-    } else {
-        startConnect();
-    }
-}
-
 void QtTrustTunnelClient::setExtraExclusionDomains(const QStringList &domains)
 {
     std::vector<std::string> exclusions;
@@ -378,138 +211,6 @@ void QtTrustTunnelClient::setExcludedRouteStrings(const QStringList &routes)
     std::transform(routes.cbegin(), routes.cend(), std::back_inserter(excluded),
                      [](const QString &r) { return r.toStdString(); });
     setRoutingRules({}, excluded);
-}
-
-void QtTrustTunnelClient::doConnectAttemptInThread() {
-    // If thread is already running, wait for it to finish
-    if (m_connectThread.isRunning()) {
-        m_connectThread.quit();
-        m_connectThread.wait();
-    }
-
-    // BUG FIX: Disconnect any previous QThread::started connections that
-    // accumulated from earlier calls to this function.  Without this, every
-    // reconnect adds one more connection and on the N-th reconnect the lambda
-    // fires N times simultaneously, causing parallel doConnectAttempt() calls
-    // and a data race / crash on m_client.
-    disconnect(&m_connectThread, &QThread::started, nullptr, nullptr);
-
-    // BUG FIX: Use `worker` (not `this`) as the receiver context object so
-    // that Qt routes the lambda to m_connectThread instead of the main thread.
-    // With `this` as the context, Qt picks Qt::QueuedConnection across threads
-    // and posts the lambda to the main thread's event loop — doConnectAttempt()
-    // would then block the entire UI.
-    auto *worker = new QObject();
-    worker->moveToThread(&m_connectThread);
-    connect(&m_connectThread, &QThread::started, worker, [this, worker]() {
-        doConnectAttempt();
-        worker->deleteLater();
-        m_connectThread.quit();
-    });
-
-    m_connectThread.start();
-}
-
-bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
-{
-    if (m_config.has_value())
-        return true;
-    if (!m_lastConfigToml.isEmpty())
-        return loadConfigFromToml(m_lastConfigToml);
-    if (!m_lastConfigPath.isEmpty())
-        return loadConfigFromFile(m_lastConfigPath);
-    setState(State::Error);
-    emit vpnError(QStringLiteral("TrustTunnel config is not set"));
-    return false;
-}
-
-bool QtTrustTunnelClient::ensureClientReady()
-{
-    if (m_client)
-        return true;
-    if (!reloadStoredConfigIfNeeded())
-        return false;
-    emit connectProgress(tr("Initializing VPN core..."));
-    m_client = std::make_unique<ag::TrustTunnelClient>(std::move(*m_config), makeCallbacks());
-    m_config.reset();
-    emit connectProgress(tr("Starting network monitor..."));
-    m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), "");
-    if (m_networkMonitor->start())
-        return true;
-    m_networkMonitor.reset();
-    teardownClient();
-    setState(State::Error);
-    emit vpnError(QStringLiteral("Failed to start network monitor"));
-    return false;
-}
-
-void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHint)
-{
-    QString msg = qErr;
-    if (privilegeHint)
-        msg += QStringLiteral(" (likely needs sudo/admin privileges)");
-    teardownClient();
-    m_stopRequested = true;
-    setState(State::Error);
-    emit vpnError(QString("connect() failed: %1").arg(msg));
-}
-
-bool QtTrustTunnelClient::attemptTunnelConnect()
-{
-    emit connectProgress(tr("Configuring DNS..."));
-    if (auto dnsErr = m_client->set_system_dns()) {
-        teardownClient();
-        m_stopRequested = true;
-        setState(State::Error);
-        emit vpnError(QString("set_system_dns() failed: %1")
-                              .arg(QString::fromStdString(dnsErr->str())));
-        return false;
-    }
-
-    m_lastConnectAttempt = std::chrono::steady_clock::now();
-    emit connectProgress(tr("Establishing tunnel..."));
-    if (auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{})) {
-        const QString qErr = QString::fromStdString(err->str());
-        if (qErr.contains("Failed to create listener", Qt::CaseInsensitive)) {
-            failConnectFatal(qErr, true);
-            return false;
-        }
-        scheduleReconnect(QString("connect() failed: %1").arg(qErr));
-        return false;
-    }
-    return true;
-}
-
-void QtTrustTunnelClient::doConnectAttempt() {
-    if (m_stopRequested) {
-        return;
-    }
-
-    const bool isReconnect = (m_client != nullptr);
-    // If called from scheduleReconnect, update state (connectVpn already set it).
-    if (m_state != State::Connecting) {
-        setState(isReconnect ? State::Reconnecting : State::Connecting);
-    }
-
-    try {
-        // If the client already exists, properly tear down the old VPN session
-        // before reconnecting. Without this, connect_impl() creates a new Vpn
-        // instance via vpn_open() and overwrites the pointer, leaking the
-        // previous session and all its resources.
-        if (isReconnect) {
-            emit connectProgress(tr("Disconnecting previous session..."));
-            teardownClient();  // Full cleanup including networkMonitor
-        }
-
-        if (!m_client && !ensureClientReady())
-            return;
-
-        if (!attemptTunnelConnect())
-            return;
-    } catch (const std::exception &e) {
-        teardownClient();
-        scheduleReconnect(QString::fromUtf8(e.what()));
-    }
 }
 
 void QtTrustTunnelClient::disconnectVpn() {
@@ -550,7 +251,7 @@ QtTrustTunnelClient::State QtTrustTunnelClient::state() const {
 }
 
 void QtTrustTunnelClient::setLogLevel(const QString &level) {
-    m_logLevel = parse_log_level(level);
+    m_logLevel = qt_trusttunnel_parse_log_level(level);
     ag::Logger::set_log_level(m_logLevel);
     if (m_config.has_value()) {
         m_config->loglevel = m_logLevel;
@@ -592,8 +293,8 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
 
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     ag::VpnCallbacks callbacks;
-    callbacks.protect_handler = protectOutboundSocket;
-    callbacks.verify_handler = verifyServerCertificate;
+    callbacks.protect_handler = qt_trusttunnel_protect_outbound_socket;
+    callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
         ag::VpnSessionState sessionState = event ? event->state : ag::VPN_SS_DISCONNECTED;
         QMetaObject::invokeMethod(this, [this, sessionState]() { handleCoreStateChanged(sessionState); },
@@ -617,7 +318,7 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
                 Qt::QueuedConnection);
     };
     callbacks.connection_info_handler = [this](ag::VpnConnectionInfoEvent *event) {
-        const QString line = connectionInfoLine(event);
+        const QString line = qt_trusttunnel_connection_info_line(event);
         QMetaObject::invokeMethod(this, [this, line]() { emit connectionInfo(line); }, Qt::QueuedConnection);
     };
     return callbacks;

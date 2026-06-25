@@ -124,40 +124,50 @@ void setupMacDockIcon(QGuiApplication &app, Backend &backend)
 void setupMacDockIcon(QGuiApplication &, Backend &) {}
 #endif
 
+QByteArray readLocalSocketPayload(QLocalSocket *c)
+{
+    QByteArray buf = c->readAll();
+    while (c->state() == QLocalSocket::ConnectedState && buf.size() < 64 * 1024
+           && c->waitForReadyRead(200))
+        buf += c->readAll();
+    buf += c->readAll();
+    return buf;
+}
+
+void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
+                              const QString &instanceToken)
+{
+    if (!c)
+        return;
+    const QByteArray buf = readLocalSocketPayload(c);
+    if (!localSocketPeerIsSameUser(c)) {
+        c->deleteLater();
+        return;
+    }
+    QString recvToken;
+    QString cmd;
+    if (!parseInstanceMessage(buf, &recvToken, &cmd) || instanceToken.isEmpty()
+            || !instanceTokensEqual(recvToken, instanceToken)) {
+        c->deleteLater();
+        return;
+    }
+    c->deleteLater();
+    backend.handleControl(cmd);
+    if (win) {
+        win->show();
+        win->raise();
+        win->requestActivate();
+    }
+}
+
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken)
 {
     QObject::connect(server, &QLocalServer::newConnection, server,
                      [server, &backend, win, instanceToken]() {
-        QLocalSocket *c = server->nextPendingConnection();
-        if (!c)
-            return;
-        QByteArray buf = c->readAll();
-        while (c->state() == QLocalSocket::ConnectedState
-               && buf.size() < 64 * 1024
-               && c->waitForReadyRead(200))
-            buf += c->readAll();
-        buf += c->readAll();
-        if (!localSocketPeerIsSameUser(c)) {
-            c->deleteLater();
-            return;
-        }
-        QString recvToken;
-        QString cmd;
-        if (!parseInstanceMessage(buf, &recvToken, &cmd)
-                || instanceToken.isEmpty()
-                || !instanceTokensEqual(recvToken, instanceToken)) {
-            c->deleteLater();
-            return;
-        }
-        c->deleteLater();
-        backend.handleControl(cmd);
-        if (win) {
-            win->show();
-            win->raise();
-            win->requestActivate();
-        }
-    });
+                         handleInstanceConnection(server->nextPendingConnection(), backend, win,
+                                                  instanceToken);
+                     });
 }
 
 void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)

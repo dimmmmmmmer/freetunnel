@@ -49,18 +49,23 @@ bool interfaceIsVirtual(const QString &name) {
                        [&name](const QString &p) { return name.startsWith(p); });
 }
 
-freetunnel::PhysicalRoute routeFromInterface(const QNetworkInterface &ni) {
-    freetunnel::PhysicalRoute r;
-    QHostAddress v4, v6;
+void pickInterfaceRouteAddresses(const QNetworkInterface &ni, QHostAddress *v4, QHostAddress *v6)
+{
     for (const QNetworkAddressEntry &e : ni.addressEntries()) {
         const QHostAddress a = e.ip();
         if (a.isLoopback() || a.isLinkLocal())
             continue;
-        if (a.protocol() == QAbstractSocket::IPv4Protocol && v4.isNull())
-            v4 = a;
-        else if (a.protocol() == QAbstractSocket::IPv6Protocol && v6.isNull())
-            v6 = a;
+        if (a.protocol() == QAbstractSocket::IPv4Protocol && v4->isNull())
+            *v4 = a;
+        else if (a.protocol() == QAbstractSocket::IPv6Protocol && v6->isNull())
+            *v6 = a;
     }
+}
+
+freetunnel::PhysicalRoute routeFromInterface(const QNetworkInterface &ni) {
+    freetunnel::PhysicalRoute r;
+    QHostAddress v4, v6;
+    pickInterfaceRouteAddresses(ni, &v4, &v6);
     if (!v4.isNull() || !v6.isNull()) {
         r.index = ni.index();
         r.v4 = v4;
@@ -221,6 +226,15 @@ std::optional<freetunnel::PhysicalRoute> routeForDefaultGateway()
 #endif
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+void closeNativeSocket(qintptr fd)
+{
+#if defined(Q_OS_WIN)
+    ::closesocket(static_cast<SOCKET>(fd));
+#else
+    ::close(static_cast<int>(fd));
+#endif
+}
+
 bool attachNativeBoundSocket(QTcpSocket *sock, const freetunnel::PhysicalRoute &r, bool v6)
 {
     const int sockType = v6 ? AF_INET6 : AF_INET;
@@ -234,20 +248,12 @@ bool attachNativeBoundSocket(QTcpSocket *sock, const freetunnel::PhysicalRoute &
         return false;
 #endif
     if (!bindSocketToRouteIndex(fd, r, v6)) {
-#if defined(Q_OS_WIN)
-        ::closesocket(fd);
-#else
-        ::close(fd);
-#endif
+        closeNativeSocket(static_cast<qintptr>(fd));
         return false;
     }
     if (sock->setSocketDescriptor(static_cast<qintptr>(fd), QAbstractSocket::UnconnectedState))
         return true;
-#if defined(Q_OS_WIN)
-    ::closesocket(fd);
-#else
-    ::close(fd);
-#endif
+    closeNativeSocket(static_cast<qintptr>(fd));
     return false;
 }
 #endif

@@ -95,6 +95,7 @@ private:
     bool ensureClientReady();
     void failConnectFatal(const QString &qErr, bool privilegeHint);
     bool attemptTunnelConnect();
+    void teardownIfReconnecting(bool isReconnect);
     void forceFdReconnect(const QString &logReason, const QString &userReason);
     static int countOpenFds();
     static int getFdLimit();

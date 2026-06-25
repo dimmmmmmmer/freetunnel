@@ -88,6 +88,9 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/PlatformAutoStart.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
+    ../src/app/BackendConfigCreate.cpp
+    ../src/app/BackendConfigImport.cpp
+    ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
     ../src/core/AppSettings.cpp
     ../src/core/ConfigStore.cpp
@@ -310,6 +313,9 @@ set(BACKEND_TEST_SOURCES
     ../src/app/PlatformAutoStart.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
+    ../src/app/BackendConfigCreate.cpp
+    ../src/app/BackendConfigImport.cpp
+    ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
     ../src/core/AppSettings.cpp
     ../src/core/ConfigStore.cpp

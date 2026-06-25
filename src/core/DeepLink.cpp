@@ -143,27 +143,41 @@ bool applyDeepLinkStringTlv(quint64 tag, const QByteArray &value, DeepLinkConfig
     }
 }
 
+bool applyDeepLinkVersionTlv(const QByteArray &value, DeepLinkConfig &cfg)
+{
+    int p = 0;
+    quint64 v = 0;
+    readVarint(value, p, v);
+    cfg.version = static_cast<int>(v);
+    return true;
+}
+
+bool applyDeepLinkBoolTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg)
+{
+    const bool flag = value.isEmpty() ? false : (value.at(0) != 0);
+    switch (tag) {
+    case 0x04: cfg.hasIpv6 = value.isEmpty() ? true : flag; return true;
+    case 0x07: cfg.skipVerification = flag; return true;
+    case 0x0A: cfg.antiDpi = flag; return true;
+    default: return false;
+    }
+}
+
 bool applyDeepLinkScalarTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg)
 {
-    const auto asBool = [&](bool def) {
-        return value.isEmpty() ? def : (value.at(0) != 0);
-    };
-    const auto asVarint = [&](quint64 def) {
-        int p = 0;
-        quint64 v = def;
-        readVarint(value, p, v);
-        return v;
-    };
-
     switch (tag) {
-    case 0x00: cfg.version = static_cast<int>(asVarint(0)); return true;
-    case 0x04: cfg.hasIpv6 = asBool(true); return true;
-    case 0x07: cfg.skipVerification = asBool(false); return true;
+    case 0x00: return applyDeepLinkVersionTlv(value, cfg);
+    case 0x04:
+    case 0x07:
+    case 0x0A: return applyDeepLinkBoolTlv(tag, value, cfg);
     case 0x08: cfg.certificate = value; return true;
-    case 0x09:
-        cfg.upstreamProtocol = asVarint(1) == 2 ? UpstreamProtocol::Http3 : UpstreamProtocol::Http2;
+    case 0x09: {
+        int p = 0;
+        quint64 v = 1;
+        readVarint(value, p, v);
+        cfg.upstreamProtocol = v == 2 ? UpstreamProtocol::Http3 : UpstreamProtocol::Http2;
         return true;
-    case 0x0A: cfg.antiDpi = asBool(false); return true;
+    }
     default: return false;
     }
 }
@@ -244,26 +258,36 @@ std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, Q
     return cfg;
 }
 
-void writeOptionalDeepLinkTlvs(QByteArray &p, const DeepLinkConfig &cfg)
+void writeOptionalDeepLinkFlagTlvs(QByteArray &p, const DeepLinkConfig &cfg)
 {
-    if (!cfg.customSni.isEmpty())
-        writeTlv(p, 0x03, cfg.customSni.toUtf8());
     if (!cfg.hasIpv6)
         writeTlv(p, 0x04, QByteArray(1, '\0'));
     if (cfg.skipVerification)
         writeTlv(p, 0x07, QByteArray(1, '\1'));
+    if (cfg.antiDpi)
+        writeTlv(p, 0x0A, QByteArray(1, '\1'));
+}
+
+void writeOptionalDeepLinkMetaTlvs(QByteArray &p, const DeepLinkConfig &cfg)
+{
+    if (!cfg.customSni.isEmpty())
+        writeTlv(p, 0x03, cfg.customSni.toUtf8());
     if (!cfg.certificate.isEmpty())
         writeTlv(p, 0x08, cfg.certificate);
     if (cfg.upstreamProtocol != UpstreamProtocol::Http2)
         writeTlv(p, 0x09, varintBytes(static_cast<quint64>(cfg.upstreamProtocol)));
-    if (cfg.antiDpi)
-        writeTlv(p, 0x0A, QByteArray(1, '\1'));
     if (!cfg.clientRandomPrefix.isEmpty())
         writeTlv(p, 0x0B, cfg.clientRandomPrefix.toUtf8());
     if (!cfg.name.isEmpty())
         writeTlv(p, 0x0C, cfg.name.toUtf8());
     if (!cfg.dnsUpstreams.isEmpty())
         writeTlv(p, 0x0D, encodeStringList(cfg.dnsUpstreams));
+}
+
+void writeOptionalDeepLinkTlvs(QByteArray &p, const DeepLinkConfig &cfg)
+{
+    writeOptionalDeepLinkFlagTlvs(p, cfg);
+    writeOptionalDeepLinkMetaTlvs(p, cfg);
 }
 
 } // namespace

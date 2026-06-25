@@ -331,6 +331,22 @@ QString CredentialStore::loadPassword(const QString &key)
 #endif
 }
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+static bool deletePasswordLinuxAll(const QString &key)
+{
+#if defined(FT_HAVE_LIBSECRET)
+    const bool fromLibsecret = libsecretClear(key);
+#endif
+    const bool fromService = secretServiceClear(key);
+    const bool fromFile = deletePasswordFile(key);
+#if defined(FT_HAVE_LIBSECRET)
+    return fromLibsecret || fromService || fromFile;
+#else
+    return fromService || fromFile;
+#endif
+}
+#endif
+
 bool CredentialStore::deletePassword(const QString &key)
 {
     if (key.isEmpty())
@@ -347,16 +363,7 @@ bool CredentialStore::deletePassword(const QString &key)
     const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
     return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
 #else
-#if defined(FT_HAVE_LIBSECRET)
-    const bool fromLibsecret = libsecretClear(key);
-#endif
-    const bool fromService = secretServiceClear(key);
-    const bool fromFile = deletePasswordFile(key);
-#if defined(FT_HAVE_LIBSECRET)
-    return fromLibsecret || fromService || fromFile;
-#else
-    return fromService || fromFile;
-#endif
+    return deletePasswordLinuxAll(key);
 #endif
 }
 

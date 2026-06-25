@@ -58,22 +58,28 @@ void Backend::wireVpnClientSignals()
     connect(&m_client, &VpnHelperClient::vpnError, this, &Backend::onVpnErrorReceived);
 }
 
-void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
+void Backend::clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected)
+{
+    if (m_reapplying && (nowConnected || st == VpnHelperClient::State::Error))
+        m_reapplying = false;
+}
+
+void Backend::applyVpnClientState(VpnHelperClient::State st)
 {
     const bool nowConnected = st == VpnHelperClient::State::Connected;
-    if (nowConnected && !m_connected) {
+    if (nowConnected && !m_connected)
         m_session.restart();
-    }
     m_connected = nowConnected;
     m_connecting = st == VpnHelperClient::State::Connecting
                    || st == VpnHelperClient::State::Reconnecting
                    || st == VpnHelperClient::State::WaitingForNetwork;
-    if (m_reapplying && (nowConnected || st == VpnHelperClient::State::Error)) {
-        m_reapplying = false;
-    }
-    // Don't surface "Disconnecting…" during a silent live re-apply
-    // (rule changes briefly tear the tunnel down and back up).
+    clearReapplyingIfDone(st, nowConnected);
     m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
+}
+
+void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
+{
+    applyVpnClientState(st);
     emit stateChanged();
     appendLog(QStringLiteral("INFO"), statusText());
 }

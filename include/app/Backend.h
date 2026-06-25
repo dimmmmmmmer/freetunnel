@@ -207,20 +207,29 @@ private:
     bool isInternalVpnError(const QString &m) const;
     QString friendlyVpnError(const QString &m) const;
     void emitDedupedVpnError(const QString &friendly);
-    bool finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
-                               const QString &password, const QString &tomlBody,
-                               const QString &editContent, const QString &editPassword,
-                               const QString &editProfile, bool editingSnapshot, int editIndex);
+    struct CreatedConfigFinalize {
+        QVariantMap form;
+        QString oldPath;
+        QString target;
+        QString password;
+        QString tomlBody;
+        QString editContent;
+        QString editPassword;
+        QString editProfile;
+        bool editingSnapshot = false;
+        int editIndex = -1;
+    };
+    void emitCreateConfigError(const QString &parseErr);
+    bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);
     void pingConfigAtIndex(int index);
+    bool finalizeImportedConfig(const QString &target, bool hadNoActive);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
                                    bool wasActive);
-    void maybeReapplyCreatedConfig(const QVariantMap &f, const QString &oldPath,
-                                   const QString &target, const QString &password,
-                                   const QString &tomlBody, const QString &editContent,
-                                   const QString &editPassword, const QString &editProfile,
-                                   bool editingSnapshot, int editIndex);
+    void maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx);
+    void applyVpnClientState(VpnHelperClient::State st);
+    void clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

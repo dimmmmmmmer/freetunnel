@@ -51,19 +51,19 @@ bool verifyFileAgainstSums(const QString &filePath, const QByteArray &sumsConten
     return sha256HexOfFile(filePath).toLower() == expected;
 }
 
-bool verifyEd25519Signature(const QByteArray &data, const QByteArray &signature,
-                            const QByteArray &publicKeyPem)
-{
 #ifdef FT_HAVE_OPENSSL
-    if (publicKeyPem.isEmpty() || signature.isEmpty())
-        return false;
+EVP_PKEY *loadEd25519PublicKey(const QByteArray &publicKeyPem)
+{
     BIO *bio = BIO_new_mem_buf(publicKeyPem.constData(), static_cast<int>(publicKeyPem.size()));
     if (!bio)
-        return false;
+        return nullptr;
     EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
     BIO_free(bio);
-    if (!pkey)
-        return false;
+    return pkey;
+}
+
+bool digestVerifyEd25519(EVP_PKEY *pkey, const QByteArray &data, const QByteArray &signature)
+{
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     bool ok = false;
     if (ctx && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, pkey) == 1) {
@@ -75,6 +75,20 @@ bool verifyEd25519Signature(const QByteArray &data, const QByteArray &signature,
     }
     if (ctx)
         EVP_MD_CTX_free(ctx);
+    return ok;
+}
+#endif
+
+bool verifyEd25519Signature(const QByteArray &data, const QByteArray &signature,
+                            const QByteArray &publicKeyPem)
+{
+#ifdef FT_HAVE_OPENSSL
+    if (publicKeyPem.isEmpty() || signature.isEmpty())
+        return false;
+    EVP_PKEY *pkey = loadEd25519PublicKey(publicKeyPem);
+    if (!pkey)
+        return false;
+    const bool ok = digestVerifyEd25519(pkey, data, signature);
     EVP_PKEY_free(pkey);
     return ok;
 #else

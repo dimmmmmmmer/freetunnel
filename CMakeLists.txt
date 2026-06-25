@@ -71,6 +71,10 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendSettings.cpp
     src/app/BackendLogs.cpp
     src/app/BackendConfig.cpp
+    src/app/BackendConfigCreate.cpp
+    src/app/BackendConfigImport.cpp
+    src/app/BackendConfigShared.cpp
+    src/app/BackendConfigShared.h
     src/app/BackendSplit.cpp
     include/app/Backend.h
     src/core/AppSettings.cpp
@@ -102,6 +106,9 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/core/ReleaseVerify.cpp
     include/core/ReleaseVerify.h
     src/vpn/qt_trusttunnel_client.cpp
+    src/vpn/qt_trusttunnel_connect.cpp
+    src/vpn/qt_trusttunnel_platform.cpp
+    src/vpn/qt_trusttunnel_platform.h
     include/vpn/qt_trusttunnel_client.h
     src/vpn/vpn_helper_client.cpp
     include/vpn/vpn_helper_client.h
