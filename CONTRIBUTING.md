@@ -151,6 +151,34 @@ CI uploads lcov from the Linux coverage job when the secret is set:
 
 Local coverage report: `bash scripts/coverage-report.sh`.
 
+### Branch protection and Codacy status checks
+
+`main` requires CI checks (unit tests Linux, cppcheck, clang-tidy, pinned deps, i18n)
+**and** **Codacy Static Code Analysis** in GitHub branch protection.
+
+Codacy still shows **main branch isn't protected** until:
+
+1. **Codacy → freetunnel → Settings (⚙) → Integrations** — toggle **Status checks**
+   (there is no separate “GitHub → Status checks” submenu; options live on the Integrations tab).
+2. At least one analysis finishes on `main` (Codacy posts the status check to GitHub).
+3. Every quality-gate rule you enforce in Codacy is also a **required** check on `main`.
+
+Repository-side hygiene for Codacy:
+
+- [`.codacy.yml`](.codacy.yml) — excludes, cppcheck language, complexity/duplication ignores
+- [`cppcheck.cfg`](cppcheck.cfg) — Qt false-positive suppressions (also used by Codacy's cppcheck)
+- [`.github/action-pins.env`](.github/action-pins.env) — full SHA pins for third-party Actions
+
+Quality gate (default): add **Codacy Static Code Analysis** — already required on `main`.
+
+Coverage gates (optional): enable **Diff coverage is under** or **Coverage variation is under**
+in Codacy **Settings → Quality settings**, set GitHub secret `CODACY_PROJECT_TOKEN`, then
+also require **Codacy Diff Coverage** and/or **Codacy Coverage Variation** on `main`.
+
+GitHub → **Settings → Branches** → edit `main` if you change which Codacy checks are enforced.
+
+Optional: set quality gates for **new code** only so historical issues do not block merges.
+
 ## Translations (i18n)
 
 Strings use `qsTr()` in QML and `tr()` in C++. Russian is in `i18n/freetunnel_ru.ts`.

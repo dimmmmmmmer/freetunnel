@@ -119,6 +119,97 @@ static void raise_fd_limit() {
 static void raise_fd_limit() {} // no-op on Windows
 #endif
 
+#ifdef Q_OS_MACOS
+static void setupMacDockIcon(QGuiApplication &app, Backend &backend)
+{
+    if (QOperatingSystemVersion::current().majorVersion() < 26) {
+        app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
+        return;
+    }
+    auto renderDockIcon = [&app, &backend]() {
+        const QString m = backend.themeMode();
+        const bool darkUi = m == QLatin1String("dark")
+                || (m == QLatin1String("system")
+                    && app.styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+        constexpr int kCanvas = 1024;
+        constexpr int kTileInset = 100;
+        constexpr int kTileSize = kCanvas - 2 * kTileInset;
+        constexpr int kCornerRadius = 185;
+        const int kLogoSize = kTileSize * 700 / 944;
+        const int kLogoOffset = kTileInset + (kTileSize - kLogoSize) / 2;
+
+        QPixmap pm(kCanvas, kCanvas);
+        pm.fill(Qt::transparent);
+        QPainter painter(&pm);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPainterPath tile;
+        tile.addRoundedRect(QRectF(kTileInset, kTileInset, kTileSize, kTileSize),
+                            kCornerRadius, kCornerRadius);
+        painter.fillPath(tile, QColor(darkUi ? QStringLiteral("#ffffff")
+                                             : QStringLiteral("#1c1c1e")));
+        QSvgRenderer logo(darkUi ? QStringLiteral(":/assets/logo.svg")
+                                 : QStringLiteral(":/assets/logo-light.svg"));
+        logo.render(&painter, QRectF(kLogoOffset, kLogoOffset, kLogoSize, kLogoSize));
+        painter.end();
+        app.setWindowIcon(QIcon(pm));
+    };
+    renderDockIcon();
+    QObject::connect(&backend, &Backend::settingsChanged, &app, renderDockIcon);
+    QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &app,
+                     [renderDockIcon](Qt::ColorScheme) { renderDockIcon(); });
+}
+#endif
+
+static void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
+                               const QString &instanceToken)
+{
+    QObject::connect(server, &QLocalServer::newConnection, server,
+                     [server, &backend, win, instanceToken]() {
+        QLocalSocket *c = server->nextPendingConnection();
+        if (!c)
+            return;
+        QByteArray buf = c->readAll();
+        while (c->state() == QLocalSocket::ConnectedState
+               && buf.size() < 64 * 1024
+               && c->waitForReadyRead(200))
+            buf += c->readAll();
+        buf += c->readAll();
+        if (!freetunnel::localSocketPeerIsSameUser(c)) {
+            c->deleteLater();
+            return;
+        }
+        QString recvToken;
+        QString cmd;
+        if (!freetunnel::parseInstanceMessage(buf, &recvToken, &cmd)
+                || instanceToken.isEmpty()
+                || !freetunnel::instanceTokensEqual(recvToken, instanceToken)) {
+            c->deleteLater();
+            return;
+        }
+        c->deleteLater();
+        backend.handleControl(cmd);
+        if (win) {
+            win->show();
+            win->raise();
+            win->requestActivate();
+        }
+    });
+}
+
+static void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
+{
+    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
+                     [win, &appQuitting](Qt::ApplicationState s) {
+                         if (appQuitting)
+                             return;
+                         if (s == Qt::ApplicationActive && win && !win->isVisible()) {
+                             win->show();
+                             win->raise();
+                             win->requestActivate();
+                         }
+                     });
+}
+
 int main(int argc, char *argv[]) {
     raise_fd_limit();
     // Required so Icon.qml can XHR-GET the bundled SVGs (qrc:/icons/*) and
@@ -179,52 +270,7 @@ int main(int argc, char *argv[]) {
     Backend backend;
 
 #ifdef Q_OS_MACOS
-    // Dock icon on macOS. macOS 26 (Tahoe) masks the bundle .icns into a rounded
-    // square and fills the transparent background with a default light colour —
-    // an app can't opt out of the masking for the launcher tile. So on Tahoe we
-    // draw our own rounded tile in the app's current theme colour at runtime
-    // (runtime-set icons are NOT OS-masked) and refresh it whenever the theme
-    // changes. On older macOS, where transparent icons render as-is, keep the
-    // bare floating logo.
-    if (QOperatingSystemVersion::current().majorVersion() >= 26) {
-        auto renderDockIcon = [&app, &backend]() {
-            const QString m = backend.themeMode();
-            const bool darkUi = m == QLatin1String("dark")
-                    || (m == QLatin1String("system")
-                        && app.styleHints()->colorScheme() == Qt::ColorScheme::Dark);
-            // Match the native Tahoe squircle grid (~100 px inset on a 1024 canvas).
-            constexpr int kCanvas = 1024;
-            constexpr int kTileInset = 100;
-            constexpr int kTileSize = kCanvas - 2 * kTileInset;
-            constexpr int kCornerRadius = 185;
-            const int kLogoSize = kTileSize * 700 / 944;
-            const int kLogoOffset = kTileInset + (kTileSize - kLogoSize) / 2;
-
-            QPixmap pm(kCanvas, kCanvas);
-            pm.fill(Qt::transparent);
-            QPainter painter(&pm);
-            painter.setRenderHint(QPainter::Antialiasing);
-            QPainterPath tile;
-            tile.addRoundedRect(QRectF(kTileInset, kTileInset, kTileSize, kTileSize),
-                                kCornerRadius, kCornerRadius);
-            // Invert tile vs tunnel: dark UI → white tile + dark tunnel; light UI → dark tile + light tunnel.
-            painter.fillPath(tile, QColor(darkUi ? QStringLiteral("#ffffff")
-                                                 : QStringLiteral("#1c1c1e")));
-            QSvgRenderer logo(darkUi ? QStringLiteral(":/assets/logo.svg")
-                                     : QStringLiteral(":/assets/logo-light.svg"));
-            logo.render(&painter, QRectF(kLogoOffset, kLogoOffset, kLogoSize, kLogoSize));
-            painter.end();
-            app.setWindowIcon(QIcon(pm));
-        };
-        renderDockIcon();
-        // Theme switches arrive as settingsChanged; "system" mode also tracks the
-        // OS appearance via colorSchemeChanged.
-        QObject::connect(&backend, &Backend::settingsChanged, &app, renderDockIcon);
-        QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &app,
-                         [renderDockIcon](Qt::ColorScheme) { renderDockIcon(); });
-    } else {
-        app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
-    }
+    setupMacDockIcon(app, backend);
 #endif
 
     QuitFilter quitFilter;
@@ -263,56 +309,8 @@ int main(int argc, char *argv[]) {
     if (!controlArg.isEmpty())
         backend.handleControl(controlArg);
 
-    // macOS: after the window is hidden (red button), a Dock-icon click
-    // reactivates the app — re-show the window then. Skip during quit: a
-    // late ApplicationActive event would resurrect the UI after Quit/⌘Q.
-    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
-                     [win, &appQuitting](Qt::ApplicationState s) {
-                         if (appQuitting)
-                             return;
-                         if (s == Qt::ApplicationActive && win && !win->isVisible()) {
-                             win->show();
-                             win->raise();
-                             win->requestActivate();
-                         }
-                     });
-
-    // A second instance forwards its command here (token-authenticated).
-    QObject::connect(server, &QLocalServer::newConnection, &app,
-                     [server, &backend, win, instanceToken]() {
-        QLocalSocket *c = server->nextPendingConnection();
-        if (!c)
-            return;
-        // The peer writes "token\npayload" then disconnects; the payload (e.g. a
-        // tt:// import link) can span several reads. Accumulate until it closes
-        // the connection or a short deadline, so a fragmented message isn't
-        // truncated. Cap the buffer so a rogue same-user client can't grow it.
-        QByteArray buf = c->readAll();
-        while (c->state() == QLocalSocket::ConnectedState
-               && buf.size() < 64 * 1024
-               && c->waitForReadyRead(200))
-            buf += c->readAll();
-        buf += c->readAll();
-        if (!freetunnel::localSocketPeerIsSameUser(c)) {
-            c->deleteLater();
-            return;
-        }
-        QString recvToken;
-        QString cmd;
-        if (!freetunnel::parseInstanceMessage(buf, &recvToken, &cmd)
-                || instanceToken.isEmpty()
-                || !freetunnel::instanceTokensEqual(recvToken, instanceToken)) {
-            c->deleteLater();
-            return;
-        }
-        c->deleteLater();
-        backend.handleControl(cmd);
-        if (win) {
-            win->show();
-            win->raise();
-            win->requestActivate();
-        }
-    });
+    setupDockReopen(app, win, appQuitting);
+    wireInstanceServer(server, backend, win, instanceToken);
 
     return app.exec();
 }

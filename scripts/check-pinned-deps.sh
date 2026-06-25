@@ -22,6 +22,15 @@ check "upstream ref in build workflow" 'UPSTREAM_REF|upstream_ref' .github/workf
 check "QHotkey tag" 'GIT_TAG 1\.5\.0' CMakeLists.txt
 check "QHotkey tag in tests" 'GIT_TAG 1\.5\.0' tests/CMakeLists.txt
 
+# Third-party GitHub Actions must be pinned to full commit SHAs (see action-pins.env).
+while IFS='=' read -r name sha; do
+  [[ -z "$name" || "$name" =~ ^# ]] && continue
+  if ! grep -rq "$sha" .github/workflows; then
+    echo "pinned-deps: SHA for $name not found in .github/workflows" >&2
+    fail=1
+  fi
+done < .github/action-pins.env
+
 if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi

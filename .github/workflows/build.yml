@@ -45,12 +45,12 @@ jobs:
     name: Render bundle icons
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Install rasterizers
         run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
       - name: Render icons from logo.svg
         run: bash scripts/render-icons.sh icons-out
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bundle-icons
           path: icons-out/
@@ -87,7 +87,7 @@ jobs:
 
     steps:
       - name: Checkout client
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           path: client
 
@@ -95,7 +95,7 @@ jobs:
       # the client is injected into the upstream tree. Best-effort.
       - name: Use rendered bundle icons
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: bundle-icons
           path: client/assets
@@ -110,7 +110,7 @@ jobs:
         run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ steps.upstream_ref.outputs.value }}
@@ -137,7 +137,7 @@ jobs:
           test -f upstream/requirements.txt
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
 
@@ -200,7 +200,7 @@ jobs:
       # -------------------------------------------------------------- Windows
       - name: Set up MSVC (Windows)
         if: matrix.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
 
@@ -208,7 +208,7 @@ jobs:
       # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
       # .deb bundle a modern Qt regardless of the distro.
       - name: Install Qt (aqt)
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
         with:
           version: '6.8.*'
           host: ${{ matrix.qt_host }}
@@ -240,14 +240,14 @@ jobs:
       # ------------------------------------------------------------- Caching
       - name: ccache
         if: matrix.platform != 'windows'
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
         with:
           # Key includes the runner OS so deps/objects built against one glibc
           # are never reused on another (e.g. ubuntu-24.04 -> ubuntu-22.04).
           key: ${{ matrix.os }}-${{ matrix.artifact }}-ccache
 
       - name: Conan cache
-        uses: actions/cache@v6
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6
         with:
           path: ~/.conan2
           key: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
@@ -506,7 +506,7 @@ jobs:
           ls out
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}
           path: out/*
@@ -521,7 +521,7 @@ jobs:
       contents: write
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
           pattern: freetunnel-*
@@ -559,7 +559,7 @@ jobs:
           ls -la SHA256SUMS.txt.sig
 
       - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           files: |
             artifacts/**/*.deb

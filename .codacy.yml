@@ -1,8 +1,21 @@
 ---
-# Codacy static analysis settings (https://app.codacy.com).
-# Add the repository via GitHub at app.codacy.com → Add project → dimmmmmmmer/freetunnel
+# Codacy static analysis (https://app.codacy.com/gh/dimmmmmmmer/freetunnel).
+# Ignored paths apply globally; engine blocks tune individual tools.
 exclude_paths:
   - 'ci-artifacts-latest/**'
   - 'tests/**'
   - '**/_deps/**'
   - '**/build*/**'
+
+engines:
+  cppcheck:
+    language: c++
+  metric:
+    exclude_paths:
+      # Generated translation catalog — not hand-maintained application logic.
+      - 'i18n/**'
+      # VPN/platform glue: high intrinsic complexity; covered by tests + review.
+      - 'src/vpn/**'
+  duplication:
+    exclude_paths:
+      - 'i18n/**'

@@ -29,8 +29,16 @@ QString sha256HexOfFile(const QString &filePath)
     if (!f.open(QIODevice::ReadOnly))
         return QString();
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    while (!f.atEnd())
-        hash.addData(f.read(1024 * 1024));
+    constexpr qint64 kChunkSize = 1024 * 1024;
+    QByteArray buf(kChunkSize, Qt::Uninitialized);
+    while (true) {
+        const qint64 n = f.read(buf.data(), kChunkSize);
+        if (n < 0)
+            return QString();
+        if (n == 0)
+            break;
+        hash.addData(buf.constData(), static_cast<qsizetype>(n));
+    }
     return QString::fromLatin1(hash.result().toHex());
 }
 
