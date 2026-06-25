@@ -136,14 +136,19 @@ int main(int argc, char *argv[]) {
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
-#ifndef Q_OS_MACOS
-    // macOS shows the bundle's logo.icns (a proper rounded-square app icon) in the
-    // Dock. Setting a window icon there overrode it with the bare, differently
-    // sized SVG logo — the icon that visibly "changed" when the window opened — so
-    // leave the .icns authoritative. A stale Dock cache from old installs is a
-    // local issue (fix with lsregister), not something to paper over here.
-    // Windows/Linux need the icon set: use the multi-size .ico that matches the
-    // one embedded in the .exe. logo.png is a raster fallback.
+#ifdef Q_OS_MACOS
+    // macOS 26 (Tahoe) masks the *bundle* .icns into a rounded square and fills
+    // the transparent area with a default light background. Overriding the
+    // running app's Dock icon at runtime with the bare transparent mark bypasses
+    // that masking, so the Dock shows the floating logo with no background —
+    // matching Windows/Linux — while the app is open. (The launcher tile shown
+    // when the app isn't running is still the OS-masked .icns; that's unavoidable
+    // on Tahoe.) Now that the bundle icon is rendered at the same size, there's
+    // no size jump when this kicks in on launch.
+    app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
+#else
+    // Windows/Linux: use the multi-size .ico that matches the one embedded in the
+    // .exe (no OS-imposed icon mask there). logo.png is a raster fallback.
     QIcon appIcon(QStringLiteral(":/assets/logo.ico"));
     appIcon.addFile(QStringLiteral(":/assets/logo.png"));
     app.setWindowIcon(appIcon);
