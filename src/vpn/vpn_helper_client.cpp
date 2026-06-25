@@ -430,28 +430,48 @@ void VpnHelperClient::onReadyRead() {
     }
 }
 
+void VpnHelperClient::handleReadyEvent()
+{
+    m_helloAcked = true;
+    clearTokenFile();
+    setVpnMode(m_selective);
+    setKillSwitch(m_killSwitch);
+    setExtraExclusions(m_exclusions);
+    setExcludedRoutes(m_excludedRoutes);
+    if (!m_connectPending)
+        return;
+    m_connectPending = false;
+    connectVpn();
+}
+
 void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     const QString type = ev.value("ev").toString();
     if (type == "ready") {
-        m_helloAcked = true;
-        clearTokenFile();
-        setVpnMode(m_selective);
-        setKillSwitch(m_killSwitch);
-        setExtraExclusions(m_exclusions);
-        setExcludedRoutes(m_excludedRoutes);
-        if (m_connectPending) { m_connectPending = false; connectVpn(); }
-    } else if (type == "state") {
+        handleReadyEvent();
+        return;
+    }
+    if (type == "state") {
         setState(stateFromString(ev.value("state").toString()));
-    } else if (type == "stats") {
+        return;
+    }
+    if (type == "stats") {
         emit tunnelStats(static_cast<quint64>(ev.value("up").toDouble()),
                          static_cast<quint64>(ev.value("down").toDouble()));
-    } else if (type == "info") {
+        return;
+    }
+    if (type == "info") {
         emit connectionInfo(ev.value("msg").toString());
-    } else if (type == "progress") {
+        return;
+    }
+    if (type == "progress") {
         emit connectProgress(ev.value("msg").toString());
-    } else if (type == "log") {
+        return;
+    }
+    if (type == "log") {
         emit coreLogLine(ev.value("msg").toString());
-    } else if (type == "error") {
+        return;
+    }
+    if (type == "error") {
         emit vpnError(ev.value("msg").toString());
     }
 }

@@ -68,6 +68,7 @@ private:
     void onReadyRead();
     void onSocketConnected();
     void handleEvent(const QJsonObject &ev);
+    void handleReadyEvent();
     void setState(State s);
     void fail(const QString &msg);
 
