@@ -402,6 +402,17 @@
     </message>
 </context>
 <context>
+    <name>QObject</name>
+    <message>
+        <source>Could not launch osascript</source>
+        <translation>Не удалось запустить osascript</translation>
+    </message>
+    <message>
+        <source>Elevation was cancelled or failed</source>
+        <translation>Повышение прав отменено или не удалось</translation>
+    </message>
+</context>
+<context>
     <name>QtTrustTunnelClient</name>
     <message>
         <source>Disconnecting previous session...</source>
@@ -595,14 +606,6 @@
     <message>
         <source>Could not create the VPN helper token file</source>
         <translation>Не удалось создать файл токена VPN-помощника</translation>
-    </message>
-    <message>
-        <source>Could not launch osascript</source>
-        <translation>Не удалось запустить osascript</translation>
-    </message>
-    <message>
-        <source>Elevation was cancelled or failed</source>
-        <translation>Повышение прав отменено или не удалось</translation>
     </message>
     <message>
         <source>Could not start the VPN helper — authorization may have been declined, or pkexec/sudo elevation failed.</source>
