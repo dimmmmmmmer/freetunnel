@@ -26,6 +26,7 @@ private slots:
     void controlArgFromArgv();
     void urlOpenFilterBuffersUntilReady();
     void quitFilterEmitsShutdown();
+    void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
     void wireInstanceServerForwardsCommand();
 };
@@ -82,6 +83,15 @@ void TestAppStartup::quitFilterEmitsShutdown()
     QCoreApplication::postEvent(qApp, new QEvent(QEvent::Quit));
     QCoreApplication::processEvents();
     QCOMPARE(spy.count(), 1);
+    QTRY_VERIFY(QCoreApplication::closingDown());
+}
+
+void TestAppStartup::prepareQuitRequestsApplicationQuit()
+{
+    Backend backend;
+    QVERIFY(!QCoreApplication::closingDown());
+    backend.quitApplication();
+    QTRY_VERIFY(QCoreApplication::closingDown());
 }
 
 void TestAppStartup::applyLanguageLoadsRussian()

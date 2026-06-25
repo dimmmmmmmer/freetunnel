@@ -22,6 +22,8 @@ static void applyAppBranding(QGuiApplication &app)
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
 #ifndef Q_OS_MACOS
+    // macOS uses logo.icns from the bundle; setWindowIcon() there overrides the Dock
+    // icon when the window opens (see setupMacDockIcon).
     QIcon winLinuxIcon(QStringLiteral(":/assets/logo.ico"));
     winLinuxIcon.addFile(QStringLiteral(":/assets/logo.png"));
     app.setWindowIcon(winLinuxIcon);

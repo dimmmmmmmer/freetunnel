@@ -27,6 +27,8 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken);
 
 void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
+// Re-show the main window when the user activates the app from the dock/taskbar
+// while it was hidden to the tray (macOS Dock, Linux panel, etc.).
 
 int runGuiApplication(int argc, char *argv[]);
 

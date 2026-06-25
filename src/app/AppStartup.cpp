@@ -4,24 +4,14 @@
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QGuiApplication>
-#include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QOperatingSystemVersion>
-#include <QPainter>
-#include <QPainterPath>
-#include <QPixmap>
 #include <QQmlApplicationEngine>
-#include <QStyleHints>
 #include <QTranslator>
 #include <QWindow>
 
 #include "app/Backend.h"
 #include "core/InstanceControl.h"
-
-#ifdef Q_OS_MACOS
-#include <QSvgRenderer>
-#endif
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -82,47 +72,58 @@ void raiseFdLimit()
 }
 
 #ifdef Q_OS_MACOS
-void setupMacDockIcon(QGuiApplication &app, Backend &backend)
+void setupMacDockIcon(QGuiApplication &, Backend &)
 {
-    if (QOperatingSystemVersion::current().majorVersion() < 26) {
-        app.setWindowIcon(QIcon(QStringLiteral(":/assets/logo.svg")));
-        return;
-    }
-    auto renderDockIcon = [&app, &backend]() {
-        const QString m = backend.themeMode();
-        const bool darkUi = m == QLatin1String("dark")
-                || (m == QLatin1String("system")
-                    && app.styleHints()->colorScheme() == Qt::ColorScheme::Dark);
-        constexpr int kCanvas = 1024;
-        constexpr int kTileInset = 100;
-        constexpr int kTileSize = kCanvas - 2 * kTileInset;
-        constexpr int kCornerRadius = 185;
-        const int kLogoSize = kTileSize * 700 / 944;
-        const int kLogoOffset = kTileInset + (kTileSize - kLogoSize) / 2;
-
-        QPixmap pm(kCanvas, kCanvas);
-        pm.fill(Qt::transparent);
-        QPainter painter(&pm);
-        painter.setRenderHint(QPainter::Antialiasing);
-        QPainterPath tile;
-        tile.addRoundedRect(QRectF(kTileInset, kTileInset, kTileSize, kTileSize),
-                            kCornerRadius, kCornerRadius);
-        painter.fillPath(tile, QColor(darkUi ? QStringLiteral("#ffffff")
-                                             : QStringLiteral("#1c1c1e")));
-        QSvgRenderer logo(darkUi ? QStringLiteral(":/assets/logo.svg")
-                                 : QStringLiteral(":/assets/logo-light.svg"));
-        logo.render(&painter, QRectF(kLogoOffset, kLogoOffset, kLogoSize, kLogoSize));
-        painter.end();
-        app.setWindowIcon(QIcon(pm));
-    };
-    renderDockIcon();
-    QObject::connect(&backend, &Backend::settingsChanged, &app, renderDockIcon);
-    QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &app,
-                     [renderDockIcon](Qt::ColorScheme) { renderDockIcon(); });
+    // macOS uses CFBundleIconFile (logo.icns). setWindowIcon() overrides it once the
+    // window is shown, so the Dock icon visibly swaps on open/close — keep the bundle
+    // icon authoritative (regression fix after AppStartup refactor).
 }
 #else
 void setupMacDockIcon(QGuiApplication &, Backend &) {}
 #endif
+
+static void raiseMainWindow(QWindow *win)
+{
+    if (!win)
+        return;
+    if (!win->isVisible())
+        win->show();
+    win->raise();
+    win->requestActivate();
+}
+
+namespace {
+
+class HiddenWindowReopenFilter : public QObject {
+public:
+    QWindow *win = nullptr;
+    bool *appQuitting = nullptr;
+
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override
+    {
+        if (!win || !appQuitting || *appQuitting)
+            return false;
+        // ApplicationActivate is delivered to QGuiApplication (taskbar/dock on Windows/Linux).
+        if (e->type() == QEvent::ApplicationActivate) {
+            raiseMainWindow(win);
+            return false;
+        }
+        if (o != win)
+            return false;
+        switch (e->type()) {
+        case QEvent::WindowActivate:
+        case QEvent::Show:
+            raiseMainWindow(win);
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+};
+
+} // namespace
 
 QByteArray readLocalSocketPayload(QLocalSocket *c)
 {
@@ -153,11 +154,7 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
     }
     c->deleteLater();
     backend.handleControl(cmd);
-    if (win) {
-        win->show();
-        win->raise();
-        win->requestActivate();
-    }
+    raiseMainWindow(win);
 }
 
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
@@ -172,15 +169,34 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
 
 void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
 {
+    if (!win)
+        return;
+
+    auto *filter = new HiddenWindowReopenFilter(&app);
+    filter->win = win;
+    filter->appQuitting = &appQuitting;
+    app.installEventFilter(filter);
+    win->installEventFilter(filter);
+
     QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
                      [win, &appQuitting](Qt::ApplicationState s) {
                          if (appQuitting)
                              return;
-                         if (s == Qt::ApplicationActive && win && !win->isVisible()) {
-                             win->show();
-                             win->raise();
-                             win->requestActivate();
-                         }
+                         if (s == Qt::ApplicationActive)
+                             raiseMainWindow(win);
+                     });
+
+    // Panel/taskbar can activate a hidden window without changing application state.
+    QObject::connect(win, &QWindow::activeChanged, win, [win, &appQuitting]() {
+        if (appQuitting || !win->isActive())
+            return;
+        raiseMainWindow(win);
+    });
+    QObject::connect(&app, &QGuiApplication::focusWindowChanged, &app,
+                     [win, &appQuitting](QWindow *focus) {
+                         if (appQuitting || focus != win)
+                             return;
+                         raiseMainWindow(win);
                      });
 }
 
@@ -214,16 +230,12 @@ bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
 void UrlOpenFilter::apply(const QString &u)
 {
     backend->handleControl(u);
-    if (win) {
-        win->show();
-        win->raise();
-        win->requestActivate();
-    }
+    freetunnel::raiseMainWindow(win);
 }
 
 bool QuitFilter::eventFilter(QObject *o, QEvent *e)
 {
     if (e->type() == QEvent::Quit && backend)
-        backend->prepareQuit();
+        backend->quitApplication();
     return QObject::eventFilter(o, e);
 }

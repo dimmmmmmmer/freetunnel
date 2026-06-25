@@ -136,6 +136,7 @@ public:
     Q_INVOKABLE void pingConfigs() {}
     Q_INVOKABLE bool importFromClipboard() { return false; }
     Q_INVOKABLE void prepareQuit() { emit aboutToShutdown(); }
+    Q_INVOKABLE void quitApplication() { prepareQuit(); }
 
 signals:
     void stateChanged();

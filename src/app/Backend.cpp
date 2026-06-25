@@ -266,8 +266,17 @@ void Backend::prepareQuit() {
     m_quitting = true;
     emit aboutToShutdown();
     unregisterHotkeys();
+    m_ticker.stop();
     m_client.shutdown();
     freetunnel::sweepStaleMaterializedConfigs();
+}
+
+void Backend::quitApplication() {
+    // Queue quit before helper IPC teardown. On macOS the tray/⌘Q menu handler must
+    // return before quit is processed; defer anyway so sync tray teardown cannot
+    // swallow it (Windows) and ⌘Q always gets an explicit exit (QuitFilter).
+    QTimer::singleShot(0, qApp, []() { QCoreApplication::quit(); });
+    prepareQuit();
 }
 
 QString Backend::credentialStorageWarning() const

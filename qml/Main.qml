@@ -26,7 +26,7 @@ Window {
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // macOS red button hides to tray; Linux/Windows custom ✕ calls hide()
-    // directly. onClosing then means a real quit (panel Quit, Ctrl+Q, Alt+F4).
+    // directly. Real quit: tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Linux/Windows).
     property bool shuttingDown: false
     onClosing: function(close) {
         if (shuttingDown) {
@@ -38,16 +38,18 @@ Window {
             win.hide()
             return
         }
-        backend.prepareQuit()
+        backend.quitApplication()
         close.accepted = true
-        Qt.quit()
     }
 
     Connections {
         target: backend
         function onAboutToShutdown() {
             shuttingDown = true
-            tray.visible = false
+            // macOS: leave the status item alone while its Quit menu is closing.
+            // Windows: sync hide can swallow deferred quit — defer there only.
+            if (!win.isMac)
+                Qt.callLater(function() { tray.visible = false })
         }
         function onDeepLinkImportConfirmationRequired(message, link) {
             showConfirm(message, qsTr("Import anyway"), function() {
@@ -106,7 +108,7 @@ Window {
             }
             Platform.MenuItem {
                 text: qsTr("Quit")
-                onTriggered: { backend.prepareQuit(); Qt.quit() }
+                onTriggered: backend.quitApplication()
             }
         }
     }
