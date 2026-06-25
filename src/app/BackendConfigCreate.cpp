@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
 #include <QDir>
@@ -10,6 +11,7 @@
 #include "core/AppSettings.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
+#include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 

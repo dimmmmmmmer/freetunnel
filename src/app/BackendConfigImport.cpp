@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
 #include <QClipboard>
@@ -12,6 +13,8 @@
 #include "BackendConfigShared.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
+#include "core/ConfigStore.h"
+#include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 
 bool Backend::importFromClipboard()

@@ -14,6 +14,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
