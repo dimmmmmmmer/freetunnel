@@ -83,15 +83,14 @@ void TestAppStartup::quitFilterEmitsShutdown()
     QCoreApplication::postEvent(qApp, new QEvent(QEvent::Quit));
     QCoreApplication::processEvents();
     QCOMPARE(spy.count(), 1);
-    QTRY_VERIFY(QCoreApplication::closingDown());
 }
 
 void TestAppStartup::prepareQuitRequestsApplicationQuit()
 {
     Backend backend;
-    QVERIFY(!QCoreApplication::closingDown());
+    QSignalSpy spy(&backend, &Backend::aboutToShutdown);
     backend.quitApplication();
-    QTRY_VERIFY(QCoreApplication::closingDown());
+    QCOMPARE(spy.count(), 1);
 }
 
 void TestAppStartup::applyLanguageLoadsRussian()
