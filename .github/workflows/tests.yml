@@ -75,17 +75,7 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            dbus-run-session -- bash -c '
-              eval "$(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null || true)"
-              eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
-              ctest --test-dir build-tests -j1 --output-on-failure
-            '
-          else
-            ctest --test-dir build-tests -j1 --output-on-failure
-          fi
+        run: bash scripts/run-ctest.sh build-tests
 
   coverage:
     name: Coverage (Linux)
@@ -177,10 +167,4 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           ASAN_OPTIONS: detect_leaks=0:allocator_may_return_null=1
           UBSAN_OPTIONS: print_stacktrace=1
-        shell: bash
-        run: |
-          dbus-run-session -- bash -c '
-            eval "$(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null || true)"
-            eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
-            ctest --test-dir build-asan -j1 --output-on-failure
-          '
+        run: bash scripts/run-ctest.sh build-asan

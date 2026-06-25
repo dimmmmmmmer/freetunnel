@@ -339,6 +339,50 @@ void QtTrustTunnelClient::doConnectAttemptInThread() {
     m_connectThread.start();
 }
 
+bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
+{
+    if (m_config.has_value())
+        return true;
+    if (!m_lastConfigToml.isEmpty())
+        return loadConfigFromToml(m_lastConfigToml);
+    if (!m_lastConfigPath.isEmpty())
+        return loadConfigFromFile(m_lastConfigPath);
+    setState(State::Error);
+    emit vpnError(QStringLiteral("TrustTunnel config is not set"));
+    return false;
+}
+
+bool QtTrustTunnelClient::ensureClientReady()
+{
+    if (m_client)
+        return true;
+    if (!reloadStoredConfigIfNeeded())
+        return false;
+    emit connectProgress(tr("Initializing VPN core..."));
+    m_client = std::make_unique<ag::TrustTunnelClient>(std::move(*m_config), makeCallbacks());
+    m_config.reset();
+    emit connectProgress(tr("Starting network monitor..."));
+    m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), "");
+    if (m_networkMonitor->start())
+        return true;
+    m_networkMonitor.reset();
+    teardownClient();
+    setState(State::Error);
+    emit vpnError(QStringLiteral("Failed to start network monitor"));
+    return false;
+}
+
+void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHint)
+{
+    QString msg = qErr;
+    if (privilegeHint)
+        msg += QStringLiteral(" (likely needs sudo/admin privileges)");
+    teardownClient();
+    m_stopRequested = true;
+    setState(State::Error);
+    emit vpnError(QString("connect() failed: %1").arg(msg));
+}
+
 void QtTrustTunnelClient::doConnectAttempt() {
     if (m_stopRequested) {
         return;
@@ -361,49 +405,18 @@ void QtTrustTunnelClient::doConnectAttempt() {
         }
 
         if (!m_client) {
-            // TrustTunnelConfig is move-only (contains unique_ptr), so we
-            // cannot copy it.  If m_config was already consumed by a previous
-            // client session, reload it from the saved file path.
-            if (!m_config.has_value()) {
-                if (!m_lastConfigToml.isEmpty()) {
-                    if (!loadConfigFromToml(m_lastConfigToml))
-                        return;
-                } else if (!m_lastConfigPath.isEmpty()) {
-                    if (!loadConfigFromFile(m_lastConfigPath))
-                        return;
-                } else {
-                    setState(State::Error);
-                    emit vpnError(QStringLiteral("TrustTunnel config is not set"));
-                    return;
-                }
-            }
-            emit connectProgress(tr("Initializing VPN core..."));
-
-            m_client = std::make_unique<ag::TrustTunnelClient>(std::move(*m_config), makeCallbacks());
-            m_config.reset();
-
-            emit connectProgress(tr("Starting network monitor..."));
-
-            m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), "");
-            if (!m_networkMonitor->start()) {
-                m_networkMonitor.reset();
-                teardownClient();
-                setState(State::Error);
-                emit vpnError(QStringLiteral("Failed to start network monitor"));
+            if (!ensureClientReady())
                 return;
-            }
         }
 
         emit connectProgress(tr("Configuring DNS..."));
 
         if (auto dnsErr = m_client->set_system_dns()) {
-            const std::string errText = dnsErr->str();
-            const QString qErr = QString::fromStdString(errText);
-            // DNS setup failure is usually fatal until privileges change; stop auto-retry.
             teardownClient();
             m_stopRequested = true;
             setState(State::Error);
-            emit vpnError(QString("set_system_dns() failed: %1").arg(qErr));
+            emit vpnError(QString("set_system_dns() failed: %1")
+                                  .arg(QString::fromStdString(dnsErr->str())));
             return;
         }
 
@@ -412,16 +425,9 @@ void QtTrustTunnelClient::doConnectAttempt() {
         emit connectProgress(tr("Establishing tunnel..."));
 
         if (auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{})) {
-            const std::string errText = err->str();
-            QString qErr = QString::fromStdString(errText);
+            const QString qErr = QString::fromStdString(err->str());
             if (qErr.contains("Failed to create listener", Qt::CaseInsensitive)) {
-                qErr += QStringLiteral(" (likely needs sudo/admin privileges)");
-                // Fatal until privileges/config change: stop reconnect loop.
-                // The core may have started background threads — tear everything down.
-                teardownClient();
-                m_stopRequested = true;
-                setState(State::Error);
-                emit vpnError(QString("connect() failed: %1").arg(qErr));
+                failConnectFatal(qErr, true);
                 return;
             }
             scheduleReconnect(QString("connect() failed: %1").arg(qErr));

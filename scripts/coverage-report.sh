@@ -15,7 +15,7 @@ cmake -S "$ROOT/tests" -B "$BUILD" -G Ninja -DFT_ENABLE_COVERAGE=ON
 cmake --build "$BUILD" -j"$(nproc 2>/dev/null || echo 4)"
 
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
-ctest --test-dir "$BUILD" -j1 --output-on-failure
+bash "$ROOT/scripts/run-ctest.sh" "$BUILD"
 
 mkdir -p "$OUT"
 lcov --quiet --capture --directory "$BUILD" --output-file "$OUT/coverage.info"

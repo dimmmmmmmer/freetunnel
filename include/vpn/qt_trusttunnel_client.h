@@ -86,6 +86,9 @@ private:
     void handleCoreDisconnected();
     void teardownClient();
     void checkFdHealth();
+    bool reloadStoredConfigIfNeeded();
+    bool ensureClientReady();
+    void failConnectFatal(const QString &qErr, bool privilegeHint);
     static int countOpenFds();
     static int getFdLimit();
 

@@ -199,6 +199,38 @@ bool secretServiceAvailable()
             && p.exitStatus() == QProcess::NormalExit;
 }
 
+static QString migrateLegacyFilePassword(const QString &key, const QString &fromFile)
+{
+    if (fromFile.isEmpty() || !CredentialStore::secureStorageAvailable())
+        return fromFile;
+#if defined(FT_HAVE_LIBSECRET)
+    if (libsecretStore(key, fromFile)) {
+        deletePasswordFile(key);
+        return fromFile;
+    }
+#endif
+    if (secretServiceStore(key, fromFile)) {
+        deletePasswordFile(key);
+        return fromFile;
+    }
+    return fromFile;
+}
+
+static QString loadPasswordLinux(const QString &key)
+{
+    bool ok = false;
+#if defined(FT_HAVE_LIBSECRET)
+    const QString fromLibsecret = libsecretLookup(key, &ok);
+    if (ok && !fromLibsecret.isEmpty())
+        return fromLibsecret;
+    ok = false;
+#endif
+    const QString fromService = secretServiceLookup(key, &ok);
+    if (ok && !fromService.isEmpty())
+        return fromService;
+    return migrateLegacyFilePassword(key, loadPasswordFile(key));
+}
+
 #endif
 
 } // namespace
@@ -295,32 +327,7 @@ QString CredentialStore::loadPassword(const QString &key)
     CredFree(cred);
     return out;
 #else
-    bool ok = false;
-#if defined(FT_HAVE_LIBSECRET)
-    const QString fromLibsecret = libsecretLookup(key, &ok);
-    if (ok && !fromLibsecret.isEmpty())
-        return fromLibsecret;
-    ok = false;
-#endif
-    const QString fromService = secretServiceLookup(key, &ok);
-    if (ok && !fromService.isEmpty())
-        return fromService;
-    const QString fromFile = loadPasswordFile(key);
-    if (fromFile.isEmpty())
-        return QString();
-    if (secureStorageAvailable()) {
-#if defined(FT_HAVE_LIBSECRET)
-        if (libsecretStore(key, fromFile)) {
-            deletePasswordFile(key);
-            return fromFile;
-        }
-#endif
-        if (secretServiceStore(key, fromFile)) {
-            deletePasswordFile(key);
-            return fromFile;
-        }
-    }
-    return fromFile;
+    return loadPasswordLinux(key);
 #endif
 }
 
