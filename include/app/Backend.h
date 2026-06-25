@@ -197,6 +197,14 @@ private:
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
+    void wireVpnClientSignals();
+    void onVpnClientStateChanged(VpnHelperClient::State st);
+    void onVpnErrorReceived(const QString &m);
+    void onStatsTick();
+    bool finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
+                               const QString &password, const QString &tomlBody,
+                               const QString &editContent, const QString &editPassword,
+                               const QString &editProfile, bool editingSnapshot, int editIndex);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

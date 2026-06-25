@@ -140,7 +140,9 @@ coverage tracking on the repository page (badges in [README.md](README.md)).
 3. Codacy reads [`.codacy.yml`](.codacy.yml) for exclude paths and analyzes each push.
 
 If the Codacy badge stays gray, open the project on Codacy and re-copy the badge
-markdown from **Settings → General → Badges** (it embeds your project UUID).
+markdown from **Settings → General → Badges** (it embeds your project UUID). Append
+`?branch=main` to both Grade and Coverage badge URLs so GitHub shows the latest
+`main` analysis (without it the badge can look stale).
 
 ### Coverage badge (required for non-zero Codacy coverage)
 

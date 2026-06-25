@@ -49,6 +49,55 @@ static ag::LogLevel parse_log_level(const QString &level) {
     return ag::LOG_LEVEL_INFO;
 }
 
+static void protectOutboundSocket(ag::SocketProtectEvent *event)
+{
+    if (!event)
+        return;
+    event->result = 0;
+#ifdef __APPLE__
+    uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
+    if (idx == 0)
+        return;
+    if (event->peer->sa_family == AF_INET) {
+        if (setsockopt(event->fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx)) != 0)
+            event->result = -1;
+    } else if (event->peer->sa_family == AF_INET6) {
+        if (setsockopt(event->fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx)) != 0)
+            event->result = -1;
+    }
+#endif
+#ifdef __linux__
+    (void) event;
+#endif
+#ifdef _WIN32
+    if (!ag::vpn_win_socket_protect(event->fd, event->peer))
+        event->result = -1;
+#endif
+}
+
+static void verifyServerCertificate(ag::VpnVerifyCertificateEvent *event)
+{
+    if (!event)
+        return;
+    const char *err = ag::tls_verify_cert(event->cert, event->chain, nullptr);
+    event->result = (err == nullptr) ? 0 : -1;
+}
+
+static QString connectionInfoLine(ag::VpnConnectionInfoEvent *event)
+{
+    if (!event)
+        return QStringLiteral("connection info");
+    QString action;
+    switch (event->action) {
+    case ag::VPN_FCA_BYPASS: action = QStringLiteral("bypass"); break;
+    case ag::VPN_FCA_TUNNEL: action = QStringLiteral("tunnel"); break;
+    case ag::VPN_FCA_REJECT: action = QStringLiteral("reject"); break;
+    default: action = QStringLiteral("unknown"); break;
+    }
+    const QString domain = event->domain ? QString::fromUtf8(event->domain) : QStringLiteral("-");
+    return QStringLiteral("%1 %2").arg(action, domain);
+}
+
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     : QObject(parent) {
     m_reconnectTimer.setSingleShot(true);
@@ -415,49 +464,8 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
 
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     ag::VpnCallbacks callbacks;
-    callbacks.protect_handler = [](ag::SocketProtectEvent *event) {
-        if (!event) return;
-        event->result = 0;
-#ifdef __APPLE__
-        // Bind the socket to the physical outbound interface so it bypasses
-        // the TUN routing table.  Without this, bypass connections loop back
-        // through the TUN and never reach the destination.
-        uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-        if (idx == 0) return;
-        if (event->peer->sa_family == AF_INET) {
-            if (setsockopt(event->fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx)) != 0) {
-                event->result = -1;
-            }
-        } else if (event->peer->sa_family == AF_INET6) {
-            if (setsockopt(event->fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx)) != 0) {
-                event->result = -1;
-            }
-        }
-#endif
-#ifdef __linux__
-        // On Linux, SO_BINDTODEVICE requires root and a known interface name.
-        // For now we rely on routing rules; if bound_if is needed, it can be
-        // configured via the TunListener config.
-        (void) event;
-#endif
-#ifdef _WIN32
-        if (!ag::vpn_win_socket_protect(event->fd, event->peer)) {
-            event->result = -1;
-        }
-#endif
-    };
-    callbacks.verify_handler = [](ag::VpnVerifyCertificateEvent *event) {
-        if (!event) return;
-        // Verify the server certificate chain against the system CA store, exactly
-        // like the upstream reference client (trusttunnel_client.cpp). The core
-        // already handles the pinned-certificate and skip_verification cases
-        // itself and only delegates here when neither applies (and always for
-        // DNS upstream certs), so an unconditional accept (result = 0) would
-        // silently disable TLS authentication for any config without a pinned
-        // cert. result: 0 = verified/accepted, non-zero = reject.
-        const char *err = ag::tls_verify_cert(event->cert, event->chain, nullptr);
-        event->result = (err == nullptr) ? 0 : -1;
-    };
+    callbacks.protect_handler = protectOutboundSocket;
+    callbacks.verify_handler = verifyServerCertificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
         ag::VpnSessionState state = event ? event->state : ag::VPN_SS_DISCONNECTED;
         QMetaObject::invokeMethod(this, [this, state]() { handleCoreStateChanged(state); }, Qt::QueuedConnection);
@@ -465,37 +473,22 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     callbacks.client_output_handler = [this](ag::VpnClientOutputEvent *event) {
         size_t bytes = 0;
         if (event) {
-            for (size_t i = 0; i < event->packet.chunks_num; ++i) {
+            for (size_t i = 0; i < event->packet.chunks_num; ++i)
                 bytes += event->packet.chunks[i].iov_len;
-            }
         }
         QMetaObject::invokeMethod(this, [this, bytes]() { emit clientOutput(QString::number(bytes)); },
                 Qt::QueuedConnection);
     };
-    // tunnel_stats_handler is added to ag::VpnCallbacks by our CI wrapper patch
-    // (scripts/patch_core_wrapper.py), which routes VPN_EVENT_TUNNEL_CONNECTION_STATS
-    // to it so the TrafficGraph gets live per-connection upload/download deltas.
     callbacks.tunnel_stats_handler = [this](ag::VpnTunnelConnectionStatsEvent *event) {
-        if (event) {
-            quint64 up = event->upload;
-            quint64 down = event->download;
-            QMetaObject::invokeMethod(this, [this, up, down]() { emit tunnelStats(up, down); },
-                    Qt::QueuedConnection);
-        }
+        if (!event)
+            return;
+        const quint64 up = event->upload;
+        const quint64 down = event->download;
+        QMetaObject::invokeMethod(this, [this, up, down]() { emit tunnelStats(up, down); },
+                Qt::QueuedConnection);
     };
     callbacks.connection_info_handler = [this](ag::VpnConnectionInfoEvent *event) {
-        QString line = QStringLiteral("connection info");
-        if (event) {
-            QString action;
-            switch (event->action) {
-            case ag::VPN_FCA_BYPASS: action = QStringLiteral("bypass"); break;
-            case ag::VPN_FCA_TUNNEL: action = QStringLiteral("tunnel"); break;
-            case ag::VPN_FCA_REJECT: action = QStringLiteral("reject"); break;
-            default: action = QStringLiteral("unknown"); break;
-            }
-            const QString domain = event->domain ? QString::fromUtf8(event->domain) : QStringLiteral("-");
-            line = QStringLiteral("%1 %2").arg(action, domain);
-        }
+        const QString line = connectionInfoLine(event);
         QMetaObject::invokeMethod(this, [this, line]() { emit connectionInfo(line); }, Qt::QueuedConnection);
     };
     return callbacks;
@@ -543,68 +536,69 @@ void QtTrustTunnelClient::setState(State s) {
     emit stateChanged(m_state);
 }
 
-void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState state) {
-    if (m_stopRequested) {
+void QtTrustTunnelClient::handleCoreConnected()
+{
+    m_reconnectDelayMs = 1000;
+    m_reconnectTimer.stop();
+    m_networkWaitTimer.stop();
+    m_everConnected = true;
+    setState(State::Connected);
+    emit vpnConnected();
+}
+
+void QtTrustTunnelClient::handleCoreConnecting()
+{
+    m_networkWaitTimer.stop();
+    setState(m_everConnected ? State::Reconnecting : State::Connecting);
+}
+
+void QtTrustTunnelClient::handleCoreRecovery(const QString &reason)
+{
+    m_networkWaitTimer.stop();
+    if (!m_stopRequested && m_autoReconnect) {
+        teardownClient();
+        scheduleReconnect(reason);
         return;
     }
+    setState(m_everConnected ? State::Reconnecting : State::Connecting);
+}
+
+void QtTrustTunnelClient::handleCoreWaitingForNetwork()
+{
+    setState(State::WaitingForNetwork);
+    if (!m_stopRequested && m_autoReconnect)
+        m_networkWaitTimer.start();
+}
+
+void QtTrustTunnelClient::handleCoreDisconnected()
+{
+    m_networkWaitTimer.stop();
+    if (!m_stopRequested)
+        scheduleReconnect(QStringLiteral("core disconnected"));
+}
+
+void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState state) {
+    if (m_stopRequested)
+        return;
 
     switch (state) {
     case ag::VPN_SS_CONNECTED:
-        m_reconnectDelayMs = 1000;
-        m_reconnectTimer.stop();
-        m_networkWaitTimer.stop(); // no longer waiting for network
-        m_everConnected = true;
-        setState(State::Connected);
-        emit vpnConnected();
+        handleCoreConnected();
         break;
     case ag::VPN_SS_CONNECTING:
-        m_networkWaitTimer.stop();
-        setState(m_everConnected ? State::Reconnecting : State::Connecting);
+        handleCoreConnecting();
         break;
     case ag::VPN_SS_RECOVERING:
-        // The core's internal recovery leaks TCP/IP sockets (the old tcpip
-        // stack and its buffered connections are not fully closed before
-        // new ones are created).  Force a clean teardown + reconnect from
-        // the Qt layer to avoid exhausting file descriptors.
-        m_networkWaitTimer.stop();
-        if (!m_stopRequested && m_autoReconnect) {
-            teardownClient();
-            scheduleReconnect(QStringLiteral("recovery: full reconnect to avoid fd leak"));
-        } else {
-            setState(m_everConnected ? State::Reconnecting : State::Connecting);
-        }
+        handleCoreRecovery(QStringLiteral("recovery: full reconnect to avoid fd leak"));
         break;
     case ag::VPN_SS_WAITING_RECOVERY:
-        // Same as RECOVERING — don't let the core attempt its own recovery;
-        // do a clean reconnect from our side.
-        m_networkWaitTimer.stop();
-        if (!m_stopRequested && m_autoReconnect) {
-            teardownClient();
-            scheduleReconnect(QStringLiteral("waiting recovery: full reconnect to avoid fd leak"));
-        } else {
-            setState(m_everConnected ? State::Reconnecting : State::Connecting);
-        }
+        handleCoreRecovery(QStringLiteral("waiting recovery: full reconnect to avoid fd leak"));
         break;
     case ag::VPN_SS_WAITING_FOR_NETWORK:
-        // Network connectivity lost (internet disconnect, sleep mode, etc.).
-        // Show a distinct state so the user knows the issue is local.
-        // Start a watchdog: if the core does not self-recover within 30 s,
-        // we force a full teardown + reconnect.  This handles the common
-        // sleep/wake scenario where the core gets stuck after waking up.
-        setState(State::WaitingForNetwork);
-        if (!m_stopRequested && m_autoReconnect) {
-            m_networkWaitTimer.start();
-        }
+        handleCoreWaitingForNetwork();
         break;
     case ag::VPN_SS_DISCONNECTED:
-        // With VPN_CRP_FALL_INTO_RECOVERY the core only reaches DISCONNECTED
-        // on fatal errors (auth failure, cert error, location unavailable).
-        // Schedule a Qt-level reconnect anyway, which will create a fresh
-        // client and reload the config.
-        m_networkWaitTimer.stop();
-        if (!m_stopRequested) {
-            scheduleReconnect(QStringLiteral("core disconnected"));
-        }
+        handleCoreDisconnected();
         break;
     default:
         break;

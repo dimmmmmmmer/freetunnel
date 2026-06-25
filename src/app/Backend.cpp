@@ -21,74 +21,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         m_activePath = m_paths.first();
     }
 
-    connect(&m_client, &VpnHelperClient::stateChanged, this,
-            [this](VpnHelperClient::State st) {
-                const bool nowConnected = st == VpnHelperClient::State::Connected;
-                if (nowConnected && !m_connected) {
-                    m_session.restart();
-                }
-                m_connected = nowConnected;
-                m_connecting = st == VpnHelperClient::State::Connecting
-                               || st == VpnHelperClient::State::Reconnecting
-                               || st == VpnHelperClient::State::WaitingForNetwork;
-                if (m_reapplying
-                    && (nowConnected || st == VpnHelperClient::State::Error)) {
-                    m_reapplying = false;
-                }
-                // Don't surface "Disconnecting…" during a silent live re-apply
-                // (rule changes briefly tear the tunnel down and back up).
-                m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
-                // Never delete the password temp config in response to a state
-                // change. The core re-reads the config *path* during its own
-                // recovery — after a dropped link it cycles through Disconnected /
-                // Error / Reconnecting and reopens the file — so removing it here
-                // makes the reconnect fail with "config could not be opened".
-                // It is cleaned up deterministically instead: connectVpn() removes
-                // the previous one before materializing the next, prepareQuit()
-                // removes it on exit, and sweepStaleMaterializedConfigs() clears
-                // any orphan at startup.
-                emit stateChanged();
-                appendLog(QStringLiteral("INFO"), statusText());
-            });
-    connect(&m_client, &VpnHelperClient::tunnelStats, this,
-            [this](quint64 up, quint64 down) {
-                m_accUp += up;
-                m_accDown += down;
-            });
-    connect(&m_client, &VpnHelperClient::connectionInfo, this,
-            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
-    connect(&m_client, &VpnHelperClient::vpnError, this, [this](const QString &m) {
-        appendLog(QStringLiteral("ERROR"), m); // raw message always logged
-        // While we're intentionally tearing the tunnel down to switch config or
-        // re-apply rules, suppress the scary "disconnected" pop-up.
-        if (m_reapplying || m_inConnect)
-            return;
-        // Turn low-level core messages into something a user can act on.
-        const QString lower = m.toLower();
-        QString friendly = m;
-        if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
-            friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
-        else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
-            friendly = tr("Server isn't responding (timed out).");
-        else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
-            friendly = tr("Authentication failed — check the username and password.");
-        // Throttle toasts: a flaky connection can spit the same error every few
-        // seconds — show it once, then stay quiet for a while unless it changes.
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
-            m_lastErrorMsg = friendly;
-            m_lastErrorAt = now;
-            emit errorOccurred(friendly);
-        }
-    });
+    wireVpnClientSignals();
 
     m_ticker.setInterval(1000);
-    connect(&m_ticker, &QTimer::timeout, this, [this]() {
-        m_downRate = static_cast<double>(m_accDown);
-        m_upRate = static_cast<double>(m_accUp);
-        m_accUp = m_accDown = 0;
-        emit tick();
-    });
+    connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
 
     registerHotkeys();
@@ -103,6 +39,68 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     // Connect on startup if requested (deferred so the window shows first).
     if (m_settings.auto_connect_on_start && !m_activePath.isEmpty())
         QTimer::singleShot(600, this, [this] { connectVpn(); });
+}
+
+void Backend::wireVpnClientSignals()
+{
+    connect(&m_client, &VpnHelperClient::stateChanged, this, &Backend::onVpnClientStateChanged);
+    connect(&m_client, &VpnHelperClient::tunnelStats, this,
+            [this](quint64 up, quint64 down) {
+                m_accUp += up;
+                m_accDown += down;
+            });
+    connect(&m_client, &VpnHelperClient::connectionInfo, this,
+            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
+    connect(&m_client, &VpnHelperClient::vpnError, this, &Backend::onVpnErrorReceived);
+}
+
+void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
+{
+    const bool nowConnected = st == VpnHelperClient::State::Connected;
+    if (nowConnected && !m_connected) {
+        m_session.restart();
+    }
+    m_connected = nowConnected;
+    m_connecting = st == VpnHelperClient::State::Connecting
+                   || st == VpnHelperClient::State::Reconnecting
+                   || st == VpnHelperClient::State::WaitingForNetwork;
+    if (m_reapplying && (nowConnected || st == VpnHelperClient::State::Error)) {
+        m_reapplying = false;
+    }
+    // Don't surface "Disconnecting…" during a silent live re-apply
+    // (rule changes briefly tear the tunnel down and back up).
+    m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
+    emit stateChanged();
+    appendLog(QStringLiteral("INFO"), statusText());
+}
+
+void Backend::onVpnErrorReceived(const QString &m)
+{
+    appendLog(QStringLiteral("ERROR"), m); // raw message always logged
+    if (m_reapplying || m_inConnect)
+        return;
+    const QString lower = m.toLower();
+    QString friendly = m;
+    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+        friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
+    else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+        friendly = tr("Server isn't responding (timed out).");
+    else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
+        friendly = tr("Authentication failed — check the username and password.");
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
+        m_lastErrorMsg = friendly;
+        m_lastErrorAt = now;
+        emit errorOccurred(friendly);
+    }
+}
+
+void Backend::onStatsTick()
+{
+    m_downRate = static_cast<double>(m_accDown);
+    m_upRate = static_cast<double>(m_accUp);
+    m_accUp = m_accDown = 0;
+    emit tick();
 }
 
 QString Backend::statusText() const {

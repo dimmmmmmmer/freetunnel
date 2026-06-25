@@ -78,6 +78,11 @@ private:
     void scheduleReconnect(const QString &reason);
     void setState(State s);
     void handleCoreStateChanged(ag::VpnSessionState state);
+    void handleCoreConnected();
+    void handleCoreConnecting();
+    void handleCoreRecovery(const QString &reason);
+    void handleCoreWaitingForNetwork();
+    void handleCoreDisconnected();
     void teardownClient();
     void checkFdHealth();
     static int countOpenFds();

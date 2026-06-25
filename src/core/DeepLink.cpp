@@ -124,6 +124,80 @@ QString derToPem(const QByteArray &der) {
             + QStringLiteral("-----END CERTIFICATE-----\n");
 }
 
+struct DeepLinkFieldFlags {
+    bool hostname = false;
+    bool user = false;
+    bool pass = false;
+};
+
+bool applyDeepLinkStringTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg, DeepLinkFieldFlags &flags)
+{
+    switch (tag) {
+    case 0x01: cfg.hostname = QString::fromUtf8(value); flags.hostname = true; return true;
+    case 0x02: cfg.addresses << QString::fromUtf8(value); return true;
+    case 0x03: cfg.customSni = QString::fromUtf8(value); return true;
+    case 0x05: cfg.username = QString::fromUtf8(value); flags.user = true; return true;
+    case 0x06: cfg.password = QString::fromUtf8(value); flags.pass = true; return true;
+    case 0x0B: cfg.clientRandomPrefix = QString::fromUtf8(value); return true;
+    case 0x0C: cfg.name = QString::fromUtf8(value); return true;
+    default: return false;
+    }
+}
+
+bool applyDeepLinkScalarTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg)
+{
+    const auto asBool = [&](bool def) {
+        return value.isEmpty() ? def : (value.at(0) != 0);
+    };
+    const auto asVarint = [&](quint64 def) {
+        int p = 0;
+        quint64 v = def;
+        readVarint(value, p, v);
+        return v;
+    };
+
+    switch (tag) {
+    case 0x00: cfg.version = static_cast<int>(asVarint(0)); return true;
+    case 0x04: cfg.hasIpv6 = asBool(true); return true;
+    case 0x07: cfg.skipVerification = asBool(false); return true;
+    case 0x08: cfg.certificate = value; return true;
+    case 0x09:
+        cfg.upstreamProtocol = asVarint(1) == 2 ? UpstreamProtocol::Http3 : UpstreamProtocol::Http2;
+        return true;
+    case 0x0A: cfg.antiDpi = asBool(false); return true;
+    default: return false;
+    }
+}
+
+bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
+                      DeepLinkFieldFlags &flags, QString *error)
+{
+    if (applyDeepLinkStringTlv(tag, value, cfg, flags))
+        return true;
+    if (applyDeepLinkScalarTlv(tag, value, cfg))
+        return true;
+    if (tag == 0x0D) {
+        bool ok = false;
+        cfg.dnsUpstreams = decodeStringList(value, &ok);
+        if (!ok && error)
+            *error = QStringLiteral("malformed dns_upstreams list");
+        return ok;
+    }
+    return true;
+}
+
+QString normalizeDeepLinkBody(QString s)
+{
+    const int ttIdx = s.indexOf(QLatin1String("tt="));
+    if (ttIdx >= 0 && !s.startsWith(QLatin1String("tt://")))
+        s = QStringLiteral("tt://?") + s.mid(ttIdx + 3);
+    if (s.startsWith(QLatin1String("tt://?")))
+        return s.mid(6);
+    if (s.startsWith(QLatin1String("tt://")))
+        return s.mid(5);
+    return {};
+}
+
 } // namespace
 
 std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) {
@@ -135,23 +209,9 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     };
 
     QString s = uri.trimmed();
-    // Also accept share links like https://trusttunnel.org/qr.html#tt=<base64>
-    // (or ?tt=<base64>): the payload after tt= is the same base64url body.
-    const int ttIdx = s.indexOf(QLatin1String("tt="));
-    if (ttIdx >= 0 && !s.startsWith(QLatin1String("tt://")))
-        s = QStringLiteral("tt://?") + s.mid(ttIdx + 3);
-
-    // Scheme is case-sensitive `tt`; payload lives in the query part.
-    if (s.startsWith(QLatin1String("tt://?"))) {
-        s = s.mid(6);
-    } else if (s.startsWith(QLatin1String("tt://"))) {
-        s = s.mid(5);
-    } else {
+    s = normalizeDeepLinkBody(s);
+    if (s.isEmpty())
         return fail(QStringLiteral("not a tt:// deep link"));
-    }
-    if (s.isEmpty()) {
-        return fail(QStringLiteral("empty deep link payload"));
-    }
 
     const QByteArray payload =
             QByteArray::fromBase64(s.toLatin1(), QByteArray::Base64UrlEncoding);
@@ -160,7 +220,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     }
 
     DeepLinkConfig cfg;
-    bool haveHostname = false, haveUser = false, havePass = false;
+    DeepLinkFieldFlags flags;
     int pos = 0;
     while (pos < payload.size()) {
         quint64 tag = 0, len = 0;
@@ -172,50 +232,14 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
         }
         const QByteArray value = payload.mid(pos, static_cast<int>(len));
         pos += static_cast<int>(len);
-
-        const auto asBool = [&](bool def) {
-            return value.isEmpty() ? def : (value.at(0) != 0);
-        };
-        const auto asVarint = [&](quint64 def) {
-            int p = 0;
-            quint64 v = def;
-            readVarint(value, p, v);
-            return v;
-        };
-
-        switch (tag) {
-        case 0x00: cfg.version = static_cast<int>(asVarint(0)); break;
-        case 0x01: cfg.hostname = QString::fromUtf8(value); haveHostname = true; break;
-        case 0x02: cfg.addresses << QString::fromUtf8(value); break;
-        case 0x03: cfg.customSni = QString::fromUtf8(value); break;
-        case 0x04: cfg.hasIpv6 = asBool(true); break;
-        case 0x05: cfg.username = QString::fromUtf8(value); haveUser = true; break;
-        case 0x06: cfg.password = QString::fromUtf8(value); havePass = true; break;
-        case 0x07: cfg.skipVerification = asBool(false); break;
-        case 0x08: cfg.certificate = value; break;
-        case 0x09:
-            cfg.upstreamProtocol =
-                    asVarint(1) == 2 ? UpstreamProtocol::Http3 : UpstreamProtocol::Http2;
-            break;
-        case 0x0A: cfg.antiDpi = asBool(false); break;
-        case 0x0B: cfg.clientRandomPrefix = QString::fromUtf8(value); break;
-        case 0x0C: cfg.name = QString::fromUtf8(value); break;
-        case 0x0D: {
-            bool ok = false;
-            cfg.dnsUpstreams = decodeStringList(value, &ok);
-            if (!ok) {
-                return fail(QStringLiteral("malformed dns_upstreams list"));
-            }
-            break;
-        }
-        default: break; // ignore unknown tags (forward compatibility)
-        }
+        if (!applyDeepLinkTlv(tag, value, cfg, flags, error))
+            return std::nullopt;
     }
 
     if (cfg.version > kDeepLinkMaxVersion) {
         return fail(QStringLiteral("unsupported deep link version %1").arg(cfg.version));
     }
-    if (!haveHostname || cfg.addresses.isEmpty() || !haveUser || !havePass) {
+    if (!flags.hostname || cfg.addresses.isEmpty() || !flags.user || !flags.pass) {
         return fail(QStringLiteral("deep link missing required fields "
                                    "(hostname, address, username, password)"));
     }

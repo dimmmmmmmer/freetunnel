@@ -54,6 +54,11 @@ signals:
 private:
     bool ensureHelper();
     bool spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err);
+    void resetHelperTransport();
+    bool configureTestHelper();
+    bool configureProductionHelper();
+    void wireHelperSocket(bool testHelper);
+    void startHelperConnectRetry();
     void abortStartup();
     void clearTokenFile();
     void send(const QJsonObject &obj);

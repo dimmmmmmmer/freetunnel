@@ -24,6 +24,125 @@
 #include "core/DeepLink.h"
 #include "core/NetBind.h"
 
+namespace {
+
+bool validateAddressList(const QString &addresses)
+{
+    const QStringList addrs = addresses.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &raw : addrs) {
+        const QString a = raw.trimmed();
+        const int colon = a.lastIndexOf(QLatin1Char(':'));
+        bool portOk = false;
+        const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
+        if (colon <= 0 || !portOk || port < 1 || port > 65535)
+            return false;
+    }
+    return true;
+}
+
+bool validateDnsList(const QString &dns)
+{
+    static const QRegularExpression dnsScheme(
+        QStringLiteral("^(tls|https|quic|h3|sdns|udp|tcp)://"), QRegularExpression::CaseInsensitiveOption);
+    const QStringList dnsList = dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
+                                         Qt::SkipEmptyParts);
+    for (const QString &raw : dnsList) {
+        const QString d = raw.trimmed();
+        if (dnsScheme.match(d).hasMatch())
+            continue;
+        QString host = d;
+        const int colon = host.lastIndexOf(QLatin1Char(':'));
+        if (colon > 0 && !host.contains(QLatin1Char('[')) && host.count(QLatin1Char(':')) == 1)
+            host = host.left(colon);
+        if (QHostAddress(host).isNull())
+            return false;
+    }
+    return true;
+}
+
+struct EditSnapshot {
+    QString oldPath;
+    QString content;
+    QString password;
+    QString profile;
+    bool active = false;
+};
+
+EditSnapshot snapshotForEdit(int editIndex, const QStringList &paths, const AppSettings &settings)
+{
+    EditSnapshot snap;
+    if (editIndex < 0 || editIndex >= paths.size())
+        return snap;
+    snap.oldPath = paths.at(editIndex);
+    snap.active = true;
+    QFile of(snap.oldPath);
+    if (of.open(QIODevice::ReadOnly | QIODevice::Text))
+        snap.content = QString::fromUtf8(of.readAll());
+    snap.password = freetunnel::CredentialStore::loadPassword(
+            freetunnel::CredentialStore::keyForConfigPath(snap.oldPath));
+    snap.profile = settings.config_profiles.value(snap.oldPath);
+    if (snap.profile.isEmpty() || !settings.profiles.contains(snap.profile))
+        snap.profile = QStringLiteral("Default");
+    return snap;
+}
+
+bool writeConfigFile(const QString &target, const QByteArray &body)
+{
+    QFile file(target);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    file.write(body);
+    file.close();
+    QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
+}
+
+bool storeConfigPassword(const QString &target, const QString &password)
+{
+    freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForConfigPath(target),
+                                               password);
+    if (!password.isEmpty()
+        && freetunnel::CredentialStore::loadPassword(
+                   freetunnel::CredentialStore::keyForConfigPath(target))
+                   .isEmpty()) {
+        QFile::remove(target);
+        return false;
+    }
+    return true;
+}
+
+void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target)
+{
+    const int storedIdx = oldPath.isEmpty() ? -1 : stored.indexOf(oldPath);
+    if (storedIdx >= 0) {
+        stored[storedIdx] = target;
+        stored.removeDuplicates();
+    } else if (!stored.contains(target)) {
+        stored.prepend(target);
+    }
+}
+
+QString normalizedSplitProfile(const QVariantMap &f, const AppSettings &settings)
+{
+    QString profile = f.value(QStringLiteral("splitProfile"), QStringLiteral("Default")).toString();
+    if (!settings.profiles.contains(profile))
+        profile = QStringLiteral("Default");
+    return profile;
+}
+
+void assignSplitProfile(AppSettings &settings, const QString &oldPath, const QString &target,
+                        const QString &profile)
+{
+    if (!oldPath.isEmpty() && oldPath != target)
+        settings.config_profiles.remove(oldPath);
+    if (profile == QLatin1String("Default"))
+        settings.config_profiles.remove(target);
+    else
+        settings.config_profiles[target] = profile;
+}
+
+} // namespace
+
 // Read the first endpoint "host:port" out of a config TOML.
 static QString firstAddress(const QString &path) {
     QFile f(path);
@@ -193,17 +312,9 @@ bool Backend::createConfig(const QVariantMap &f) {
         emit errorOccurred(tr("Fill in host, address, username and password"));
         return false;
     }
-    // Each address must be host:port (e.g. 1.2.3.4:443 or [::1]:443).
-    const QStringList addrs = ct.addresses.split(QLatin1Char(','), Qt::SkipEmptyParts);
-    for (const QString &raw : addrs) {
-        const QString a = raw.trimmed();
-        const int colon = a.lastIndexOf(QLatin1Char(':'));
-        bool portOk = false;
-        const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
-        if (colon <= 0 || !portOk || port < 1 || port > 65535) {
-            emit errorOccurred(tr("Address must be host:port, e.g. 1.2.3.4:443"));
-            return false;
-        }
+    if (!validateAddressList(ct.addresses)) {
+        emit errorOccurred(tr("Address must be host:port, e.g. 1.2.3.4:443"));
+        return false;
     }
     ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
     ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
@@ -211,106 +322,63 @@ bool Backend::createConfig(const QVariantMap &f) {
     ct.dns = f.value(QStringLiteral("dns")).toString();
     ct.customSni = f.value(QStringLiteral("customSni")).toString();
     ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
-    // DNS servers (when given): plain IP, or an encrypted-DNS URL
-    // (tls://, https://, quic://, h3://, sdns://, udp://, tcp://).
-    const QStringList dnsList = ct.dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
-                                            Qt::SkipEmptyParts);
-    static const QRegularExpression dnsScheme(
-        QStringLiteral("^(tls|https|quic|h3|sdns|udp|tcp)://"), QRegularExpression::CaseInsensitiveOption);
-    for (const QString &raw : dnsList) {
-        const QString d = raw.trimmed();
-        if (dnsScheme.match(d).hasMatch())
-            continue; // an encrypted-DNS endpoint URL — accept as-is
-        // Otherwise a bare IP (optionally with :port).
-        QString host = d;
-        const int colon = host.lastIndexOf(QLatin1Char(':'));
-        if (colon > 0 && !host.contains(QLatin1Char('[')) && host.count(QLatin1Char(':')) == 1)
-            host = host.left(colon);
-        if (QHostAddress(host).isNull()) {
-            emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
-            return false;
-        }
+    if (!validateDnsList(ct.dns)) {
+        emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
+        return false;
     }
-    // Client random (when given) must be a hex string.
     const QString cr = ct.clientRandom.trimmed();
     if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+$")).match(cr).hasMatch()) {
         emit errorOccurred(tr("Client random must be hexadecimal"));
         return false;
     }
+
     const QString password = ct.password;
     ct.password.clear();
-    const QString t = freetunnel::buildConfigToml(ct);
-    const QString hostname = ct.hostname;
-
-    const QString src = name.isEmpty() ? hostname : name;
-    const QString safe = freetunnel::sanitizeConfigBaseName(src, QStringLiteral("config"));
+    const QString tomlBody = freetunnel::buildConfigToml(ct);
+    const QString safe = freetunnel::sanitizeConfigBaseName(
+            name.isEmpty() ? ct.hostname : name, QStringLiteral("config"));
 
     const int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
-    const QString oldPath = (editIndex >= 0 && editIndex < m_paths.size())
-            ? m_paths.at(editIndex) : QString();
+    const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
+    const QString &oldPath = edit.oldPath;
 
-    // Snapshot the config being edited so a true no-op save (identical content,
-    // password and split profile) doesn't tear down a live tunnel further down.
-    const bool editingSame = editIndex >= 0 && !oldPath.isEmpty();
-    QString oldContent, oldPassword, oldProfile;
-    if (editingSame) {
-        QFile of(oldPath);
-        if (of.open(QIODevice::ReadOnly | QIODevice::Text))
-            oldContent = QString::fromUtf8(of.readAll());
-        oldPassword = freetunnel::CredentialStore::loadPassword(
-                freetunnel::CredentialStore::keyForConfigPath(oldPath));
-        oldProfile = m_settings.config_profiles.value(oldPath);
-        if (oldProfile.isEmpty() || !m_settings.profiles.contains(oldProfile))
-            oldProfile = QStringLiteral("Default");
-    }
-
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(base);
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::uniqueOwnerConfigPath(safe);
-    QFile file(target);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (!writeConfigFile(target, tomlBody.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
         return false;
     }
-    file.write(t.toUtf8());
-    file.close();
-    // Restrict the config to the owner. Passwords live in the OS credential store.
-    QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForConfigPath(target),
-                                               password);
-    if (!password.isEmpty()
-        && freetunnel::CredentialStore::loadPassword(
-                   freetunnel::CredentialStore::keyForConfigPath(target))
-                   .isEmpty()) {
+    if (!storeConfigPassword(target, password)) {
         emit errorOccurred(tr("Could not store the VPN password securely. Install "
                              "gnome-keyring or KWallet, then try again."));
-        QFile::remove(target);
         return false;
     }
     if (!oldPath.isEmpty() && oldPath != target)
         freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(oldPath));
 
+    return finalizeCreatedConfig(f, oldPath, target, password, tomlBody, edit.content, edit.password,
+                                 edit.profile, edit.active, editIndex);
+}
+
+bool Backend::finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
+                                    const QString &password, const QString &tomlBody,
+                                    const QString &editContent, const QString &editPassword,
+                                    const QString &editProfile, bool editingSnapshot, int editIndex)
+{
     QStringList stored = loadStoredConfigs();
     const bool editing = editIndex >= 0;
-    const int storedIdx = oldPath.isEmpty() ? -1 : stored.indexOf(oldPath);
     const bool wasActive = !oldPath.isEmpty() && m_activePath == oldPath;
-    if (!oldPath.isEmpty() && oldPath != target) { // edit + rename
+    if (!oldPath.isEmpty() && oldPath != target) {
         QFile::remove(oldPath);
-        if (wasActive) m_activePath = target;
+        if (wasActive)
+            m_activePath = target;
     }
-    if (storedIdx >= 0) {
-        stored[storedIdx] = target; // keep the list position when editing
-        stored.removeDuplicates();
-    } else if (!stored.contains(target)) {
-        stored.prepend(target); // a brand-new config goes to the top (edits keep their place above)
-    }
+    updateStoredConfigList(stored, oldPath, target);
     saveStoredConfigs(stored);
     reloadConfigs();
-    // Move the just-written password into the keychain immediately so it never
-    // lingers as plaintext in the .toml (imports already do this).
     freetunnel::migrateConfigPassword(target);
+
     if (!editing) {
-        // A newly created config becomes the active selection.
         m_activePath = target;
         m_settings.last_config_path = target;
         persistSettings();
@@ -319,26 +387,13 @@ bool Backend::createConfig(const QVariantMap &f) {
         persistSettings();
     }
 
-    // Per-config split profile assignment (Default is the implicit, unstored value).
-    QString newProfile = f.value(QStringLiteral("splitProfile"), QStringLiteral("Default")).toString();
-    if (!m_settings.profiles.contains(newProfile))
-        newProfile = QStringLiteral("Default");
-    {
-        if (!oldPath.isEmpty() && oldPath != target)
-            m_settings.config_profiles.remove(oldPath);
-        if (newProfile == QLatin1String("Default"))
-            m_settings.config_profiles.remove(target);
-        else
-            m_settings.config_profiles[target] = newProfile;
-        persistSettings();
-    }
+    const QString newProfile = normalizedSplitProfile(f, m_settings);
+    assignSplitProfile(m_settings, oldPath, target, newProfile);
+    persistSettings();
 
     emit configChanged();
-    // Re-apply rules and reconnect only when the live config actually changed.
-    // Saving an edit that changed nothing — same content, password and profile —
-    // must not tear the tunnel down and reconnect.
-    const bool noChange = editingSame && oldPath == target
-            && t == oldContent && password == oldPassword && newProfile == oldProfile;
+    const bool noChange = editingSnapshot && oldPath == target && tomlBody == editContent
+            && password == editPassword && newProfile == editProfile;
     if (editing && m_activePath == target && !noChange) {
         applySplitRules();
         reapplyIfConnected();

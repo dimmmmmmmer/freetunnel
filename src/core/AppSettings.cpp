@@ -75,6 +75,65 @@ QStringList recommendedRussiaDomains() {
         QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")};
 }
 
+static void loadProfileMap(const QSettings &s, AppSettings &out)
+{
+    const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
+    const QStringList legacy = s.value("bypass/rules", QStringList{}).toStringList();
+    out.profiles.clear();
+    for (const QString &n : names) {
+        const QString key = QStringLiteral("bypass/profile/") + n;
+        if (s.contains(key)) {
+            out.profiles.insert(n, s.value(key).toStringList());
+            continue;
+        }
+        if (n == QStringLiteral("Default")) {
+            if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
+                out.profiles.insert(n, legacy);
+            else
+                out.profiles.insert(n, recommendedRussiaDomains());
+        } else {
+            out.profiles.insert(n, {});
+        }
+    }
+    if (out.profiles.isEmpty())
+        out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
+    if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
+            && names == QStringList{QStringLiteral("Default")})
+        out.profiles[QStringLiteral("Default")] = legacy;
+}
+
+static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
+{
+    out.active_profile = s.value("bypass/active_profile", QStringLiteral("Default")).toString();
+    if (!out.profiles.contains(out.active_profile))
+        out.active_profile = out.profiles.firstKey();
+    out.domain_bypass_rules = out.profiles.value(out.active_profile);
+
+    const QStringList names = out.profiles.keys();
+    QStringList order;
+    for (const QString &n : s.value("bypass/profile_order", names).toStringList()) {
+        if (out.profiles.contains(n) && !order.contains(n))
+            order << n;
+    }
+    for (const QString &n : names) {
+        if (!order.contains(n))
+            order << n;
+    }
+    if (!order.contains(QStringLiteral("Default")))
+        order.prepend(QStringLiteral("Default"));
+    out.profile_order = order;
+
+    const QVariantMap cp = s.value("bypass/config_profiles").toMap();
+    for (auto it = cp.constBegin(); it != cp.constEnd(); ++it)
+        out.config_profiles.insert(it.key(), it.value().toString());
+}
+
+static void loadBypassProfiles(const QSettings &s, AppSettings &out)
+{
+    loadProfileMap(s, out);
+    loadProfileOrderAndAssignments(s, out);
+}
+
 AppSettings loadAppSettings() {
     // Uses QCoreApplication's organization/application name (set to "FreeTunnel"
     // in main()), so tests can redirect the store to an isolated domain.
@@ -91,49 +150,7 @@ AppSettings loadAppSettings() {
     out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
-    // Split-tunnel profiles.
-    const QStringList names = s.value("bypass/profile_names", QStringList{"Default"}).toStringList();
-    const QStringList legacy = s.value("bypass/rules", QStringList{}).toStringList();
-    out.profiles.clear();
-    for (const QString &n : names) {
-        const QString key = QStringLiteral("bypass/profile/") + n;
-        if (s.contains(key))
-            out.profiles.insert(n, s.value(key).toStringList());
-        else if (n == QStringLiteral("Default")) {
-            // Pre-profile installs stored rules under bypass/rules only.
-            if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
-                out.profiles.insert(n, legacy);
-            else
-                out.profiles.insert(n, recommendedRussiaDomains());
-        } else
-            out.profiles.insert(n, {});
-    }
-    if (out.profiles.isEmpty())
-        out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
-    // Migrate a pre-profiles single rule list into Default when the profile
-    // entry exists but is still empty.
-    if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
-            && names == QStringList{QStringLiteral("Default")})
-        out.profiles[QStringLiteral("Default")] = legacy;
-    out.active_profile = s.value("bypass/active_profile", QStringLiteral("Default")).toString();
-    if (!out.profiles.contains(out.active_profile))
-        out.active_profile = out.profiles.firstKey();
-    out.domain_bypass_rules = out.profiles.value(out.active_profile);
-    // Preserve creation order; reconcile with the actual profile set.
-    QStringList order;
-    for (const QString &n : s.value("bypass/profile_order", names).toStringList())
-        if (out.profiles.contains(n) && !order.contains(n))
-            order << n;
-    for (const QString &n : out.profiles.keys())
-        if (!order.contains(n))
-            order << n;
-    if (!order.contains(QStringLiteral("Default")))
-        order.prepend(QStringLiteral("Default"));
-    out.profile_order = order;
-    // Per-config profile assignments (config path -> profile name).
-    const QVariantMap cp = s.value("bypass/config_profiles").toMap();
-    for (auto it = cp.constBegin(); it != cp.constEnd(); ++it)
-        out.config_profiles.insert(it.key(), it.value().toString());
+    loadBypassProfiles(s, out);
     out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
     out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
     out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();

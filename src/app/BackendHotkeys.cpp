@@ -13,6 +13,11 @@ void Backend::unregisterHotkeys() {
 
 void Backend::registerHotkeys() {
     unregisterHotkeys();
+#ifdef FT_ENABLE_TEST_HOOKS
+    // QHotkey needs a real windowing session; offscreen CI (QT_QPA_PLATFORM=offscreen) segfaults.
+    if (qEnvironmentVariable("QT_QPA_PLATFORM") == QLatin1String("offscreen"))
+        return;
+#endif
     if (!m_settings.hotkeys_enabled) // master switch off — leave everything unbound
         return;
     auto make = [this](const QString &seq, void (Backend::*slot)()) -> QHotkey * {
