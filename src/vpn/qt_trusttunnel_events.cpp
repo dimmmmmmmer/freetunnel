@@ -4,6 +4,8 @@
 
 #include "net/network_manager.h"
 
+#include <QList>
+
 #include <chrono>
 
 StateChangedPayload extractStateChangedPayload(ag::VpnStateChangedEvent *event)

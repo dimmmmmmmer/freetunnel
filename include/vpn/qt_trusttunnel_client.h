@@ -102,6 +102,7 @@ private:
     bool attemptTunnelConnect();
     void teardownIfReconnecting(bool isReconnect);
     void forceFdReconnect(const QString &logReason, const QString &userReason);
+    void protectOutboundSocket(ag::SocketProtectEvent *event);
     static int countOpenFds();
     static int getFdLimit();
 

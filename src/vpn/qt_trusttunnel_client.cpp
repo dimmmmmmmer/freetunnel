@@ -3,6 +3,7 @@
 #include "qt_trusttunnel_platform.h"
 #include "qt_trusttunnel_events.h"
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -300,10 +301,7 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     ag::VpnCallbacks callbacks;
     callbacks.protect_handler = [this](ag::SocketProtectEvent *event) {
-#ifdef Q_OS_WIN
-        pinWindowsPhysicalOutbound(m_winPhysicalIfIndex);
-#endif
-        qt_trusttunnel_protect_outbound_socket(event);
+        protectOutboundSocket(event);
     };
     callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
@@ -333,6 +331,14 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
         QMetaObject::invokeMethod(this, [this, line]() { emit connectionInfo(line); }, Qt::QueuedConnection);
     };
     return callbacks;
+}
+
+void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
+{
+#ifdef Q_OS_WIN
+    pinWindowsPhysicalOutbound(m_winPhysicalIfIndex);
+#endif
+    qt_trusttunnel_protect_outbound_socket(event);
 }
 
 void QtTrustTunnelClient::scheduleReconnect(const QString &reason) {
