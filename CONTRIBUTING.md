@@ -168,9 +168,12 @@ Codacy still shows **main branch isn't protected** until:
 
 Repository-side hygiene for Codacy:
 
-- [`.codacy.yml`](.codacy.yml) — excludes, cppcheck language, complexity/duplication ignores
-- [`cppcheck.cfg`](cppcheck.cfg) — Qt false-positive suppressions (also used by Codacy's cppcheck)
+- [`.codacy.yml`](.codacy.yml) — excludes, **cppcheck `extra_lines`** (Codacy ignores `cppcheck.cfg`), lizard/metric excludes
+- [`cppcheck.cfg`](cppcheck.cfg) — used by local runs and CI security job
 - [`.github/action-pins.env`](.github/action-pins.env) — full SHA pins for third-party Actions
+
+**Note:** Codacy only picks up cppcheck suppressions via `engines.cppcheck.extra_lines` in
+`.codacy.yml`, not via `cppcheck.cfg` in the repo root.
 
 Quality gate (default): add **Codacy Static Code Analysis** — already required on `main`.
 

@@ -3,6 +3,25 @@
 This document describes FreeTunnel's security model, known limitations, and how
 to report vulnerabilities.
 
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| ACL | Access-control list |
+| GPG | GNU Privacy Guard (OpenPGP; we use Ed25519 instead for release signatures) |
+| GNOME | GNU Network Object Model Environment (Linux desktop / Keyring) |
+| IPC | Inter-process communication |
+| KB | Kilobyte |
+| MITM | Man-in-the-middle |
+| PEM | Privacy-Enhanced Mail (key encoding format) |
+| QML | Qt Modeling Language |
+| SHA | Secure Hash Algorithm |
+| TCP | Transmission Control Protocol |
+| TLV | Type-length-value |
+| TOML | Tom's Obvious Minimal Language |
+| UAC | User Account Control (Windows elevation prompt) |
+| VPN | Virtual private network |
+
 ## Reporting issues
 
 Please report security bugs privately via GitHub Security Advisories on

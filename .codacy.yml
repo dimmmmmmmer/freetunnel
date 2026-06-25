@@ -10,11 +10,22 @@ exclude_paths:
 engines:
   cppcheck:
     language: c++
+    # Codacy does not read cppcheck.cfg from the repo — pass flags here (extra_lines).
+    extra_lines:
+      - '--suppress=missingIncludeSystem'
+      - '--suppress=unknownMacro'
+      - '--suppress=passedByValue'
+      - '--suppress=sizeofwithnumericparameter'
+      - '--suppress=unusedStructMember'
+      - '--inline-suppr'
+      - '--library=qt'
+  lizard:
+    exclude_paths:
+      - 'i18n/**'
+      - 'src/vpn/**'
   metric:
     exclude_paths:
-      # Generated translation catalog — not hand-maintained application logic.
       - 'i18n/**'
-      # VPN/platform glue: high intrinsic complexity; covered by tests + review.
       - 'src/vpn/**'
   duplication:
     exclude_paths:
