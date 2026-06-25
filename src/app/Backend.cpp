@@ -94,19 +94,27 @@ bool Backend::isInternalVpnError(const QString &m) const
            || lower.contains(QLatin1String("network wait timeout:"));
 }
 
+namespace {
+
+QString classifyVpnErrorMessage(const QString &lower, const Backend *self)
+{
+    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+        return self->tr("Connection lost — couldn't reach the server. Check the config or your network.");
+    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+        return self->tr("Server isn't responding (timed out).");
+    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
+        return self->tr("Authentication failed — check the username and password.");
+    return QString();
+}
+
+} // namespace
+
 QString Backend::friendlyVpnError(const QString &m) const
 {
     if (m.startsWith(QStringLiteral("Connection failed:"), Qt::CaseInsensitive))
         return m;
-    const QString lower = m.toLower();
-    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core"))
-        || lower.startsWith(QLatin1String("connection failed")))
-        return tr("Connection lost — couldn't reach the server. Check the config or your network.");
-    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
-        return tr("Server isn't responding (timed out).");
-    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
-        return tr("Authentication failed — check the username and password.");
-    return m;
+    const QString classified = classifyVpnErrorMessage(m.toLower(), this);
+    return classified.isEmpty() ? m : classified;
 }
 
 void Backend::emitDedupedVpnError(const QString &friendly)

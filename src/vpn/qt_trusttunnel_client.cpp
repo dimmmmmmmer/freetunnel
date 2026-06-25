@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
+#include "qt_trusttunnel_events.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -24,7 +25,6 @@ struct iovec {
 #endif
 
 #include "vpn/vpn.h"
-#include "net/network_manager.h"
 #include "net/tls.h"
 
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
@@ -301,39 +301,22 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     ag::VpnCallbacks callbacks;
     callbacks.protect_handler = [this](ag::SocketProtectEvent *event) {
 #ifdef Q_OS_WIN
-        if (m_winPhysicalIfIndex != 0)
-            ag::vpn_network_manager_set_outbound_interface(m_winPhysicalIfIndex);
+        pinWindowsPhysicalOutbound(m_winPhysicalIfIndex);
 #endif
         qt_trusttunnel_protect_outbound_socket(event);
     };
     callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
-        ag::VpnSessionState sessionState = event ? event->state : ag::VPN_SS_DISCONNECTED;
-        int errCode = 0;
-        QString errText;
-        if (event) {
-            if (event->state == ag::VPN_SS_WAITING_RECOVERY) {
-                errCode = event->waiting_recovery_info.error.code;
-                if (event->waiting_recovery_info.error.text)
-                    errText = QString::fromUtf8(event->waiting_recovery_info.error.text);
-            } else if (event->state != ag::VPN_SS_CONNECTED) {
-                errCode = event->error.code;
-                if (event->error.text)
-                    errText = QString::fromUtf8(event->error.text);
-            }
-        }
+        const StateChangedPayload payload = extractStateChangedPayload(event);
         QMetaObject::invokeMethod(this,
-                                  [this, sessionState, errCode, errText]() {
-                                      handleCoreStateChanged(sessionState, errCode, errText);
+                                  [this, payload]() {
+                                      handleCoreStateChanged(payload.state, payload.errCode,
+                                                             payload.errText);
                                   },
                                   Qt::QueuedConnection);
     };
     callbacks.client_output_handler = [this](ag::VpnClientOutputEvent *event) {
-        size_t bytes = 0;
-        if (event) {
-            for (size_t i = 0; i < event->packet.chunks_num; ++i)
-                bytes += event->packet.chunks[i].iov_len;
-        }
+        const size_t bytes = clientOutputBytes(event);
         QMetaObject::invokeMethod(this, [this, bytes]() { emit clientOutput(QString::number(bytes)); },
                 Qt::QueuedConnection);
     };
@@ -434,22 +417,7 @@ void QtTrustTunnelClient::handleCoreDisconnected(int errCode, const QString &err
     m_networkWaitTimer.stop();
     if (m_stopRequested)
         return;
-    QString reason = qt_trusttunnel_format_vpn_error(errCode, errText);
-    if (reason.isEmpty()) {
-        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         std::chrono::steady_clock::now() - m_lastConnectAttempt)
-                                         .count();
-        if (m_lastConnectAttempt != std::chrono::steady_clock::time_point{} && elapsedMs >= 15000
-                && elapsedMs <= 45000) {
-            reason = QStringLiteral("Connection failed: endpoint timed out (~%1s)")
-                             .arg(elapsedMs / 1000);
-        } else {
-            reason = QStringLiteral("core disconnected");
-        }
-    } else if (!m_everConnected) {
-        reason = QStringLiteral("Connection failed: %1").arg(reason);
-    }
-    scheduleReconnect(reason);
+    scheduleReconnect(buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt));
 }
 
 void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, int errCode,
@@ -465,16 +433,10 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, 
         handleCoreConnecting();
         break;
     case ag::VPN_SS_RECOVERING:
-        handleCoreRecovery(qt_trusttunnel_format_vpn_error(errCode, errText).isEmpty()
-                                   ? QStringLiteral("recovery: reconnecting")
-                                   : QStringLiteral("recovery: %1")
-                                             .arg(qt_trusttunnel_format_vpn_error(errCode, errText)));
+        handleCoreRecovery(recoveryReason(QStringLiteral("recovery"), errCode, errText));
         break;
     case ag::VPN_SS_WAITING_RECOVERY:
-        handleCoreRecovery(qt_trusttunnel_format_vpn_error(errCode, errText).isEmpty()
-                                   ? QStringLiteral("waiting recovery: reconnecting")
-                                   : QStringLiteral("waiting recovery: %1")
-                                             .arg(qt_trusttunnel_format_vpn_error(errCode, errText)));
+        handleCoreRecovery(recoveryReason(QStringLiteral("waiting recovery"), errCode, errText));
         break;
     case ag::VPN_SS_WAITING_FOR_NETWORK:
         handleCoreWaitingForNetwork();
@@ -616,11 +578,5 @@ void QtTrustTunnelClient::pollCoreLogFile()
     if (chunk.isEmpty())
         return;
 
-    const QList<QByteArray> lines = chunk.split('\n');
-    for (const QByteArray &raw : lines) {
-        const QByteArray line = raw.trimmed();
-        if (line.isEmpty())
-            continue;
-        emit coreLogLine(QString::fromUtf8(line));
-    }
+    emitCoreLogLines(chunk, [this](const QString &line) { emit coreLogLine(line); });
 }

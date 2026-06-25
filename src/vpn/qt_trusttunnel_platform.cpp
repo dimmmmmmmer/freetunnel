@@ -2,6 +2,7 @@
 #include "qt_trusttunnel_client.h"
 
 #include <QDir>
+#include <QHash>
 #include <QStandardPaths>
 
 #include <string>
@@ -37,47 +38,40 @@ QString qt_trusttunnel_default_core_log_path()
             + QStringLiteral("/vpn-core.log");
 }
 
+static const QHash<int, QString> &vpnErrorCodeNames()
+{
+    static const QHash<int, QString> names = {
+            {VPN_EC_NOERROR, QStringLiteral("OK")},
+            {VPN_EC_ERROR, QStringLiteral("ERROR")},
+            {VPN_EC_INVALID_SETTINGS, QStringLiteral("INVALID_SETTINGS")},
+            {VPN_EC_ADDR_IN_USE, QStringLiteral("ADDR_IN_USE")},
+            {VPN_EC_INVALID_STATE, QStringLiteral("INVALID_STATE")},
+            {VPN_EC_AUTH_REQUIRED, QStringLiteral("AUTH_REQUIRED")},
+            {VPN_EC_LOCATION_UNAVAILABLE, QStringLiteral("LOCATION_UNAVAILABLE")},
+            {VPN_EC_CERTIFICATE_VERIFICATION_FAILED, QStringLiteral("CERTIFICATE_VERIFICATION_FAILED")},
+            {VPN_EC_EVENT_LOOP_FAILURE, QStringLiteral("EVENT_LOOP_FAILURE")},
+            {VPN_EC_INITIAL_CONNECT_FAILED, QStringLiteral("INITIAL_CONNECT_FAILED")},
+            {VPN_EC_FATAL_CONNECTIVITY_ERROR, QStringLiteral("FATAL_CONNECTIVITY_ERROR")},
+    };
+    return names;
+}
+
 static QString vpnErrorCodeName(int code)
 {
-    switch (code) {
-    case VPN_EC_NOERROR:
-        return QStringLiteral("OK");
-    case VPN_EC_ERROR:
-        return QStringLiteral("ERROR");
-    case VPN_EC_INVALID_SETTINGS:
-        return QStringLiteral("INVALID_SETTINGS");
-    case VPN_EC_ADDR_IN_USE:
-        return QStringLiteral("ADDR_IN_USE");
-    case VPN_EC_INVALID_STATE:
-        return QStringLiteral("INVALID_STATE");
-    case VPN_EC_AUTH_REQUIRED:
-        return QStringLiteral("AUTH_REQUIRED");
-    case VPN_EC_LOCATION_UNAVAILABLE:
-        return QStringLiteral("LOCATION_UNAVAILABLE");
-    case VPN_EC_CERTIFICATE_VERIFICATION_FAILED:
-        return QStringLiteral("CERTIFICATE_VERIFICATION_FAILED");
-    case VPN_EC_EVENT_LOOP_FAILURE:
-        return QStringLiteral("EVENT_LOOP_FAILURE");
-    case VPN_EC_INITIAL_CONNECT_FAILED:
-        return QStringLiteral("INITIAL_CONNECT_FAILED");
-    case VPN_EC_FATAL_CONNECTIVITY_ERROR:
-        return QStringLiteral("FATAL_CONNECTIVITY_ERROR");
-    default:
-        return QStringLiteral("ERR_%1").arg(code);
-    }
+    const auto it = vpnErrorCodeNames().constFind(code);
+    return it != vpnErrorCodeNames().constEnd() ? *it : QStringLiteral("ERR_%1").arg(code);
 }
 
 QString qt_trusttunnel_format_vpn_error(int code, const QString &text)
 {
-    if (code == VPN_EC_NOERROR && text.trimmed().isEmpty())
-        return QString();
     const QString trimmed = text.trimmed();
-    const QString codeName = vpnErrorCodeName(code);
+    if (code == VPN_EC_NOERROR && trimmed.isEmpty())
+        return QString();
     if (trimmed.isEmpty())
-        return codeName;
+        return vpnErrorCodeName(code);
     if (code == VPN_EC_NOERROR || code == VPN_EC_ERROR)
         return trimmed;
-    return QStringLiteral("%1 (%2)").arg(trimmed, codeName);
+    return QStringLiteral("%1 (%2)").arg(trimmed, vpnErrorCodeName(code));
 }
 
 ag::LogLevel qt_trusttunnel_parse_log_level(const QString &level)

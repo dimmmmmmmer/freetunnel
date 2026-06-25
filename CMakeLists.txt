@@ -107,6 +107,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/ReleaseVerify.h
     src/vpn/qt_trusttunnel_client.cpp
     src/vpn/qt_trusttunnel_connect.cpp
+    src/vpn/qt_trusttunnel_events.cpp
+    src/vpn/qt_trusttunnel_events.h
     src/vpn/qt_trusttunnel_platform.cpp
     src/vpn/qt_trusttunnel_platform.h
     include/vpn/qt_trusttunnel_client.h
