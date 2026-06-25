@@ -166,7 +166,14 @@ bool Backend::importFile(const QString &path) {
     }
     const bool hadNoActive = m_activePath.isEmpty();
     reloadConfigs();
-    freetunnel::migrateConfigPassword(target);
+    if (!freetunnel::migrateConfigPassword(target)) {
+        QFile::remove(target);
+        stored.removeAll(target);
+        saveStoredConfigs(stored);
+        emit errorOccurred(tr("Could not store the VPN password securely. Install "
+                             "gnome-keyring or KWallet, then try again."));
+        return false;
+    }
     if (hadNoActive) { // first config in an empty list — make it the active one
         m_activePath = target;
         m_settings.last_config_path = target;
@@ -277,6 +284,15 @@ bool Backend::createConfig(const QVariantMap &f) {
     QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForConfigPath(target),
                                                password);
+    if (!password.isEmpty()
+        && freetunnel::CredentialStore::loadPassword(
+                   freetunnel::CredentialStore::keyForConfigPath(target))
+                   .isEmpty()) {
+        emit errorOccurred(tr("Could not store the VPN password securely. Install "
+                             "gnome-keyring or KWallet, then try again."));
+        QFile::remove(target);
+        return false;
+    }
     if (!oldPath.isEmpty() && oldPath != target)
         freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(oldPath));
 
@@ -459,7 +475,12 @@ bool Backend::importDeepLink(const QString &link) {
     f.close();
     // Imported config carries credentials — owner-only (see createConfig).
     QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    freetunnel::migrateConfigPassword(target);
+    if (!freetunnel::migrateConfigPassword(target)) {
+        QFile::remove(target);
+        emit errorOccurred(tr("Could not store the VPN password securely. Install "
+                             "gnome-keyring or KWallet, then try again."));
+        return false;
+    }
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
         stored.prepend(target); // a newly added config goes to the top of the list

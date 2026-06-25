@@ -5,10 +5,13 @@
 namespace freetunnel {
 
 // Stores VPN config passwords outside the on-disk TOML (macOS Keychain, Windows
-// Credential Manager, Linux libsecret / Secret Service / owner-only file).
+// Credential Manager, Linux libsecret / Secret Service). Plaintext file fallback is
+// disabled for new passwords — see secureStorageAvailable().
 class CredentialStore {
 public:
     static QString keyForConfigPath(const QString &absoluteConfigPath);
+    /// True when the OS can encrypt credentials at rest (always on macOS/Windows).
+    static bool secureStorageAvailable();
     static bool storePassword(const QString &key, const QString &password);
     static QString loadPassword(const QString &key);
     static bool deletePassword(const QString &key);

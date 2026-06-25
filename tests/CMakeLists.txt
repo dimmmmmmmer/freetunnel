@@ -7,6 +7,9 @@ project(freetunnel-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+
+# Allow plaintext credential fallback in unit tests (CI runners may lack a keyring).
+add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network REQUIRED)
@@ -88,9 +91,17 @@ add_test(NAME control COMMAND test_control)
 add_executable(test_instance_control
     test_instance_control.cpp
     ../src/core/InstanceControl.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/core/ConfigToml.cpp
 )
 target_include_directories(test_instance_control PRIVATE ../include ../include/core)
 target_link_libraries(test_instance_control PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+freetunnel_link_linux_secrets(test_instance_control)
+if(APPLE)
+    target_link_libraries(test_instance_control PRIVATE "-framework Security")
+elseif(WIN32)
+    target_link_libraries(test_instance_control PRIVATE advapi32)
+endif()
 add_test(NAME instance_control COMMAND test_instance_control)
 
 add_executable(test_configtoml

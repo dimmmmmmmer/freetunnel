@@ -226,6 +226,17 @@ void Backend::prepareQuit() {
     m_materializedConfigPath.clear();
 }
 
+QString Backend::credentialStorageWarning() const
+{
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    if (!freetunnel::CredentialStore::secureStorageAvailable()) {
+        return tr("Secure credential storage is unavailable. Install gnome-keyring or "
+                  "KWallet (with secret-tool) before saving VPN passwords.");
+    }
+#endif
+    return QString();
+}
+
 void Backend::handleControl(const QString &command) {
     using freetunnel::ControlAction;
     const auto cmd = freetunnel::parseControlCommand(command);

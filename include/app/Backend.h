@@ -58,6 +58,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings NOTIFY pingsChanged) // per-config latency text
+    Q_PROPERTY(QString credentialStorageWarning READ credentialStorageWarning NOTIFY credentialStorageChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -161,6 +162,8 @@ public:
     Q_INVOKABLE void pingConfigs();
     Q_INVOKABLE bool importFromClipboard();
 
+    QString credentialStorageWarning() const;
+
 signals:
     void stateChanged();
     void tick();
@@ -173,6 +176,7 @@ signals:
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
+    void credentialStorageChanged();
     void errorOccurred(const QString &msg);
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();

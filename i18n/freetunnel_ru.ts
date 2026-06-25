@@ -143,6 +143,14 @@
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
+    <message>
+        <source>Secure credential storage is unavailable. Install gnome-keyring or KWallet (with secret-tool) before saving VPN passwords.</source>
+        <translation>Безопасное хранилище паролей недоступно. Установите gnome-keyring или KWallet (с secret-tool), прежде чем сохранять пароли VPN.</translation>
+    </message>
+    <message>
+        <source>Could not store the VPN password securely. Install gnome-keyring or KWallet, then try again.</source>
+        <translation>Не удалось сохранить пароль VPN безопасно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

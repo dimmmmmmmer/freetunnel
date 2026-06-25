@@ -40,6 +40,32 @@ Item {
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Security"); theme: settingsRoot.theme }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: credWarnCol.implicitHeight + 20
+                radius: 8
+                visible: backend.credentialStorageWarning.length > 0
+                color: Qt.rgba(1, 0.75, 0.2, theme.dark ? 0.12 : 0.18)
+                border.color: Qt.rgba(1, 0.75, 0.2, 0.45)
+                border.width: 1
+                ColumnLayout {
+                    id: credWarnCol
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 4
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: backend.credentialStorageWarning
+                        color: theme.text
+                        font.pixelSize: 13
+                    }
+                }
+            }
+            Item {
+                Layout.preferredHeight: 8
+                visible: backend.credentialStorageWarning.length > 0
+            }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0

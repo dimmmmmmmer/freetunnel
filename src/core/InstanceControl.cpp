@@ -1,14 +1,27 @@
 #include "core/InstanceControl.h"
 
+#include "core/CredentialStore.h"
+
 #include <QDir>
 #include <QFile>
 #include <QLocalSocket>
 #include <QRandomGenerator>
 #include <QStandardPaths>
 
+#if !defined(Q_OS_WIN)
+#include <unistd.h>
+#if defined(Q_OS_LINUX)
+#include <sys/socket.h>
+#elif defined(Q_OS_MACOS)
+// getpeereid() — declared in unistd.h on macOS
+#endif
+#endif
+
 namespace freetunnel {
 
 namespace {
+
+const QString kInstanceAuthKey = QStringLiteral("__freetunnel_instance_auth__");
 
 QString randomInstanceToken()
 {
@@ -27,6 +40,15 @@ QString instanceAuthFilePath()
 bool writeInstanceAuthToken(QString *tokenOut)
 {
     const QString token = randomInstanceToken();
+    // Prefer OS credential storage over a plaintext file (same-user malware can
+    // still read it, but not by simply cat-ing a predictable path).
+    if (CredentialStore::storePassword(kInstanceAuthKey, token)) {
+        QFile::remove(instanceAuthFilePath()); // drop legacy file from older builds
+        if (tokenOut)
+            *tokenOut = token;
+        return true;
+    }
+    // Fallback when Linux has no Secret Service — keep single-instance working.
     const QString path = instanceAuthFilePath();
     QDir().mkpath(QFileInfo(path).absolutePath());
 
@@ -45,6 +67,7 @@ bool writeInstanceAuthToken(QString *tokenOut)
 
 void removeInstanceAuthToken()
 {
+    CredentialStore::deletePassword(kInstanceAuthKey);
     QFile::remove(instanceAuthFilePath());
 }
 
@@ -52,6 +75,12 @@ bool readInstanceAuthToken(QString *tokenOut)
 {
     if (!tokenOut)
         return false;
+    const QString fromStore = CredentialStore::loadPassword(kInstanceAuthKey);
+    if (!fromStore.isEmpty()) {
+        *tokenOut = fromStore;
+        return true;
+    }
+    // Legacy plaintext file from builds before credential-store migration.
     QFile f(instanceAuthFilePath());
     if (!f.open(QIODevice::ReadOnly))
         return false;
@@ -89,6 +118,35 @@ bool instanceTokensEqual(const QString &a, const QString &b)
     for (int i = 0; i < ba.size(); ++i)
         diff |= static_cast<char>(ba[i] ^ bb[i]);
     return diff == 0;
+}
+
+bool localSocketPeerIsSameUser(QLocalSocket *socket)
+{
+    if (!socket)
+        return false;
+#if defined(Q_OS_WIN)
+    // QLocalServer::UserAccessOption restricts the named pipe to the same user.
+    return socket->state() == QLocalSocket::ConnectedState;
+#else
+    const qintptr fd = socket->socketDescriptor();
+    if (fd < 0)
+        return false;
+#if defined(Q_OS_LINUX)
+    ucred cred{};
+    socklen_t len = sizeof(cred);
+    if (getsockopt(static_cast<int>(fd), SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0)
+        return false;
+    return cred.uid == getuid();
+#elif defined(Q_OS_MACOS)
+    uid_t uid = 0;
+    gid_t gid = 0;
+    if (getpeereid(static_cast<int>(fd), &uid, &gid) != 0)
+        return false;
+    return uid == getuid();
+#else
+    return true;
+#endif
+#endif
 }
 
 bool forwardToRunningInstance(const QString &socketName, const QString &controlArg)

@@ -79,6 +79,8 @@ cmake -S . -B build-http3 -G Ninja \
   -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 ```
 
+CI release builds already use `DISABLE_HTTP3=OFF` (see `.github/workflows/build.yml`).
+
 Or use the Makefile inside `FreeTunnel/` when already configured from upstream:
 
 ```bash
@@ -113,9 +115,11 @@ Cred Manager on macOS/Windows), release verify, control commands, helper IPC,
 QML UI smoke tests, integration tests (config workflow, Backend+mock VPN,
 single-instance socket, helper client), UpdateChecker E2E (mock HTTP).
 
-Security CI (`.github/workflows/security.yml`): cppcheck on `src/` + upstream
-patch verification (`scripts/verify_upstream_patch.sh` against
-`scripts/upstream_ref.txt`).
+Security CI (`.github/workflows/security.yml`): cppcheck on `src/` and `include/`,
+upstream patch verification (`scripts/verify_upstream_patch.sh` against
+`scripts/upstream_ref.txt`), i18n catalog freshness, and pinned-dependency checks.
+
+See [SECURITY.md](SECURITY.md) for the threat model and known limitations.
 
 ## Translations (i18n)
 
@@ -151,17 +155,23 @@ For production distribution:
 | --- | --- |
 | **macOS** | Sign with Developer ID Application + notarize with `notarytool`; staple the ticket on the `.dmg`. |
 | **Windows** | Sign the installer and bundled binaries with an Authenticode cert (EV recommended for SmartScreen reputation). |
-| **Linux** | Optional GPG signatures on release assets; `.deb` maintainer scripts as needed. |
+| **Linux** | `.deb` packages; release integrity via Ed25519-signed `SHA256SUMS.txt` |
 
 Code signing is orthogonal to the in-app **update manifest** signing
 (Ed25519 on `SHA256SUMS.txt`) documented below.
 
 ## Signed updates (Ed25519)
 
-Release manifests (`SHA256SUMS.txt`) can be signed so the in-app updater
+Release manifests (`SHA256SUMS.txt`) are signed in CI so the in-app updater
 verifies them against the public key in `include/core/ReleaseSigning.h`.
 
-1. Generate a key pair (or rotate keys):
+**This repo is already configured:** the public key is in `ReleaseSigning.h`,
+the private key lives in the GitHub Actions secret `ED25519_SIGNING_KEY`, and
+tagged releases publish `SHA256SUMS.txt` + `SHA256SUMS.txt.sig` (see v1.0.6).
+
+To rotate keys:
+
+1. Generate a new pair:
 
    ```bash
    ./scripts/gen-release-signing-key.sh release-signing.pem
@@ -170,12 +180,16 @@ verifies them against the public key in `include/core/ReleaseSigning.h`.
 2. Paste the printed public PEM into `include/core/ReleaseSigning.h`
    (`kReleaseSigningPublicKeyPem`).
 
-3. Add the **private** PEM file as the `ED25519_SIGNING_KEY` repository secret
-   in GitHub (Settings → Secrets → Actions). CI uses it in the release job to
-   produce `SHA256SUMS.txt.sig`.
+3. Update the `ED25519_SIGNING_KEY` repository secret to the matching private PEM.
 
-Never commit the private key. If the public key in the repo changes, rotate the
-GitHub secret to the matching private key.
+Never commit the private key.
+
+### Binary code signing (paid — optional)
+
+Apple Developer ID and Authenticode certificates cost money. CI uses **ad-hoc**
+`codesign` on macOS (free, not notarized) so the bundle launches after the user
+approves Gatekeeper manually. Windows/Linux installer binaries remain unsigned;
+integrity is covered by SHA256 + Ed25519 on the release manifest instead.
 
 ## Deep links
 
@@ -185,10 +199,9 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 
 | Workflow | Purpose |
 | --- | --- |
-| `.github/workflows/build.yml` | Release builds (HTTP/2), Linux/macOS/Windows |
-| `.github/workflows/build-http3.yml` | Optional HTTP/3 variant (quiche enabled) |
+| `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows |
 | `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows) |
-| `.github/workflows/security.yml` | cppcheck, upstream patch verify, i18n freshness, PR dependency review |
+| `.github/workflows/security.yml` | cppcheck, upstream patch verify, i18n freshness, pinned deps |
 
 Upstream ref is pinned in workflow `env.UPSTREAM_REF`. Bump it with the patch
 script re-verified.

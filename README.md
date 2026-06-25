@@ -63,10 +63,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local build instructions, tests, and
 translations. Builds are fully automated in GitHub Actions
 ([`.github/workflows/build.yml`](.github/workflows/build.yml)): the client links
 against the C++ core [`TrustTunnel/TrustTunnelClient`](https://github.com/TrustTunnel/TrustTunnelClient).
-HTTP/3 (QUIC) builds are available via
-[`.github/workflows/build-http3.yml`](.github/workflows/build-http3.yml). Unit tests —
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml). Releases are
-published automatically on `v*` tags.
+HTTP/3 (QUIC) builds are enabled in CI (`.github/workflows/build.yml`, `DISABLE_HTTP3=OFF`).
+Unit tests — [`.github/workflows/tests.yml`](.github/workflows/tests.yml). Security checks —
+[`.github/workflows/security.yml`](.github/workflows/security.yml) and [SECURITY.md](SECURITY.md).
+Releases are published automatically on `v*` tags.
 
 ## License
 

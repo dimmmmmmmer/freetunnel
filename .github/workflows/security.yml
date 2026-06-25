@@ -34,7 +34,16 @@ jobs:
             --inline-suppr \
             --library=qt \
             -I include -I include/app -I include/core -I include/vpn \
-            src
+            include src
+
+  pinned-deps:
+    name: pinned dependency refs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify pinned upstream and FetchContent tags
+        run: bash scripts/check-pinned-deps.sh
 
   upstream-patch:
     name: upstream patch verify

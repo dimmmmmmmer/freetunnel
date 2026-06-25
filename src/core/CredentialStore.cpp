@@ -181,6 +181,21 @@ bool secretServiceClear(const QString &key)
                    QStringLiteral("com.freetunnel.app"), QStringLiteral("account"), key});
     return p.waitForFinished(5000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
+
+bool secretServiceAvailable()
+{
+    const QString tool = secretToolPath();
+    if (tool.isEmpty())
+        return false;
+    QProcess p;
+    // Exit 0/1 both mean the Secret Service responded; no D-Bus gives a quick failure.
+    p.start(tool, {QStringLiteral("lookup"), QStringLiteral("service"),
+                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"),
+                   QStringLiteral("__freetunnel_probe__")});
+    return p.waitForStarted(2000) && p.waitForFinished(3000)
+            && p.exitStatus() == QProcess::NormalExit;
+}
+
 #endif
 
 } // namespace
@@ -188,6 +203,21 @@ bool secretServiceClear(const QString &key)
 QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
 {
     return QFileInfo(absoluteConfigPath).absoluteFilePath();
+}
+
+bool CredentialStore::secureStorageAvailable()
+{
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    return true;
+#else
+#if defined(FT_HAVE_LIBSECRET)
+    if (secretServiceAvailable())
+        return true;
+    // libsecret works when a session D-Bus is present even if secret-tool is absent.
+    return qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS");
+#endif
+    return secretServiceAvailable();
+#endif
 }
 
 bool CredentialStore::storePassword(const QString &key, const QString &password)
@@ -229,13 +259,14 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
         deletePasswordFile(key); // don't leave a plaintext-ish copy on disk
         return true;
     }
-    // No desktop Secret Service (GNOME Keyring / KWallet) available — the
-    // password can only be persisted as a 0600 plaintext file. Warn loudly so
-    // the user understands the credential is not OS-encrypted at rest.
-    qWarning("CredentialStore: no Secret Service available (install gnome-keyring "
-             "or kwallet + secret-tool); storing VPN password as a plaintext "
-             "0600 file. It is NOT encrypted at rest.");
+#if defined(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
+    qWarning("CredentialStore: no Secret Service — storing password as plaintext "
+             "(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)");
     return storePasswordFile(key, password);
+#endif
+    qWarning("CredentialStore: no Secret Service available (install gnome-keyring "
+             "or kwallet + secret-tool); refusing to store VPN password insecurely.");
+    return false;
 #endif
 }
 

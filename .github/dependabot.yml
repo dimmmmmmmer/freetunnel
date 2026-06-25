@@ -5,3 +5,5 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+# FetchContent deps (QHotkey) and TrustTunnel upstream are pinned in CMakeLists.txt
+# and scripts/upstream_ref.txt — see scripts/check-pinned-deps.sh in security CI.

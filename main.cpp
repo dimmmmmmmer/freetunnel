@@ -189,19 +189,30 @@ int main(int argc, char *argv[]) {
     if (QOperatingSystemVersion::current().majorVersion() >= 26) {
         auto renderDockIcon = [&app, &backend]() {
             const QString m = backend.themeMode();
-            const bool dark = m == QLatin1String("dark")
+            const bool darkUi = m == QLatin1String("dark")
                     || (m == QLatin1String("system")
                         && app.styleHints()->colorScheme() == Qt::ColorScheme::Dark);
-            QPixmap pm(1024, 1024);
+            // Match the native Tahoe squircle grid (~100 px inset on a 1024 canvas).
+            constexpr int kCanvas = 1024;
+            constexpr int kTileInset = 100;
+            constexpr int kTileSize = kCanvas - 2 * kTileInset;
+            constexpr int kCornerRadius = 185;
+            const int kLogoSize = kTileSize * 700 / 944;
+            const int kLogoOffset = kTileInset + (kTileSize - kLogoSize) / 2;
+
+            QPixmap pm(kCanvas, kCanvas);
             pm.fill(Qt::transparent);
             QPainter painter(&pm);
             painter.setRenderHint(QPainter::Antialiasing);
             QPainterPath tile;
-            tile.addRoundedRect(QRectF(40, 40, 944, 944), 230, 230);
-            painter.fillPath(tile, QColor(dark ? QStringLiteral("#181818")
-                                               : QStringLiteral("#ececec")));
-            QSvgRenderer logo(QStringLiteral(":/assets/logo.svg"));
-            logo.render(&painter, QRectF(162, 162, 700, 700));
+            tile.addRoundedRect(QRectF(kTileInset, kTileInset, kTileSize, kTileSize),
+                                kCornerRadius, kCornerRadius);
+            // Invert tile vs tunnel: dark UI → white tile + dark tunnel; light UI → dark tile + light tunnel.
+            painter.fillPath(tile, QColor(darkUi ? QStringLiteral("#ffffff")
+                                                 : QStringLiteral("#1c1c1e")));
+            QSvgRenderer logo(darkUi ? QStringLiteral(":/assets/logo.svg")
+                                     : QStringLiteral(":/assets/logo-light.svg"));
+            logo.render(&painter, QRectF(kLogoOffset, kLogoOffset, kLogoSize, kLogoSize));
             painter.end();
             app.setWindowIcon(QIcon(pm));
         };
@@ -282,6 +293,10 @@ int main(int argc, char *argv[]) {
                && c->waitForReadyRead(200))
             buf += c->readAll();
         buf += c->readAll();
+        if (!freetunnel::localSocketPeerIsSameUser(c)) {
+            c->deleteLater();
+            return;
+        }
         QString recvToken;
         QString cmd;
         if (!freetunnel::parseInstanceMessage(buf, &recvToken, &cmd)
