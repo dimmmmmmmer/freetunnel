@@ -22,6 +22,10 @@ class QHostAddress;
 class QHotkey;
 class UpdateChecker;
 
+namespace freetunnel {
+struct PreparedImport;
+}
+
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
@@ -97,6 +101,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
@@ -181,6 +186,7 @@ signals:
     void languageChanged(const QString &lang);
     void credentialStorageChanged();
     void errorOccurred(const QString &msg);
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
@@ -225,6 +231,7 @@ private:
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive);
+    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
                                    bool wasActive);
     void maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx);

@@ -31,6 +31,7 @@ Download a build for your platform from
 | **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
 | **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
+| **Linux** (portable, any distro) | `freetunnel-linux-x86_64.AppImage` |
 
 Builds are **unsigned** (no code-signing certificates), so the OS may warn on first launch:
 
@@ -38,6 +39,7 @@ Builds are **unsigned** (no code-signing certificates), so the OS may warn on fi
   `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
 - **Windows**: SmartScreen → **More info** → **Run anyway**.
 - **Linux (.deb)**: `sudo apt install ./freetunnel-linux-x86_64.deb`
+- **Linux (AppImage)**: `chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage`
 
 VPN requires elevated privileges: Windows shows UAC; on Linux/macOS you enter an
 admin password the first time you connect in a session.

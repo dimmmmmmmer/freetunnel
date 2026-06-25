@@ -80,6 +80,18 @@ bool Backend::importFile(const QString &path)
     return finalizeImportedConfig(target, m_activePath.isEmpty());
 }
 
+bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared)
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    const QString target = QDir(base).filePath(prepared.fileName);
+    if (!freetunnel::backend_config::writeConfigFile(target, prepared.tomlContent.toUtf8())) {
+        emit errorOccurred(tr("Could not write config"));
+        return false;
+    }
+    return finalizeImportedConfig(target, m_activePath.isEmpty());
+}
+
 bool Backend::importDeepLink(const QString &link)
 {
     QString err;
@@ -88,12 +100,23 @@ bool Backend::importDeepLink(const QString &link)
         emit errorOccurred(tr("Link error: %1").arg(err));
         return false;
     }
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(base);
-    const QString target = QDir(base).filePath(prepared->fileName);
-    if (!freetunnel::backend_config::writeConfigFile(target, prepared->tomlContent.toUtf8())) {
-        emit errorOccurred(tr("Could not write config"));
+    if (prepared->skipVerification) {
+        emit deepLinkImportConfirmationRequired(
+                tr("This link disables server certificate verification. "
+                   "Only import configs from sources you trust."),
+                link);
         return false;
     }
-    return finalizeImportedConfig(target, m_activePath.isEmpty());
+    return importPreparedDeepLink(*prepared);
+}
+
+bool Backend::confirmDeepLinkImport(const QString &link)
+{
+    QString err;
+    auto prepared = freetunnel::prepareDeepLinkImport(link, &err);
+    if (!prepared) {
+        emit errorOccurred(tr("Link error: %1").arg(err));
+        return false;
+    }
+    return importPreparedDeepLink(*prepared);
 }

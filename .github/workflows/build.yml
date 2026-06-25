@@ -418,6 +418,21 @@ jobs:
             "out/${{ matrix.artifact }}.deb"
           ls -la out
 
+      # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
+      - name: Package AppImage (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -eux
+          if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
+            echo "::error::AppDir missing — cannot build AppImage"
+            exit 1
+          fi
+          ld=linuxdeploy-x86_64.AppImage
+          PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage
+          appimage=$(ls -1 *.AppImage | head -1)
+          mv "$appimage" "out/${{ matrix.artifact }}.AppImage"
+          ls -la out
+
       - name: Build & package universal (macOS)
         if: matrix.platform == 'macos'
         run: |
@@ -534,7 +549,7 @@ jobs:
         run: |
           set -eux
           cd artifacts
-          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' \) \
+          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' \) \
             -exec sha256sum {} + \
             | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
             | sort -k2 > SHA256SUMS.txt
@@ -565,6 +580,7 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.dmg
             artifacts/**/*-Setup.exe
+            artifacts/**/*.AppImage
             artifacts/SHA256SUMS.txt
             artifacts/SHA256SUMS.txt.sig
           generate_release_notes: true
@@ -573,7 +589,9 @@ jobs:
 
             - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
               (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
-              own Qt and integrates into the app menu.
+              own Qt and integrates into the app menu. Or run the portable
+              **AppImage** (`chmod +x freetunnel-linux-x86_64.AppImage &&
+              ./freetunnel-linux-x86_64.AppImage`).
             - **macOS**: the app is ad-hoc signed but not notarized. On first launch
               right-click the app → Open (or run
               `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).

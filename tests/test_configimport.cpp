@@ -10,6 +10,7 @@ class TestConfigImport : public QObject {
 
 private slots:
     void importsValidLink();
+    void skipVerificationFlagPropagates();
     void fileNameFromServerName();
     void fileNameSanitized();
     void rejectsInvalidLink();
@@ -32,6 +33,20 @@ void TestConfigImport::importsValidLink() {
     QVERIFY(out->fileName.endsWith(".toml"));
     QVERIFY(out->tomlContent.contains("[endpoint]"));
     QVERIFY(out->tomlContent.contains("hostname = \"vpn.example.com\""));
+    QVERIFY(!out->skipVerification);
+}
+
+void TestConfigImport::skipVerificationFlagPropagates() {
+    DeepLinkConfig c;
+    c.hostname = "vpn.example.com";
+    c.addresses = {"1.2.3.4:443"};
+    c.username = "u";
+    c.password = "p";
+    c.skipVerification = true;
+    auto out = prepareDeepLinkImport(encodeDeepLink(c));
+    QVERIFY(out.has_value());
+    QVERIFY(out->skipVerification);
+    QVERIFY(out->tomlContent.contains("skip_verification = true"));
 }
 
 void TestConfigImport::fileNameFromServerName() {

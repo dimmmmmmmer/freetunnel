@@ -12,6 +12,7 @@ namespace freetunnel {
 struct PreparedImport {
     QString fileName;    // safe target file name (ends with .toml)
     QString tomlContent; // TOML ready to write to disk
+    bool skipVerification = false;
 };
 
 // Decode an official `tt://` deep link into a ready-to-write TOML config and a

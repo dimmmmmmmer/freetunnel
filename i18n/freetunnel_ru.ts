@@ -151,6 +151,10 @@
         <source>Could not store the VPN password securely. Install gnome-keyring or KWallet, then try again.</source>
         <translation>Не удалось сохранить пароль VPN безопасно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
     </message>
+    <message>
+        <source>This link disables server certificate verification. Only import configs from sources you trust.</source>
+        <translation>Эта ссылка отключает проверку сертификата сервера. Импортируйте конфиги только из надёжных источников.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -399,6 +403,10 @@
     <message>
         <source>Config added: %1</source>
         <translation>Конфиг добавлен: %1</translation>
+    </message>
+    <message>
+        <source>Import anyway</source>
+        <translation>Импортировать всё равно</translation>
     </message>
 </context>
 <context>

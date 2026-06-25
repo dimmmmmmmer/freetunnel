@@ -47,6 +47,10 @@ freetunnel
 *.log
 *.tmp
 
+# Local CI artifact downloads / Python cache
+ci-artifacts-latest/
+scripts/__pycache__/
+
 env/
 .env/
 venv/

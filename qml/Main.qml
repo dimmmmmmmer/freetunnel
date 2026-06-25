@@ -49,6 +49,11 @@ Window {
             shuttingDown = true
             tray.visible = false
         }
+        function onDeepLinkImportConfirmationRequired(message, link) {
+            showConfirm(message, qsTr("Import anyway"), function() {
+                backend.confirmDeepLinkImport(link)
+            })
+        }
     }
 
     // ---------- system tray ----------

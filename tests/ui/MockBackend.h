@@ -103,6 +103,7 @@ public:
     Q_INVOKABLE void selectConfig(int index);
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE bool importDeepLink(const QString &link);
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link) { Q_UNUSED(link); return true; }
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
@@ -147,6 +148,7 @@ signals:
     void pingsChanged();
     void languageChanged(const QString &lang);
     void errorOccurred(const QString &msg);
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
     void aboutToShutdown();
 
 private:

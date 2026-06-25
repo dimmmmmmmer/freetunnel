@@ -129,6 +129,62 @@ if(OpenSSL_FOUND)
 endif()
 add_test(NAME app_startup COMMAND test_app_startup)
 
+set(BACKEND_IMPORT_TEST_SOURCES
+    ../src/app/AppStartup.cpp
+    ../src/app/Backend.cpp
+    ../src/app/BackendHotkeys.cpp
+    ../src/app/BackendUpdates.cpp
+    ../src/app/BackendSettings.cpp
+    ../src/app/PlatformAutoStart.cpp
+    ../src/app/BackendLogs.cpp
+    ../src/app/BackendConfig.cpp
+    ../src/app/BackendConfigCreate.cpp
+    ../src/app/BackendConfigImport.cpp
+    ../src/app/BackendConfigShared.cpp
+    ../src/app/BackendSplit.cpp
+    ../src/core/AppSettings.cpp
+    ../src/core/ConfigStore.cpp
+    ../src/core/DeepLink.cpp
+    ../src/core/ConfigImport.cpp
+    ../src/core/ConfigPaths.cpp
+    ../src/core/ControlCommand.cpp
+    ../src/core/ConfigToml.cpp
+    ../src/core/NetBind.cpp
+    ../src/core/AppUiUtils.cpp
+    ../src/core/UpdateChecker.cpp
+    ../src/core/VersionCompare.cpp
+    ../src/core/ReleaseVerify.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/core/InstanceControl.cpp
+    ../src/vpn/vpn_helper_client.cpp
+    ../include/app/AppStartup.h
+    ../include/app/Backend.h
+    ../include/core/UpdateChecker.h
+    ../include/vpn/vpn_helper_client.h
+)
+
+add_executable(test_backend_deeplink_import
+    test_backend_deeplink_import.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_deeplink_import PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_deeplink_import PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_deeplink_import)
+if(WIN32)
+    target_link_libraries(test_backend_deeplink_import PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_deeplink_import PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_deeplink_import COMMAND test_backend_deeplink_import)
+
 add_executable(test_vpn_helper_launch
     test_vpn_helper_launch.cpp
     ../src/vpn/vpn_helper_launch.cpp
@@ -254,6 +310,15 @@ add_executable(test_helper_ipc
 target_include_directories(test_helper_ipc PRIVATE ../include ../include/vpn)
 target_link_libraries(test_helper_ipc PRIVATE Qt6::Core Qt6::Test Qt6::Network)
 add_test(NAME helper_ipc COMMAND test_helper_ipc)
+
+add_executable(test_helper_ipc_fuzz
+    test_helper_ipc_fuzz.cpp
+    helper_ipc_mock_server.cpp
+    helper_ipc_mock_server.h
+)
+target_include_directories(test_helper_ipc_fuzz PRIVATE ../include ../include/vpn)
+target_link_libraries(test_helper_ipc_fuzz PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+add_test(NAME helper_ipc_fuzz COMMAND test_helper_ipc_fuzz)
 
 add_executable(test_qml_ui
     test_qml_ui.cpp

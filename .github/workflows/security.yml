@@ -4,7 +4,7 @@ name: Security
 
 on:
   push:
-    branches: [main, feat/qml]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

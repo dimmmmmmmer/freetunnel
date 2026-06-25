@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -217,6 +218,7 @@ bool VpnHelperClient::configureProductionHelper()
     }
     tf.write(m_token.toUtf8());
     tf.close();
+    QFile::setPermissions(tf.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     m_tokenPath = tf.fileName();
 
     QString err;
