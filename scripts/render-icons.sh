@@ -17,11 +17,13 @@ pad_png() {
   local size=$1 dest=$2
   local inner=$size
   rsvg-convert -w "$inner" -h "$inner" "$svg" -o "$tmp/mark.png"
-  # Force RGBA (TrueColorAlpha): the mark is pure grey, so without this
-  # ImageMagick stores grayscale PNGs and drops the alpha channel on the .ico's
-  # 256px layer — which then renders with a white background at large sizes.
+  # Force true RGBA: the mark is pure grey, so otherwise ImageMagick (esp. the
+  # v6 build on the CI runner) stores grayscale PNGs and the .ico's 256px PNG
+  # layer renders with a white background at large sizes (e.g. under CrossOver).
+  # -colorspace sRGB stops the grayscale detection; png:color-type=6 forces the
+  # PNG encoder to emit RGBA regardless of the ImageMagick version.
   convert -size "${size}x${size}" xc:none "$tmp/mark.png" -gravity center -composite \
-    -type TrueColorAlpha "$dest"
+    -background none -colorspace sRGB -type TrueColorAlpha -define png:color-type=6 "$dest"
 }
 
 for s in 16 32 48 64 128 256 512 1024; do
@@ -42,7 +44,7 @@ png2icns "$out/logo.icns" \
 
 convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
   "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" \
-  -type TrueColorAlpha "$out/logo.ico"
+  -colorspace sRGB -type TrueColorAlpha -define png:color-type=6 "$out/logo.ico"
 
 # Apple iconset for iconutil (proper Finder/Dock .icns on macOS).
 ic=$out/icon.iconset
