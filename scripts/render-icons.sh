@@ -9,11 +9,13 @@ out=${1:-$root/assets}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# Leave ~12% transparent margin so macOS Finder/Dock don't clip the mark in a
-# hard square (Apple icons are masked, but edge-to-edge art reads as a box).
+# Render the mark edge-to-edge (no extra margin): logo.svg already carries its
+# own ~12% breathing room inside the 100-unit viewBox, and the in-app logo and
+# tray icon use that same full SVG. Padding the bundle icons further made the
+# Dock/taskbar mark visibly smaller than everywhere else — keep them unified.
 pad_png() {
   local size=$1 dest=$2
-  local inner=$((size * 82 / 100))
+  local inner=$size
   rsvg-convert -w "$inner" -h "$inner" "$svg" -o "$tmp/mark.png"
   # Force RGBA (TrueColorAlpha): the mark is pure grey, so without this
   # ImageMagick stores grayscale PNGs and drops the alpha channel on the .ico's
