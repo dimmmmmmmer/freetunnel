@@ -26,11 +26,8 @@ QString Backend::coreVersion() const {
 #endif
 }
 
-void Backend::ensureUpdater()
+void Backend::wireUpdaterSignals()
 {
-    if (m_updater)
-        return;
-    m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
     connect(m_updater, &UpdateChecker::updateAvailable, this,
             [this](const UpdateChecker::ReleaseInfo &info) {
                 m_updateState = QStringLiteral("available");
@@ -42,10 +39,8 @@ void Backend::ensureUpdater()
     connect(m_updater, &UpdateChecker::downloadProgress, this,
             [this](qint64 received, qint64 total) {
                 m_updateState = QStringLiteral("downloading");
-                if (total > 0)
-                    m_updateMessage = tr("Downloading… %1%").arg(received * 100 / total);
-                else
-                    m_updateMessage = tr("Downloading…");
+                m_updateMessage = total > 0 ? tr("Downloading… %1%").arg(received * 100 / total)
+                                            : tr("Downloading…");
                 emit updateChanged();
             });
     connect(m_updater, &UpdateChecker::downloadReady, this,
@@ -67,21 +62,26 @@ void Backend::ensureUpdater()
                 }
 #endif
             });
-    connect(m_updater, &UpdateChecker::downloadFailed, this,
-            [this](const QString &msg) {
-                m_updateState = QStringLiteral("error");
-                m_updateMessage = msg;
-                emit updateChanged();
-            });
-    connect(m_updater, &UpdateChecker::noUpdateAvailable, this,
-            [this](const QString &) {
-                if (!m_updateCheckUserInitiated)
-                    return;
-                // No newer release (incl. 404 when no releases exist yet).
-                m_updateState = QStringLiteral("current");
-                m_updateMessage = tr("You have the latest version");
-                emit updateChanged();
-            });
+    connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {
+        m_updateState = QStringLiteral("error");
+        m_updateMessage = msg;
+        emit updateChanged();
+    });
+    connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &) {
+        if (!m_updateCheckUserInitiated)
+            return;
+        m_updateState = QStringLiteral("current");
+        m_updateMessage = tr("You have the latest version");
+        emit updateChanged();
+    });
+}
+
+void Backend::ensureUpdater()
+{
+    if (m_updater)
+        return;
+    m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
+    wireUpdaterSignals();
 }
 
 void Backend::checkForUpdates(bool userInitiated)

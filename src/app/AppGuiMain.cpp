@@ -16,9 +16,8 @@
 
 namespace freetunnel {
 
-int runGuiApplication(int argc, char *argv[])
+static void applyAppBranding(QGuiApplication &app)
 {
-    QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("FreeTunnel"));
     app.setOrganizationName(QStringLiteral("FreeTunnel"));
     app.setApplicationDisplayName(QStringLiteral("FreeTunnel"));
@@ -28,35 +27,45 @@ int runGuiApplication(int argc, char *argv[])
     app.setWindowIcon(winLinuxIcon);
 #endif
     QGuiApplication::setQuitOnLastWindowClosed(false);
+}
 
-    const QString controlArg = controlArgFrom(argc, argv);
+static QLocalServer *startSingleInstanceServer(QGuiApplication &app, QString *instanceToken)
+{
     const QString kInstanceKey = QStringLiteral("FreeTunnelInstance");
-
-    if (forwardToRunningInstance(kInstanceKey, controlArg))
-        return 0;
-
     QLocalServer::removeServer(kInstanceKey);
-    QString instanceToken;
-    if (!writeInstanceAuthToken(&instanceToken))
-        instanceToken.clear();
+    if (!writeInstanceAuthToken(instanceToken))
+        instanceToken->clear();
     auto *server = new QLocalServer(&app);
     server->setSocketOptions(QLocalServer::UserAccessOption);
     server->listen(kInstanceKey);
+    return server;
+}
 
-    UrlOpenFilter urlFilter;
-    app.installEventFilter(&urlFilter);
+static QWindow *loadMainWindow(QQmlApplicationEngine &engine, Backend &backend)
+{
+    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
+    if (engine.rootObjects().isEmpty())
+        return nullptr;
+    return qobject_cast<QWindow *>(engine.rootObjects().first());
+}
 
-    Backend backend;
+static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &engine, Backend &backend,
+                                QTranslator *&translator)
+{
+    applyLanguage(app, engine, translator, backend.language());
+    QObject::connect(&backend, &Backend::languageChanged, &app,
+                     [&app, &engine, &translator](const QString &lang) {
+                         applyLanguage(app, engine, translator, lang);
+                     });
+}
 
-#ifdef Q_OS_MACOS
-    setupMacDockIcon(app, backend);
-#endif
-
+static void wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &appQuitting)
+{
     QuitFilter quitFilter;
     quitFilter.backend = &backend;
     app.installEventFilter(&quitFilter);
 
-    bool appQuitting = false;
     QObject::connect(&backend, &Backend::aboutToShutdown, &app, [&appQuitting]() {
         appQuitting = true;
     });
@@ -64,24 +73,41 @@ int runGuiApplication(int argc, char *argv[])
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &app, []() {
         removeInstanceAuthToken();
     });
+}
+
+int runGuiApplication(int argc, char *argv[])
+{
+    QGuiApplication app(argc, argv);
+    applyAppBranding(app);
+
+    const QString controlArg = controlArgFrom(argc, argv);
+    if (forwardToRunningInstance(QStringLiteral("FreeTunnelInstance"), controlArg))
+        return 0;
+
+    QString instanceToken;
+    QLocalServer *server = startSingleInstanceServer(app, &instanceToken);
+
+    UrlOpenFilter urlFilter;
+    app.installEventFilter(&urlFilter);
+
+    Backend backend;
+#ifdef Q_OS_MACOS
+    setupMacDockIcon(app, backend);
+#endif
+
+    bool appQuitting = false;
+    wireBackendLifecycle(app, backend, appQuitting);
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
-    if (engine.rootObjects().isEmpty())
+    QWindow *win = loadMainWindow(engine, backend);
+    if (!win)
         return -1;
 
     QTranslator *translator = nullptr;
-    applyLanguage(app, engine, translator, backend.language());
-    QObject::connect(&backend, &Backend::languageChanged, &app,
-                     [&app, &engine, &translator](const QString &lang) {
-                         applyLanguage(app, engine, translator, lang);
-                     });
+    wireLanguageChanges(app, engine, backend, translator);
 
-    auto *win = qobject_cast<QWindow *>(engine.rootObjects().first());
 #ifdef Q_OS_MACOS
-    if (win)
-        applyMacUnifiedTitlebar(win->winId());
+    applyMacUnifiedTitlebar(win->winId());
 #endif
     urlFilter.ready(&backend, win);
     if (!controlArg.isEmpty())

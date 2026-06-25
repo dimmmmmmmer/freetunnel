@@ -324,10 +324,10 @@ bool VpnHelperClient::ensureHelper() {
     return true;
 }
 
-bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
-    const QString exe = QCoreApplication::applicationFilePath();
-
 #if defined(Q_OS_MACOS)
+static bool launchMacElevatedHelper(QProcess **procOut, QObject *parent, const QString &exe,
+                                    quint16 port, const QString &tokenPath, QString *err)
+{
     const QString inner =
             QStringLiteral("logf=$(mktemp \"${TMPDIR:-/tmp}/freetunnel-helper.XXXXXX\") || logf=/dev/null; "
                            "exec %1 --helper --port %2 --token-file %3 "
@@ -335,11 +335,23 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
                     .arg(shellEscape(exe), QString::number(port), shellEscape(tokenPath));
     const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
                                    .arg(appleScriptEscape(inner));
-    m_proc = new QProcess(this);
-    m_proc->start(QStringLiteral("osascript"), {QStringLiteral("-e"), script});
-    if (!m_proc->waitForStarted(5000)) { if (err) *err = tr("Could not launch osascript"); return false; }
+    auto *proc = new QProcess(parent);
+    proc->start(QStringLiteral("osascript"), {QStringLiteral("-e"), script});
+    if (!proc->waitForStarted(5000)) {
+        if (err)
+            *err = QObject::tr("Could not launch osascript");
+        proc->deleteLater();
+        return false;
+    }
+    *procOut = proc;
     return true;
-#elif defined(Q_OS_WIN)
+}
+#endif
+
+#if defined(Q_OS_WIN)
+static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QString &tokenPath,
+                                    QString *err)
+{
     const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"")
                                  .arg(QString::number(port), tokenPath);
     SHELLEXECUTEINFOW sei{};
@@ -352,10 +364,21 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
     sei.lpParameters = wargs.c_str();
     sei.nShow = SW_HIDE;
     if (!ShellExecuteExW(&sei)) {
-        if (err) *err = tr("Elevation was cancelled or failed");
+        if (err)
+            *err = QObject::tr("Elevation was cancelled or failed");
         return false;
     }
     return true;
+}
+#endif
+
+bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
+    const QString exe = QCoreApplication::applicationFilePath();
+
+#if defined(Q_OS_MACOS)
+    return launchMacElevatedHelper(&m_proc, this, exe, port, tokenPath, err);
+#elif defined(Q_OS_WIN)
+    return launchWinElevatedHelper(exe, port, tokenPath, err);
 #else
     m_proc = new QProcess(this);
     const QStringList helperCmd = linuxHelperCommand(exe, port, tokenPath);

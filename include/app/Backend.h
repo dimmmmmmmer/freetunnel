@@ -199,6 +199,7 @@ private:
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
+    void wireUpdaterSignals();
     void wireVpnClientSignals();
     void onVpnClientStateChanged(VpnHelperClient::State st);
     void onVpnErrorReceived(const QString &m);

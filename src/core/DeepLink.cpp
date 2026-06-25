@@ -302,57 +302,74 @@ QString encodeDeepLink(const DeepLinkConfig &cfg) {
                                              | QByteArray::OmitTrailingEquals));
 }
 
-QString deepLinkConfigToToml(const DeepLinkConfig &cfg) {
-    QStringList dnsQuoted;
-    for (const QString &d : cfg.dnsUpstreams) {
-        dnsQuoted << QStringLiteral("\"%1\"").arg(tomlEscape(d));
-    }
-    QStringList addrQuoted;
-    for (const QString &a : cfg.addresses) {
-        addrQuoted << QStringLiteral("\"%1\"").arg(tomlEscape(a));
-    }
+static QString quotedTomlList(const QStringList &items)
+{
+    QStringList out;
+    for (const QString &item : items)
+        out << QStringLiteral("\"%1\"").arg(tomlEscape(item));
+    return out.join(QStringLiteral(", "));
+}
 
-    QString clientRandom = cfg.clientRandomPrefix;
-    QString clientRandomMask;
-    const int slash = clientRandom.indexOf('/');
+static void splitClientRandom(const DeepLinkConfig &cfg, QString *random, QString *mask)
+{
+    *random = cfg.clientRandomPrefix;
+    mask->clear();
+    const int slash = random->indexOf('/');
     if (slash >= 0) {
-        clientRandomMask = clientRandom.mid(slash + 1);
-        clientRandom = clientRandom.left(slash);
+        *mask = random->mid(slash + 1);
+        *random = random->left(slash);
     }
+}
 
+static QString endpointTomlSection(const DeepLinkConfig &cfg, const QString &clientRandom,
+                                    const QString &clientRandomMask)
+{
     QString t;
-    t += QStringLiteral("loglevel = \"info\"\n");
-    t += QStringLiteral("vpn_mode = \"general\"\n");
-    t += QStringLiteral("killswitch_enabled = false\n");
-    t += QStringLiteral("post_quantum_group_enabled = true\n");
-    t += QStringLiteral("dns_upstreams = [%1]\n").arg(dnsQuoted.join(QStringLiteral(", ")));
     t += QStringLiteral("\n[endpoint]\n");
     t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEscape(cfg.hostname));
-    t += QStringLiteral("addresses = [%1]\n").arg(addrQuoted.join(QStringLiteral(", ")));
+    t += QStringLiteral("addresses = [%1]\n").arg(quotedTomlList(cfg.addresses));
     t += QStringLiteral("username = \"%1\"\n").arg(tomlEscape(cfg.username));
     t += QStringLiteral("password = \"%1\"\n").arg(tomlEscape(cfg.password));
     t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEscape(clientRandom));
-    if (!clientRandomMask.isEmpty()) {
+    if (!clientRandomMask.isEmpty())
         t += QStringLiteral("client_random_mask = \"%1\"\n").arg(tomlEscape(clientRandomMask));
-    }
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEscape(cfg.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(cfg.hasIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(cfg.skipVerification ? "true" : "false");
     t += QStringLiteral("upstream_protocol = \"%1\"\n")
                  .arg(cfg.upstreamProtocol == UpstreamProtocol::Http3 ? "http3" : "http2");
     t += QStringLiteral("anti_dpi = %1\n").arg(cfg.antiDpi ? "true" : "false");
-    if (!cfg.certificate.isEmpty()) {
+    if (!cfg.certificate.isEmpty())
         t += QStringLiteral("certificate = \"\"\"\n%1\"\"\"\n").arg(derToPem(cfg.certificate));
-    } else {
+    else
         t += QStringLiteral("certificate = \"\"\n");
-    }
-    t += QStringLiteral("\n[listener.tun]\n");
-    t += QStringLiteral("bound_if = \"\"\n");
-    t += QStringLiteral("mtu_size = 1500\n");
-    t += QStringLiteral("change_system_dns = true\n");
-    t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
-    t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
-                        "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    return t;
+}
+
+static QString listenerTomlSection()
+{
+    return QStringLiteral("\n[listener.tun]\n"
+                          "bound_if = \"\"\n"
+                          "mtu_size = 1500\n"
+                          "change_system_dns = true\n"
+                          "included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n"
+                          "excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
+                          "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+}
+
+QString deepLinkConfigToToml(const DeepLinkConfig &cfg) {
+    QString clientRandom;
+    QString clientRandomMask;
+    splitClientRandom(cfg, &clientRandom, &clientRandomMask);
+
+    QString t;
+    t += QStringLiteral("loglevel = \"info\"\n");
+    t += QStringLiteral("vpn_mode = \"general\"\n");
+    t += QStringLiteral("killswitch_enabled = false\n");
+    t += QStringLiteral("post_quantum_group_enabled = true\n");
+    t += QStringLiteral("dns_upstreams = [%1]\n").arg(quotedTomlList(cfg.dnsUpstreams));
+    t += endpointTomlSection(cfg, clientRandom, clientRandomMask);
+    t += listenerTomlSection();
     return t;
 }
 
