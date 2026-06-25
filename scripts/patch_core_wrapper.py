@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-
-Patch the injected TrustTunnelClient C++ wrapper to surface telemetry events.
+"""Patch the injected TrustTunnelClient C++ wrapper to surface telemetry events.
 
 The public `ag::VpnCallbacks` wrapper exposes only 5 of the core's ~11 events.
 In particular `VPN_EVENT_TUNNEL_CONNECTION_STATS` (per-connection upload/download

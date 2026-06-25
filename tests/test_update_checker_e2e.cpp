@@ -17,8 +17,13 @@ class TestUpdateCheckerE2e : public QObject {
 private slots:
     void checkNowFindsNewerRelease();
     void checkNowNoUpdateWhenCurrent();
+    void checkNowNetworkError();
+    void checkNowInvalidJson();
     void downloadVerifiesChecksum();
     void downloadRejectsBadChecksum();
+    void downloadRejectsMissingChecksums();
+    void downloadRejectsMissingSignature();
+    void downloadRejectsInvalidSignature();
 };
 
 static QString sha256HexOfBytes(const QByteArray &body)
@@ -154,6 +159,151 @@ void TestUpdateCheckerE2e::downloadVerifiesChecksum()
 
     qunsetenv("FT_GITHUB_API_BASE");
     qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
+}
+
+void TestUpdateCheckerE2e::checkNowNetworkError()
+{
+    qputenv("FT_GITHUB_API_BASE", QByteArrayLiteral("http://127.0.0.1:1"));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return none.count() > 0; }, 5000));
+    QCOMPARE(none.count(), 1);
+    QVERIFY(none.at(0).at(0).toString().contains(QStringLiteral("Network error")));
+
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+void TestUpdateCheckerE2e::checkNowInvalidJson()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+
+    MockHttpServer::Route route;
+    route.body = QByteArrayLiteral("not-json");
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), route);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return none.count() > 0; }, 5000));
+    QCOMPARE(none.at(0).at(0).toString(), QStringLiteral("Invalid response from GitHub API"));
+
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+void TestUpdateCheckerE2e::downloadRejectsMissingChecksums()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = QStringLiteral("v2.0.0");
+    release[QStringLiteral("html_url")] = base + QStringLiteral("/release");
+    release[QStringLiteral("body")] = QStringLiteral("notes");
+    QJsonArray assets;
+    QJsonObject installerAsset;
+    installerAsset[QStringLiteral("name")] = testInstallerAssetName();
+    installerAsset[QStringLiteral("browser_download_url")] = base + QStringLiteral("/installer");
+    assets.append(installerAsset);
+    release[QStringLiteral("assets")] = assets;
+
+    MockHttpServer::Route releaseRoute;
+    releaseRoute.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), releaseRoute);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
+
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
+    QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("SHA256SUMS.txt")));
+
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+void TestUpdateCheckerE2e::downloadRejectsMissingSignature()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+
+    const QString installerName = testInstallerAssetName();
+    const QJsonObject release = makeReleaseJson(QStringLiteral("v2.0.0"), base, installerName);
+    MockHttpServer::Route releaseRoute;
+    releaseRoute.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), releaseRoute);
+
+    const QByteArray sums = QByteArrayLiteral("abc123  ") + installerName.toUtf8() + "\n";
+    MockHttpServer::Route sumsRoute;
+    sumsRoute.body = sums;
+    sumsRoute.contentType = QByteArrayLiteral("text/plain");
+    http.setRoute(QStringLiteral("/checksums"), sumsRoute);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
+
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
+    QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("not signed")));
+
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+void TestUpdateCheckerE2e::downloadRejectsInvalidSignature()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+
+    const QString installerName = testInstallerAssetName();
+    QJsonObject release = makeReleaseJson(QStringLiteral("v2.0.0"), base, installerName);
+    QJsonArray assets = release[QStringLiteral("assets")].toArray();
+    QJsonObject sigAsset;
+    sigAsset[QStringLiteral("name")] = QStringLiteral("SHA256SUMS.txt.sig");
+    sigAsset[QStringLiteral("browser_download_url")] = base + QStringLiteral("/signature");
+    assets.append(sigAsset);
+    release[QStringLiteral("assets")] = assets;
+
+    MockHttpServer::Route releaseRoute;
+    releaseRoute.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), releaseRoute);
+
+    const QByteArray sums = QByteArrayLiteral("abc123  ") + installerName.toUtf8() + "\n";
+    MockHttpServer::Route sumsRoute;
+    sumsRoute.body = sums;
+    sumsRoute.contentType = QByteArrayLiteral("text/plain");
+    http.setRoute(QStringLiteral("/checksums"), sumsRoute);
+
+    MockHttpServer::Route sigRoute;
+    sigRoute.body = QByteArrayLiteral("not-a-valid-signature");
+    sigRoute.contentType = QByteArrayLiteral("application/octet-stream");
+    http.setRoute(QStringLiteral("/signature"), sigRoute);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
+
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 10000));
+    QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("signature")));
+
+    qunsetenv("FT_GITHUB_API_BASE");
 }
 
 void TestUpdateCheckerE2e::downloadRejectsBadChecksum()

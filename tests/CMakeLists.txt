@@ -67,6 +67,14 @@ target_include_directories(test_safe_fileread PRIVATE ../include ../include/core
 target_link_libraries(test_safe_fileread PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME safe_fileread COMMAND test_safe_fileread)
 
+add_executable(test_appuiutils
+    test_appuiutils.cpp
+    ../src/core/AppUiUtils.cpp
+)
+target_include_directories(test_appuiutils PRIVATE ../include ../include/core)
+target_link_libraries(test_appuiutils PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME appuiutils COMMAND test_appuiutils)
+
 add_executable(test_configimport
     test_configimport.cpp
     ../src/core/ConfigImport.cpp
