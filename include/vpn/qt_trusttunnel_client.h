@@ -15,8 +15,8 @@
 #ifndef IOVEC_DEFINED_QT
 #define IOVEC_DEFINED_QT
 struct iovec {
-    void *iov_base;
-    size_t iov_len;
+    void *iov_base; // cppcheck-suppress unusedStructMember
+    size_t iov_len; // cppcheck-suppress unusedStructMember
 };
 #endif
 #endif
