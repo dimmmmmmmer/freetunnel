@@ -3,6 +3,7 @@
 
 #include <QGuiApplication>
 #include <QKeySequence>
+#include <QTimer>
 
 #include <QHotkey>
 
@@ -40,6 +41,30 @@ void Backend::registerHotkeys() {
     m_hkToggle = make(m_settings.hotkey_toggle, tr("Toggle VPN"), &Backend::toggle);
     m_hkConnect = make(m_settings.hotkey_connect, tr("Connect"), &Backend::connectVpn);
     m_hkDisconnect = make(m_settings.hotkey_disconnect, tr("Disconnect"), &Backend::disconnectVpn);
+}
+
+void Backend::ensureHotkeysRegistered()
+{
+    if (!m_settings.hotkeys_enabled)
+        return;
+    const auto ok = [](QHotkey *hk, const QString &seq) {
+        return seq.trimmed().isEmpty() || (hk && hk->isRegistered());
+    };
+    if (ok(m_hkToggle, m_settings.hotkey_toggle) && ok(m_hkConnect, m_settings.hotkey_connect)
+        && ok(m_hkDisconnect, m_settings.hotkey_disconnect))
+        return;
+    registerHotkeys();
+}
+
+void Backend::wireHotkeyLifecycle()
+{
+    QTimer::singleShot(0, this, [this] { registerHotkeys(); });
+    if (auto *gui = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        connect(gui, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
+            if (s == Qt::ApplicationActive)
+                ensureHotkeysRegistered();
+        });
+    }
 }
 
 void Backend::setHotkeysEnabled(bool v) {

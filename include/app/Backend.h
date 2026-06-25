@@ -205,6 +205,8 @@ private:
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     void unregisterHotkeys();
+    void wireHotkeyLifecycle();
+    void ensureHotkeysRegistered();
     void appendLog(const QString &level, const QString &msg);
     QString nameForPath(const QString &path) const;
     void ensureUpdater();

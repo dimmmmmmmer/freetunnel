@@ -5,7 +5,6 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
-#include <QGuiApplication>
 
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
@@ -31,20 +30,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
 
-    QTimer::singleShot(0, this, [this] { registerHotkeys(); });
-    if (auto *gui = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
-        connect(gui, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
-            if (s != Qt::ApplicationActive || !m_settings.hotkeys_enabled)
-                return;
-            const auto ok = [this](QHotkey *hk, const QString &seq) {
-                return seq.trimmed().isEmpty() || (hk && hk->isRegistered());
-            };
-            if (ok(m_hkToggle, m_settings.hotkey_toggle) && ok(m_hkConnect, m_settings.hotkey_connect)
-                && ok(m_hkDisconnect, m_settings.hotkey_disconnect))
-                return;
-            registerHotkeys();
-        });
-    }
+    wireHotkeyLifecycle();
     trimLogFile();
     loadLogTail(); // show previous session's log instead of starting blank
     appendLog(QStringLiteral("INFO"),
