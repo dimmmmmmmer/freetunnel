@@ -75,3 +75,67 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build-tests -j1 --output-on-failure
+
+  coverage:
+    name: Coverage (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config lcov
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      - name: Build, test, and report coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: bash scripts/coverage-report.sh build-coverage coverage-out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage-out/
+          if-no-files-found: error
+
+  sanitizers:
+    name: ASan+UBSan (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      - name: Configure
+        run: cmake -S tests -B build-asan -G Ninja -DFT_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-asan -j
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0:allocator_may_return_null=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build-asan -j1 --output-on-failure

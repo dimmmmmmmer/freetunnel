@@ -108,16 +108,21 @@ cmake --build build-tests -j
 ctest --test-dir build-tests --output-on-failure
 ```
 
-CI runs this on every push/PR via `.github/workflows/tests.yml`.
+CI runs this on every push/PR via `.github/workflows/tests.yml` (matrix: Linux,
+macOS, Windows). Additional Linux-only jobs: **gcov/lcov coverage**
+(`scripts/coverage-report.sh`) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
-Test suites: deep links, config import, settings, TOML, credentials (Keychain /
-Cred Manager on macOS/Windows), release verify, control commands, helper IPC,
-QML UI smoke tests, integration tests (config workflow, Backend+mock VPN,
-single-instance socket, helper client), UpdateChecker E2E (mock HTTP).
+Test suites: deep links (incl. structured fuzz), config import, settings, TOML,
+credentials (Keychain / Cred Manager on macOS/Windows), release verify, control
+commands, helper IPC, QML UI smoke tests, integration tests (config workflow,
+Backend+mock VPN, single-instance socket, helper client), UpdateChecker E2E
+(mock HTTP).
 
-Security CI (`.github/workflows/security.yml`): cppcheck on `src/` and `include/`,
-upstream patch verification (`scripts/verify_upstream_patch.sh` against
-`scripts/upstream_ref.txt`), i18n catalog freshness, and pinned-dependency checks.
+Security CI (`.github/workflows/security.yml`): cppcheck on `src/` and
+`include/`, **clang-tidy** (`scripts/run-clang-tidy.sh`), PR **dependency
+review**, upstream patch verification (`scripts/verify_upstream_patch.sh`
+against `scripts/upstream_ref.txt`), i18n catalog freshness, and pinned-dependency
+checks (`scripts/check-pinned-deps.sh`).
 
 See [SECURITY.md](SECURITY.md) for the threat model and known limitations.
 
@@ -200,8 +205,8 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 | Workflow | Purpose |
 | --- | --- |
 | `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows |
-| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows) |
-| `.github/workflows/security.yml` | cppcheck, upstream patch verify, i18n freshness, pinned deps |
+| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows); Linux coverage + ASan |
+| `.github/workflows/security.yml` | cppcheck, clang-tidy, dependency review (PRs), upstream patch verify, i18n freshness, pinned deps |
 
 Upstream ref is pinned in workflow `env.UPSTREAM_REF`. Bump it with the patch
 script re-verified.

@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QRandomGenerator>
 
 #include "core/DeepLink.h"
 
@@ -18,6 +19,9 @@ private slots:
     void tomlContainsKeyFields();
     void tomlInjectionStripped();
     void malformedPayloadsNeverCrash();
+    void structuredTlvFuzzNeverCrash();
+    void mutatesValidLinksSafely();
+    void rejectsOversizedTlvLength();
     void acceptsTrustTunnelQrFragment();
 };
 
@@ -183,9 +187,9 @@ void TestDeepLink::tomlInjectionStripped() {
 
 void TestDeepLink::malformedPayloadsNeverCrash()
 {
-    for (int seed = 0; seed < 500; ++seed) {
+    for (int seed = 0; seed < 3000; ++seed) {
         QByteArray p;
-        p.resize(seed % 256);
+        p.resize(seed % 512);
         for (int i = 0; i < p.size(); ++i)
             p[i] = static_cast<char>((seed * 31 + i * 17) & 0xFF);
         const QString uri = QStringLiteral("tt://?")
@@ -194,6 +198,71 @@ void TestDeepLink::malformedPayloadsNeverCrash()
         (void)parseDeepLink(uri, &err);
     }
     QVERIFY(true);
+}
+
+// Random TLV-shaped byte streams (not necessarily valid base64url payloads).
+void TestDeepLink::structuredTlvFuzzNeverCrash()
+{
+    auto *rng = QRandomGenerator::global();
+    for (int i = 0; i < 2000; ++i) {
+        QByteArray p;
+        p.resize(rng->bounded(1, 384));
+        for (int j = 0; j < p.size(); ++j)
+            p[j] = static_cast<char>(rng->generate() & 0xFF);
+        const QString uri = QStringLiteral("tt://?")
+                + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
+                                                 | QByteArray::OmitTrailingEquals));
+        QString err;
+        (void)parseDeepLink(uri, &err);
+    }
+    QVERIFY(true);
+}
+
+void TestDeepLink::mutatesValidLinksSafely()
+{
+    DeepLinkConfig in;
+    in.hostname = QStringLiteral("vpn.example.com");
+    in.addresses = {QStringLiteral("1.2.3.4:443")};
+    in.username = QStringLiteral("user");
+    in.password = QStringLiteral("pass");
+    const QString valid = encodeDeepLink(in);
+    const QString payload = valid.mid(QStringLiteral("tt://?").size());
+
+    auto *rng = QRandomGenerator::global();
+    for (int i = 0; i < 500; ++i) {
+        QByteArray mutated = payload.toLatin1();
+        const int n = rng->bounded(1, 8);
+        for (int j = 0; j < n; ++j) {
+            const int pos = rng->bounded(mutated.size() + 1);
+            if (pos == mutated.size())
+                mutated.append(static_cast<char>(rng->generate() & 0xFF));
+            else
+                mutated[pos] = static_cast<char>(rng->generate() & 0xFF);
+        }
+        if (rng->bounded(4) == 0 && !mutated.isEmpty())
+            mutated.chop(rng->bounded(1, qMin(16, mutated.size())));
+        const QString uri = QStringLiteral("tt://?")
+                + QString::fromLatin1(mutated);
+        QString err;
+        (void)parseDeepLink(uri, &err);
+    }
+    QVERIFY(true);
+}
+
+void TestDeepLink::rejectsOversizedTlvLength()
+{
+    // Tag 0x01 + 8-byte varint length > INT_MAX must fail safely (no overflow crash).
+    QByteArray p;
+    p.append(static_cast<char>(0x01));
+    p.append(static_cast<char>(0xC0));
+    for (int i = 0; i < 7; ++i)
+        p.append(static_cast<char>(0xFF));
+    const QString uri = QStringLiteral("tt://?")
+            + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
+                                             | QByteArray::OmitTrailingEquals));
+    QString err;
+    QVERIFY(!parseDeepLink(uri, &err).has_value());
+    QVERIFY(!err.isEmpty());
 }
 
 void TestDeepLink::acceptsTrustTunnelQrFragment()

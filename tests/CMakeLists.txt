@@ -12,6 +12,18 @@ set(CMAKE_AUTOMOC ON)
 add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
 set(CMAKE_AUTORCC ON)
 
+option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)
+option(FT_ENABLE_SANITIZERS "Build tests with ASan+UBSan (Linux/clang recommended)" OFF)
+
+if (FT_ENABLE_COVERAGE)
+    add_compile_options(--coverage)
+    add_link_options(--coverage)
+endif ()
+if (FT_ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif ()
+
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network REQUIRED)
 
 include(FetchContent)

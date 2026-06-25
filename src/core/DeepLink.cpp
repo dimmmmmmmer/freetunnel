@@ -1,7 +1,18 @@
 #include "core/DeepLink.h"
 
+#include <limits>
+
 namespace freetunnel {
 namespace {
+
+bool tlvLengthFits(const QByteArray &buf, int pos, quint64 len)
+{
+    if (len > static_cast<quint64>(std::numeric_limits<int>::max()))
+        return false;
+    if (pos < 0 || pos > buf.size())
+        return false;
+    return len <= static_cast<quint64>(buf.size() - pos);
+}
 
 // ---- QUIC/TLS variable-length integer (RFC 9000 §16) ----
 
@@ -73,7 +84,7 @@ QStringList decodeStringList(const QByteArray &value, bool *ok) {
     int pos = 0;
     while (pos < value.size()) {
         quint64 len = 0;
-        if (!readVarint(value, pos, len) || pos + static_cast<int>(len) > value.size()) {
+        if (!readVarint(value, pos, len) || !tlvLengthFits(value, pos, len)) {
             *ok = false;
             return {};
         }
@@ -155,7 +166,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
         if (!readVarint(payload, pos, tag) || !readVarint(payload, pos, len)) {
             return fail(QStringLiteral("truncated TLV header"));
         }
-        if (pos + static_cast<int>(len) > payload.size()) {
+        if (!tlvLengthFits(payload, pos, len)) {
             return fail(QStringLiteral("TLV length exceeds payload"));
         }
         const QByteArray value = payload.mid(pos, static_cast<int>(len));
