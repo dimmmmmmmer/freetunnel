@@ -108,6 +108,7 @@ QString filePathForKey(const QString &key)
     return QDir(credentialDir()).filePath(QString::fromLatin1(hash));
 }
 
+#if defined(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
 bool storePasswordFile(const QString &key, const QString &password)
 {
     QFile f(filePathForKey(key));
@@ -118,6 +119,7 @@ bool storePasswordFile(const QString &key, const QString &password)
     QFile::setPermissions(f.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
+#endif
 
 QString loadPasswordFile(const QString &key)
 {
