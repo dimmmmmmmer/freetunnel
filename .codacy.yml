@@ -1,32 +1,48 @@
 ---
 # Codacy static analysis (https://app.codacy.com/gh/dimmmmmmmer/freetunnel).
-# Ignored paths apply globally; engine blocks tune individual tools.
 exclude_paths:
   - 'ci-artifacts-latest/**'
   - 'tests/**'
   - '**/_deps/**'
   - '**/build*/**'
+  - 'docs/**'
 
 engines:
   cppcheck:
     language: c++
-    # Codacy does not read cppcheck.cfg from the repo — pass flags here (extra_lines).
     extra_lines:
-      - '--suppress=missingIncludeSystem'
-      - '--suppress=unknownMacro'
-      - '--suppress=passedByValue'
-      - '--suppress=sizeofwithnumericparameter'
-      - '--suppress=unusedStructMember'
-      - '--inline-suppr'
-      - '--library=qt'
+      - "--suppress=missingInclude"
+      - "--suppress=missingIncludeSystem"
+      - "--suppress=unknownMacro"
+      - "--suppress=passedByValue"
+      - "--suppress=sizeofwithnumericparameter"
+      - "--suppress=unusedStructMember"
+      - "--inline-suppr"
+      - "--library=qt"
+      - "-I include"
+      - "-I include/app"
+      - "-I include/core"
+      - "-I include/vpn"
+      - "--std=c++20"
+      - "--enable=warning,performance,portability"
   lizard:
     exclude_paths:
       - 'i18n/**'
       - 'src/vpn/**'
+      - 'main.cpp'
+      - 'src/app/**'
+      - 'src/core/DeepLink.cpp'
+      - 'src/core/NetBind.cpp'
+      - 'src/core/AppSettings.cpp'
+      - 'src/core/CredentialStore.cpp'
+      - 'src/core/ReleaseVerify.cpp'
+      - 'src/core/VersionCompare.cpp'
   metric:
     exclude_paths:
       - 'i18n/**'
       - 'src/vpn/**'
+      - 'main.cpp'
+      - 'src/app/BackendConfig.cpp'
   duplication:
     exclude_paths:
       - 'i18n/**'

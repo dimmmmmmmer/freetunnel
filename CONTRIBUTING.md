@@ -124,7 +124,8 @@ review**, upstream patch verification (`scripts/verify_upstream_patch.sh`
 against `scripts/upstream_ref.txt`), i18n catalog freshness, and pinned-dependency
 checks (`scripts/check-pinned-deps.sh`).
 
-See [SECURITY.md](SECURITY.md) for the threat model and known limitations.
+See [SECURITY.md](SECURITY.md) and [docs/security-threats.md](docs/security-threats.md) for the
+threat model and known limitations.
 
 ## Codacy (code quality dashboard)
 
