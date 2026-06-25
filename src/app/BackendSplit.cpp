@@ -13,36 +13,43 @@ void Backend::setSplitEnabled(bool v) {
 }
 // A bypass rule is valid if it's a domain (optionally wildcard "*.x.y"), or an
 // IP / CIDR subnet.
-static bool isValidBypassRule(const QString &rule) {
-    QString r = rule;
-    // Wildcard forms cover a whole suffix: "*.example.com", a bare TLD "*.ru",
-    // or the leading-dot shorthand ".ru" / ".рф". Only these may end in a single
-    // label; a plain hostname still needs at least one dot.
-    bool wildcard = false;
-    if (r.startsWith(QLatin1String("*."))) { r = r.mid(2); wildcard = true; }
-    else if (r.startsWith(QLatin1Char('.'))) { r = r.mid(1); wildcard = true; }
-    if (r.isEmpty())
+static bool isValidIpBypassRule(const QString &rule)
+{
+    const int slash = rule.indexOf(QLatin1Char('/'));
+    const QString addr = slash >= 0 ? rule.left(slash) : rule;
+    if (QHostAddress(addr).isNull())
         return false;
-    // IP or subnet?
-    const int slash = r.indexOf(QLatin1Char('/'));
-    const QString addr = slash >= 0 ? r.left(slash) : r;
-    if (!QHostAddress(addr).isNull()) {
-        if (slash < 0) return true;
-        bool ok = false; const int p = r.mid(slash + 1).toInt(&ok);
-        const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
-        return ok && p >= 0 && p <= max;
-    }
-    // Hostname. Unicode-aware so IDN domains validate (e.g. рф, мвд.рф). A bare
-    // TLD label ("ru", "рф") is accepted only under a wildcard ("*.ru" / ".ru").
+    if (slash < 0)
+        return true;
+    bool ok = false;
+    const int p = rule.mid(slash + 1).toInt(&ok);
+    const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
+    return ok && p >= 0 && p <= max;
+}
+
+static bool isValidDomainBypassRule(const QString &rule, bool wildcard)
+{
     static const QRegularExpression tld(
         QStringLiteral("^[\\p{L}]{2,63}$"), QRegularExpression::UseUnicodePropertiesOption);
-    if (wildcard && tld.match(r).hasMatch())
+    if (wildcard && tld.match(rule).hasMatch())
         return true;
     static const QRegularExpression fqdn(
         QStringLiteral("^(?=.{1,253}$)([\\p{L}\\p{N}]([\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?\\.)+"
                        "[\\p{L}]{2,63}$"),
         QRegularExpression::UseUnicodePropertiesOption);
-    return fqdn.match(r).hasMatch();
+    return fqdn.match(rule).hasMatch();
+}
+
+static bool isValidBypassRule(const QString &rule) {
+    QString r = rule;
+    bool wildcard = false;
+    if (r.startsWith(QLatin1String("*."))) { r = r.mid(2); wildcard = true; }
+    else if (r.startsWith(QLatin1Char('.'))) { r = r.mid(1); wildcard = true; }
+    if (r.isEmpty())
+        return false;
+    if (isValidIpBypassRule(r))
+        return true;
+    return isValidDomainBypassRule(r, wildcard);
 }
 
 bool Backend::addDomain(const QString &domain) {

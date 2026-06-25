@@ -83,34 +83,37 @@ bool interfaceEligibleForRoute(const QNetworkInterface &ni, bool requireRunning)
 
 QHostAddress queryRouteSourceOnSocket(int fd, bool v6)
 {
-    const char *dst = v6 ? "2606:4700:4700::1111" : "1.1.1.1";
-    QHostAddress result;
     if (v6) {
         sockaddr_in6 sa{};
         sa.sin6_family = AF_INET6;
         sa.sin6_port = htons(53);
-        if (::inet_pton(AF_INET6, dst, &sa.sin6_addr) == 1
-                && ::connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof(sa)) == 0) {
-            sockaddr_in6 local{};
-            ft_socklen len = sizeof(local);
-            if (::getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) == 0)
-                result = QHostAddress(reinterpret_cast<sockaddr *>(&local));
-        }
-    } else {
-        sockaddr_in sa{};
-        sa.sin_family = AF_INET;
-        sa.sin_port = htons(53);
-        if (::inet_pton(AF_INET, dst, &sa.sin_addr) == 1
-                && ::connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof(sa)) == 0) {
-            sockaddr_in local{};
-            ft_socklen len = sizeof(local);
-            if (::getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) == 0)
-                result = QHostAddress(reinterpret_cast<sockaddr *>(&local));
-        }
+        if (::inet_pton(AF_INET6, "2606:4700:4700::1111", &sa.sin6_addr) != 1
+                || ::connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof(sa)) != 0)
+            return {};
+        sockaddr_in6 local{};
+        ft_socklen len = sizeof(local);
+        if (::getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) != 0)
+            return {};
+        return QHostAddress(reinterpret_cast<sockaddr *>(&local));
     }
-    if (result.isNull() || result.isLoopback() || result.isLinkLocal())
+    sockaddr_in sa{};
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(53);
+    if (::inet_pton(AF_INET, "1.1.1.1", &sa.sin_addr) != 1
+            || ::connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof(sa)) != 0)
         return {};
-    return result;
+    sockaddr_in local{};
+    ft_socklen len = sizeof(local);
+    if (::getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) != 0)
+        return {};
+    return QHostAddress(reinterpret_cast<sockaddr *>(&local));
+}
+
+QHostAddress normalizeRouteSource(const QHostAddress &addr)
+{
+    if (addr.isNull() || addr.isLoopback() || addr.isLinkLocal())
+        return {};
+    return addr;
 }
 
 // The source address the OS would use to reach a public host. A UDP "connect"
@@ -125,7 +128,7 @@ QHostAddress osRouteSourceAddress(bool v6) {
     if (fd < 0)
         return {};
 #endif
-    const QHostAddress result = queryRouteSourceOnSocket(fd, v6);
+    const QHostAddress result = normalizeRouteSource(queryRouteSourceOnSocket(fd, v6));
 #if defined(Q_OS_WIN)
     ::closesocket(fd);
 #else
@@ -218,6 +221,38 @@ std::optional<freetunnel::PhysicalRoute> routeForDefaultGateway()
 }
 #endif
 
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+bool attachNativeBoundSocket(QTcpSocket *sock, const freetunnel::PhysicalRoute &r, bool v6)
+{
+    const int sockType = v6 ? AF_INET6 : AF_INET;
+#if defined(Q_OS_WIN)
+    const SOCKET fd = ::socket(sockType, SOCK_STREAM, 0);
+    if (fd == INVALID_SOCKET)
+        return false;
+#else
+    const int fd = ::socket(sockType, SOCK_STREAM, 0);
+    if (fd < 0)
+        return false;
+#endif
+    if (!bindSocketToRouteIndex(fd, r, v6)) {
+#if defined(Q_OS_WIN)
+        ::closesocket(fd);
+#else
+        ::close(fd);
+#endif
+        return false;
+    }
+    if (sock->setSocketDescriptor(static_cast<qintptr>(fd), QAbstractSocket::UnconnectedState))
+        return true;
+#if defined(Q_OS_WIN)
+    ::closesocket(fd);
+#else
+    ::close(fd);
+#endif
+    return false;
+}
+#endif
+
 } // namespace
 
 namespace freetunnel {
@@ -246,25 +281,8 @@ QTcpSocket *makePhysicalBoundTcpSocket(QObject *parent,
     const bool v6 = proto == QAbstractSocket::IPv6Protocol;
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
-    const int sockType = v6 ? AF_INET6 : AF_INET;
-#if defined(Q_OS_WIN)
-    const SOCKET fd = ::socket(sockType, SOCK_STREAM, 0);
-    if (fd == INVALID_SOCKET)
+    if (attachNativeBoundSocket(sock, r, v6))
         return sock;
-#else
-    const int fd = ::socket(sockType, SOCK_STREAM, 0);
-    if (fd < 0)
-        return sock;
-#endif
-    if (bindSocketToRouteIndex(fd, r, v6)
-            && sock->setSocketDescriptor(static_cast<qintptr>(fd),
-                                         QAbstractSocket::UnconnectedState))
-        return sock;
-#if defined(Q_OS_WIN)
-    ::closesocket(fd);
-#else
-    ::close(fd);
-#endif
 #else
     const QHostAddress src = v6 ? r.v6 : r.v4;
     if (!src.isNull())

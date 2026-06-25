@@ -141,6 +141,96 @@ void assignSplitProfile(AppSettings &settings, const QString &oldPath, const QSt
         settings.config_profiles[target] = profile;
 }
 
+struct ParsedCreateConfig {
+    freetunnel::ConfigToml ct;
+    QString password;
+    QString safeName;
+};
+
+bool validateCreateOptionalFields(const freetunnel::ConfigToml &ct, QString *err)
+{
+    if (!validateDnsList(ct.dns)) {
+        if (err)
+            *err = QStringLiteral("bad_dns");
+        return false;
+    }
+    const QString cr = ct.clientRandom.trimmed();
+    if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+$")).match(cr).hasMatch()) {
+        if (err)
+            *err = QStringLiteral("bad_client_random");
+        return false;
+    }
+    return true;
+}
+
+bool parseCreateConfigFields(const QVariantMap &f, ParsedCreateConfig *out, QString *err)
+{
+    out->ct.hostname = f.value(QStringLiteral("hostname")).toString().trimmed();
+    out->ct.addresses = f.value(QStringLiteral("addresses")).toString().trimmed();
+    out->ct.username = f.value(QStringLiteral("username")).toString().trimmed();
+    out->ct.password = f.value(QStringLiteral("password")).toString();
+    if (out->ct.hostname.isEmpty() || out->ct.addresses.isEmpty() || out->ct.username.isEmpty()
+            || out->ct.password.isEmpty()) {
+        if (err)
+            *err = QStringLiteral("missing_fields");
+        return false;
+    }
+    if (!validateAddressList(out->ct.addresses)) {
+        if (err)
+            *err = QStringLiteral("bad_address");
+        return false;
+    }
+    out->ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
+    out->ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
+    out->ct.certificate = f.value(QStringLiteral("certificate")).toString().trimmed();
+    out->ct.dns = f.value(QStringLiteral("dns")).toString();
+    out->ct.customSni = f.value(QStringLiteral("customSni")).toString();
+    out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
+    if (!validateCreateOptionalFields(out->ct, err))
+        return false;
+    const QString name = f.value(QStringLiteral("name")).toString().trimmed();
+    out->password = out->ct.password;
+    out->ct.password.clear();
+    out->safeName = freetunnel::sanitizeConfigBaseName(
+            name.isEmpty() ? out->ct.hostname : name, QStringLiteral("config"));
+    return true;
+}
+
+bool readValidatedImportContent(const QString &path, QString *contentOut, QString *errOut)
+{
+    QFile vf(path);
+    if (!vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (errOut)
+            *errOut = QStringLiteral("read");
+        return false;
+    }
+    const QString content = QString::fromUtf8(vf.readAll());
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(content);
+    if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
+        if (errOut)
+            *errOut = QStringLiteral("invalid");
+        return false;
+    }
+    if (contentOut)
+        *contentOut = content;
+    return true;
+}
+
+bool copyImportIntoAppConfigDir(const QString &content, const QString &sourcePath, QString *targetOut)
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    const QString stem = freetunnel::sanitizeConfigBaseName(QFileInfo(sourcePath).completeBaseName());
+    QString target = freetunnel::uniqueOwnerConfigPath(stem);
+    if (QFileInfo(target).absoluteFilePath() == QFileInfo(sourcePath).absoluteFilePath())
+        target = freetunnel::uniqueOwnerConfigPath(stem + QStringLiteral("-copy"));
+    if (!writeConfigFile(target, content.toUtf8()))
+        return false;
+    if (targetOut)
+        *targetOut = target;
+    return true;
+}
+
 } // namespace
 
 // Read the first endpoint "host:port" out of a config TOML.
@@ -154,70 +244,69 @@ static QString firstAddress(const QString &path) {
     return m.hasMatch() ? m.captured(1) : QString();
 }
 
+void Backend::markConfigPingFailed(int index)
+{
+    if (index < m_pings.size() && m_pings[index].toString() == QStringLiteral("…")) {
+        m_pings[index] = QStringLiteral("—");
+        emit pingsChanged();
+    }
+}
+
+void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
+{
+    QTcpSocket *sock = freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
+    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+    connect(sock, &QTcpSocket::connected, this, [this, index, sock, t0]() {
+        if (index < m_pings.size())
+            m_pings[index] = QString::number(QDateTime::currentMSecsSinceEpoch() - t0) + tr(" ms");
+        sock->abort();
+        sock->deleteLater();
+        emit pingsChanged();
+    });
+    connect(sock, &QTcpSocket::errorOccurred, this, [this, index, sock](QAbstractSocket::SocketError) {
+        markConfigPingFailed(index);
+        sock->deleteLater();
+    });
+    QTimer::singleShot(3000, sock, [this, index, sock]() {
+        if (sock->state() != QAbstractSocket::ConnectedState) {
+            markConfigPingFailed(index);
+            sock->abort();
+            sock->deleteLater();
+        }
+    });
+    sock->connectToHost(ip, port);
+}
+
+void Backend::pingConfigAtIndex(int index)
+{
+    const QString addr = firstAddress(m_paths.at(index));
+    const int colon = addr.lastIndexOf(':');
+    if (colon < 0) {
+        markConfigPingFailed(index);
+        return;
+    }
+    const QString host = addr.left(colon);
+    const quint16 port = addr.mid(colon + 1).toUShort();
+    const QHostAddress literal(host);
+    if (!literal.isNull()) {
+        runConfigPing(index, literal, port);
+        return;
+    }
+    QHostInfo::lookupHost(host, this, [this, index, port](const QHostInfo &hi) {
+        if (hi.addresses().isEmpty())
+            markConfigPingFailed(index);
+        else
+            runConfigPing(index, hi.addresses().first(), port);
+    });
+}
+
 void Backend::pingConfigs() {
     m_pings.clear();
     for (int i = 0; i < m_paths.size(); ++i)
         m_pings << QStringLiteral("…");
     emit pingsChanged();
-
-    // Connect to ip:port over the physical interface (bypassing the VPN) and
-    // record the connect time. Bound per-protocol so it takes the original path.
-    auto pingOne = [this](int i, const QHostAddress &ip, quint16 port) {
-        QTcpSocket *sock = freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
-        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
-        connect(sock, &QTcpSocket::connected, this, [this, i, sock, t0]() {
-            if (i < m_pings.size())
-                m_pings[i] = QString::number(QDateTime::currentMSecsSinceEpoch() - t0)
-                        + tr(" ms");
-            sock->abort();
-            sock->deleteLater();
-            emit pingsChanged();
-        });
-        connect(sock, &QTcpSocket::errorOccurred, this,
-                [this, i, sock](QAbstractSocket::SocketError) {
-                    if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…"))
-                        m_pings[i] = QStringLiteral("—");
-                    sock->deleteLater();
-                    emit pingsChanged();
-                });
-        QTimer::singleShot(3000, sock, [this, i, sock]() {
-            if (sock->state() != QAbstractSocket::ConnectedState) {
-                if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…")) {
-                    m_pings[i] = QStringLiteral("—");
-                    emit pingsChanged();
-                }
-                sock->abort();
-                sock->deleteLater();
-            }
-        });
-        sock->connectToHost(ip, port);
-    };
-    auto markDash = [this](int i) {
-        if (i < m_pings.size() && m_pings[i].toString() == QStringLiteral("…"))
-            m_pings[i] = QStringLiteral("—");
-        emit pingsChanged();
-    };
-
-    for (int i = 0; i < m_paths.size(); ++i) {
-        const QString addr = firstAddress(m_paths.at(i));
-        const int colon = addr.lastIndexOf(':');
-        if (colon < 0) { markDash(i); continue; }
-        const QString host = addr.left(colon);
-        const quint16 port = addr.mid(colon + 1).toUShort();
-        const QHostAddress literal(host);
-        if (!literal.isNull()) {
-            pingOne(i, literal, port);
-        } else {
-            // Hostname endpoint — resolve first so the bound socket uses the
-            // right address family, then ping the first resolved address.
-            QHostInfo::lookupHost(host, this, [pingOne, markDash, i, port](const QHostInfo &hi) {
-                if (hi.addresses().isEmpty())
-                    markDash(i);
-                else
-                    pingOne(i, hi.addresses().first(), port);
-            });
-        }
-    }
+    for (int i = 0; i < m_paths.size(); ++i)
+        pingConfigAtIndex(i);
 }
 
 bool Backend::importFromClipboard() {
@@ -241,44 +330,23 @@ bool Backend::importFile(const QString &path) {
         emit errorOccurred(tr("File not found: %1").arg(p));
         return false;
     }
-    // Validate it's a usable config TOML before importing.
     QString content;
-    {
-        QFile vf(p);
-        if (!vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    QString importErr;
+    if (!readValidatedImportContent(p, &content, &importErr)) {
+        if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
-            return false;
-        }
-        content = QString::fromUtf8(vf.readAll());
-        const freetunnel::ConfigToml c = freetunnel::parseConfigToml(content);
-        if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
+        else
             emit errorOccurred(tr("Not a valid TrustTunnel config (missing address or credentials)"));
-            return false;
-        }
+        return false;
     }
-    // Copy the config into our owner-only config dir rather than tracking the
-    // external path: the original file may live in a world-readable location
-    // and we can't guarantee its permissions. The password is then migrated
-    // into the OS credential store, stripping it from the on-disk copy.
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(base);
-    const QString stem = freetunnel::sanitizeConfigBaseName(QFileInfo(p).completeBaseName());
-    QString target = freetunnel::uniqueOwnerConfigPath(stem);
-    if (QFileInfo(target).absoluteFilePath() == QFileInfo(p).absoluteFilePath())
-        target = freetunnel::uniqueOwnerConfigPath(stem + QStringLiteral("-copy"));
-    {
-        QFile out(target);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            emit errorOccurred(tr("Could not write config"));
-            return false;
-        }
-        out.write(content.toUtf8());
-        out.close();
-        QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    QString target;
+    if (!copyImportIntoAppConfigDir(content, p, &target)) {
+        emit errorOccurred(tr("Could not write config"));
+        return false;
     }
     QStringList stored = loadStoredConfigs();
     if (!stored.contains(target)) {
-        stored.prepend(target); // a newly added config goes to the top of the list
+        stored.prepend(target);
         saveStoredConfigs(stored);
     }
     const bool hadNoActive = m_activePath.isEmpty();
@@ -291,7 +359,7 @@ bool Backend::importFile(const QString &path) {
                              "gnome-keyring or KWallet, then try again."));
         return false;
     }
-    if (hadNoActive) { // first config in an empty list — make it the active one
+    if (hadNoActive) {
         m_activePath = target;
         m_settings.last_config_path = target;
         persistSettings();
@@ -302,53 +370,32 @@ bool Backend::importFile(const QString &path) {
 }
 
 bool Backend::createConfig(const QVariantMap &f) {
-    const QString name = f.value(QStringLiteral("name")).toString().trimmed();
-    freetunnel::ConfigToml ct;
-    ct.hostname = f.value(QStringLiteral("hostname")).toString().trimmed();
-    ct.addresses = f.value(QStringLiteral("addresses")).toString().trimmed();
-    ct.username = f.value(QStringLiteral("username")).toString().trimmed();
-    ct.password = f.value(QStringLiteral("password")).toString();
-    if (ct.hostname.isEmpty() || ct.addresses.isEmpty() || ct.username.isEmpty() || ct.password.isEmpty()) {
-        emit errorOccurred(tr("Fill in host, address, username and password"));
-        return false;
-    }
-    if (!validateAddressList(ct.addresses)) {
-        emit errorOccurred(tr("Address must be host:port, e.g. 1.2.3.4:443"));
-        return false;
-    }
-    ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
-    ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
-    ct.certificate = f.value(QStringLiteral("certificate")).toString().trimmed();
-    ct.dns = f.value(QStringLiteral("dns")).toString();
-    ct.customSni = f.value(QStringLiteral("customSni")).toString();
-    ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
-    if (!validateDnsList(ct.dns)) {
-        emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
-        return false;
-    }
-    const QString cr = ct.clientRandom.trimmed();
-    if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+$")).match(cr).hasMatch()) {
-        emit errorOccurred(tr("Client random must be hexadecimal"));
+    ParsedCreateConfig parsed;
+    QString parseErr;
+    if (!parseCreateConfigFields(f, &parsed, &parseErr)) {
+        if (parseErr == QLatin1String("missing_fields"))
+            emit errorOccurred(tr("Fill in host, address, username and password"));
+        else if (parseErr == QLatin1String("bad_address"))
+            emit errorOccurred(tr("Address must be host:port, e.g. 1.2.3.4:443"));
+        else if (parseErr == QLatin1String("bad_dns"))
+            emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
+        else if (parseErr == QLatin1String("bad_client_random"))
+            emit errorOccurred(tr("Client random must be hexadecimal"));
         return false;
     }
 
-    const QString password = ct.password;
-    ct.password.clear();
-    const QString tomlBody = freetunnel::buildConfigToml(ct);
-    const QString safe = freetunnel::sanitizeConfigBaseName(
-            name.isEmpty() ? ct.hostname : name, QStringLiteral("config"));
-
+    const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
     const int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
     const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
     const QString &oldPath = edit.oldPath;
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
-    const QString target = freetunnel::uniqueOwnerConfigPath(safe);
+    const QString target = freetunnel::uniqueOwnerConfigPath(parsed.safeName);
     if (!writeConfigFile(target, tomlBody.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
         return false;
     }
-    if (!storeConfigPassword(target, password)) {
+    if (!storeConfigPassword(target, parsed.password)) {
         emit errorOccurred(tr("Could not store the VPN password securely. Install "
                              "gnome-keyring or KWallet, then try again."));
         return false;
@@ -356,23 +403,19 @@ bool Backend::createConfig(const QVariantMap &f) {
     if (!oldPath.isEmpty() && oldPath != target)
         freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(oldPath));
 
-    return finalizeCreatedConfig(f, oldPath, target, password, tomlBody, edit.content, edit.password,
+    return finalizeCreatedConfig(f, oldPath, target, parsed.password, tomlBody, edit.content, edit.password,
                                  edit.profile, edit.active, editIndex);
 }
 
-bool Backend::finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
-                                    const QString &password, const QString &tomlBody,
-                                    const QString &editContent, const QString &editPassword,
-                                    const QString &editProfile, bool editingSnapshot, int editIndex)
+void Backend::persistCreatedConfigPaths(const QString &oldPath, const QString &target,
+                                        bool editing, bool wasActive)
 {
-    QStringList stored = loadStoredConfigs();
-    const bool editing = editIndex >= 0;
-    const bool wasActive = !oldPath.isEmpty() && m_activePath == oldPath;
     if (!oldPath.isEmpty() && oldPath != target) {
         QFile::remove(oldPath);
         if (wasActive)
             m_activePath = target;
     }
+    QStringList stored = loadStoredConfigs();
     updateStoredConfigList(stored, oldPath, target);
     saveStoredConfigs(stored);
     reloadConfigs();
@@ -381,23 +424,42 @@ bool Backend::finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath
     if (!editing) {
         m_activePath = target;
         m_settings.last_config_path = target;
-        persistSettings();
     } else if (wasActive) {
         m_settings.last_config_path = m_activePath;
-        persistSettings();
     }
+    persistSettings();
+}
 
+void Backend::maybeReapplyCreatedConfig(const QVariantMap &f, const QString &oldPath,
+                                        const QString &target, const QString &password,
+                                        const QString &tomlBody, const QString &editContent,
+                                        const QString &editPassword, const QString &editProfile,
+                                        bool editingSnapshot, int editIndex)
+{
     const QString newProfile = normalizedSplitProfile(f, m_settings);
     assignSplitProfile(m_settings, oldPath, target, newProfile);
     persistSettings();
-
     emit configChanged();
+
+    const bool editing = editIndex >= 0;
     const bool noChange = editingSnapshot && oldPath == target && tomlBody == editContent
             && password == editPassword && newProfile == editProfile;
     if (editing && m_activePath == target && !noChange) {
         applySplitRules();
         reapplyIfConnected();
     }
+}
+
+bool Backend::finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
+                                    const QString &password, const QString &tomlBody,
+                                    const QString &editContent, const QString &editPassword,
+                                    const QString &editProfile, bool editingSnapshot, int editIndex)
+{
+    const bool editing = editIndex >= 0;
+    const bool wasActive = !oldPath.isEmpty() && m_activePath == oldPath;
+    persistCreatedConfigPaths(oldPath, target, editing, wasActive);
+    maybeReapplyCreatedConfig(f, oldPath, target, password, tomlBody, editContent, editPassword,
+                              editProfile, editingSnapshot, editIndex);
     return true;
 }
 

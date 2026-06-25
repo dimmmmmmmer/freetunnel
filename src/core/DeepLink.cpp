@@ -198,90 +198,105 @@ QString normalizeDeepLinkBody(QString s)
     return {};
 }
 
-} // namespace
-
-std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) {
-    const auto fail = [&](const QString &msg) -> std::optional<DeepLinkConfig> {
-        if (error) {
-            *error = msg;
-        }
-        return std::nullopt;
-    };
-
-    QString s = uri.trimmed();
-    s = normalizeDeepLinkBody(s);
-    if (s.isEmpty())
-        return fail(QStringLiteral("not a tt:// deep link"));
-
-    const QByteArray payload =
-            QByteArray::fromBase64(s.toLatin1(), QByteArray::Base64UrlEncoding);
-    if (payload.isEmpty()) {
-        return fail(QStringLiteral("invalid base64url payload"));
+bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &cfg,
+                          DeepLinkFieldFlags &flags, QString *error)
+{
+    quint64 tag = 0, len = 0;
+    if (!readVarint(payload, *pos, tag) || !readVarint(payload, *pos, len)) {
+        if (error)
+            *error = QStringLiteral("truncated TLV header");
+        return false;
     }
+    if (!tlvLengthFits(payload, *pos, len)) {
+        if (error)
+            *error = QStringLiteral("TLV length exceeds payload");
+        return false;
+    }
+    const QByteArray value = payload.mid(*pos, static_cast<int>(len));
+    *pos += static_cast<int>(len);
+    return applyDeepLinkTlv(tag, value, cfg, flags, error);
+}
 
+bool deepLinkHasRequiredFields(const DeepLinkConfig &cfg, const DeepLinkFieldFlags &flags)
+{
+    return flags.hostname && !cfg.addresses.isEmpty() && flags.user && flags.pass;
+}
+
+std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, QString *error)
+{
     DeepLinkConfig cfg;
     DeepLinkFieldFlags flags;
     int pos = 0;
     while (pos < payload.size()) {
-        quint64 tag = 0, len = 0;
-        if (!readVarint(payload, pos, tag) || !readVarint(payload, pos, len)) {
-            return fail(QStringLiteral("truncated TLV header"));
-        }
-        if (!tlvLengthFits(payload, pos, len)) {
-            return fail(QStringLiteral("TLV length exceeds payload"));
-        }
-        const QByteArray value = payload.mid(pos, static_cast<int>(len));
-        pos += static_cast<int>(len);
-        if (!applyDeepLinkTlv(tag, value, cfg, flags, error))
+        if (!readDeepLinkTlvEntry(payload, &pos, cfg, flags, error))
             return std::nullopt;
     }
-
     if (cfg.version > kDeepLinkMaxVersion) {
-        return fail(QStringLiteral("unsupported deep link version %1").arg(cfg.version));
+        if (error)
+            *error = QStringLiteral("unsupported deep link version %1").arg(cfg.version);
+        return std::nullopt;
     }
-    if (!flags.hostname || cfg.addresses.isEmpty() || !flags.user || !flags.pass) {
-        return fail(QStringLiteral("deep link missing required fields "
-                                   "(hostname, address, username, password)"));
+    if (!deepLinkHasRequiredFields(cfg, flags)) {
+        if (error)
+            *error = QStringLiteral("deep link missing required fields "
+                                     "(hostname, address, username, password)");
+        return std::nullopt;
     }
     return cfg;
+}
+
+void writeOptionalDeepLinkTlvs(QByteArray &p, const DeepLinkConfig &cfg)
+{
+    if (!cfg.customSni.isEmpty())
+        writeTlv(p, 0x03, cfg.customSni.toUtf8());
+    if (!cfg.hasIpv6)
+        writeTlv(p, 0x04, QByteArray(1, '\0'));
+    if (cfg.skipVerification)
+        writeTlv(p, 0x07, QByteArray(1, '\1'));
+    if (!cfg.certificate.isEmpty())
+        writeTlv(p, 0x08, cfg.certificate);
+    if (cfg.upstreamProtocol != UpstreamProtocol::Http2)
+        writeTlv(p, 0x09, varintBytes(static_cast<quint64>(cfg.upstreamProtocol)));
+    if (cfg.antiDpi)
+        writeTlv(p, 0x0A, QByteArray(1, '\1'));
+    if (!cfg.clientRandomPrefix.isEmpty())
+        writeTlv(p, 0x0B, cfg.clientRandomPrefix.toUtf8());
+    if (!cfg.name.isEmpty())
+        writeTlv(p, 0x0C, cfg.name.toUtf8());
+    if (!cfg.dnsUpstreams.isEmpty())
+        writeTlv(p, 0x0D, encodeStringList(cfg.dnsUpstreams));
+}
+
+} // namespace
+
+std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) {
+    QString s = uri.trimmed();
+    s = normalizeDeepLinkBody(s);
+    if (s.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("not a tt:// deep link");
+        return std::nullopt;
+    }
+
+    const QByteArray payload =
+            QByteArray::fromBase64(s.toLatin1(), QByteArray::Base64UrlEncoding);
+    if (payload.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("invalid base64url payload");
+        return std::nullopt;
+    }
+    return decodeDeepLinkPayload(payload, error);
 }
 
 QString encodeDeepLink(const DeepLinkConfig &cfg) {
     QByteArray p;
     writeTlv(p, 0x00, varintBytes(kDeepLinkMaxVersion));
     writeTlv(p, 0x01, cfg.hostname.toUtf8());
-    for (const QString &addr : cfg.addresses) {
+    for (const QString &addr : cfg.addresses)
         writeTlv(p, 0x02, addr.toUtf8());
-    }
-    if (!cfg.customSni.isEmpty()) {
-        writeTlv(p, 0x03, cfg.customSni.toUtf8());
-    }
-    if (!cfg.hasIpv6) { // default is true; only emit when false
-        writeTlv(p, 0x04, QByteArray(1, '\0'));
-    }
     writeTlv(p, 0x05, cfg.username.toUtf8());
     writeTlv(p, 0x06, cfg.password.toUtf8());
-    if (cfg.skipVerification) {
-        writeTlv(p, 0x07, QByteArray(1, '\1'));
-    }
-    if (!cfg.certificate.isEmpty()) {
-        writeTlv(p, 0x08, cfg.certificate);
-    }
-    if (cfg.upstreamProtocol != UpstreamProtocol::Http2) {
-        writeTlv(p, 0x09, varintBytes(static_cast<quint64>(cfg.upstreamProtocol)));
-    }
-    if (cfg.antiDpi) {
-        writeTlv(p, 0x0A, QByteArray(1, '\1'));
-    }
-    if (!cfg.clientRandomPrefix.isEmpty()) {
-        writeTlv(p, 0x0B, cfg.clientRandomPrefix.toUtf8());
-    }
-    if (!cfg.name.isEmpty()) {
-        writeTlv(p, 0x0C, cfg.name.toUtf8());
-    }
-    if (!cfg.dnsUpstreams.isEmpty()) {
-        writeTlv(p, 0x0D, encodeStringList(cfg.dnsUpstreams));
-    }
+    writeOptionalDeepLinkTlvs(p, cfg);
     return QStringLiteral("tt://?")
             + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
                                              | QByteArray::OmitTrailingEquals));

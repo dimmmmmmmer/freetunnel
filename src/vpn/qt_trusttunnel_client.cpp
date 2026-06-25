@@ -55,41 +55,59 @@ static ag::LogLevel parse_log_level(const QString &level) {
     return ag::LOG_LEVEL_INFO;
 }
 
+#if defined(__APPLE__)
+static void protectOutboundSocketApple(ag::SocketProtectEvent *event)
+{
+    const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
+    if (idx == 0)
+        return;
+    const int level = event->peer->sa_family == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP;
+    const int opt = event->peer->sa_family == AF_INET6 ? IPV6_BOUND_IF : IP_BOUND_IF;
+    if (setsockopt(event->fd, level, opt, &idx, sizeof(idx)) != 0)
+        event->result = -1;
+}
+#endif
+
+#if defined(__linux__)
+static void protectOutboundSocketLinux(ag::SocketProtectEvent *event)
+{
+    if (geteuid() != 0) {
+        event->result = -1;
+        return;
+    }
+    const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
+    if (idx == 0) {
+        event->result = -1;
+        return;
+    }
+    char ifname[IFNAMSIZ]{};
+    if (if_indextoname(static_cast<unsigned int>(idx), ifname) == nullptr
+            || setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, ifname,
+                          static_cast<socklen_t>(strlen(ifname) + 1))
+                    != 0)
+        event->result = -1;
+}
+#endif
+
+#ifdef _WIN32
+static void protectOutboundSocketWin(ag::SocketProtectEvent *event)
+{
+    if (!ag::vpn_win_socket_protect(event->fd, event->peer))
+        event->result = -1;
+}
+#endif
+
 static void protectOutboundSocket(ag::SocketProtectEvent *event)
 {
     if (!event)
         return;
     event->result = 0;
-#ifdef __APPLE__
-    uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-    if (idx == 0)
-        return;
-    if (event->peer->sa_family == AF_INET) {
-        if (setsockopt(event->fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx)) != 0)
-            event->result = -1;
-    } else if (event->peer->sa_family == AF_INET6) {
-        if (setsockopt(event->fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx)) != 0)
-            event->result = -1;
-    }
-#endif
-#ifdef __linux__
-    if (geteuid() == 0) {
-        const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-        if (idx != 0) {
-            char ifname[IFNAMSIZ]{};
-            if (if_indextoname(static_cast<unsigned int>(idx), ifname) != nullptr
-                    && setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, ifname,
-                                  static_cast<socklen_t>(strlen(ifname) + 1))
-                           == 0)
-                return;
-        }
-        event->result = -1;
-        return;
-    }
-#endif
-#ifdef _WIN32
-    if (!ag::vpn_win_socket_protect(event->fd, event->peer))
-        event->result = -1;
+#if defined(__APPLE__)
+    protectOutboundSocketApple(event);
+#elif defined(__linux__)
+    protectOutboundSocketLinux(event);
+#elif defined(_WIN32)
+    protectOutboundSocketWin(event);
 #endif
 }
 
@@ -383,6 +401,32 @@ void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHi
     emit vpnError(QString("connect() failed: %1").arg(msg));
 }
 
+bool QtTrustTunnelClient::attemptTunnelConnect()
+{
+    emit connectProgress(tr("Configuring DNS..."));
+    if (auto dnsErr = m_client->set_system_dns()) {
+        teardownClient();
+        m_stopRequested = true;
+        setState(State::Error);
+        emit vpnError(QString("set_system_dns() failed: %1")
+                              .arg(QString::fromStdString(dnsErr->str())));
+        return false;
+    }
+
+    m_lastConnectAttempt = std::chrono::steady_clock::now();
+    emit connectProgress(tr("Establishing tunnel..."));
+    if (auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{})) {
+        const QString qErr = QString::fromStdString(err->str());
+        if (qErr.contains("Failed to create listener", Qt::CaseInsensitive)) {
+            failConnectFatal(qErr, true);
+            return false;
+        }
+        scheduleReconnect(QString("connect() failed: %1").arg(qErr));
+        return false;
+    }
+    return true;
+}
+
 void QtTrustTunnelClient::doConnectAttempt() {
     if (m_stopRequested) {
         return;
@@ -404,35 +448,11 @@ void QtTrustTunnelClient::doConnectAttempt() {
             teardownClient();  // Full cleanup including networkMonitor
         }
 
-        if (!m_client) {
-            if (!ensureClientReady())
-                return;
-        }
-
-        emit connectProgress(tr("Configuring DNS..."));
-
-        if (auto dnsErr = m_client->set_system_dns()) {
-            teardownClient();
-            m_stopRequested = true;
-            setState(State::Error);
-            emit vpnError(QString("set_system_dns() failed: %1")
-                                  .arg(QString::fromStdString(dnsErr->str())));
+        if (!m_client && !ensureClientReady())
             return;
-        }
 
-        m_lastConnectAttempt = std::chrono::steady_clock::now();
-
-        emit connectProgress(tr("Establishing tunnel..."));
-
-        if (auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{})) {
-            const QString qErr = QString::fromStdString(err->str());
-            if (qErr.contains("Failed to create listener", Qt::CaseInsensitive)) {
-                failConnectFatal(qErr, true);
-                return;
-            }
-            scheduleReconnect(QString("connect() failed: %1").arg(qErr));
+        if (!attemptTunnelConnect())
             return;
-        }
     } catch (const std::exception &e) {
         teardownClient();
         scheduleReconnect(QString::fromUtf8(e.what()));
@@ -697,41 +717,43 @@ int QtTrustTunnelClient::getFdLimit() {
     return -1;
 }
 
-void QtTrustTunnelClient::checkFdHealth() {
-    if (m_state != State::Connected && m_state != State::Reconnecting) {
-        return;
-    }
-    const int openFds = countOpenFds();
-    if (openFds < 0) {
-        return;
-    }
+void QtTrustTunnelClient::forceFdReconnect(const QString &logReason, const QString &userReason)
+{
+    qWarning("%s", qPrintable(logReason));
+    emit vpnError(userReason);
+    teardownClient();
+    if (!m_stopRequested && m_autoReconnect)
+        scheduleReconnect(QStringLiteral("fd watchdog: too many open files, clean reconnect"));
+}
 
-    // Prefer growth since connect over absolute fd-limit percentage — the baseline
-    // varies with Qt/runtime and would false-positive on busy desktops.
+void QtTrustTunnelClient::checkFdHealth() {
+    if (m_state != State::Connected && m_state != State::Reconnecting)
+        return;
+    const int openFds = countOpenFds();
+    if (openFds < 0)
+        return;
+
     constexpr int kFdGrowthThreshold = 64;
     if (m_fdBaseline >= 0 && openFds - m_fdBaseline >= kFdGrowthThreshold) {
-        qWarning("[fd watchdog] Open fds grew by %d since connect (%d -> %d) — forcing clean reconnect",
-                openFds - m_fdBaseline, m_fdBaseline, openFds);
-        emit vpnError(QStringLiteral("fd watchdog: reconnecting after fd growth"));
-        teardownClient();
-        if (!m_stopRequested && m_autoReconnect) {
-            scheduleReconnect(QStringLiteral("fd watchdog: too many open files, clean reconnect"));
-        }
+        forceFdReconnect(
+                QStringLiteral("[fd watchdog] Open fds grew by %1 since connect (%2 -> %3)")
+                        .arg(openFds - m_fdBaseline)
+                        .arg(m_fdBaseline)
+                        .arg(openFds),
+                QStringLiteral("fd watchdog: reconnecting after fd growth"));
         return;
     }
 
     const int fdLimit = getFdLimit();
-    if (fdLimit < 0) {
+    if (fdLimit < 0)
         return;
-    }
     const double usage = static_cast<double>(openFds) / static_cast<double>(fdLimit);
     if (usage > 0.85) {
-        qWarning("[fd watchdog] Open fds: %d / %d (%.0f%%) — forcing clean reconnect",
-                openFds, fdLimit, usage * 100.0);
-        emit vpnError(QStringLiteral("fd watchdog: reconnecting near fd limit"));
-        teardownClient();
-        if (!m_stopRequested && m_autoReconnect) {
-            scheduleReconnect(QStringLiteral("fd watchdog: too many open files, clean reconnect"));
-        }
+        forceFdReconnect(
+                QStringLiteral("[fd watchdog] Open fds: %1 / %2 (%3%)")
+                        .arg(openFds)
+                        .arg(fdLimit)
+                        .arg(static_cast<int>(usage * 100.0)),
+                QStringLiteral("fd watchdog: reconnecting near fd limit"));
     }
 }

@@ -14,6 +14,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+class QHostAddress;
+
 #include "core/AppSettings.h"
 #include "vpn/vpn_helper_client.h"
 
@@ -201,10 +203,23 @@ private:
     void onVpnClientStateChanged(VpnHelperClient::State st);
     void onVpnErrorReceived(const QString &m);
     void onStatsTick();
+    bool isInternalVpnError(const QString &m) const;
+    QString friendlyVpnError(const QString &m) const;
+    void emitDedupedVpnError(const QString &friendly);
     bool finalizeCreatedConfig(const QVariantMap &f, const QString &oldPath, const QString &target,
                                const QString &password, const QString &tomlBody,
                                const QString &editContent, const QString &editPassword,
                                const QString &editProfile, bool editingSnapshot, int editIndex);
+    void markConfigPingFailed(int index);
+    void runConfigPing(int index, const QHostAddress &ip, quint16 port);
+    void pingConfigAtIndex(int index);
+    void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
+                                   bool wasActive);
+    void maybeReapplyCreatedConfig(const QVariantMap &f, const QString &oldPath,
+                                   const QString &target, const QString &password,
+                                   const QString &tomlBody, const QString &editContent,
+                                   const QString &editPassword, const QString &editProfile,
+                                   bool editingSnapshot, int editIndex);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

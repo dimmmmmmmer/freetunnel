@@ -76,32 +76,42 @@ void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
     appendLog(QStringLiteral("INFO"), statusText());
 }
 
+bool Backend::isInternalVpnError(const QString &m) const
+{
+    const QString lower = m.toLower();
+    return lower.contains(QLatin1String("recovery:"))
+           || lower.contains(QLatin1String("fd watchdog:"))
+           || lower.contains(QLatin1String("network wait timeout:"));
+}
+
+QString Backend::friendlyVpnError(const QString &m) const
+{
+    const QString lower = m.toLower();
+    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+        return tr("Connection lost — couldn't reach the server. Check the config or your network.");
+    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+        return tr("Server isn't responding (timed out).");
+    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
+        return tr("Authentication failed — check the username and password.");
+    return m;
+}
+
+void Backend::emitDedupedVpnError(const QString &friendly)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (friendly == m_lastErrorMsg && now - m_lastErrorAt <= 30000)
+        return;
+    m_lastErrorMsg = friendly;
+    m_lastErrorAt = now;
+    emit errorOccurred(friendly);
+}
+
 void Backend::onVpnErrorReceived(const QString &m)
 {
-    appendLog(QStringLiteral("ERROR"), m); // raw message always logged
-    if (m_reapplying || m_inConnect)
+    appendLog(QStringLiteral("ERROR"), m);
+    if (m_reapplying || m_inConnect || isInternalVpnError(m))
         return;
-    // Internal reconnect reasons from the helper/core — logged above, not shown as toasts.
-    const QString lowerInternal = m.toLower();
-    if (lowerInternal.contains(QLatin1String("recovery:"))
-        || lowerInternal.contains(QLatin1String("fd watchdog:"))
-        || lowerInternal.contains(QLatin1String("network wait timeout:"))) {
-        return;
-    }
-    const QString lower = m.toLower();
-    QString friendly = m;
-    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
-        friendly = tr("Connection lost — couldn't reach the server. Check the config or your network.");
-    else if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
-        friendly = tr("Server isn't responding (timed out).");
-    else if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
-        friendly = tr("Authentication failed — check the username and password.");
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (friendly != m_lastErrorMsg || now - m_lastErrorAt > 30000) {
-        m_lastErrorMsg = friendly;
-        m_lastErrorAt = now;
-        emit errorOccurred(friendly);
-    }
+    emitDedupedVpnError(friendlyVpnError(m));
 }
 
 void Backend::onStatsTick()
