@@ -21,6 +21,7 @@ mkdir -p "$OUT"
 lcov --quiet --capture --directory "$BUILD" --output-file "$OUT/coverage.info"
 lcov --quiet --remove "$OUT/coverage.info" \
   '*/tests/*' '*/_deps/*' '*/Qt/*' '/usr/*' \
+  '*/build-coverage/*' '*_autogen/*' '*moc_*.cpp' '*qrc_*.cpp' \
   --output-file "$OUT/coverage.filtered.info"
 
 # Codacy matches lcov SF: entries to repository paths — use paths relative to repo root.

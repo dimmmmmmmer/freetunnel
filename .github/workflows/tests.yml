@@ -109,16 +109,24 @@ jobs:
 
       - name: Upload coverage to Codacy
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+        continue-on-error: true
         env:
           CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
         run: |
           if [ -z "${CODACY_PROJECT_TOKEN:-}" ]; then
-            echo "::notice title=Codacy coverage::CODACY_PROJECT_TOKEN is not set — coverage stays at 0% on Codacy. Add the Project API token from Codacy → Settings → Coverage as a GitHub Actions secret."
+            echo "::notice title=Codacy coverage::CODACY_PROJECT_TOKEN is not set — coverage stays at 0% on Codacy."
             exit 0
           fi
+          # Must be the *Coverage* project token (Settings → Coverage), not Account → API tokens.
           bash <(curl -Ls https://coverage.codacy.com/get.sh) report \
+            --project-token "${CODACY_PROJECT_TOKEN}" \
             -r coverage-out/coverage.filtered.info \
-            --commit-uuid "${GITHUB_SHA}"
+            -l Cpp \
+            --commit-uuid "${GITHUB_SHA}" \
+            || {
+              echo "::warning title=Codacy coverage upload failed::Use the Project API token from Codacy → freetunnel → Settings → Coverage (not Account → API tokens). See CONTRIBUTING.md."
+              exit 1
+            }
 
   sanitizers:
     name: ASan+UBSan (Linux)
