@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
+#include <QGuiApplication>
 #include <QKeySequence>
 
 #include <QHotkey>
@@ -20,7 +21,7 @@ void Backend::registerHotkeys() {
 #endif
     if (!m_settings.hotkeys_enabled) // master switch off — leave everything unbound
         return;
-    auto make = [this](const QString &seq, void (Backend::*slot)()) -> QHotkey * {
+    auto make = [this](const QString &seq, const QString &label, void (Backend::*slot)()) -> QHotkey * {
         const QString s = seq.trimmed();
         if (s.isEmpty())
             return nullptr;
@@ -29,11 +30,16 @@ void Backend::registerHotkeys() {
             return nullptr;
         auto *hk = new QHotkey(ks, true /*autoRegister*/, this);
         connect(hk, &QHotkey::activated, this, slot);
+        if (!hk->isRegistered()) {
+            appendLog(QStringLiteral("INFO"),
+                      tr("Hotkey “%1” (%2) could not be registered — it may be in use by another app.")
+                              .arg(s, label));
+        }
         return hk;
     };
-    m_hkToggle = make(m_settings.hotkey_toggle, &Backend::toggle);
-    m_hkConnect = make(m_settings.hotkey_connect, &Backend::connectVpn);
-    m_hkDisconnect = make(m_settings.hotkey_disconnect, &Backend::disconnectVpn);
+    m_hkToggle = make(m_settings.hotkey_toggle, tr("Toggle VPN"), &Backend::toggle);
+    m_hkConnect = make(m_settings.hotkey_connect, tr("Connect"), &Backend::connectVpn);
+    m_hkDisconnect = make(m_settings.hotkey_disconnect, tr("Disconnect"), &Backend::disconnectVpn);
 }
 
 void Backend::setHotkeysEnabled(bool v) {

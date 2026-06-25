@@ -96,6 +96,7 @@ namespace {
 
 class HiddenWindowReopenFilter : public QObject {
 public:
+    explicit HiddenWindowReopenFilter(QObject *parent = nullptr) : QObject(parent) {}
     QWindow *win = nullptr;
     bool *appQuitting = nullptr;
 

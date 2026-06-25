@@ -155,6 +155,22 @@
         <source>Authentication failed — check the username and password.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Hotkey “%1” (%2) could not be registered — it may be in use by another app.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Toggle VPN</source>
+        <translation type="unfinished">Переключить VPN</translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation type="unfinished">Подключить</translation>
+    </message>
+    <message>
+        <source>Disconnect</source>
+        <translation type="unfinished">Отключить</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

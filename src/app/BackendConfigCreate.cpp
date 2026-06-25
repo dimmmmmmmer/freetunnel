@@ -163,7 +163,7 @@ bool Backend::createConfig(const QVariantMap &f)
     const QString &oldPath = edit.oldPath;
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
-    const QString target = freetunnel::uniqueOwnerConfigPath(parsed.safeName);
+    const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
     if (!freetunnel::backend_config::writeConfigFile(target, tomlBody.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
         return false;

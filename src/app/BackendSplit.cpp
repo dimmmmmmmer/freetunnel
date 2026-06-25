@@ -3,6 +3,7 @@
 
 #include <QHostAddress>
 #include <QRegularExpression>
+#include <QUrl>
 
 #include "core/AppSettings.h"
 
@@ -53,6 +54,48 @@ static bool isValidBypassRule(const QString &rule) {
     if (isValidIpBypassRule(r))
         return true;
     return isValidDomainBypassRule(r, wildcard);
+}
+
+static QString punycodeHost(const QString &host)
+{
+    const QByteArray ace = QUrl::toAce(host, QUrl::ConvertUnicodeHostnames);
+    return ace.isEmpty() ? host : QString::fromLatin1(ace);
+}
+
+// TrustTunnel's DOMAIN_FILTER rejects TLD-only rules (.ru, *.ru) and bare IDN labels
+// without punycode — keep them in the UI profile but only ship core-compatible rules.
+static QString toCoreBypassRule(const QString &rule)
+{
+    QString r = rule.trimmed();
+    if (r.isEmpty())
+        return {};
+    bool wild = false;
+    if (r.startsWith(QLatin1String("*."))) {
+        wild = true;
+        r = r.mid(2);
+    } else if (r.startsWith(QLatin1Char('.'))) {
+        return {};
+    }
+    if (isValidIpBypassRule(r))
+        return rule.trimmed();
+    if (!r.contains(QLatin1Char('.')))
+        return {};
+    if (!isValidDomainBypassRule(r, wild))
+        return {};
+    const QString ascii = punycodeHost(r);
+    return wild ? QStringLiteral("*.") + ascii : ascii;
+}
+
+static QStringList coreBypassRules(const QStringList &rules)
+{
+    QStringList out;
+    out.reserve(rules.size());
+    for (const QString &rule : rules) {
+        const QString core = toCoreBypassRule(rule);
+        if (!core.isEmpty() && !out.contains(core))
+            out << core;
+    }
+    return out;
 }
 
 bool Backend::addDomain(const QString &domain) {
@@ -248,10 +291,11 @@ QString Backend::activeConfigProfile() const {
 void Backend::applySplitRules() {
     const bool on = m_settings.domain_bypass_enabled;
     const QStringList profileDomains = m_settings.profiles.value(activeConfigProfile());
+    const QStringList coreDomains = coreBypassRules(profileDomains);
     std::vector<std::string> ex;
     if (on) {
-        ex.reserve(static_cast<size_t>(profileDomains.size()));
-        std::transform(profileDomains.cbegin(), profileDomains.cend(), std::back_inserter(ex),
+        ex.reserve(static_cast<size_t>(coreDomains.size()));
+        std::transform(coreDomains.cbegin(), coreDomains.cend(), std::back_inserter(ex),
                        [](const QString &d) { return d.toStdString(); });
     }
     m_client.setExtraExclusions(ex);

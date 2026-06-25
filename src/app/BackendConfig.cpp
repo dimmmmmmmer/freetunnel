@@ -61,7 +61,13 @@ void Backend::markConfigPingFailed(int index)
 
 void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
 {
-    QTcpSocket *sock = freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
+    const bool activeWhileConnected = m_connected && index >= 0 && index < m_paths.size()
+            && m_paths.at(index) == m_activePath;
+    // While connected, the active server is reached through the tunnel exclusion path;
+    // binding to the physical IF often fails or times out on Windows.
+    QTcpSocket *sock = activeWhileConnected
+            ? new QTcpSocket(this)
+            : freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
     auto *elapsed = new QElapsedTimer();
     elapsed->start();
     connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed]() {

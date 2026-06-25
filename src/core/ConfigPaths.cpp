@@ -29,4 +29,14 @@ QString uniqueOwnerConfigPath(const QString &stem)
     return target;
 }
 
+QString ownerConfigPathForSave(const QString &stem, const QString &existingPath)
+{
+    if (!existingPath.isEmpty()) {
+        const QFileInfo existing(existingPath);
+        if (existing.completeBaseName() == stem)
+            return existingPath;
+    }
+    return uniqueOwnerConfigPath(stem);
+}
+
 } // namespace freetunnel

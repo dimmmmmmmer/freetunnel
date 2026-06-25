@@ -11,4 +11,7 @@ QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefi
 /// Resolve a unique owner-only config path under AppConfigLocation.
 QString uniqueOwnerConfigPath(const QString &stem);
 
+/// Pick a save path for create/edit: reuse @p existingPath when the stem is unchanged.
+QString ownerConfigPathForSave(const QString &stem, const QString &existingPath = {});
+
 } // namespace freetunnel
