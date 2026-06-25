@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Pure, core-independent generation/parsing of the client config TOML, so the

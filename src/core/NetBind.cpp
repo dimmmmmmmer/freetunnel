@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include <QtGlobal>
 
 // On Windows winsock2.h must be included before anything that may pull in

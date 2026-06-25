@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include <QGuiApplication>
 #include <QEvent>
 #include <QFileOpenEvent>

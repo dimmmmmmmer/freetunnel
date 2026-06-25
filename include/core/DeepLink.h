@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Official TrustTunnel deep link support: `tt://?<base64url>` with a binary

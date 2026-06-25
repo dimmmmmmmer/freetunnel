@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "vpn/vpn_helper_client.h"
 
 #include <QCoreApplication>

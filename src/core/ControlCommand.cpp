@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "ControlCommand.h"
 
 namespace freetunnel {

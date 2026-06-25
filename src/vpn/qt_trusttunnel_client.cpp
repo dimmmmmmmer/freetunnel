@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "qt_trusttunnel_client.h"
 #include <QCoreApplication>
 #include <QMetaObject>

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Pure, UI/core-independent parsing of control commands that arrive via deep

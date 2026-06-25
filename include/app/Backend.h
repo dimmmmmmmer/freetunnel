@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Bridge object exposed to QML. Wraps the VPN client + config/settings storage

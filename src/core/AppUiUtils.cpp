@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "AppUiUtils.h"
 
 #include <QDesktopServices>

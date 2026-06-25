@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Entry point for the privileged helper mode (FreeTunnel --helper --port P

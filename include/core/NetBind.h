@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Bind outbound sockets to the physical (non-VPN) interface so they take the

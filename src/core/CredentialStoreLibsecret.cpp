@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #if defined(FT_HAVE_LIBSECRET)
 
 // libsecret/GLib headers must be included before any Qt header: Qt defines a

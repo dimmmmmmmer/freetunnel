@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // Pure, UI-independent logic for importing a config from a deep link, so it can

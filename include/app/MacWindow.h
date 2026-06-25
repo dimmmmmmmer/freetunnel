@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // macOS-only: make the window's title bar transparent and let the content view

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 // GUI-side proxy for the VPN. Spawns the privileged helper (the same binary run
