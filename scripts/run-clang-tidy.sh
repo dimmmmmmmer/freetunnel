@@ -14,13 +14,14 @@ cmake -S "$ROOT/tests" -B "$BUILD" -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build "$BUILD" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 mapfile -t SOURCES < <(
-  python3 - <<'PY'
+  BUILD="$BUILD" ROOT="$ROOT" python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-build = Path("'"$BUILD"'")
+build = Path(os.environ["BUILD"])
 cmds = json.loads((build / "compile_commands.json").read_text())
-root = Path("'"$ROOT"'").resolve()
+root = Path(os.environ["ROOT"]).resolve()
 seen = set()
 for entry in cmds:
     src = Path(entry["file"]).resolve()
