@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
@@ -96,14 +97,20 @@ bool Backend::isInternalVpnError(const QString &m) const
 
 namespace {
 
-QString classifyVpnErrorMessage(const QString &lower, const Backend *self)
+QString classifyVpnErrorMessage(const QString &lower)
 {
-    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
-        return self->tr("Connection lost — couldn't reach the server. Check the config or your network.");
-    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
-        return self->tr("Server isn't responding (timed out).");
-    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential")))
-        return self->tr("Authentication failed — check the username and password.");
+    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core"))) {
+        return QCoreApplication::translate(
+                "Backend",
+                "Connection lost — couldn't reach the server. Check the config or your network.");
+    }
+    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out"))) {
+        return QCoreApplication::translate("Backend", "Server isn't responding (timed out).");
+    }
+    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"))) {
+        return QCoreApplication::translate("Backend",
+                                           "Authentication failed — check the username and password.");
+    }
     return QString();
 }
 
@@ -113,7 +120,7 @@ QString Backend::friendlyVpnError(const QString &m) const
 {
     if (m.startsWith(QStringLiteral("Connection failed:"), Qt::CaseInsensitive))
         return m;
-    const QString classified = classifyVpnErrorMessage(m.toLower(), this);
+    const QString classified = classifyVpnErrorMessage(m.toLower());
     return classified.isEmpty() ? m : classified;
 }
 

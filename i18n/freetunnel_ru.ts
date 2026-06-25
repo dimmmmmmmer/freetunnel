@@ -4,18 +4,6 @@
 <context>
     <name>Backend</name>
     <message>
-        <source>Connection lost — couldn&apos;t reach the server. Check the config or your network.</source>
-        <translation>Соединение потеряно — не удалось связаться с сервером. Проверьте конфиг или сеть.</translation>
-    </message>
-    <message>
-        <source>Server isn&apos;t responding (timed out).</source>
-        <translation>Сервер не отвечает (таймаут).</translation>
-    </message>
-    <message>
-        <source>Authentication failed — check the username and password.</source>
-        <translation>Ошибка авторизации — проверьте логин и пароль.</translation>
-    </message>
-    <message>
         <source>FreeTunnel %1 started</source>
         <translation>FreeTunnel %1 запущен</translation>
     </message>
@@ -154,6 +142,18 @@
     <message>
         <source>This link disables server certificate verification. Only import configs from sources you trust.</source>
         <translation>Эта ссылка отключает проверку сертификата сервера. Импортируйте конфиги только из надёжных источников.</translation>
+    </message>
+    <message>
+        <source>Connection lost — couldn&apos;t reach the server. Check the config or your network.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server isn&apos;t responding (timed out).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Authentication failed — check the username and password.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
