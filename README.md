@@ -7,7 +7,8 @@
 [![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
 [![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
-![FreeTunnel logo](assets/logo.svg)
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
 
 **FreeTunnel** — a free, open-source desktop VPN client with a modern Qt interface,
 built on the [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient) core.
@@ -53,8 +54,6 @@ admin password the first time you connect in a session.
 
 - **Configs → ＋** — create a new TOML, import from file, or paste a `tt://`
   link from the clipboard.
-- Official TrustTunnel format: `tt://?<base64url>` (same as QR codes and mobile
-  clients).
 
 ## External control
 
@@ -66,12 +65,6 @@ admin password the first time you connect in a session.
   work even when the window is minimized.
 - **System tray** — quick actions; closing the window hides to tray instead of
   quitting.
-
-## Compatibility
-
-- **Windows**: 10/11 (x64).
-- **macOS**: 11 Big Sur or newer — **universal** (Apple Silicon and Intel in one `.dmg`).
-- **Linux**: Debian/Ubuntu/Pop!_OS amd64 (`.deb` bundles its own Qt).
 
 ## For developers
 
