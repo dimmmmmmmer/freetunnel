@@ -58,7 +58,7 @@ static bool isValidBypassRule(const QString &rule) {
 
 static QString punycodeHost(const QString &host)
 {
-    const QByteArray ace = QUrl::toAce(host, QUrl::ConvertUnicodeHostnames);
+    const QByteArray ace = QUrl::toAce(host);
     return ace.isEmpty() ? host : QString::fromLatin1(ace);
 }
 
