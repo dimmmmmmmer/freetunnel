@@ -71,11 +71,13 @@ signals:
     void vpnError(const QString &msg);
     void connectProgress(const QString &step);
     void connectionInfo(const QString &msg);
+    void coreLogLine(const QString &line);
     void clientOutput(const QString &bytes); // bytes in chunk
     void tunnelStats(quint64 upload, quint64 download); // per-connection delta bytes
 
 private slots:
     void doConnectAttemptInThread();
+    void pollCoreLogFile();
 
 private:
     ag::VpnCallbacks makeCallbacks();
@@ -83,12 +85,15 @@ private:
     void startConnectAttempt();
     void scheduleReconnect(const QString &reason);
     void setState(State s);
-    void handleCoreStateChanged(ag::VpnSessionState coreState);
+    void handleCoreStateChanged(ag::VpnSessionState coreState, int errCode, const QString &errText);
     void handleCoreConnected();
     void handleCoreConnecting();
     void handleCoreRecovery(const QString &reason);
     void handleCoreWaitingForNetwork();
-    void handleCoreDisconnected();
+    void handleCoreDisconnected(int errCode, const QString &errText);
+    void applyCoreLogPathToConfig();
+    void startCoreLogTail();
+    void stopCoreLogTail();
     void teardownClient();
     void checkFdHealth();
     bool reloadStoredConfigIfNeeded();
@@ -116,6 +121,7 @@ private:
     QTimer m_fdWatchdogTimer;
     int m_fdBaseline = -1; // open fd count right after connect (for leak detection)
     QTimer m_networkWaitTimer;   // fires if we stay in WaitingForNetwork too long
+    QTimer *m_coreLogPoll = nullptr;
     QThread m_connectThread;
     State m_state = State::Disconnected;
     bool m_autoReconnect = true;
@@ -124,5 +130,10 @@ private:
     int m_reconnectDelayMs = 1000;
     int m_reconnectMaxMs = 30000;
     ag::LogLevel m_logLevel = ag::LOG_LEVEL_INFO;
+    QString m_coreLogPath;
+    qint64 m_coreLogOffset = 0;
     std::chrono::steady_clock::time_point m_lastConnectAttempt{};
+#ifdef Q_OS_WIN
+    uint32_t m_winPhysicalIfIndex = 0;
+#endif
 };

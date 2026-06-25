@@ -2,6 +2,8 @@
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
 #include <QCoreApplication>
+#include <QFile>
+#include <QFileInfo>
 #include <QMetaObject>
 #include <QRandomGenerator>
 #include <QThread>
@@ -90,6 +92,9 @@ void QtTrustTunnelClient::teardownClient() {
         m_client->disconnect();
     }
     m_client.reset();
+#ifdef Q_OS_WIN
+    m_winPhysicalIfIndex = 0;
+#endif
 }
 
 void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
@@ -218,6 +223,7 @@ void QtTrustTunnelClient::disconnectVpn() {
     m_reconnectTimer.stop();
     m_fdWatchdogTimer.stop();
     m_networkWaitTimer.stop();
+    stopCoreLogTail();
 
     // Stop connect thread if running.  No timeout: teardownClient() below calls
     // m_client.reset() and a running thread would still hold a pointer to it.
@@ -293,12 +299,34 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
 
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
     ag::VpnCallbacks callbacks;
-    callbacks.protect_handler = qt_trusttunnel_protect_outbound_socket;
+    callbacks.protect_handler = [this](ag::SocketProtectEvent *event) {
+#ifdef Q_OS_WIN
+        if (m_winPhysicalIfIndex != 0)
+            ag::vpn_network_manager_set_outbound_interface(m_winPhysicalIfIndex);
+#endif
+        qt_trusttunnel_protect_outbound_socket(event);
+    };
     callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
         ag::VpnSessionState sessionState = event ? event->state : ag::VPN_SS_DISCONNECTED;
-        QMetaObject::invokeMethod(this, [this, sessionState]() { handleCoreStateChanged(sessionState); },
-                Qt::QueuedConnection);
+        int errCode = 0;
+        QString errText;
+        if (event) {
+            if (event->state == ag::VPN_SS_WAITING_RECOVERY) {
+                errCode = event->waiting_recovery_info.error.code;
+                if (event->waiting_recovery_info.error.text)
+                    errText = QString::fromUtf8(event->waiting_recovery_info.error.text);
+            } else if (event->state != ag::VPN_SS_CONNECTED) {
+                errCode = event->error.code;
+                if (event->error.text)
+                    errText = QString::fromUtf8(event->error.text);
+            }
+        }
+        QMetaObject::invokeMethod(this,
+                                  [this, sessionState, errCode, errText]() {
+                                      handleCoreStateChanged(sessionState, errCode, errText);
+                                  },
+                                  Qt::QueuedConnection);
     };
     callbacks.client_output_handler = [this](ag::VpnClientOutputEvent *event) {
         size_t bytes = 0;
@@ -401,14 +429,31 @@ void QtTrustTunnelClient::handleCoreWaitingForNetwork()
         m_networkWaitTimer.start();
 }
 
-void QtTrustTunnelClient::handleCoreDisconnected()
+void QtTrustTunnelClient::handleCoreDisconnected(int errCode, const QString &errText)
 {
     m_networkWaitTimer.stop();
-    if (!m_stopRequested)
-        scheduleReconnect(QStringLiteral("core disconnected"));
+    if (m_stopRequested)
+        return;
+    QString reason = qt_trusttunnel_format_vpn_error(errCode, errText);
+    if (reason.isEmpty()) {
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - m_lastConnectAttempt)
+                                         .count();
+        if (m_lastConnectAttempt != std::chrono::steady_clock::time_point{} && elapsedMs >= 15000
+                && elapsedMs <= 45000) {
+            reason = QStringLiteral("Connection failed: endpoint timed out (~%1s)")
+                             .arg(elapsedMs / 1000);
+        } else {
+            reason = QStringLiteral("core disconnected");
+        }
+    } else if (!m_everConnected) {
+        reason = QStringLiteral("Connection failed: %1").arg(reason);
+    }
+    scheduleReconnect(reason);
 }
 
-void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState) {
+void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, int errCode,
+                                                 const QString &errText) {
     if (m_stopRequested)
         return;
 
@@ -420,16 +465,22 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState) 
         handleCoreConnecting();
         break;
     case ag::VPN_SS_RECOVERING:
-        handleCoreRecovery(QStringLiteral("recovery: reconnecting"));
+        handleCoreRecovery(qt_trusttunnel_format_vpn_error(errCode, errText).isEmpty()
+                                   ? QStringLiteral("recovery: reconnecting")
+                                   : QStringLiteral("recovery: %1")
+                                             .arg(qt_trusttunnel_format_vpn_error(errCode, errText)));
         break;
     case ag::VPN_SS_WAITING_RECOVERY:
-        handleCoreRecovery(QStringLiteral("waiting recovery: reconnecting"));
+        handleCoreRecovery(qt_trusttunnel_format_vpn_error(errCode, errText).isEmpty()
+                                   ? QStringLiteral("waiting recovery: reconnecting")
+                                   : QStringLiteral("waiting recovery: %1")
+                                             .arg(qt_trusttunnel_format_vpn_error(errCode, errText)));
         break;
     case ag::VPN_SS_WAITING_FOR_NETWORK:
         handleCoreWaitingForNetwork();
         break;
     case ag::VPN_SS_DISCONNECTED:
-        handleCoreDisconnected();
+        handleCoreDisconnected(errCode, errText);
         break;
     default:
         break;
@@ -510,5 +561,66 @@ void QtTrustTunnelClient::checkFdHealth() {
                         .arg(fdLimit)
                         .arg(static_cast<int>(usage * 100.0)),
                 QStringLiteral("fd watchdog: reconnecting near fd limit"));
+    }
+}
+
+void QtTrustTunnelClient::applyCoreLogPathToConfig()
+{
+    if (m_coreLogPath.isEmpty())
+        m_coreLogPath = qt_trusttunnel_default_core_log_path();
+    if (m_config.has_value())
+        m_config->log_file_path = m_coreLogPath.toStdString();
+}
+
+void QtTrustTunnelClient::startCoreLogTail()
+{
+    applyCoreLogPathToConfig();
+    QDir().mkpath(QFileInfo(m_coreLogPath).absolutePath());
+
+    QFile marker(m_coreLogPath);
+    if (marker.open(QIODevice::Append | QIODevice::Text)) {
+        marker.write("\n--- FreeTunnel VPN session ---\n");
+        marker.close();
+    }
+    m_coreLogOffset = QFileInfo(m_coreLogPath).size();
+
+    if (!m_coreLogPoll) {
+        m_coreLogPoll = new QTimer(this);
+        m_coreLogPoll->setInterval(300);
+        connect(m_coreLogPoll, &QTimer::timeout, this, &QtTrustTunnelClient::pollCoreLogFile);
+    }
+    if (!m_coreLogPoll->isActive())
+        m_coreLogPoll->start();
+    pollCoreLogFile();
+}
+
+void QtTrustTunnelClient::stopCoreLogTail()
+{
+    if (m_coreLogPoll)
+        m_coreLogPoll->stop();
+    pollCoreLogFile();
+}
+
+void QtTrustTunnelClient::pollCoreLogFile()
+{
+    if (m_coreLogPath.isEmpty())
+        return;
+    QFile f(m_coreLogPath);
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    if (!f.seek(m_coreLogOffset))
+        return;
+    const QByteArray chunk = f.readAll();
+    m_coreLogOffset = f.pos();
+    f.close();
+    if (chunk.isEmpty())
+        return;
+
+    const QList<QByteArray> lines = chunk.split('\n');
+    for (const QByteArray &raw : lines) {
+        const QByteArray line = raw.trimmed();
+        if (line.isEmpty())
+            continue;
+        emit coreLogLine(QString::fromUtf8(line));
     }
 }

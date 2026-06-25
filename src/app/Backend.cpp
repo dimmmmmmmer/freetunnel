@@ -55,6 +55,8 @@ void Backend::wireVpnClientSignals()
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
     connect(&m_client, &VpnHelperClient::connectProgress, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
+    connect(&m_client, &VpnHelperClient::coreLogLine, this,
+            [this](const QString &line) { appendLog(QStringLiteral("CORE"), line); });
     connect(&m_client, &VpnHelperClient::vpnError, this, &Backend::onVpnErrorReceived);
 }
 
@@ -94,8 +96,11 @@ bool Backend::isInternalVpnError(const QString &m) const
 
 QString Backend::friendlyVpnError(const QString &m) const
 {
+    if (m.startsWith(QStringLiteral("Connection failed:"), Qt::CaseInsensitive))
+        return m;
     const QString lower = m.toLower();
-    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core")))
+    if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core"))
+        || lower.startsWith(QLatin1String("connection failed")))
         return tr("Connection lost — couldn't reach the server. Check the config or your network.");
     if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
         return tr("Server isn't responding (timed out).");

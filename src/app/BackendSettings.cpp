@@ -13,6 +13,11 @@ QString Backend::logPath() const {
             + QStringLiteral("/freetunnel.log");
 }
 
+QString Backend::coreLogPath() const {
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+            + QStringLiteral("/vpn-core.log");
+}
+
 // cppcheck-suppress functionStatic
 bool Backend::autoStart() const {
     return freetunnel::platformAutoStartEnabled();

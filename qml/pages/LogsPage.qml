@@ -58,7 +58,8 @@ Item {
                         for (var i = 0; i < es.length; i++) {
                             var e = es[i]
                             var lc = e.level === "ERROR" ? theme.danger
-                                   : e.level === "WARN" ? theme.warn : theme.textDim
+                                   : e.level === "WARN" ? theme.warn
+                                   : e.level === "CORE" ? theme.accent : theme.textDim
                             out += "<font color='" + theme.textFaint + "'>" + e.time + "</font> "
                                  + "<font color='" + lc + "'>" + e.level + "</font> "
                                  + "<font color='" + theme.text + "'>" + esc(e.msg) + "</font><br>"
@@ -70,11 +71,16 @@ Item {
             }
         }
         RowLayout { Layout.fillWidth: true; spacing: 8
-            Text { Layout.fillWidth: true; text: backend.logPath; font.pixelSize: 11
-                   color: logPathMa.containsMouse ? theme.accent : theme.textDim
-                   font.underline: logPathMa.containsMouse; elide: Text.ElideMiddle
-                   MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
-                               cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 2
+                Text { Layout.fillWidth: true; text: backend.logPath; font.pixelSize: 11
+                       color: logPathMa.containsMouse ? theme.accent : theme.textDim
+                       font.underline: logPathMa.containsMouse; elide: Text.ElideMiddle
+                       MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
+                                   cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
+                Text { Layout.fillWidth: true; text: backend.coreLogPath; font.pixelSize: 10
+                       color: theme.textFaint; elide: Text.ElideMiddle }
+            }
             Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
             Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: logFlick.autoScroll; implicitWidth: 34; implicitHeight: 20
                      onToggled: function(v){ logFlick.autoScroll = v } }

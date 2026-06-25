@@ -449,6 +449,8 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
         emit connectionInfo(ev.value("msg").toString());
     } else if (type == "progress") {
         emit connectProgress(ev.value("msg").toString());
+    } else if (type == "log") {
+        emit coreLogLine(ev.value("msg").toString());
     } else if (type == "error") {
         emit vpnError(ev.value("msg").toString());
     }

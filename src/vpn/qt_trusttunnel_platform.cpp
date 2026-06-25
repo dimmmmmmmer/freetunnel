@@ -1,6 +1,9 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "qt_trusttunnel_client.h"
 
+#include <QDir>
+#include <QStandardPaths>
+
 #include <string>
 
 #include "net/network_manager.h"
@@ -27,6 +30,55 @@ bool qt_trusttunnel_is_process_elevated()
     return ok && elevation.TokenIsElevated;
 }
 #endif
+
+QString qt_trusttunnel_default_core_log_path()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+            + QStringLiteral("/vpn-core.log");
+}
+
+static QString vpnErrorCodeName(int code)
+{
+    switch (code) {
+    case VPN_EC_NOERROR:
+        return QStringLiteral("OK");
+    case VPN_EC_ERROR:
+        return QStringLiteral("ERROR");
+    case VPN_EC_INVALID_SETTINGS:
+        return QStringLiteral("INVALID_SETTINGS");
+    case VPN_EC_ADDR_IN_USE:
+        return QStringLiteral("ADDR_IN_USE");
+    case VPN_EC_INVALID_STATE:
+        return QStringLiteral("INVALID_STATE");
+    case VPN_EC_AUTH_REQUIRED:
+        return QStringLiteral("AUTH_REQUIRED");
+    case VPN_EC_LOCATION_UNAVAILABLE:
+        return QStringLiteral("LOCATION_UNAVAILABLE");
+    case VPN_EC_CERTIFICATE_VERIFICATION_FAILED:
+        return QStringLiteral("CERTIFICATE_VERIFICATION_FAILED");
+    case VPN_EC_EVENT_LOOP_FAILURE:
+        return QStringLiteral("EVENT_LOOP_FAILURE");
+    case VPN_EC_INITIAL_CONNECT_FAILED:
+        return QStringLiteral("INITIAL_CONNECT_FAILED");
+    case VPN_EC_FATAL_CONNECTIVITY_ERROR:
+        return QStringLiteral("FATAL_CONNECTIVITY_ERROR");
+    default:
+        return QStringLiteral("ERR_%1").arg(code);
+    }
+}
+
+QString qt_trusttunnel_format_vpn_error(int code, const QString &text)
+{
+    if (code == VPN_EC_NOERROR && text.trimmed().isEmpty())
+        return QString();
+    const QString trimmed = text.trimmed();
+    const QString codeName = vpnErrorCodeName(code);
+    if (trimmed.isEmpty())
+        return codeName;
+    if (code == VPN_EC_NOERROR || code == VPN_EC_ERROR)
+        return trimmed;
+    return QStringLiteral("%1 (%2)").arg(trimmed, codeName);
+}
 
 ag::LogLevel qt_trusttunnel_parse_log_level(const QString &level)
 {
@@ -82,8 +134,11 @@ static void protectOutboundSocketLinux(ag::SocketProtectEvent *event)
 #ifdef _WIN32
 static void protectOutboundSocketWin(ag::SocketProtectEvent *event)
 {
-    if (!ag::vpn_win_socket_protect(event->fd, event->peer))
+    const uint32_t outbound = ag::vpn_network_manager_get_outbound_interface();
+    if (!ag::vpn_win_socket_protect(event->fd, event->peer)) {
+        qWarning("Windows socket protect failed (outbound ifindex %u)", outbound);
         event->result = -1;
+    }
 }
 #endif
 
@@ -106,7 +161,12 @@ void qt_trusttunnel_verify_server_certificate(ag::VpnVerifyCertificateEvent *eve
     if (!event)
         return;
     const char *err = ag::tls_verify_cert(event->cert, event->chain, nullptr);
-    event->result = (err == nullptr) ? 0 : -1;
+    if (err != nullptr) {
+        qWarning("TrustTunnel certificate verification failed: %s", err);
+        event->result = -1;
+        return;
+    }
+    event->result = 0;
 }
 
 QString qt_trusttunnel_connection_info_line(ag::VpnConnectionInfoEvent *event)

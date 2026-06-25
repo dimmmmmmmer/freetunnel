@@ -103,6 +103,14 @@ public:
         connect(&m_client, &QtTrustTunnelClient::connectProgress, this,
                 [this](const QString &m) { QJsonObject e; e["ev"]="progress"; e["msg"]=m; send(e); },
                 Qt::QueuedConnection);
+        connect(&m_client, &QtTrustTunnelClient::coreLogLine, this,
+                [this](const QString &line) {
+                    QJsonObject e;
+                    e["ev"] = "log";
+                    e["msg"] = line;
+                    send(e);
+                },
+                Qt::QueuedConnection);
         connect(&m_client, &QtTrustTunnelClient::vpnError, this,
                 [this](const QString &m) { QJsonObject e; e["ev"]="error"; e["msg"]=m; send(e); },
                 Qt::QueuedConnection);
@@ -265,6 +273,13 @@ private:
 
 int runVpnHelper(int argc, char **argv) {
     QCoreApplication app(argc, argv);
+#if defined(Q_OS_WIN)
+    QString wintunErr;
+    if (!prepareWindowsHelperRuntime(&wintunErr)) {
+        qWarning("%s", qPrintable(wintunErr));
+        return 4;
+    }
+#endif
     const freetunnel::HelperLaunchConfig cfg =
             freetunnel::parseHelperLaunchArgs(QCoreApplication::arguments());
     if (!cfg.ok())

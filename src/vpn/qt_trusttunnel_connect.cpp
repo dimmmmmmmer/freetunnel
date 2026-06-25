@@ -2,6 +2,9 @@
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
 
+#include "core/NetBind.h"
+#include "net/network_manager.h"
+
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QRandomGenerator>
@@ -14,6 +17,18 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#if defined(Q_OS_WIN)
+static uint32_t captureWindowsPhysicalOutbound()
+{
+    const freetunnel::PhysicalRoute route = freetunnel::physicalOutboundRoute();
+    if (route.index <= 0)
+        return 0;
+    const auto idx = static_cast<uint32_t>(route.index);
+    ag::vpn_network_manager_set_outbound_interface(idx);
+    return idx;
+}
 #endif
 
 void QtTrustTunnelClient::connectVpn()
@@ -108,11 +123,20 @@ bool QtTrustTunnelClient::ensureClientReady()
         return true;
     if (!reloadStoredConfigIfNeeded())
         return false;
+    applyCoreLogPathToConfig();
     emit connectProgress(tr("Initializing VPN core..."));
+#if defined(Q_OS_WIN)
+    m_winPhysicalIfIndex = captureWindowsPhysicalOutbound();
+    const std::string boundIf =
+            m_winPhysicalIfIndex != 0 ? std::to_string(m_winPhysicalIfIndex) : std::string{};
+#else
+    const std::string boundIf;
+#endif
     m_client = std::make_unique<ag::TrustTunnelClient>(std::move(*m_config), makeCallbacks());
     m_config.reset();
+    startCoreLogTail();
     emit connectProgress(tr("Starting network monitor..."));
-    m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), "");
+    m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), boundIf);
     if (m_networkMonitor->start())
         return true;
     m_networkMonitor.reset();

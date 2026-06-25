@@ -40,6 +40,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString updateMessage READ updateMessage CONSTANT)
     Q_PROPERTY(QString latestVersion READ latestVersion CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
+    Q_PROPERTY(QString coreLogPath READ coreLogPath CONSTANT)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings CONSTANT)
 
@@ -91,6 +92,7 @@ public:
     QString updateMessage() const { return QString(); }
     QString latestVersion() const { return QString(); }
     QString logPath() const;
+    QString coreLogPath() const { return QStringLiteral("/tmp/vpn-core.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v);
     QVariantList pings() const { return m_pings; }

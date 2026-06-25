@@ -45,8 +45,16 @@ bool interfaceIsVirtual(const QString &name) {
                                       QStringLiteral("ipsec"), QStringLiteral("wg"),
                                       QStringLiteral("gpd"),  QStringLiteral("zt"),
                                       QStringLiteral("ham")};
-    return std::any_of(kVirt.cbegin(), kVirt.cend(),
-                       [&name](const QString &p) { return name.startsWith(p); });
+    if (std::any_of(kVirt.cbegin(), kVirt.cend(),
+                    [&name](const QString &p) { return name.startsWith(p); }))
+        return true;
+#if defined(Q_OS_WIN)
+    // Wintun adapters created by TrustTunnel must not be treated as the physical uplink.
+    const QString lower = name.toLower();
+    if (lower.contains(QStringLiteral("wintun")) || lower.contains(QStringLiteral("trusttunnel")))
+        return true;
+#endif
+    return false;
 }
 
 void pickInterfaceRouteAddresses(const QNetworkInterface &ni, QHostAddress *v4, QHostAddress *v6)

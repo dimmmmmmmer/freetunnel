@@ -51,6 +51,7 @@ signals:
     void tunnelStats(quint64 upload, quint64 download);
     void connectionInfo(const QString &msg);
     void connectProgress(const QString &step);
+    void coreLogLine(const QString &line);
     void vpnError(const QString &msg);
 
 private:
