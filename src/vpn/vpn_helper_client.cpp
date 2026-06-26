@@ -74,14 +74,11 @@ VpnHelperClient::~VpnHelperClient() {
 
 void VpnHelperClient::shutdown() {
     if (m_sock && m_helloAcked) {
-        if (m_state != State::Disconnected && m_state != State::Error) {
-            QJsonObject c; c["cmd"] = "disconnect"; send(c);
-            m_sock->flush();
-            m_sock->waitForBytesWritten(500);
-        }
-        QJsonObject q; q["cmd"] = "quit"; send(q);
+        QJsonObject q;
+        q["cmd"] = "quit";
+        send(q);
         m_sock->flush();
-        m_sock->waitForBytesWritten(500);
+        m_sock->waitForBytesWritten(300);
     }
     abortStartup();
 }

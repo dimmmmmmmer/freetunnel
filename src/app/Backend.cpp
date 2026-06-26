@@ -32,6 +32,16 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_ticker.start();
 
     wireHotkeyLifecycle();
+
+    m_coreLogCoalesceTimer.setSingleShot(true);
+    m_coreLogCoalesceTimer.setInterval(200);
+    connect(&m_coreLogCoalesceTimer, &QTimer::timeout, this, [this]() {
+        if (!m_coreLogPending)
+            return;
+        m_coreLogPending = false;
+        emit logChanged();
+    });
+
     if (m_settings.logging_enabled) {
         trimLogFile();
         loadLogTail();
@@ -279,7 +289,7 @@ void Backend::quitApplication() {
     if (m_quitting)
         return;
     prepareQuit();
-    QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
+    QCoreApplication::exit(0);
 }
 
 QString Backend::credentialStorageWarning() const

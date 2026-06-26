@@ -32,7 +32,8 @@ QString recoveryReason(const QString &prefix, int errCode, const QString &errTex
 QString buildDisconnectReason(int errCode, const QString &errText, bool everConnected,
                               std::chrono::steady_clock::time_point lastAttempt);
 size_t clientOutputBytes(ag::VpnClientOutputEvent *event);
-void emitCoreLogLines(const QByteArray &chunk, const std::function<void(const QString &)> &emitLine);
+void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLines,
+                           const std::function<void(const QString &)> &emitLine);
 
 #ifdef _WIN32
 void pinWindowsPhysicalOutbound(uint32_t ifIndex);

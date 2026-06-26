@@ -264,6 +264,8 @@ private:
 
     QElapsedTimer m_session;
     QTimer m_ticker;
+    QTimer m_coreLogCoalesceTimer;
+    bool m_coreLogPending = false;
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
 

@@ -16,6 +16,7 @@
 #include "app/AppStartup.h"
 #include "app/Backend.h"
 #include "core/AppSettings.h"
+#include "core/ConfigStore.h"
 #include "core/InstanceControl.h"
 
 class TestAppStartup : public QObject {
@@ -36,11 +37,13 @@ void TestAppStartup::initTestCase()
     QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
     QCoreApplication::setApplicationName(QStringLiteral("AppStartupTest"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    QStandardPaths::setTestModeEnabled(true);
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
             + QStringLiteral("/ft-app-startup-test");
     QDir().mkpath(dir);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir);
     saveAppSettings(AppSettings{});
+    saveStoredConfigs({});
 }
 
 void TestAppStartup::controlArgFromArgv()

@@ -135,6 +135,7 @@ private:
     ag::LogLevel m_logLevel = ag::LOG_LEVEL_INFO;
     QString m_coreLogPath;
     qint64 m_coreLogOffset = 0;
+    QByteArray m_coreLogLineBuffer;
     std::chrono::steady_clock::time_point m_lastConnectAttempt{};
 #ifdef Q_OS_WIN
     uint32_t m_winPhysicalIfIndex = 0;

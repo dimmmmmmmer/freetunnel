@@ -413,13 +413,13 @@ void QtTrustTunnelClient::handleCoreConnecting()
 
 void QtTrustTunnelClient::handleCoreRecovery(const QString &reason)
 {
+    // Core handles in-process recovery; tearing down here races DNS/network restarts
+    // and leaves the tunnel stuck in VPN_SS_WAITING_RECOVERY until vpn_stop.
     m_networkWaitTimer.stop();
-    if (!m_stopRequested && m_autoReconnect) {
-        teardownClient();
-        scheduleReconnect(reason);
-        return;
-    }
+    m_reconnectTimer.stop();
     setState(m_everConnected ? State::Reconnecting : State::Connecting);
+    if (!reason.isEmpty())
+        emit connectionInfo(reason);
 }
 
 void QtTrustTunnelClient::handleCoreWaitingForNetwork()
@@ -568,7 +568,7 @@ void QtTrustTunnelClient::startCoreLogTail()
 
     if (!m_coreLogPoll) {
         m_coreLogPoll = new QTimer(this);
-        m_coreLogPoll->setInterval(300);
+        m_coreLogPoll->setInterval(800);
         connect(m_coreLogPoll, &QTimer::timeout, this, &QtTrustTunnelClient::pollCoreLogFile);
     }
     if (!m_coreLogPoll->isActive())
@@ -580,7 +580,7 @@ void QtTrustTunnelClient::stopCoreLogTail()
 {
     if (m_coreLogPoll)
         m_coreLogPoll->stop();
-    pollCoreLogFile();
+    m_coreLogLineBuffer.clear();
 }
 
 void QtTrustTunnelClient::pollCoreLogFile()
@@ -598,5 +598,7 @@ void QtTrustTunnelClient::pollCoreLogFile()
     if (chunk.isEmpty())
         return;
 
-    emitCoreLogLines(chunk, [this](const QString &line) { emit coreLogLine(line); });
+    constexpr int kMaxLinesPerPoll = 24;
+    drainCoreLogTailBytes(&m_coreLogLineBuffer, chunk, kMaxLinesPerPoll,
+            [this](const QString &line) { emit coreLogLine(line); });
 }

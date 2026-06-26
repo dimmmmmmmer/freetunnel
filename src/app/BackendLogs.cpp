@@ -48,8 +48,12 @@ void Backend::appendLog(const QString &level, const QString &msg) {
     if (m_log.size() > 500)
         m_log.removeFirst();
     // CORE lines are written by the VPN core into the shared log file; keep UI only.
-    if (level == QLatin1String("CORE"))
-        return emit logChanged();
+    if (level == QLatin1String("CORE")) {
+        m_coreLogPending = true;
+        if (!m_coreLogCoalesceTimer.isActive())
+            m_coreLogCoalesceTimer.start();
+        return;
+    }
     const QString lp = logPath();
     QDir().mkpath(QFileInfo(lp).absolutePath());
     // The log can contain connection/domain info — keep it owner-only. Set perms

@@ -71,21 +71,37 @@ size_t clientOutputBytes(ag::VpnClientOutputEvent *event)
     return bytes;
 }
 
-void emitCoreLogLines(const QByteArray &chunk, const std::function<void(const QString &)> &emitLine)
+static bool skipCoreLogTailLine(const QString &text)
 {
-    for (const QByteArray &raw : chunk.split('\n')) {
-        const QByteArray line = raw.trimmed();
-        if (line.isEmpty())
+    if (text.startsWith(QStringLiteral("... (older log entries trimmed)")))
+        return true;
+    return text.size() >= 20 && text.at(4) == QLatin1Char('-') && text.at(7) == QLatin1Char('-')
+            && text.at(10) == QLatin1Char(' ') && text.at(19) == QLatin1Char('\t');
+}
+
+void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLines,
+                           const std::function<void(const QString &)> &emitLine)
+{
+    if (!carry || maxLines <= 0)
+        return;
+    carry->append(chunk);
+    int emitted = 0;
+    int start = 0;
+    for (int i = 0; i < carry->size() && emitted < maxLines; ++i) {
+        if ((*carry)[i] != '\n')
             continue;
-        const QString text = QString::fromUtf8(line);
-        if (text.startsWith(QStringLiteral("... (older log entries trimmed)")))
+        const QByteArray raw = carry->mid(start, i - start).trimmed();
+        start = i + 1;
+        if (raw.isEmpty())
             continue;
-        if (text.size() >= 20 && text.at(4) == QLatin1Char('-') && text.at(7) == QLatin1Char('-')
-                && text.at(10) == QLatin1Char(' ') && text.at(19) == QLatin1Char('\t')) {
+        const QString text = QString::fromUtf8(raw);
+        if (skipCoreLogTailLine(text))
             continue;
-        }
         emitLine(text);
+        ++emitted;
     }
+    if (start > 0)
+        carry->remove(0, start);
 }
 
 #ifdef Q_OS_WIN

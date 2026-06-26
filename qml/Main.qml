@@ -110,7 +110,7 @@ Window {
             }
             Platform.MenuItem {
                 text: qsTr("Quit")
-                onTriggered: Qt.callLater(function() { backend.quitApplication() })
+                onTriggered: backend.quitApplication()
             }
         }
     }
