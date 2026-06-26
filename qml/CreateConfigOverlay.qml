@@ -10,6 +10,11 @@ Item {
     required property var backend
     required property var theme
 
+    readonly property bool isMac: Qt.platform.os === "osx"
+    // Keep the card below native traffic lights / frameless window controls.
+    readonly property int safeTop: isMac ? 40 : 48
+    readonly property int cardWidth: Math.min(width - 28, 372)
+
     anchors.fill: parent
     // Dimmed backdrop — the main UI shows through; click to close.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
@@ -18,9 +23,14 @@ Item {
 
     Rectangle {
         id: cform
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 28, 360)
-        height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 28)
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.horizontalCenterOffset: createRoot.isMac
+            ? Math.max(0, 72 - (createRoot.width - cardWidth) / 2) : 0
+        anchors.top: parent.top
+        anchors.topMargin: createRoot.safeTop
+        width: createRoot.cardWidth
+        height: Math.min(parent.height - createRoot.safeTop - 12,
+                        fcol.implicitHeight + chdr.height + 14)
         radius: 14; color: theme.bg; border.color: theme.border; border.width: 1
         // Clicking empty card space clears focus from any text field.
         TapHandler { onTapped: cform.forceActiveFocus() }
@@ -135,7 +145,7 @@ Item {
                     onAccepted: fCert.text = backend.readTextFile(certFileDlg.file.toString())
                 }
                 Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8
-                        topPadding: 8; bottomPadding: 20
+                        topPadding: 6; bottomPadding: 12
                     Rectangle { width: 88; height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }
