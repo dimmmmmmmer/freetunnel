@@ -23,9 +23,11 @@ Item {
 
     Rectangle {
         id: cform
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: createRoot.safeTop
+        // Centre in the window, but never let the top rise above the title-bar
+        // safe area — so a tall window centres the card vertically, while a short
+        // one keeps it pinned just below the traffic lights.
+        x: (parent.width - width) / 2
+        y: Math.max(createRoot.safeTop, (parent.height - height) / 2)
         width: createRoot.cardWidth
         height: Math.min(parent.height - createRoot.safeTop - 12,
                         fcol.implicitHeight + chdr.height + 14)

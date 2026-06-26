@@ -69,11 +69,15 @@ Item {
                              : level === "CORE" ? theme.accent : theme.textDim
                         font.family: "Menlo"; font.pixelSize: 11
                     }
-                    Text {
+                    // TextEdit (not Text) so the message stays selectable by mouse
+                    // for hand-copying a snippet; the Copy button still grabs it all.
+                    TextEdit {
                         width: logFlick.width - timeText.width - levelText.width - 12
                         text: msg
                         color: theme.text; font.family: "Menlo"; font.pixelSize: 11
-                        wrapMode: Text.Wrap; textFormat: Text.PlainText
+                        wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
+                        readOnly: true; selectByMouse: true; persistentSelection: true
+                        selectionColor: theme.accent
                     }
                 }
             }

@@ -61,7 +61,7 @@ void Backend::wireVpnClientSignals()
     connect(&m_client, &VpnHelperClient::connectProgress, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
     connect(&m_client, &VpnHelperClient::coreLogLine, this,
-            [this](const QString &line) { appendLog(QStringLiteral("CORE"), line); });
+            [this](const QString &line) { appendCoreLog(line); });
     connect(&m_client, &VpnHelperClient::vpnError, this, &Backend::onVpnErrorReceived);
 }
 

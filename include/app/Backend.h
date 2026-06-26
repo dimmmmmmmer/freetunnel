@@ -210,6 +210,7 @@ private:
     void wireHotkeyLifecycle();
     void ensureHotkeysRegistered();
     void appendLog(const QString &level, const QString &msg);
+    void appendCoreLog(const QString &raw); // parse the core's own time/level out
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
     void wireUpdaterSignals();

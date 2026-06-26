@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTime>
 #include <QUrl>
@@ -34,6 +35,33 @@ void Backend::trimLogFile() {
         f.write(tail);
         f.close();
     }
+}
+
+// The core emits self-describing lines like
+//   "26.06.2026 19:57:38.006946 INFO [4439691] CATEGORY: message"
+// Re-prefixing those with our own time + a "CORE" level showed the date, time and
+// level twice. Parse the core's own timestamp/level out and keep only the message,
+// so the row matches the other entries (time + level + text, no duplication).
+void Backend::appendCoreLog(const QString &raw) {
+    if (!m_settings.logging_enabled)
+        return;
+    static const QRegularExpression re(
+            QStringLiteral("^\\d{2}\\.\\d{2}\\.\\d{4}\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d+\\s+(\\w+)\\s+(.*)$"));
+    const QRegularExpressionMatch m = re.match(raw);
+    if (!m.hasMatch()) {
+        // Unrecognised shape (e.g. a truncated first line) — keep it verbatim.
+        m_logModel.append(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")),
+                          QStringLiteral("CORE"), raw);
+        return;
+    }
+    const QString lv = m.captured(2).toUpper();
+    const QString level = (lv == QLatin1String("ERROR") || lv == QLatin1String("ERR")
+                           || lv == QLatin1String("FATAL"))
+            ? QStringLiteral("ERROR")
+            : (lv == QLatin1String("WARN") || lv == QLatin1String("WARNING"))
+                    ? QStringLiteral("WARN")
+                    : QStringLiteral("CORE"); // keep INFO/DEBUG/etc. tagged as core
+    m_logModel.append(m.captured(1), level, m.captured(3));
 }
 
 void Backend::appendLog(const QString &level, const QString &msg) {
