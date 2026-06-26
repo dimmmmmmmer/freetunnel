@@ -16,6 +16,7 @@
 
 class QHostAddress;
 
+#include "app/LogModel.h"
 #include "core/AppSettings.h"
 #include "vpn/vpn_helper_client.h"
 
@@ -43,7 +44,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
-    Q_PROPERTY(QVariantList logEntries READ logEntries NOTIFY logChanged)
+    Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged) // general|selective
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
@@ -115,7 +116,7 @@ public:
     Q_INVOKABLE QString configDeepLink(int index) const;
     Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
 
-    QVariantList logEntries() const { return m_log; }
+    QObject *logModel() { return &m_logModel; }
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE void openLogFolder();
     Q_INVOKABLE QString logText() const; // whole log as plain text (for Copy)
@@ -183,7 +184,6 @@ signals:
     void configChanged();
     void configsChanged();
     void settingsChanged();
-    void logChanged();
     void splitChanged();
     void hotkeysChanged();
     void updateChanged();
@@ -264,12 +264,10 @@ private:
     bool m_connected = false;
     bool m_connecting = false; // Connecting / Reconnecting / WaitingForNetwork
     bool m_disconnecting = false; // Disconnecting (tearing down / cancelling)
-    QVariantList m_log;
+    LogModel m_logModel;
 
     QElapsedTimer m_session;
     QTimer m_ticker;
-    QTimer m_coreLogCoalesceTimer;
-    bool m_coreLogPending = false;
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
 

@@ -76,6 +76,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendConfigShared.cpp
     src/app/BackendConfigShared.h
     src/app/BackendSplit.cpp
+    src/app/LogModel.cpp
+    include/app/LogModel.h
     include/app/Backend.h
     src/core/AppSettings.cpp
     include/core/AppSettings.h

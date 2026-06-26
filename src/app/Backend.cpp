@@ -33,15 +33,6 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 
     wireHotkeyLifecycle();
 
-    m_coreLogCoalesceTimer.setSingleShot(true);
-    m_coreLogCoalesceTimer.setInterval(200);
-    connect(&m_coreLogCoalesceTimer, &QTimer::timeout, this, [this]() {
-        if (!m_coreLogPending)
-            return;
-        m_coreLogPending = false;
-        emit logChanged();
-    });
-
     if (m_settings.logging_enabled) {
         trimLogFile();
         loadLogTail();

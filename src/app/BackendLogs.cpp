@@ -40,20 +40,12 @@ void Backend::appendLog(const QString &level, const QString &msg) {
     if (!m_settings.logging_enabled)
         return;
     const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
-    QVariantMap e;
-    e[QStringLiteral("time")] = time;
-    e[QStringLiteral("level")] = level;
-    e[QStringLiteral("msg")] = msg;
-    m_log.append(e);
-    if (m_log.size() > 500)
-        m_log.removeFirst();
+    // Incremental insert: the virtualized ListView only re-lays the new row, so a
+    // connect-time burst no longer stalls the UI (and no coalescing is needed).
+    m_logModel.append(time, level, msg);
     // CORE lines are written by the VPN core into the shared log file; keep UI only.
-    if (level == QLatin1String("CORE")) {
-        m_coreLogPending = true;
-        if (!m_coreLogCoalesceTimer.isActive())
-            m_coreLogCoalesceTimer.start();
+    if (level == QLatin1String("CORE"))
         return;
-    }
     const QString lp = logPath();
     QDir().mkpath(QFileInfo(lp).absolutePath());
     // The log can contain connection/domain info — keep it owner-only. Set perms
@@ -69,7 +61,6 @@ void Backend::appendLog(const QString &level, const QString &msg) {
         if (!logExisted)
             QFile::setPermissions(lp, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     }
-    emit logChanged();
 }
 
 // Load the most recent on-disk log lines into the in-memory view at startup so
@@ -83,21 +74,12 @@ void Backend::loadLogTail() {
     const int start = qMax(0, lines.size() - 200);
     for (int i = start; i < lines.size(); ++i) {
         const QStringList parts = lines.at(i).split(QLatin1Char('\t'));
-        QVariantMap e;
-        if (parts.size() >= 3) {
-            const QString dt = parts.at(0);
-            e[QStringLiteral("time")] = dt.section(QLatin1Char(' '), 1, 1);
-            e[QStringLiteral("level")] = parts.at(1);
-            e[QStringLiteral("msg")] = parts.mid(2).join(QLatin1Char('\t'));
-        } else {
-            e[QStringLiteral("time")] = QString();
-            e[QStringLiteral("level")] = QStringLiteral("CORE");
-            e[QStringLiteral("msg")] = lines.at(i);
-        }
-        m_log.append(e);
+        if (parts.size() >= 3)
+            m_logModel.append(parts.at(0).section(QLatin1Char(' '), 1, 1), parts.at(1),
+                              parts.mid(2).join(QLatin1Char('\t')));
+        else
+            m_logModel.append(QString(), QStringLiteral("CORE"), lines.at(i));
     }
-    if (!m_log.isEmpty())
-        emit logChanged();
 }
 
 void Backend::copyToClipboard(const QString &text) const {
@@ -110,20 +92,12 @@ QString Backend::readTextFile(const QString &pathOrUrl) const {
 }
 
 QString Backend::logText() const {
-    QStringList out;
-    for (const QVariant &v : m_log) {
-        const QVariantMap e = v.toMap();
-        out << e.value(QStringLiteral("time")).toString() + QLatin1Char(' ')
-               + e.value(QStringLiteral("level")).toString() + QLatin1Char(' ')
-               + e.value(QStringLiteral("msg")).toString();
-    }
-    return out.join(QLatin1Char('\n'));
+    return m_logModel.toPlainText();
 }
 
 void Backend::clearLogs() {
-    m_log.clear();
+    m_logModel.clear();
     QFile::remove(logPath()); // also clear the on-disk file
-    emit logChanged();
 }
 
 void Backend::openLogFolder() {

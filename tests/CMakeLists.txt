@@ -92,6 +92,8 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/LogModel.cpp
+    ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
     ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp
@@ -143,6 +145,8 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/LogModel.cpp
+    ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
     ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp
@@ -323,16 +327,27 @@ target_include_directories(test_helper_ipc_fuzz PRIVATE ../include ../include/vp
 target_link_libraries(test_helper_ipc_fuzz PRIVATE Qt6::Core Qt6::Test Qt6::Network)
 add_test(NAME helper_ipc_fuzz COMMAND test_helper_ipc_fuzz)
 
+add_executable(test_logmodel
+    test_logmodel.cpp
+    ../src/app/LogModel.cpp
+    ../include/app/LogModel.h
+)
+target_include_directories(test_logmodel PRIVATE ../include)
+target_link_libraries(test_logmodel PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME logmodel COMMAND test_logmodel)
+
 add_executable(test_qml_ui
     test_qml_ui.cpp
     ui/MockBackend.cpp
     ui/MockShell.cpp
     ui/UiTheme.cpp
+    ../src/app/LogModel.cpp
+    ../include/app/LogModel.h
     ../qml.qrc
     ../assets/app.qrc
     ../i18n/i18n.qrc
 )
-target_include_directories(test_qml_ui PRIVATE . ui)
+target_include_directories(test_qml_ui PRIVATE . ui ../include)
 target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
 add_test(NAME qml_ui COMMAND test_qml_ui)
 
@@ -385,6 +400,8 @@ set(BACKEND_TEST_SOURCES
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/LogModel.cpp
+    ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
     ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp

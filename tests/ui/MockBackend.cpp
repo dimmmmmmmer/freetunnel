@@ -5,11 +5,8 @@
 
 MockBackend::MockBackend(QObject *parent) : QObject(parent)
 {
-    QVariantMap logLine;
-    logLine[QStringLiteral("time")] = QStringLiteral("12:00:00");
-    logLine[QStringLiteral("level")] = QStringLiteral("INFO");
-    logLine[QStringLiteral("msg")] = QStringLiteral("Mock backend ready");
-    m_logEntries.append(logLine);
+    m_logModel.append(QStringLiteral("12:00:00"), QStringLiteral("INFO"),
+                      QStringLiteral("Mock backend ready"));
 }
 
 void MockBackend::setConnected(bool v)

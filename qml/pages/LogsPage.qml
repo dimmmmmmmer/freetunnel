@@ -32,52 +32,48 @@ Item {
             Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
             clip: true
             Text {
-                anchors.centerIn: parent; visible: backend.logEntries.length === 0
+                anchors.centerIn: parent; visible: logFlick.count === 0
                 text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
             }
             // One delegate per line, virtualised: only the ~20 visible rows are
-            // realised, so a log update costs O(visible) instead of re-parsing the
-            // whole 500-line log as a single RichText/QTextDocument every batch
-            // (which froze the UI during the connect-time core-log storm).
+            // realised and new lines are inserted incrementally (LogModel), so a
+            // log update costs O(visible) instead of re-parsing the whole 500-line
+            // log as a single RichText/QTextDocument (which froze the UI during the
+            // connect-time core-log storm) — and the scroll position is kept when
+            // auto-scroll is off, since the model is never reset out from under it.
             ListView {
                 id: logFlick
                 anchors.fill: parent; anchors.margins: 12; clip: true
                 property bool autoScroll: true
-                model: backend.logEntries
+                model: backend.logModel
                 boundsBehavior: Flickable.StopAtBounds
                 cacheBuffer: 400
                 function toBottom() { if (autoScroll) positionViewAtEnd() }
+                onCountChanged: if (autoScroll) Qt.callLater(positionViewAtEnd)
                 delegate: Row {
-                    required property var modelData
+                    required property string time
+                    required property string level
+                    required property string msg
                     width: logFlick.width
                     spacing: 6
                     Text {
                         id: timeText
-                        text: modelData.time
+                        text: time
                         color: theme.textFaint; font.family: "Menlo"; font.pixelSize: 11
                     }
                     Text {
                         id: levelText
-                        text: modelData.level
-                        color: modelData.level === "ERROR" ? theme.danger
-                             : modelData.level === "WARN" ? theme.warn
-                             : modelData.level === "CORE" ? theme.accent : theme.textDim
+                        text: level
+                        color: level === "ERROR" ? theme.danger
+                             : level === "WARN" ? theme.warn
+                             : level === "CORE" ? theme.accent : theme.textDim
                         font.family: "Menlo"; font.pixelSize: 11
                     }
                     Text {
                         width: logFlick.width - timeText.width - levelText.width - 12
-                        text: modelData.msg
+                        text: msg
                         color: theme.text; font.family: "Menlo"; font.pixelSize: 11
                         wrapMode: Text.Wrap; textFormat: Text.PlainText
-                    }
-                }
-                // Re-pin to the bottom on each batch (the model is replaced wholesale
-                // on logChanged, so onCountChanged alone misses updates at the cap).
-                Connections {
-                    target: backend
-                    function onLogChanged() {
-                        if (logFlick.autoScroll)
-                            Qt.callLater(logFlick.positionViewAtEnd)
                     }
                 }
             }

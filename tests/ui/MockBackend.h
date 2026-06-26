@@ -7,6 +7,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "app/LogModel.h"
+
 // Lightweight Backend stand-in for headless QML/UI tests (no VPN core).
 class MockBackend : public QObject {
     Q_OBJECT
@@ -24,7 +26,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
-    Q_PROPERTY(QVariantList logEntries READ logEntries CONSTANT)
+    Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains CONSTANT)
@@ -78,7 +80,7 @@ public:
         emit settingsChanged();
     }
 
-    QVariantList logEntries() const { return m_logEntries; }
+    QObject *logModel() { return &m_logModel; }
     bool splitEnabled() const { return m_splitEnabled; }
     void setSplitEnabled(bool v);
     QString vpnMode() const { return m_vpnMode; }
@@ -176,7 +178,7 @@ private:
     bool m_autoConnect = false;
     bool m_killSwitch = false;
     bool m_loggingEnabled = true;
-    QVariantList m_logEntries;
+    LogModel m_logModel;
     bool m_splitEnabled = false;
     QString m_vpnMode = QStringLiteral("general");
     QStringList m_domains;
