@@ -41,27 +41,40 @@ bool signatureVerificationActive()
 // browser_download_url could point the installer/manifest at an attacker host.
 // Integrity is still gated by the Ed25519-signed SHA256SUMS, but pinning the
 // host is cheap defense-in-depth (and matters if signing is ever unconfigured).
+bool isGithubHost(const QString &host)
+{
+    return host == QLatin1String("github.com")
+            || host.endsWith(QLatin1String(".github.com"))
+            || host.endsWith(QLatin1String(".githubusercontent.com"));
+}
+
+bool matchesTestBaseHost(const QString &host)
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    // When the update endpoint is redirected for tests, allow that same host
+    // (the mock serves assets over http on loopback). Compiled out of releases.
+    const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
+    if (base.isEmpty())
+        return false;
+    const QUrl baseUrl(QString::fromUtf8(base));
+    return baseUrl.isValid() && !host.isEmpty() && host == baseUrl.host().toLower();
+#else
+    Q_UNUSED(host);
+    return false;
+#endif
+}
+
 bool isTrustedDownloadUrl(const QString &urlStr)
 {
     const QUrl url(urlStr);
     if (!url.isValid())
         return false;
     const QString host = url.host().toLower();
-#ifdef FT_ENABLE_TEST_HOOKS
-    // When the update endpoint is redirected for tests, allow that same host
-    // (the mock serves assets over http on loopback). Compiled out of releases.
-    const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
-    if (!base.isEmpty()) {
-        const QUrl baseUrl(QString::fromUtf8(base));
-        if (baseUrl.isValid() && !host.isEmpty() && host == baseUrl.host().toLower())
-            return true;
-    }
-#endif
+    if (matchesTestBaseHost(host))
+        return true;
     if (url.scheme() != QLatin1String("https"))
         return false;
-    return host == QLatin1String("github.com")
-            || host.endsWith(QLatin1String(".github.com"))
-            || host.endsWith(QLatin1String(".githubusercontent.com"));
+    return isGithubHost(host);
 }
 
 QString githubApiUrl(const QString &path)
