@@ -52,6 +52,7 @@ private:
 class QuitFilter : public QObject {
     Q_OBJECT
 public:
+    explicit QuitFilter(QObject *parent = nullptr) : QObject(parent) {}
     Backend *backend = nullptr;
 
 protected:
