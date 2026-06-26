@@ -201,6 +201,7 @@ private:
     void applySplitRules(); // push the active CONFIG's profile rules to the core
     QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
+    void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
     void trimLogFile();     // cap the log file size so it never grows unbounded
@@ -275,6 +276,7 @@ private:
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
+    bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
     bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran

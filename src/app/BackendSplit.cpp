@@ -235,11 +235,21 @@ void Backend::reconnectActiveConfig() {
         return;
     m_reapplying = true;
     m_connecting = false;
+    m_pendingReconnect = true;
     m_client.disconnectVpn();
-    QTimer::singleShot(400, this, [this]() {
-        if (!m_activePath.isEmpty())
-            connectVpn();
-    });
+    // Reconnect once the old session has actually reached Disconnected (driven
+    // from onVpnClientStateChanged), not after a fixed delay that could fire
+    // mid-teardown and leave the previous tunnel up. The timer is only a safety
+    // net for a Disconnected event that never arrives.
+    QTimer::singleShot(5000, this, [this]() { firePendingReconnect(); });
+}
+
+void Backend::firePendingReconnect() {
+    if (!m_pendingReconnect)
+        return;
+    m_pendingReconnect = false;
+    if (!m_activePath.isEmpty())
+        connectVpn();
 }
 
 void Backend::reapplyIfConnected() {

@@ -89,6 +89,11 @@ void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
     applyVpnClientState(st);
     emit stateChanged();
     appendLog(QStringLiteral("INFO"), statusText());
+    // A config switch / live rule reapply disconnects first, then reconnects only
+    // once the old tunnel is fully down. Defer so we never re-enter the VPN client
+    // from inside its own state callback (disconnectVpn can emit this synchronously).
+    if (st == VpnHelperClient::State::Disconnected && m_pendingReconnect)
+        QTimer::singleShot(0, this, [this]() { firePendingReconnect(); });
 }
 
 bool Backend::isInternalVpnError(const QString &m) const
