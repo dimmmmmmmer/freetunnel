@@ -36,5 +36,4 @@ private:
         QString msg;
     };
     QVector<Row> m_rows;
-    static constexpr int kMaxRows = 500;
 };

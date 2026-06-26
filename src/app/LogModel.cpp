@@ -3,6 +3,11 @@
 
 #include <QStringList>
 
+namespace {
+// Cap the in-memory log view; the on-disk file keeps the full history.
+constexpr int kMaxRows = 500;
+} // namespace
+
 LogModel::LogModel(QObject *parent) : QAbstractListModel(parent) {}
 
 int LogModel::rowCount(const QModelIndex &parent) const
