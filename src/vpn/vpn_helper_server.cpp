@@ -209,7 +209,7 @@ private:
         m_buf = rest;
         disconnect(s, nullptr, this, nullptr);
         connect(m_sock, &QTcpSocket::readyRead, this, &HelperServer::onReadyRead);
-        connect(m_sock, &QTcpSocket::disconnected, this, [this]() { QCoreApplication::quit(); });
+        connect(m_sock, &QTcpSocket::disconnected, this, []() { QCoreApplication::quit(); });
 
         QJsonObject e;
         e["ev"] = "ready";
