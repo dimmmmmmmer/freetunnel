@@ -29,18 +29,18 @@ Window {
     // directly. Real quit: tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Linux/Windows).
     property bool shuttingDown: false
     onClosing: function(close) {
-        // macOS Quit / ⌘Q closes windows first; accept during app shutdown.
-        // Red traffic-light close still hides to tray (not a quit).
+        // macOS: only the red traffic-light is spontaneous; Quit / ⌘Q close is not.
         if (shuttingDown || backend.applicationClosingDown()) {
             close.accepted = true
             return
         }
-        if (win.isMac) {
+        if (win.isMac && close.spontaneous) {
             close.accepted = false
             win.hide()
             return
         }
-        backend.quitApplication()
+        if (!win.isMac)
+            backend.quitApplication()
         close.accepted = true
     }
 
@@ -48,10 +48,8 @@ Window {
         target: backend
         function onAboutToShutdown() {
             shuttingDown = true
-            // macOS: leave the status item alone while its Quit menu is closing.
-            // Windows: sync hide can swallow deferred quit — defer there only.
-            if (!win.isMac)
-                Qt.callLater(function() { tray.visible = false })
+            // Defer so tray/dock menu items can finish closing before we tear down.
+            Qt.callLater(function() { tray.visible = false })
         }
         function onDeepLinkImportConfirmationRequired(message, link) {
             showConfirm(message, qsTr("Import anyway"), function() {

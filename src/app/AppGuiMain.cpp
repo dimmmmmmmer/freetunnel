@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/AppStartup.h"
 
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
@@ -9,6 +10,9 @@
 #include <QTranslator>
 #include <QUrl>
 #include <QWindow>
+#ifdef Q_OS_MACOS
+#include <QAction>
+#endif
 
 #include "app/Backend.h"
 #include "app/MacWindow.h"
@@ -64,9 +68,9 @@ static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &eng
 
 static void wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &appQuitting)
 {
-    QuitFilter quitFilter;
-    quitFilter.backend = &backend;
-    app.installEventFilter(&quitFilter);
+    auto *quitFilter = new QuitFilter(&app);
+    quitFilter->backend = &backend;
+    app.installEventFilter(quitFilter);
 
     QObject::connect(&backend, &Backend::aboutToShutdown, &app, [&appQuitting]() {
         appQuitting = true;
@@ -76,6 +80,17 @@ static void wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &a
         removeInstanceAuthToken();
     });
 }
+
+#ifdef Q_OS_MACOS
+static void setupMacApplicationQuit(Backend &backend)
+{
+    // Replace the platform Quit item (Завершить / ⌘Q) so it calls our shutdown path
+    // instead of QCoreApplication::quit(), which our onClosing handler would cancel.
+    auto *quitAction = new QAction(QCoreApplication::translate("App", "Quit"), &backend);
+    quitAction->setMenuRole(QAction::QuitRole);
+    QObject::connect(quitAction, &QAction::triggered, &backend, &Backend::quitApplication);
+}
+#endif
 
 int runGuiApplication(int argc, char *argv[])
 {
@@ -99,6 +114,9 @@ int runGuiApplication(int argc, char *argv[])
 
     bool appQuitting = false;
     wireBackendLifecycle(app, backend, appQuitting);
+#ifdef Q_OS_MACOS
+    setupMacApplicationQuit(backend);
+#endif
 
     QQmlApplicationEngine engine;
     QWindow *win = loadMainWindow(engine, backend);

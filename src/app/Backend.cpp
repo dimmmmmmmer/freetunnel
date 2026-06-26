@@ -315,7 +315,8 @@ void Backend::quitApplication() {
         return;
     m_quitting = true;
     emit aboutToShutdown();
-    QCoreApplication::exit(0);
+    // Let QML hide the tray icon before exit (macOS keeps running while status items exist).
+    QMetaObject::invokeMethod(qApp, []() { QCoreApplication::exit(0); }, Qt::QueuedConnection);
 }
 
 QString Backend::credentialStorageWarning() const
