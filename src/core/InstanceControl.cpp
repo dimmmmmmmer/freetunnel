@@ -74,8 +74,15 @@ void removeInstanceAuthToken()
 
 void sweepLegacyInstanceAuthFile()
 {
+    // Only a leftover legacy plaintext file ever needs sweeping. Check that first
+    // so a normal startup doesn't do a blocking keychain read — on macOS that can
+    // raise a keychain unlock/ACL prompt and freeze the UI at launch just to learn
+    // there was nothing to delete.
+    const QString legacyPath = instanceAuthFilePath();
+    if (!QFile::exists(legacyPath))
+        return;
     if (!CredentialStore::loadPassword(kInstanceAuthKey).isEmpty())
-        QFile::remove(instanceAuthFilePath());
+        QFile::remove(legacyPath);
 }
 
 bool readInstanceAuthToken(QString *tokenOut)
