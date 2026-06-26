@@ -24,8 +24,6 @@ Item {
     Rectangle {
         id: cform
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.horizontalCenterOffset: createRoot.isMac
-            ? Math.max(0, 72 - (createRoot.width - cardWidth) / 2) : 0
         anchors.top: parent.top
         anchors.topMargin: createRoot.safeTop
         width: createRoot.cardWidth
