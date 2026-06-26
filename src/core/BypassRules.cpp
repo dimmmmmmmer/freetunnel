@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "core/BypassRules.h"
 
 #include <QHostAddress>
