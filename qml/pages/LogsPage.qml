@@ -35,38 +35,50 @@ Item {
                 anchors.centerIn: parent; visible: backend.logEntries.length === 0
                 text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
             }
-            Flickable {
+            // One delegate per line, virtualised: only the ~20 visible rows are
+            // realised, so a log update costs O(visible) instead of re-parsing the
+            // whole 500-line log as a single RichText/QTextDocument every batch
+            // (which froze the UI during the connect-time core-log storm).
+            ListView {
                 id: logFlick
                 anchors.fill: parent; anchors.margins: 12; clip: true
-                contentWidth: width; contentHeight: logView.implicitHeight
                 property bool autoScroll: true
-                function toBottom() { if (autoScroll) contentY = Math.max(0, contentHeight - height) }
-                // Colour-coded, selectable log. RichText keeps per-level colour;
-                // selectByMouse lets the user copy snippets by hand.
-                TextEdit {
-                    id: logView
+                model: backend.logEntries
+                boundsBehavior: Flickable.StopAtBounds
+                cacheBuffer: 400
+                function toBottom() { if (autoScroll) positionViewAtEnd() }
+                delegate: Row {
+                    required property var modelData
                     width: logFlick.width
-                    readOnly: true; selectByMouse: true; persistentSelection: true
-                    wrapMode: TextEdit.Wrap
-                    textFormat: TextEdit.RichText
-                    font.family: "Menlo"; font.pixelSize: 11
-                    color: theme.text; selectionColor: theme.accent
-                    text: {
-                        function esc(s){ return (""+s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") }
-                        var out = ""
-                        var es = backend.logEntries
-                        for (var i = 0; i < es.length; i++) {
-                            var e = es[i]
-                            var lc = e.level === "ERROR" ? theme.danger
-                                   : e.level === "WARN" ? theme.warn
-                                   : e.level === "CORE" ? theme.accent : theme.textDim
-                            out += "<font color='" + theme.textFaint + "'>" + e.time + "</font> "
-                                 + "<font color='" + lc + "'>" + e.level + "</font> "
-                                 + "<font color='" + theme.text + "'>" + esc(e.msg) + "</font><br>"
-                        }
-                        return out
+                    spacing: 6
+                    Text {
+                        id: timeText
+                        text: modelData.time
+                        color: theme.textFaint; font.family: "Menlo"; font.pixelSize: 11
                     }
-                    onTextChanged: Qt.callLater(logFlick.toBottom)
+                    Text {
+                        id: levelText
+                        text: modelData.level
+                        color: modelData.level === "ERROR" ? theme.danger
+                             : modelData.level === "WARN" ? theme.warn
+                             : modelData.level === "CORE" ? theme.accent : theme.textDim
+                        font.family: "Menlo"; font.pixelSize: 11
+                    }
+                    Text {
+                        width: logFlick.width - timeText.width - levelText.width - 12
+                        text: modelData.msg
+                        color: theme.text; font.family: "Menlo"; font.pixelSize: 11
+                        wrapMode: Text.Wrap; textFormat: Text.PlainText
+                    }
+                }
+                // Re-pin to the bottom on each batch (the model is replaced wholesale
+                // on logChanged, so onCountChanged alone misses updates at the cap).
+                Connections {
+                    target: backend
+                    function onLogChanged() {
+                        if (logFlick.autoScroll)
+                            Qt.callLater(logFlick.positionViewAtEnd)
+                    }
                 }
             }
         }
