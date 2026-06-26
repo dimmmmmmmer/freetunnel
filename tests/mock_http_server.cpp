@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "mock_http_server.h"
 
 #include <QTcpSocket>

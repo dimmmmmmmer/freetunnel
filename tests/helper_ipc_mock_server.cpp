@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "helper_ipc_mock_server.h"
 
 #include <QJsonArray>

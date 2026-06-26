@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "ui/MockShell.h"
 
 MockShell::MockShell(QObject *parent) : QObject(parent) {}

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
 #include "core/ControlCommand.h"

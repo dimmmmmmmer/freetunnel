@@ -2,6 +2,13 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ru_RU">
 <context>
+    <name>App</name>
+    <message>
+        <source>Quit</source>
+        <translation type="unfinished">Выход</translation>
+    </message>
+</context>
+<context>
     <name>Backend</name>
     <message>
         <source>FreeTunnel %1 started</source>
