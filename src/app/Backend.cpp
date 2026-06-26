@@ -223,6 +223,10 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Select a config first"));
         return;
     }
+    // Connect hotkey / deep link: no-op when already up or a session is in flight.
+    // reconnectActiveConfig() sets m_reapplying so live rule edits can still rebuild.
+    if (!m_reapplying && (m_connected || m_connecting || m_disconnecting))
+        return;
     // Show "Connecting…" immediately — the helper handshake (and any elevation
     // prompt) can take a few seconds before the core reports a real state.
     // A subsequent state change (Connected / Error / Disconnected) overrides it.
