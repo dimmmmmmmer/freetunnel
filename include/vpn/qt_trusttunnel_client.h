@@ -63,6 +63,7 @@ public:
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     Q_INVOKABLE void setVpnMode(bool selective); // selective = route only the exclusions list
     Q_INVOKABLE void setKillSwitch(bool enabled);
+    Q_INVOKABLE void setSessionLogging(const QString &path, bool enabled);
 
 signals:
     void stateChanged(QtTrustTunnelClient::State state);
@@ -118,6 +119,7 @@ private:
     std::string m_originalExclusions; // exclusions from config file before our additions
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)
     bool m_killSwitch = false;
+    bool m_loggingEnabled = true;
     QTimer m_reconnectTimer;
     QTimer m_fdWatchdogTimer;
     int m_fdBaseline = -1; // open fd count right after connect (for leak detection)

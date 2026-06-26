@@ -255,6 +255,10 @@ private:
 #endif
         const QString toml = c.value(QStringLiteral("configToml")).toString();
         const QString path = c.value(QStringLiteral("configPath")).toString();
+        const QString logPath = c.value(QStringLiteral("logPath")).toString();
+        const bool loggingEnabled = c.value(QStringLiteral("loggingEnabled")).toBool(true);
+        QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
+                                  Q_ARG(QString, logPath), Q_ARG(bool, loggingEnabled));
         QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
                                   Q_ARG(QString, toml), Q_ARG(QString, path));
     }

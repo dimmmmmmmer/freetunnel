@@ -13,9 +13,13 @@ QString Backend::logPath() const {
             + QStringLiteral("/freetunnel.log");
 }
 
-QString Backend::coreLogPath() const {
-    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-            + QStringLiteral("/vpn-core.log");
+void Backend::setLoggingEnabled(bool v) {
+    if (m_settings.logging_enabled == v)
+        return;
+    m_settings.logging_enabled = v;
+    persistSettings();
+    m_client.setSessionLogging(logPath(), v);
+    emit settingsChanged();
 }
 
 // cppcheck-suppress functionStatic

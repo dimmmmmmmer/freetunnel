@@ -150,6 +150,7 @@ AppSettings loadAppSettings() {
     QSettings s;
     AppSettings out;
     out.log_path = s.value("logs/path", defaultLogPath()).toString();
+    out.logging_enabled = s.value("logs/enabled", true).toBool();
     // Migrate the old insecure /tmp default to the per-user app data dir.
     if (out.log_path == legacyTmpLogPath())
         out.log_path = defaultLogPath();
@@ -175,6 +176,7 @@ AppSettings loadAppSettings() {
 void saveAppSettings(const AppSettings &cfg) {
     QSettings s;
     s.setValue("logs/path", cfg.log_path);
+    s.setValue("logs/enabled", cfg.logging_enabled);
     s.setValue("ui/theme_mode", cfg.theme_mode);
     s.setValue("ui/language", cfg.language);
     s.setValue("vpn/auto_connect_on_start", cfg.auto_connect_on_start);

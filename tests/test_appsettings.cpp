@@ -40,6 +40,7 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.auto_connect_on_start, false);
     QCOMPARE(s.killswitch_enabled, true);
     QCOMPARE(s.domain_bypass_enabled, true);
+    QCOMPARE(s.logging_enabled, true);
     QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral("*.ru")));
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral(".ru")));

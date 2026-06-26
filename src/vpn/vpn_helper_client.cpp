@@ -154,6 +154,12 @@ void VpnHelperClient::setKillSwitch(bool enabled) {
     }
 }
 
+void VpnHelperClient::setSessionLogging(const QString &path, bool enabled)
+{
+    m_logPath = path;
+    m_loggingEnabled = enabled;
+}
+
 void VpnHelperClient::connectVpn() {
     if (!ensureHelper())
         return;
@@ -163,6 +169,8 @@ void VpnHelperClient::connectVpn() {
     }
     QJsonObject c;
     c["cmd"] = "connect";
+    c["logPath"] = m_logPath;
+    c["loggingEnabled"] = m_loggingEnabled;
     if (!m_configToml.isEmpty())
         c["configToml"] = m_configToml;
     else

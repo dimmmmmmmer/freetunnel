@@ -561,6 +561,18 @@
         <source>TrustTunnel core </source>
         <translation>Ядро TrustTunnel </translation>
     </message>
+    <message>
+        <source>Logging</source>
+        <translation>Логирование</translation>
+    </message>
+    <message>
+        <source>Enable logging</source>
+        <translation>Включить логирование</translation>
+    </message>
+    <message>
+        <source>app and VPN core share one log file</source>
+        <translation>приложение и VPN-ядро пишут в один файл</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>

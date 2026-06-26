@@ -236,7 +236,9 @@ void UrlOpenFilter::apply(const QString &u)
 
 bool QuitFilter::eventFilter(QObject *o, QEvent *e)
 {
-    if (e->type() == QEvent::Quit && backend)
+    if (e->type() == QEvent::Quit && backend) {
         backend->quitApplication();
+        return true;
+    }
     return QObject::eventFilter(o, e);
 }

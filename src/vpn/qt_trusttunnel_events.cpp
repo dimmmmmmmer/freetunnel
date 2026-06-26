@@ -75,8 +75,16 @@ void emitCoreLogLines(const QByteArray &chunk, const std::function<void(const QS
 {
     for (const QByteArray &raw : chunk.split('\n')) {
         const QByteArray line = raw.trimmed();
-        if (!line.isEmpty())
-            emitLine(QString::fromUtf8(line));
+        if (line.isEmpty())
+            continue;
+        const QString text = QString::fromUtf8(line);
+        if (text.startsWith(QStringLiteral("... (older log entries trimmed)")))
+            continue;
+        if (text.size() >= 20 && text.at(4) == QLatin1Char('-') && text.at(7) == QLatin1Char('-')
+                && text.at(10) == QLatin1Char(' ') && text.at(19) == QLatin1Char('\t')) {
+            continue;
+        }
+        emitLine(text);
     }
 }
 

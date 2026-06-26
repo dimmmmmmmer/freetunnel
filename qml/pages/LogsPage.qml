@@ -71,16 +71,11 @@ Item {
             }
         }
         RowLayout { Layout.fillWidth: true; spacing: 8
-            ColumnLayout {
-                Layout.fillWidth: true; spacing: 2
-                Text { Layout.fillWidth: true; text: backend.logPath; font.pixelSize: 11
-                       color: logPathMa.containsMouse ? theme.accent : theme.textDim
-                       font.underline: logPathMa.containsMouse; elide: Text.ElideMiddle
-                       MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
-                                   cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
-                Text { Layout.fillWidth: true; text: backend.coreLogPath; font.pixelSize: 10
-                       color: theme.textFaint; elide: Text.ElideMiddle }
-            }
+            Text { Layout.fillWidth: true; text: backend.logPath; font.pixelSize: 11
+                   color: logPathMa.containsMouse ? theme.accent : theme.textDim
+                   font.underline: logPathMa.containsMouse; elide: Text.ElideMiddle
+                   MouseArea { id: logPathMa; anchors.fill: parent; hoverEnabled: true
+                               cursorShape: Qt.PointingHandCursor; onClicked: backend.openLogFolder() } }
             Text { text: qsTr("Auto-scroll"); color: theme.textDim; font.pixelSize: 12 }
             Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: logFlick.autoScroll; implicitWidth: 34; implicitHeight: 20
                      onToggled: function(v){ logFlick.autoScroll = v } }

@@ -58,6 +58,8 @@ Window {
         }
     }
 
+    Shortcut { sequences: [StandardKey.Quit]; onActivated: backend.quitApplication() }
+
     // ---------- system tray ----------
     Platform.SystemTrayIcon {
         id: tray
@@ -108,7 +110,7 @@ Window {
             }
             Platform.MenuItem {
                 text: qsTr("Quit")
-                onTriggered: backend.quitApplication()
+                onTriggered: Qt.callLater(function() { backend.quitApplication() })
             }
         }
     }

@@ -157,6 +157,18 @@ Item {
                 }
             }
             Item { Layout.preferredHeight: 16 }
+            SectionLabel { text: qsTr("Logging"); theme: settingsRoot.theme }
+            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+                ColumnLayout {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("Enable logging"); color: theme.text; font.pixelSize: 14 }
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("app and VPN core share one log file"); color: theme.textFaint; font.pixelSize: 12 }
+                }
+                Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.loggingEnabled
+                         onToggled: function(v){ backend.loggingEnabled = v } } }
+            Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
             Item { Layout.fillWidth: true; Layout.preferredHeight: 42
                 RowLayout {

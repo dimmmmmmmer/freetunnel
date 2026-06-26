@@ -40,6 +40,7 @@ public:
     void setExcludedRoutes(const std::vector<std::string> &routes);
     void setVpnMode(bool selective);
     void setKillSwitch(bool enabled);
+    void setSessionLogging(const QString &path, bool enabled);
 
     void connectVpn();
     void disconnectVpn();
@@ -83,6 +84,8 @@ private:
     std::vector<std::string> m_excludedRoutes;
     bool m_selective = false;
     bool m_killSwitch = false;
+    QString m_logPath;
+    bool m_loggingEnabled = true;
     State m_state = State::Disconnected;
     bool m_helloAcked = false;
     bool m_connectPending = false;

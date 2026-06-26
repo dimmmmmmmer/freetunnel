@@ -40,7 +40,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString updateMessage READ updateMessage CONSTANT)
     Q_PROPERTY(QString latestVersion READ latestVersion CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
-    Q_PROPERTY(QString coreLogPath READ coreLogPath CONSTANT)
+    Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings CONSTANT)
 
@@ -69,6 +69,13 @@ public:
     void setAutoConnect(bool v);
     bool killSwitch() const { return m_killSwitch; }
     void setKillSwitch(bool v);
+    bool loggingEnabled() const { return m_loggingEnabled; }
+    void setLoggingEnabled(bool v) {
+        if (m_loggingEnabled == v)
+            return;
+        m_loggingEnabled = v;
+        emit settingsChanged();
+    }
 
     QVariantList logEntries() const { return m_logEntries; }
     bool splitEnabled() const { return m_splitEnabled; }
@@ -92,7 +99,6 @@ public:
     QString updateMessage() const { return QString(); }
     QString latestVersion() const { return QString(); }
     QString logPath() const;
-    QString coreLogPath() const { return QStringLiteral("/tmp/vpn-core.log"); }
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v);
     QVariantList pings() const { return m_pings; }
@@ -168,6 +174,7 @@ private:
     QString m_themeMode = QStringLiteral("dark");
     bool m_autoConnect = false;
     bool m_killSwitch = false;
+    bool m_loggingEnabled = true;
     QVariantList m_logEntries;
     bool m_splitEnabled = false;
     QString m_vpnMode = QStringLiteral("general");

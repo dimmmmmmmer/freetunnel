@@ -37,6 +37,8 @@ void Backend::trimLogFile() {
 }
 
 void Backend::appendLog(const QString &level, const QString &msg) {
+    if (!m_settings.logging_enabled)
+        return;
     const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
     QVariantMap e;
     e[QStringLiteral("time")] = time;
@@ -45,7 +47,9 @@ void Backend::appendLog(const QString &level, const QString &msg) {
     m_log.append(e);
     if (m_log.size() > 500)
         m_log.removeFirst();
-    // Persist to disk so the log survives restarts and shows up in the folder.
+    // CORE lines are written by the VPN core into the shared log file; keep UI only.
+    if (level == QLatin1String("CORE"))
+        return emit logChanged();
     const QString lp = logPath();
     QDir().mkpath(QFileInfo(lp).absolutePath());
     // The log can contain connection/domain info — keep it owner-only. Set perms
@@ -75,12 +79,17 @@ void Backend::loadLogTail() {
     const int start = qMax(0, lines.size() - 200);
     for (int i = start; i < lines.size(); ++i) {
         const QStringList parts = lines.at(i).split(QLatin1Char('\t'));
-        if (parts.size() < 3) continue;
-        const QString dt = parts.at(0); // "yyyy-MM-dd HH:mm:ss"
         QVariantMap e;
-        e[QStringLiteral("time")] = dt.section(QLatin1Char(' '), 1, 1);
-        e[QStringLiteral("level")] = parts.at(1);
-        e[QStringLiteral("msg")] = parts.mid(2).join(QLatin1Char('\t'));
+        if (parts.size() >= 3) {
+            const QString dt = parts.at(0);
+            e[QStringLiteral("time")] = dt.section(QLatin1Char(' '), 1, 1);
+            e[QStringLiteral("level")] = parts.at(1);
+            e[QStringLiteral("msg")] = parts.mid(2).join(QLatin1Char('\t'));
+        } else {
+            e[QStringLiteral("time")] = QString();
+            e[QStringLiteral("level")] = QStringLiteral("CORE");
+            e[QStringLiteral("msg")] = lines.at(i);
+        }
         m_log.append(e);
     }
     if (!m_log.isEmpty())

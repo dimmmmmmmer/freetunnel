@@ -25,16 +25,19 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     }
 
     wireVpnClientSignals();
+    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
 
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
 
     wireHotkeyLifecycle();
-    trimLogFile();
-    loadLogTail(); // show previous session's log instead of starting blank
-    appendLog(QStringLiteral("INFO"),
-              tr("FreeTunnel %1 started").arg(appVersion())); // also ensures the log file exists
+    if (m_settings.logging_enabled) {
+        trimLogFile();
+        loadLogTail();
+        appendLog(QStringLiteral("INFO"),
+                  tr("FreeTunnel %1 started").arg(appVersion()));
+    }
 
     // Background update check: badge Settings when a newer release exists.
     QTimer::singleShot(1200, this, [this] { checkForUpdates(false); });
@@ -245,6 +248,7 @@ void Backend::connectVpn() {
     m_client.loadConfigFromToml(connectToml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
+    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
     m_client.connectVpn();
     m_inConnect = false;
 }
@@ -272,11 +276,10 @@ void Backend::prepareQuit() {
 }
 
 void Backend::quitApplication() {
-    // Queue quit before helper IPC teardown. On macOS the tray/⌘Q menu handler must
-    // return before quit is processed; defer anyway so sync tray teardown cannot
-    // swallow it (Windows) and ⌘Q always gets an explicit exit (QuitFilter).
-    QTimer::singleShot(0, qApp, []() { QCoreApplication::quit(); });
+    if (m_quitting)
+        return;
     prepareQuit();
+    QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
 }
 
 QString Backend::credentialStorageWarning() const

@@ -63,7 +63,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
     // Misc
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
-    Q_PROPERTY(QString coreLogPath READ coreLogPath CONSTANT)
+    Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings NOTIFY pingsChanged) // per-config latency text
     Q_PROPERTY(QString credentialStorageWarning READ credentialStorageWarning NOTIFY credentialStorageChanged)
@@ -86,10 +86,12 @@ public:
     const QString &themeMode() const { return m_settings.theme_mode; }
     bool autoConnect() const { return m_settings.auto_connect_on_start; }
     bool killSwitch() const { return m_settings.killswitch_enabled; }
+    bool loggingEnabled() const { return m_settings.logging_enabled; }
     void setLanguage(const QString &v);
     void setThemeMode(const QString &v);
     void setAutoConnect(bool v);
     void setKillSwitch(bool v);
+    void setLoggingEnabled(bool v);
 
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void connectVpn();
@@ -166,7 +168,6 @@ public:
     Q_INVOKABLE void startWindowDrag(QObject *window);
 
     QString logPath() const;
-    QString coreLogPath() const;
     bool autoStart() const;
     void setAutoStart(bool v);
     QVariantList pings() const { return m_pings; }

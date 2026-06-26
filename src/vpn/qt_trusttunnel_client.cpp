@@ -138,6 +138,17 @@ void QtTrustTunnelClient::setKillSwitch(bool enabled) {
         m_config->killswitch_enabled = enabled;
 }
 
+void QtTrustTunnelClient::setSessionLogging(const QString &path, bool enabled)
+{
+    m_loggingEnabled = enabled;
+    m_coreLogPath = enabled ? path.trimmed() : QString();
+    if (m_coreLogPath.isEmpty() && enabled)
+        m_coreLogPath = qt_trusttunnel_default_core_log_path();
+    applyCoreLogPathToConfig();
+    if (!enabled)
+        stopCoreLogTail();
+}
+
 bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
     const std::string configPath = path.toStdString();
     toml::parse_result parsed = toml::parse_file(configPath);
@@ -534,6 +545,11 @@ void QtTrustTunnelClient::checkFdHealth() {
 
 void QtTrustTunnelClient::applyCoreLogPathToConfig()
 {
+    if (!m_loggingEnabled) {
+        if (m_config.has_value())
+            m_config->log_file_path.clear();
+        return;
+    }
     if (m_coreLogPath.isEmpty())
         m_coreLogPath = qt_trusttunnel_default_core_log_path();
     if (m_config.has_value())
@@ -542,14 +558,12 @@ void QtTrustTunnelClient::applyCoreLogPathToConfig()
 
 void QtTrustTunnelClient::startCoreLogTail()
 {
+    if (!m_loggingEnabled)
+        return;
     applyCoreLogPathToConfig();
+    if (m_coreLogPath.isEmpty())
+        return;
     QDir().mkpath(QFileInfo(m_coreLogPath).absolutePath());
-
-    QFile marker(m_coreLogPath);
-    if (marker.open(QIODevice::Append | QIODevice::Text)) {
-        marker.write("\n--- FreeTunnel VPN session ---\n");
-        marker.close();
-    }
     m_coreLogOffset = QFileInfo(m_coreLogPath).size();
 
     if (!m_coreLogPoll) {

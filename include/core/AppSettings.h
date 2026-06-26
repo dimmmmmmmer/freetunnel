@@ -7,6 +7,7 @@
 
 struct AppSettings {
     QString log_path = "";
+    bool logging_enabled = true;
     QString theme_mode = "system";
     QString language = "en";
     bool auto_connect_on_start = false;

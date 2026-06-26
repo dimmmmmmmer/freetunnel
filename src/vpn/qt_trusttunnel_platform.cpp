@@ -35,8 +35,8 @@ bool qt_trusttunnel_is_process_elevated()
 
 QString qt_trusttunnel_default_core_log_path()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-            + QStringLiteral("/vpn-core.log");
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+            + QStringLiteral("/freetunnel.log");
 }
 
 static const QHash<int, QString> &vpnErrorCodeNames()
