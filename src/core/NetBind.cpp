@@ -285,22 +285,28 @@ PhysicalRoute physicalOutboundRoute() {
     return firstPhysicalInterface(true);
 }
 
-QTcpSocket *makePhysicalBoundTcpSocket(QObject *parent,
-                                       QAbstractSocket::NetworkLayerProtocol proto) {
-    auto *sock = new QTcpSocket(parent);
+void bindSocketToPhysicalRoute(QTcpSocket *sock,
+                               QAbstractSocket::NetworkLayerProtocol proto) {
+    if (!sock)
+        return;
     const PhysicalRoute r = physicalOutboundRoute();
     if (r.index <= 0)
-        return sock;
+        return;
     const bool v6 = proto == QAbstractSocket::IPv6Protocol;
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
-    if (attachNativeBoundSocket(sock, r, v6))
-        return sock;
+    attachNativeBoundSocket(sock, r, v6);
 #else
     const QHostAddress src = v6 ? r.v6 : r.v4;
     if (!src.isNull())
         sock->bind(src);
 #endif
+}
+
+QTcpSocket *makePhysicalBoundTcpSocket(QObject *parent,
+                                       QAbstractSocket::NetworkLayerProtocol proto) {
+    auto *sock = new QTcpSocket(parent);
+    bindSocketToPhysicalRoute(sock, proto);
     return sock;
 }
 

@@ -28,6 +28,12 @@ struct PhysicalRoute {
 
 PhysicalRoute physicalOutboundRoute();
 
+// Bind an existing socket to the physical interface for the given protocol.
+// No-op when no physical interface is available or binding isn't supported.
+// Works on any QTcpSocket subclass (e.g. QSslSocket) via virtual dispatch.
+void bindSocketToPhysicalRoute(QTcpSocket *sock,
+                               QAbstractSocket::NetworkLayerProtocol proto);
+
 // A TCP socket bound to the physical interface for the given protocol. Falls
 // back to an ordinary (unbound) socket when no physical interface is available
 // or binding isn't supported. Caller takes ownership (parented to `parent`).
