@@ -25,23 +25,16 @@ Window {
     readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
-    // macOS red button hides to tray; Linux/Windows custom ✕ calls hide()
-    // directly. Real quit: tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Linux/Windows).
+    // Hide-to-tray is handled by the window's own ✕: on macOS the red traffic-light
+    // is retargeted natively (installMacWindowCloseToTray); on Linux/Windows the
+    // custom ✕ calls win.hide() directly. So any close event that actually reaches
+    // this handler is a real quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
     property bool shuttingDown: false
     onClosing: function(close) {
-        // macOS: only the red traffic-light is spontaneous; Quit / ⌘Q close is not.
-        if (shuttingDown || backend.applicationClosingDown()) {
-            close.accepted = true
-            return
-        }
-        if (win.isMac && close.spontaneous) {
-            close.accepted = false
-            win.hide()
-            return
-        }
-        if (!win.isMac)
-            backend.quitApplication()
         close.accepted = true
+        if (shuttingDown || backend.applicationClosingDown())
+            return
+        backend.quitApplication()
     }
 
     Connections {

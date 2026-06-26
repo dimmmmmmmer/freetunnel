@@ -128,6 +128,8 @@ int runGuiApplication(int argc, char *argv[])
 
 #ifdef Q_OS_MACOS
     applyMacUnifiedTitlebar(win->winId());
+    // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
+    installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
 #endif
     urlFilter.ready(&backend, win);
     if (!controlArg.isEmpty())
