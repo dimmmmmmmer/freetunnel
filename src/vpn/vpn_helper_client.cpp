@@ -210,8 +210,12 @@ void VpnHelperClient::resetHelperTransport()
 bool VpnHelperClient::configureProductionHelper()
 {
     m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16383));
-    m_token = QString::number(QRandomGenerator::system()->generate64(), 16)
-            + QString::number(QRandomGenerator::system()->generate64(), 16);
+    // Two 64-bit CSPRNG values, zero-padded to a fixed 32-hex (128-bit) string —
+    // QString::number(…, 16) drops leading zero nibbles, which would otherwise
+    // make the token length leak a little and vary between runs.
+    m_token = QStringLiteral("%1%2")
+                      .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'))
+                      .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'));
     clearTokenFile();
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(dir);

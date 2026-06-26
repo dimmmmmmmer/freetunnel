@@ -9,6 +9,12 @@
 
 // Loopback mock of vpn_helper_server JSON protocol (no VPN core). Used by
 // test_helper_ipc to validate the IPC contract the GUI relies on.
+//
+// Like the real helper, only one client is ever served. The real server tracks
+// every pre-auth connection and lets the one that presents a valid token win
+// (closing the rest); this mock uses the simpler, deterministic equivalent of
+// "the newest pre-auth connection takes the slot" so a token-less squatter that
+// connected first can never block the real client from authenticating.
 class MockHelperServer : public QObject {
     Q_OBJECT
 public:

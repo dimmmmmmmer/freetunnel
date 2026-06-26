@@ -73,10 +73,20 @@ void MockHelperServer::adoptSocket(QTcpSocket *s)
     if (!s)
         return;
     ++m_connectionCount;
-    if (m_sock) {
+    // After a client has authenticated, the slot is taken — reject extra links.
+    if (m_authed) {
         s->close();
         s->deleteLater();
         return;
+    }
+    // Pre-auth: the newest connection takes the slot. Dropping any earlier,
+    // still-unauthenticated socket here is what stops a token-less squatter
+    // from holding the slot and blocking the real client.
+    if (m_sock) {
+        m_sock->disconnect(this);
+        m_sock->abort();
+        m_sock->deleteLater();
+        m_buf.clear();
     }
     s->setParent(this);
     m_sock = s;

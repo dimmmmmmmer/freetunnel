@@ -5,10 +5,12 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -138,20 +140,31 @@ public:
     bool authed() const { return m_authed; }
 
 private:
+    // Unauthenticated connections never occupy the single client slot: they are
+    // tracked as "pending" and only a valid token promotes one to the client
+    // (closing the rest). This stops a local process that can reach the loopback
+    // port — but lacks the owner-only token — from squatting the slot and
+    // blocking the real GUI from ever connecting. Each pending connection is
+    // also dropped after a short deadline so it can't linger.
+    static constexpr int kAuthDeadlineMs = 5000;
+
     void onConnection() {
-        QTcpSocket *s = m_server.nextPendingConnection();
-        if (!s) return;
-        if (m_sock) { s->close(); s->deleteLater(); return; } // single GUI client
-        m_sock = s;
-        connect(m_sock, &QTcpSocket::readyRead, this, &HelperServer::onReadyRead);
-        connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
-            if (m_authed) {
-                QCoreApplication::quit();
-                return;
-            }
-            if (m_sock) { m_sock->deleteLater(); m_sock = nullptr; }
-            m_buf.clear();
-        });
+        while (QTcpSocket *s = m_server.nextPendingConnection()) {
+            if (m_authed) { s->close(); s->deleteLater(); continue; }
+            m_pending.insert(s);
+            connect(s, &QTcpSocket::readyRead, this, [this, s]() { onPendingRead(s); });
+            connect(s, &QTcpSocket::disconnected, this, [this, s]() { dropPending(s); });
+            // Context object = s, so the timer auto-cancels if s is destroyed first.
+            QTimer::singleShot(kAuthDeadlineMs, s, [this, s]() { dropPending(s); });
+        }
+    }
+
+    void dropPending(QTcpSocket *s) {
+        if (!m_pending.remove(s))
+            return;
+        m_pendingBuf.remove(s);
+        s->close();
+        s->deleteLater();
     }
 
     void send(const QJsonObject &e) {
@@ -159,8 +172,66 @@ private:
             m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
     }
 
+    void onPendingRead(QTcpSocket *s) {
+        if (!m_pending.contains(s))
+            return;
+        QByteArray &buf = m_pendingBuf[s];
+        buf += s->readAll();
+        if (buf.size() > vpn_helper::kMaxIpcLineBytes) {
+            dropPending(s);
+            return;
+        }
+        const int nl = buf.indexOf('\n');
+        if (nl < 0)
+            return; // wait for a complete line
+        const QByteArray line = buf.left(nl);
+        const QByteArray rest = buf.mid(nl + 1);
+        const auto doc = QJsonDocument::fromJson(line);
+        const QJsonObject c = doc.object();
+        // Only a valid hello authenticates; any other first message drops the link.
+        if (!doc.isObject() || c.value("cmd").toString() != QLatin1String("hello")
+            || !vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
+            dropPending(s);
+            return;
+        }
+        promoteToAuthed(s, rest);
+    }
+
+    void promoteToAuthed(QTcpSocket *s, const QByteArray &rest) {
+        m_authed = true;
+        m_pending.remove(s);
+        m_pendingBuf.remove(s);
+        const auto racing = m_pending;
+        for (QTcpSocket *other : racing)
+            dropPending(other);
+
+        m_sock = s;
+        m_buf = rest;
+        disconnect(s, nullptr, this, nullptr);
+        connect(m_sock, &QTcpSocket::readyRead, this, &HelperServer::onReadyRead);
+        connect(m_sock, &QTcpSocket::disconnected, this, [this]() { QCoreApplication::quit(); });
+
+        QJsonObject e;
+        e["ev"] = "ready";
+        m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
+        QJsonObject pe;
+        pe["ev"] = "info";
+        pe["msg"] = helperIsElevated()
+                ? QStringLiteral("VPN helper started with admin privileges")
+                : QStringLiteral("VPN helper started WITHOUT admin privileges — connecting will fail");
+        m_sock->write(QJsonDocument(pe).toJson(QJsonDocument::Compact) + '\n');
+
+        // Process any commands pipelined after the hello line in the same burst.
+        if (!m_buf.isEmpty())
+            processAuthedBuffer();
+    }
+
     void onReadyRead() {
         m_buf += m_sock->readAll();
+        processAuthedBuffer();
+    }
+
+    void processAuthedBuffer() {
         if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
             m_sock->close();
             return;
@@ -170,32 +241,8 @@ private:
             const QByteArray line = m_buf.left(nl);
             m_buf.remove(0, nl + 1);
             const auto doc = QJsonDocument::fromJson(line);
-            if (doc.isObject()) handle(doc.object());
+            if (doc.isObject()) handleAuthed(doc.object());
         }
-    }
-
-    void handle(const QJsonObject &c) {
-        if (!m_authed)
-            return handlePreAuth(c);
-        handleAuthed(c);
-    }
-
-    void handlePreAuth(const QJsonObject &c) {
-        const QString cmd = c.value("cmd").toString();
-        if (cmd == "hello" && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
-            m_authed = true;
-            QJsonObject e;
-            e["ev"] = "ready";
-            m_sock->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
-            QJsonObject pe;
-            pe["ev"] = "info";
-            pe["msg"] = helperIsElevated()
-                    ? QStringLiteral("VPN helper started with admin privileges")
-                    : QStringLiteral("VPN helper started WITHOUT admin privileges — connecting will fail");
-            m_sock->write(QJsonDocument(pe).toJson(QJsonDocument::Compact) + '\n');
-            return;
-        }
-        m_sock->close();
     }
 
     void handleAuthed(const QJsonObject &c) {
@@ -268,6 +315,8 @@ private:
     QTcpServer m_server;
     QTcpSocket *m_sock = nullptr;
     QByteArray m_buf;
+    QSet<QTcpSocket *> m_pending;
+    QHash<QTcpSocket *, QByteArray> m_pendingBuf;
     bool m_authed = false;
     QThread m_vpnThread;
     QtTrustTunnelClient m_client;

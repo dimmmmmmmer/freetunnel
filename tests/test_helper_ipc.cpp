@@ -18,7 +18,8 @@ private slots:
     void tokensEqualMatches();
     void authSuccess();
     void authRejectsBadToken();
-    void rejectsSecondClient();
+    void rejectsSecondClientAfterAuth();
+    void preAuthSquatterDoesNotBlock();
     void oversizedBufferClosesConnection();
     void connectDisconnectFlow();
     void preAuthCommandsRejected();
@@ -77,23 +78,68 @@ void TestHelperIpc::authRejectsBadToken()
     QVERIFY(!server.authed());
 }
 
-void TestHelperIpc::rejectsSecondClient()
+// Once a client has authenticated it owns the single slot — a later connection
+// is dropped.
+void TestHelperIpc::rejectsSecondClientAfterAuth()
 {
-    MockHelperServer server(QStringLiteral("tok"));
+    const QString token = QStringLiteral("tok");
+    MockHelperServer server(token);
     QVERIFY(server.listen());
 
     QTcpSocket first;
     first.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(first.waitForConnected(3000));
     server.acceptPending();
+    QJsonObject hello;
+    hello["cmd"] = "hello";
+    hello["token"] = token;
+    first.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
+    first.flush();
+    QVERIFY(server.waitForClientData(3000));
+    QVERIFY(server.authed());
 
     QTcpSocket second;
     second.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(second.waitForConnected(3000));
     server.acceptPending();
-    QVERIFY(second.waitForDisconnected(1000));
+    QVERIFY(second.waitForDisconnected(2000));
 
     QCOMPARE(server.connectionCount(), 2);
+}
+
+// A local process that opens the loopback port without the token must not be
+// able to block the real client from connecting and authenticating afterwards.
+void TestHelperIpc::preAuthSquatterDoesNotBlock()
+{
+    const QString token = QStringLiteral("real-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+
+    // Squatter connects first and never sends a valid hello.
+    QTcpSocket squatter;
+    squatter.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
+    QVERIFY(squatter.waitForConnected(3000));
+    server.acceptPending();
+
+    // The real client connects; it displaces the idle squatter and can then
+    // authenticate normally.
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
+    QVERIFY(client.waitForConnected(3000));
+    server.acceptPending();
+    QVERIFY(squatter.waitForDisconnected(2000));
+
+    QJsonObject hello;
+    hello["cmd"] = "hello";
+    hello["token"] = token;
+    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
+    client.flush();
+    QVERIFY(server.waitForClientData(3000));
+    QVERIFY(client.waitForReadyRead(3000));
+    const auto doc = QJsonDocument::fromJson(client.readLine());
+    QVERIFY(doc.isObject());
+    QCOMPARE(doc.object().value("ev").toString(), QStringLiteral("ready"));
+    QVERIFY(server.authed());
 }
 
 void TestHelperIpc::oversizedBufferClosesConnection()

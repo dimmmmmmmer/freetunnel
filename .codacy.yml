@@ -1,8 +1,11 @@
 ---
 # Codacy static analysis (https://app.codacy.com/gh/dimmmmmmmer/freetunnel).
+# Tests are NOT globally excluded: cppcheck/pattern engines run over them so real
+# bugs in test code are caught. They are kept out of the complexity/duplication
+# metric engines below, where test scaffolding legitimately repeats itself.
 exclude_paths:
   - 'ci-artifacts-latest/**'
-  - 'tests/**'
+  - 'tests/**/_*build*/**'
   - '**/_deps/**'
   - '**/build*/**'
   - 'docs/**'
@@ -28,6 +31,8 @@ engines:
       - "--suppress=functionStatic"
       - "--suppress=constParameter"
       - "--suppress=useStlAlgorithm"
+      # Idiomatic for Qt Q_PROPERTY getters (and test mocks) to return by value.
+      - "--suppress=returnByReference"
       - "--inline-suppr"
       - "--library=qt"
       - "-D__linux__"
@@ -46,9 +51,12 @@ engines:
   lizard:
     exclude_paths:
       - 'i18n/**'
+      - 'tests/**'
   metric:
     exclude_paths:
       - 'i18n/**'
+      - 'tests/**'
   duplication:
     exclude_paths:
       - 'i18n/**'
+      - 'tests/**'

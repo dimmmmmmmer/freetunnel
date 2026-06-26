@@ -11,6 +11,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QStandardPaths>
+#include <QUrl>
 
 #include "ReleaseSigning.h"
 #include "ReleaseVerify.h"
@@ -33,6 +34,34 @@ bool signatureVerificationActive()
         return false;
 #endif
     return signatureVerificationConfigured();
+}
+
+// Release assets must be downloaded from GitHub's own hosts. The asset URLs come
+// from the GitHub API JSON, so without this an API/MITM that swapped a
+// browser_download_url could point the installer/manifest at an attacker host.
+// Integrity is still gated by the Ed25519-signed SHA256SUMS, but pinning the
+// host is cheap defense-in-depth (and matters if signing is ever unconfigured).
+bool isTrustedDownloadUrl(const QString &urlStr)
+{
+    const QUrl url(urlStr);
+    if (!url.isValid())
+        return false;
+    const QString host = url.host().toLower();
+#ifdef FT_ENABLE_TEST_HOOKS
+    // When the update endpoint is redirected for tests, allow that same host
+    // (the mock serves assets over http on loopback). Compiled out of releases.
+    const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
+    if (!base.isEmpty()) {
+        const QUrl baseUrl(QString::fromUtf8(base));
+        if (baseUrl.isValid() && !host.isEmpty() && host == baseUrl.host().toLower())
+            return true;
+    }
+#endif
+    if (url.scheme() != QLatin1String("https"))
+        return false;
+    return host == QLatin1String("github.com")
+            || host.endsWith(QLatin1String(".github.com"))
+            || host.endsWith(QLatin1String(".githubusercontent.com"));
 }
 
 QString githubApiUrl(const QString &path)
@@ -116,12 +145,16 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     for (const QJsonValue &val : assets) {
         const QJsonObject asset = val.toObject();
         const QString name = asset.value("name").toString();
+        const QString downloadUrl = asset.value("browser_download_url").toString();
+        // Ignore any asset whose download URL isn't on a GitHub host.
+        if (!isTrustedDownloadUrl(downloadUrl))
+            continue;
         if (name == QLatin1String("SHA256SUMS.txt")) {
-            m_latest.checksumsUrl = asset.value("browser_download_url").toString();
+            m_latest.checksumsUrl = downloadUrl;
             continue;
         }
         if (name == QLatin1String("SHA256SUMS.txt.sig")) {
-            m_latest.signatureUrl = asset.value("browser_download_url").toString();
+            m_latest.signatureUrl = downloadUrl;
             continue;
         }
 #ifdef _WIN32
@@ -131,7 +164,7 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 #else
         if (name.endsWith(".AppImage", Qt::CaseInsensitive) || name.endsWith(".deb", Qt::CaseInsensitive)) {
 #endif
-            m_latest.installerUrl = asset.value("browser_download_url").toString();
+            m_latest.installerUrl = downloadUrl;
             // Basename only — never let a crafted asset name escape the temp dir.
             m_latest.assetName = QFileInfo(name).fileName();
         }
