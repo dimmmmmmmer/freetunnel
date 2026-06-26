@@ -98,6 +98,7 @@ public:
     Q_INVOKABLE void disconnectVpn();
     Q_INVOKABLE void prepareQuit();
     Q_INVOKABLE void quitApplication();
+    Q_INVOKABLE bool applicationClosingDown() const;
     // Handle a control command from a deep link / second instance:
     // "freetunnel://toggle|connect|disconnect" or a "tt://" config import.
     void handleControl(const QString &command);
@@ -273,5 +274,6 @@ private:
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
     bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
-    bool m_quitting = false;      // prepareQuit() already ran — don't re-show the window
+    bool m_quitting = false;      // user requested quit — allow window close on macOS
+    bool m_shutdownPrepared = false; // prepareQuit() already ran
 };

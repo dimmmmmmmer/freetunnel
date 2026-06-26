@@ -279,20 +279,29 @@ void Backend::disconnectVpn() {
 }
 
 void Backend::prepareQuit() {
-    if (m_quitting)
+    if (m_shutdownPrepared)
         return;
-    m_quitting = true;
-    emit aboutToShutdown();
+    m_shutdownPrepared = true;
+    if (!m_quitting) {
+        m_quitting = true;
+        emit aboutToShutdown();
+    }
     unregisterHotkeys();
     m_ticker.stop();
     m_client.shutdown();
     freetunnel::sweepStaleMaterializedConfigs();
 }
 
+bool Backend::applicationClosingDown() const
+{
+    return m_quitting || QCoreApplication::closingDown();
+}
+
 void Backend::quitApplication() {
     if (m_quitting)
         return;
-    prepareQuit();
+    m_quitting = true;
+    emit aboutToShutdown();
     QCoreApplication::exit(0);
 }
 

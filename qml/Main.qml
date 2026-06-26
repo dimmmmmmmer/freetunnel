@@ -29,7 +29,9 @@ Window {
     // directly. Real quit: tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Linux/Windows).
     property bool shuttingDown: false
     onClosing: function(close) {
-        if (shuttingDown) {
+        // macOS Quit / ⌘Q closes windows first; accept during app shutdown.
+        // Red traffic-light close still hides to tray (not a quit).
+        if (shuttingDown || backend.applicationClosingDown()) {
             close.accepted = true
             return
         }
