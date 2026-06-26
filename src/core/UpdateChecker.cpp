@@ -48,21 +48,19 @@ bool isGithubHost(const QString &host)
             || host.endsWith(QLatin1String(".githubusercontent.com"));
 }
 
+#ifdef FT_ENABLE_TEST_HOOKS
+// When the update endpoint is redirected for tests, allow that same host (the
+// mock serves assets over http on loopback). The whole helper — and its call
+// site below — only exist in test-hook builds, never in a shipped binary.
 bool matchesTestBaseHost(const QString &host)
 {
-#ifdef FT_ENABLE_TEST_HOOKS
-    // When the update endpoint is redirected for tests, allow that same host
-    // (the mock serves assets over http on loopback). Compiled out of releases.
     const QByteArray base = qgetenv("FT_GITHUB_API_BASE");
     if (base.isEmpty())
         return false;
     const QUrl baseUrl(QString::fromUtf8(base));
     return baseUrl.isValid() && !host.isEmpty() && host == baseUrl.host().toLower();
-#else
-    Q_UNUSED(host);
-    return false;
-#endif
 }
+#endif
 
 bool isTrustedDownloadUrl(const QString &urlStr)
 {
@@ -70,8 +68,10 @@ bool isTrustedDownloadUrl(const QString &urlStr)
     if (!url.isValid())
         return false;
     const QString host = url.host().toLower();
+#ifdef FT_ENABLE_TEST_HOOKS
     if (matchesTestBaseHost(host))
         return true;
+#endif
     if (url.scheme() != QLatin1String("https"))
         return false;
     return isGithubHost(host);
