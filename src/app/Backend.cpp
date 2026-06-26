@@ -218,6 +218,39 @@ void Backend::toggle() {
         connectVpn();
 }
 
+bool Backend::shouldSkipConnectAttempt() const
+{
+    return !m_reapplying && (m_connected || m_connecting || m_disconnecting);
+}
+
+void Backend::logConnectAttempt()
+{
+    QFile f(m_activePath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(f.readAll()));
+    const bool h3 = c.protocol == QLatin1String("http3");
+    appendLog(QStringLiteral("INFO"),
+              tr("Connecting to %1 [%2] · %3 over %4")
+                      .arg(c.hostname.isEmpty() ? nameForPath(m_activePath) : c.hostname,
+                           c.addresses,
+                           h3 ? QStringLiteral("HTTP/3") : QStringLiteral("HTTP/2"),
+                           h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
+}
+
+bool Backend::loadConnectTomlOrFail(QString *tomlOut)
+{
+    const QString connectToml = freetunnel::buildConnectConfigToml(m_activePath);
+    if (!connectToml.isEmpty()) {
+        *tomlOut = connectToml;
+        return true;
+    }
+    m_connecting = false;
+    emit stateChanged();
+    emit errorOccurred(tr("Config has no password — edit it and try again"));
+    return false;
+}
+
 void Backend::connectVpn() {
     if (m_activePath.isEmpty()) {
         emit errorOccurred(tr("Select a config first"));
@@ -225,7 +258,7 @@ void Backend::connectVpn() {
     }
     // Connect hotkey / deep link: no-op when already up or a session is in flight.
     // reconnectActiveConfig() sets m_reapplying so live rule edits can still rebuild.
-    if (!m_reapplying && (m_connected || m_connecting || m_disconnecting))
+    if (shouldSkipConnectAttempt())
         return;
     // Show "Connecting…" immediately — the helper handshake (and any elevation
     // prompt) can take a few seconds before the core reports a real state.
@@ -234,30 +267,10 @@ void Backend::connectVpn() {
         m_connecting = true;
         emit stateChanged();
     }
-    // Log the endpoint we're dialing (host, address:port, protocol, transport)
-    // so the log is useful even before the core chimes in.
-    {
-        QFile f(m_activePath);
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            const freetunnel::ConfigToml c =
-                    freetunnel::parseConfigToml(QString::fromUtf8(f.readAll()));
-            const bool h3 = c.protocol == QLatin1String("http3");
-            appendLog(QStringLiteral("INFO"),
-                      tr("Connecting to %1 [%2] · %3 over %4")
-                          .arg(c.hostname.isEmpty() ? nameForPath(m_activePath) : c.hostname,
-                               c.addresses,
-                               h3 ? QStringLiteral("HTTP/3") : QStringLiteral("HTTP/2"),
-                               h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
-        }
-    }
-    // Materialize config in memory only — send to the elevated helper over loopback IPC.
-    const QString connectToml = freetunnel::buildConnectConfigToml(m_activePath);
-    if (connectToml.isEmpty()) {
-        m_connecting = false;
-        emit stateChanged();
-        emit errorOccurred(tr("Config has no password — edit it and try again"));
+    logConnectAttempt();
+    QString connectToml;
+    if (!loadConnectTomlOrFail(&connectToml))
         return;
-    }
     m_inConnect = true;
     m_client.loadConfigFromToml(connectToml);
     applySplitRules(); // push domain-bypass rules to the core before connecting

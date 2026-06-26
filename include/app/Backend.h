@@ -244,6 +244,9 @@ private:
     void maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx);
     void applyVpnClientState(VpnHelperClient::State st);
     void clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected);
+    bool shouldSkipConnectAttempt() const;
+    void logConnectAttempt();
+    bool loadConnectTomlOrFail(QString *tomlOut);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

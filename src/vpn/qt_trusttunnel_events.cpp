@@ -79,6 +79,19 @@ static bool skipCoreLogTailLine(const QString &text)
             && text.at(10) == QLatin1Char(' ') && text.at(19) == QLatin1Char('\t');
 }
 
+static bool emitOneCoreLogTailLine(const QByteArray &raw,
+                                   const std::function<void(const QString &)> &emitLine)
+{
+    const QByteArray line = raw.trimmed();
+    if (line.isEmpty())
+        return false;
+    const QString text = QString::fromUtf8(line);
+    if (skipCoreLogTailLine(text))
+        return false;
+    emitLine(text);
+    return true;
+}
+
 void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLines,
                            const std::function<void(const QString &)> &emitLine)
 {
@@ -90,15 +103,9 @@ void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLi
     for (int i = 0; i < carry->size() && emitted < maxLines; ++i) {
         if ((*carry)[i] != '\n')
             continue;
-        const QByteArray raw = carry->mid(start, i - start).trimmed();
+        if (emitOneCoreLogTailLine(carry->mid(start, i - start), emitLine))
+            ++emitted;
         start = i + 1;
-        if (raw.isEmpty())
-            continue;
-        const QString text = QString::fromUtf8(raw);
-        if (skipCoreLogTailLine(text))
-            continue;
-        emitLine(text);
-        ++emitted;
     }
     if (start > 0)
         carry->remove(0, start);
