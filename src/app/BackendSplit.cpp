@@ -3,9 +3,9 @@
 
 #include <QHostAddress>
 #include <QRegularExpression>
-#include <QUrl>
 
 #include "core/AppSettings.h"
+#include "core/BypassRules.h"
 
 #include <algorithm>
 #include <iterator>
@@ -14,88 +14,6 @@ void Backend::setSplitEnabled(bool v) {
     if (m_settings.domain_bypass_enabled == v) return;
     m_settings.domain_bypass_enabled = v;
     persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
-}
-// A bypass rule is valid if it's a domain (optionally wildcard "*.x.y"), or an
-// IP / CIDR subnet.
-static bool isValidIpBypassRule(const QString &rule)
-{
-    const int slash = rule.indexOf(QLatin1Char('/'));
-    const QString addr = slash >= 0 ? rule.left(slash) : rule;
-    if (QHostAddress(addr).isNull())
-        return false;
-    if (slash < 0)
-        return true;
-    bool ok = false;
-    const int p = rule.mid(slash + 1).toInt(&ok);
-    const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
-    return ok && p >= 0 && p <= max;
-}
-
-static bool isValidDomainBypassRule(const QString &rule, bool wildcard)
-{
-    static const QRegularExpression tld(
-        QStringLiteral("^[\\p{L}]{2,63}$"), QRegularExpression::UseUnicodePropertiesOption);
-    if (wildcard && tld.match(rule).hasMatch())
-        return true;
-    static const QRegularExpression fqdn(
-        QStringLiteral("^(?=.{1,253}$)([\\p{L}\\p{N}]([\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?\\.)+"
-                       "[\\p{L}]{2,63}$"),
-        QRegularExpression::UseUnicodePropertiesOption);
-    return fqdn.match(rule).hasMatch();
-}
-
-static bool isValidBypassRule(const QString &rule) {
-    QString r = rule;
-    bool wildcard = false;
-    if (r.startsWith(QLatin1String("*."))) { r = r.mid(2); wildcard = true; }
-    else if (r.startsWith(QLatin1Char('.'))) { r = r.mid(1); wildcard = true; }
-    if (r.isEmpty())
-        return false;
-    if (isValidIpBypassRule(r))
-        return true;
-    return isValidDomainBypassRule(r, wildcard);
-}
-
-static QString punycodeHost(const QString &host)
-{
-    const QByteArray ace = QUrl::toAce(host);
-    return ace.isEmpty() ? host : QString::fromLatin1(ace);
-}
-
-// TrustTunnel's DOMAIN_FILTER rejects TLD-only rules (.ru, *.ru) and bare IDN labels
-// without punycode — keep them in the UI profile but only ship core-compatible rules.
-static QString toCoreBypassRule(const QString &rule)
-{
-    QString r = rule.trimmed();
-    if (r.isEmpty())
-        return {};
-    bool wild = false;
-    if (r.startsWith(QLatin1String("*."))) {
-        wild = true;
-        r = r.mid(2);
-    } else if (r.startsWith(QLatin1Char('.'))) {
-        return {};
-    }
-    if (isValidIpBypassRule(r))
-        return rule.trimmed();
-    if (!r.contains(QLatin1Char('.')))
-        return {};
-    if (!isValidDomainBypassRule(r, wild))
-        return {};
-    const QString ascii = punycodeHost(r);
-    return wild ? QStringLiteral("*.") + ascii : ascii;
-}
-
-static QStringList coreBypassRules(const QStringList &rules)
-{
-    QStringList out;
-    out.reserve(rules.size());
-    for (const QString &rule : rules) {
-        const QString core = toCoreBypassRule(rule);
-        if (!core.isEmpty() && !out.contains(core))
-            out << core;
-    }
-    return out;
 }
 
 bool Backend::addDomain(const QString &domain) {

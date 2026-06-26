@@ -93,6 +93,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
     ../src/core/AppSettings.cpp
+    ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigImport.cpp
@@ -143,6 +144,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
     ../src/core/AppSettings.cpp
+    ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigImport.cpp
@@ -214,9 +216,10 @@ add_test(NAME configimport COMMAND test_configimport)
 add_executable(test_appsettings
     test_appsettings.cpp
     ../src/core/AppSettings.cpp
+    ../src/core/BypassRules.cpp
 )
 target_include_directories(test_appsettings PRIVATE ../include ../include/core)
-target_link_libraries(test_appsettings PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(test_appsettings PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME appsettings COMMAND test_appsettings)
 
 add_executable(test_configstore
@@ -383,6 +386,7 @@ set(BACKEND_TEST_SOURCES
     ../src/app/BackendConfigShared.cpp
     ../src/app/BackendSplit.cpp
     ../src/core/AppSettings.cpp
+    ../src/core/BypassRules.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigImport.cpp

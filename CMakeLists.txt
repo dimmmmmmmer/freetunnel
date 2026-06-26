@@ -79,6 +79,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/app/Backend.h
     src/core/AppSettings.cpp
     include/core/AppSettings.h
+    src/core/BypassRules.cpp
+    include/core/BypassRules.h
     src/core/ConfigStore.cpp
     include/core/ConfigStore.h
     src/core/DeepLink.cpp

@@ -10,10 +10,10 @@ import "components"
 Window {
     id: win
     visible: true
-    // Default size; 400px min keeps frameless nav clear of window controls on Linux/Windows.
-    width: 400
+    // Default size; min width keeps frameless nav clear of window controls on Linux/Windows.
+    width: 388
     height: 460
-    minimumWidth: 400
+    minimumWidth: 388
     minimumHeight: 460
     color: theme.bg
     title: "FreeTunnel"
@@ -22,7 +22,9 @@ Window {
     // with our own window controls + drag/resize, so the chrome matches macOS.
     readonly property bool isMac: Qt.platform.os === "osx"
     // Custom min/max/close on frameless Linux/Windows (must match nav offset below).
-    readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
+    readonly property int framelessChromeWidth: 114 // 9 + 3×30 + 2×3 + 9
+    // macOS traffic lights sit in the left title-bar inset.
+    readonly property int macTitlebarInset: 78
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // macOS red button hides to tray; Linux/Windows custom ✕ calls hide()
@@ -212,7 +214,7 @@ Window {
     // the empty top band and starts a native window move.
     MouseArea {
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-        height: Qt.platform.os === "osx" ? 70 : 52
+        height: Qt.platform.os === "osx" ? 72 : 56
         onPressed: backend.startWindowDrag(win)
     }
 
@@ -289,21 +291,21 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: Qt.platform.os === "osx" ? 26 : 36
-            Layout.bottomMargin: 6
+            Layout.topMargin: win.isMac ? 34 : 40
+            Layout.bottomMargin: 8
             spacing: 0
 
-            // Mirror the top-right window controls on the left so the nav sits
-            // in the true horizontal centre of the title bar (Linux/Windows).
-            Item { Layout.preferredWidth: win.isMac ? 0 : win.framelessChromeWidth
-                   Layout.maximumWidth: win.isMac ? 0 : win.framelessChromeWidth }
+            // Asymmetric insets: reserve the right side for min/max/close (Linux/Windows)
+            // and the left for traffic lights (macOS).
+            Item { Layout.preferredWidth: win.isMac ? win.macTitlebarInset : 56
+                   Layout.maximumWidth: win.isMac ? win.macTitlebarInset : 56 }
 
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 38
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 8
+                    spacing: 6
                     Repeater {
                         model: win.navIcons
                         Rectangle {
@@ -311,7 +313,7 @@ Window {
                             required property int index
                             required property string modelData
                             property bool active: index === win.currentPage
-                            width: 46; height: 38; radius: 8
+                            width: 42; height: 38; radius: 8
                             color: theme.bg
                             Rectangle {
                                 anchors.fill: parent; radius: parent.radius; color: theme.surface
@@ -354,8 +356,8 @@ Window {
                 }
             }
 
-            Item { Layout.preferredWidth: win.isMac ? 0 : win.framelessChromeWidth
-                   Layout.maximumWidth: win.isMac ? 0 : win.framelessChromeWidth }
+            Item { Layout.preferredWidth: win.isMac ? 12 : (win.framelessChromeWidth + 12)
+                   Layout.maximumWidth: win.isMac ? 12 : (win.framelessChromeWidth + 12) }
         }
 
         Loader {

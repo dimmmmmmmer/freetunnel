@@ -4,6 +4,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#include "core/BypassRules.h"
+
 static QString defaultLogPath() {
     // Keep the log in the per-user app data dir (owner-only). A predictable,
     // world-writable path like /tmp/freetunnel.log lets another local user
@@ -27,11 +29,8 @@ QStringList defaultExcludedRoutes() {
 }
 
 QStringList recommendedRussiaDomains() {
-    // Curated set of RU services that work best routed through the VPN. Mirrors
-    // the preset shipped by the native client.
-    return {
-        QStringLiteral("*.ru"), QStringLiteral(".ru"), QStringLiteral("*.рф"), QStringLiteral(".рф"),
-        QStringLiteral("*.su"), QStringLiteral(".su"),
+    // RU services that TrustTunnel's DOMAIN_FILTER accepts (no TLD-only *.ru / .ru).
+    return sanitizedBypassRules({
         QStringLiteral("yandex.ru"), QStringLiteral("*.yandex.ru"), QStringLiteral("ya.ru"),
         QStringLiteral("*.ya.ru"), QStringLiteral("yastatic.net"), QStringLiteral("*.yastatic.net"),
         QStringLiteral("yandex.net"), QStringLiteral("*.yandex.net"),
@@ -72,7 +71,7 @@ QStringList recommendedRussiaDomains() {
         QStringLiteral("open.ru"), QStringLiteral("*.open.ru"),
         QStringLiteral("psbank.ru"), QStringLiteral("*.psbank.ru"),
         QStringLiteral("rosselkhozbank.ru"), QStringLiteral("*.rosselkhozbank.ru"),
-        QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")};
+        QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")});
 }
 
 static QStringList domainsForProfileName(const QSettings &s, const QString &n,
@@ -95,12 +94,12 @@ static void loadProfileMap(const QSettings &s, AppSettings &out)
     const QStringList legacy = s.value("bypass/rules", QStringList{}).toStringList();
     out.profiles.clear();
     for (const QString &n : names)
-        out.profiles.insert(n, domainsForProfileName(s, n, names, legacy));
+        out.profiles.insert(n, sanitizedBypassRules(domainsForProfileName(s, n, names, legacy)));
     if (out.profiles.isEmpty())
         out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
     if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
             && names == QStringList{QStringLiteral("Default")})
-        out.profiles[QStringLiteral("Default")] = legacy;
+        out.profiles[QStringLiteral("Default")] = sanitizedBypassRules(legacy);
 }
 
 static QStringList mergedProfileOrder(const QSettings &s, const QStringList &names,

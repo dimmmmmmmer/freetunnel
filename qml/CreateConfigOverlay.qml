@@ -19,8 +19,8 @@ Item {
     Rectangle {
         id: cform
         anchors.centerIn: parent
-        width: Math.min(parent.width - 28, 380)
-        height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 10)
+        width: Math.min(parent.width - 28, 360)
+        height: Math.min(parent.height - 36, fcol.implicitHeight + chdr.height + 28)
         radius: 14; color: theme.bg; border.color: theme.border; border.width: 1
         // Clicking empty card space clears focus from any text field.
         TapHandler { onTapped: cform.forceActiveFocus() }
@@ -134,7 +134,8 @@ Item {
                     nameFilters: ["PEM (*.pem *.crt *.cer)", qsTr("All files (*)")]
                     onAccepted: fCert.text = backend.readTextFile(certFileDlg.file.toString())
                 }
-                Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8; topPadding: 4; bottomPadding: 4
+                Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8
+                        topPadding: 8; bottomPadding: 20
                     Rectangle { width: 88; height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }

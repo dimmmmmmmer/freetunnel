@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 
 #include "core/AppSettings.h"
+#include "core/BypassRules.h"
 
 // Round-trip coverage for the settings store, including the global-hotkey
 // fields. QSettings is redirected to a temp dir so the test never touches the
@@ -40,6 +41,8 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.killswitch_enabled, true);
     QCOMPARE(s.domain_bypass_enabled, true);
     QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
+    QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral("*.ru")));
+    QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral(".ru")));
     QCOMPARE(s.hotkeys_enabled, true);
     QCOMPARE(s.hotkey_toggle, QStringLiteral("Ctrl+Shift+T"));
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
