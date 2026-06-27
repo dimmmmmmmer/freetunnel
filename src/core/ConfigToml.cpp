@@ -31,9 +31,9 @@ static QString csvToTomlArray(const QString &csv) {
     return items.join(QStringLiteral(", "));
 }
 
-QString buildConfigToml(const ConfigToml &c) {
+QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     QString t;
-    t += QStringLiteral("loglevel = \"info\"\n");
+    t += QStringLiteral("loglevel = \"%1\"\n").arg(logLevel);
     t += QStringLiteral("vpn_mode = \"general\"\n");
     t += QStringLiteral("killswitch_enabled = false\n");
     t += QStringLiteral("post_quantum_group_enabled = true\n");

@@ -44,6 +44,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString latestVersion READ latestVersion CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool verboseLogs READ verboseLogs WRITE setVerboseLogs NOTIFY settingsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings CONSTANT)
 
@@ -77,6 +78,13 @@ public:
         if (m_loggingEnabled == v)
             return;
         m_loggingEnabled = v;
+        emit settingsChanged();
+    }
+    bool verboseLogs() const { return m_verboseLogs; }
+    void setVerboseLogs(bool v) {
+        if (m_verboseLogs == v)
+            return;
+        m_verboseLogs = v;
         emit settingsChanged();
     }
 
@@ -178,6 +186,7 @@ private:
     bool m_autoConnect = false;
     bool m_killSwitch = false;
     bool m_loggingEnabled = true;
+    bool m_verboseLogs = false;
     LogModel m_logModel;
     bool m_splitEnabled = false;
     QString m_vpnMode = QStringLiteral("general");

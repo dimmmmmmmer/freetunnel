@@ -401,7 +401,7 @@ bool migrateConfigPassword(const QString &configPath)
     return writeConfigText(abs, buildConfigToml(c));
 }
 
-QString buildConnectConfigToml(const QString &configPath)
+QString buildConnectConfigToml(const QString &configPath, const QString &logLevel)
 {
     const QString abs = QFileInfo(configPath).absoluteFilePath();
     migrateConfigPassword(abs);
@@ -411,7 +411,7 @@ QString buildConnectConfigToml(const QString &configPath)
         c.password = CredentialStore::loadPassword(CredentialStore::keyForConfigPath(abs));
     if (c.password.isEmpty())
         return QString();
-    return buildConfigToml(c);
+    return buildConfigToml(c, logLevel);
 }
 
 QString materializeConfigForConnect(const QString &configPath)

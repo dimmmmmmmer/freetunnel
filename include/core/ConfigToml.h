@@ -26,7 +26,7 @@ struct ConfigToml {
 };
 
 // Render a ConfigToml to the client TOML format.
-QString buildConfigToml(const ConfigToml &c);
+QString buildConfigToml(const ConfigToml &c, const QString &logLevel = QStringLiteral("info"));
 
 // Parse a client TOML back into a ConfigToml (endpoint fields only).
 ConfigToml parseConfigToml(const QString &toml);

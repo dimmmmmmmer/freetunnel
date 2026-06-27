@@ -22,6 +22,17 @@ void Backend::setLoggingEnabled(bool v) {
     emit settingsChanged();
 }
 
+void Backend::setVerboseLogs(bool v) {
+    if (m_settings.verbose_logs == v)
+        return;
+    m_settings.verbose_logs = v;
+    persistSettings();
+    emit settingsChanged();
+    // The core's log level is baked into the config at connect time; reconnect
+    // seamlessly so the change takes effect right away if a tunnel is up.
+    reapplyIfConnected();
+}
+
 // cppcheck-suppress functionStatic
 bool Backend::autoStart() const {
     return freetunnel::platformAutoStartEnabled();

@@ -236,7 +236,9 @@ void Backend::logConnectAttempt()
 
 bool Backend::loadConnectTomlOrFail(QString *tomlOut)
 {
-    const QString connectToml = freetunnel::buildConnectConfigToml(m_activePath);
+    const QString connectToml = freetunnel::buildConnectConfigToml(
+            m_activePath,
+            m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
     if (!connectToml.isEmpty()) {
         *tomlOut = connectToml;
         return true;

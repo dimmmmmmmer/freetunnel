@@ -22,7 +22,9 @@ public:
 bool migrateConfigPassword(const QString &configPath);
 
 // Build a helper-readable config TOML with password injected (in-memory only).
-QString buildConnectConfigToml(const QString &configPath);
+// logLevel sets the core's verbosity ("warn" by default; "info" for debug logs).
+QString buildConnectConfigToml(const QString &configPath,
+                               const QString &logLevel = QStringLiteral("warn"));
 // Build a helper-readable config path (temp file with password injected when needed).
 QString materializeConfigForConnect(const QString &configPath);
 void removeMaterializedConfig(const QString &materializedPath);

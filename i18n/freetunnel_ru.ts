@@ -588,6 +588,14 @@
         <source>app and VPN core share one log file</source>
         <translation>приложение и VPN-ядро пишут в один файл</translation>
     </message>
+    <message>
+        <source>Verbose logs</source>
+        <translation>Подробные логи</translation>
+    </message>
+    <message>
+        <source>full VPN core detail for debugging (noisy)</source>
+        <translation>полная детализация ядра VPN для отладки (шумно)</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>

@@ -168,6 +168,17 @@ Item {
                 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.loggingEnabled
                          onToggled: function(v){ backend.loggingEnabled = v } } }
+            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; enabled: backend.loggingEnabled
+                opacity: backend.loggingEnabled ? 1 : 0.45
+                ColumnLayout {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("Verbose logs"); color: theme.text; font.pixelSize: 14 }
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("full VPN core detail for debugging (noisy)"); color: theme.textFaint; font.pixelSize: 12 }
+                }
+                Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.verboseLogs
+                         onToggled: function(v){ backend.verboseLogs = v } } }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
             Item { Layout.fillWidth: true; Layout.preferredHeight: 42
