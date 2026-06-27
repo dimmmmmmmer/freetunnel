@@ -100,6 +100,8 @@ void QtTrustTunnelClient::teardownClient() {
 
 void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
+    // m_logLevel is set from the config TOML's loglevel in the load functions
+    // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
     m_config->loglevel = m_logLevel;
     ag::Logger::set_log_level(m_logLevel);
     if (std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
@@ -149,6 +151,17 @@ void QtTrustTunnelClient::setSessionLogging(const QString &path, bool enabled)
         stopCoreLogTail();
 }
 
+// The core's build_config may not surface the TOML `loglevel`, so read it back
+// ourselves and use it as the client log level. The GUI sets it from the
+// Verbose-logs toggle (warn by default, info when on); without this the core
+// stayed pinned at the default level and the toggle did nothing.
+static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fallback)
+{
+    if (const auto lvl = t["loglevel"].value<std::string>())
+        return qt_trusttunnel_parse_log_level(QString::fromStdString(*lvl));
+    return fallback;
+}
+
 bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
     const std::string configPath = path.toStdString();
     toml::parse_result parsed = toml::parse_file(configPath);
@@ -169,6 +182,7 @@ bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
 
     m_lastConfigPath = path;
     m_lastConfigToml.clear();
+    m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
     setConfig(std::move(*config));
     setState(State::Disconnected);
     return true;
@@ -198,6 +212,7 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
 
     m_lastConfigPath.clear();
     m_lastConfigToml = tomlContent;
+    m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
     setConfig(std::move(*config));
     setState(State::Disconnected);
     return true;
