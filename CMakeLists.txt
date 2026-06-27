@@ -134,6 +134,46 @@ target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
 )
 
+# --- Build hardening -------------------------------------------------------
+# Defense-in-depth for a process that parses untrusted network/IPC/TLV input in
+# C++. Scoped to the FreeTunnel target only (PRIVATE) so the VPN core, built as a
+# parent project, is unaffected. Flags are probed before use so an unusual
+# toolchain (e.g. Apple clang lacking -fstack-clash-protection) just skips them.
+include(CheckCXXCompilerFlag)
+function(ft_add_cxx_flag_if_supported tgt flag)
+    string(MAKE_C_IDENTIFIER "FT_HAS${flag}" _var)
+    check_cxx_compiler_flag("${flag}" ${_var})
+    if(${_var})
+        target_compile_options(${tgt} PRIVATE ${flag})
+    endif()
+endfunction()
+
+if(MSVC)
+    target_compile_options(FreeTunnel PRIVATE /W4 /guard:cf /sdl)
+    target_link_options(FreeTunnel PRIVATE /guard:cf /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA)
+else()
+    target_compile_options(FreeTunnel PRIVATE -Wall -Wextra)
+    foreach(_f -fstack-protector-strong -Wformat -Wformat-security)
+        ft_add_cxx_flag_if_supported(FreeTunnel ${_f})
+    endforeach()
+    # Apple clang accepts -fstack-clash-protection but no-ops it (warns per file),
+    # so probe it only where it actually does something.
+    if(UNIX AND NOT APPLE)
+        ft_add_cxx_flag_if_supported(FreeTunnel -fstack-clash-protection)
+    endif()
+    # _FORTIFY_SOURCE only does anything in an optimizing build, and redefining it
+    # (some distros pre-define it) warns — so undefine first, optimized configs only.
+    target_compile_options(FreeTunnel PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>)
+    if(UNIX AND NOT APPLE)
+        # Full RELRO + non-executable stack on Linux.
+        target_link_options(FreeTunnel PRIVATE LINKER:-z,relro LINKER:-z,now LINKER:-z,noexecstack)
+    endif()
+endif()
+# Position-independent executable (explicit; default on macOS, enforced on Linux).
+set_target_properties(FreeTunnel PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(FreeTunnel PRIVATE
     include
     include/app

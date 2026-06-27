@@ -205,6 +205,10 @@ void UpdateChecker::downloadLatest()
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
             + QStringLiteral("/freetunnel-update");
     QDir().mkpath(dir);
+    // Owner-only: the installer is verified (Ed25519 + SHA-256) and then executed,
+    // so keep other local users from swapping it in the window between the two.
+    QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                       | QFileDevice::ExeOwner);
     m_downloadPath = QDir(dir).filePath(m_latest.assetName);
 
     // Never install an asset we can't integrity-check. A release without a

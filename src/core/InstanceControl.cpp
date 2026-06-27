@@ -26,8 +26,12 @@ const QString kInstanceAuthKey = QStringLiteral("__freetunnel_instance_auth__");
 
 QString randomInstanceToken()
 {
-    return QString::number(QRandomGenerator::system()->generate64(), 16)
-            + QString::number(QRandomGenerator::system()->generate64(), 16);
+    // Zero-pad each 64-bit half to a fixed 16 hex chars: QString::number(…, 16)
+    // drops leading-zero nibbles, which would let the token length vary between
+    // runs and shave bits off the worst case. Matches the helper IPC token.
+    return QStringLiteral("%1%2")
+            .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'))
+            .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'));
 }
 
 } // namespace

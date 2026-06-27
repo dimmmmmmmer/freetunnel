@@ -15,6 +15,7 @@ private slots:
     void escapesQuotes();
     void emptyCertificate();
     void defaultsProtocol();
+    void boolFlagsAreLineAnchored();
 };
 
 void TestConfigToml::roundTrip() {
@@ -74,6 +75,27 @@ void TestConfigToml::defaultsProtocol() {
     // Unknown protocol falls back to http2.
     in.protocol = "weird";
     QVERIFY(buildConfigToml(in).contains("upstream_protocol = \"http2\""));
+}
+
+void TestConfigToml::boolFlagsAreLineAnchored() {
+    // A `skip_verification = true` substring sitting inside another value (e.g. a
+    // pasted certificate body) must NOT flip the real flag — it's only honored
+    // when it stands alone at the start of a line.
+    const QString toml = QStringLiteral(
+            "skip_verification = false\n"
+            "has_ipv6 = true\n"
+            "anti_dpi = false\n"
+            "certificate = \"\"\"\n"
+            "note: skip_verification = true anti_dpi = true has_ipv6 = false\n"
+            "\"\"\"\n");
+    const ConfigToml c = parseConfigToml(toml);
+    QCOMPARE(c.skipVerification, false);
+    QCOMPARE(c.antiDpi, false);
+    QCOMPARE(c.allowIpv6, true);
+
+    // And a genuine line-anchored flag is still read.
+    ConfigToml on = parseConfigToml(QStringLiteral("skip_verification = true\n"));
+    QCOMPARE(on.skipVerification, true);
 }
 
 QTEST_MAIN(TestConfigToml)

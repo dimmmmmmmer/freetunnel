@@ -92,9 +92,18 @@ ConfigToml parseConfigToml(const QString &toml) {
     c.dns = arr("dns_upstreams");
     c.customSni = str("custom_sni");
     c.clientRandom = str("client_random");
-    c.allowIpv6 = !toml.contains(QStringLiteral("has_ipv6 = false"));
-    c.skipVerification = toml.contains(QStringLiteral("skip_verification = true"));
-    c.antiDpi = toml.contains(QStringLiteral("anti_dpi = true"));
+    // Anchored to the start of a line so a `true`/`false` token sitting inside the
+    // certificate block or a comment can't flip a flag (skip_verification in
+    // particular is security-significant — it disables server cert checking).
+    auto boolKey = [&](const char *key, bool dflt) -> bool {
+        const QRegularExpression re(
+                QStringLiteral("(?m)^%1\\s*=\\s*(true|false)\\b").arg(QLatin1String(key)));
+        const auto m = re.match(toml);
+        return m.hasMatch() ? (m.captured(1) == QLatin1String("true")) : dflt;
+    };
+    c.allowIpv6 = boolKey("has_ipv6", true);
+    c.skipVerification = boolKey("skip_verification", false);
+    c.antiDpi = boolKey("anti_dpi", false);
     static const QRegularExpression certRe(
             QStringLiteral("certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
             QRegularExpression::DotMatchesEverythingOption);
