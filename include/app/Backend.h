@@ -218,6 +218,8 @@ private:
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings
+    QHotkey *makeHotkey(const QString &seq, const QString &label, void (Backend::*slot)(),
+                        const QString &platform); // bind one hotkey + log the outcome
     void unregisterHotkeys();
     void wireHotkeyLifecycle();
     void ensureHotkeysRegistered();

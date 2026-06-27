@@ -71,32 +71,34 @@ void Backend::registerHotkeys() {
         return;
     }
     const QString platform = QGuiApplication::platformName();
-    auto make = [this, &platform](const QString &seq, const QString &label,
-                                  void (Backend::*slot)()) -> QHotkey * {
-        const QString s = seq.trimmed();
-        if (s.isEmpty())
-            return nullptr;
-        QKeySequence ks(s);
-        if (ks.isEmpty()) {
-            appendLog(QStringLiteral("WARN"),
-                      tr("Hotkey “%1” (%2) is not a valid key sequence — ignored.").arg(s, label));
-            return nullptr;
-        }
-        auto *hk = new QHotkey(ks, true /*autoRegister*/, this);
-        connect(hk, &QHotkey::activated, this, slot);
-        if (hk->isRegistered()) {
-            appendLog(QStringLiteral("INFO"),
-                      tr("Hotkey “%1” (%2) registered [%3].").arg(s, label, platform));
-        } else {
-            appendLog(QStringLiteral("WARN"),
-                      tr("Hotkey “%1” (%2) could not be registered [%3] — it may be in use "
-                         "by another app or the desktop.").arg(s, label, platform));
-        }
-        return hk;
-    };
-    m_hkToggle = make(m_settings.hotkey_toggle, tr("Toggle VPN"), &Backend::toggle);
-    m_hkConnect = make(m_settings.hotkey_connect, tr("Connect"), &Backend::connectVpn);
-    m_hkDisconnect = make(m_settings.hotkey_disconnect, tr("Disconnect"), &Backend::disconnectVpn);
+    m_hkToggle = makeHotkey(m_settings.hotkey_toggle, tr("Toggle VPN"), &Backend::toggle, platform);
+    m_hkConnect = makeHotkey(m_settings.hotkey_connect, tr("Connect"), &Backend::connectVpn, platform);
+    m_hkDisconnect =
+            makeHotkey(m_settings.hotkey_disconnect, tr("Disconnect"), &Backend::disconnectVpn, platform);
+}
+
+QHotkey *Backend::makeHotkey(const QString &seq, const QString &label,
+                             void (Backend::*slot)(), const QString &platform) {
+    const QString s = seq.trimmed();
+    if (s.isEmpty())
+        return nullptr;
+    QKeySequence ks(s);
+    if (ks.isEmpty()) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("Hotkey “%1” (%2) is not a valid key sequence — ignored.").arg(s, label));
+        return nullptr;
+    }
+    auto *hk = new QHotkey(ks, true /*autoRegister*/, this);
+    connect(hk, &QHotkey::activated, this, slot);
+    if (hk->isRegistered()) {
+        appendLog(QStringLiteral("INFO"),
+                  tr("Hotkey “%1” (%2) registered [%3].").arg(s, label, platform));
+    } else {
+        appendLog(QStringLiteral("WARN"),
+                  tr("Hotkey “%1” (%2) could not be registered [%3] — it may be in use "
+                     "by another app or the desktop.").arg(s, label, platform));
+    }
+    return hk;
 }
 
 void Backend::ensureHotkeysRegistered()
