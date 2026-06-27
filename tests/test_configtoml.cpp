@@ -28,6 +28,8 @@ void TestConfigToml::roundTrip() {
     in.customSni = "example.org";
     in.clientRandom = "deadbeef";
     in.allowIpv6 = false;
+    in.skipVerification = true;
+    in.antiDpi = true;
     in.certificate = "-----BEGIN-----\nabc\n-----END-----";
 
     const ConfigToml out = parseConfigToml(buildConfigToml(in));
@@ -40,6 +42,8 @@ void TestConfigToml::roundTrip() {
     QCOMPARE(out.customSni, in.customSni);
     QCOMPARE(out.clientRandom, in.clientRandom);
     QCOMPARE(out.allowIpv6, false);
+    QCOMPARE(out.skipVerification, true);
+    QCOMPARE(out.antiDpi, true);
     QCOMPARE(out.certificate, in.certificate);
 }
 

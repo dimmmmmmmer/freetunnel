@@ -21,6 +21,8 @@ struct ConfigToml {
     QString clientRandom;
     QString certificate; // PEM body, optional
     bool allowIpv6 = true;
+    bool skipVerification = false; // accept the server's TLS cert without validation
+    bool antiDpi = false;          // enable the core's anti-DPI obfuscation
 };
 
 // Render a ConfigToml to the client TOML format.

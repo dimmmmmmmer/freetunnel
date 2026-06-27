@@ -108,6 +108,8 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
 {
     out->ct.protocol = f.value(QStringLiteral("protocol"), QStringLiteral("http2")).toString();
     out->ct.allowIpv6 = f.value(QStringLiteral("allowIpv6"), true).toBool();
+    out->ct.skipVerification = f.value(QStringLiteral("skipVerification"), false).toBool();
+    out->ct.antiDpi = f.value(QStringLiteral("antiDpi"), false).toBool();
     out->ct.certificate = f.value(QStringLiteral("certificate")).toString().trimmed();
     out->ct.dns = f.value(QStringLiteral("dns")).toString();
     out->ct.customSni = f.value(QStringLiteral("customSni")).toString();

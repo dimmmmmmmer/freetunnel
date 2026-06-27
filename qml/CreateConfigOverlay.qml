@@ -36,13 +36,15 @@ Item {
         TapHandler { onTapped: cform.forceActiveFocus() }
         property string protocol: "http2"
         property bool ipv6: true
+        property bool skipVerification: false
+        property bool antiDpi: false
         property string splitProfile: "Default"
         property string snap: ""
         readonly property bool editing: shell.editIndex >= 0
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
                     protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
-                    splitProfile].join("")
+                    skipVerification, antiDpi, splitProfile].join("")
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
@@ -57,6 +59,8 @@ Item {
                 fCert.text = f.certificate || ""
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
+                cform.skipVerification = f.skipVerification === true
+                cform.antiDpi = f.antiDpi === true
                 cform.splitProfile = f.splitProfile || "Default"
             }
             snap = snapshot()
@@ -125,6 +129,20 @@ Item {
                              anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                              onToggled: function(v){ cform.ipv6 = v } }
                 }
+                Item { width: parent.width; height: 32
+                    Text { text: qsTr("Skip certificate check"); color: theme.textDim; font.pixelSize: 13
+                           anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
+                    Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: cform.skipVerification
+                             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                             onToggled: function(v){ cform.skipVerification = v } }
+                }
+                Item { width: parent.width; height: 32
+                    Text { text: qsTr("Anti-DPI"); color: theme.textDim; font.pixelSize: 13
+                           anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
+                    Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: cform.antiDpi
+                             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                             onToggled: function(v){ cform.antiDpi = v } }
+                }
                 Column { width: parent.width; spacing: 4
                     Item { width: parent.width; height: certLoad.implicitHeight
                         Text { id: certLoad; anchors.right: parent.right; text: qsTr("Load from file…"); font.pixelSize: 12
@@ -155,7 +173,8 @@ Item {
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
-                                allowIpv6: cform.ipv6, certificate: fCert.text,
+                                allowIpv6: cform.ipv6, skipVerification: cform.skipVerification,
+                                antiDpi: cform.antiDpi, certificate: fCert.text,
                                 splitProfile: cform.splitProfile, editIndex: shell.editIndex });
                             if (ok) cform.close()
                         } } }

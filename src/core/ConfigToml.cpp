@@ -47,9 +47,9 @@ QString buildConfigToml(const ConfigToml &c) {
     t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEsc(c.clientRandom));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEsc(c.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(c.allowIpv6 ? "true" : "false");
-    t += QStringLiteral("skip_verification = false\n");
+    t += QStringLiteral("skip_verification = %1\n").arg(c.skipVerification ? "true" : "false");
     t += QStringLiteral("upstream_protocol = \"%1\"\n").arg(c.protocol == "http3" ? "http3" : "http2");
-    t += QStringLiteral("anti_dpi = false\n");
+    t += QStringLiteral("anti_dpi = %1\n").arg(c.antiDpi ? "true" : "false");
     if (!c.certificate.trimmed().isEmpty())
         t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n").arg(c.certificate.trimmed());
     else
@@ -93,6 +93,8 @@ ConfigToml parseConfigToml(const QString &toml) {
     c.customSni = str("custom_sni");
     c.clientRandom = str("client_random");
     c.allowIpv6 = !toml.contains(QStringLiteral("has_ipv6 = false"));
+    c.skipVerification = toml.contains(QStringLiteral("skip_verification = true"));
+    c.antiDpi = toml.contains(QStringLiteral("anti_dpi = true"));
     static const QRegularExpression certRe(
             QStringLiteral("certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
             QRegularExpression::DotMatchesEverythingOption);

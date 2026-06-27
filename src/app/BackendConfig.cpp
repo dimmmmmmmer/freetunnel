@@ -151,6 +151,8 @@ QVariantMap Backend::configFields(int index) const
     f[QStringLiteral("customSni")] = c.customSni;
     f[QStringLiteral("clientRandom")] = c.clientRandom;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
+    f[QStringLiteral("skipVerification")] = c.skipVerification;
+    f[QStringLiteral("antiDpi")] = c.antiDpi;
     f[QStringLiteral("certificate")] = c.certificate;
     const QString prof = m_settings.config_profiles.value(configPath);
     f[QStringLiteral("splitProfile")] =
