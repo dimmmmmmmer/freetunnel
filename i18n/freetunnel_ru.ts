@@ -163,10 +163,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hotkey “%1” (%2) could not be registered — it may be in use by another app.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Toggle VPN</source>
         <translation type="unfinished">Переключить VPN</translation>
     </message>
@@ -177,6 +173,22 @@
     <message>
         <source>Disconnect</source>
         <translation type="unfinished">Отключить</translation>
+    </message>
+    <message>
+        <source>Global hotkeys are not supported under Wayland. Log in to an X11/Xorg session (or run with QT_QPA_PLATFORM=xcb) to use them.</source>
+        <translation>Глобальные горячие клавиши не поддерживаются в Wayland. Войдите в сессию X11/Xorg (или запустите с QT_QPA_PLATFORM=xcb), чтобы использовать их.</translation>
+    </message>
+    <message>
+        <source>Hotkey “%1” (%2) is not a valid key sequence — ignored.</source>
+        <translation>Горячая клавиша «%1» (%2) — некорректная комбинация, игнорируется.</translation>
+    </message>
+    <message>
+        <source>Hotkey “%1” (%2) registered [%3].</source>
+        <translation>Горячая клавиша «%1» (%2) зарегистрирована [%3].</translation>
+    </message>
+    <message>
+        <source>Hotkey “%1” (%2) could not be registered [%3] — it may be in use by another app or the desktop.</source>
+        <translation>Горячую клавишу «%1» (%2) не удалось зарегистрировать [%3] — возможно, занята другим приложением или системой.</translation>
     </message>
 </context>
 <context>
@@ -595,6 +607,10 @@
     <message>
         <source>full VPN core detail for debugging (noisy)</source>
         <translation>полная детализация ядра VPN для отладки (шумно)</translation>
+    </message>
+    <message>
+        <source>Not available under Wayland — use an X11/Xorg session</source>
+        <translation>Недоступно в Wayland — используйте сессию X11/Xorg</translation>
     </message>
 </context>
 <context>
