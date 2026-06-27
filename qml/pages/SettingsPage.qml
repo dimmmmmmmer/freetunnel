@@ -136,15 +136,25 @@ Item {
 
             SectionLabel { text: qsTr("Hotkeys"); theme: settingsRoot.theme }
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
-                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
-                       text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
-                Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.hotkeysEnabled
+                ColumnLayout {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
+                    // Wayland can't deliver global hotkeys — say so where it's off.
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight; visible: !backend.hotkeysSupported
+                           text: qsTr("Not available under Wayland — use an X11/Xorg session")
+                           color: theme.textFaint; font.pixelSize: 12 }
+                }
+                Toggle { accent: theme.accent; offColor: theme.toggleOff
+                         enabled: backend.hotkeysSupported
+                         checked: backend.hotkeysSupported && backend.hotkeysEnabled
                          onToggled: function(v){ backend.hotkeysEnabled = v } } }
-            // The shortcut fields dim out while the feature is off.
+            // The shortcut fields dim out while the feature is off or unavailable.
             Item { Layout.fillWidth: true; implicitHeight: hkCol.implicitHeight
-                opacity: backend.hotkeysEnabled ? 1.0 : 0.4
+                readonly property bool hkActive: backend.hotkeysSupported && backend.hotkeysEnabled
+                opacity: hkActive ? 1.0 : 0.4
                 Behavior on opacity { NumberAnimation { duration: 150 } }
-                enabled: backend.hotkeysEnabled
+                enabled: hkActive
                 ColumnLayout { id: hkCol; anchors.left: parent.left; anchors.right: parent.right; spacing: 0
                     HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle; shell: settingsRoot.shell; theme: settingsRoot.theme
                         onCaptured: function(s){ backend.hotkeyToggle = s } }

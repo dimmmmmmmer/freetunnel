@@ -12,6 +12,8 @@ Rectangle {
     implicitWidth: 38
     implicitHeight: 22
     radius: height / 2
+    // Dim when disabled (e.g. a feature the platform can't provide).
+    opacity: enabled ? 1.0 : 0.45
     color: checked ? accent : offColor
     border.width: checked ? 0 : 1
     border.color: Qt.rgba(0, 0, 0, 0.18)

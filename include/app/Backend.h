@@ -52,6 +52,9 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
+    // hotkeysSupported is false where the platform can't deliver global hotkeys
+    // (Wayland) so the UI can disable the feature outright. Fixed for the session.
+    Q_PROPERTY(bool hotkeysSupported READ hotkeysSupported CONSTANT)
     Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
@@ -151,6 +154,7 @@ public:
     Q_INVOKABLE void removeProfile(const QString &name);
     Q_INVOKABLE void renameProfile(const QString &oldName, const QString &newName);
 
+    bool hotkeysSupported() const;
     bool hotkeysEnabled() const { return m_settings.hotkeys_enabled; }
     void setHotkeysEnabled(bool v);
     const QString &hotkeyToggle() const { return m_settings.hotkey_toggle; }
@@ -159,6 +163,10 @@ public:
     void setHotkeyToggle(const QString &v);
     void setHotkeyConnect(const QString &v);
     void setHotkeyDisconnect(const QString &v);
+    // Maps a key's physical position (QKeyEvent::nativeScanCode) to its Latin
+    // letter "A".."Z", or "" if it isn't a letter key. Lets hotkey capture work
+    // under a non-Latin layout (e.g. Russian), where key()/text() are Cyrillic.
+    Q_INVOKABLE QString physicalLetterForScanCode(quint32 nativeScanCode) const;
 
     QString appVersion() const;
     QString coreVersion() const;
@@ -258,6 +266,7 @@ private:
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;
     QHotkey *m_hkDisconnect = nullptr;
+    bool m_waylandHotkeyWarned = false; // log the Wayland limitation only once
 
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;

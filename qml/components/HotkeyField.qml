@@ -11,6 +11,13 @@ Item {
     Layout.fillWidth: true
     Layout.preferredHeight: 42
     property bool capturing: false
+
+    // Capturing relies on this Item holding active focus (Keys.onPressed below).
+    // Active focus is unique per window, so starting capture on another field —
+    // or clicking empty space (the root focusSink steals focus) — drops it here
+    // and must end this field's capture, otherwise several fields show "Press…"
+    // at once and a half-started capture stays stuck on the old value.
+    onActiveFocusChanged: if (!hk.activeFocus) hk.capturing = false
     RowLayout {
         anchors.fill: parent
         Text { text: hk.label; color: theme.text; font.pixelSize: 14 }
@@ -44,6 +51,12 @@ Item {
         if (e.modifiers & Qt.ShiftModifier) parts.push("Shift")
         if (e.modifiers & Qt.MetaModifier) parts.push("Meta")
         var kn = shell.keyName(e.key, e.text)
+        if (kn === "") {
+            // Non-Latin layout (e.g. Russian): key()/text() are Cyrillic. Recover
+            // the Latin letter from the physical key position so the captured
+            // shortcut is the same whatever layout was active.
+            kn = backend.physicalLetterForScanCode(e.nativeScanCode)
+        }
         if (kn === "") return
         parts.push(kn)
         hk.capturing = false

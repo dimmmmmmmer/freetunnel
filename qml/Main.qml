@@ -165,7 +165,13 @@ Window {
         m[Qt.Key_Insert] = "Ins"; m[Qt.Key_PageUp] = "PgUp"; m[Qt.Key_PageDown] = "PgDown"
         m[Qt.Key_Up] = "Up"; m[Qt.Key_Down] = "Down"; m[Qt.Key_Left] = "Left"; m[Qt.Key_Right] = "Right"
         if (m[key] !== undefined) return m[key]
-        if (text && text.length === 1 && text.charCodeAt(0) >= 33) return text.toUpperCase()
+        // ASCII printable only — a non-Latin layout (e.g. Russian) reports a
+        // Cyrillic char here, which QKeySequence/QHotkey can't use. Returning ""
+        // lets HotkeyField recover the Latin letter from the physical key code.
+        if (text && text.length === 1) {
+            var cc = text.charCodeAt(0)
+            if (cc >= 33 && cc < 127) return text.toUpperCase()
+        }
         return ""
     }
 
