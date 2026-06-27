@@ -237,7 +237,7 @@ private:
     void emitCreateConfigError(const QString &parseErr);
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
-    void runConfigPing(int index, const QString &sniHost, const QHostAddress &ip, quint16 port);
+    void runConfigPing(int index, const QHostAddress &ip, quint16 port);
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive);
     bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);

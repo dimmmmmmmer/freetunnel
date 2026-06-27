@@ -9,7 +9,6 @@
 #include <QHostAddress>
 #include <QHostInfo>
 #include <QRegularExpression>
-#include <QSslSocket>
 #include <QTcpSocket>
 #include <QElapsedTimer>
 #include <QUrl>
@@ -60,41 +59,39 @@ void Backend::markConfigPingFailed(int index)
     }
 }
 
-void Backend::runConfigPing(int index, const QString &sniHost, const QHostAddress &ip, quint16 port)
+void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
 {
     const bool activeWhileConnected = m_connected && index >= 0 && index < m_paths.size()
             && m_paths.at(index) == m_activePath;
-    // TLS-handshake probe: a host that accepts a bare TCP connection but can't
-    // complete the secure handshake (wrong/closed listener, not actually up) no
-    // longer reports a misleading latency. Verification is off — we time the
-    // handshake, we don't validate the certificate.
-    auto *sock = new QSslSocket(this);
-    sock->setPeerVerifyMode(QSslSocket::VerifyNone);
+    // TCP-connect latency probe. A TLS handshake would be a closer "can I connect"
+    // signal, but TrustTunnel's anti-DPI servers don't complete a vanilla TLS
+    // handshake, so it never landed; a real check needs the core's own handshake.
     // While connected, the active server is reached through the tunnel exclusion
     // path; binding to the physical IF often fails or times out on Windows.
-    if (!activeWhileConnected)
-        freetunnel::bindSocketToPhysicalRoute(sock, ip.protocol());
+    QTcpSocket *sock = activeWhileConnected
+            ? new QTcpSocket(this)
+            : freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
     QElapsedTimer elapsed;
     elapsed.start();
-    connect(sock, &QSslSocket::encrypted, this, [this, index, sock, elapsed]() {
+    connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed]() {
         if (index < m_pings.size())
             m_pings[index] = QString::number(elapsed.elapsed()) + tr(" ms");
         sock->abort();
         sock->deleteLater();
         emit pingsChanged();
     });
-    connect(sock, &QSslSocket::errorOccurred, this, [this, index, sock](QAbstractSocket::SocketError) {
+    connect(sock, &QTcpSocket::errorOccurred, this, [this, index, sock](QAbstractSocket::SocketError) {
         markConfigPingFailed(index);
         sock->deleteLater();
     });
-    QTimer::singleShot(5000, sock, [this, index, sock]() {
-        if (!sock->isEncrypted()) {
+    QTimer::singleShot(3000, sock, [this, index, sock]() {
+        if (sock->state() != QAbstractSocket::ConnectedState) {
             markConfigPingFailed(index);
             sock->abort();
             sock->deleteLater();
         }
     });
-    sock->connectToHostEncrypted(ip.toString(), port, sniHost);
+    sock->connectToHost(ip, port);
 }
 
 void Backend::pingConfigAtIndex(int index)
@@ -107,25 +104,16 @@ void Backend::pingConfigAtIndex(int index)
     }
     const QString host = addr.left(colon);
     const quint16 port = addr.mid(colon + 1).toUShort();
-    // SNI for the handshake: prefer the config's custom SNI, then its hostname,
-    // then the address host. Many servers only complete the handshake for the
-    // expected name (domain fronting / anti-DPI), so a bare IP would mislead.
-    const QVariantMap f = configFields(index);
-    QString sni = f.value(QStringLiteral("customSni")).toString().trimmed();
-    if (sni.isEmpty())
-        sni = f.value(QStringLiteral("hostname")).toString().trimmed();
-    if (sni.isEmpty())
-        sni = host;
     const QHostAddress literal(host);
     if (!literal.isNull()) {
-        runConfigPing(index, sni, literal, port);
+        runConfigPing(index, literal, port);
         return;
     }
-    QHostInfo::lookupHost(host, this, [this, index, sni, port](const QHostInfo &hi) {
+    QHostInfo::lookupHost(host, this, [this, index, port](const QHostInfo &hi) {
         if (hi.addresses().isEmpty())
             markConfigPingFailed(index);
         else
-            runConfigPing(index, sni, hi.addresses().first(), port);
+            runConfigPing(index, hi.addresses().first(), port);
     });
 }
 

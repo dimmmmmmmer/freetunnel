@@ -32,54 +32,41 @@ Item {
             Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
             clip: true
             Text {
-                anchors.centerIn: parent; visible: logFlick.count === 0
+                anchors.centerIn: parent; visible: backend.logModel.count === 0
                 text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
             }
-            // One delegate per line, virtualised: only the ~20 visible rows are
-            // realised and new lines are inserted incrementally (LogModel), so a
-            // log update costs O(visible) instead of re-parsing the whole 500-line
-            // log as a single RichText/QTextDocument (which froze the UI during the
-            // connect-time core-log storm) — and the scroll position is kept when
-            // auto-scroll is off, since the model is never reset out from under it.
-            ListView {
+            // One plain-text editor for the whole log (not a virtualized list) so
+            // the entire thing — timestamps included — can be selected and copied by
+            // hand. Plain text (no per-line RichText/QTextDocument) keeps it cheap,
+            // and refreshes are coalesced so a connect-time core-log burst can't
+            // thrash the layout. Trade-off: no per-level colour.
+            Flickable {
                 id: logFlick
                 anchors.fill: parent; anchors.margins: 12; clip: true
+                contentWidth: width; contentHeight: logView.implicitHeight
                 property bool autoScroll: true
-                model: backend.logModel
-                boundsBehavior: Flickable.StopAtBounds
-                cacheBuffer: 400
-                function toBottom() { if (autoScroll) positionViewAtEnd() }
-                onCountChanged: if (autoScroll) Qt.callLater(positionViewAtEnd)
-                delegate: Row {
-                    required property string time
-                    required property string level
-                    required property string msg
+                function toBottom() { if (autoScroll) contentY = Math.max(0, contentHeight - height) }
+                TextEdit {
+                    id: logView
                     width: logFlick.width
-                    spacing: 6
-                    Text {
-                        id: timeText
-                        text: time
-                        color: theme.textFaint; font.family: "Menlo"; font.pixelSize: 11
-                    }
-                    Text {
-                        id: levelText
-                        text: level
-                        color: level === "ERROR" ? theme.danger
-                             : level === "WARN" ? theme.warn
-                             : level === "CORE" ? theme.accent : theme.textDim
-                        font.family: "Menlo"; font.pixelSize: 11
-                    }
-                    // TextEdit (not Text) so the message stays selectable by mouse
-                    // for hand-copying a snippet; the Copy button still grabs it all.
-                    TextEdit {
-                        width: logFlick.width - timeText.width - levelText.width - 12
-                        text: msg
-                        color: theme.text; font.family: "Menlo"; font.pixelSize: 11
-                        wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
-                        readOnly: true; selectByMouse: true; persistentSelection: true
-                        selectionColor: theme.accent
-                    }
+                    readOnly: true; selectByMouse: true; persistentSelection: true
+                    wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
+                    font.family: "Menlo"; font.pixelSize: 11
+                    color: theme.text; selectionColor: theme.accent
+                    Component.onCompleted: text = backend.logText()
+                    onTextChanged: Qt.callLater(logFlick.toBottom)
                 }
+            }
+            // Coalesce model growth into at most one text rebuild per interval; skip
+            // while the user holds a selection so a live update can't wipe it.
+            Timer {
+                id: logRefresh; interval: 180
+                onTriggered: if (logView.selectionStart === logView.selectionEnd)
+                                 logView.text = backend.logText()
+            }
+            Connections {
+                target: backend.logModel
+                function onCountChanged() { if (!logRefresh.running) logRefresh.start() }
             }
         }
         RowLayout { Layout.fillWidth: true; spacing: 8
