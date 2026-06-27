@@ -280,6 +280,7 @@ void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
     m_reapplying = false;
+    m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
     m_connecting = false;
     m_disconnecting = true;

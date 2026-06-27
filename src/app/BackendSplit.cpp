@@ -248,7 +248,8 @@ void Backend::firePendingReconnect() {
     if (!m_pendingReconnect)
         return;
     m_pendingReconnect = false;
-    if (!m_activePath.isEmpty())
+    // Don't resurrect a tunnel while the app is shutting down.
+    if (!m_quitting && !m_activePath.isEmpty())
         connectVpn();
 }
 
