@@ -339,6 +339,14 @@
         <source>Split profile</source>
         <translation>Профиль раздельного туннеля</translation>
     </message>
+    <message>
+        <source>Skip certificate check</source>
+        <translation>Пропустить проверку сертификата</translation>
+    </message>
+    <message>
+        <source>Anti-DPI</source>
+        <translation>Анти-DPI</translation>
+    </message>
 </context>
 <context>
     <name>HomePage</name>
