@@ -26,10 +26,10 @@ Window {
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // The window's own ✕ never quits: on macOS the red traffic-light is retargeted
-    // to hide natively (installMacWindowCloseToTray); on Windows the custom ✕ hides
-    // to tray; on Linux it minimizes (a hidden window can't be reliably restored
-    // there). So any close event that actually reaches this handler is a real quit
-    // — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
+    // to hide natively (installMacWindowCloseToTray); on Linux and Windows the
+    // custom ✕ minimizes (keeps the taskbar entry and the VPN running). So any
+    // close event that actually reaches this handler is a real quit — tray «Quit»,
+    // ⌘Q (macOS), Ctrl+Q / Alt+F4.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
@@ -237,7 +237,7 @@ Window {
             // lerps the RGB channels and flashes dark before reaching the light hue.
             color: minMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
-            Rectangle { anchors.centerIn: parent; width: 11; height: 1.6; radius: 1; color: theme.textDim }
+            Rectangle { anchors.centerIn: parent; width: 11; height: 1.4; radius: 1; color: theme.textDim }
             MouseArea { id: minMa; anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor; onClicked: win.showMinimized() }
         }
@@ -250,23 +250,23 @@ Window {
             MouseArea { id: maxMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized) }
         }
-        // close: Windows hides to the (reliable) tray; Linux minimizes instead.
-        // A hidden window on Linux/GNOME gets stuck — there's no dependable tray
-        // and the dock won't relaunch a "running" app with no visible window, so
-        // the user can't get it back. Minimizing keeps a taskbar/dock entry (and
-        // the VPN running) so a click restores it; the tray menu still works too.
+        // close: minimize to the taskbar/dock (Linux and Windows alike) rather than
+        // hide. A hidden window vanishes from the taskbar entirely, which is
+        // disorienting (and on Linux/GNOME a hidden window can't be reliably
+        // brought back). Minimizing keeps the entry and the VPN running; the tray
+        // icon is always present too.
         Rectangle { width: 30; height: 24; radius: 6
             color: closeMa.containsMouse ? theme.danger : Qt.rgba(theme.danger.r, theme.danger.g, theme.danger.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
             Item { anchors.centerIn: parent; width: 12; height: 12
-                Rectangle { anchors.centerIn: parent; width: 13; height: 1.6; radius: 1; rotation: 45
+                Rectangle { anchors.centerIn: parent; width: 13; height: 1.4; radius: 1; rotation: 45
                             color: closeMa.containsMouse ? "white" : theme.textDim }
-                Rectangle { anchors.centerIn: parent; width: 13; height: 1.6; radius: 1; rotation: -45
+                Rectangle { anchors.centerIn: parent; width: 13; height: 1.4; radius: 1; rotation: -45
                             color: closeMa.containsMouse ? "white" : theme.textDim }
             }
             MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: Qt.platform.os === "linux" ? win.showMinimized() : win.hide() }
+                        onClicked: win.showMinimized() }
         }
     }
 
