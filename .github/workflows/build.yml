@@ -497,10 +497,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\assets | Out-Null
           Copy-Item client\assets\logo.ico dist\assets\ -Force
           Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
-          # --compiler-runtime bundles the MSVC runtime (MSVCP140.dll,
-          # VCRUNTIME140*.dll) next to the exe, so the app launches on a clean
-          # Windows without a separately installed VC++ Redistributable.
-          & $deploy --release --no-translations --compiler-runtime --qmldir client\qml dist\FreeTunnel.exe
+          & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
+
+          # Bundle the MSVC runtime (MSVCP140.dll, VCRUNTIME140*.dll) so the app
+          # launches on a clean Windows without a separately installed VC++
+          # Redistributable. windeployqt --compiler-runtime doesn't locate it under
+          # the VS18 layout, so copy the CRT redist DLLs from VCToolsRedistDir.
+          $crt = Get-ChildItem -Path (Join-Path $env:VCToolsRedistDir "x64") -Directory `
+                   -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if (-not $crt) { throw "VC++ CRT redist not found under '$env:VCToolsRedistDir'" }
+          Copy-Item (Join-Path $crt.FullName "*.dll") dist\ -Force
           if (-not (Test-Path "dist\MSVCP140.dll")) { throw "VC++ runtime (MSVCP140.dll) was not bundled" }
 
           # Bundle Wintun: the VPN core creates its tunnel adapter via wintun.dll
