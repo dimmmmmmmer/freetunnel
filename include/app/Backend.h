@@ -254,6 +254,7 @@ private:
     // physical = probe over the physical interface (bypass the tunnel); on failure
     // while connected it retries once with physical=false (plain routing).
     void startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical);
+    void retryOrFailPing(int index, const QHostAddress &ip, quint16 port, bool physical);
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive);
     bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);

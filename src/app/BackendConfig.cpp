@@ -71,6 +71,19 @@ void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
     startPingProbe(index, ip, port, /*physical=*/true);
 }
 
+void Backend::retryOrFailPing(int index, const QHostAddress &ip, quint16 port, bool physical)
+{
+    // A physical bind can fail/time out on some Windows setups while the tunnel is
+    // up. Only the active server stays direct over plain routing (the core excludes
+    // its endpoint from the tunnel), so retry plain just for it; a plain probe to
+    // any other server would go through the tunnel.
+    const bool isActive = index >= 0 && index < m_paths.size() && m_paths.at(index) == m_activePath;
+    if (physical && m_connected && isActive)
+        startPingProbe(index, ip, port, /*physical=*/false);
+    else
+        markConfigPingFailed(index);
+}
+
 void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical)
 {
     QTcpSocket *sock = physical ? freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol())
@@ -79,20 +92,12 @@ void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bo
     elapsed->start();
     auto finished = std::make_shared<bool>(false);
 
-    const bool isActive = index >= 0 && index < m_paths.size() && m_paths.at(index) == m_activePath;
-    auto fail = [this, index, ip, port, physical, isActive, sock, finished]() {
+    auto fail = [this, index, ip, port, physical, sock, finished]() {
         if (*finished)
             return;
         *finished = true;
         sock->deleteLater();
-        // A physical bind can fail/time out on some Windows setups while the tunnel
-        // is up. Only the active server stays direct over plain routing (the core
-        // excludes its endpoint from the tunnel), so retry plain just for it;
-        // a plain probe to any other server would go through the tunnel.
-        if (physical && m_connected && isActive)
-            startPingProbe(index, ip, port, /*physical=*/false);
-        else
-            markConfigPingFailed(index);
+        retryOrFailPing(index, ip, port, physical);
     };
 
     connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed, finished]() {
