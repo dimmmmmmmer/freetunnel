@@ -158,13 +158,13 @@ Item {
                                 }
                             }) } }
                 Item { Layout.preferredWidth: 30; Layout.fillHeight: true
-                    Text { anchors.centerIn: parent; text: "⋯"; font.pixelSize: 20
-                           color: dotsMa.containsMouse ? theme.text : theme.textDim }
+                    Icon { anchors.centerIn: parent; width: 18; height: 18; svg: "qrc:/icons/more.svg"
+                           color: dotsMa.containsMouse ? theme.text : theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: { shell.editIndex = index; shell.overlay = "create" } } }
                 Item { Layout.preferredWidth: 30; Layout.fillHeight: true
-                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 17
-                           color: delMa.containsMouse ? theme.danger : theme.textDim }
+                    Icon { anchors.centerIn: parent; width: 16; height: 16; svg: "qrc:/icons/close.svg"
+                           color: delMa.containsMouse ? theme.danger : theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
                                     qsTr("Delete"), function(){ backend.removeConfig(index) }) } }

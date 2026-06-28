@@ -14,5 +14,7 @@
         <file alias="log.svg">icons/log.svg</file>
         <file alias="speedometer.svg">icons/speedometer.svg</file>
         <file alias="export.svg">icons/export.svg</file>
+        <file alias="more.svg">icons/more.svg</file>
+        <file alias="close.svg">icons/close.svg</file>
     </qresource>
 </RCC>

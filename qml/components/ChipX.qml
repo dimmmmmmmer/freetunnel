@@ -6,10 +6,11 @@ Item {
     property bool onAccent: false
     signal clicked()
     implicitWidth: 18; implicitHeight: 18
-    Text {
+    Icon {
         anchors.centerIn: parent
-        text: "✕"
-        font.pixelSize: 17
+        width: 14; height: 14
+        svg: "qrc:/icons/close.svg"
+        theme: cx.theme
         color: cxMa.containsMouse ? theme.danger
               : (cx.onAccent ? "white" : theme.textDim)
     }
