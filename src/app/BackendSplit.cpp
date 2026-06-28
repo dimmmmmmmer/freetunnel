@@ -99,7 +99,10 @@ void Backend::clearExcludedRoutes() {
 }
 
 void Backend::restoreDefaultExcludedRoutes() {
-    m_settings.excluded_routes = defaultExcludedRoutes();
+    const QStringList defaults = defaultExcludedRoutes();
+    if (m_settings.excluded_routes == defaults)
+        return; // already the defaults — don't churn the tunnel for a no-op
+    m_settings.excluded_routes = defaults;
     persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
