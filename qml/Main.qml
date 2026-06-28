@@ -25,10 +25,11 @@ Window {
     readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
-    // Hide-to-tray is handled by the window's own ✕: on macOS the red traffic-light
-    // is retargeted natively (installMacWindowCloseToTray); on Linux/Windows the
-    // custom ✕ calls win.hide() directly. So any close event that actually reaches
-    // this handler is a real quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
+    // The window's own ✕ never quits: on macOS the red traffic-light is retargeted
+    // to hide natively (installMacWindowCloseToTray); on Windows the custom ✕ hides
+    // to tray; on Linux it minimizes (a hidden window can't be reliably restored
+    // there). So any close event that actually reaches this handler is a real quit
+    // — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
@@ -246,7 +247,11 @@ Window {
             MouseArea { id: maxMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized) }
         }
-        // close (hides to tray, like the macOS red button)
+        // close: Windows hides to the (reliable) tray; Linux minimizes instead.
+        // A hidden window on Linux/GNOME gets stuck — there's no dependable tray
+        // and the dock won't relaunch a "running" app with no visible window, so
+        // the user can't get it back. Minimizing keeps a taskbar/dock entry (and
+        // the VPN running) so a click restores it; the tray menu still works too.
         Rectangle { width: 30; height: 24; radius: 6
             color: closeMa.containsMouse ? theme.danger : Qt.rgba(theme.danger.r, theme.danger.g, theme.danger.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
@@ -257,7 +262,8 @@ Window {
                             color: closeMa.containsMouse ? "white" : theme.textDim }
             }
             MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: win.hide() }
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Qt.platform.os === "linux" ? win.showMinimized() : win.hide() }
         }
     }
 
