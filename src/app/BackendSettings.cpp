@@ -28,9 +28,9 @@ void Backend::setVerboseLogs(bool v) {
     m_settings.verbose_logs = v;
     persistSettings();
     emit settingsChanged();
-    // The core's log level is baked into the config at connect time; reconnect
-    // seamlessly so the change takes effect right away if a tunnel is up.
-    reapplyIfConnected();
+    // Apply the new level live over IPC — no need to drop the tunnel for a logging
+    // preference. A fresh connect also picks it up via the config TOML.
+    m_client.setLogLevel(v ? QStringLiteral("info") : QStringLiteral("warn"));
 }
 
 // cppcheck-suppress functionStatic

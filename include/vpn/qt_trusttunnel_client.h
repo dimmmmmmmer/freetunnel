@@ -54,7 +54,7 @@ public:
     Q_INVOKABLE void disconnectVpn();
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
-    void setLogLevel(const QString &level);
+    Q_INVOKABLE void setLogLevel(const QString &level); // applied live (no reconnect)
     void setRoutingRules(const std::vector<std::string> &includeRoutes,
             const std::vector<std::string> &excludeRoutes);
     void setCustomDns(const std::vector<std::string> &dnsServers);

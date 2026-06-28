@@ -151,6 +151,14 @@ void VpnHelperClient::setKillSwitch(bool enabled) {
     }
 }
 
+void VpnHelperClient::setLogLevel(const QString &level) {
+    m_logLevel = level;
+    if (m_helloAcked) {
+        QJsonObject c; c["cmd"] = "setLogLevel"; c["level"] = level;
+        send(c);
+    }
+}
+
 void VpnHelperClient::setSessionLogging(const QString &path, bool enabled)
 {
     m_logPath = path;
@@ -445,6 +453,7 @@ void VpnHelperClient::handleReadyEvent()
     clearTokenFile();
     setVpnMode(m_selective);
     setKillSwitch(m_killSwitch);
+    setLogLevel(m_logLevel);
     setExtraExclusions(m_exclusions);
     setExcludedRoutes(m_excludedRoutes);
     if (!m_connectPending)

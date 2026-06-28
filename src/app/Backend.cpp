@@ -57,7 +57,15 @@ void Backend::wireVpnClientSignals()
                 m_accDown += down;
             });
     connect(&m_client, &VpnHelperClient::connectionInfo, this,
-            [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
+            [this](const QString &m) {
+                // Internal recovery/watchdog chatter ("recovery: reconnecting", …)
+                // just duplicates the state line ("Reconnecting…"); keep it for the
+                // verbose log only so a normal reconnect isn't three near-identical
+                // lines.
+                if (!m_settings.verbose_logs && isInternalVpnError(m))
+                    return;
+                appendLog(QStringLiteral("INFO"), m);
+            });
     connect(&m_client, &VpnHelperClient::connectProgress, this,
             [this](const QString &m) { appendLog(QStringLiteral("INFO"), m); });
     connect(&m_client, &VpnHelperClient::coreLogLine, this,
@@ -273,6 +281,7 @@ void Backend::connectVpn() {
     m_client.loadConfigFromToml(connectToml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
+    m_client.setLogLevel(m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
     m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
     m_client.connectVpn();
     m_inConnect = false;

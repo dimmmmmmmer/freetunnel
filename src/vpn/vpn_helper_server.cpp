@@ -261,6 +261,11 @@ private:
                                       Q_ARG(bool, c.value("enabled").toBool()));
             return;
         }
+        if (cmd == "setLogLevel") {
+            QMetaObject::invokeMethod(&m_client, "setLogLevel", Qt::QueuedConnection,
+                                      Q_ARG(QString, c.value("level").toString()));
+            return;
+        }
         if (cmd == "connect") {
             handleConnect(c);
             return;
