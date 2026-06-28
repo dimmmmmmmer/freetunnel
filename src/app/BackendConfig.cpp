@@ -14,6 +14,8 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <memory>
+
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
@@ -61,35 +63,53 @@ void Backend::markConfigPingFailed(int index)
 
 void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
 {
-    const bool activeWhileConnected = m_connected && index >= 0 && index < m_paths.size()
-            && m_paths.at(index) == m_activePath;
     // TCP-connect latency probe. A TLS handshake would be a closer "can I connect"
     // signal, but TrustTunnel's anti-DPI servers don't complete a vanilla TLS
     // handshake, so it never landed; a real check needs the core's own handshake.
-    // While connected, the active server is reached through the tunnel exclusion
-    // path; binding to the physical IF often fails or times out on Windows.
-    QTcpSocket *sock = activeWhileConnected
-            ? new QTcpSocket(this)
-            : freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol());
-    QElapsedTimer elapsed;
-    elapsed.start();
-    connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed]() {
+    // Always probe over the physical interface so the latency is the direct path to
+    // the server, never via the tunnel — independent of VPN state.
+    startPingProbe(index, ip, port, /*physical=*/true);
+}
+
+void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical)
+{
+    QTcpSocket *sock = physical ? freetunnel::makePhysicalBoundTcpSocket(this, ip.protocol())
+                                : new QTcpSocket(this);
+    auto elapsed = std::make_shared<QElapsedTimer>();
+    elapsed->start();
+    auto finished = std::make_shared<bool>(false);
+
+    const bool isActive = index >= 0 && index < m_paths.size() && m_paths.at(index) == m_activePath;
+    auto fail = [this, index, ip, port, physical, isActive, sock, finished]() {
+        if (*finished)
+            return;
+        *finished = true;
+        sock->deleteLater();
+        // A physical bind can fail/time out on some Windows setups while the tunnel
+        // is up. Only the active server stays direct over plain routing (the core
+        // excludes its endpoint from the tunnel), so retry plain just for it;
+        // a plain probe to any other server would go through the tunnel.
+        if (physical && m_connected && isActive)
+            startPingProbe(index, ip, port, /*physical=*/false);
+        else
+            markConfigPingFailed(index);
+    };
+
+    connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed, finished]() {
+        if (*finished)
+            return;
+        *finished = true;
         if (index < m_pings.size())
-            m_pings[index] = QString::number(elapsed.elapsed()) + tr(" ms");
+            m_pings[index] = QString::number(elapsed->elapsed()) + tr(" ms");
         sock->abort();
         sock->deleteLater();
         emit pingsChanged();
     });
-    connect(sock, &QTcpSocket::errorOccurred, this, [this, index, sock](QAbstractSocket::SocketError) {
-        markConfigPingFailed(index);
-        sock->deleteLater();
-    });
-    QTimer::singleShot(3000, sock, [this, index, sock]() {
-        if (sock->state() != QAbstractSocket::ConnectedState) {
-            markConfigPingFailed(index);
-            sock->abort();
-            sock->deleteLater();
-        }
+    connect(sock, &QTcpSocket::errorOccurred, this,
+            [fail](QAbstractSocket::SocketError) { fail(); });
+    QTimer::singleShot(3000, sock, [sock, fail]() {
+        if (sock->state() != QAbstractSocket::ConnectedState)
+            fail();
     });
     sock->connectToHost(ip, port);
 }
