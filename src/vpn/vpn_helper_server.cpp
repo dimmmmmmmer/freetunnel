@@ -245,27 +245,35 @@ private:
         }
     }
 
+    // Scalar setting commands that just forward one value to the VPN client.
+    // Split out of handleAuthed to keep its branch count under the lint limit.
+    bool applyClientSetting(const QString &cmd, const QJsonObject &c) {
+        if (cmd == "setMode") {
+            QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
+                                      Q_ARG(bool, c.value("selective").toBool()));
+            return true;
+        }
+        if (cmd == "setKillSwitch") {
+            QMetaObject::invokeMethod(&m_client, "setKillSwitch", Qt::QueuedConnection,
+                                      Q_ARG(bool, c.value("enabled").toBool()));
+            return true;
+        }
+        if (cmd == "setLogLevel") {
+            QMetaObject::invokeMethod(&m_client, "setLogLevel", Qt::QueuedConnection,
+                                      Q_ARG(QString, c.value("level").toString()));
+            return true;
+        }
+        return false;
+    }
+
     void handleAuthed(const QJsonObject &c) {
         const QString cmd = c.value("cmd").toString();
         if (cmd == "setExclusions")
             return applyExclusions(c);
         if (cmd == "setRoutes")
             return applyRoutes(c);
-        if (cmd == "setMode") {
-            QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
-                                      Q_ARG(bool, c.value("selective").toBool()));
+        if (applyClientSetting(cmd, c))
             return;
-        }
-        if (cmd == "setKillSwitch") {
-            QMetaObject::invokeMethod(&m_client, "setKillSwitch", Qt::QueuedConnection,
-                                      Q_ARG(bool, c.value("enabled").toBool()));
-            return;
-        }
-        if (cmd == "setLogLevel") {
-            QMetaObject::invokeMethod(&m_client, "setLogLevel", Qt::QueuedConnection,
-                                      Q_ARG(QString, c.value("level").toString()));
-            return;
-        }
         if (cmd == "connect") {
             handleConnect(c);
             return;
