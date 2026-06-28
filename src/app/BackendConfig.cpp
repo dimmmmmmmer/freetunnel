@@ -63,25 +63,14 @@ void Backend::markConfigPingFailed(int index)
 
 void Backend::runConfigPing(int index, const QHostAddress &ip, quint16 port)
 {
-    // TCP-connect latency probe. A TLS handshake would be a closer "can I connect"
-    // signal, but TrustTunnel's anti-DPI servers don't complete a vanilla TLS
-    // handshake, so it never landed; a real check needs the core's own handshake.
-    // Always probe over the physical interface so the latency is the direct path to
-    // the server, never via the tunnel — independent of VPN state.
-    startPingProbe(index, ip, port, /*physical=*/true);
-}
-
-void Backend::retryOrFailPing(int index, const QHostAddress &ip, quint16 port, bool physical)
-{
-    // A physical bind can fail/time out on some Windows setups while the tunnel is
-    // up. Only the active server stays direct over plain routing (the core excludes
-    // its endpoint from the tunnel), so retry plain just for it; a plain probe to
-    // any other server would go through the tunnel.
+    // TCP-connect latency probe (a TLS handshake would be closer, but TrustTunnel's
+    // anti-DPI servers don't complete a vanilla one). Measure the direct path to the
+    // server, never via the tunnel: bind the physical interface to bypass it.
+    // Exception — the active server while connected already reaches direct over
+    // plain routing (the core excludes its endpoint), and a physical bind there can
+    // stall on Windows, so probe it with a plain socket.
     const bool isActive = index >= 0 && index < m_paths.size() && m_paths.at(index) == m_activePath;
-    if (physical && m_connected && isActive)
-        startPingProbe(index, ip, port, /*physical=*/false);
-    else
-        markConfigPingFailed(index);
+    startPingProbe(index, ip, port, /*physical=*/!(m_connected && isActive));
 }
 
 void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical)
@@ -92,12 +81,12 @@ void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bo
     elapsed->start();
     auto finished = std::make_shared<bool>(false);
 
-    auto fail = [this, index, ip, port, physical, sock, finished]() {
+    auto fail = [this, index, sock, finished]() {
         if (*finished)
             return;
         *finished = true;
         sock->deleteLater();
-        retryOrFailPing(index, ip, port, physical);
+        markConfigPingFailed(index);
     };
 
     connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed, finished]() {

@@ -251,10 +251,10 @@ private:
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);
-    // physical = probe over the physical interface (bypass the tunnel); on failure
-    // while connected it retries once with physical=false (plain routing).
+    // physical = probe over the physical interface (bypass the tunnel); the active
+    // server while connected uses physical=false (already direct via the core's
+    // endpoint exclusion, and a physical bind can stall there on Windows).
     void startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical);
-    void retryOrFailPing(int index, const QHostAddress &ip, quint16 port, bool physical);
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive);
     bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);
