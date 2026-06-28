@@ -14,7 +14,7 @@ QString Backend::appVersion() const {
 #ifdef FREETUNNEL_VERSION
     return QStringLiteral(FREETUNNEL_VERSION);
 #else
-    return QStringLiteral("1.1.0");
+    return QStringLiteral("1.1.1");
 #endif
 }
 
