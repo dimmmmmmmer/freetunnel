@@ -62,9 +62,12 @@ Window {
         icon.source: backend.connected ? "qrc:/assets/logo.svg" : "qrc:/assets/logo-dim.svg"
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
-        // Click opens the menu (below). Double-click brings the window forward.
+        // Right-click opens the menu (below). Double-click — or a single left-click
+        // on Windows, the expected tray gesture there — brings the window forward.
+        // On macOS a single click opens the menu, so don't steal it.
         onActivated: function(reason) {
-            if (reason === Platform.SystemTrayIcon.DoubleClick) {
+            if (reason === Platform.SystemTrayIcon.DoubleClick
+                    || (reason === Platform.SystemTrayIcon.Trigger && Qt.platform.os === "windows")) {
                 win.show(); win.raise(); win.requestActivate()
             }
         }
