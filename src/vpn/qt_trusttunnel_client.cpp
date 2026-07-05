@@ -30,6 +30,16 @@ struct iovec {
 
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     : QObject(parent) {
+    // Parent the member timers so moveToThread() carries them along with this
+    // object. The helper server moves the client to a dedicated VPN thread;
+    // an unparented member timer stays on the construction thread and Qt then
+    // silently refuses every start() from the VPN thread ("Timers cannot be
+    // started from another thread") — auto-reconnect, the fd watchdog and the
+    // network-wait recovery never fire.
+    m_reconnectTimer.setParent(this);
+    m_fdWatchdogTimer.setParent(this);
+    m_networkWaitTimer.setParent(this);
+
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &QtTrustTunnelClient::startConnectAttempt);
 
@@ -84,6 +94,11 @@ void QtTrustTunnelClient::teardownClient() {
             m_connectThread.wait();
         }
     }
+
+    // Invalidate the session: any core events still queued (or emitted during
+    // the disconnect below) belong to the client being destroyed and must not
+    // be attributed to a session started afterwards.
+    ++m_sessionGen;
 
     if (m_networkMonitor) {
         m_networkMonitor->stop();
@@ -325,36 +340,57 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
 }
 
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
+    // Core callbacks are queued to our event loop, so events from a client that
+    // has since been torn down (config switch: disconnect + connect a new one)
+    // can arrive after the next session already started. A stale DISCONNECTED
+    // would then trigger a bogus reconnect of the NEW session. Tag every event
+    // with the session generation it belongs to and drop mismatches on arrival.
+    const quint64 session = ++m_sessionGen;
     ag::VpnCallbacks callbacks;
     callbacks.protect_handler = [this](ag::SocketProtectEvent *event) {
         protectOutboundSocket(event);
     };
     callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
-    callbacks.state_changed_handler = [this](ag::VpnStateChangedEvent *event) {
+    callbacks.state_changed_handler = [this, session](ag::VpnStateChangedEvent *event) {
         const StateChangedPayload payload = extractStateChangedPayload(event);
         QMetaObject::invokeMethod(this,
-                                  [this, payload]() {
+                                  [this, session, payload]() {
+                                      if (session != m_sessionGen)
+                                          return;
                                       handleCoreStateChanged(payload.state, payload.errCode,
                                                              payload.errText);
                                   },
                                   Qt::QueuedConnection);
     };
-    callbacks.client_output_handler = [this](ag::VpnClientOutputEvent *event) {
+    callbacks.client_output_handler = [this, session](ag::VpnClientOutputEvent *event) {
         const size_t bytes = clientOutputBytes(event);
-        QMetaObject::invokeMethod(this, [this, bytes]() { emit clientOutput(QString::number(bytes)); },
+        QMetaObject::invokeMethod(this,
+                [this, session, bytes]() {
+                    if (session == m_sessionGen)
+                        emit clientOutput(QString::number(bytes));
+                },
                 Qt::QueuedConnection);
     };
-    callbacks.tunnel_stats_handler = [this](ag::VpnTunnelConnectionStatsEvent *event) {
+    callbacks.tunnel_stats_handler = [this, session](ag::VpnTunnelConnectionStatsEvent *event) {
         if (!event)
             return;
         const quint64 up = event->upload;
         const quint64 down = event->download;
-        QMetaObject::invokeMethod(this, [this, up, down]() { emit tunnelStats(up, down); },
+        QMetaObject::invokeMethod(this,
+                [this, session, up, down]() {
+                    if (session == m_sessionGen)
+                        emit tunnelStats(up, down);
+                },
                 Qt::QueuedConnection);
     };
-    callbacks.connection_info_handler = [this](ag::VpnConnectionInfoEvent *event) {
+    callbacks.connection_info_handler = [this, session](ag::VpnConnectionInfoEvent *event) {
         const QString line = qt_trusttunnel_connection_info_line(event);
-        QMetaObject::invokeMethod(this, [this, line]() { emit connectionInfo(line); }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this,
+                [this, session, line]() {
+                    if (session == m_sessionGen)
+                        emit connectionInfo(line);
+                },
+                Qt::QueuedConnection);
     };
     return callbacks;
 }
@@ -368,8 +404,23 @@ void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
 }
 
 void QtTrustTunnelClient::scheduleReconnect(const QString &reason) {
+    // Failed connect attempts call this from m_connectThread; the timers live
+    // on this object's thread and QTimer::start() from any other thread is a
+    // silent no-op — the retry would never fire. Marshal onto our thread.
+    if (QThread::currentThread() != thread()) {
+        const QString reasonCopy = reason;
+        QMetaObject::invokeMethod(
+                this, [this, reasonCopy]() { scheduleReconnect(reasonCopy); }, Qt::QueuedConnection);
+        return;
+    }
+
     const QString message = reason.isEmpty() ? QStringLiteral("connect() failed") : reason;
-    if (m_stopRequested || !m_autoReconnect) {
+    if (m_stopRequested) {
+        // The user asked to disconnect while an attempt was in flight — the
+        // session is over, don't overwrite Disconnected with a spurious Error.
+        return;
+    }
+    if (!m_autoReconnect) {
         setState(State::Error);
         emit vpnError(message);
         return;

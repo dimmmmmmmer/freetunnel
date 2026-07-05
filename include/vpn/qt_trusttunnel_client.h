@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QThread>
+#include <atomic>
 #include <memory>
 #include <functional>
 #include <optional>
@@ -128,7 +129,12 @@ private:
     QThread m_connectThread;
     State m_state = State::Disconnected;
     bool m_autoReconnect = true;
-    bool m_stopRequested = false;
+    // Written from the object's thread, read from m_connectThread (and vice
+    // versa for error paths) — must be atomic to avoid torn/stale reads.
+    std::atomic<bool> m_stopRequested{false};
+    // Incremented for every new core client (and again on teardown); core
+    // callbacks capture the value and stale queued events are dropped.
+    std::atomic<quint64> m_sessionGen{0};
     bool m_everConnected = false; // true after first successful connect in this session
     int m_reconnectDelayMs = 1000;
     int m_reconnectMaxMs = 30000;
