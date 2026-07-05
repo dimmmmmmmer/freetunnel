@@ -57,10 +57,12 @@ void QtTrustTunnelClient::connectVpn()
 
 void QtTrustTunnelClient::startConnectAttempt()
 {
-    if (thread() != QCoreApplication::instance()->thread()) {
-        doConnectAttempt();
-        return;
-    }
+    // Always run the attempt on the dedicated worker thread. Running it inline
+    // used to block this object's event loop for the whole (potentially very
+    // long) native connect — in the helper process that meant queued
+    // "disconnect" / "connect new config" commands from the GUI sat unprocessed
+    // until the attempt finished, which looked like a hung Disconnecting state
+    // or a config switch that never connects.
     doConnectAttemptInThread();
 }
 
@@ -89,7 +91,15 @@ void QtTrustTunnelClient::doConnectAttemptInThread()
 {
     if (m_connectThread.isRunning()) {
         m_connectThread.quit();
-        m_connectThread.wait();
+        // Bounded wait: a previous attempt stuck inside a blocking native call
+        // must not freeze this thread's event loop forever (same policy as
+        // teardownClient / disconnectVpn).
+        if (!m_connectThread.wait(15000)) {
+            qWarning("[doConnectAttemptInThread] previous connect attempt did not exit in 15 s — "
+                     "forcing terminate");
+            m_connectThread.terminate();
+            m_connectThread.wait();
+        }
     }
     disconnect(&m_connectThread, &QThread::started, nullptr, nullptr);
 
