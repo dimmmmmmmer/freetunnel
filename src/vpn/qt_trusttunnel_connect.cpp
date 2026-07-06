@@ -31,18 +31,29 @@ static uint32_t captureWindowsPhysicalOutbound()
 }
 #endif
 
+static bool skipPrivilegeCheckForTests()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Test-only: unit tests drive the state machine against a mock core and
+    // don't run elevated. Compiled out of release builds.
+    return qEnvironmentVariableIsSet("FT_TEST_SKIP_PRIVILEGE_CHECK");
+#else
+    return false;
+#endif
+}
+
 void QtTrustTunnelClient::connectVpn()
 {
     if (m_state == State::Connecting || m_state == State::Connected
             || m_state == State::Reconnecting || m_state == State::WaitingForNetwork)
         return;
 #ifndef _WIN32
-    if (::geteuid() != 0) {
+    if (::geteuid() != 0 && !skipPrivilegeCheckForTests()) {
         emit vpnError(QStringLiteral("Root permissions are required to initialize VPN (run app with sudo)."));
         return;
     }
 #else
-    if (!qt_trusttunnel_is_process_elevated()) {
+    if (!qt_trusttunnel_is_process_elevated() && !skipPrivilegeCheckForTests()) {
         emit vpnError(QStringLiteral(
                 "Administrator privileges are required to initialize VPN. Restart the app as Administrator."));
         return;

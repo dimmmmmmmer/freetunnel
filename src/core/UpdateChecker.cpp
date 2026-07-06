@@ -286,11 +286,31 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
 
 void UpdateChecker::fetchInstaller()
 {
+    m_installerOut = std::make_unique<QFile>(m_downloadPath);
+    if (!m_installerOut->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        m_installerOut.reset();
+        emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
+        return;
+    }
+    m_installerHash.reset();
+
     QNetworkRequest req(m_latest.installerUrl);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = m_nam->get(req);
+    // Stream each chunk straight to disk and into the running hash — an
+    // installer is 100+ MB and must never be buffered in RAM as one piece.
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply]() {
+        if (!m_installerOut)
+            return;
+        const QByteArray chunk = reply->readAll();
+        m_installerHash.addData(chunk);
+        if (m_installerOut->write(chunk) != chunk.size()) {
+            m_installerOut->close();
+            m_installerOut.reset(); // disk full / IO error — fail in finished()
+        }
+    });
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
                 const qint64 base = signatureVerificationActive() ? 10 : 5;
@@ -302,23 +322,37 @@ void UpdateChecker::fetchInstaller()
 void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
 {
     reply->deleteLater();
+
+    if (m_installerOut) { // drain whatever arrived after the last readyRead
+        const QByteArray rest = reply->readAll();
+        if (!rest.isEmpty()) {
+            m_installerHash.addData(rest);
+            if (m_installerOut->write(rest) != rest.size())
+                m_installerOut.reset();
+        }
+    }
+    if (m_installerOut) {
+        m_installerOut->close();
+        m_installerOut.reset();
+    } else {
+        // Write error mid-stream (or open failure surfaced earlier).
+        QFile::remove(m_downloadPath);
+        if (reply->error() == QNetworkReply::NoError) {
+            emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
+            return;
+        }
+    }
     if (reply->error() != QNetworkReply::NoError) {
+        QFile::remove(m_downloadPath);
         emit downloadFailed(QStringLiteral("Download failed: %1").arg(reply->errorString()));
         return;
     }
 
-    QFile out(m_downloadPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
-        return;
-    }
-    out.write(reply->readAll());
-    out.close();
-
     // Mandatory integrity check: the manifest must be present and the asset's
     // SHA-256 must match before we hand the file off to be executed.
-    if (m_checksumsData.isEmpty()
-        || !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
+    const QString expected = expectedSha256FromSums(m_checksumsData, m_latest.assetName);
+    const QString actual = QString::fromLatin1(m_installerHash.result().toHex());
+    if (expected.isEmpty() || actual.toLower() != expected) {
         QFile::remove(m_downloadPath);
         emit downloadFailed(QStringLiteral("Download failed integrity check (SHA-256 mismatch)"));
         return;

@@ -37,7 +37,7 @@ private:
 
 void TestQmlUi::initTestCase()
 {
-    qputenv("QML_XHR_ALLOW_FILE_READ", "1");
+    // Icons load through backend.readBundledText — no QML XHR file access needed.
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
 }
 

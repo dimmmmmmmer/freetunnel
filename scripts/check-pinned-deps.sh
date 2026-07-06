@@ -22,14 +22,19 @@ check "upstream ref in build workflow" 'UPSTREAM_REF|upstream_ref' .github/workf
 check "QHotkey tag" 'GIT_TAG 1\.5\.0' CMakeLists.txt
 check "QHotkey tag in tests" 'GIT_TAG 1\.5\.0' tests/CMakeLists.txt
 
-# Third-party GitHub Actions must be pinned to full commit SHAs (see action-pins.env).
-while IFS='=' read -r name sha; do
-  [[ -z "$name" || "$name" =~ ^# ]] && continue
-  if ! grep -rq "$sha" .github/workflows; then
-    echo "pinned-deps: SHA for $name not found in .github/workflows" >&2
+# Third-party GitHub Actions must be pinned to full commit SHAs. Validate every
+# `uses:` reference in the workflows directly (a tag or branch is mutable —
+# supply-chain risk). Checking the workflows themselves, instead of keeping a
+# duplicate SHA list in a side file, keeps dependabot action bumps mergeable
+# without a manual sync step.
+while read -r use; do
+  ref="${use##*@}"
+  if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "pinned-deps: action not pinned to a full commit SHA: $use" >&2
     fail=1
   fi
-done < .github/action-pins.env
+done < <(grep -rhoE 'uses:[[:space:]]*[^[:space:]]+@[^[:space:]]+' .github/workflows \
+         | sed -E 's/uses:[[:space:]]*//')
 
 if [[ "$fail" -ne 0 ]]; then
   exit 1

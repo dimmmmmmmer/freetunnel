@@ -178,7 +178,8 @@ Repository-side hygiene for Codacy:
 
 - [`.codacy.yml`](.codacy.yml) — excludes, **cppcheck `extra_lines`** (Codacy ignores `cppcheck.cfg`), lizard/metric excludes
 - [`cppcheck.cfg`](cppcheck.cfg) — used by local runs and CI security job
-- [`.github/action-pins.env`](.github/action-pins.env) — full SHA pins for third-party Actions
+- [`scripts/check-pinned-deps.sh`](scripts/check-pinned-deps.sh) — CI-enforced: every third-party
+  Action in `.github/workflows` must be pinned to a full commit SHA (dependabot bumps stay mergeable)
 
 **Note:** Codacy only picks up cppcheck suppressions via `engines.cppcheck.extra_lines` in
 `.codacy.yml`, not via `cppcheck.cfg` in the repo root.
