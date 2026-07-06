@@ -297,6 +297,16 @@ jobs:
             || echo "core.download:retry = 8" >> "$CONAN_HOME_DIR/global.conf"
           grep -q "core.download:retry_wait" "$CONAN_HOME_DIR/global.conf" \
             || echo "core.download:retry_wait = 30" >> "$CONAN_HOME_DIR/global.conf"
+          # Checksum-keyed download cache inside ~/.conan2, so the actions/cache
+          # step persists it: after ONE successful boringssl download per matrix
+          # arm, source() never hits googlesource.com again (works even for
+          # recipes with hardcoded retry args). Skipped on Windows — the bash
+          # $HOME path isn't valid for the native conan there.
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            grep -q "core.download:download_cache" "$CONAN_HOME_DIR/global.conf" \
+              || echo "core.download:download_cache = $CONAN_HOME_DIR/download-cache" \
+                   >> "$CONAN_HOME_DIR/global.conf"
+          fi
           conan config show "core.download:retry"
           conan config show "core.download:retry_wait"
 
