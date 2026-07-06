@@ -154,7 +154,6 @@ public:
     Q_INVOKABLE void selectProfile(const QString &name);
     Q_INVOKABLE void addProfile(const QString &name);
     Q_INVOKABLE void removeProfile(const QString &name);
-    Q_INVOKABLE void renameProfile(const QString &oldName, const QString &newName);
 
     bool hotkeysSupported() const;
     bool hotkeysEnabled() const { return m_settings.hotkeys_enabled; }

@@ -195,7 +195,14 @@ Item {
                 RowLayout {
                     anchors.fill: parent
                     Text { id: updTxt; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
-                           text: qsTr("Check for updates"); font.pixelSize: 14
+                           // Surface the backend's status line (download %, error
+                           // text, "Version X is available") while an update flow
+                           // is active — the icons alone don't say what happened.
+                           readonly property bool updActive: backend.updateState !== ""
+                                                             && backend.updateState !== "current"
+                           text: (updActive && backend.updateMessage.length > 0)
+                                 ? backend.updateMessage : qsTr("Check for updates")
+                           font.pixelSize: 14
                            color: updTxtMa.containsMouse ? theme.accent : theme.text
                            font.underline: updTxtMa.containsMouse
                         MouseArea { id: updTxtMa; anchors.fill: parent; hoverEnabled: true

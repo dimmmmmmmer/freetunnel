@@ -170,33 +170,6 @@ void Backend::removeProfile(const QString &name) {
     emit configChanged(); // a config's effective profile may have changed
 }
 
-namespace {
-
-void retargetProfileName(AppSettings &settings, const QString &oldName, const QString &newName)
-{
-    const int i = settings.profile_order.indexOf(oldName);
-    if (i >= 0)
-        settings.profile_order[i] = newName;
-    if (settings.active_profile == oldName)
-        settings.active_profile = newName;
-    for (auto it = settings.config_profiles.begin(); it != settings.config_profiles.end(); ++it) {
-        if (it.value() == oldName)
-            it.value() = newName;
-    }
-}
-
-} // namespace
-
-void Backend::renameProfile(const QString &oldName, const QString &newName) {
-    const QString n = newName.trimmed();
-    if (oldName == QLatin1String("Default") || n.isEmpty()
-            || !m_settings.profiles.contains(oldName) || m_settings.profiles.contains(n))
-        return;
-    m_settings.profiles.insert(n, m_settings.profiles.take(oldName));
-    retargetProfileName(m_settings, oldName, n);
-    persistSettings(); emit splitChanged();
-}
-
 // The split profile assigned to the active config (falls back to "Default" when
 // unassigned or pointing at a deleted profile).
 QString Backend::activeConfigProfile() const {
