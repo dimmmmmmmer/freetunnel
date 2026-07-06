@@ -119,6 +119,23 @@ QString Backend::readTextFile(const QString &pathOrUrl) const {
     return safeReadUserTextFile(pathOrUrl);
 }
 
+QString Backend::readBundledText(const QUrl &url) const {
+    // qrc-only on purpose: this feeds Icon.qml's SVG recolor and replaces the
+    // former QML_XHR_ALLOW_FILE_READ escape hatch, which opened QML XHR to
+    // arbitrary local files.
+    QString path;
+    if (url.scheme() == QLatin1String("qrc"))
+        path = QLatin1Char(':') + url.path();
+    else if (url.toString().startsWith(QLatin1String(":/")))
+        path = url.toString();
+    else
+        return QString();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(f.readAll());
+}
+
 QString Backend::logText() const {
     return m_logModel.toPlainText();
 }

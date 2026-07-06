@@ -7,9 +7,8 @@
 int main(int argc, char *argv[])
 {
     freetunnel::raiseFdLimit();
-    // Required so Icon.qml can XHR-GET bundled qrc icons; every QML/XHR URL is
-    // hardcoded in the binary — no untrusted local-file read path exists.
-    qputenv("QML_XHR_ALLOW_FILE_READ", "1");
+    // Icon.qml reads bundled SVGs through backend.readBundledText (qrc-only),
+    // so QML XHR local-file access stays disabled engine-wide.
     qputenv("QML_DISABLE_DISK_CACHE", "1");
 
     for (int i = 1; i < argc; ++i) {

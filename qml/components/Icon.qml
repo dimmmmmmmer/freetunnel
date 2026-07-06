@@ -9,15 +9,12 @@ Image {
     sourceSize: Qt.size(width * 2, height * 2)
     function reload() {
         if (svg == "") return
-        var x = new XMLHttpRequest()
-        x.open("GET", svg)
-        x.onreadystatechange = function() {
-            if (x.readyState === XMLHttpRequest.DONE && x.responseText) {
-                var s = x.responseText.replace(/currentColor/g, "" + ic.color)
-                ic.source = "data:image/svg+xml;utf8," + encodeURIComponent(s)
-            }
-        }
-        x.send()
+        // qrc-restricted read via the backend — avoids enabling QML XHR local
+        // file access (QML_XHR_ALLOW_FILE_READ) for the whole engine.
+        var text = backend.readBundledText(svg)
+        if (!text) return
+        var s = text.replace(/currentColor/g, "" + ic.color)
+        ic.source = "data:image/svg+xml;utf8," + encodeURIComponent(s)
     }
     onColorChanged: reload()
     onSvgChanged: reload()

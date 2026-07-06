@@ -1,9 +1,13 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
+#include <QCryptographicHash>
 #include <QObject>
 #include <QString>
 
+#include <memory>
+
+class QFile;
 class QNetworkAccessManager;
 class QNetworkReply;
 
@@ -78,4 +82,8 @@ private:
     QByteArray m_checksumsData;
     QByteArray m_signatureData;
     QString m_downloadPath;
+    // Installer download is streamed to disk and hashed incrementally so a
+    // 100+ MB asset never sits in RAM in one piece.
+    std::unique_ptr<QFile> m_installerOut;
+    QCryptographicHash m_installerHash{QCryptographicHash::Sha256};
 };

@@ -239,6 +239,7 @@ void Backend::reconnectActiveConfig() {
     m_reapplying = true;
     m_connecting = false;
     m_pendingReconnect = true;
+    emit stateChanged(); // reflect the cleared "Connecting…" right away
     m_client.disconnectVpn();
     // Reconnect once the old session has actually reached Disconnected (driven
     // from onVpnClientStateChanged), not after a fixed delay that could fire

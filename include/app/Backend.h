@@ -11,6 +11,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -128,6 +129,7 @@ public:
     Q_INVOKABLE QString logText() const; // whole log as plain text (for Copy)
     Q_INVOKABLE void copyToClipboard(const QString &text) const;
     Q_INVOKABLE QString readTextFile(const QString &pathOrUrl) const; // for cert load
+    Q_INVOKABLE QString readBundledText(const QUrl &url) const; // qrc-only (icon recolor)
 
     bool splitEnabled() const { return m_settings.domain_bypass_enabled; }
     const QStringList &domains() const { return m_settings.domain_bypass_rules; }
@@ -278,6 +280,9 @@ private:
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
     QVariantList m_pings;
+    int m_pingGeneration = 0;  // bumped on every ping run / config reload so
+                               // in-flight probe callbacks from a previous run
+                               // can't write results into the wrong rows
     QStringList m_paths;       // config file paths
     QStringList m_names;       // display names, parallel to m_paths
     QString m_activePath;
@@ -288,6 +293,8 @@ private:
 
     QElapsedTimer m_session;
     QTimer m_ticker;
+    QTimer m_logTrimTimer; // hourly size check; startup-only trim let long
+                           // sessions grow the file without bound
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
 

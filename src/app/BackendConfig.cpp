@@ -80,23 +80,29 @@ void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bo
     auto elapsed = std::make_shared<QElapsedTimer>();
     elapsed->start();
     auto finished = std::make_shared<bool>(false);
+    // Probes from a superseded run (pingConfigs re-triggered, configs reloaded)
+    // must not touch the repopulated list — rows may map to other servers now.
+    const int gen = m_pingGeneration;
 
-    auto fail = [this, index, sock, finished]() {
+    auto fail = [this, gen, index, sock, finished]() {
         if (*finished)
             return;
         *finished = true;
         sock->deleteLater();
-        markConfigPingFailed(index);
+        if (gen == m_pingGeneration)
+            markConfigPingFailed(index);
     };
 
-    connect(sock, &QTcpSocket::connected, this, [this, index, sock, elapsed, finished]() {
+    connect(sock, &QTcpSocket::connected, this, [this, gen, index, sock, elapsed, finished]() {
         if (*finished)
             return;
         *finished = true;
-        if (index < m_pings.size())
-            m_pings[index] = QString::number(elapsed->elapsed()) + tr(" ms");
         sock->abort();
         sock->deleteLater();
+        if (gen != m_pingGeneration)
+            return;
+        if (index < m_pings.size())
+            m_pings[index] = QString::number(elapsed->elapsed()) + tr(" ms");
         emit pingsChanged();
     });
     connect(sock, &QTcpSocket::errorOccurred, this,
@@ -108,22 +114,54 @@ void Backend::startPingProbe(int index, const QHostAddress &ip, quint16 port, bo
     sock->connectToHost(ip, port);
 }
 
+namespace {
+
+// Split "host:port" / "[v6]:port". A bare "host" (no port) returns false.
+bool splitHostPort(const QString &addr, QString *host, quint16 *port)
+{
+    QString portStr;
+    if (addr.startsWith(QLatin1Char('['))) {
+        // Bracketed IPv6: "[2001:db8::1]:443".
+        const int rb = addr.indexOf(QLatin1String("]:"));
+        if (rb < 0)
+            return false;
+        *host = addr.mid(1, rb - 1);
+        portStr = addr.mid(rb + 2);
+    } else {
+        const int colon = addr.lastIndexOf(QLatin1Char(':'));
+        if (colon < 0)
+            return false;
+        *host = addr.left(colon);
+        portStr = addr.mid(colon + 1);
+    }
+    bool ok = false;
+    const uint p = portStr.toUInt(&ok);
+    if (!ok || p == 0 || p > 65535)
+        return false;
+    *port = static_cast<quint16>(p);
+    return true;
+}
+
+} // namespace
+
 void Backend::pingConfigAtIndex(int index)
 {
-    const QString addr = firstAddress(m_paths.at(index));
-    const int colon = addr.lastIndexOf(':');
-    if (colon < 0) {
+    const QString addr = firstAddress(m_paths.at(index)).trimmed();
+    QString host;
+    quint16 port = 0;
+    if (!splitHostPort(addr, &host, &port)) {
         markConfigPingFailed(index);
         return;
     }
-    const QString host = addr.left(colon);
-    const quint16 port = addr.mid(colon + 1).toUShort();
     const QHostAddress literal(host);
     if (!literal.isNull()) {
         runConfigPing(index, literal, port);
         return;
     }
-    QHostInfo::lookupHost(host, this, [this, index, port](const QHostInfo &hi) {
+    const int gen = m_pingGeneration;
+    QHostInfo::lookupHost(host, this, [this, gen, index, port](const QHostInfo &hi) {
+        if (gen != m_pingGeneration)
+            return;
         if (hi.addresses().isEmpty())
             markConfigPingFailed(index);
         else
@@ -133,6 +171,7 @@ void Backend::pingConfigAtIndex(int index)
 
 void Backend::pingConfigs()
 {
+    ++m_pingGeneration; // supersede any probes still in flight
     m_pings.clear();
     for (int i = 0; i < m_paths.size(); ++i)
         m_pings << QStringLiteral("…");
