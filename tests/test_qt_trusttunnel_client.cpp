@@ -9,6 +9,13 @@
 #include <QSignalSpy>
 #include <QThread>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+#include <vector>
+
 #include "mock_core_controller.h"
 #include "qt_trusttunnel_client.h"
 
@@ -25,6 +32,11 @@ private slots:
     void initTestCase()
     {
         qputenv("FT_TEST_SKIP_PRIVILEGE_CHECK", "1");
+        // Shrink the watchdog/join intervals (10 s / 30 s / 15 s in production)
+        // so the recovery paths run within test timeouts.
+        qputenv("FT_TEST_STUCK_JOIN_MS", "400");
+        qputenv("FT_TEST_NETWORK_WAIT_MS", "400");
+        qputenv("FT_TEST_FD_WATCHDOG_MS", "300");
         qRegisterMetaType<QtTrustTunnelClient::State>();
     }
 
@@ -64,6 +76,9 @@ private slots:
     void failedAttemptSchedulesWorkingRetry();
     void coreDropTriggersAutoReconnect();
     void disconnectWhileConnectBlockedStaysClean();
+    void disconnectWhileConnectStuckAbandonsAttempt();
+    void networkWaitTimeoutForcesReconnect();
+    void fdWatchdogForcesReconnect();
 
 private:
     void beginConnect()
@@ -193,6 +208,84 @@ void TestQtTrustTunnelClient::disconnectWhileConnectBlockedStaysClean()
     QCOMPARE(m_lastState, State::Disconnected);
     QVERIFY2(m_errors.filter(QStringLiteral("connect() failed")).isEmpty(),
              qPrintable(m_errors.join(QStringLiteral("; "))));
+}
+
+void TestQtTrustTunnelClient::disconnectWhileConnectStuckAbandonsAttempt()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setBlockConnect(true);
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const quint64 firstId = ctl.lastClientId();
+
+    // The native connect never returns within the join window (400 ms in
+    // tests). disconnectVpn must ABANDON the stuck attempt — no terminate(),
+    // no indefinite hang — and settle on Disconnected.
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+
+    // Let the zombie thread's native call return: the stale attempt must drop
+    // its result, and the abandoned core client must be cleaned up.
+    ctl.releaseConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(!ctl.clientAlive(firstId), kLongWaitMs);
+    QTest::qWait(300);
+    QCOMPARE(m_lastState, State::Disconnected); // stale result really dropped
+
+    // A fresh session on a fresh thread must work after the abandonment.
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+}
+
+void TestQtTrustTunnelClient::networkWaitTimeoutForcesReconnect()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+
+    // The core reports no network and never self-recovers; after the wait
+    // timeout (400 ms in tests) the wrapper must tear down and reconnect.
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_WAITING_FOR_NETWORK);
+    QTRY_COMPARE(m_lastState, State::WaitingForNetwork);
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
+
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+}
+
+void TestQtTrustTunnelClient::fdWatchdogForcesReconnect()
+{
+#ifdef Q_OS_WIN
+    QSKIP("fd counting is not supported on Windows — the watchdog is inert there");
+#else
+    auto &ctl = mockcore::Controller::instance();
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected); // fd baseline recorded here
+
+    // Simulate a descriptor leak: grow past the 64-fd threshold and expect the
+    // watchdog (300 ms interval in tests) to force a clean reconnect.
+    std::vector<int> fds;
+    for (int i = 0; i < 80; ++i) {
+        const int fd = ::open("/dev/null", O_RDONLY);
+        if (fd >= 0)
+            fds.push_back(fd);
+    }
+    QVERIFY(fds.size() > 64);
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
+    for (const int fd : fds)
+        ::close(fd);
+
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+#endif
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)

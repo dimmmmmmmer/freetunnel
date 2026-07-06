@@ -28,6 +28,26 @@ struct iovec {
 #include "vpn/vpn.h"
 #include "net/tls.h"
 
+namespace {
+
+// Test-only overrides for the watchdog/join intervals — the real values (10 s /
+// 30 s / 15 s) would make the state-machine tests take minutes. Compiled out of
+// release builds.
+int testHookMs(const char *name, int defaultMs)
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    bool ok = false;
+    const int v = qEnvironmentVariableIntValue(name, &ok);
+    if (ok && v > 0)
+        return v;
+#else
+    Q_UNUSED(name);
+#endif
+    return defaultMs;
+}
+
+} // namespace
+
 QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     : QObject(parent) {
     // Parent the member timers so moveToThread() carries them along with this
@@ -43,15 +63,17 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &QtTrustTunnelClient::startConnectAttempt);
 
+    m_stuckJoinWaitMs = testHookMs("FT_TEST_STUCK_JOIN_MS", 15000);
+
     // Periodically check open fd count and force clean reconnect if leaking.
-    m_fdWatchdogTimer.setInterval(10000); // every 10 seconds
+    m_fdWatchdogTimer.setInterval(testHookMs("FT_TEST_FD_WATCHDOG_MS", 10000)); // every 10 s
     connect(&m_fdWatchdogTimer, &QTimer::timeout, this, &QtTrustTunnelClient::checkFdHealth);
 
     // If we stay stuck in WaitingForNetwork for more than 30 s (common after
     // sleep/wake or a brief network blip where the core doesn't self-recover),
     // force a clean teardown and reconnect from the Qt side.
     m_networkWaitTimer.setSingleShot(true);
-    m_networkWaitTimer.setInterval(30000);
+    m_networkWaitTimer.setInterval(testHookMs("FT_TEST_NETWORK_WAIT_MS", 30000));
     connect(&m_networkWaitTimer, &QTimer::timeout, this, [this]() {
         if (m_state == State::WaitingForNetwork && !m_stopRequested && m_autoReconnect) {
             teardownClient();
@@ -65,35 +87,29 @@ QtTrustTunnelClient::~QtTrustTunnelClient() {
     // reference this object which is already being torn down.
     m_stopRequested = true;
     m_reconnectTimer.stop();
-    if (m_connectThread.isRunning()) {
-        m_connectThread.quit();
-        m_connectThread.wait();
+    if (joinOrAbandonConnectThread(m_stuckJoinWaitMs)) {
+        delete m_connectThread;
+        m_connectThread = nullptr;
     }
+    // else: abandoned — the thread (and the core objects it may still touch)
+    // intentionally leak; we're going down anyway and a terminate() could
+    // deadlock the process on locks the native call holds.
     blockSignals(true);
     teardownClient();
 }
 
 void QtTrustTunnelClient::teardownClient() {
-    // If teardownClient is called from the main thread (e.g. handleCoreStateChanged,
-    // checkFdHealth, disconnectVpn) we MUST wait for m_connectThread to finish before
-    // touching m_client.  The thread may currently be inside m_client->connect() or
-    // m_client->set_system_dns(), so resetting m_client while it runs is a data race.
+    // If teardownClient is called from the object's thread (handleCoreStateChanged,
+    // checkFdHealth, disconnectVpn) the connect thread may currently be inside
+    // m_client->connect() or set_system_dns(), so resetting m_client while it
+    // runs would be a use-after-free. Join it — or, if it is stuck in the
+    // native call, abandon it (joinOrAbandonConnectThread hands the core
+    // objects over to the stale thread's cleanup, leaving m_client null here).
     //
-    // When teardownClient is called FROM the connect thread itself (doConnectAttempt
-    // on a reconnect) we must NOT join it — that would deadlock.
-    if (QThread::currentThread() != &m_connectThread && m_connectThread.isRunning()) {
-        m_connectThread.quit();
-        // BUG FIX: wait() without a timeout — a finite wait(5000) returns false
-        // after 5 s even when the thread is still alive inside a blocking native
-        // call (m_client->connect, set_system_dns).  Calling m_client.reset()
-        // while the thread holds a reference is a use-after-free / data race.
-        // As a last resort after 15 s we terminate to prevent a complete hang.
-        if (!m_connectThread.wait(15000)) {
-            qWarning("[teardownClient] connect thread did not exit in 15 s — forcing terminate");
-            m_connectThread.terminate();
-            m_connectThread.wait();
-        }
-    }
+    // When teardownClient is called FROM the connect thread itself
+    // (doConnectAttempt on a reconnect) we must NOT join — that would deadlock.
+    if (QThread::currentThread() != m_connectThread)
+        joinOrAbandonConnectThread(m_stuckJoinWaitMs);
 
     // Invalidate the session: any core events still queued (or emitted during
     // the disconnect below) belong to the client being destroyed and must not
@@ -240,16 +256,10 @@ void QtTrustTunnelClient::disconnectVpn() {
     m_networkWaitTimer.stop();
     stopCoreLogTail();
 
-    // Stop connect thread if running.  No timeout: teardownClient() below calls
-    // m_client.reset() and a running thread would still hold a pointer to it.
-    if (m_connectThread.isRunning()) {
-        m_connectThread.quit();
-        if (!m_connectThread.wait(15000)) {
-            qWarning("[disconnectVpn] connect thread did not exit in 15 s — forcing terminate");
-            m_connectThread.terminate();
-            m_connectThread.wait();
-        }
-    }
+    // Stop the in-flight attempt. Bounded: an attempt stuck inside a blocking
+    // native call is abandoned after m_stuckJoinWaitMs (see
+    // joinOrAbandonConnectThread) so the user's disconnect always completes.
+    joinOrAbandonConnectThread(m_stuckJoinWaitMs);
 
     setState(State::Disconnecting);
     teardownClient();

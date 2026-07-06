@@ -82,7 +82,8 @@ private slots:
 
 private:
     ag::VpnCallbacks makeCallbacks();
-    void doConnectAttempt();
+    void doConnectAttempt(quint64 attemptGen);
+    bool joinOrAbandonConnectThread(int waitMs);
     void startConnectAttempt();
     void scheduleReconnect(const QString &reason);
     void setState(State s);
@@ -100,7 +101,7 @@ private:
     bool reloadStoredConfigIfNeeded();
     bool ensureClientReady();
     void failConnectFatal(const QString &qErr, bool privilegeHint);
-    bool attemptTunnelConnect();
+    bool attemptTunnelConnect(quint64 attemptGen);
     void teardownIfReconnecting(bool isReconnect);
     void forceFdReconnect(const QString &logReason, const QString &userReason);
     void protectOutboundSocket(ag::SocketProtectEvent *event);
@@ -124,7 +125,11 @@ private:
     int m_fdBaseline = -1; // open fd count right after connect (for leak detection)
     QTimer m_networkWaitTimer;   // fires if we stay in WaitingForNetwork too long
     QTimer *m_coreLogPoll = nullptr;
-    QThread m_connectThread;
+    // Heap-allocated and unparented on purpose: a connect attempt stuck inside
+    // a blocking native call is ABANDONED (thread pointer dropped, deleted on
+    // finished) rather than terminate()d — a parented member thread would be
+    // deleted while still running when this object dies.
+    QThread *m_connectThread = nullptr;
     State m_state = State::Disconnected;
     bool m_autoReconnect = true;
     // Written from the object's thread, read from m_connectThread (and vice
@@ -133,6 +138,11 @@ private:
     // Incremented for every new core client (and again on teardown); core
     // callbacks capture the value and stale queued events are dropped.
     std::atomic<quint64> m_sessionGen{0};
+    // Incremented per connect attempt and when a stuck attempt is abandoned;
+    // an abandoned attempt sees the mismatch after its blocking call returns
+    // and drops its result instead of touching shared state.
+    std::atomic<quint64> m_attemptGen{0};
+    int m_stuckJoinWaitMs = 15000; // join timeout before abandoning (test hook)
     bool m_everConnected = false; // true after first successful connect in this session
     int m_reconnectDelayMs = 1000;
     int m_reconnectMaxMs = 30000;

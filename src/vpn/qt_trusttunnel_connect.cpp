@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <memory>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -95,31 +96,68 @@ void QtTrustTunnelClient::beginConnect(const QString &configToml)
     }
 }
 
+// Join the connect thread within waitMs; returns true when no attempt thread
+// is left running. On timeout the stuck thread is ABANDONED, not terminate()d:
+// pthread_cancel/TerminateThread can kill it while core/CRT locks are held and
+// deadlock the whole process later. An abandoned thread exits by itself when
+// the blocking native call finally returns; the attempt-generation guard makes
+// it drop its stale result, and the core client/monitor move into its cleanup
+// handler so it never touches freed objects. If the native call never returns,
+// they leak until process exit — the safer failure mode.
+//
+// NOTE: the abandoned thread still references this QtTrustTunnelClient. The
+// helper process keeps the client alive until exit, which satisfies that.
+bool QtTrustTunnelClient::joinOrAbandonConnectThread(int waitMs)
+{
+    QThread *thread = m_connectThread;
+    if (!thread || !thread->isRunning())
+        return true;
+    thread->quit();
+    if (thread->wait(waitMs))
+        return true;
+
+    qWarning("[QtTrustTunnelClient] connect attempt stuck in a native call for %d ms — "
+             "abandoning the thread",
+             waitMs);
+    ++m_attemptGen; // the stale attempt must drop its result when it resumes
+    ++m_sessionGen; // and events from its core client are no longer ours
+    auto client = std::make_shared<std::unique_ptr<ag::TrustTunnelClient>>(std::move(m_client));
+    auto monitor =
+            std::make_shared<std::unique_ptr<ag::AutoNetworkMonitor>>(std::move(m_networkMonitor));
+    connect(thread, &QThread::finished, this, [client, monitor]() {
+        if (*monitor) {
+            (*monitor)->stop();
+            monitor->reset();
+        }
+        if (*client) {
+            (*client)->disconnect();
+            client->reset();
+        }
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    m_connectThread = nullptr; // the next attempt gets a fresh thread
+    return false;
+}
+
 void QtTrustTunnelClient::doConnectAttemptInThread()
 {
-    if (m_connectThread.isRunning()) {
-        m_connectThread.quit();
-        // Bounded wait: a previous attempt stuck inside a blocking native call
-        // must not freeze this thread's event loop forever (same policy as
-        // teardownClient / disconnectVpn).
-        if (!m_connectThread.wait(15000)) {
-            qWarning("[doConnectAttemptInThread] previous connect attempt did not exit in 15 s — "
-                     "forcing terminate");
-            m_connectThread.terminate();
-            m_connectThread.wait();
-        }
-    }
-    disconnect(&m_connectThread, &QThread::started, nullptr, nullptr);
+    joinOrAbandonConnectThread(m_stuckJoinWaitMs);
+    if (!m_connectThread)
+        m_connectThread = new QThread();
+    else
+        disconnect(m_connectThread, &QThread::started, nullptr, nullptr);
 
+    const quint64 attemptGen = ++m_attemptGen;
     auto *worker = new QObject();
-    worker->moveToThread(&m_connectThread);
-    connect(&m_connectThread, &QThread::started, worker, [this, worker]() {
-        doConnectAttempt();
+    worker->moveToThread(m_connectThread);
+    QThread *thread = m_connectThread;
+    connect(thread, &QThread::started, worker, [this, worker, thread, attemptGen]() {
+        doConnectAttempt(attemptGen);
         worker->deleteLater();
-        m_connectThread.quit();
+        thread->quit();
     });
 
-    m_connectThread.start();
+    thread->start();
 }
 
 bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
@@ -173,10 +211,16 @@ void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHi
     emit vpnError(QString("connect() failed: %1").arg(msg));
 }
 
-bool QtTrustTunnelClient::attemptTunnelConnect()
+bool QtTrustTunnelClient::attemptTunnelConnect(quint64 attemptGen)
 {
     emit connectProgress(tr("Configuring DNS..."));
-    if (auto dnsErr = m_client->set_system_dns()) {
+    const auto dnsErr = m_client->set_system_dns();
+    // A blocking call may have outlived the join timeout — this attempt was
+    // then abandoned and must not touch shared state (the core objects were
+    // handed to the zombie cleanup; m_client here is already null).
+    if (attemptGen != m_attemptGen)
+        return false;
+    if (dnsErr) {
         teardownClient();
         m_stopRequested = true;
         setState(State::Error);
@@ -187,7 +231,10 @@ bool QtTrustTunnelClient::attemptTunnelConnect()
 
     m_lastConnectAttempt = std::chrono::steady_clock::now();
     emit connectProgress(tr("Establishing tunnel..."));
-    if (auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{})) {
+    const auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{});
+    if (attemptGen != m_attemptGen)
+        return false; // abandoned while blocked (see above)
+    if (err) {
         const QString qErr = QString::fromStdString(err->str());
         if (qErr.contains("Failed to create listener", Qt::CaseInsensitive)) {
             failConnectFatal(qErr, true);
@@ -207,9 +254,9 @@ void QtTrustTunnelClient::teardownIfReconnecting(bool isReconnect)
     teardownClient();
 }
 
-void QtTrustTunnelClient::doConnectAttempt()
+void QtTrustTunnelClient::doConnectAttempt(quint64 attemptGen)
 {
-    if (m_stopRequested)
+    if (m_stopRequested || attemptGen != m_attemptGen)
         return;
 
     const bool isReconnect = (m_client != nullptr);
@@ -220,9 +267,11 @@ void QtTrustTunnelClient::doConnectAttempt()
         teardownIfReconnecting(isReconnect);
         if (!ensureClientReady())
             return;
-        if (!attemptTunnelConnect())
+        if (!attemptTunnelConnect(attemptGen))
             return;
     } catch (const std::exception &e) {
+        if (attemptGen != m_attemptGen)
+            return; // abandoned mid-call — the result is stale
         teardownClient();
         scheduleReconnect(QString::fromUtf8(e.what()));
     }
