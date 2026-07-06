@@ -282,12 +282,10 @@ jobs:
           conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
           rm -rf _dnslibs
 
-      # boringssl sources come from boringssl.googlesource.com, which
-      # rate-limits GitHub runner IPs with 503 bursts. Conan's default retry
-      # (2 attempts, 5 s apart) loses that race regularly — stretch it so a
-      # burst has minutes to clear instead of failing the whole matrix job.
-      # Runs AFTER the bootstrap/profile steps (they may reinitialise the conan
-      # home) and resolves the home via conan itself.
+      # Stretch conan's conf-driven download retries (defaults: 2 attempts,
+      # 5 s apart). NOTE: recipes that pass explicit retry args — the boringssl
+      # one does — ignore this conf; those are covered by the retry loops
+      # around the configure steps below.
       - name: Harden conan downloads against 503 bursts
         shell: bash
         run: |
@@ -308,14 +306,21 @@ jobs:
         run: |
           # clang-18 from llvm.sh (upstream is clang-only; gcc trips -Werror=extra)
           # with libstdc++; Qt comes from aqt ($QT_ROOT_DIR).
-          cmake -S upstream -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF \
-            -DBUILD_TRUSTTUNNEL_QT=ON \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries"
+          # Retried: the conan install inside configure downloads boringssl from
+          # googlesource.com, whose 503 bursts outlast the recipe's own retries.
+          for attempt in 1 2 3; do
+            cmake -S upstream -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF \
+              -DBUILD_TRUSTTUNNEL_QT=ON \
+              -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+              -DCMAKE_EXE_LINKER_FLAGS="-Wl,--copy-dt-needed-entries" && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            echo "configure attempt $attempt failed — retrying in 90 s"
+            sleep 90
+          done
 
       # macOS configures/builds both arches in the universal step below.
 
@@ -323,12 +328,22 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          cmake -S upstream -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
-            -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF `
-            -DBUILD_TRUSTTUNNEL_QT=ON `
-            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          # Retried: see the Linux configure comment (boringssl 503 bursts).
+          $ok = $false
+          foreach ($attempt in 1..3) {
+            cmake -S upstream -B build -G Ninja `
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+              -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+              -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF `
+              -DBUILD_TRUSTTUNNEL_QT=ON `
+              -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            if ($attempt -lt 3) {
+              Write-Host "configure attempt $attempt failed - retrying in 90 s"
+              Start-Sleep -Seconds 90
+            }
+          }
+          if (-not $ok) { exit 1 }
 
       # --------------------------------------------------------------- Build
       - name: Build
@@ -468,10 +483,21 @@ jobs:
           # needs that Rust target installed (the runner only has the native one).
           rustup target add x86_64-apple-darwin
 
+          # Configure is retried: see the Linux configure comment (boringssl
+          # 503 bursts on googlesource.com). Builds themselves are not retried.
+          retry_configure() {
+            for attempt in 1 2 3; do
+              if cmake "$@"; then return 0; fi
+              if [ "$attempt" = 3 ]; then return 1; fi
+              echo "configure attempt $attempt failed — retrying in 90 s"
+              sleep 90
+            done
+          }
+
           # arm64 (native) and x86_64 (cross-compiled by Apple clang).
-          cmake "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
+          retry_configure "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
           cmake --build build-arm64 --target FreeTunnel -j3
-          cmake "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
+          retry_configure "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
           cmake --build build-x64 --target FreeTunnel -j3
 
           # Merge the two slices into a universal binary inside the arm64 bundle.
