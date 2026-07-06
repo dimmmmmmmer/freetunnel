@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -116,6 +117,7 @@ public:
 
     int toggleCount() const { return m_toggleCount; }
 
+    Q_INVOKABLE QString readBundledText(const QUrl &url) const;
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void connectVpn() { m_connecting = true; emit stateChanged(); }
     Q_INVOKABLE void disconnectVpn() { m_connected = false; emit stateChanged(); }

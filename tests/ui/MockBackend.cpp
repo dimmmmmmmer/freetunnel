@@ -1,12 +1,29 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "ui/MockBackend.h"
 
+#include <QFile>
 #include <QStandardPaths>
 
 MockBackend::MockBackend(QObject *parent) : QObject(parent)
 {
     m_logModel.append(QStringLiteral("12:00:00"), QStringLiteral("INFO"),
                       QStringLiteral("Mock backend ready"));
+}
+
+// Mirrors Backend::readBundledText (qrc-only) so Icon.qml renders in UI tests.
+QString MockBackend::readBundledText(const QUrl &url) const
+{
+    QString path;
+    if (url.scheme() == QLatin1String("qrc"))
+        path = QLatin1Char(':') + url.path();
+    else if (url.toString().startsWith(QLatin1String(":/")))
+        path = url.toString();
+    else
+        return QString();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(f.readAll());
 }
 
 void MockBackend::setConnected(bool v)

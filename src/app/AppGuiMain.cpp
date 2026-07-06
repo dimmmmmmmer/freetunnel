@@ -43,7 +43,12 @@ static QLocalServer *startSingleInstanceServer(QGuiApplication &app, QString *in
         instanceToken->clear();
     auto *server = new QLocalServer(&app);
     server->setSocketOptions(QLocalServer::UserAccessOption);
-    server->listen(kInstanceKey);
+    if (!server->listen(kInstanceKey)) {
+        // Not fatal (the app works without single-instance forwarding), but a
+        // persistent failure here usually means another user squats the name.
+        qWarning("Single-instance server failed to listen on '%s': %s",
+                 qPrintable(kInstanceKey), qPrintable(server->errorString()));
+    }
     return server;
 }
 

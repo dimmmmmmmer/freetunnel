@@ -185,6 +185,14 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     if (!probe.waitForConnected(250))
         return false;
 
+    // The local-socket name lives in a world-writable namespace on Unix, so a
+    // process of ANOTHER user could squat it before our real instance starts.
+    // Sending the auth token there would leak it and make this launch exit as
+    // if an instance were already running (silent startup DoS). Only talk to a
+    // listener owned by the same user.
+    if (!localSocketPeerIsSameUser(&probe))
+        return false;
+
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
     const QByteArray msg = formatInstanceMessage(token, payload);
     if (probe.write(msg) != msg.size())

@@ -314,13 +314,22 @@ private:
         }
 #endif
         const QString toml = c.value(QStringLiteral("configToml")).toString();
-        const QString path = c.value(QStringLiteral("configPath")).toString();
+        // Path-based connect would make this elevated process open an arbitrary
+        // file named by the (unprivileged) GUI. Nothing legitimate uses it — the
+        // GUI always sends the config inline — so refuse it as hardening.
+        if (toml.isEmpty()) {
+            QJsonObject e;
+            e["ev"] = "error";
+            e["msg"] = QStringLiteral("connect requires inline configToml");
+            send(e);
+            return;
+        }
         const QString logPath = c.value(QStringLiteral("logPath")).toString();
         const bool loggingEnabled = c.value(QStringLiteral("loggingEnabled")).toBool(true);
         QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
                                   Q_ARG(QString, logPath), Q_ARG(bool, loggingEnabled));
         QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
-                                  Q_ARG(QString, toml), Q_ARG(QString, path));
+                                  Q_ARG(QString, toml), Q_ARG(QString, QString()));
     }
 
     quint16 m_port = 0;

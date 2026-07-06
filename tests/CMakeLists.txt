@@ -456,3 +456,22 @@ if(OpenSSL_FOUND)
     target_link_libraries(test_update_checker_e2e PRIVATE OpenSSL::Crypto)
 endif()
 add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e)
+
+# QtTrustTunnelClient state machine against the mock core in tests/mock_core —
+# connect/disconnect/config-switch/reconnect behavior without the native VPN
+# core. The mock include dir must come FIRST so "vpn/vpn.h", "net/*.h" and
+# <toml++/toml.h> resolve to the stubs.
+add_executable(test_qt_trusttunnel_client
+    test_qt_trusttunnel_client.cpp
+    ../src/vpn/qt_trusttunnel_client.cpp
+    ../src/vpn/qt_trusttunnel_connect.cpp
+    ../src/vpn/qt_trusttunnel_events.cpp
+    ../src/vpn/qt_trusttunnel_platform.cpp
+    ../src/core/NetBind.cpp
+    ../include/vpn/qt_trusttunnel_client.h
+)
+target_include_directories(test_qt_trusttunnel_client PRIVATE
+    mock_core ../include ../include/vpn ../src/vpn)
+target_compile_definitions(test_qt_trusttunnel_client PRIVATE FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client)

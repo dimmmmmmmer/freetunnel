@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
@@ -30,6 +31,16 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
+
+    // Re-check the log size hourly, but only while the tunnel is fully down:
+    // the core (in the elevated helper) appends to the same file through its
+    // own descriptor, and rewriting it under the core's feet would corrupt it.
+    m_logTrimTimer.setInterval(60 * 60 * 1000);
+    connect(&m_logTrimTimer, &QTimer::timeout, this, [this]() {
+        if (m_settings.logging_enabled && !m_connected && !m_connecting && !m_disconnecting)
+            trimLogFile();
+    });
+    m_logTrimTimer.start();
 
     wireHotkeyLifecycle();
 
@@ -208,6 +219,7 @@ void Backend::reloadConfigs() {
     m_names.clear();
     for (const QString &p : m_paths)
         m_names << nameForPath(p);
+    ++m_pingGeneration; // invalidate in-flight probes: indices are shifting
     m_pings.clear(); // indices shifted — stale pings would mislabel servers
     emit pingsChanged();
     emit configsChanged();
@@ -368,6 +380,13 @@ void Backend::removeConfig(int index) {
         return;
     const QString path = m_paths.at(index);
     freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(path));
+    // Remove the TOML itself when we own it (imported/created configs live in
+    // the app config dir) — a "deleted" server shouldn't stay recoverable on
+    // disk with its hostname/username/cert. Files elsewhere are the user's.
+    const QString appConfigDir = QFileInfo(
+            QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).absoluteFilePath();
+    if (QFileInfo(path).absolutePath() == appConfigDir)
+        QFile::remove(path);
     QStringList stored = loadStoredConfigs();
     stored.removeAll(path);
     saveStoredConfigs(stored);

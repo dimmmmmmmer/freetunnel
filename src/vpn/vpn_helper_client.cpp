@@ -302,7 +302,10 @@ void VpnHelperClient::startHelperConnectRetry()
             m_attempt = nullptr;
             return;
         }
-        if (++m_tries > 80) {
+        // 240 × 250 ms = 60 s. The elevation dialog blocks the helper from even
+        // starting until the user finishes typing the admin password — the old
+        // 20 s window expired mid-typing for anyone without Touch ID.
+        if (++m_tries > 240) {
             m_attempt->stop();
             m_attempt->deleteLater();
             m_attempt = nullptr;
