@@ -329,7 +329,7 @@ private:
         QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
                                   Q_ARG(QString, logPath), Q_ARG(bool, loggingEnabled));
         QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
-                                  Q_ARG(QString, toml), Q_ARG(QString, QString()));
+                                  Q_ARG(QString, toml));
     }
 
     quint16 m_port = 0;

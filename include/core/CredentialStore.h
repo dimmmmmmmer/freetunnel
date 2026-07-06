@@ -25,10 +25,8 @@ bool migrateConfigPassword(const QString &configPath);
 // logLevel sets the core's verbosity ("warn" by default; "info" for debug logs).
 QString buildConnectConfigToml(const QString &configPath,
                                const QString &logLevel = QStringLiteral("warn"));
-// Build a helper-readable config path (temp file with password injected when needed).
-QString materializeConfigForConnect(const QString &configPath);
-void removeMaterializedConfig(const QString &materializedPath);
-// Delete any leftover materialized configs (e.g. from a crash) — call at startup.
+// Delete any leftover materialized configs (crash leftovers from versions that
+// wrote password-injected temp files) — call at startup.
 void sweepStaleMaterializedConfigs();
 // Migrate/remove legacy plaintext credential files when secure storage is available.
 void sweepLegacyPlaintextStorage();

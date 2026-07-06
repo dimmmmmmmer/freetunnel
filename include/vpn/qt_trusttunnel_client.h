@@ -45,13 +45,12 @@ public:
     ~QtTrustTunnelClient();
 
     void setConfig(ag::TrustTunnelConfig config);
-    bool loadConfigFromFile(const QString &path);
     bool loadConfigFromToml(const QString &tomlContent);
     void setAutoReconnectEnabled(bool enabled);
     void setReconnectBoundsMs(int initialDelayMs, int maxDelayMs);
 
     Q_INVOKABLE void connectVpn();
-    Q_INVOKABLE void beginConnect(const QString &configToml, const QString &configPath);
+    Q_INVOKABLE void beginConnect(const QString &configToml);
     Q_INVOKABLE void disconnectVpn();
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
@@ -111,7 +110,6 @@ private:
     std::unique_ptr<ag::TrustTunnelClient> m_client;
     std::unique_ptr<ag::AutoNetworkMonitor> m_networkMonitor;
     std::optional<ag::TrustTunnelConfig> m_config;
-    QString m_lastConfigPath; // stored so we can reload config after disconnect
     QString m_lastConfigToml; // in-memory config for reconnect without on-disk secrets
     std::vector<std::string> m_extraIncludedRoutes;
     std::vector<std::string> m_extraExcludedRoutes;

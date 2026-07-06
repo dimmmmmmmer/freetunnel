@@ -5,7 +5,6 @@
 #include "core/NetBind.h"
 #include "net/network_manager.h"
 
-#include <QCoreApplication>
 #include <QMetaObject>
 #include <QRandomGenerator>
 #include <QThread>
@@ -77,14 +76,12 @@ void QtTrustTunnelClient::startConnectAttempt()
     doConnectAttemptInThread();
 }
 
-void QtTrustTunnelClient::beginConnect(const QString &configToml, const QString &configPath)
+void QtTrustTunnelClient::beginConnect(const QString &configToml)
 {
     const auto st = state();
     const bool needsTeardown = st != State::Disconnected && st != State::Error;
-    auto startConnect = [this, configToml, configPath]() {
-        const bool loaded = !configToml.isEmpty() ? loadConfigFromToml(configToml)
-                                                  : loadConfigFromFile(configPath);
-        if (!loaded) {
+    auto startConnect = [this, configToml]() {
+        if (!loadConfigFromToml(configToml)) {
             emit vpnError(QStringLiteral("Failed to load config"));
             return;
         }
@@ -131,8 +128,6 @@ bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
         return true;
     if (!m_lastConfigToml.isEmpty())
         return loadConfigFromToml(m_lastConfigToml);
-    if (!m_lastConfigPath.isEmpty())
-        return loadConfigFromFile(m_lastConfigPath);
     setState(State::Error);
     emit vpnError(QStringLiteral("TrustTunnel config is not set"));
     return false;

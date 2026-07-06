@@ -101,15 +101,8 @@ static VpnHelperClient::State stateFromString(const QString &s) {
     return S::Disconnected;
 }
 
-bool VpnHelperClient::loadConfigFromFile(const QString &path) {
-    m_configPath = path;
-    m_configToml.clear();
-    return !path.isEmpty();
-}
-
 bool VpnHelperClient::loadConfigFromToml(const QString &toml) {
     m_configToml = toml;
-    m_configPath.clear();
     return !toml.isEmpty();
 }
 
@@ -176,10 +169,7 @@ void VpnHelperClient::connectVpn() {
     c["cmd"] = "connect";
     c["logPath"] = m_logPath;
     c["loggingEnabled"] = m_loggingEnabled;
-    if (!m_configToml.isEmpty())
-        c["configToml"] = m_configToml;
-    else
-        c["configPath"] = m_configPath;
+    c["configToml"] = m_configToml; // inline only — the helper refuses file paths
     send(c);
 }
 

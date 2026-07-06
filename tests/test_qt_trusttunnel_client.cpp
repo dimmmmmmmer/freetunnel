@@ -69,8 +69,7 @@ private:
     void beginConnect()
     {
         QMetaObject::invokeMethod(m_client, "beginConnect", Qt::QueuedConnection,
-                                  Q_ARG(QString, QStringLiteral("mock = true")),
-                                  Q_ARG(QString, QString()));
+                                  Q_ARG(QString, QStringLiteral("mock = true")));
     }
 
     void requestDisconnect()

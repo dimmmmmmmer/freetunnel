@@ -11,7 +11,6 @@
 #include <QLoggingCategory>
 #include <QProcess>
 #include <QStandardPaths>
-#include <QTemporaryFile>
 
 #if defined(Q_OS_MACOS)
 #include <CoreFoundation/CoreFoundation.h>
@@ -414,44 +413,11 @@ QString buildConnectConfigToml(const QString &configPath, const QString &logLeve
     return buildConfigToml(c, logLevel);
 }
 
-QString materializeConfigForConnect(const QString &configPath)
-{
-    const QString toml = buildConnectConfigToml(configPath);
-    if (toml.isEmpty())
-        return QString();
-
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(dir);
-    QTemporaryFile tf(dir + QStringLiteral("/.connect-XXXXXX.toml"));
-    tf.setAutoRemove(false);
-    if (!tf.open())
-        return QString();
-    tf.write(toml.toUtf8());
-    tf.close();
-    QFile::setPermissions(tf.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    return tf.fileName();
-}
-
-void removeMaterializedConfig(const QString &materializedPath)
-{
-    if (materializedPath.isEmpty())
-        return;
-    const QString absConfigDir = QFileInfo(
-            QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).absoluteFilePath();
-    const QFileInfo fi(materializedPath);
-    // Exact parent-directory match (not a prefix) so a sibling like
-    // "<config>-evil/.connect-x.toml" can't be coaxed into removal, and only
-    // remove the password temp files we ourselves materialize.
-    if (fi.absolutePath() != absConfigDir)
-        return;
-    if (fi.fileName().startsWith(QStringLiteral(".connect-")))
-        QFile::remove(materializedPath);
-}
-
 void sweepStaleMaterializedConfigs()
 {
-    // A crash mid-connection can leave a .connect-XXXXXX.toml (which holds the
-    // injected password) behind. None should exist at startup, so clear them.
+    // Older versions materialized password-injected .connect-XXXXXX.toml temp
+    // files for connecting; a crash could leave one behind. The connect path
+    // is in-memory-only now, but keep sweeping so upgrades clean old leftovers.
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir d(dir);
     const QStringList stale = d.entryList({QStringLiteral(".connect-*.toml")},

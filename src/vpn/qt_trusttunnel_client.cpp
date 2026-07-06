@@ -177,32 +177,6 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
     return fallback;
 }
 
-bool QtTrustTunnelClient::loadConfigFromFile(const QString &path) {
-    const std::string configPath = path.toStdString();
-    toml::parse_result parsed = toml::parse_file(configPath);
-    if (!parsed) {
-        const std::string_view descrView = parsed.error().description();
-        const std::string descr{descrView};
-        setState(State::Error);
-        emit vpnError(QString("Failed parsing config: %1").arg(QString::fromStdString(descr)));
-        return false;
-    }
-
-    auto config = ag::TrustTunnelConfig::build_config(parsed.table());
-    if (!config.has_value()) {
-        setState(State::Error);
-        emit vpnError(QStringLiteral("Invalid TrustTunnel config structure"));
-        return false;
-    }
-
-    m_lastConfigPath = path;
-    m_lastConfigToml.clear();
-    m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
-    setConfig(std::move(*config));
-    setState(State::Disconnected);
-    return true;
-}
-
 bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     if (tomlContent.isEmpty()) {
         setState(State::Error);
@@ -225,7 +199,6 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
         return false;
     }
 
-    m_lastConfigPath.clear();
     m_lastConfigToml = tomlContent;
     m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
     setConfig(std::move(*config));

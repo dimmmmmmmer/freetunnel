@@ -34,7 +34,6 @@ public:
     explicit VpnHelperClient(QObject *parent = nullptr);
     ~VpnHelperClient() override;
 
-    bool loadConfigFromFile(const QString &path);
     bool loadConfigFromToml(const QString &tomlContent);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setExcludedRoutes(const std::vector<std::string> &routes);
@@ -79,7 +78,6 @@ private:
     quint16 m_tcpPort = 0;
     QString m_token;
     QString m_tokenPath;
-    QString m_configPath;
     QString m_configToml;
     std::vector<std::string> m_exclusions;
     std::vector<std::string> m_excludedRoutes;

@@ -8,7 +8,9 @@ and threat summary.
 A second launch forwards commands (`freetunnel://toggle`, `tt://…` import) to the
 running instance via a local socket (`QLocalServer`) protected by:
 
-- `UserAccessOption` — other OS users cannot connect
+- `UserAccessOption` (Windows) and peer-uid verification (macOS/Linux) — other
+  OS users cannot connect; the second instance also verifies the listener's
+  owner before sending the token, so a squatted socket name can't harvest it
 - Per-session random token (stored in the OS credential store when available)
 - Constant-time token comparison
 - 64 KB message cap

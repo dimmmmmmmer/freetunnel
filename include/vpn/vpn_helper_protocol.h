@@ -19,7 +19,6 @@ inline bool tokensEqual(const QString &a, const QString &b)
     return diff == 0;
 }
 
-inline constexpr int kMaxReadBuffer = 65536;
 // Connect payloads carry full TOML (certs can be large).
 inline constexpr int kMaxIpcLineBytes = 512 * 1024;
 
