@@ -282,6 +282,26 @@ jobs:
           conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
           rm -rf _dnslibs
 
+      # boringssl sources come from boringssl.googlesource.com, which
+      # rate-limits GitHub runner IPs with 503 bursts. Conan's default retry
+      # (2 attempts, 5 s apart) loses that race regularly — stretch it so a
+      # burst has minutes to clear instead of failing the whole matrix job.
+      # Runs AFTER the bootstrap/profile steps (they may reinitialise the conan
+      # home) and resolves the home via conan itself.
+      - name: Harden conan downloads against 503 bursts
+        shell: bash
+        run: |
+          set -eux
+          CONAN_HOME_DIR="$(conan config home)"
+          mkdir -p "$CONAN_HOME_DIR"
+          touch "$CONAN_HOME_DIR/global.conf"
+          grep -q "core.download:retry " "$CONAN_HOME_DIR/global.conf" \
+            || echo "core.download:retry = 8" >> "$CONAN_HOME_DIR/global.conf"
+          grep -q "core.download:retry_wait" "$CONAN_HOME_DIR/global.conf" \
+            || echo "core.download:retry_wait = 30" >> "$CONAN_HOME_DIR/global.conf"
+          conan config show "core.download:retry"
+          conan config show "core.download:retry_wait"
+
       # ----------------------------------------------------------- Configure
       - name: Configure (Linux)
         if: matrix.platform == 'linux'
