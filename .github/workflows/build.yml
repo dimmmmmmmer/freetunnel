@@ -253,6 +253,20 @@ jobs:
           key: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
           restore-keys: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-
 
+      # boringssl sources come from boringssl.googlesource.com, which
+      # rate-limits GitHub runner IPs with 503 bursts. Conan's default retry
+      # (2 quick attempts) loses that race regularly — stretch it so a burst
+      # has minutes to clear instead of failing the whole matrix job.
+      - name: Harden conan downloads against 503 bursts
+        shell: bash
+        run: |
+          mkdir -p ~/.conan2
+          touch ~/.conan2/global.conf
+          grep -q "core.download:retry " ~/.conan2/global.conf \
+            || echo "core.download:retry = 8" >> ~/.conan2/global.conf
+          grep -q "core.download:retry_wait" ~/.conan2/global.conf \
+            || echo "core.download:retry_wait = 30" >> ~/.conan2/global.conf
+
       - name: Patch bootstrap for Windows (run .sh via sh)
         if: matrix.platform == 'windows'
         shell: bash
