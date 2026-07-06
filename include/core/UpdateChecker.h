@@ -2,12 +2,12 @@
 #pragma once
 
 #include <QCryptographicHash>
+#include <QFile> // full type: std::unique_ptr<QFile> member needs it for ~UpdateChecker
 #include <QObject>
 #include <QString>
 
 #include <memory>
 
-class QFile;
 class QNetworkAccessManager;
 class QNetworkReply;
 
