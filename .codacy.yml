@@ -21,6 +21,11 @@ languages:
 engines:
   cppcheck:
     language: c++
+    exclude_paths:
+      # API-shape mocks of the vendor core: members exist to satisfy the real
+      # wrapper code, so "unused struct member" is meaningless there. Real test
+      # logic (tests/*.cpp) stays analyzed.
+      - 'tests/mock_core/**'
     extra_lines:
       - "--suppress=missingInclude"
       - "--suppress=missingIncludeSystem"

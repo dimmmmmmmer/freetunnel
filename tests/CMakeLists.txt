@@ -464,6 +464,7 @@ add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e)
 add_executable(test_qt_trusttunnel_client
     test_qt_trusttunnel_client.cpp
     ../src/vpn/qt_trusttunnel_client.cpp
+    ../src/vpn/qt_trusttunnel_fdwatch.cpp
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
