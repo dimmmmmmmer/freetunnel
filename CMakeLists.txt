@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreeTunnel VERSION 1.1.2 LANGUAGES CXX)
+project(FreeTunnel VERSION 1.1.3 LANGUAGES CXX)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
