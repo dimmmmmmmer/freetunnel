@@ -33,7 +33,6 @@ class Backend : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY stateChanged) // connecting/reconnecting
     Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY stateChanged) // tearing the tunnel down
-    Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY tick)
@@ -80,7 +79,6 @@ public:
     bool connected() const { return m_connected; }
     bool connecting() const { return m_connecting; }
     bool disconnecting() const { return m_disconnecting; }
-    QString statusText() const;
     QString sessionTime() const;
     QString downSpeed() const;
     QString upSpeed() const;
@@ -208,6 +206,7 @@ signals:
     void aboutToShutdown();
 
 private:
+    QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(); // push the active CONFIG's profile rules to the core

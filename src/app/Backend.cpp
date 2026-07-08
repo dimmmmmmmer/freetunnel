@@ -127,6 +127,12 @@ namespace {
 
 QString classifyVpnErrorMessage(const QString &lower)
 {
+    // Helper lifecycle messages are already written for humans — and phrases
+    // like "authorization may have been declined" would false-match the
+    // credential branch below and turn an elevation refusal into a bogus
+    // "Authentication failed — check the username and password".
+    if (lower.contains(QLatin1String("helper")))
+        return QString();
     if (lower.contains(QLatin1String("disconnect")) || lower.contains(QLatin1String("core"))) {
         return QCoreApplication::translate(
                 "Backend",
@@ -165,7 +171,11 @@ void Backend::emitDedupedVpnError(const QString &friendly)
 void Backend::onVpnErrorReceived(const QString &m)
 {
     appendLog(QStringLiteral("ERROR"), m);
-    if (m_reapplying || m_inConnect || isInternalVpnError(m))
+    // NOT gated on m_inConnect: a synchronous helper-spawn failure (no
+    // pkexec/sudo, token file not writable) emits from inside connectVpn(),
+    // and swallowing it left Connect looking like a silent no-op. Duplicate
+    // chatter is already handled by m_reapplying + the 30 s dedupe below.
+    if (m_reapplying || isInternalVpnError(m))
         return;
     emitDedupedVpnError(friendlyVpnError(m));
 }

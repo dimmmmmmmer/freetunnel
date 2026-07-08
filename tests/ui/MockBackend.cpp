@@ -50,17 +50,6 @@ void MockBackend::setDisconnecting(bool v)
     emit stateChanged();
 }
 
-QString MockBackend::statusText() const
-{
-    if (m_disconnecting)
-        return QStringLiteral("Disconnecting…");
-    if (m_connecting)
-        return QStringLiteral("Connecting…");
-    if (m_connected)
-        return QStringLiteral("Connected");
-    return QStringLiteral("Off");
-}
-
 void MockBackend::setLanguage(const QString &v)
 {
     if (m_language == v)

@@ -26,7 +26,6 @@ public:
         QString tagName;      ///< e.g. "v0.6b"
         QString version;      ///< tag without leading 'v', e.g. "0.6b"
         QString htmlUrl;      ///< browser URL to the release page
-        QString body;         ///< release notes / changelog (markdown)
         QString installerUrl; ///< direct download URL for the platform asset
         QString assetName;    ///< filename of the installer asset
         QString checksumsUrl; ///< SHA256SUMS.txt download URL (when published)

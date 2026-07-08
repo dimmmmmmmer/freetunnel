@@ -207,7 +207,8 @@ void VpnHelperClient::resetHelperTransport()
 
 bool VpnHelperClient::configureProductionHelper()
 {
-    m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16383));
+    // Full dynamic/ephemeral port range 49152–65535 (16384 ports).
+    m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16384));
     // Two 64-bit CSPRNG values, zero-padded to a fixed 32-hex (128-bit) string —
     // QString::number(…, 16) drops leading zero nibbles, which would otherwise
     // make the token length leak a little and vary between runs.

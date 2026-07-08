@@ -152,7 +152,6 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     m_latest.tagName = tagName;
     m_latest.version = remoteVersion;
     m_latest.htmlUrl = obj.value("html_url").toString();
-    m_latest.body = obj.value("body").toString();
 
     const QJsonArray assets = obj.value("assets").toArray();
     for (const QJsonValue &val : assets) {
@@ -224,7 +223,12 @@ void UpdateChecker::fetchChecksumsThenInstaller()
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
-                emit downloadProgress(received * 5 / qMax<qint64>(total, 1), 100);
+                // total <= 0 = size unknown (no Content-Length): report an
+                // indeterminate (0, 0) instead of a garbage percentage.
+                if (total <= 0)
+                    emit downloadProgress(0, 0);
+                else
+                    emit downloadProgress(received * 5 / total, 100);
             });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onChecksumsFetched(reply); });
 }
@@ -257,7 +261,10 @@ void UpdateChecker::fetchSignature()
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
-                emit downloadProgress(5 + received * 5 / qMax<qint64>(total, 1), 100);
+                if (total <= 0)
+                    emit downloadProgress(0, 0);
+                else
+                    emit downloadProgress(5 + received * 5 / total, 100);
             });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onSignatureFetched(reply); });
 }
@@ -308,8 +315,12 @@ void UpdateChecker::fetchInstaller()
     });
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 received, qint64 total) {
+                if (total <= 0) {
+                    emit downloadProgress(0, 0);
+                    return;
+                }
                 const qint64 base = signatureVerificationActive() ? 10 : 5;
-                emit downloadProgress(base + received * (100 - base) / qMax<qint64>(total, 1), 100);
+                emit downloadProgress(base + received * (100 - base) / total, 100);
             });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onInstallerFetched(reply); });
 }

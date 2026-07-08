@@ -40,9 +40,9 @@ jobs:
   # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
   # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
   # every platform build, so the dock/taskbar/Finder icons match the in-app
-  # monochrome logo. NOTE: this job is effectively REQUIRED — several outputs
-  # (icon.iconset for macOS, installer-*.bmp for NSIS, logo-48/128/512.png for
-  # the .deb) are not committed, so packaging fails without the artifact.
+  # monochrome logo. REQUIRED: several outputs (icon.iconset for macOS,
+  # installer-*.bmp for NSIS, logo-48/128/512.png for the .deb) are not
+  # committed, so packaging cannot proceed without this artifact.
   icons:
     name: Render bundle icons
     runs-on: ubuntu-latest
@@ -93,10 +93,12 @@ jobs:
         with:
           path: client
 
-      # Drop the freshly-rendered neutral icons over the committed ones before
-      # the client is injected into the upstream tree. Best-effort.
+      # Drop the freshly-rendered icons over the committed ones before the
+      # client is injected into the upstream tree. Must succeed: packaging
+      # needs files that only exist in this artifact (see the icons job) —
+      # a swallowed failure here used to resurface minutes later as a cryptic
+      # NSIS/iconutil/cp error.
       - name: Use rendered bundle icons
-        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: bundle-icons

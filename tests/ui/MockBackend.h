@@ -16,7 +16,6 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY stateChanged)
     Q_PROPERTY(bool connecting READ connecting WRITE setConnecting NOTIFY stateChanged)
     Q_PROPERTY(bool disconnecting READ disconnecting WRITE setDisconnecting NOTIFY stateChanged)
-    Q_PROPERTY(QString statusText READ statusText CONSTANT)
     Q_PROPERTY(QString sessionTime READ sessionTime CONSTANT)
     Q_PROPERTY(QString downSpeed READ downSpeed CONSTANT)
     Q_PROPERTY(QString upSpeed READ upSpeed CONSTANT)
@@ -58,7 +57,6 @@ public:
     void setConnecting(bool v);
     bool disconnecting() const { return m_disconnecting; }
     void setDisconnecting(bool v);
-    QString statusText() const;
     QString sessionTime() const { return m_sessionTime; }
     QString downSpeed() const { return m_downSpeed; }
     QString upSpeed() const { return m_upSpeed; }
@@ -146,7 +144,6 @@ public:
     Q_INVOKABLE void selectProfile(const QString &) {}
     Q_INVOKABLE void addProfile(const QString &) {}
     Q_INVOKABLE void removeProfile(const QString &) {}
-    Q_INVOKABLE void renameProfile(const QString &, const QString &) {}
     Q_INVOKABLE void checkForUpdates() {}
     Q_INVOKABLE void downloadUpdate() {}
     Q_INVOKABLE void openLatestRelease() {}
