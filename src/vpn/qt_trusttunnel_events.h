@@ -31,7 +31,6 @@ StateChangedPayload extractStateChangedPayload(ag::VpnStateChangedEvent *event);
 QString recoveryReason(const QString &prefix, int errCode, const QString &errText);
 QString buildDisconnectReason(int errCode, const QString &errText, bool everConnected,
                               std::chrono::steady_clock::time_point lastAttempt);
-size_t clientOutputBytes(ag::VpnClientOutputEvent *event);
 void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLines,
                            const std::function<void(const QString &)> &emitLine);
 

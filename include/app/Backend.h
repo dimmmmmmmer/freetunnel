@@ -63,7 +63,7 @@ class Backend : public QObject {
     // Updater (GitHub Releases)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
-    Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|error
+    Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|downloading|ready|error
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
     // Misc

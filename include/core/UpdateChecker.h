@@ -67,7 +67,6 @@ private slots:
     void onCheckFinished(QNetworkReply *reply);
 
 private:
-    bool isNewerVersion(const QString &remote) const;
     void fetchChecksumsThenInstaller();
     void fetchSignature();
     void fetchInstaller();

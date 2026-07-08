@@ -46,7 +46,6 @@ public:
 
     void setConfig(ag::TrustTunnelConfig config);
     bool loadConfigFromToml(const QString &tomlContent);
-    void setAutoReconnectEnabled(bool enabled);
     void setReconnectBoundsMs(int initialDelayMs, int maxDelayMs);
 
     Q_INVOKABLE void connectVpn();
@@ -55,9 +54,7 @@ public:
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
     Q_INVOKABLE void setLogLevel(const QString &level); // applied live (no reconnect)
-    void setRoutingRules(const std::vector<std::string> &includeRoutes,
-            const std::vector<std::string> &excludeRoutes);
-    void setCustomDns(const std::vector<std::string> &dnsServers);
+    void setExcludedRoutes(const std::vector<std::string> &excludeRoutes);
     Q_INVOKABLE void setExtraExclusionDomains(const QStringList &domains);
     Q_INVOKABLE void setExcludedRouteStrings(const QStringList &routes);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
@@ -73,7 +70,6 @@ signals:
     void connectProgress(const QString &step);
     void connectionInfo(const QString &msg);
     void coreLogLine(const QString &line);
-    void clientOutput(const QString &bytes); // bytes in chunk
     void tunnelStats(quint64 upload, quint64 download); // per-connection delta bytes
 
 private slots:
@@ -112,9 +108,7 @@ private:
     std::unique_ptr<ag::AutoNetworkMonitor> m_networkMonitor;
     std::optional<ag::TrustTunnelConfig> m_config;
     QString m_lastConfigToml; // in-memory config for reconnect without on-disk secrets
-    std::vector<std::string> m_extraIncludedRoutes;
     std::vector<std::string> m_extraExcludedRoutes;
-    std::vector<std::string> m_customDns;
     std::vector<std::string> m_extraExclusions;
     std::string m_originalExclusions; // exclusions from config file before our additions
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)

@@ -137,12 +137,7 @@ void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
     ag::Logger::set_log_level(m_logLevel);
     if (std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
         auto &tun = std::get<ag::TrustTunnelConfig::TunListener>(m_config->listener);
-        tun.included_routes.insert(tun.included_routes.end(), m_extraIncludedRoutes.begin(), m_extraIncludedRoutes.end());
         tun.excluded_routes.insert(tun.excluded_routes.end(), m_extraExcludedRoutes.begin(), m_extraExcludedRoutes.end());
-    }
-    // Apply custom DNS overrides
-    if (!m_customDns.empty()) {
-        m_config->location.dns_upstreams = m_customDns;
     }
     // Append extra exclusions (domain bypass rules)
     // Save original exclusions before we touch them so they can be restored
@@ -222,10 +217,6 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     return true;
 }
 
-void QtTrustTunnelClient::setAutoReconnectEnabled(bool enabled) {
-    m_autoReconnect = enabled;
-}
-
 void QtTrustTunnelClient::setReconnectBoundsMs(int initialDelayMs, int maxDelayMs) {
     m_reconnectDelayMs = std::max(250, initialDelayMs);
     m_reconnectMaxMs = std::max(m_reconnectDelayMs, maxDelayMs);
@@ -246,7 +237,7 @@ void QtTrustTunnelClient::setExcludedRouteStrings(const QStringList &routes)
     excluded.reserve(static_cast<size_t>(routes.size()));
     std::transform(routes.cbegin(), routes.cend(), std::back_inserter(excluded),
                      [](const QString &r) { return r.toStdString(); });
-    setRoutingRules({}, excluded);
+    setExcludedRoutes(excluded);
 }
 
 void QtTrustTunnelClient::disconnectVpn() {
@@ -289,21 +280,11 @@ void QtTrustTunnelClient::setLogLevel(const QString &level) {
     }
 }
 
-void QtTrustTunnelClient::setRoutingRules(const std::vector<std::string> &includeRoutes,
-        const std::vector<std::string> &excludeRoutes) {
-    m_extraIncludedRoutes = includeRoutes;
+void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excludeRoutes) {
     m_extraExcludedRoutes = excludeRoutes;
     if (m_config.has_value() && std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
         auto &tun = std::get<ag::TrustTunnelConfig::TunListener>(m_config->listener);
-        tun.included_routes.insert(tun.included_routes.end(), m_extraIncludedRoutes.begin(), m_extraIncludedRoutes.end());
         tun.excluded_routes.insert(tun.excluded_routes.end(), m_extraExcludedRoutes.begin(), m_extraExcludedRoutes.end());
-    }
-}
-
-void QtTrustTunnelClient::setCustomDns(const std::vector<std::string> &dnsServers) {
-    m_customDns = dnsServers;
-    if (m_config.has_value() && !m_customDns.empty()) {
-        m_config->location.dns_upstreams = m_customDns;
     }
 }
 
@@ -344,15 +325,6 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
                                                              payload.errText);
                                   },
                                   Qt::QueuedConnection);
-    };
-    callbacks.client_output_handler = [this, session](ag::VpnClientOutputEvent *event) {
-        const size_t bytes = clientOutputBytes(event);
-        QMetaObject::invokeMethod(this,
-                [this, session, bytes]() {
-                    if (session == m_sessionGen)
-                        emit clientOutput(QString::number(bytes));
-                },
-                Qt::QueuedConnection);
     };
     callbacks.tunnel_stats_handler = [this, session](ag::VpnTunnelConnectionStatsEvent *event) {
         if (!event)

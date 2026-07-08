@@ -40,7 +40,9 @@ jobs:
   # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
   # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
   # every platform build, so the dock/taskbar/Finder icons match the in-app
-  # monochrome logo. Best-effort: the builds fall back to the committed icons.
+  # monochrome logo. NOTE: this job is effectively REQUIRED — several outputs
+  # (icon.iconset for macOS, installer-*.bmp for NSIS, logo-48/128/512.png for
+  # the .deb) are not committed, so packaging fails without the artifact.
   icons:
     name: Render bundle icons
     runs-on: ubuntu-latest

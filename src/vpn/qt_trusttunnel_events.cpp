@@ -61,16 +61,6 @@ QString buildDisconnectReason(int errCode, const QString &errText, bool everConn
     return reason;
 }
 
-size_t clientOutputBytes(ag::VpnClientOutputEvent *event)
-{
-    if (!event)
-        return 0;
-    size_t bytes = 0;
-    for (size_t i = 0; i < event->packet.chunks_num; ++i)
-        bytes += event->packet.chunks[i].iov_len;
-    return bytes;
-}
-
 static bool skipCoreLogTailLine(const QString &text)
 {
     if (text.startsWith(QStringLiteral("... (older log entries trimmed)")))

@@ -190,11 +190,6 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     }
 }
 
-bool UpdateChecker::isNewerVersion(const QString &remote) const
-{
-    return isVersionNewer(m_currentVersion, remote);
-}
-
 void UpdateChecker::downloadLatest()
 {
     if (m_latest.installerUrl.isEmpty()) {
