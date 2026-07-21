@@ -1,6 +1,7 @@
 #include "app/MacWindow.h"
 
 #import <AppKit/AppKit.h>
+#import <CoreServices/CoreServices.h> // kCoreEventClass / kAEReopenApplication
 
 #include <functional>
 #include <utility>
@@ -60,4 +61,42 @@ void installMacWindowCloseToTray(unsigned long long nsViewPtr, std::function<voi
     target = [[FTCloseButtonTarget alloc] initWithHandler:std::move(onClose)];
     closeButton.target = target;
     closeButton.action = @selector(ftClosePressed:);
+}
+
+// Handler object for the Dock-icon reopen Apple Event ('rapp').
+@interface FTReopenTarget : NSObject {
+    std::function<void()> _onReopen;
+}
+- (instancetype)initWithHandler:(std::function<void()>)handler;
+- (void)handleReopen:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply;
+@end
+
+@implementation FTReopenTarget
+- (instancetype)initWithHandler:(std::function<void()>)handler {
+    if ((self = [super init]))
+        _onReopen = std::move(handler);
+    return self;
+}
+- (void)handleReopen:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply {
+    (void)event;
+    (void)reply;
+    if (_onReopen)
+        _onReopen();
+}
+@end
+
+void installMacDockReopenHandler(std::function<void()> onReopen) {
+    // kAEReopenApplication ('rapp') is delivered ONLY on a Dock-icon click, so a
+    // window hidden to the menu bar is reopened by that gesture alone — not by the
+    // app merely becoming active (status-bar clicks, Cmd-Tab), which is what used
+    // to yank the window back open. Isolated to this one event: launch ('oapp'),
+    // URL open ('GURL') and quit are separate and unaffected.
+    // Intentionally never released: one per process, lives for the app's lifetime.
+    static FTReopenTarget *target = nil;
+    target = [[FTReopenTarget alloc] initWithHandler:std::move(onReopen)];
+    [[NSAppleEventManager sharedAppleEventManager]
+            setEventHandler:target
+                andSelector:@selector(handleReopen:withReplyEvent:)
+              forEventClass:kCoreEventClass
+                 andEventID:kAEReopenApplication];
 }

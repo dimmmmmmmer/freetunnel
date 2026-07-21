@@ -135,6 +135,15 @@ int runGuiApplication(int argc, char *argv[])
     applyMacUnifiedTitlebar(win->winId());
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
     installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
+    // Bring the hidden window back only on a real Dock-icon click — not on every
+    // app activation (status-bar clicks, Cmd-Tab), which used to re-open it.
+    installMacDockReopenHandler([win, &appQuitting]() {
+        if (appQuitting)
+            return;
+        win->show();
+        win->raise();
+        win->requestActivate();
+    });
 #endif
     urlFilter.ready(&backend, win);
     if (!controlArg.isEmpty())

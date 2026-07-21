@@ -173,6 +173,16 @@ void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
     if (!win)
         return;
 
+#ifdef Q_OS_MACOS
+    // macOS reopens via the native Dock-icon Apple Event (installMacDockReopenHandler,
+    // wired in runGuiApplication), which fires ONLY on a Dock click — not on
+    // status-bar clicks or Cmd-Tab. The broad app-activation handlers below would
+    // re-show the menu-bar-hidden window on any activation (the reported bug), so
+    // they are macOS-excluded. Windows/Linux keep them: there the window is
+    // minimized to the taskbar (not hidden) and these drive taskbar reopen.
+    Q_UNUSED(app);
+    Q_UNUSED(appQuitting);
+#else
     auto *filter = new HiddenWindowReopenFilter(&app);
     filter->win = win;
     filter->appQuitting = &appQuitting;
@@ -199,6 +209,7 @@ void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
                              return;
                          raiseMainWindow(win);
                      });
+#endif
 }
 
 } // namespace freetunnel
