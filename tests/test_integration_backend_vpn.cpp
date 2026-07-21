@@ -26,6 +26,7 @@ private slots:
     void init();
     void backendConnectsThroughMockHelper();
     void configSwitchSuppressesCoreDisconnectToast();
+    void deletingActiveConfigWhileConnectedTearsDownTunnel();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
 };
@@ -176,6 +177,51 @@ void TestIntegrationBackendVpn::configSwitchSuppressesCoreDisconnectToast()
         QVERIFY2(!msg.contains(QStringLiteral("connection lost")),
                  qPrintable(QStringLiteral("unexpected toast: ") + v.toString()));
     }
+
+    backend.prepareQuit();
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+    freetunnel::CredentialStore::deletePassword(configA);
+    freetunnel::CredentialStore::deletePassword(configB);
+    QFile::remove(configA);
+    QFile::remove(configB);
+}
+
+void TestIntegrationBackendVpn::deletingActiveConfigWhileConnectedTearsDownTunnel()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+
+    QString configA, configB;
+    QVERIFY(writeTestConfig(base, QStringLiteral("del-server-a"), &configA));
+    QVERIFY(writeTestConfig(base, QStringLiteral("del-server-b"), &configB));
+    saveStoredConfigs({configA, configB});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = configA;
+    saveAppSettings(settings);
+
+    const QString token = QStringLiteral("backend-delete-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(backend.activeIndex(), 0);
+
+    // Deleting a NON-active config while connected must leave the tunnel up.
+    backend.removeConfig(1);
+    QTest::qWait(200);
+    QVERIFY(backend.connected());
+    QCOMPARE(backend.activeIndex(), 0); // configA still the active, still connected
+
+    // Deleting the ACTIVE config must tear the tunnel down — not silently
+    // relabel the "connected" state onto whatever config remains.
+    backend.removeConfig(0);
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    QVERIFY(!backend.connected());
 
     backend.prepareQuit();
     qunsetenv("FT_TEST_HELPER_PORT");

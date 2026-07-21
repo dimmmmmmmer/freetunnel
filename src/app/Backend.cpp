@@ -389,6 +389,13 @@ void Backend::removeConfig(int index) {
     if (index < 0 || index >= m_paths.size())
         return;
     const QString path = m_paths.at(index);
+    // Deleting the config we're actively connected to (or connecting to) must
+    // tear the tunnel down. Otherwise the helper keeps an orphaned tunnel to a
+    // server that no longer has a config, and the active slot silently shifts to
+    // whatever config lands first below — leaving m_connected true, so its
+    // "connected" badge would jump onto a config that isn't actually up.
+    if (path == m_activePath && (m_connected || m_connecting))
+        disconnectVpn();
     freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(path));
     // Remove the TOML itself when we own it (imported/created configs live in
     // the app config dir) — a "deleted" server shouldn't stay recoverable on

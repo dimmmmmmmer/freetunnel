@@ -140,7 +140,11 @@ Item {
                 Text { visible: index < backend.pings.length && backend.pings[index] !== ""
                        text: index < backend.pings.length ? backend.pings[index] : ""
                        color: theme.textDim; font.pixelSize: 12 }
-                Rectangle { visible: index === backend.activeIndex && backend.connected
+                // Hide the badge the moment teardown starts (disconnecting) so it
+                // never lingers on a config whose tunnel is going down. A seamless
+                // config switch keeps disconnecting=false (m_reapplying), so the
+                // badge stays put there as intended.
+                Rectangle { visible: index === backend.activeIndex && backend.connected && !backend.disconnecting
                     radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
                     Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
                 Item { Layout.preferredWidth: 30; Layout.fillHeight: true
