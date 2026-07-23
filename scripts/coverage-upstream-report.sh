@@ -35,15 +35,10 @@ echo "==> Bootstrapping conan deps"
   cd "$UPSTREAM"
   ./scripts/bootstrap_conan_deps.py
 )
+bash "$ROOT/scripts/export-patched-boringssl.sh"
+# The upstream bootstrap exports the exact pinned dns-libs version itself;
+# the old re-export workaround for tag drift is gone.
 conan profile detect --force >/dev/null 2>&1 || true
-DNS_VER="$(grep -oE 'dns-libs/[0-9]+\.[0-9]+\.[0-9]+@adguard/oss' "$UPSTREAM/conanfile.py" \
-  | head -1 | sed -E 's#dns-libs/([0-9.]+)@.*#\1#')"
-if [[ -n "$DNS_VER" ]]; then
-  rm -rf "$ROOT/_dnslibs"
-  git clone --depth 1 --branch "v${DNS_VER}" https://github.com/AdguardTeam/DnsLibs.git "$ROOT/_dnslibs"
-  conan export "$ROOT/_dnslibs" --user adguard --channel oss --version "${DNS_VER}"
-  rm -rf "$ROOT/_dnslibs"
-fi
 
 set +e
 UPSTREAM_OK=0

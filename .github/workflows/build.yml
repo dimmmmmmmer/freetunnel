@@ -270,21 +270,20 @@ jobs:
         shell: bash
         run: ./scripts/bootstrap_conan_deps.py
 
-      - name: Prepare conan profile and pin AdGuard deps
+      # Upstream needs a newer boringssl recipe revision than its pinned NLC
+      # carries (see the script header).
+      - name: Export patched boringssl recipe
+        shell: bash
+        run: bash client/scripts/export-patched-boringssl.sh
+
+      # The upstream bootstrap now exports the exact dns-libs version pinned in
+      # conanfile.py (it reads the pin and checks out the matching revision), so
+      # the old re-export workaround for tag drift is gone.
+      - name: Prepare conan profile
         shell: bash
         run: |
           set -eux
           conan profile detect --force
-          # The upstream bootstrap exports the *latest* DnsLibs tag, which can drift
-          # ahead of the version pinned in conanfile.py. Export the exact one.
-          DNS_VER=$(grep -oE 'dns-libs/[0-9]+\.[0-9]+\.[0-9]+@adguard/oss' \
-            upstream/conanfile.py | head -1 | sed -E 's#dns-libs/([0-9.]+)@.*#\1#')
-          echo "pinned dns-libs=${DNS_VER}"
-          rm -rf _dnslibs
-          git clone --depth 1 --branch "v${DNS_VER}" \
-            https://github.com/AdguardTeam/DnsLibs.git _dnslibs
-          conan export _dnslibs --user adguard --channel oss --version "${DNS_VER}"
-          rm -rf _dnslibs
 
       # Stretch conan's conf-driven download retries (defaults: 2 attempts,
       # 5 s apart). NOTE: recipes that pass explicit retry args — the boringssl
@@ -539,7 +538,12 @@ jobs:
           SetFile -a C "$MOUNT/.VolumeIcon.icns"
           ln -sf /Applications "$MOUNT/Applications"
           bless --folder "$MOUNT" --openfolder "$MOUNT" --icon "$MOUNT/.VolumeIcon.icns" || true
-          hdiutil detach "$MOUNT"
+          # Spotlight/fseventsd can hold the volume briefly — retry the detach.
+          for i in 1 2 3 4 5; do
+            if hdiutil detach "$MOUNT"; then break; fi
+            if [ "$i" = 5 ]; then hdiutil detach "$MOUNT" -force; fi
+            sleep 5
+          done
           hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o out/${{ matrix.artifact }}.dmg
           rm -f "$RW"
 
