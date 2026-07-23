@@ -17,7 +17,7 @@ check() {
   fi
 }
 
-check "upstream ref" 'fa033c08|UPSTREAM_REF|upstream_ref' scripts/upstream_ref.txt
+check "upstream ref" '^[0-9a-f]{40}$' scripts/upstream_ref.txt
 check "upstream ref in build workflow" 'UPSTREAM_REF|upstream_ref' .github/workflows/build.yml
 check "QHotkey tag" 'GIT_TAG 1\.5\.0' CMakeLists.txt
 check "QHotkey tag in tests" 'GIT_TAG 1\.5\.0' tests/CMakeLists.txt
