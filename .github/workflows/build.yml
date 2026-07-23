@@ -270,6 +270,12 @@ jobs:
         shell: bash
         run: ./scripts/bootstrap_conan_deps.py
 
+      # Upstream needs a newer boringssl recipe revision than its pinned NLC
+      # carries (see the script header).
+      - name: Export patched boringssl recipe
+        shell: bash
+        run: bash client/scripts/export-patched-boringssl.sh
+
       # The upstream bootstrap now exports the exact dns-libs version pinned in
       # conanfile.py (it reads the pin and checks out the matching revision), so
       # the old re-export workaround for tag drift is gone.
