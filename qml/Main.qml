@@ -58,8 +58,8 @@ Window {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        // Bright mark when connected, dimmed when off.
-        icon.source: backend.connected ? "qrc:/assets/logo.svg" : "qrc:/assets/logo-dim.svg"
+        // Green mark when connected (matches the in-app badge), dimmed when off.
+        icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
         // Right-click opens the menu (below). Double-click — or a single left-click
