@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
+  <!-- Connected tray mark, dark theme: the portal silhouette in exactly
+       theme.success (#3fbf93) so it matches the "connected" badge. -->
+  <path d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z" fill="#3fbf93"/>
+</svg>

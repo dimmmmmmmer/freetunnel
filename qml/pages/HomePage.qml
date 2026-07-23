@@ -66,14 +66,6 @@ Item {
                             Behavior on opacity { NumberAnimation { duration: 220 } }
                             scale: (heroMa.pressed ? 0.96 : 1.0) * ((backend.connecting || backend.disconnecting) ? pulse.value : 1.0)
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                            // Tint the mark theme.success while connected — same green
-                            // as the "connected" badge and the tray icon.
-                            layer.enabled: true
-                            layer.effect: MultiEffect {
-                                colorization: backend.connected ? 1.0 : 0.0
-                                colorizationColor: theme.success
-                                Behavior on colorization { NumberAnimation { duration: 220 } }
-                            }
                             QtObject {
                                 id: pulse; property real value: 1.0
                             }
