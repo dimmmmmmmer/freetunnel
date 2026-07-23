@@ -227,6 +227,13 @@ endif()
 # OpenSSL 3.0). macOS/Windows use the system/Homebrew/MSVC package explicitly.
 if (UNIX AND NOT APPLE)
     if (NOT DISABLE_HTTP3)
+        # Conan's boringssl package exposes the OpenSSL::SSL/Crypto targets; the
+        # find_package used to happen transitively via quiche, which upstream
+        # dropped, so ask for it ourselves (resolved from the conan generators
+        # dir, not the distro OpenSSL).
+        if (NOT TARGET OpenSSL::SSL)
+            find_package(OpenSSL REQUIRED)
+        endif ()
         # Upstream lists libcrypto before libssl; ECH needs libssl→libcrypto refs.
         target_link_options(FreeTunnel PRIVATE "LINKER:--start-group")
         target_link_libraries(FreeTunnel PRIVATE OpenSSL::SSL OpenSSL::Crypto)

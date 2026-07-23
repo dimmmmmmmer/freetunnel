@@ -538,7 +538,12 @@ jobs:
           SetFile -a C "$MOUNT/.VolumeIcon.icns"
           ln -sf /Applications "$MOUNT/Applications"
           bless --folder "$MOUNT" --openfolder "$MOUNT" --icon "$MOUNT/.VolumeIcon.icns" || true
-          hdiutil detach "$MOUNT"
+          # Spotlight/fseventsd can hold the volume briefly — retry the detach.
+          for i in 1 2 3 4 5; do
+            if hdiutil detach "$MOUNT"; then break; fi
+            if [ "$i" = 5 ]; then hdiutil detach "$MOUNT" -force; fi
+            sleep 5
+          done
           hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o out/${{ matrix.artifact }}.dmg
           rm -f "$RW"
 
