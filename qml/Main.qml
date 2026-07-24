@@ -58,12 +58,9 @@ Window {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        // Green mark when connected — exactly theme.success, the same color as
-        // the "connected" badge on the configs page — dimmed when off.
-        icon.source: backend.connected
-                     ? (win.theme.dark ? "qrc:/assets/logo-green-dark.svg"
-                                       : "qrc:/assets/logo-green-light.svg")
-                     : "qrc:/assets/logo-dim.svg"
+        // Green mark when connected — the configs-page "connected" badge
+        // color — dimmed when off.
+        icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
         // Right-click opens the menu (below). Double-click — or a single left-click

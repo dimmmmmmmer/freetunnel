@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
-  <!-- Connected tray mark, light theme: same depth ladder as logo.svg. The
-       outer (dominant) arch is exactly theme.success (#1d9e75) — the
-       "connected" badge color — the inner arches step darker from it. -->
+  <!-- Connected tray mark: same depth ladder as logo.svg. The outer
+       (dominant) arch is exactly the configs-page "connected" badge color
+       (theme.success, light value #1d9e75); the inner arches step darker. -->
   <path d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z" fill="#1d9e75"/>
   <path d="M24 86 L24 50 A26 26 0 0 1 76 50 L76 86 Z" fill="#177b5b"/>
   <path d="M36 86 L36 55 A14 14 0 0 1 64 55 L64 86 Z" fill="#105842"/>

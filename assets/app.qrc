@@ -4,8 +4,7 @@
         <file>logo.ico</file>
         <file>logo.svg</file>
         <file>logo-dim.svg</file>
-        <file>logo-green-dark.svg</file>
-        <file>logo-green-light.svg</file>
+        <file>logo-green.svg</file>
         <file>logo-light.svg</file>
         <file alias="LICENSE">../LICENSE</file>
     </qresource>
