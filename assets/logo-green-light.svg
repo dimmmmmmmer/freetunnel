@@ -1,16 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
-  <!-- Connected tray mark, light theme: the same concentric-arch ladder as
-       logo.svg, but every band is exactly theme.success (#1d9e75) — the
-       "connected" badge color — with transparent slits carrying the depth
-       instead of shade steps. -->
-  <path fill-rule="evenodd" fill="#1d9e75"
-        d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z
-           M22 86 L22 50 A28 28 0 0 1 78 50 L78 86 Z"/>
-  <path fill-rule="evenodd" fill="#1d9e75"
-        d="M24 86 L24 50 A26 26 0 0 1 76 50 L76 86 Z
-           M34 86 L34 55 A16 16 0 0 1 66 55 L66 86 Z"/>
-  <path fill-rule="evenodd" fill="#1d9e75"
-        d="M36 86 L36 55 A14 14 0 0 1 64 55 L64 86 Z
-           M44 86 L44 60 A6 6 0 0 1 56 60 L56 86 Z"/>
-  <path fill="#1d9e75" d="M46 86 L46 60 A4 4 0 0 1 54 60 L54 86 Z"/>
+  <!-- Connected tray mark, light theme: same depth ladder as logo.svg. The
+       outer (dominant) arch is exactly theme.success (#1d9e75) — the
+       "connected" badge color — the inner arches step darker from it. -->
+  <path d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z" fill="#1d9e75"/>
+  <path d="M24 86 L24 50 A26 26 0 0 1 76 50 L76 86 Z" fill="#177b5b"/>
+  <path d="M36 86 L36 55 A14 14 0 0 1 64 55 L64 86 Z" fill="#105842"/>
+  <path d="M46 86 L46 60 A4 4 0 0 1 54 60 L54 86 Z" fill="#0a392a"/>
 </svg>
