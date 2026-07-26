@@ -94,9 +94,29 @@ void installMacDockReopenHandler(std::function<void()> onReopen) {
     // Intentionally never released: one per process, lives for the app's lifetime.
     static FTReopenTarget *target = nil;
     target = [[FTReopenTarget alloc] initWithHandler:std::move(onReopen)];
-    [[NSAppleEventManager sharedAppleEventManager]
-            setEventHandler:target
-                andSelector:@selector(handleReopen:withReplyEvent:)
-              forEventClass:kCoreEventClass
-                 andEventID:kAEReopenApplication];
+    void (^install)(void) = ^{
+        [[NSAppleEventManager sharedAppleEventManager]
+                setEventHandler:target
+                    andSelector:@selector(handleReopen:withReplyEvent:)
+                  forEventClass:kCoreEventClass
+                     andEventID:kAEReopenApplication];
+    };
+    // -[NSApplication finishLaunching] installs the system's own Apple event
+    // handlers, silently replacing any earlier registration for the same event.
+    // This function runs before Qt starts the event loop (and thus before
+    // finishLaunching), so registering right away would be clobbered and Dock
+    // clicks would reopen nothing. Defer until the app has finished launching;
+    // install immediately only if that already happened.
+    if (NSApp.running) {
+        install();
+    } else {
+        [[NSNotificationCenter defaultCenter]
+                addObserverForName:NSApplicationDidFinishLaunchingNotification
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *note) {
+                            (void)note;
+                            install();
+                        }];
+    }
 }
