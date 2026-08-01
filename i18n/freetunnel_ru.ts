@@ -152,15 +152,15 @@
     </message>
     <message>
         <source>Connection lost — couldn&apos;t reach the server. Check the config or your network.</source>
-        <translation type="unfinished"></translation>
+        <translation>Соединение потеряно — сервер недоступен. Проверьте конфигурацию или сеть.</translation>
     </message>
     <message>
         <source>Server isn&apos;t responding (timed out).</source>
-        <translation type="unfinished"></translation>
+        <translation>Сервер не отвечает (истекло время ожидания).</translation>
     </message>
     <message>
         <source>Authentication failed — check the username and password.</source>
-        <translation type="unfinished"></translation>
+        <translation>Не удалось войти — проверьте имя пользователя и пароль.</translation>
     </message>
     <message>
         <source>Toggle VPN</source>
@@ -192,11 +192,11 @@
     </message>
     <message>
         <source>Add a VPN server from this link? All your traffic can be routed through it — only import configs from sources you trust.</source>
-        <translation type="unfinished"></translation>
+        <translation>Добавить VPN-сервер по этой ссылке? Через него может пойти весь ваш трафик — импортируйте конфигурации только из источников, которым доверяете.</translation>
     </message>
     <message>
         <source>Update check failed: %1</source>
-        <translation type="unfinished"></translation>
+        <translation>Не удалось проверить обновления: %1</translation>
     </message>
 </context>
 <context>
@@ -457,7 +457,7 @@
     </message>
     <message>
         <source>Import</source>
-        <translation type="unfinished"></translation>
+        <translation>Импортировать</translation>
     </message>
 </context>
 <context>
@@ -472,7 +472,7 @@
     </message>
     <message>
         <source>wintun.dll is missing next to FreeTunnel.exe (%1). Reinstall from the official installer.</source>
-        <translation type="unfinished"></translation>
+        <translation>Рядом с FreeTunnel.exe нет wintun.dll (%1). Переустановите приложение через официальный установщик.</translation>
     </message>
 </context>
 <context>
@@ -622,7 +622,7 @@
     </message>
     <message>
         <source>Kill switch</source>
-        <translation type="unfinished"></translation>
+        <translation>Аварийное отключение</translation>
     </message>
 </context>
 <context>
@@ -713,6 +713,18 @@
     <message>
         <source>VPN helper sent too much data</source>
         <translation>VPN-помощник отправил слишком много данных</translation>
+    </message>
+    <message>
+        <source>The process answering on the helper port could not prove it is the FreeTunnel helper — refusing to send the config.</source>
+        <translation>Процесс, ответивший на порту помощника, не подтвердил, что он — помощник FreeTunnel. Конфигурация ему не отправлена.</translation>
+    </message>
+    <message>
+        <source>VPN helper sent an invalid challenge</source>
+        <translation>VPN-помощник прислал некорректный запрос подтверждения</translation>
+    </message>
+    <message>
+        <source>The process answering on the helper port did not authenticate — refusing to continue.</source>
+        <translation>Процесс, ответивший на порту помощника, не прошёл проверку подлинности — продолжение отменено.</translation>
     </message>
 </context>
 </TS>

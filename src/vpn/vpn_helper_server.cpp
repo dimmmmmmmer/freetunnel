@@ -409,86 +409,86 @@ private:
     // already owns: an absolute, traversal-free *.log path whose existing parent
     // directory belongs to that user (and is not a symlink into somewhere else).
     // Returns an empty string to mean "use the core default".
+    // --- core log path confinement -------------------------------------
+    // Split into named steps deliberately: this is the check that keeps a root
+    // process from being talked into creating a file wherever the (unprivileged)
+    // GUI asks, so each rule should be readable on its own.
+
+    static bool logPathShapeOk(const QString &path, const QFileInfo &info) {
+        return info.isAbsolute() && !path.contains(QStringLiteral(".."))
+                && path.endsWith(QStringLiteral(".log"));
+    }
+
+    static bool logPathTargetOk(const QFileInfo &info) {
+        // isSymLink() BEFORE exists(): a DANGLING symlink reports exists()==false
+        // (QFileInfo resolves the target), so an exists()-guarded symlink check
+        // waves through the most useful case for an attacker — the link's target
+        // does not exist yet, and root is about to create it.
+        if (info.isSymLink())
+            return false;
+        return !info.exists() || info.isFile();
+    }
+
+    static bool logPathParentOk(const QFileInfo &parent) {
+        // A symlink anywhere in the parent chain redirects the whole write, so
+        // the directory must be exactly what it claims to be.
+        return parent.exists() && parent.isDir()
+                && parent.canonicalFilePath() == parent.absoluteFilePath();
+    }
+
+#ifndef Q_OS_WIN
+    // The decisive check: root must not be talked into writing outside the
+    // unprivileged user's own tree. m_ownerUid comes from the 0600 token file
+    // the GUI created for this launch. lstat, not stat — the target must not be
+    // reached through a link either.
+    bool logPathOwnedByLauncher(const QFileInfo &parent, const QFileInfo &info) const {
+        if (m_ownerUid < 0)
+            return false;
+        struct stat st {};
+        if (::lstat(QFile::encodeName(parent.absoluteFilePath()).constData(), &st) != 0
+            || !S_ISDIR(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid) {
+            return false;
+        }
+        if (::lstat(QFile::encodeName(info.absoluteFilePath()).constData(), &st) == 0
+            && (!S_ISREG(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid)) {
+            return false;
+        }
+        return true;
+    }
+#else
+    // No uid to anchor to on Windows, so confine by location instead: the helper
+    // is elevated there too, and an arbitrary absolute *.log path would still let
+    // the GUI side of a compromise write into system trees.
+    bool logPathOwnedByLauncher(const QFileInfo &parent, const QFileInfo &) const {
+        const QString dir = QDir::toNativeSeparators(parent.absoluteFilePath()).toLower();
+        const QStringList roots = {
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation),
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation),
+            QStandardPaths::writableLocation(QStandardPaths::TempLocation),
+        };
+        for (const QString &root : roots) {
+            if (root.isEmpty())
+                continue;
+            if (dir.startsWith(QDir::toNativeSeparators(root).toLower()))
+                return true;
+        }
+        return false;
+    }
+#endif
+
+    // Empty return means "use the core's own default" — a rejected path must not
+    // fail the connect, only lose the custom location.
     QString sanitizedLogPath(const QString &requested) const {
         const QString path = requested.trimmed();
         if (path.isEmpty())
             return QString();
         const QFileInfo info(path);
-        if (!info.isAbsolute() || path.contains(QStringLiteral(".."))
-            || !path.endsWith(QStringLiteral(".log"))) {
-            qWarning("[helper] refusing core log path (shape): %s", qPrintable(path));
-            return QString();
-        }
-        // isSymLink() BEFORE exists(): a DANGLING symlink reports exists()==false
-        // (QFileInfo resolves the target), so an exists()-guarded symlink check
-        // waves through the most useful case for an attacker — the link's target
-        // does not exist yet, and root is about to create it.
-        if (info.isSymLink()) {
-            qWarning("[helper] refusing core log path (symlink): %s", qPrintable(path));
-            return QString();
-        }
-        if (info.exists() && !info.isFile()) {
-            qWarning("[helper] refusing core log path (not a regular file): %s", qPrintable(path));
-            return QString();
-        }
         const QFileInfo parent(info.absolutePath());
-        if (!parent.exists() || !parent.isDir()) {
-            qWarning("[helper] refusing core log path (parent): %s", qPrintable(path));
+        if (!logPathShapeOk(path, info) || !logPathTargetOk(info) || !logPathParentOk(parent)
+            || !logPathOwnedByLauncher(parent, info)) {
+            qWarning("[helper] refusing core log path: %s", qPrintable(path));
             return QString();
         }
-        // A symlink anywhere in the parent chain redirects the whole write, so
-        // require the directory to be exactly what it claims to be.
-        if (parent.canonicalFilePath() != parent.absoluteFilePath()) {
-            qWarning("[helper] refusing core log path (parent is not canonical): %s",
-                     qPrintable(path));
-            return QString();
-        }
-#ifndef Q_OS_WIN
-        // The decisive check: root must not be talked into writing outside the
-        // unprivileged user's own tree. m_ownerUid comes from the 0600 token
-        // file the GUI created for this launch.
-        if (m_ownerUid < 0) {
-            qWarning("[helper] refusing core log path: launching user unknown");
-            return QString();
-        }
-        struct stat st {};
-        if (::lstat(QFile::encodeName(parent.absoluteFilePath()).constData(), &st) != 0
-            || !S_ISDIR(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid) {
-            qWarning("[helper] refusing core log path (owner): %s", qPrintable(path));
-            return QString();
-        }
-        // lstat, not stat: the target must not be reached through a link either.
-        if (::lstat(QFile::encodeName(info.absoluteFilePath()).constData(), &st) == 0
-            && (!S_ISREG(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid)) {
-            qWarning("[helper] refusing core log path (file owner): %s", qPrintable(path));
-            return QString();
-        }
-#else
-        // No uid to anchor to on Windows, so confine by location instead: the
-        // helper is elevated there too, and an arbitrary absolute *.log path
-        // would still let the GUI side of a compromise write into system trees.
-        const QString canonicalParent = QDir::toNativeSeparators(parent.absoluteFilePath()).toLower();
-        const QStringList allowedRoots = {
-            QDir::toNativeSeparators(
-                    QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).toLower(),
-            QDir::toNativeSeparators(
-                    QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).toLower(),
-            QDir::toNativeSeparators(
-                    QStandardPaths::writableLocation(QStandardPaths::TempLocation)).toLower(),
-        };
-        bool underAllowedRoot = false;
-        for (const QString &root : allowedRoots) {
-            if (!root.isEmpty() && canonicalParent.startsWith(root)) {
-                underAllowedRoot = true;
-                break;
-            }
-        }
-        if (!underAllowedRoot) {
-            qWarning("[helper] refusing core log path (outside the app data roots): %s",
-                     qPrintable(path));
-            return QString();
-        }
-#endif
         return path;
     }
 

@@ -148,7 +148,10 @@ void Backend::clearLogs() {
     // (core lines silently lost until reconnect), and on Windows the removal just
     // fails, so the file isn't cleared at all. Defer instead — the user's intent
     // is that the file ends up empty, not that it is unlinked right now.
-    if (m_connected || m_connecting || m_disconnecting) {
+    // Only the core actually holds the file, and only when session logging is on;
+    // with logging disabled there is no second writer, so honour the click now
+    // instead of making the user disconnect first.
+    if (m_settings.logging_enabled && (m_connected || m_connecting || m_disconnecting)) {
         m_logClearPending = true;
         return;
     }
@@ -159,7 +162,9 @@ void Backend::clearLogs() {
 // Run the deferred clearLogs() once the tunnel is down and the core has let go
 // of the file (called from the VPN state handler).
 void Backend::clearPendingLogFile() {
-    if (!m_logClearPending || m_connected || m_connecting || m_disconnecting)
+    if (!m_logClearPending)
+        return;
+    if (m_settings.logging_enabled && (m_connected || m_connecting || m_disconnecting))
         return;
     m_logClearPending = false;
     QFile::remove(logPath());

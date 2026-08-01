@@ -196,6 +196,9 @@ Item {
             }
         }
     }
+    // Read by the window so its own confirm dialog can stand down while this
+    // inner one owns Escape.
+    readonly property bool confirmVisible: discardConfirm.visible
     ConfirmDialog {
         id: discardConfirm
         theme: createRoot.theme

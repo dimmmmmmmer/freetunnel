@@ -89,6 +89,11 @@ private:
     };
     using GuardPtr = std::shared_ptr<LifetimeGuard>;
     static bool attemptIsStale(const GuardPtr &guard, quint64 attemptGen);
+    // Hop a core event back onto this object's thread, dropping it if its
+    // session has been superseded. Called with the guard mutex held.
+    void postCoreStateChanged(quint64 session, int coreState, int errCode, const QString &errText);
+    void postTunnelStats(quint64 session, quint64 up, quint64 down);
+    void postConnectionInfo(quint64 session, const QString &line);
 
     ag::VpnCallbacks makeCallbacks(const GuardPtr &guard);
     void doConnectAttempt(const GuardPtr &guard, quint64 attemptGen);

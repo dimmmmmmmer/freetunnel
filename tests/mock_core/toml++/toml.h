@@ -126,7 +126,10 @@ public:
     explicit parse_result(std::string error) : m_error{std::move(error)}, m_ok(false) {}
 
     explicit operator bool() const { return m_ok; }
-    parse_error error() const { return m_error; }
+    // By REFERENCE, like the real toml++: description() hands out a
+    // string_view into the error, and returning by value made that view dangle
+    // the moment the temporary died (ASan caught it as a heap-use-after-free).
+    const parse_error &error() const { return m_error; }
     toml::table &table() { return m_table; }
     const toml::table &table() const { return m_table; }
 

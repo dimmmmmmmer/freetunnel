@@ -479,7 +479,12 @@ Window {
         id: overlayLayer; anchors.fill: parent; z: 1500
         visible: selectPopup.open
         MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
-        Shortcut { sequence: "Escape"; enabled: selectPopup.open; onActivated: selectPopup.open = false }
+        // Stand down while a confirm dialog is up: it owns Escape then, and two
+        // enabled shortcuts on the same key make Qt report the press as
+        // ambiguous — Escape would do nothing at all.
+        Shortcut { sequence: "Escape"
+                   enabled: selectPopup.open && !winConfirm.visible
+                   onActivated: selectPopup.open = false }
         Rectangle {
             id: selectPopup
             property bool open: false
@@ -534,6 +539,7 @@ Window {
         winConfirm.open()
     }
     ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
+                    escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
         onConfirmed: if (win.confirmCb) win.confirmCb() }
 
 }

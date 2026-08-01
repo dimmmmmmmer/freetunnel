@@ -43,5 +43,11 @@ Item {
             }
         }
     }
-    Shortcut { sequences: ["Escape"]; enabled: cd.visible; onActivated: cd.visible = false }
+    // escapeOwner lets an outer dialog stand down while a more-inner one is up:
+    // two visible confirm dialogs would otherwise both claim Escape and Qt would
+    // report the press as ambiguous, so neither would close.
+    property bool escapeOwner: true
+    Shortcut { sequences: ["Escape"]
+               enabled: cd.visible && cd.escapeOwner
+               onActivated: cd.visible = false }
 }

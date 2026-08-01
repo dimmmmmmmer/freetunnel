@@ -215,10 +215,11 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     }
     toml::parse_result parsed = toml::parse(tomlContent.toStdString());
     if (!parsed) {
-        const std::string_view descrView = parsed.error().description();
+        // Copy immediately: description() hands back a view owned by the parse
+        // result, and keeping a view alive across statements is a lifetime trap.
+        const std::string descr{parsed.error().description()};
         setState(State::Error);
-        emit vpnError(QString("Failed parsing config: %1")
-                              .arg(QString::fromStdString(std::string{descrView})));
+        emit vpnError(QString("Failed parsing config: %1").arg(QString::fromStdString(descr)));
         return false;
     }
 
@@ -332,6 +333,42 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
     }
 }
 
+void QtTrustTunnelClient::postCoreStateChanged(quint64 session, int coreState, int errCode,
+                                               const QString &errText)
+{
+    QMetaObject::invokeMethod(
+            this,
+            [this, session, coreState, errCode, errText]() {
+                if (session != m_sessionGen)
+                    return;
+                handleCoreStateChanged(static_cast<ag::VpnSessionState>(coreState), errCode,
+                                       errText);
+            },
+            Qt::QueuedConnection);
+}
+
+void QtTrustTunnelClient::postTunnelStats(quint64 session, quint64 up, quint64 down)
+{
+    QMetaObject::invokeMethod(
+            this,
+            [this, session, up, down]() {
+                if (session == m_sessionGen)
+                    emit tunnelStats(up, down);
+            },
+            Qt::QueuedConnection);
+}
+
+void QtTrustTunnelClient::postConnectionInfo(quint64 session, const QString &line)
+{
+    QMetaObject::invokeMethod(
+            this,
+            [this, session, line]() {
+                if (session == m_sessionGen)
+                    emit connectionInfo(line);
+            },
+            Qt::QueuedConnection);
+}
+
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
     // Core callbacks are queued to our event loop, so events from a client that
     // has since been torn down (config switch: disconnect + connect a new one)
@@ -342,54 +379,38 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
     // An ABANDONED client outlives this object entirely, so the hop back to it
     // is taken under the guard: while the mutex is held `alive` cannot flip, and
     // once the destructor has cleared it no callback dereferences `this` again.
+    // Note the payload is extracted BEFORE the lock — that touches the event,
+    // not this object, and must not happen while holding it.
     const quint64 session = ++m_sessionGen;
     ag::VpnCallbacks callbacks;
+    callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.protect_handler = [this, guard](ag::SocketProtectEvent *event) {
         std::lock_guard<std::mutex> lk(guard->mutex);
         if (guard->alive)
             protectOutboundSocket(event);
     };
-    callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
     callbacks.state_changed_handler = [this, guard, session](ag::VpnStateChangedEvent *event) {
         const StateChangedPayload payload = extractStateChangedPayload(event);
         std::lock_guard<std::mutex> lk(guard->mutex);
-        if (!guard->alive)
-            return;
-        QMetaObject::invokeMethod(this,
-                                  [this, session, payload]() {
-                                      if (session != m_sessionGen)
-                                          return;
-                                      handleCoreStateChanged(payload.state, payload.errCode,
-                                                             payload.errText);
-                                  },
-                                  Qt::QueuedConnection);
+        if (guard->alive)
+            postCoreStateChanged(session, static_cast<int>(payload.state), payload.errCode,
+                                 payload.errText);
     };
-    callbacks.tunnel_stats_handler = [this, guard, session](ag::VpnTunnelConnectionStatsEvent *event) {
+    callbacks.tunnel_stats_handler = [this, guard,
+                                      session](ag::VpnTunnelConnectionStatsEvent *event) {
         if (!event)
             return;
         const quint64 up = event->upload;
         const quint64 down = event->download;
         std::lock_guard<std::mutex> lk(guard->mutex);
-        if (!guard->alive)
-            return;
-        QMetaObject::invokeMethod(this,
-                [this, session, up, down]() {
-                    if (session == m_sessionGen)
-                        emit tunnelStats(up, down);
-                },
-                Qt::QueuedConnection);
+        if (guard->alive)
+            postTunnelStats(session, up, down);
     };
     callbacks.connection_info_handler = [this, guard, session](ag::VpnConnectionInfoEvent *event) {
         const QString line = qt_trusttunnel_connection_info_line(event);
         std::lock_guard<std::mutex> lk(guard->mutex);
-        if (!guard->alive)
-            return;
-        QMetaObject::invokeMethod(this,
-                [this, session, line]() {
-                    if (session == m_sessionGen)
-                        emit connectionInfo(line);
-                },
-                Qt::QueuedConnection);
+        if (guard->alive)
+            postConnectionInfo(session, line);
     };
     return callbacks;
 }
