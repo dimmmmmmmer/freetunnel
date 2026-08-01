@@ -45,12 +45,48 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\LICENSE"
+; The uninstaller recursively deletes $INSTDIR, so the only safe rule is to
+; never take over a directory that already holds someone else's files. Checking
+; at INSTALL time is what makes that deletion safe — checking at uninstall time
+; cannot help, because by then our own exe is sitting in the user's D:\Tools and
+; the directory looks like ours.
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryLeave
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
+
+;--------------------------------
+; Install directory safety
+
+Function DirectoryLeave
+  ; New directory, or a previous FreeTunnel install being upgraded: fine.
+  IfFileExists "$INSTDIR\*.*" 0 dirOk
+  IfFileExists "$INSTDIR\${PRODUCT_EXE}" dirOk 0
+
+  ; Existing directory with unrelated content.
+  ClearErrors
+  FindFirst $0 $1 "$INSTDIR\*.*"
+  dirScan:
+    StrCmp $1 "" dirScanDone
+    StrCmp $1 "." dirNext
+    StrCmp $1 ".." dirNext
+    FindClose $0
+    MessageBox MB_ICONEXCLAMATION|MB_OK \
+      "$INSTDIR already contains other files.$\n$\nUninstalling FreeTunnel removes \
+this folder and everything in it, so FreeTunnel will not install into a folder \
+it does not own. Choose an empty or new folder."
+    Abort
+  dirNext:
+    FindNext $0 $1
+    Goto dirScan
+  dirScanDone:
+  FindClose $0
+
+  dirOk:
+FunctionEnd
 
 ;--------------------------------
 ; Languages
@@ -123,6 +159,14 @@ SectionEnd
 ; Uninstaller Section
 
 Section "Uninstall"
+  ; Is this actually our install directory? The directory page accepts any
+  ; existing folder (e.g. D:\Tools), and an unconditional recursive delete there
+  ; would take everything else in it with us. Decide BEFORE removing the very
+  ; file we recognise ourselves by.
+  StrCpy $0 "0"
+  IfFileExists "$INSTDIR\${PRODUCT_EXE}" 0 +2
+    StrCpy $0 "1"
+
   ; Kill running instance
   nsExec::Exec 'taskkill /F /IM ${PRODUCT_EXE}'
 
@@ -132,7 +176,11 @@ Section "Uninstall"
   Delete "$INSTDIR\Uninstall.exe"
 
   ; Remove every installed plugin/qml subdirectory and the install root.
-  RMDir /r "$INSTDIR"
+  StrCmp $0 "1" 0 +3
+    RMDir /r "$INSTDIR"
+    Goto uninst_root_done
+  RMDir "$INSTDIR"   ; unrecognised directory: only remove it if it is empty
+  uninst_root_done:
 
   ; Remove shortcuts
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"

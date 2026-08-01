@@ -13,6 +13,13 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default: no job needs to write to the repo except the
+# release job, which asks for contents: write explicitly. Without this the
+# repo/org default applies, handing a write-capable token to every job —
+# including the ones that execute third-party tooling.
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: Unit tests (${{ matrix.os }})
@@ -93,7 +100,7 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 18
           sudo apt-get install -y g++-13
-          pip install "conan~=2.12"
+          pip install "conan==2.31.1"
 
       - name: Install Qt
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4

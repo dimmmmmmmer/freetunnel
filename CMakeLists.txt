@@ -20,8 +20,10 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_Declare(
     QHotkey
     GIT_REPOSITORY https://github.com/Skycoder42/QHotkey.git
-    GIT_TAG 1.5.0
-    GIT_SHALLOW TRUE
+    # Pinned to the immutable commit behind tag 1.5.0 (git ls-remote
+    # https://github.com/Skycoder42/QHotkey 1.5.0): this code is compiled into
+    # shipped builds, and a tag can be repointed by whoever owns the repo.
+    GIT_TAG 34330d6ff5d2ca111c376f6d7da66be9d1817430 # 1.5.0
 )
 FetchContent_MakeAvailable(QHotkey)
 
@@ -161,12 +163,22 @@ else()
     # so probe it only where it actually does something.
     if(UNIX AND NOT APPLE)
         ft_add_cxx_flag_if_supported(FreeTunnel -fstack-clash-protection)
+        # Indirect-branch tracking / shadow stack markers (CET). Harmless on CPUs
+        # without CET, and required for the loader to enable it on those that do.
+        ft_add_cxx_flag_if_supported(FreeTunnel -fcf-protection=full)
     endif()
     # _FORTIFY_SOURCE only does anything in an optimizing build, and redefining it
     # (some distros pre-define it) warns — so undefine first, optimized configs only.
+    # Level 3 adds the dynamic-size object checks level 2 can't do; fall back to
+    # 2 on toolchains that don't know it (probe compiles with -Werror).
+    set(_ft_fortify 2)
+    check_cxx_compiler_flag("-Werror -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3" FT_HAS_FORTIFY3)
+    if(FT_HAS_FORTIFY3)
+        set(_ft_fortify 3)
+    endif()
     target_compile_options(FreeTunnel PRIVATE
         $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
-        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>)
+        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=${_ft_fortify}>)
     if(UNIX AND NOT APPLE)
         # Full RELRO + non-executable stack on Linux.
         target_link_options(FreeTunnel PRIVATE LINKER:-z,relro LINKER:-z,now LINKER:-z,noexecstack)
