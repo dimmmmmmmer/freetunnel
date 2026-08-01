@@ -211,6 +211,14 @@ void VpnHelperClient::abortStartup() {
     m_buf.clear();
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; }
     if (m_sock) { m_sock->abort(); m_sock->deleteLater(); m_sock = nullptr; }
+    // On macOS m_proc is osascript, not the helper — the helper was exec'd into
+    // the background and survives this kill. Two things bound it: deleting the
+    // token file below makes a helper that has not read it yet exit immediately
+    // (no token, no start), and one that already read it finds itself
+    // unauthenticated and self-quits on its own 60 s deadline. Until then it
+    // holds a loopback port with a token nobody will ever present, so it cannot
+    // be driven — but it is a live root process, which is why the deadline
+    // exists at all.
     if (m_proc) { m_proc->kill(); m_proc->deleteLater(); m_proc = nullptr; }
     clearTokenFile();
 }
