@@ -278,6 +278,9 @@ private:
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    // Which side failed: m_latestVersion cannot answer that — it only says "this
+    // process has ever seen a release" and is never cleared.
+    bool m_updateErrorFromDownload = false;
     QVariantList m_pings;
     int m_pingGeneration = 0;  // bumped on every ping run / config reload so
                                // in-flight probe callbacks from a previous run

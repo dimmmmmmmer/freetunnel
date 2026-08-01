@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QLoggingCategory>
 #include <QProcess>
+#include <QSaveFile>
 #include <QStandardPaths>
 
 #if defined(Q_OS_MACOS)
@@ -458,13 +459,29 @@ static QString readConfigText(const QString &path)
 
 static bool writeConfigText(const QString &path, const QString &toml)
 {
-    QFile f(path);
-    if (!openOwnerOnlyForWrite(f, path))
+    // Atomic on purpose. migrateConfigPassword() rewrites the user's LIVE config,
+    // and by the time it does the password has already moved into the credential
+    // store and been stripped from the text — so a truncate-in-place that then
+    // fails half way (full disk, I/O error, power loss) leaves a config with no
+    // server details AND no password in it. Stage and rename instead.
+    //
+    // The rename also replaces a symlink sitting at the target rather than
+    // writing through it, so dropping the O_NOFOLLOW open loses nothing here.
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
         return false;
+    // Owner-only before a single byte is written: this file carries the config
+    // during the window where the password may still be inline.
+    if (!f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        f.cancelWriting();
+        return false;
+    }
     const QByteArray data = toml.toUtf8();
-    const bool ok = f.write(data) == data.size();
-    f.close();
-    return ok;
+    if (f.write(data) != data.size()) {
+        f.cancelWriting();
+        return false;
+    }
+    return f.commit();
 }
 
 bool migrateConfigPassword(const QString &configPath)

@@ -64,6 +64,7 @@ void Backend::wireUpdaterSignals()
             });
     connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {
         m_updateState = QStringLiteral("error");
+        m_updateErrorFromDownload = true;
         m_updateMessage = msg;
         emit updateChanged();
     });
@@ -98,6 +99,7 @@ void Backend::checkForUpdates(bool userInitiated)
         return;
     ensureUpdater();
     m_updateCheckUserInitiated = userInitiated;
+    m_updateErrorFromDownload = false;
     if (userInitiated) {
         m_updateState = QStringLiteral("checking");
         m_updateMessage = tr("Checking…");
@@ -107,11 +109,13 @@ void Backend::checkForUpdates(bool userInitiated)
 }
 
 void Backend::openLatestRelease() {
-    // "error" now covers a failed download (retry it — we know what to fetch) and
-    // a failed update *check*, where there is no release to download yet: retry
-    // the check instead of asking the updater for an asset it never resolved.
-    const bool haveRelease = !m_latestVersion.isEmpty();
-    if (m_updateState == QLatin1String("error") && !haveRelease) {
+    // "error" covers a failed download (retry it — we know what to fetch) and a
+    // failed update *check*, where there is nothing resolved to download yet.
+    // Track which one it was explicitly: m_latestVersion was a bad proxy, because
+    // it is set on the first successful check and never cleared, so once ANY
+    // check had found a release every later CHECK failure was treated as a
+    // download failure and silently started downloading instead of retrying.
+    if (m_updateState == QLatin1String("error") && !m_updateErrorFromDownload) {
         checkForUpdates(true);
     } else if (m_updateState == QLatin1String("available")
                || m_updateState == QLatin1String("error")) {
