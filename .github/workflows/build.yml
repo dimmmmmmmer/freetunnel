@@ -186,13 +186,14 @@ jobs:
         run: |
           sudo apt-get update
           # Modern clang (the core is clang-only; 22.04's default clang is too old).
-          # Verified before it runs: this script is executed AS ROOT in the job
-          # that produces release binaries, so an unannounced change to it must
-          # stop the build rather than silently reconfigure the toolchain.
-          # Re-pin deliberately: curl -fsSL https://apt.llvm.org/llvm.sh | sha256sum
-          wget -q https://apt.llvm.org/llvm.sh
+          # From this repo's build-tools mirror, not apt.llvm.org: this script runs
+          # AS ROOT in the job that produces release binaries, and upstream can
+          # change it at any time. Digest verified after download as well.
+          curl -fsSL -o llvm.sh \
+            "https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02/llvm.sh"
           echo "9474ecd78b52aba6e923976b1e9773f5613027cc7e237b9956986cb536e02a36  llvm.sh" \
-            | sha256sum -c -
+            | sha256sum -c - \
+            || { echo "::error::llvm.sh does not match its pinned digest"; exit 1; }
           chmod +x llvm.sh
           sudo ./llvm.sh 18
           # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
@@ -423,27 +424,21 @@ jobs:
           export QML_SOURCES_PATHS="$PWD/client/qml"
           ld=linuxdeploy-x86_64.AppImage
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
-          # These tools choose the libraries, AppRun and Qt plugins that end up in
-          # the published .deb/.AppImage, so they are part of the shipped product
-          # and must not float. linuxdeploy publishes only a "continuous" release
-          # that is rewritten in place — there is no immutable upstream reference
-          # to pin (asset ids turn over with each rebuild too), so the CONTENT is
-          # the pin: verify the bytes and fail closed on any change.
-          #
-          # A mismatch means either upstream rebuilt (frequent — re-hash, skim
-          # what changed, bump) or someone tampered with the download. Both
-          # deserve a human look, which is why this does not auto-accept.
-          # Re-pin with: curl -sL <url> | sha256sum
-          # The durable fix is mirroring a reviewed copy into a release of this
-          # repo and fetching that instead.
-          curl -fsSL -o "$ld" \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
-          curl -fsSL -o "$ldqt" \
-            "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
+          # Mirrored in this repo's own build-tools release: linuxdeploy publishes
+          # only a "continuous" release that is rewritten in place, so upstream had
+          # no immutable reference to pin and every rebuild broke the digest. These
+          # tools pick the libraries, AppRun and Qt plugins that go into the
+          # published .deb/.AppImage, so what they are must be a deliberate choice.
+          # The digest is still verified — a corrupted mirror fails the build too.
+          # To refresh: download upstream, review, upload under a new
+          # build-tools-<date> tag, update the URLs and digests here.
+          tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
+          curl -fsSL -o "$ld" "$tools/$ld"
+          curl -fsSL -o "$ldqt" "$tools/$ldqt"
           echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
-            || { echo "::error::$ld changed upstream — review and re-pin its sha256"; exit 1; }
+            || { echo "::error::$ld does not match its pinned digest"; exit 1; }
           echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \
-            || { echo "::error::$ldqt changed upstream — review and re-pin its sha256"; exit 1; }
+            || { echo "::error::$ldqt does not match its pinned digest"; exit 1; }
           chmod +x "$ld" "$ldqt"
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/

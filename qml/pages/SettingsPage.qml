@@ -225,7 +225,11 @@ Item {
                             visible: backend.updateState === "available"
                                    || backend.updateState === "error"
                                    || backend.updateState === "ready"
-                            text: "↻"
+                            // Download vs retry are different offers and must not
+                            // look identical: a failed CHECK used to show the same
+                            // glyph as "a new version is waiting for you", which
+                            // reads as an update that does not exist.
+                            text: backend.updateState === "error" ? "↻" : "↓"
                             font.pixelSize: 17
                             color: updIconMa.containsMouse ? theme.text : theme.accent
                             rotation: updIconMa.containsMouse ? -30 : 0
