@@ -21,6 +21,30 @@ static QString tomlEsc(const QString &s) {
     return o;
 }
 
+// Escape a value for a multi-line basic string (""" … """). Same job as
+// tomlEsc(), minus the newline stripping a PEM block needs: escaping every quote
+// means the content can never contain the """ that would close the string early
+// and let a pasted "certificate" inject arbitrary TOML into the file the ROOT
+// helper later parses.
+static QString tomlEscMultiline(const QString &s) {
+    QString o;
+    o.reserve(s.size());
+    for (const QChar &c : s) {
+        if (c == QLatin1Char('\r'))
+            continue; // CRLF from a pasted PEM: keep the \n, drop the \r
+        if (c == QLatin1Char('\n')) {
+            o += c;
+            continue;
+        }
+        if (c < QChar(0x20) || c == QChar(0x7F))
+            continue;
+        if (c == QLatin1Char('\\') || c == QLatin1Char('"'))
+            o += QLatin1Char('\\');
+        o += c;
+    }
+    return o;
+}
+
 static QString csvToTomlArray(const QString &csv) {
     QStringList items;
     for (const QString &raw : csv.split(',', Qt::SkipEmptyParts)) {
@@ -51,7 +75,8 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     t += QStringLiteral("upstream_protocol = \"%1\"\n").arg(c.protocol == "http3" ? "http3" : "http2");
     t += QStringLiteral("anti_dpi = %1\n").arg(c.antiDpi ? "true" : "false");
     if (!c.certificate.trimmed().isEmpty())
-        t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n").arg(c.certificate.trimmed());
+        t += QStringLiteral("certificate = \"\"\"\n%1\n\"\"\"\n")
+                     .arg(tomlEscMultiline(c.certificate.trimmed()));
     else
         t += QStringLiteral("certificate = \"\"\n");
     t += QStringLiteral("\n[listener.tun]\n");
@@ -108,7 +133,10 @@ ConfigToml parseConfigToml(const QString &toml) {
             QStringLiteral("certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
             QRegularExpression::DotMatchesEverythingOption);
     const auto cm = certRe.match(toml);
-    c.certificate = cm.hasMatch() ? cm.captured(1) : QString();
+    // Same unescaping as the quoted fields: buildConfigToml() escapes quotes and
+    // backslashes in the certificate block, and a PEM (which has neither) still
+    // round-trips byte for byte.
+    c.certificate = cm.hasMatch() ? unesc(cm.captured(1)) : QString();
     return c;
 }
 

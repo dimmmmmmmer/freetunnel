@@ -1,7 +1,6 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
-#include <QCryptographicHash>
 #include <QFile> // full type: std::unique_ptr<QFile> member needs it for ~UpdateChecker
 #include <QObject>
 #include <QString>
@@ -80,8 +79,7 @@ private:
     QByteArray m_checksumsData;
     QByteArray m_signatureData;
     QString m_downloadPath;
-    // Installer download is streamed to disk and hashed incrementally so a
-    // 100+ MB asset never sits in RAM in one piece.
+    // Installer download is streamed to disk so a 100+ MB asset never sits in
+    // RAM in one piece; the SHA-256 is then taken from the finished file.
     std::unique_ptr<QFile> m_installerOut;
-    QCryptographicHash m_installerHash{QCryptographicHash::Sha256};
 };
