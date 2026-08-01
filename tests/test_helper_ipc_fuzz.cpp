@@ -43,17 +43,7 @@ bool authenticateClient(MockHelperServer &server, QTcpSocket &client, const QStr
         return false;
     server.acceptPending();
 
-    QJsonObject hello;
-    hello["cmd"] = "hello";
-    hello["token"] = token;
-    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
-    client.flush();
-    if (!server.waitForClientData(3000))
-        return false;
-    if (!client.waitForReadyRead(3000))
-        return false;
-    client.readLine();
-    return server.authed();
+    return mockHelperHandshake(server, client, token) && server.authed();
 }
 
 } // namespace

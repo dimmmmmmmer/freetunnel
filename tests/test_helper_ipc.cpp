@@ -44,18 +44,7 @@ void TestHelperIpc::authSuccess()
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
-    QJsonObject hello;
-    hello["cmd"] = "hello";
-    hello["token"] = token;
-    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
-    client.flush();
-    QVERIFY(server.waitForClientData(3000));
-    QVERIFY(client.waitForReadyRead(3000));
-
-    const QByteArray line = client.readLine();
-    const auto doc = QJsonDocument::fromJson(line);
-    QVERIFY(doc.isObject());
-    QCOMPARE(doc.object().value("ev").toString(), QStringLiteral("ready"));
+    QVERIFY(mockHelperHandshake(server, client, token));
     QVERIFY(server.authed());
 }
 
@@ -69,10 +58,22 @@ void TestHelperIpc::authRejectsBadToken()
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
+    // Wrong token: the proof over our nonce cannot be produced, so the peer
+    // never authenticates.
     QJsonObject hello;
     hello["cmd"] = "hello";
-    hello["token"] = "wrong";
+    hello["nonce"] = QStringLiteral("nonce-for-the-wrong-token");
     client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
+    client.flush();
+    QVERIFY(server.waitForClientData(3000));
+    QVERIFY(client.waitForReadyRead(3000));
+    const auto ch = QJsonDocument::fromJson(client.readLine()).object();
+    QJsonObject wrong;
+    wrong["cmd"] = "auth";
+    wrong["proof"] = vpn_helper::authProof(QStringLiteral("wrong"),
+                                           QString::fromLatin1(vpn_helper::kGuiRole),
+                                           ch.value("nonce").toString());
+    client.write(QJsonDocument(wrong).toJson(QJsonDocument::Compact) + '\n');
     client.flush();
     QVERIFY(server.waitForClientData(3000));
     QVERIFY(client.waitForDisconnected(3000));
@@ -91,9 +92,9 @@ void TestHelperIpc::rejectsSecondClientAfterAuth()
     first.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
     QVERIFY(first.waitForConnected(3000));
     server.acceptPending();
+    QVERIFY(mockHelperHandshake(server, first, token));
     QJsonObject hello;
-    hello["cmd"] = "hello";
-    hello["token"] = token;
+    hello["cmd"] = "noop";
     first.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
     first.flush();
     QVERIFY(server.waitForClientData(3000));
@@ -130,16 +131,7 @@ void TestHelperIpc::preAuthSquatterDoesNotBlock()
     server.acceptPending();
     QVERIFY(squatter.waitForDisconnected(2000));
 
-    QJsonObject hello;
-    hello["cmd"] = "hello";
-    hello["token"] = token;
-    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
-    client.flush();
-    QVERIFY(server.waitForClientData(3000));
-    QVERIFY(client.waitForReadyRead(3000));
-    const auto doc = QJsonDocument::fromJson(client.readLine());
-    QVERIFY(doc.isObject());
-    QCOMPARE(doc.object().value("ev").toString(), QStringLiteral("ready"));
+    QVERIFY(mockHelperHandshake(server, client, token));
     QVERIFY(server.authed());
 }
 
@@ -175,14 +167,7 @@ void TestHelperIpc::connectDisconnectFlow()
     QVERIFY(client.waitForConnected(3000));
     server.acceptPending();
 
-    QJsonObject hello;
-    hello["cmd"] = "hello";
-    hello["token"] = token;
-    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
-    client.flush();
-    QVERIFY(server.waitForClientData(3000));
-    QVERIFY(client.waitForReadyRead(3000));
-    client.readLine();
+    QVERIFY(mockHelperHandshake(server, client, token));
 
     QJsonObject connectCmd;
     connectCmd["cmd"] = "connect";

@@ -88,6 +88,9 @@ void MockHelperServer::adoptSocket(QTcpSocket *s)
         m_sock->abort();
         m_sock->deleteLater();
         m_buf.clear();
+        // Per-connection handshake state must not leak into the next socket, or
+        // the second client would be answering the first one's challenge.
+        m_challenge.clear();
     }
     s->setParent(this);
     m_sock = s;
@@ -115,10 +118,10 @@ void MockHelperServer::onReadyRead()
     if (!m_sock)
         return;
     m_buf += m_sock->readAll();
-    if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
-        m_sock->abort();
-        return;
-    }
+    // Mirror the real server: drain complete lines first and cap the LINE, not
+    // the accumulated buffer. Capping the buffer killed legitimate pipelined
+    // bursts, and a mock with the old policy would keep passing after production
+    // was fixed.
     int nl;
     while ((nl = m_buf.indexOf('\n')) >= 0) {
         const QByteArray line = m_buf.left(nl);
@@ -130,22 +133,46 @@ void MockHelperServer::onReadyRead()
         if (!m_sock)
             break;
     }
+    if (m_sock && m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
+        m_buf.clear();
+        m_sock->abort();
+    }
 }
 
 void MockHelperServer::handle(const QJsonObject &c)
 {
     const QString cmd = c.value("cmd").toString();
     if (!m_authed) {
-        if (cmd == QLatin1String("hello")
-            && vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
+        // Mirrors the production handshake in vpn_helper_server.cpp: the client
+        // opens with a nonce only, we prove we hold the token over it and send a
+        // nonce of our own, and only a correct answer authenticates. Keep the two
+        // in step — this double is what the client-side tests talk to.
+        if (cmd == QLatin1String("hello") && !c.value("nonce").toString().isEmpty()
+            && m_challenge.isEmpty()) {
+            m_challenge = QStringLiteral("mock-nonce-0123456789abcdef");
+            QJsonObject ch;
+            ch["ev"] = "challenge";
+            ch["proof"] = vpn_helper::authProof(
+                    m_token, QString::fromLatin1(vpn_helper::kHelperRole),
+                    c.value("nonce").toString());
+            ch["nonce"] = m_challenge;
+            m_sock->write(QJsonDocument(ch).toJson(QJsonDocument::Compact) + '\n');
+            m_sock->flush();
+            return;
+        }
+        if (cmd == QLatin1String("auth") && !m_challenge.isEmpty()
+            && vpn_helper::tokensEqual(
+                    c.value("proof").toString(),
+                    vpn_helper::authProof(m_token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                          m_challenge))) {
             m_authed = true;
             QJsonObject ready;
             ready["ev"] = "ready";
             m_sock->write(QJsonDocument(ready).toJson(QJsonDocument::Compact) + '\n');
             m_sock->flush();
-        } else {
-            m_sock->abort();
+            return;
         }
+        m_sock->abort();
         return;
     }
 
@@ -169,4 +196,35 @@ void MockHelperServer::handle(const QJsonObject &c)
     } else if (cmd == QLatin1String("quit")) {
         emit quitRequested();
     }
+}
+
+bool mockHelperHandshake(MockHelperServer &server, QTcpSocket &client, const QString &token)
+{
+    const QString nonce = QStringLiteral("test-gui-nonce-abcdef0123456789");
+    QJsonObject hello;
+    hello["cmd"] = QStringLiteral("hello");
+    hello["nonce"] = nonce;
+    client.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
+    client.flush();
+    if (!server.waitForClientData(3000) || !client.waitForReadyRead(3000))
+        return false;
+    const auto challenge = QJsonDocument::fromJson(client.readLine()).object();
+    if (challenge.value("ev").toString() != QLatin1String("challenge"))
+        return false;
+    // The client half of the contract: never answer a peer that cannot prove it
+    // holds the token.
+    if (!vpn_helper::tokensEqual(
+                challenge.value("proof").toString(),
+                vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kHelperRole), nonce)))
+        return false;
+    QJsonObject auth;
+    auth["cmd"] = QStringLiteral("auth");
+    auth["proof"] = vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                          challenge.value("nonce").toString());
+    client.write(QJsonDocument(auth).toJson(QJsonDocument::Compact) + '\n');
+    client.flush();
+    if (!server.waitForClientData(3000) || !client.waitForReadyRead(3000))
+        return false;
+    return QJsonDocument::fromJson(client.readLine()).object().value("ev").toString()
+            == QLatin1String("ready");
 }
