@@ -7,8 +7,11 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
+#include <QTimer>
 #include <QTranslator>
 #include <QWindow>
+
+#include <memory>
 
 #include "app/Backend.h"
 #include "core/InstanceControl.h"
@@ -126,36 +129,62 @@ protected:
 
 } // namespace
 
-QByteArray readLocalSocketPayload(QLocalSocket *c)
-{
-    QByteArray buf = c->readAll();
-    while (c->state() == QLocalSocket::ConnectedState && buf.size() < 64 * 1024
-           && c->waitForReadyRead(200))
-        buf += c->readAll();
-    buf += c->readAll();
-    return buf;
-}
+namespace {
 
+// An instance message is "token\npayload" with no terminator, so the only end
+// markers are the peer's disconnect, a gap in the stream, or the size cap.
+constexpr int kInstanceMessageMax = 64 * 1024;
+constexpr int kInstanceMessageIdleMs = 250;  // no more bytes for this long → done
+constexpr int kInstanceMessageDeadlineMs = 3000; // hard stop for a peer that drips
+
+} // namespace
+
+// Collect the message without blocking: the old waitForReadyRead(200) loop froze
+// the GUI thread for up to 200 ms per chunk (64 KB worth) while a same-user peer
+// took its time. Buffer on readyRead instead and deliver from the event loop.
 void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
                               const QString &instanceToken)
 {
     if (!c)
         return;
-    const QByteArray buf = readLocalSocketPayload(c);
     if (!localSocketPeerIsSameUser(c)) {
         c->deleteLater();
         return;
     }
-    QString recvToken;
-    QString cmd;
-    if (!parseInstanceMessage(buf, &recvToken, &cmd) || instanceToken.isEmpty()
-            || !instanceTokensEqual(recvToken, instanceToken)) {
+    auto buf = std::make_shared<QByteArray>();
+    auto delivered = std::make_shared<bool>(false);
+    auto *idle = new QTimer(c);
+    idle->setSingleShot(true);
+    idle->setInterval(kInstanceMessageIdleMs);
+
+    Backend *be = &backend;
+    auto deliver = [c, buf, delivered, be, win, instanceToken]() {
+        if (*delivered)
+            return;
+        *delivered = true;
+        *buf += c->readAll();
         c->deleteLater();
-        return;
-    }
-    c->deleteLater();
-    backend.handleControl(cmd);
-    raiseMainWindow(win);
+        QString recvToken;
+        QString cmd;
+        if (!parseInstanceMessage(*buf, &recvToken, &cmd) || instanceToken.isEmpty()
+                || !instanceTokensEqual(recvToken, instanceToken))
+            return;
+        be->handleControl(cmd);
+        raiseMainWindow(win);
+    };
+
+    QObject::connect(idle, &QTimer::timeout, c, deliver);
+    QObject::connect(c, &QLocalSocket::readyRead, c, [c, buf, idle, deliver]() {
+        *buf += c->readAll();
+        if (buf->size() >= kInstanceMessageMax) {
+            deliver();
+            return;
+        }
+        idle->start();
+    });
+    QObject::connect(c, &QLocalSocket::disconnected, c, deliver);
+    QTimer::singleShot(kInstanceMessageDeadlineMs, c, deliver);
+    idle->start();
 }
 
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
@@ -218,10 +247,15 @@ void UrlOpenFilter::ready(Backend *b, QWindow *w)
 {
     backend = b;
     win = w;
+    const QStringList queued = pendingMore;
+    pendingMore.clear();
     if (!pending.isEmpty()) {
-        apply(pending);
+        const QString first = pending;
         pending.clear();
+        apply(first);
     }
+    for (const QString &u : queued)
+        apply(u);
 }
 
 bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
@@ -231,8 +265,10 @@ bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
         if (!u.isEmpty()) {
             if (backend)
                 apply(u);
-            else
+            else if (pending.isEmpty())
                 pending = u;
+            else
+                pendingMore << u; // several links can land before ready()
         }
         return true;
     }

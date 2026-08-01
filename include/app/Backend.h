@@ -216,6 +216,7 @@ private:
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
     void trimLogFile();     // cap the log file size so it never grows unbounded
+    void clearPendingLogFile(); // drop the log file a clearLogs() deferred while connected
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
     void registerHotkeys(); // (re)bind global hotkeys from current settings
     QHotkey *makeHotkey(const QString &seq, const QString &label, void (Backend::*slot)(),
@@ -301,6 +302,7 @@ private:
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
     bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
+    bool m_logClearPending = false; // clearLogs() ran while the core held the log open
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran
 };

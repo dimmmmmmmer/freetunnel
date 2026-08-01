@@ -37,6 +37,17 @@ static QString autoStartPath()
     return QDir::homePath() + QStringLiteral("/Library/LaunchAgents/com.freetunnel.app.plist");
 }
 
+// The install path goes into an XML <string>; an unescaped '&' or '<' (legal in a
+// macOS path) would make launchd reject the whole plist.
+static QString plistEscaped(const QString &s)
+{
+    QString out = s;
+    out.replace(QLatin1Char('&'), QLatin1String("&amp;")); // first: it introduces the others
+    out.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+    out.replace(QLatin1Char('>'), QLatin1String("&gt;"));
+    return out;
+}
+
 bool platformAutoStartEnabled()
 {
     return QFileInfo::exists(autoStartPath());
@@ -58,7 +69,7 @@ void setPlatformAutoStart(bool enabled)
                 "  <key>ProgramArguments</key><array><string>%1</string></array>\n"
                 "  <key>RunAtLoad</key><true/>\n"
                 "</dict></plist>\n")
-                            .arg(QCoreApplication::applicationFilePath())
+                            .arg(plistEscaped(QCoreApplication::applicationFilePath()))
                             .toUtf8());
         }
     } else {
@@ -72,6 +83,19 @@ static QString autoStartPath()
             + QStringLiteral("/autostart/freetunnel.desktop");
 }
 
+// Exec= is word-split like a shell command line, so an install path containing a
+// space would start the wrong program (or nothing). Quote it per the Desktop
+// Entry spec: inside double quotes, '"', '\', '$' and '`' are backslash-escaped.
+static QString desktopExecQuoted(const QString &path)
+{
+    QString out = path;
+    out.replace(QLatin1Char('\\'), QLatin1String("\\\\")); // first: it introduces the others
+    out.replace(QLatin1Char('"'), QLatin1String("\\\""));
+    out.replace(QLatin1Char('$'), QLatin1String("\\$"));
+    out.replace(QLatin1Char('`'), QLatin1String("\\`"));
+    return QLatin1Char('"') + out + QLatin1Char('"');
+}
+
 static void writeDesktopAutostart(const QString &path)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -79,7 +103,7 @@ static void writeDesktopAutostart(const QString &path)
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QStringLiteral("[Desktop Entry]\nType=Application\nName=FreeTunnel\n"
                                "Exec=%1\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
-                        .arg(QCoreApplication::applicationFilePath())
+                        .arg(desktopExecQuoted(QCoreApplication::applicationFilePath()))
                         .toUtf8());
     }
 }

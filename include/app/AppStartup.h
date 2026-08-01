@@ -4,6 +4,7 @@
 #include <QEvent>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class Backend;
 class QGuiApplication;
@@ -39,7 +40,11 @@ class UrlOpenFilter : public QObject {
 public:
     Backend *backend = nullptr;
     QWindow *win = nullptr;
+    // Deep links delivered before ready(): the first waits in `pending`, any
+    // further ones queue behind it. Keeping only the last one dropped imports
+    // when macOS delivered several FileOpen events back-to-back at launch.
     QString pending;
+    QStringList pendingMore;
     void ready(Backend *b, QWindow *w);
 
 protected:

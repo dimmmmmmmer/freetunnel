@@ -67,11 +67,19 @@ void Backend::wireUpdaterSignals()
         m_updateMessage = msg;
         emit updateChanged();
     });
-    connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &) {
+    connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &message) {
         if (!m_updateCheckUserInitiated)
             return;
-        m_updateState = QStringLiteral("current");
-        m_updateMessage = tr("You have the latest version");
+        // noUpdateAvailable doubles as the checker's failure path — it also carries
+        // "Network error: …" / "Invalid response from GitHub API". Dropping the
+        // message told an offline user their check had succeeded and they were up
+        // to date; only the checker's own up-to-date line means we actually reached
+        // GitHub and compared versions.
+        const bool upToDate = message.contains(QLatin1String("latest version"),
+                                               Qt::CaseInsensitive);
+        m_updateState = upToDate ? QStringLiteral("current") : QStringLiteral("error");
+        m_updateMessage = upToDate ? tr("You have the latest version")
+                                   : tr("Update check failed: %1").arg(message);
         emit updateChanged();
     });
 }
@@ -99,9 +107,16 @@ void Backend::checkForUpdates(bool userInitiated)
 }
 
 void Backend::openLatestRelease() {
-    if (m_updateState == QLatin1String("available") || m_updateState == QLatin1String("error"))
+    // "error" now covers a failed download (retry it — we know what to fetch) and
+    // a failed update *check*, where there is no release to download yet: retry
+    // the check instead of asking the updater for an asset it never resolved.
+    const bool haveRelease = !m_latestVersion.isEmpty();
+    if (m_updateState == QLatin1String("error") && !haveRelease) {
+        checkForUpdates(true);
+    } else if (m_updateState == QLatin1String("available")
+               || m_updateState == QLatin1String("error")) {
         downloadUpdate();
-    else {
+    } else {
         const QString url = m_latestUrl.isEmpty()
                 ? QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/latest")
                 : m_latestUrl;

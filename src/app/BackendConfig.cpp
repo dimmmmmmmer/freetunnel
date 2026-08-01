@@ -16,6 +16,7 @@
 
 #include <memory>
 
+#include "BackendConfigShared.h"
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
@@ -260,13 +261,11 @@ bool Backend::exportConfigToml(int index, const QString &fileUrl) const
             ? QUrl(fileUrl).toLocalFile() : fileUrl;
     if (dest.isEmpty())
         return false;
-    QFile out(dest);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-    out.write(freetunnel::buildConfigToml(c).toUtf8());
-    out.close();
-    QFile::setPermissions(dest, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    return true;
+    // The export carries the password in cleartext into a user-chosen directory
+    // (~/Downloads and friends): writeConfigFile makes it owner-only before the
+    // first byte lands, instead of chmod'ing a world-readable file afterwards.
+    return freetunnel::backend_config::writeConfigFile(dest,
+                                                       freetunnel::buildConfigToml(c).toUtf8());
 }
 
 void Backend::moveConfig(int from, int to)

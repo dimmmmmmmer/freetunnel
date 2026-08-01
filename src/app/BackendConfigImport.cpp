@@ -84,7 +84,13 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared)
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    const QString target = QDir(base).filePath(prepared.fileName);
+    // The file name comes from the link, so writing it straight would let a link
+    // silently replace an existing config of the same name: the row already sits
+    // in configs.json (no new entry appears) while its TOML and keychain entry now
+    // point at the link author's server. Always take a fresh path, like the file
+    // import path does.
+    const QString target = freetunnel::uniqueOwnerConfigPath(
+            QFileInfo(prepared.fileName).completeBaseName());
     if (!freetunnel::backend_config::writeConfigFile(target, prepared.tomlContent.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
         return false;
@@ -100,14 +106,20 @@ bool Backend::importDeepLink(const QString &link)
         emit errorOccurred(tr("Link error: %1").arg(err));
         return false;
     }
-    if (prepared->skipVerification) {
-        emit deepLinkImportConfirmationRequired(
-                tr("This link disables server certificate verification. "
-                   "Only import configs from sources you trust."),
-                link);
-        return false;
-    }
-    return importPreparedDeepLink(*prepared);
+    // Every deep link is attacker-reachable: a web page can invoke the scheme
+    // handler unattended, and an imported config becomes the active one (and the
+    // connect target) when the user has none — so "freetunnel://connect" right
+    // after would route everything through the link author's server. Confirmation
+    // is therefore mandatory for ALL links, not only the ones that also turn off
+    // certificate verification.
+    emit deepLinkImportConfirmationRequired(
+            prepared->skipVerification
+                    ? tr("This link disables server certificate verification. "
+                         "Only import configs from sources you trust.")
+                    : tr("Add a VPN server from this link? All your traffic can be routed "
+                         "through it — only import configs from sources you trust."),
+            link);
+    return false;
 }
 
 bool Backend::confirmDeepLinkImport(const QString &link)

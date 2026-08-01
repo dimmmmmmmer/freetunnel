@@ -166,13 +166,14 @@ bool Backend::createConfig(const QVariantMap &f)
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
-    if (!freetunnel::backend_config::writeConfigFile(target, tomlBody.toUtf8())) {
-        emit errorOccurred(tr("Could not write config"));
-        return false;
-    }
-    if (!freetunnel::backend_config::storeConfigPassword(target, parsed.password)) {
-        emit errorOccurred(tr("Could not store the VPN password securely. Install "
-                             "gnome-keyring or KWallet, then try again."));
+    QString saveErr;
+    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(),
+                                                            parsed.password, &saveErr)) {
+        if (saveErr == QLatin1String("password"))
+            emit errorOccurred(tr("Could not store the VPN password securely. Install "
+                                 "gnome-keyring or KWallet, then try again."));
+        else
+            emit errorOccurred(tr("Could not write config"));
         return false;
     }
     if (!oldPath.isEmpty() && oldPath != target)
@@ -226,10 +227,22 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
     const bool noChange = ctx.editingSnapshot && ctx.oldPath == ctx.target
             && ctx.tomlBody == ctx.editContent && ctx.password == ctx.editPassword
             && newProfile == ctx.editProfile;
-    if (editing && m_activePath == ctx.target && !noChange) {
+    if (m_activePath != ctx.target)
+        return;
+    if (editing) {
+        if (noChange)
+            return;
         applySplitRules();
         reapplyIfConnected();
+        return;
     }
+    // Creating a config makes it the active one (persistCreatedConfigPaths). If a
+    // tunnel is up it is still carrying the PREVIOUS server, so the "connected"
+    // badge would sit on a config we aren't actually talking to — rebuild it, the
+    // same way selectConfig() does when the user switches by hand.
+    applySplitRules();
+    if (m_connected || m_connecting)
+        reconnectActiveConfig();
 }
 
 bool Backend::finalizeCreatedConfig(const CreatedConfigFinalize &ctx)

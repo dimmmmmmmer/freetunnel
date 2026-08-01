@@ -96,16 +96,27 @@ void Backend::applyVpnClientState(VpnHelperClient::State st)
     if (nowConnected && !m_connected)
         m_session.restart();
     m_connected = nowConnected;
+    clearReapplyingIfDone(st, nowConnected);
+    // A config-switch / rule-reapply teardown is the first half of a reconnect,
+    // not an "Off" state. Reporting connected=connecting=disconnecting=false for
+    // that window made the UI show "Off" while the tunnel was still up, let
+    // toggle() start a connect that raced the pending one, and let removeConfig()
+    // miss its delete-active guard (leaving m_pendingReconnect to auto-connect a
+    // config the user never selected).
+    const bool switching = m_reapplying
+            && (st == VpnHelperClient::State::Disconnecting
+                || st == VpnHelperClient::State::Disconnected);
     m_connecting = st == VpnHelperClient::State::Connecting
                    || st == VpnHelperClient::State::Reconnecting
-                   || st == VpnHelperClient::State::WaitingForNetwork;
-    clearReapplyingIfDone(st, nowConnected);
+                   || st == VpnHelperClient::State::WaitingForNetwork
+                   || switching;
     m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
 }
 
 void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
 {
     applyVpnClientState(st);
+    clearPendingLogFile(); // a Clear Logs issued while the tunnel was up
     emit stateChanged();
     appendLog(QStringLiteral("INFO"), statusText());
     // A config switch / live rule reapply disconnects first, then reconnects only
@@ -274,6 +285,12 @@ bool Backend::loadConnectTomlOrFail(QString *tomlOut)
         return true;
     }
     m_connecting = false;
+    // Nothing further will report Connected or Error for this attempt, so
+    // clearReapplyingIfDone() would never run: a reapply that dies here used to
+    // latch m_reapplying forever, masking m_disconnecting, swallowing every
+    // vpnError toast and killing live rule reapply until some later connect
+    // happened to succeed.
+    m_reapplying = false;
     emit stateChanged();
     emit errorOccurred(tr("Config has no password — edit it and try again"));
     return false;

@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QHostAddress>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -48,26 +49,83 @@ bool validateDnsList(const QString &dns)
     });
 }
 
+namespace {
+
+// Config files are password-bearing — a created config until storeConfigPassword()
+// runs, a deep-link import until migrateConfigPassword() moves the plaintext
+// `password = "…"` line into the keychain. Creating them with default permissions
+// and chmod'ing afterwards left a world-readable window, so set the mode on the
+// (still unnamed) QSaveFile temp before a single byte is written, and treat a
+// failure to do so as a failed write rather than ignoring it.
+bool openOwnerOnly(QSaveFile *file)
+{
+    if (!file->open(QIODevice::WriteOnly))
+        return false;
+    if (!file->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        file->cancelWriting();
+        return false;
+    }
+    return true;
+}
+
+bool writeAll(QSaveFile *file, const QByteArray &body)
+{
+    if (file->write(body) != body.size()) {
+        file->cancelWriting();
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
 bool writeConfigFile(const QString &target, const QByteArray &body)
 {
-    QFile file(target);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    QSaveFile file(target);
+    if (!openOwnerOnly(&file) || !writeAll(&file, body))
         return false;
-    file.write(body);
-    file.close();
-    QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    return true;
+    return file.commit();
 }
 
 bool storeConfigPassword(const QString &target, const QString &password)
 {
-    freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForConfigPath(target),
-                                               password);
-    if (!password.isEmpty()
-        && freetunnel::CredentialStore::loadPassword(
-                   freetunnel::CredentialStore::keyForConfigPath(target))
-                   .isEmpty()) {
-        QFile::remove(target);
+    const QString key = freetunnel::CredentialStore::keyForConfigPath(target);
+    freetunnel::CredentialStore::storePassword(key, password);
+    if (password.isEmpty())
+        return true;
+    // Compare the value, not just "something is there". When EDITING a config in
+    // place the key already holds the PREVIOUS password, so a non-empty readback
+    // proves nothing: a store that rejected the write would look like success and
+    // the config would be committed with a stale credential, failing to connect
+    // with no indication why.
+    return freetunnel::CredentialStore::loadPassword(key) == password;
+}
+
+bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
+                            QString *errOut)
+{
+    // Editing a config saves over the ORIGINAL file (ownerConfigPathForSave reuses
+    // oldPath when the name is unchanged). The old order — truncate the file, then
+    // delete it if the credential store refused — destroyed the user's config
+    // outright whenever a Linux keyring was locked, leaving a ghost row in
+    // configs.json. Stage the body instead and only replace the destination once
+    // the password is verifiably in the store, so a credential failure can never
+    // reach existing data on disk.
+    QSaveFile file(target);
+    if (!openOwnerOnly(&file) || !writeAll(&file, body)) {
+        if (errOut)
+            *errOut = QStringLiteral("write");
+        return false;
+    }
+    if (!storeConfigPassword(target, password)) {
+        file.cancelWriting(); // the config already on disk stays exactly as it was
+        if (errOut)
+            *errOut = QStringLiteral("password");
+        return false;
+    }
+    if (!file.commit()) {
+        if (errOut)
+            *errOut = QStringLiteral("write");
         return false;
     }
     return true;

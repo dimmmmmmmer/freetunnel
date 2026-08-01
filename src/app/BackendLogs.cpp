@@ -142,7 +142,27 @@ QString Backend::logText() const {
 
 void Backend::clearLogs() {
     m_logModel.clear();
-    QFile::remove(logPath()); // also clear the on-disk file
+    // Same reason the hourly trim waits for a fully-down tunnel: the core (in the
+    // elevated helper) appends to this file through its own descriptor. Removing
+    // it mid-session makes POSIX keep the core's writes on the unlinked inode
+    // (core lines silently lost until reconnect), and on Windows the removal just
+    // fails, so the file isn't cleared at all. Defer instead — the user's intent
+    // is that the file ends up empty, not that it is unlinked right now.
+    if (m_connected || m_connecting || m_disconnecting) {
+        m_logClearPending = true;
+        return;
+    }
+    m_logClearPending = false;
+    QFile::remove(logPath());
+}
+
+// Run the deferred clearLogs() once the tunnel is down and the core has let go
+// of the file (called from the VPN state handler).
+void Backend::clearPendingLogFile() {
+    if (!m_logClearPending || m_connected || m_connecting || m_disconnecting)
+        return;
+    m_logClearPending = false;
+    QFile::remove(logPath());
 }
 
 void Backend::openLogFolder() {
