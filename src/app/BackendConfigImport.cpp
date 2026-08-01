@@ -172,16 +172,21 @@ bool Backend::importDeepLink(const QString &link)
     const QString existingName =
             QFileInfo::exists(collision) ? nameForPath(collision) : QString();
 
-    QString message = prepared->skipVerification
-            ? tr("This link disables server certificate verification. "
-                 "Only import configs from sources you trust.")
-            : tr("Add a VPN server from this link? All your traffic can be routed "
-                 "through it — only import configs from sources you trust.");
-    if (!existingName.isEmpty()) {
-        message += QLatin1Char('\n')
-                + tr("“%1” already exists — replace it, or add this as a separate config?")
-                          .arg(existingName);
+    // Say what is actually happening and nothing else. A collision replaces the
+    // generic question rather than stacking on top of it — the buttons already
+    // read Replace / Add copy — and the certificate line is a technical fact the
+    // user cannot see any other way, so it is the one warning worth keeping.
+    QStringList lines;
+    if (existingName.isEmpty()) {
+        lines << tr("Add a VPN server from this link?");
+    } else {
+        lines << tr("“%1” already exists. Replace it, or add this as a separate config?")
+                         .arg(existingName);
     }
+    if (prepared->skipVerification)
+        lines << tr("This link turns off server certificate verification.");
+    const QString message = lines.join(QLatin1Char('\n'));
+
     emit deepLinkImportConfirmationRequired(message, link, existingName);
     return false;
 }

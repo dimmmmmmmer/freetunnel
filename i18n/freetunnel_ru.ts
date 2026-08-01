@@ -147,10 +147,6 @@
         <translation>Не удалось сохранить пароль VPN безопасно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
     </message>
     <message>
-        <source>This link disables server certificate verification. Only import configs from sources you trust.</source>
-        <translation>Эта ссылка отключает проверку сертификата сервера. Импортируйте конфиги только из надёжных источников.</translation>
-    </message>
-    <message>
         <source>Connection lost — couldn&apos;t reach the server. Check the config or your network.</source>
         <translation>Соединение потеряно — сервер недоступен. Проверьте конфигурацию или сеть.</translation>
     </message>
@@ -191,16 +187,20 @@
         <translation>Горячую клавишу «%1» (%2) не удалось зарегистрировать [%3] — возможно, занята другим приложением или системой.</translation>
     </message>
     <message>
-        <source>Add a VPN server from this link? All your traffic can be routed through it — only import configs from sources you trust.</source>
-        <translation>Добавить VPN-сервер по этой ссылке? Через него может пойти весь ваш трафик — импортируйте конфигурации только из источников, которым доверяете.</translation>
-    </message>
-    <message>
         <source>Update check failed: %1</source>
         <translation>Не удалось проверить обновления: %1</translation>
     </message>
     <message>
-        <source>“%1” already exists — replace it, or add this as a separate config?</source>
-        <translation>«%1» уже существует — заменить или добавить как отдельную конфигурацию?</translation>
+        <source>Add a VPN server from this link?</source>
+        <translation>Добавить VPN-сервер по этой ссылке?</translation>
+    </message>
+    <message>
+        <source>“%1” already exists. Replace it, or add this as a separate config?</source>
+        <translation>«%1» уже существует. Заменить или добавить отдельной конфигурацией?</translation>
+    </message>
+    <message>
+        <source>This link turns off server certificate verification.</source>
+        <translation>Эта ссылка отключает проверку сертификата сервера.</translation>
     </message>
 </context>
 <context>
