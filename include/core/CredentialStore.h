@@ -5,6 +5,13 @@
 
 namespace freetunnel {
 
+// Name the OS credential stores are keyed by (Keychain service, libsecret schema,
+// Credential Manager target prefix). Test builds resolve to a separate name: it is
+// the only isolation the OS stores offer — QStandardPaths test mode and
+// XDG_CONFIG_HOME redirect files only, so without this a test run reads, rewrites
+// and deletes the real app's secrets.
+QString credentialServiceName();
+
 // Stores VPN config passwords outside the on-disk TOML (macOS Keychain, Windows
 // Credential Manager, Linux libsecret / Secret Service). Plaintext file fallback is
 // disabled for new passwords — see secureStorageAvailable().

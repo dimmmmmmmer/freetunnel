@@ -13,6 +13,12 @@ set(CMAKE_AUTOMOC ON)
 if (NOT DEFINED ENV{CI})
     add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
 endif()
+
+# Every test target, unconditionally: this is what makes credentialServiceName()
+# resolve to a test-only keychain service. QStandardPaths test mode redirects
+# files only, so without this a test run rewrites and deletes the real app's
+# secrets (the single-instance auth token, per-config passwords).
+add_compile_definitions(FT_ENABLE_TEST_HOOKS)
 set(CMAKE_AUTORCC ON)
 
 option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)
@@ -36,8 +42,10 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_Declare(
     QHotkey
     GIT_REPOSITORY https://github.com/Skycoder42/QHotkey.git
-    GIT_TAG 1.5.0
-    GIT_SHALLOW TRUE
+    # Pinned to the immutable commit behind tag 1.5.0 (git ls-remote
+    # https://github.com/Skycoder42/QHotkey 1.5.0): this code is compiled into
+    # shipped builds, and a tag can be repointed by whoever owns the repo.
+    GIT_TAG 34330d6ff5d2ca111c376f6d7da66be9d1817430 # 1.5.0
 )
 FetchContent_MakeAvailable(QHotkey)
 
@@ -372,17 +380,34 @@ add_test(NAME integration_config_workflow COMMAND test_integration_config_workfl
 
 add_executable(test_integration_single_instance
     test_integration_single_instance.cpp
+    # Production sender + token/framing logic, so this exercises the auth
+    # boundary instead of re-testing Qt's socket delivery.
+    ../src/core/InstanceControl.cpp
+    ../src/core/CredentialStore.cpp
+    ../src/core/ConfigToml.cpp
 )
+target_include_directories(test_integration_single_instance PRIVATE ../include ../include/core)
 target_link_libraries(test_integration_single_instance PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+freetunnel_link_linux_secrets(test_integration_single_instance)
+if(APPLE)
+    target_link_libraries(test_integration_single_instance PRIVATE "-framework Security")
+endif()
 add_test(NAME integration_single_instance COMMAND test_integration_single_instance)
 
 add_executable(test_integration_helper_client
     test_integration_helper_client.cpp
     helper_ipc_mock_server.cpp
     helper_ipc_mock_server.h
+    # The real GUI-side client, so the handshake tests exercise production code
+    # rather than two test doubles talking to each other.
+    ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppUiUtils.cpp
+    ../include/vpn/vpn_helper_client.h
 )
-target_include_directories(test_integration_helper_client PRIVATE ../include ../include/vpn)
-target_link_libraries(test_integration_helper_client PRIVATE Qt6::Core Qt6::Test Qt6::Network)
+target_include_directories(test_integration_helper_client PRIVATE
+    ../include ../include/core ../include/vpn)
+target_link_libraries(test_integration_helper_client PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Test Qt6::Network)
 add_test(NAME integration_helper_client COMMAND test_integration_helper_client)
 
 set(BACKEND_TEST_SOURCES
@@ -476,3 +501,61 @@ target_include_directories(test_qt_trusttunnel_client PRIVATE
 target_compile_definitions(test_qt_trusttunnel_client PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client)
+
+# Split-tunnel behaviour (routes, profiles, and which edits disturb a live
+# tunnel). Reuses the Backend source set — the logic under test lives on Backend.
+add_executable(test_backend_split
+    test_backend_split.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_split PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_backend_split PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_split PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_split)
+if(WIN32)
+    target_link_libraries(test_backend_split PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_split PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_split PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_split COMMAND test_backend_split)
+
+# The REAL privileged helper server, built against the mock core so it needs
+# neither the VPN core nor root. Previously vpn_helper_server.cpp — the code that
+# runs as root and parses everything the GUI sends — was in no test target at all
+# and the IPC tests drove a hand-written double with a different pre-auth policy.
+add_executable(freetunnel_test_helper
+    helper_server_main.cpp
+    ../src/vpn/vpn_helper_server.cpp
+    ../src/vpn/vpn_helper_launch.cpp
+    ../src/vpn/qt_trusttunnel_client.cpp
+    ../src/vpn/qt_trusttunnel_fdwatch.cpp
+    ../src/vpn/qt_trusttunnel_connect.cpp
+    ../src/vpn/qt_trusttunnel_events.cpp
+    ../src/vpn/qt_trusttunnel_platform.cpp
+    ../src/core/NetBind.cpp
+    ../include/vpn/qt_trusttunnel_client.h  # AUTOMOC needs the Q_OBJECT header listed
+)
+target_include_directories(freetunnel_test_helper PRIVATE
+    mock_core ../include ../include/vpn ../src/vpn)
+target_compile_definitions(freetunnel_test_helper PRIVATE FT_ENABLE_TEST_HOOKS)
+target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network)
+
+add_executable(test_helper_server
+    test_helper_server.cpp
+    ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppUiUtils.cpp
+    ../include/vpn/vpn_helper_client.h  # AUTOMOC needs the Q_OBJECT header listed
+)
+target_include_directories(test_helper_server PRIVATE . ../include ../include/core ../include/vpn)
+target_compile_definitions(test_helper_server PRIVATE FT_ENABLE_TEST_HOOKS
+    FT_TEST_HELPER_BINARY="$<TARGET_FILE:freetunnel_test_helper>")
+target_link_libraries(test_helper_server PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+add_dependencies(test_helper_server freetunnel_test_helper)
+add_test(NAME helper_server COMMAND test_helper_server)
