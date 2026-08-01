@@ -10,9 +10,36 @@ Item {
     required property var backend
     required property var theme
 
-    // Which config the export "Save .toml" dialog is acting on.
+    // Which config the export menu / "Save .toml" dialog is acting on, and which
+    // one the delete confirmation is about. Both dialogs live at window level and
+    // outlive the row they were opened from — a background import (deep link from
+    // a second instance) resets the model and destroys that delegate — so the
+    // action has to resolve against the page, never against the delegate's index.
     property int exportIndex: -1
     property string exportName: ""
+    property int deleteIndex: -1
+
+    function exportPicked(v) {
+        if (v === "toml") { tomlSaveDlg.open(); return }
+        if (v !== "link") return
+        var lnk = backend.configDeepLink(cfgRoot.exportIndex)
+        if (lnk && lnk.length > 0) {
+            backend.copyToClipboard(lnk)
+            shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully"))
+        } else {
+            shell.showToast(qsTr("Couldn’t build deep-link"))
+        }
+    }
+    function deleteConfirmed() {
+        if (cfgRoot.deleteIndex >= 0)
+            backend.removeConfig(cfgRoot.deleteIndex)
+    }
+    // A config name is user- or import-controlled: a "/" (or "\" on Windows)
+    // would be read as a path separator by the save dialog, so flatten it.
+    function exportFileName(name) {
+        var s = name.replace(/[\/\\]/g, "-")
+        return s.length > 0 ? s : "config"
+    }
 
     // Cmd/Ctrl+V tries to import a config from the clipboard.
     Shortcut { sequences: [StandardKey.Paste]; onActivated: backend.importFromClipboard() }
@@ -59,6 +86,10 @@ Item {
         // Active drag-reorder state, shared across delegates.
         property int dragFrom: -1
         property int dragTo: -1
+        // Clear it from one place: the dragged delegate normally does this on
+        // release/cancel, but a model reset destroys that delegate with the
+        // button still held (see the Connections below).
+        function endDrag() { dragFrom = -1; dragTo = -1; interactive = true }
         delegate: Item {
             id: cfgDelegate
             required property int index
@@ -116,7 +147,7 @@ Item {
                 onReleased: {
                     if (cfgList.dragFrom === index) {
                         var from = cfgList.dragFrom, to = cfgList.dragTo
-                        cfgList.dragFrom = -1; cfgList.dragTo = -1; cfgList.interactive = true
+                        cfgList.endDrag()
                         cfgDelegate.dragY = 0
                         if (to !== from) backend.moveConfig(from, to)
                     } else if (!moved) {
@@ -124,9 +155,8 @@ Item {
                     }
                 }
                 onCanceled: {
-                    if (cfgList.dragFrom === index) {
-                        cfgList.dragFrom = -1; cfgList.dragTo = -1; cfgList.interactive = true
-                    }
+                    if (cfgList.dragFrom === index)
+                        cfgList.endDrag()
                     cfgDelegate.dragY = 0; moved = false
                 }
             }
@@ -151,16 +181,12 @@ Item {
                     Icon { anchors.centerIn: parent; width: 17; height: 17; svg: "qrc:/icons/export.svg"
                            color: expMa.containsMouse ? cfgRoot.theme.text : cfgRoot.theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: expMa; anchors.fill: parent; hoverEnabled: true
-                        onClicked: shell.showSelect(parent,
-                            [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
-                            function(v) {
-                                if (v === "toml") { cfgRoot.exportIndex = index; cfgRoot.exportName = modelData; tomlSaveDlg.open() }
-                                else if (v === "link") {
-                                    var lnk = backend.configDeepLink(index)
-                                    if (lnk && lnk.length > 0) { backend.copyToClipboard(lnk); shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully")) }
-                                    else shell.showToast(qsTr("Couldn’t build deep-link"))
-                                }
-                            }) } }
+                        onClicked: {
+                            cfgRoot.exportIndex = index; cfgRoot.exportName = modelData
+                            shell.showSelect(parent,
+                                [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
+                                cfgRoot.exportPicked)
+                        } } }
                 Item { Layout.preferredWidth: 30; Layout.fillHeight: true
                     Icon { anchors.centerIn: parent; width: 18; height: 18; svg: "qrc:/icons/more.svg"
                            color: dotsMa.containsMouse ? theme.text : theme.textDim; theme: cfgRoot.theme }
@@ -170,10 +196,22 @@ Item {
                     Icon { anchors.centerIn: parent; width: 16; height: 16; svg: "qrc:/icons/close.svg"
                            color: delMa.containsMouse ? theme.danger : theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
-                                onClicked: shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
-                                    qsTr("Delete"), function(){ backend.removeConfig(index) }) } }
+                                onClicked: {
+                                    cfgRoot.deleteIndex = index
+                                    shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
+                                                      qsTr("Delete"), cfgRoot.deleteConfirmed)
+                                } } }
             }
         }
+    }
+    // A model reset (a background import from a second instance) destroys the
+    // delegate that owns an in-flight drag while its button is still held, so
+    // that row's onReleased/onCanceled never fire — without this the list would
+    // stay non-interactive with dragFrom set, breaking scrolling and every later
+    // reorder until the page is reloaded.
+    Connections {
+        target: backend
+        function onConfigsChanged() { cfgList.endDrag() }
     }
     // Click-away backdrop + Esc to dismiss the import menu.
     MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open
@@ -225,7 +263,7 @@ Item {
         id: tomlSaveDlg; title: qsTr("Export config")
         fileMode: Platform.FileDialog.SaveFile
         nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
-        currentFile: "file:" + (cfgRoot.exportName.length ? cfgRoot.exportName : "config") + ".toml"
+        currentFile: "file:" + cfgRoot.exportFileName(cfgRoot.exportName) + ".toml"
         onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.file.toString())
                                     ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
     }

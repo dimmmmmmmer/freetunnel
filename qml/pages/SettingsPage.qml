@@ -70,7 +70,7 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
-                           text: "Kill switch"; color: theme.text; font.pixelSize: 14 }
+                           text: qsTr("Kill switch"); color: theme.text; font.pixelSize: 14 }
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12 }
                 }

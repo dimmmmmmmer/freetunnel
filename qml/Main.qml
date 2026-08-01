@@ -45,8 +45,11 @@ Window {
             // Defer so tray/dock menu items can finish closing before we tear down.
             Qt.callLater(function() { tray.visible = false })
         }
+        // Every deep-link import is confirmed, not just the ones that disable
+        // certificate verification — so the button is a plain «Import»; the
+        // backend's message carries any warning about the link itself.
         function onDeepLinkImportConfirmationRequired(message, link) {
-            showConfirm(message, qsTr("Import anyway"), function() {
+            showConfirm(message, qsTr("Import"), function() {
                 backend.confirmDeepLinkImport(link)
             })
         }
@@ -144,6 +147,11 @@ Window {
     property int currentPage: 0
     property string overlay: "" // "", "create"
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
+    // True while a window-level popup already owns Escape (the select dropdown or
+    // the confirm dialog). Sub-screens must disable their own Escape shortcut
+    // then: two *enabled* shortcuts on the same key make Qt report the press as
+    // ambiguous and neither handler runs, so Escape would go dead entirely.
+    readonly property bool windowPopupOpen: selectPopup.open || winConfirm.visible
     // nav order: Home, Configs, Split, Settings, Logs (configs before split)
     readonly property var navIcons: ["connection", "configs", "network", "settings", "log"]
     readonly property var pagePaths: ["pages/HomePage.qml", "pages/ConfigsPage.qml",

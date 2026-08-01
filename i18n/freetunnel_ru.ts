@@ -190,6 +190,14 @@
         <source>Hotkey “%1” (%2) could not be registered [%3] — it may be in use by another app or the desktop.</source>
         <translation>Горячую клавишу «%1» (%2) не удалось зарегистрировать [%3] — возможно, занята другим приложением или системой.</translation>
     </message>
+    <message>
+        <source>Add a VPN server from this link? All your traffic can be routed through it — only import configs from sources you trust.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update check failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -448,8 +456,8 @@
         <translation>Конфиг добавлен: %1</translation>
     </message>
     <message>
-        <source>Import anyway</source>
-        <translation>Импортировать всё равно</translation>
+        <source>Import</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -611,6 +619,10 @@
     <message>
         <source>Not available under Wayland — use an X11/Xorg session</source>
         <translation>Недоступно в Wayland — используйте сессию X11/Xorg</translation>
+    </message>
+    <message>
+        <source>Kill switch</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

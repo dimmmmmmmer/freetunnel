@@ -39,6 +39,11 @@ Item {
                         onClicked: { hk.capturing = true; hk.forceActiveFocus() } }
         }
     }
+    // While capturing, claim the key press before the window's Shortcuts see it.
+    // Without this, binding a combo that is already a window shortcut is
+    // impossible — ⌘Q / Ctrl+Q would quit the app mid-capture (Shortcut outranks
+    // Keys.onPressed), and Ctrl+V would fire the config paste on the configs page.
+    Keys.onShortcutOverride: function(e) { if (hk.capturing) e.accepted = true }
     Keys.onPressed: function(e) {
         if (!hk.capturing) return
         e.accepted = true

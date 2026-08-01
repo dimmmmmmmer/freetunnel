@@ -107,6 +107,30 @@ void MockBackend::setHotkeysEnabled(bool v)
     emit hotkeysChanged();
 }
 
+void MockBackend::setHotkeyToggle(const QString &v)
+{
+    if (m_hotkeyToggle == v)
+        return;
+    m_hotkeyToggle = v;
+    emit hotkeysChanged();
+}
+
+void MockBackend::setHotkeyConnect(const QString &v)
+{
+    if (m_hotkeyConnect == v)
+        return;
+    m_hotkeyConnect = v;
+    emit hotkeysChanged();
+}
+
+void MockBackend::setHotkeyDisconnect(const QString &v)
+{
+    if (m_hotkeyDisconnect == v)
+        return;
+    m_hotkeyDisconnect = v;
+    emit hotkeysChanged();
+}
+
 QString MockBackend::logPath() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
@@ -147,8 +171,27 @@ void MockBackend::removeConfig(int index)
     emit configsChanged();
 }
 
-bool MockBackend::importDeepLink(const QString &) { return true; }
-bool MockBackend::importFile(const QString &) { return true; }
+void MockBackend::moveConfig(int from, int to)
+{
+    if (from < 0 || from >= m_configs.size() || to < 0 || to >= m_configs.size() || from == to)
+        return;
+    m_configs.move(from, to);
+    emit configsChanged();
+}
+
+// Both import paths announce the added config the way Backend does, so
+// Main.qml's onConfigImported toast has a real signal to bind to.
+bool MockBackend::importDeepLink(const QString &)
+{
+    emit configImported(QStringLiteral("Imported"));
+    return true;
+}
+
+bool MockBackend::importFile(const QString &)
+{
+    emit configImported(QStringLiteral("Imported"));
+    return true;
+}
 bool MockBackend::createConfig(const QVariantMap &) { return true; }
 
 QVariantMap MockBackend::configFields(int index) const
