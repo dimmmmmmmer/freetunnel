@@ -16,6 +16,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <thread>
+
 #include "core/InstanceControl.h"
 
 class TestIntegrationSingleInstance : public QObject {
@@ -115,10 +117,19 @@ void TestIntegrationSingleInstance::forwardDeliversAuthenticatedCommand()
     QVERIFY(server.listen(m_socketName));
     wireCollector(server);
 
-    QVERIFY(freetunnel::forwardToRunningInstance(m_socketName,
-                                                 QStringLiteral("freetunnel://toggle")));
-
+    // Send from another thread so the listener is spinning its event loop while
+    // the client writes — which is what happens in production (the running
+    // instance is a separate process). Doing it inline blocks the loop until the
+    // sender has already disconnected, and a Windows named pipe discards data
+    // the server never read.
+    bool sent = false;
+    std::thread sender([&]() {
+        sent = freetunnel::forwardToRunningInstance(m_socketName,
+                                                    QStringLiteral("freetunnel://toggle"));
+    });
     const Received got = readOne(server);
+    sender.join();
+    QVERIFY(sent);
     QVERIFY(got.got);
     QCOMPARE(got.payload, QStringLiteral("freetunnel://toggle"));
     // It really is the session token — a sender that shipped anything at all
