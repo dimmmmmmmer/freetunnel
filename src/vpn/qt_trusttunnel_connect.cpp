@@ -308,6 +308,38 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     return ctx;
 }
 
+// Worker thread. Both of these end the attempt on failure, retiring whatever
+// they built so the owner is never handed a live core object to destroy.
+bool QtTrustTunnelClient::applySystemDns(const AttemptPtr &ctx)
+{
+    const auto dnsErr = ctx->client->set_system_dns();
+    if (!dnsErr)
+        return true;
+    ctx->outcome = ConnectAttempt::Outcome::FatalStop;
+    ctx->error = QString("set_system_dns() failed: %1").arg(QString::fromStdString(dnsErr->str()));
+    retireCore(ctx->client, ctx->monitor);
+    return false;
+}
+
+void QtTrustTunnelClient::establishTunnel(const AttemptPtr &ctx)
+{
+    ctx->startedAt = std::chrono::steady_clock::now();
+    const auto err = ctx->client->connect(ag::TrustTunnelClient::AutoSetup{});
+    if (!err) {
+        ctx->outcome = ConnectAttempt::Outcome::Connected;
+        return;
+    }
+    const QString qErr = QString::fromStdString(err->str());
+    // "Failed to create listener" almost always means not elevated — retrying
+    // that forever helps nobody.
+    const bool notElevated = qErr.contains("Failed to create listener", Qt::CaseInsensitive);
+    ctx->outcome = notElevated ? ConnectAttempt::Outcome::FatalStop
+                               : ConnectAttempt::Outcome::Retry;
+    ctx->privilegeHint = notElevated;
+    ctx->error = QString("connect() failed: %1").arg(qErr);
+    retireCore(ctx->client, ctx->monitor);
+}
+
 // Worker thread. Deliberately static: there is no `this` to reach for, and the
 // only contact with the owner is the guarded progress post below.
 void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
@@ -329,7 +361,7 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
 
         progress(tr("Initializing VPN core..."));
         ctx->client = std::make_unique<ag::TrustTunnelClient>(std::move(ctx->config),
-                                                              ctx->callbacks);
+                                                              std::move(ctx->callbacks));
 
         progress(tr("Starting network monitor..."));
         ctx->monitor = std::make_unique<ag::AutoNetworkMonitor>(ctx->client.get(), ctx->boundIf);
@@ -341,29 +373,11 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
         }
 
         progress(tr("Configuring DNS..."));
-        if (const auto dnsErr = ctx->client->set_system_dns()) {
-            ctx->outcome = ConnectAttempt::Outcome::FatalStop;
-            ctx->error = QString("set_system_dns() failed: %1")
-                                 .arg(QString::fromStdString(dnsErr->str()));
-            retireCore(ctx->client, ctx->monitor);
+        if (!applySystemDns(ctx))
             return;
-        }
 
         progress(tr("Establishing tunnel..."));
-        ctx->startedAt = std::chrono::steady_clock::now();
-        if (const auto err = ctx->client->connect(ag::TrustTunnelClient::AutoSetup{})) {
-            const QString qErr = QString::fromStdString(err->str());
-            // "Failed to create listener" almost always means not elevated —
-            // retrying that forever helps nobody.
-            const bool notElevated = qErr.contains("Failed to create listener", Qt::CaseInsensitive);
-            ctx->outcome = notElevated ? ConnectAttempt::Outcome::FatalStop
-                                       : ConnectAttempt::Outcome::Retry;
-            ctx->privilegeHint = notElevated;
-            ctx->error = QString("connect() failed: %1").arg(qErr);
-            retireCore(ctx->client, ctx->monitor);
-            return;
-        }
-        ctx->outcome = ConnectAttempt::Outcome::Connected;
+        establishTunnel(ctx);
     } catch (const std::exception &e) {
         ctx->outcome = ConnectAttempt::Outcome::Retry;
         ctx->error = QString::fromUtf8(e.what());

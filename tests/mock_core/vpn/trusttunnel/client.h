@@ -23,11 +23,17 @@ public:
         std::string str() const { return text; }
     };
 
-    TrustTunnelClient(TrustTunnelConfig config, VpnCallbacks callbacks)
+    // Signature mirrors the real core (vpn/trusttunnel/client.h): BOTH arguments
+    // are rvalue references there. Taking them by value here let a call that
+    // passes an lvalue compile against the mock and fail the real build — which
+    // is precisely the kind of drift a mock must not have.
+    TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks)
         : m_config(std::move(config)),
           m_id(mockcore::Controller::instance().registerClient(std::move(callbacks)))
     {
     }
+
+    TrustTunnelClient(TrustTunnelClient &&) = delete;
 
     ~TrustTunnelClient() { mockcore::Controller::instance().clientDestroyed(m_id); }
 

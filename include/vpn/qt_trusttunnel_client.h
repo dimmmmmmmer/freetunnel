@@ -121,6 +121,8 @@ private:
 
     AttemptPtr prepareAttempt(quint64 attemptGen);      // owner thread
     static void runAttempt(const AttemptPtr &ctx);      // worker thread, no `this`
+    static bool applySystemDns(const AttemptPtr &ctx);  // worker thread
+    static void establishTunnel(const AttemptPtr &ctx); // worker thread
     void adoptAttempt(const AttemptPtr &ctx);           // owner thread
     // Hop a core event back onto this object's thread, dropping it if its
     // session has been superseded. Called with the guard mutex held.
