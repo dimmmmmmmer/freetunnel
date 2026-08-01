@@ -86,6 +86,15 @@ QtTrustTunnelClient::~QtTrustTunnelClient() {
     // Suppress all signal emission during destruction — connected slots may
     // reference this object which is already being torn down.
     m_stopRequested = true;
+    // Do this FIRST and outside every other teardown step: an abandoned connect
+    // thread resumes inside a native call and then re-checks the guard, and the
+    // core callbacks of an abandoned client marshal back through it. Once alive
+    // is false neither touches this object again. Released immediately — the
+    // join below must never run with the guard mutex held.
+    {
+        std::lock_guard<std::mutex> lk(m_guard->mutex);
+        m_guard->alive = false;
+    }
     m_reconnectTimer.stop();
     if (joinOrAbandonConnectThread(m_stuckJoinWaitMs)) {
         delete m_connectThread;
@@ -130,6 +139,11 @@ void QtTrustTunnelClient::teardownClient() {
 }
 
 void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
+    setConfigLocked(std::move(config));
+}
+
+void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
     // m_logLevel is set from the config TOML's loglevel in the load functions
     // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
@@ -155,12 +169,14 @@ void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
 }
 
 void QtTrustTunnelClient::setVpnMode(bool selective) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
     m_selectiveMode = selective;
     if (m_config.has_value())
         m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
 }
 
 void QtTrustTunnelClient::setKillSwitch(bool enabled) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
     m_killSwitch = enabled;
     if (m_config.has_value())
         m_config->killswitch_enabled = enabled;
@@ -168,11 +184,14 @@ void QtTrustTunnelClient::setKillSwitch(bool enabled) {
 
 void QtTrustTunnelClient::setSessionLogging(const QString &path, bool enabled)
 {
-    m_loggingEnabled = enabled;
-    m_coreLogPath = enabled ? path.trimmed() : QString();
-    if (m_coreLogPath.isEmpty() && enabled)
-        m_coreLogPath = qt_trusttunnel_default_core_log_path();
-    applyCoreLogPathToConfig();
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        m_loggingEnabled = enabled;
+        m_coreLogPath = enabled ? path.trimmed() : QString();
+        if (m_coreLogPath.isEmpty() && enabled)
+            m_coreLogPath = qt_trusttunnel_default_core_log_path();
+        applyCoreLogPathToConfigLocked();
+    }
     if (!enabled)
         stopCoreLogTail();
 }
@@ -210,9 +229,12 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
         return false;
     }
 
-    m_lastConfigToml = tomlContent;
-    m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
-    setConfig(std::move(*config));
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        m_lastConfigToml = tomlContent;
+        m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
+        setConfigLocked(std::move(*config));
+    }
     setState(State::Disconnected);
     return true;
 }
@@ -242,6 +264,10 @@ void QtTrustTunnelClient::setExcludedRouteStrings(const QStringList &routes)
 
 void QtTrustTunnelClient::disconnectVpn() {
     m_stopRequested = true;
+    // beginConnect()'s delayed start compares this: a disconnect that lands
+    // inside the teardown delay must cancel the pending connect instead of
+    // letting the tunnel come up after the user explicitly stopped it.
+    ++m_disconnectGen;
     m_reconnectTimer.stop();
     m_fdWatchdogTimer.stop();
     m_networkWaitTimer.stop();
@@ -273,6 +299,7 @@ QtTrustTunnelClient::State QtTrustTunnelClient::state() const {
 }
 
 void QtTrustTunnelClient::setLogLevel(const QString &level) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
     m_logLevel = qt_trusttunnel_parse_log_level(level);
     ag::Logger::set_log_level(m_logLevel);
     if (m_config.has_value()) {
@@ -281,6 +308,7 @@ void QtTrustTunnelClient::setLogLevel(const QString &level) {
 }
 
 void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excludeRoutes) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
     m_extraExcludedRoutes = excludeRoutes;
     if (m_config.has_value() && std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
         auto &tun = std::get<ag::TrustTunnelConfig::TunListener>(m_config->listener);
@@ -289,6 +317,7 @@ void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excl
 }
 
 void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
     m_extraExclusions = exclusions;
     if (m_config.has_value()) {
         // Restore original config exclusions first, then append new ones.
@@ -303,20 +332,29 @@ void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exc
     }
 }
 
-ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
+ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
     // Core callbacks are queued to our event loop, so events from a client that
     // has since been torn down (config switch: disconnect + connect a new one)
     // can arrive after the next session already started. A stale DISCONNECTED
     // would then trigger a bogus reconnect of the NEW session. Tag every event
     // with the session generation it belongs to and drop mismatches on arrival.
+    //
+    // An ABANDONED client outlives this object entirely, so the hop back to it
+    // is taken under the guard: while the mutex is held `alive` cannot flip, and
+    // once the destructor has cleared it no callback dereferences `this` again.
     const quint64 session = ++m_sessionGen;
     ag::VpnCallbacks callbacks;
-    callbacks.protect_handler = [this](ag::SocketProtectEvent *event) {
-        protectOutboundSocket(event);
+    callbacks.protect_handler = [this, guard](ag::SocketProtectEvent *event) {
+        std::lock_guard<std::mutex> lk(guard->mutex);
+        if (guard->alive)
+            protectOutboundSocket(event);
     };
     callbacks.verify_handler = qt_trusttunnel_verify_server_certificate;
-    callbacks.state_changed_handler = [this, session](ag::VpnStateChangedEvent *event) {
+    callbacks.state_changed_handler = [this, guard, session](ag::VpnStateChangedEvent *event) {
         const StateChangedPayload payload = extractStateChangedPayload(event);
+        std::lock_guard<std::mutex> lk(guard->mutex);
+        if (!guard->alive)
+            return;
         QMetaObject::invokeMethod(this,
                                   [this, session, payload]() {
                                       if (session != m_sessionGen)
@@ -326,11 +364,14 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
                                   },
                                   Qt::QueuedConnection);
     };
-    callbacks.tunnel_stats_handler = [this, session](ag::VpnTunnelConnectionStatsEvent *event) {
+    callbacks.tunnel_stats_handler = [this, guard, session](ag::VpnTunnelConnectionStatsEvent *event) {
         if (!event)
             return;
         const quint64 up = event->upload;
         const quint64 down = event->download;
+        std::lock_guard<std::mutex> lk(guard->mutex);
+        if (!guard->alive)
+            return;
         QMetaObject::invokeMethod(this,
                 [this, session, up, down]() {
                     if (session == m_sessionGen)
@@ -338,8 +379,11 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
                 },
                 Qt::QueuedConnection);
     };
-    callbacks.connection_info_handler = [this, session](ag::VpnConnectionInfoEvent *event) {
+    callbacks.connection_info_handler = [this, guard, session](ag::VpnConnectionInfoEvent *event) {
         const QString line = qt_trusttunnel_connection_info_line(event);
+        std::lock_guard<std::mutex> lk(guard->mutex);
+        if (!guard->alive)
+            return;
         QMetaObject::invokeMethod(this,
                 [this, session, line]() {
                     if (session == m_sessionGen)
@@ -348,6 +392,14 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks() {
                 Qt::QueuedConnection);
     };
     return callbacks;
+}
+
+bool QtTrustTunnelClient::attemptIsStale(const GuardPtr &guard, quint64 attemptGen)
+{
+    if (guard->attemptGen.load() != attemptGen)
+        return true;
+    std::lock_guard<std::mutex> lk(guard->mutex);
+    return !guard->alive;
 }
 
 void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
@@ -390,8 +442,9 @@ void QtTrustTunnelClient::scheduleReconnect(const QString &reason) {
     // If the connection was very short-lived (<10s), the issue is likely
     // persistent — increase the backoff faster to avoid a rapid reconnect loop.
     auto now = std::chrono::steady_clock::now();
-    auto sinceLastAttempt = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastConnectAttempt).count();
-    if (m_lastConnectAttempt != std::chrono::steady_clock::time_point{} && sinceLastAttempt < 10000) {
+    const auto lastAttempt = m_lastConnectAttempt.load();
+    auto sinceLastAttempt = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastAttempt).count();
+    if (lastAttempt != std::chrono::steady_clock::time_point{} && sinceLastAttempt < 10000) {
         m_reconnectDelayMs = std::min(m_reconnectDelayMs * 2, m_reconnectMaxMs);
     }
 
@@ -408,11 +461,10 @@ void QtTrustTunnelClient::scheduleReconnect(const QString &reason) {
 }
 
 void QtTrustTunnelClient::setState(State s) {
-    if (m_state == s) {
+    if (m_state.exchange(s) == s) {
         return;
     }
-    m_state = s;
-    emit stateChanged(m_state);
+    emit stateChanged(s);
 }
 
 void QtTrustTunnelClient::handleCoreConnected()
@@ -455,7 +507,8 @@ void QtTrustTunnelClient::handleCoreDisconnected(int errCode, const QString &err
     m_networkWaitTimer.stop();
     if (m_stopRequested)
         return;
-    scheduleReconnect(buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt));
+    scheduleReconnect(
+            buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt.load()));
 }
 
 void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, int errCode,
@@ -491,6 +544,12 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, 
 
 void QtTrustTunnelClient::applyCoreLogPathToConfig()
 {
+    std::lock_guard<std::mutex> lk(m_configMutex);
+    applyCoreLogPathToConfigLocked();
+}
+
+void QtTrustTunnelClient::applyCoreLogPathToConfigLocked()
+{
     if (!m_loggingEnabled) {
         if (m_config.has_value())
             m_config->log_file_path.clear();
@@ -504,13 +563,26 @@ void QtTrustTunnelClient::applyCoreLogPathToConfig()
 
 void QtTrustTunnelClient::startCoreLogTail()
 {
-    if (!m_loggingEnabled)
+    // Called from ensureClientReady on the connect thread: a QTimer created
+    // there would be parented across threads (Qt drops the parent) and take the
+    // connect thread's affinity, where no event loop ever runs — the poll never
+    // fired and no core log line reached the GUI. Marshal onto our own thread.
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this]() { startCoreLogTail(); }, Qt::QueuedConnection);
         return;
-    applyCoreLogPathToConfig();
-    if (m_coreLogPath.isEmpty())
+    }
+    QString path;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        if (!m_loggingEnabled)
+            return;
+        applyCoreLogPathToConfigLocked();
+        path = m_coreLogPath;
+    }
+    if (path.isEmpty())
         return;
-    QDir().mkpath(QFileInfo(m_coreLogPath).absolutePath());
-    m_coreLogOffset = QFileInfo(m_coreLogPath).size();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    m_coreLogOffset = QFileInfo(path).size();
 
     if (!m_coreLogPoll) {
         m_coreLogPoll = new QTimer(this);
@@ -524,6 +596,10 @@ void QtTrustTunnelClient::startCoreLogTail()
 
 void QtTrustTunnelClient::stopCoreLogTail()
 {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this]() { stopCoreLogTail(); }, Qt::QueuedConnection);
+        return;
+    }
     if (m_coreLogPoll)
         m_coreLogPoll->stop();
     m_coreLogLineBuffer.clear();
@@ -531,9 +607,14 @@ void QtTrustTunnelClient::stopCoreLogTail()
 
 void QtTrustTunnelClient::pollCoreLogFile()
 {
-    if (m_coreLogPath.isEmpty())
+    QString path;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        path = m_coreLogPath;
+    }
+    if (path.isEmpty())
         return;
-    QFile f(m_coreLogPath);
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return;
     if (!f.seek(m_coreLogOffset))

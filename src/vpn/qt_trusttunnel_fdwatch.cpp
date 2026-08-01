@@ -12,20 +12,25 @@
 
 int QtTrustTunnelClient::countOpenFds() {
 #if defined(__APPLE__) || defined(__linux__)
-    int count = 0;
     DIR *dir = opendir("/dev/fd");
     if (!dir) {
         // Fallback for Linux: /proc/self/fd
         dir = opendir("/proc/self/fd");
     }
-    if (dir) {
-        while (readdir(dir) != nullptr) {
-            ++count;
-        }
-        closedir(dir);
-        count -= 2; // subtract "." and ".."
+    // Both opendir calls need a descriptor themselves, so they fail with EMFILE
+    // exactly when the process is out of them — i.e. when the watchdog matters
+    // most. Reporting that as a count of 0 made checkFdHealth() treat it as a
+    // healthy baseline and then, once fds recovered, read the recovery as
+    // runaway growth and tear down a perfectly good tunnel.
+    if (!dir)
+        return -1;
+    int count = 0;
+    while (readdir(dir) != nullptr) {
+        ++count;
     }
-    return count;
+    closedir(dir);
+    count -= 2; // subtract "." and ".."
+    return count < 0 ? 0 : count;
 #else
     return -1; // not supported on Windows
 #endif

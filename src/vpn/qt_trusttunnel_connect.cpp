@@ -14,6 +14,7 @@
 #include <chrono>
 #include <exception>
 #include <memory>
+#include <mutex>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -91,7 +92,17 @@ void QtTrustTunnelClient::beginConnect(const QString &configToml)
     };
     if (needsTeardown) {
         disconnectVpn();
-        QTimer::singleShot(150, this, startConnect);
+        // The queued "disconnect" command from the GUI is processed before this
+        // timer fires, so a user who cancels inside the window would otherwise
+        // get the tunnel anyway: connectVpn() clears m_stopRequested
+        // unconditionally. Snapshot the disconnect generation and drop the
+        // start if anything asked to stop in the meantime.
+        const quint64 disconnectGen = m_disconnectGen.load();
+        QTimer::singleShot(150, this, [this, disconnectGen, startConnect]() {
+            if (m_disconnectGen.load() != disconnectGen)
+                return;
+            startConnect();
+        });
     } else {
         startConnect();
     }
@@ -106,8 +117,11 @@ void QtTrustTunnelClient::beginConnect(const QString &configToml)
 // handler so it never touches freed objects. If the native call never returns,
 // they leak until process exit — the safer failure mode.
 //
-// NOTE: the abandoned thread still references this QtTrustTunnelClient. The
-// helper process keeps the client alive until exit, which satisfies that.
+// The cleanup handler is deliberately bound to the THREAD, not to this object:
+// with `this` as the context, ~QObject tore the connection down and destroyed
+// the captured owners, deleting the core client while the abandoned thread was
+// still blocked inside its connect() — a use-after-free in a root process every
+// time the app quit during an unreachable-server attempt.
 bool QtTrustTunnelClient::joinOrAbandonConnectThread(int waitMs)
 {
     QThread *thread = m_connectThread;
@@ -120,12 +134,12 @@ bool QtTrustTunnelClient::joinOrAbandonConnectThread(int waitMs)
     qWarning("[QtTrustTunnelClient] connect attempt stuck in a native call for %d ms — "
              "abandoning the thread",
              waitMs);
-    ++m_attemptGen; // the stale attempt must drop its result when it resumes
-    ++m_sessionGen; // and events from its core client are no longer ours
+    ++m_guard->attemptGen; // the stale attempt must drop its result when it resumes
+    ++m_sessionGen;        // and events from its core client are no longer ours
     auto client = std::make_shared<std::unique_ptr<ag::TrustTunnelClient>>(std::move(m_client));
     auto monitor =
             std::make_shared<std::unique_ptr<ag::AutoNetworkMonitor>>(std::move(m_networkMonitor));
-    connect(thread, &QThread::finished, this, [client, monitor]() {
+    connect(thread, &QThread::finished, thread, [client, monitor]() {
         if (*monitor) {
             (*monitor)->stop();
             monitor->reset();
@@ -148,37 +162,51 @@ void QtTrustTunnelClient::doConnectAttemptInThread()
     else
         disconnect(m_connectThread, &QThread::started, nullptr, nullptr);
 
-    const quint64 attemptGen = ++m_attemptGen;
+    const quint64 attemptGen = ++m_guard->attemptGen;
     auto *worker = new QObject();
     worker->moveToThread(m_connectThread);
     QThread *thread = m_connectThread;
-    connect(thread, &QThread::started, worker, [this, worker, thread, attemptGen]() {
-        doConnectAttempt(attemptGen);
-        worker->deleteLater();
+    const GuardPtr guard = m_guard;
+    connect(thread, &QThread::started, worker, [this, thread, guard, attemptGen]() {
+        doConnectAttempt(guard, attemptGen);
         thread->quit();
     });
+    // NOT deleteLater: quit() above lands before QThread::run() reaches exec(),
+    // so the thread's event loop never runs and a DeferredDelete posted to it is
+    // never delivered — that leaked a QObject per attempt, every auto-reconnect
+    // included. Destroy it from the thread object's own thread once the worker
+    // thread is provably finished. Single-shot: the QThread is REUSED across
+    // attempts, so a plain connection would accumulate and re-delete every
+    // previous attempt's worker on the next finish.
+    connect(
+            thread, &QThread::finished, thread, [worker]() { delete worker; },
+            Qt::SingleShotConnection);
 
     thread->start();
 }
 
 bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
 {
-    if (m_config.has_value())
-        return true;
-    if (!m_lastConfigToml.isEmpty())
-        return loadConfigFromToml(m_lastConfigToml);
+    QString stored;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        if (m_config.has_value())
+            return true;
+        stored = m_lastConfigToml;
+    }
+    if (!stored.isEmpty())
+        return loadConfigFromToml(stored);
     setState(State::Error);
     emit vpnError(QStringLiteral("TrustTunnel config is not set"));
     return false;
 }
 
-bool QtTrustTunnelClient::ensureClientReady()
+bool QtTrustTunnelClient::ensureClientReady(const GuardPtr &guard, quint64 attemptGen)
 {
     if (m_client)
         return true;
     if (!reloadStoredConfigIfNeeded())
         return false;
-    applyCoreLogPathToConfig();
     emit connectProgress(tr("Initializing VPN core..."));
 #if defined(Q_OS_WIN)
     m_winPhysicalIfIndex = captureWindowsPhysicalOutbound();
@@ -187,13 +215,38 @@ bool QtTrustTunnelClient::ensureClientReady()
 #else
     const std::string boundIf;
 #endif
-    m_client = std::make_unique<ag::TrustTunnelClient>(std::move(*m_config), makeCallbacks());
-    m_config.reset();
+    // Take the config out under the lock: the GUI's setKillSwitch / split-rule
+    // setters write into the same optional from the object's thread, and moving
+    // out from under them corrupted the heap of an elevated process.
+    ag::TrustTunnelConfig config;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        if (!m_config.has_value()) {
+            setState(State::Error);
+            emit vpnError(QStringLiteral("TrustTunnel config is not set"));
+            return false;
+        }
+        applyCoreLogPathToConfigLocked();
+        config = std::move(*m_config);
+        m_config.reset();
+    }
+    // Build into locals and publish only after re-checking: an abandonment
+    // during the core constructor or the monitor's start would otherwise hand
+    // these to an owner that has already moved on (and moved m_client away).
+    auto client = std::make_unique<ag::TrustTunnelClient>(std::move(config), makeCallbacks(guard));
+    if (attemptIsStale(guard, attemptGen))
+        return false;
+    m_client = std::move(client);
     startCoreLogTail();
     emit connectProgress(tr("Starting network monitor..."));
-    m_networkMonitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), boundIf);
+    auto monitor = std::make_unique<ag::AutoNetworkMonitor>(m_client.get(), boundIf);
+    if (attemptIsStale(guard, attemptGen))
+        return false;
+    m_networkMonitor = std::move(monitor);
     if (m_networkMonitor->start())
         return true;
+    if (attemptIsStale(guard, attemptGen))
+        return false;
     m_networkMonitor.reset();
     teardownClient();
     setState(State::Error);
@@ -212,14 +265,21 @@ void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHi
     emit vpnError(QString("connect() failed: %1").arg(msg));
 }
 
-bool QtTrustTunnelClient::attemptTunnelConnect(quint64 attemptGen)
+bool QtTrustTunnelClient::attemptTunnelConnect(const GuardPtr &guard, quint64 attemptGen)
 {
     emit connectProgress(tr("Configuring DNS..."));
-    const auto dnsErr = m_client->set_system_dns();
+    // ensureClientReady() can return true on the "already have a client" path
+    // without re-checking staleness, and an abandonment moves m_client away — so
+    // this first dereference needs the same guard as the one below it.
+    ag::TrustTunnelClient *dnsClient = m_client.get();
+    if (!dnsClient || attemptIsStale(guard, attemptGen))
+        return false;
+    const auto dnsErr = dnsClient->set_system_dns();
     // A blocking call may have outlived the join timeout — this attempt was
     // then abandoned and must not touch shared state (the core objects were
-    // handed to the zombie cleanup; m_client here is already null).
-    if (attemptGen != m_attemptGen)
+    // handed to the zombie cleanup; m_client here is already null), or the
+    // owner itself may be gone.
+    if (attemptIsStale(guard, attemptGen))
         return false;
     if (dnsErr) {
         teardownClient();
@@ -232,8 +292,13 @@ bool QtTrustTunnelClient::attemptTunnelConnect(quint64 attemptGen)
 
     m_lastConnectAttempt = std::chrono::steady_clock::now();
     emit connectProgress(tr("Establishing tunnel..."));
-    const auto err = m_client->connect(ag::TrustTunnelClient::AutoSetup{});
-    if (attemptGen != m_attemptGen)
+    // Re-read after the guard above: an abandonment between the two checks
+    // moves m_client away, and dereferencing it here was a null crash.
+    ag::TrustTunnelClient *client = m_client.get();
+    if (!client)
+        return false;
+    const auto err = client->connect(ag::TrustTunnelClient::AutoSetup{});
+    if (attemptIsStale(guard, attemptGen))
         return false; // abandoned while blocked (see above)
     if (err) {
         const QString qErr = QString::fromStdString(err->str());
@@ -255,9 +320,9 @@ void QtTrustTunnelClient::teardownIfReconnecting(bool isReconnect)
     teardownClient();
 }
 
-void QtTrustTunnelClient::doConnectAttempt(quint64 attemptGen)
+void QtTrustTunnelClient::doConnectAttempt(const GuardPtr &guard, quint64 attemptGen)
 {
-    if (m_stopRequested || attemptGen != m_attemptGen)
+    if (m_stopRequested || attemptIsStale(guard, attemptGen))
         return;
 
     const bool isReconnect = (m_client != nullptr);
@@ -266,12 +331,12 @@ void QtTrustTunnelClient::doConnectAttempt(quint64 attemptGen)
 
     try {
         teardownIfReconnecting(isReconnect);
-        if (!ensureClientReady())
+        if (!ensureClientReady(guard, attemptGen))
             return;
-        if (!attemptTunnelConnect(attemptGen))
+        if (!attemptTunnelConnect(guard, attemptGen))
             return;
     } catch (const std::exception &e) {
-        if (attemptGen != m_attemptGen)
+        if (attemptIsStale(guard, attemptGen))
             return; // abandoned mid-call — the result is stale
         teardownClient();
         scheduleReconnect(QString::fromUtf8(e.what()));
