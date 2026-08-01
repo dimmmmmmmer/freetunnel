@@ -32,12 +32,13 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
 
-    // Re-check the log size hourly, but only while the tunnel is fully down:
-    // the core (in the elevated helper) appends to the same file through its
-    // own descriptor, and rewriting it under the core's feet would corrupt it.
+    // Re-check the log size hourly. This used to wait for a fully-down tunnel
+    // because the core appended to the same file through its own descriptor —
+    // it no longer does, so the trim can run during a long session, which is
+    // exactly when the file grows.
     m_logTrimTimer.setInterval(60 * 60 * 1000);
     connect(&m_logTrimTimer, &QTimer::timeout, this, [this]() {
-        if (m_settings.logging_enabled && !m_connected && !m_connecting && !m_disconnecting)
+        if (m_settings.logging_enabled)
             trimLogFile();
     });
     m_logTrimTimer.start();
@@ -116,7 +117,6 @@ void Backend::applyVpnClientState(VpnHelperClient::State st)
 void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
 {
     applyVpnClientState(st);
-    clearPendingLogFile(); // a Clear Logs issued while the tunnel was up
     emit stateChanged();
     appendLog(QStringLiteral("INFO"), statusText());
     // A config switch / live rule reapply disconnects first, then reconnects only

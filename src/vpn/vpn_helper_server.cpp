@@ -26,7 +26,6 @@
 #if defined(Q_OS_WIN)
 #include <windows.h>
 #else
-#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -400,10 +399,6 @@ private:
                                   Q_ARG(QString, toml));
     }
 
-    // Confine a GUI-supplied core log path to something the launching user
-    // already owns: an absolute, traversal-free *.log path whose existing parent
-    // directory belongs to that user (and is not a symlink into somewhere else).
-    // Returns an empty string to mean "use the core default".
     quint16 m_port = 0;
     QString m_token;
     QTcpServer m_server;

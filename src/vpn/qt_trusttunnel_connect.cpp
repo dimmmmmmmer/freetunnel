@@ -15,6 +15,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -31,6 +32,40 @@ static uint32_t captureWindowsPhysicalOutbound()
     return idx;
 }
 #endif
+
+namespace {
+
+// Bring a core client/monitor pair down in the order the core expects. Both
+// calls block, so this must never run on the owner's event loop.
+void retireCore(std::unique_ptr<ag::TrustTunnelClient> &client,
+                std::unique_ptr<ag::AutoNetworkMonitor> &monitor)
+{
+    if (monitor) {
+        monitor->stop();
+        monitor.reset();
+    }
+    if (client) {
+        client->disconnect();
+        client.reset();
+    }
+}
+
+// Same, for a pair that reached the owner's thread anyway: hand it to a detached
+// thread rather than paying for the blocking teardown on the event loop. Same
+// trade as the abandoned-attempt path — a thread we do not join beats a stalled
+// helper — and unlike simply dropping the pointers, the tunnel actually comes
+// down instead of being left installed.
+void retireCoreDetached(std::unique_ptr<ag::TrustTunnelClient> client,
+                        std::unique_ptr<ag::AutoNetworkMonitor> monitor)
+{
+    if (!client && !monitor)
+        return;
+    std::thread([client = std::move(client), monitor = std::move(monitor)]() mutable {
+        retireCore(client, monitor);
+    }).detach();
+}
+
+} // namespace
 
 static bool privilegeCheckPasses()
 {
@@ -179,17 +214,22 @@ void QtTrustTunnelClient::doConnectAttemptInThread()
     QThread *thread = m_connectThread;
     connect(thread, &QThread::started, worker, [ctx, thread]() {
         runAttempt(ctx);
-        // Hand the result back under the guard. If the owner is gone the post is
-        // simply skipped and ctx dies with this lambda, taking the core objects
-        // with it — nothing reaches a destroyed object.
+        // Hand the result back under the guard — but only if anyone still wants
+        // it. A successful attempt carries a LIVE core client, and letting that
+        // just fall out of scope would leave the tunnel, its routes and the DNS
+        // override installed while the UI says Disconnected.
+        bool wanted = false;
         {
             std::lock_guard<std::mutex> lk(ctx->guard->mutex);
-            if (ctx->guard->alive) {
+            wanted = ctx->guard->alive && ctx->attemptGen == ctx->guard->attemptGen;
+            if (wanted) {
                 QMetaObject::invokeMethod(
                         ctx->owner, [ctx]() { ctx->owner->adoptAttempt(ctx); },
                         Qt::QueuedConnection);
             }
         }
+        if (!wanted)
+            retireCore(ctx->client, ctx->monitor); // outside the lock: this blocks
         thread->quit();
     });
     // NOT deleteLater: quit() above lands before QThread::run() reaches exec(),
@@ -256,6 +296,10 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     // and truncating it here, BEFORE the core opens it, avoids doing so behind a
     // descriptor the core already holds.
     resetCoreLogFile();
+    // Start tailing before the attempt, not after it succeeds: a connect that
+    // FAILS is precisely when the core's own diagnostics are worth having, and
+    // adopting the tail only on success discarded them.
+    startCoreLogTail();
     ctx->callbacks = makeCallbacks(m_guard);
     // The previous session goes with the attempt: retiring it blocks, and the
     // worker is where blocking belongs.
@@ -277,24 +321,10 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
                 owner, [owner, text]() { emit owner->connectProgress(text); },
                 Qt::QueuedConnection);
     };
-    // Everything the attempt built is retired here too, so a failure never hands
-    // a live core object back to the owner's thread to destroy.
-    const auto retire = [](std::unique_ptr<ag::TrustTunnelClient> &client,
-                           std::unique_ptr<ag::AutoNetworkMonitor> &monitor) {
-        if (monitor) {
-            monitor->stop();
-            monitor.reset();
-        }
-        if (client) {
-            client->disconnect();
-            client.reset();
-        }
-    };
-
     try {
         if (ctx->retiredClient || ctx->retiredMonitor) {
             progress(tr("Disconnecting previous session..."));
-            retire(ctx->retiredClient, ctx->retiredMonitor);
+            retireCore(ctx->retiredClient, ctx->retiredMonitor);
         }
 
         progress(tr("Initializing VPN core..."));
@@ -306,7 +336,7 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
         if (!ctx->monitor->start()) {
             ctx->outcome = ConnectAttempt::Outcome::FatalKeepGoing;
             ctx->error = QStringLiteral("Failed to start network monitor");
-            retire(ctx->client, ctx->monitor);
+            retireCore(ctx->client, ctx->monitor);
             return;
         }
 
@@ -315,7 +345,7 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
             ctx->outcome = ConnectAttempt::Outcome::FatalStop;
             ctx->error = QString("set_system_dns() failed: %1")
                                  .arg(QString::fromStdString(dnsErr->str()));
-            retire(ctx->client, ctx->monitor);
+            retireCore(ctx->client, ctx->monitor);
             return;
         }
 
@@ -330,15 +360,15 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
                                        : ConnectAttempt::Outcome::Retry;
             ctx->privilegeHint = notElevated;
             ctx->error = QString("connect() failed: %1").arg(qErr);
-            retire(ctx->client, ctx->monitor);
+            retireCore(ctx->client, ctx->monitor);
             return;
         }
         ctx->outcome = ConnectAttempt::Outcome::Connected;
     } catch (const std::exception &e) {
         ctx->outcome = ConnectAttempt::Outcome::Retry;
         ctx->error = QString::fromUtf8(e.what());
-        retire(ctx->client, ctx->monitor);
-        retire(ctx->retiredClient, ctx->retiredMonitor);
+        retireCore(ctx->client, ctx->monitor);
+        retireCore(ctx->retiredClient, ctx->retiredMonitor);
     }
 }
 
@@ -346,9 +376,15 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
 void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
 {
     // Superseded by a newer attempt, a disconnect or a teardown — every one of
-    // those bumps the generation. ctx frees whatever it holds when it dies.
-    if (ctx->attemptGen != m_guard->attemptGen)
+    // those bumps the generation. The worker checks this too and retires on its
+    // own thread when it can, but teardownClient() can bump the generation AFTER
+    // that check and before this runs, so a live, connected client can still
+    // arrive here. Dropping it would leave the tunnel up behind a "Disconnected"
+    // state; destroying it inline would block this event loop. Neither.
+    if (ctx->attemptGen != m_guard->attemptGen) {
+        retireCoreDetached(std::move(ctx->client), std::move(ctx->monitor));
         return;
+    }
     if (ctx->startedAt != std::chrono::steady_clock::time_point{})
         m_lastConnectAttempt = ctx->startedAt;
 
@@ -356,7 +392,6 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
     case ConnectAttempt::Outcome::Connected:
         m_client = std::move(ctx->client);
         m_networkMonitor = std::move(ctx->monitor);
-        startCoreLogTail();
         return;
     case ConnectAttempt::Outcome::Retry:
         scheduleReconnect(ctx->error);

@@ -58,9 +58,11 @@ Window {
             // Name collision: replacing is what the user usually means when a link
             // updates a server they already have, but it is destructive, so it is
             // an explicit third choice rather than the default.
-            showConfirmWithAlternate(message, qsTr("Add copy"), qsTr("Replace"),
-                                     function() { backend.confirmDeepLinkImport(link, false) },
-                                     function() { backend.confirmDeepLinkImport(link, true) })
+            // "Replace" is the destructive one, so it takes the danger-styled
+            // primary button; "Add copy" is the safe fallback and stays neutral.
+            showConfirmWithAlternate(message, qsTr("Replace"), qsTr("Add copy"),
+                                     function() { backend.confirmDeepLinkImport(link, true) },
+                                     function() { backend.confirmDeepLinkImport(link, false) })
         }
     }
 

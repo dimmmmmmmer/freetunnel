@@ -207,6 +207,7 @@ void TestQtTrustTunnelClient::disconnectWhileConnectBlockedStaysClean()
 
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1); // worker thread is now inside connect()
+    const quint64 probeId = ctl.lastClientId();
 
     // The user hits disconnect while the native connect is stuck. The command
     // must still be processed (the client's event loop is not blocked by the
@@ -221,6 +222,11 @@ void TestQtTrustTunnelClient::disconnectWhileConnectBlockedStaysClean()
     QCOMPARE(m_lastState, State::Disconnected);
     QVERIFY2(m_errors.filter(QStringLiteral("connect() failed")).isEmpty(),
              qPrintable(m_errors.join(QStringLiteral("; "))));
+    // A connect that succeeds while the user is disconnecting must still be
+    // brought DOWN, not merely dropped: the core had already installed the tun
+    // device, the routes and the DNS override, and letting the object fall out of
+    // scope leaves all of that in place behind a "Disconnected" UI.
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.disconnectCalls(probeId) >= 1, kLongWaitMs);
 }
 
 void TestQtTrustTunnelClient::disconnectWhileConnectStuckAbandonsAttempt()
@@ -242,6 +248,9 @@ void TestQtTrustTunnelClient::disconnectWhileConnectStuckAbandonsAttempt()
     // its result, and the abandoned core client must be cleaned up.
     ctl.releaseConnect();
     QTRY_VERIFY_WITH_TIMEOUT(!ctl.clientAlive(firstId), kLongWaitMs);
+    // Cleaned up means DISCONNECTED, not merely destructed: the abandoned attempt
+    // had finished connecting, so the tunnel it installed has to come down.
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.disconnectCalls(firstId) >= 1, kLongWaitMs);
     QTest::qWait(300);
     QCOMPARE(m_lastState, State::Disconnected); // stale result really dropped
 

@@ -14,6 +14,7 @@
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
+#include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 
@@ -30,10 +31,14 @@ bool Backend::importFromClipboard()
     return false;
 }
 
-bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive)
+bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bool targetPreExisted)
 {
     if (!freetunnel::migrateConfigPassword(target)) {
-        QFile::remove(target);
+        // Only remove what we created. On the replace path this is the user's
+        // own config, and deleting it because a keyring was locked is exactly the
+        // data loss the create/edit path was fixed for.
+        if (!targetPreExisted)
+            QFile::remove(target);
         emit errorOccurred(tr("Could not store the VPN password securely. Install "
                              "gnome-keyring or KWallet, then try again."));
         return false;
@@ -80,6 +85,14 @@ bool Backend::importFile(const QString &path)
     return finalizeImportedConfig(target, m_activePath.isEmpty());
 }
 
+// Put the config a failed replace was about to overwrite back on disk — a link
+// that cannot be imported must not cost the user the config they already had.
+void Backend::restoreReplacedConfig(const QString &target, const QByteArray &previousToml)
+{
+    if (!previousToml.isEmpty())
+        freetunnel::backend_config::writeConfigFile(target, previousToml);
+}
+
 // Path this link would land on if it were allowed to keep its own name.
 QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
 {
@@ -103,12 +116,37 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
     const QString target = replacing
             ? collision
             : freetunnel::uniqueOwnerConfigPath(QFileInfo(prepared.fileName).completeBaseName());
+
+    // Enough to put the old config back if this goes wrong.
+    QByteArray previousToml;
+    if (replacing) {
+        QFile old(target);
+        if (old.open(QIODevice::ReadOnly))
+            previousToml = old.readAll();
+        // The credential is keyed by config PATH. A link carrying its own
+        // password overwrites it below; one that carries NONE would otherwise
+        // inherit the user's real password and hand it to whatever server the
+        // link names, so drop it explicitly in that case. (Deliberately no
+        // read-back to "restore later": reading another build's keychain entry
+        // can block on an authorization prompt, and a passwordless replace is
+        // the hostile case anyway — losing that password is the correct outcome.)
+        if (freetunnel::parseConfigToml(prepared.tomlContent).password.isEmpty()) {
+            freetunnel::CredentialStore::deletePassword(
+                    freetunnel::CredentialStore::keyForConfigPath(target));
+        }
+    }
+
     if (!freetunnel::backend_config::writeConfigFile(target, prepared.tomlContent.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
+        if (replacing)
+            restoreReplacedConfig(target, previousToml);
         return false;
     }
-    if (!finalizeImportedConfig(target, m_activePath.isEmpty()))
+    if (!finalizeImportedConfig(target, m_activePath.isEmpty(), replacing)) {
+        if (replacing)
+            restoreReplacedConfig(target, previousToml);
         return false;
+    }
     // Replacing the config the tunnel is currently built from leaves the session
     // running the old server — rebuild it, like selecting a different config does.
     if (replacing && target == m_activePath && (m_connected || m_connecting))

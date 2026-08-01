@@ -4,6 +4,7 @@
 #include "ConfigToml.h"
 #include "CredentialStoreLibsecret.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -33,8 +34,15 @@ QString credentialServiceName()
 #if defined(FT_ENABLE_TEST_HOOKS)
     static const QString name = [] {
         const QByteArray override = qgetenv("FT_TEST_CREDENTIAL_SERVICE");
-        return override.isEmpty() ? QStringLiteral("com.freetunnel.app.test")
-                                  : QString::fromUtf8(override);
+        if (!override.isEmpty())
+            return QString::fromUtf8(override);
+        // Unique per PROCESS, not just per build. An item in the OS store carries
+        // an ACL bound to the binary that created it, and test binaries are
+        // rebuilt constantly — so touching an entry a previous build left behind
+        // makes macOS raise an authorization dialog and the run hangs until a
+        // human answers it. A per-process service can never name an older item.
+        return QStringLiteral("com.freetunnel.app.test.%1")
+                .arg(QCoreApplication::applicationPid());
     }();
     return name;
 #else
