@@ -162,9 +162,8 @@ void VpnHelperClient::setLogLevel(const QString &level) {
     }
 }
 
-void VpnHelperClient::setSessionLogging(const QString &path, bool enabled)
+void VpnHelperClient::setSessionLogging(bool enabled)
 {
-    m_logPath = path;
     m_loggingEnabled = enabled;
 }
 
@@ -177,7 +176,6 @@ void VpnHelperClient::connectVpn() {
     }
     QJsonObject c;
     c["cmd"] = "connect";
-    c["logPath"] = m_logPath;
     c["loggingEnabled"] = m_loggingEnabled;
     c["configToml"] = m_configToml; // inline only — the helper refuses file paths
     send(c);

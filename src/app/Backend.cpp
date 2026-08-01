@@ -26,7 +26,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     }
 
     wireVpnClientSignals();
-    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
+    m_client.setSessionLogging(m_settings.logging_enabled);
 
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
@@ -321,7 +321,7 @@ void Backend::connectVpn() {
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.setLogLevel(m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
-    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
+    m_client.setSessionLogging(m_settings.logging_enabled);
     m_client.connectVpn();
     m_inConnect = false;
 }

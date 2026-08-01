@@ -48,10 +48,19 @@ Window {
         // Every deep-link import is confirmed, not just the ones that disable
         // certificate verification — so the button is a plain «Import»; the
         // backend's message carries any warning about the link itself.
-        function onDeepLinkImportConfirmationRequired(message, link) {
-            showConfirm(message, qsTr("Import"), function() {
-                backend.confirmDeepLinkImport(link)
-            })
+        function onDeepLinkImportConfirmationRequired(message, link, existingName) {
+            if (existingName === "") {
+                showConfirm(message, qsTr("Import"), function() {
+                    backend.confirmDeepLinkImport(link, false)
+                })
+                return
+            }
+            // Name collision: replacing is what the user usually means when a link
+            // updates a server they already have, but it is destructive, so it is
+            // an explicit third choice rather than the default.
+            showConfirmWithAlternate(message, qsTr("Add copy"), qsTr("Replace"),
+                                     function() { backend.confirmDeepLinkImport(link, false) },
+                                     function() { backend.confirmDeepLinkImport(link, true) })
         }
     }
 
@@ -532,14 +541,22 @@ Window {
 
     // ---------- window-level confirm dialog (covers the whole window) --------
     property var confirmCb: null
+    property var confirmAltCb: null
     function showConfirm(message, confirmLabel, cb) {
+        showConfirmWithAlternate(message, confirmLabel, "", cb, null)
+    }
+    // altLabel === "" keeps the plain two-button dialog.
+    function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb) {
         winConfirm.text = message
         winConfirm.confirmText = confirmLabel
+        winConfirm.altText = altLabel
         win.confirmCb = cb
+        win.confirmAltCb = altCb
         winConfirm.open()
     }
     ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
                     escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
-        onConfirmed: if (win.confirmCb) win.confirmCb() }
+        onConfirmed: if (win.confirmCb) win.confirmCb()
+        onAlternate: if (win.confirmAltCb) win.confirmAltCb() }
 
 }

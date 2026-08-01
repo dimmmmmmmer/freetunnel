@@ -48,7 +48,7 @@ private slots:
 
         m_thread = new QThread(this);
         m_client = new QtTrustTunnelClient();
-        m_client->setSessionLogging(QString(), false); // no core log tail in tests
+        m_client->setSessionLogging(false); // no core log tail in tests
         m_client->setReconnectBoundsMs(250, 250);      // fast retries
         connect(m_client, &QtTrustTunnelClient::stateChanged, this,
                 [this](State s) { m_lastState = s; });

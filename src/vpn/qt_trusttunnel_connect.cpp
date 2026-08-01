@@ -230,6 +230,11 @@ bool QtTrustTunnelClient::ensureClientReady(const GuardPtr &guard, quint64 attem
         config = std::move(*m_config);
         m_config.reset();
     }
+    // Start each session from an empty core log. The GUI keeps the durable copy
+    // (every line reaches it over IPC), so this file is only a hand-off buffer —
+    // and truncating it here, BEFORE the core opens it, avoids doing so behind a
+    // descriptor the core already holds.
+    resetCoreLogFile();
     // Build into locals and publish only after re-checking: an abandonment
     // during the core constructor or the monitor's start would otherwise hand
     // these to an owner that has already moved on (and moved m_client away).

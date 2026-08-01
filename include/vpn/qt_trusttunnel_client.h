@@ -61,7 +61,9 @@ public:
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     Q_INVOKABLE void setVpnMode(bool selective); // selective = route only the exclusions list
     Q_INVOKABLE void setKillSwitch(bool enabled);
-    Q_INVOKABLE void setSessionLogging(const QString &path, bool enabled);
+    // Whether the core writes a session log at all. The PATH is ours to choose —
+    // it is never accepted from outside, see the note in the .cpp.
+    Q_INVOKABLE void setSessionLogging(bool enabled);
 
 signals:
     void stateChanged(QtTrustTunnelClient::State state);
@@ -110,6 +112,7 @@ private:
     void setConfigLocked(ag::TrustTunnelConfig config);
     void applyCoreLogPathToConfig();
     void applyCoreLogPathToConfigLocked();
+    void resetCoreLogFile();
     void startCoreLogTail();
     void stopCoreLogTail();
     void teardownClient();

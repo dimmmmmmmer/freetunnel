@@ -182,14 +182,19 @@ void QtTrustTunnelClient::setKillSwitch(bool enabled) {
         m_config->killswitch_enabled = enabled;
 }
 
-void QtTrustTunnelClient::setSessionLogging(const QString &path, bool enabled)
+void QtTrustTunnelClient::setSessionLogging(bool enabled)
 {
+    // The path is derived here and never supplied by the caller. This object
+    // runs inside the ELEVATED helper, and the core creates (and creates the
+    // parent directory of) whatever it is told to use — so accepting a path over
+    // IPC was a root file-write primitive that had to be fenced in with owner,
+    // symlink and canonicality checks. Not offering the choice removes the whole
+    // class instead of guarding it: the file below is a transport buffer the
+    // helper tails and forwards, and the GUI keeps the durable log.
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         m_loggingEnabled = enabled;
-        m_coreLogPath = enabled ? path.trimmed() : QString();
-        if (m_coreLogPath.isEmpty() && enabled)
-            m_coreLogPath = qt_trusttunnel_default_core_log_path();
+        m_coreLogPath = enabled ? qt_trusttunnel_default_core_log_path() : QString();
         applyCoreLogPathToConfigLocked();
     }
     if (!enabled)
@@ -582,6 +587,24 @@ void QtTrustTunnelClient::applyCoreLogPathToConfigLocked()
         m_config->log_file_path = m_coreLogPath.toStdString();
 }
 
+void QtTrustTunnelClient::resetCoreLogFile()
+{
+    QString path;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        if (!m_loggingEnabled)
+            return;
+        path = m_coreLogPath;
+    }
+    if (path.isEmpty())
+        return;
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.close();
+    m_coreLogOffset = 0;
+}
+
 void QtTrustTunnelClient::startCoreLogTail()
 {
     // Called from ensureClientReady on the connect thread: a QTimer created
@@ -608,7 +631,6 @@ void QtTrustTunnelClient::startCoreLogTail()
     if (path.isEmpty())
         return;
     QDir().mkpath(QFileInfo(path).absolutePath());
-    m_coreLogOffset = QFileInfo(path).size();
 
     if (!m_coreLogPoll) {
         m_coreLogPoll = new QTimer(this);

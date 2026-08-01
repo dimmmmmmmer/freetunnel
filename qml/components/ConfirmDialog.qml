@@ -5,11 +5,16 @@ Item {
     required property var theme
     property string text: ""
     property string confirmText: qsTr("Delete")
+    // Optional middle action, e.g. "Replace" alongside "Add copy". Empty hides it,
+    // so every existing two-button caller is unaffected.
+    property string altText: ""
     signal confirmed()
+    signal alternate()
     anchors.fill: parent
     visible: false
     z: 2000
     function open() { visible = true }
+    function close() { visible = false }
 
     TextMetrics { id: cdMetrics; font.pixelSize: 14; text: cd.text }
 
@@ -35,6 +40,12 @@ Item {
                     color: c1.containsMouse ? theme.border : theme.surface
                     Text { id: c1t; anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
                     MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
+                Rectangle { visible: cd.altText !== ""
+                    width: visible ? Math.max(76, c3t.implicitWidth + 26) : 0; height: 32; radius: 8
+                    color: c3.containsMouse ? theme.border : theme.surface
+                    Text { id: c3t; anchors.centerIn: parent; text: cd.altText; color: theme.text; font.pixelSize: 14 }
+                    MouseArea { id: c3; anchors.fill: parent; hoverEnabled: true
+                                onClicked: { cd.visible = false; cd.alternate() } } }
                 Rectangle { width: Math.max(76, c2t.implicitWidth + 26); height: 32; radius: 8
                     color: c2.containsMouse ? Qt.darker(theme.danger, 1.15) : theme.danger
                     Text { id: c2t; anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14 }

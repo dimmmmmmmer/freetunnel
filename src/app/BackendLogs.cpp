@@ -50,8 +50,8 @@ void Backend::appendCoreLog(const QString &raw) {
     const QRegularExpressionMatch m = re.match(raw);
     if (!m.hasMatch()) {
         // Unrecognised shape (e.g. a truncated first line) — keep it verbatim.
-        m_logModel.append(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")),
-                          QStringLiteral("CORE"), raw);
+        recordLogLine(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")),
+                      QStringLiteral("CORE"), raw);
         return;
     }
     const QString lv = m.captured(2).toUpper();
@@ -61,19 +61,23 @@ void Backend::appendCoreLog(const QString &raw) {
             : (lv == QLatin1String("WARN") || lv == QLatin1String("WARNING"))
                     ? QStringLiteral("WARN")
                     : QStringLiteral("CORE"); // keep INFO/DEBUG/etc. tagged as core
-    m_logModel.append(m.captured(1), level, m.captured(3));
+    recordLogLine(m.captured(1), level, m.captured(3));
 }
 
 void Backend::appendLog(const QString &level, const QString &msg) {
+    recordLogLine(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), level, msg);
+}
+
+// Single writer for the user-visible log. The core no longer shares this file —
+// it writes its own, inside the helper, and its lines reach us over IPC — so
+// everything on disk is put there by this process, and CORE lines have to be
+// persisted here or they would live only in the in-memory view.
+void Backend::recordLogLine(const QString &time, const QString &level, const QString &msg) {
     if (!m_settings.logging_enabled)
         return;
-    const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
     // Incremental insert: the virtualized ListView only re-lays the new row, so a
     // connect-time burst no longer stalls the UI (and no coalescing is needed).
     m_logModel.append(time, level, msg);
-    // CORE lines are written by the VPN core into the shared log file; keep UI only.
-    if (level == QLatin1String("CORE"))
-        return;
     const QString lp = logPath();
     QDir().mkpath(QFileInfo(lp).absolutePath());
     // The log can contain connection/domain info — keep it owner-only. Set perms

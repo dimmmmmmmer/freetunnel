@@ -198,6 +198,10 @@
         <source>Update check failed: %1</source>
         <translation>Не удалось проверить обновления: %1</translation>
     </message>
+    <message>
+        <source>“%1” already exists — replace it, or add this as a separate config?</source>
+        <translation>«%1» уже существует — заменить или добавить как отдельную конфигурацию?</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -458,6 +462,14 @@
     <message>
         <source>Import</source>
         <translation>Импортировать</translation>
+    </message>
+    <message>
+        <source>Add copy</source>
+        <translation>Добавить копию</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Заменить</translation>
     </message>
 </context>
 <context>

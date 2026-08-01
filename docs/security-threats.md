@@ -27,12 +27,12 @@ This is typical for desktop apps without a system daemon. Malware running as the
 same user can toggle VPN or import configs; it **cannot** read Keychain/Secret
 Service entries without OS APIs available to that user anyway.
 
-What it **cannot** do is reach root through us: the elevated helper validates
-what the GUI sends it rather than trusting it. The connect command must carry an
-inline config (a file path is refused), the core log path is confined to a
-`*.log` file whose parent directory is a non-symlink already owned by the user
-who launched the helper, and the elevated argv is derived from the running
-executable rather than from `$APPIMAGE`.
+What it **cannot** do is reach root through us: the elevated helper does not act
+on paths the GUI names. The connect command must carry an inline config (a file
+path is refused), the core's log path is chosen by the helper itself and is not
+part of the protocol at all — the GUI receives log lines over IPC and keeps the
+durable copy — and the elevated argv is derived from the running executable
+rather than from `$APPIMAGE`.
 
 Mitigations already in place: no remote attack surface for control IPC, tokens
 rotate each session, helper binds to loopback only.

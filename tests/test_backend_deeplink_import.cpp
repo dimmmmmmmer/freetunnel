@@ -14,6 +14,9 @@ private slots:
     void initTestCase();
     void skipVerificationRequiresConfirmation();
     void confirmImportsUnsafeLink();
+    void secondLinkWithTheSameNameOffersReplace();
+    void replaceOverwritesInsteadOfAddingACopy();
+    void addingACopyKeepsBothConfigs();
 };
 
 void TestBackendDeepLinkImport::initTestCase()
@@ -51,6 +54,43 @@ void TestBackendDeepLinkImport::confirmImportsUnsafeLink()
 
     QVERIFY(backend.confirmDeepLinkImport(unsafeLink()));
     QCOMPARE(importedSpy.count(), 1);
+}
+
+// A link naming a config that already exists must say so, so the dialog can
+// offer to replace it. Silently taking the name over is what this whole flow
+// exists to prevent; silently refusing to ever replace is merely annoying.
+void TestBackendDeepLinkImport::secondLinkWithTheSameNameOffersReplace()
+{
+    Backend backend;
+    QVERIFY(backend.confirmDeepLinkImport(unsafeLink()));
+    const int afterFirst = backend.configs().size();
+
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importDeepLink(unsafeLink()));
+    QCOMPARE(confirmSpy.count(), 1);
+    // Third argument is the colliding config's name — empty means "no collision".
+    QVERIFY(!confirmSpy.first().at(2).toString().isEmpty());
+    QCOMPARE(backend.configs().size(), afterFirst); // nothing imported yet
+}
+
+void TestBackendDeepLinkImport::replaceOverwritesInsteadOfAddingACopy()
+{
+    Backend backend;
+    QVERIFY(backend.confirmDeepLinkImport(unsafeLink()));
+    const int afterFirst = backend.configs().size();
+
+    QVERIFY(backend.confirmDeepLinkImport(unsafeLink(), /*replaceExisting=*/true));
+    QCOMPARE(backend.configs().size(), afterFirst);
+}
+
+void TestBackendDeepLinkImport::addingACopyKeepsBothConfigs()
+{
+    Backend backend;
+    QVERIFY(backend.confirmDeepLinkImport(unsafeLink()));
+    const int afterFirst = backend.configs().size();
+
+    QVERIFY(backend.confirmDeepLinkImport(unsafeLink(), /*replaceExisting=*/false));
+    QCOMPARE(backend.configs().size(), afterFirst + 1);
 }
 
 QTEST_MAIN(TestBackendDeepLinkImport)

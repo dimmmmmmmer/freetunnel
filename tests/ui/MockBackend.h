@@ -138,7 +138,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
-    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link);
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
@@ -190,7 +190,8 @@ signals:
     void languageChanged(const QString &lang);
     void credentialStorageChanged();
     void errorOccurred(const QString &msg);
-    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
+                                            const QString &existingName);
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 

@@ -65,6 +65,7 @@ private slots:
     void serverSurvivesGarbageAndOversizedInput();
     void serverRefusesPathBasedConnect();
     void newestConnectionCanStillAuthenticateUnderPreAuthPressure();
+    void connectIgnoresAnyLogPathTheClientSends();
 
 private:
     bool startHelper(quint16 port, const QString &token);
@@ -377,6 +378,59 @@ void TestHelperServer::newestConnectionCanStillAuthenticateUnderPreAuthPressure(
     for (auto *s : squatters)
         s->abort();
     qDeleteAll(squatters);
+}
+
+// The core log path used to travel over IPC, and the helper creates that file —
+// and its parent directory — as root. The field is gone from the protocol now,
+// so a client that still sends one must have no effect whatsoever: this is the
+// regression guard for the removal, not for a validator.
+void TestHelperServer::connectIgnoresAnyLogPathTheClientSends()
+{
+    const quint16 port = freePort();
+    const QString token = QStringLiteral("token-for-logpath");
+    QVERIFY(startHelper(port, token));
+
+    const QString forbidden = QDir(m_dir.path()).filePath(QStringLiteral("planted/evil.log"));
+    QVERIFY(!QFile::exists(forbidden));
+
+    QTcpSocket sock;
+    sock.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
+    QVERIFY(sock.waitForConnected(3000));
+
+    QJsonObject hello;
+    hello[QStringLiteral("cmd")] = QStringLiteral("hello");
+    hello[QStringLiteral("nonce")] = QStringLiteral("logpath-nonce");
+    sock.write(QJsonDocument(hello).toJson(QJsonDocument::Compact) + '\n');
+    sock.flush();
+    QVERIFY(sock.waitForReadyRead(3000));
+    const QJsonObject challenge = QJsonDocument::fromJson(sock.readLine()).object();
+
+    QJsonObject auth;
+    auth[QStringLiteral("cmd")] = QStringLiteral("auth");
+    auth[QStringLiteral("proof")] =
+            vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                  challenge.value(QStringLiteral("nonce")).toString());
+    sock.write(QJsonDocument(auth).toJson(QJsonDocument::Compact) + '\n');
+    sock.flush();
+    QVERIFY(sock.waitForReadyRead(3000));
+    QCOMPARE(QJsonDocument::fromJson(sock.readLine()).object().value(QStringLiteral("ev")).toString(),
+             QStringLiteral("ready"));
+
+    QJsonObject connectCmd;
+    connectCmd[QStringLiteral("cmd")] = QStringLiteral("connect");
+    connectCmd[QStringLiteral("configToml")] = QStringLiteral("loglevel = \"warn\"\n"
+                                                              "[endpoint]\n"
+                                                              "hostname = \"vpn.example\"\n");
+    connectCmd[QStringLiteral("loggingEnabled")] = true;
+    connectCmd[QStringLiteral("logPath")] = forbidden;
+    sock.write(QJsonDocument(connectCmd).toJson(QJsonDocument::Compact) + '\n');
+    sock.flush();
+
+    // Give the helper time to act on the command before concluding it did not.
+    QTest::qWait(1500);
+    QVERIFY2(!QFile::exists(forbidden), "helper honoured a client-supplied log path");
+    QVERIFY2(!QDir(m_dir.path()).exists(QStringLiteral("planted")),
+             "helper created a directory a client named");
 }
 
 QTEST_MAIN(TestHelperServer)

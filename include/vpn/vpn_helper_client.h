@@ -40,7 +40,7 @@ public:
     void setVpnMode(bool selective);
     void setKillSwitch(bool enabled);
     void setLogLevel(const QString &level); // "warn"/"info"/… applied live, no reconnect
-    void setSessionLogging(const QString &path, bool enabled);
+    void setSessionLogging(bool enabled);
 
     void connectVpn();
     void disconnectVpn();
@@ -86,7 +86,6 @@ private:
     bool m_selective = false;
     bool m_killSwitch = false;
     QString m_logLevel = QStringLiteral("warn");
-    QString m_logPath;
     bool m_loggingEnabled = true;
     State m_state = State::Disconnected;
     bool m_helloAcked = false;

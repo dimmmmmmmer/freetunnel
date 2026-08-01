@@ -112,7 +112,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
-    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link);
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
@@ -201,7 +201,10 @@ signals:
     void languageChanged(const QString &lang);
     void credentialStorageChanged();
     void errorOccurred(const QString &msg);
-    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
+    // existingName is the config this link would collide with, or empty when the
+    // name is free — the UI offers "replace" only in the first case.
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
+                                            const QString &existingName);
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
@@ -225,6 +228,8 @@ private:
     void wireHotkeyLifecycle();
     void ensureHotkeysRegistered();
     void appendLog(const QString &level, const QString &msg);
+    // Append one already-timestamped line to the model and the on-disk log.
+    void recordLogLine(const QString &time, const QString &level, const QString &msg);
     void appendCoreLog(const QString &raw); // parse the core's own time/level out
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
@@ -258,7 +263,9 @@ private:
     void startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical);
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive);
-    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);
+    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
+                                bool replaceExisting);
+    QString deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const;
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
                                    bool wasActive);
     void maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx);

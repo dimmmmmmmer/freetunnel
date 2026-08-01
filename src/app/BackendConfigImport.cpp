@@ -80,22 +80,40 @@ bool Backend::importFile(const QString &path)
     return finalizeImportedConfig(target, m_activePath.isEmpty());
 }
 
-bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared)
+// Path this link would land on if it were allowed to keep its own name.
+QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    return QDir(base).filePath(prepared.fileName);
+}
+
+bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
+                                     bool replaceExisting)
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    // The file name comes from the link, so writing it straight would let a link
-    // silently replace an existing config of the same name: the row already sits
-    // in configs.json (no new entry appears) while its TOML and keychain entry now
-    // point at the link author's server. Always take a fresh path, like the file
-    // import path does.
-    const QString target = freetunnel::uniqueOwnerConfigPath(
-            QFileInfo(prepared.fileName).completeBaseName());
+    // The name comes from the link, so writing it straight would let a link
+    // silently take over an existing config: the row already sits in configs.json
+    // (no new entry appears) while its TOML and keychain entry now point at the
+    // link author's server. Replacing is a legitimate thing to want — updating a
+    // server you already have — but it is the USER's call, made in the dialog, not
+    // the link's.
+    const QString collision = deepLinkCollisionPath(prepared);
+    const bool replacing = replaceExisting && QFileInfo::exists(collision);
+    const QString target = replacing
+            ? collision
+            : freetunnel::uniqueOwnerConfigPath(QFileInfo(prepared.fileName).completeBaseName());
     if (!freetunnel::backend_config::writeConfigFile(target, prepared.tomlContent.toUtf8())) {
         emit errorOccurred(tr("Could not write config"));
         return false;
     }
-    return finalizeImportedConfig(target, m_activePath.isEmpty());
+    if (!finalizeImportedConfig(target, m_activePath.isEmpty()))
+        return false;
+    // Replacing the config the tunnel is currently built from leaves the session
+    // running the old server — rebuild it, like selecting a different config does.
+    if (replacing && target == m_activePath && (m_connected || m_connecting))
+        reconnectActiveConfig();
+    return true;
 }
 
 bool Backend::importDeepLink(const QString &link)
@@ -112,17 +130,25 @@ bool Backend::importDeepLink(const QString &link)
     // after would route everything through the link author's server. Confirmation
     // is therefore mandatory for ALL links, not only the ones that also turn off
     // certificate verification.
-    emit deepLinkImportConfirmationRequired(
-            prepared->skipVerification
-                    ? tr("This link disables server certificate verification. "
-                         "Only import configs from sources you trust.")
-                    : tr("Add a VPN server from this link? All your traffic can be routed "
-                         "through it — only import configs from sources you trust."),
-            link);
+    const QString collision = deepLinkCollisionPath(*prepared);
+    const QString existingName =
+            QFileInfo::exists(collision) ? nameForPath(collision) : QString();
+
+    QString message = prepared->skipVerification
+            ? tr("This link disables server certificate verification. "
+                 "Only import configs from sources you trust.")
+            : tr("Add a VPN server from this link? All your traffic can be routed "
+                 "through it — only import configs from sources you trust.");
+    if (!existingName.isEmpty()) {
+        message += QLatin1Char('\n')
+                + tr("“%1” already exists — replace it, or add this as a separate config?")
+                          .arg(existingName);
+    }
+    emit deepLinkImportConfirmationRequired(message, link, existingName);
     return false;
 }
 
-bool Backend::confirmDeepLinkImport(const QString &link)
+bool Backend::confirmDeepLinkImport(const QString &link, bool replaceExisting)
 {
     QString err;
     auto prepared = freetunnel::prepareDeepLinkImport(link, &err);
@@ -130,5 +156,5 @@ bool Backend::confirmDeepLinkImport(const QString &link)
         emit errorOccurred(tr("Link error: %1").arg(err));
         return false;
     }
-    return importPreparedDeepLink(*prepared);
+    return importPreparedDeepLink(*prepared, replaceExisting);
 }

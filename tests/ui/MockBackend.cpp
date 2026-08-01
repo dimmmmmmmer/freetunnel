@@ -202,12 +202,16 @@ void MockBackend::moveConfig(int from, int to)
 // dialog Main.qml wires up would never be exercised.
 bool MockBackend::importDeepLink(const QString &link)
 {
-    emit deepLinkImportConfirmationRequired(
-            QStringLiteral("Add a VPN server from this link?"), link);
+    // Model both shapes: a link naming an existing config offers "replace".
+    const QString existing = m_configs.contains(QStringLiteral("Imported"))
+            ? QStringLiteral("Imported")
+            : QString();
+    emit deepLinkImportConfirmationRequired(QStringLiteral("Add a VPN server from this link?"),
+                                            link, existing);
     return false;
 }
 
-bool MockBackend::confirmDeepLinkImport(const QString &)
+bool MockBackend::confirmDeepLinkImport(const QString &, bool)
 {
     emit configImported(QStringLiteral("Imported"));
     return true;
