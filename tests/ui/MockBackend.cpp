@@ -163,12 +163,26 @@ void MockBackend::selectConfig(int index)
     emit configChanged();
 }
 
+// Both list mutations keep the active slot in step and announce it, like
+// Backend does. Leaving activeIndex/activeConfig stale made the "connected"
+// badge and the selection highlight point at the wrong row in the test scene —
+// exactly the desync these UI tests exist to catch.
 void MockBackend::removeConfig(int index)
 {
     if (index < 0 || index >= m_configs.size())
         return;
     m_configs.removeAt(index);
+    if (m_configs.isEmpty()) {
+        m_activeIndex = -1;
+        m_activeConfig.clear();
+    } else if (index < m_activeIndex) {
+        --m_activeIndex; // rows below shifted up
+    } else if (index == m_activeIndex) {
+        m_activeIndex = qMin(m_activeIndex, m_configs.size() - 1);
+        m_activeConfig = m_configs.at(m_activeIndex);
+    }
     emit configsChanged();
+    emit configChanged();
 }
 
 void MockBackend::moveConfig(int from, int to)
@@ -176,12 +190,24 @@ void MockBackend::moveConfig(int from, int to)
     if (from < 0 || from >= m_configs.size() || to < 0 || to >= m_configs.size() || from == to)
         return;
     m_configs.move(from, to);
+    // The active config did not change, only where it sits.
+    m_activeIndex = m_configs.indexOf(m_activeConfig);
     emit configsChanged();
+    emit configChanged();
 }
 
-// Both import paths announce the added config the way Backend does, so
-// Main.qml's onConfigImported toast has a real signal to bind to.
-bool MockBackend::importDeepLink(const QString &)
+// Deep links model the REAL contract: nothing is imported until the user
+// confirms, so this asks and returns false. Modelling it as an immediate
+// success made the mandatory-confirmation path unreachable in UI tests — the
+// dialog Main.qml wires up would never be exercised.
+bool MockBackend::importDeepLink(const QString &link)
+{
+    emit deepLinkImportConfirmationRequired(
+            QStringLiteral("Add a VPN server from this link?"), link);
+    return false;
+}
+
+bool MockBackend::confirmDeepLinkImport(const QString &)
 {
     emit configImported(QStringLiteral("Imported"));
     return true;

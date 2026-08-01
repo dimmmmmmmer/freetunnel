@@ -165,7 +165,13 @@ else()
         ft_add_cxx_flag_if_supported(FreeTunnel -fstack-clash-protection)
         # Indirect-branch tracking / shadow stack markers (CET). Harmless on CPUs
         # without CET, and required for the loader to enable it on those that do.
-        ft_add_cxx_flag_if_supported(FreeTunnel -fcf-protection=full)
+        # The linker only marks the image as CET-enabled when EVERY input object
+        # carries the property, so this has to reach the whole compile, not just
+        # this target's own sources.
+        check_cxx_compiler_flag("-fcf-protection=full" FT_HAS_CF_PROTECTION)
+        if(FT_HAS_CF_PROTECTION)
+            add_compile_options(-fcf-protection=full)
+        endif()
     endif()
     # _FORTIFY_SOURCE only does anything in an optimizing build, and redefining it
     # (some distros pre-define it) warns — so undefine first, optimized configs only.

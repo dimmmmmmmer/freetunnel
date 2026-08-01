@@ -592,6 +592,11 @@ void QtTrustTunnelClient::startCoreLogTail()
         QMetaObject::invokeMethod(this, [this]() { startCoreLogTail(); }, Qt::QueuedConnection);
         return;
     }
+    // The hop above is queued, so a disconnect can land between the request and
+    // this call — re-arming the poll then would leave it running with no session
+    // behind it.
+    if (m_stopRequested)
+        return;
     QString path;
     {
         std::lock_guard<std::mutex> lk(m_configMutex);

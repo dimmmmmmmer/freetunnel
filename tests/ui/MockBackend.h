@@ -138,7 +138,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
-    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link) { Q_UNUSED(link); return true; }
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
