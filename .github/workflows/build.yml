@@ -172,11 +172,13 @@ jobs:
 
       # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
       # every runner (macOS/Windows ship one, but install to be safe + on PATH).
+      # Pinned action instead of `curl https://sh.rustup.rs | sh`: this toolchain
+      # compiles quiche into the shipped binary, and a piped installer script is
+      # an unpinnable remote dependency in the job that publishes releases.
       - name: Install Rust
-        shell: bash
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
 
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
@@ -184,7 +186,13 @@ jobs:
         run: |
           sudo apt-get update
           # Modern clang (the core is clang-only; 22.04's default clang is too old).
+          # Verified before it runs: this script is executed AS ROOT in the job
+          # that produces release binaries, so an unannounced change to it must
+          # stop the build rather than silently reconfigure the toolchain.
+          # Re-pin deliberately: curl -fsSL https://apt.llvm.org/llvm.sh | sha256sum
           wget -q https://apt.llvm.org/llvm.sh
+          echo "9474ecd78b52aba6e923976b1e9773f5613027cc7e237b9956986cb536e02a36  llvm.sh" \
+            | sha256sum -c -
           chmod +x llvm.sh
           sudo ./llvm.sh 18
           # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
