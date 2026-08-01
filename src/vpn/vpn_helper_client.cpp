@@ -37,8 +37,18 @@ namespace {
 QStringList linuxHelperCommand(const QString &exe, quint16 port, const QString &tokenPath)
 {
     QStringList cmd;
+    // $APPIMAGE names the binary the user is about to authorize as root, so it
+    // cannot be taken on faith: anything able to set the GUI's environment (a
+    // shell profile, a .desktop entry, the session launcher) would otherwise
+    // turn the elevation prompt into "run this arbitrary file as root". Accept
+    // it only when the AppImage runtime's own $APPDIR really does contain the
+    // executable we are running out of — that part an attacker cannot forge.
     const QByteArray appImage = qgetenv("APPIMAGE");
-    if (!appImage.isEmpty()) {
+    const QByteArray appDir = qgetenv("APPDIR");
+    const bool runningFromAppImage = !appImage.isEmpty() && !appDir.isEmpty()
+            && exe.startsWith(QString::fromLocal8Bit(appDir) + QLatin1Char('/'))
+            && QFileInfo(QString::fromLocal8Bit(appImage)).isFile();
+    if (runningFromAppImage) {
         cmd << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
             << QString::fromLocal8Bit(appImage);
     } else {
@@ -176,7 +186,14 @@ void VpnHelperClient::connectVpn() {
 void VpnHelperClient::disconnectVpn() {
     if (!m_helloAcked) {
         abortStartup();
-        if (m_state != State::Disconnected) setState(State::Disconnected);
+        // Cancelling during helper startup/elevation: the state is still
+        // Disconnected (nothing sets Connecting locally — states arrive from the
+        // helper), so a value-guarded setState emitted nothing at all. The GUI
+        // clears its "disconnecting" flag only from this signal, so it stuck on
+        // "Disconnecting…" forever and every later connect became a silent
+        // no-op. Always report the outcome, even when the value is unchanged.
+        m_state = State::Disconnected;
+        emit stateChanged(m_state);
         return;
     }
     if (!m_sock) return;
@@ -187,6 +204,11 @@ void VpnHelperClient::abortStartup() {
     m_connectPending = false;
     m_starting = false;
     m_helloAcked = false;
+    m_peerProven = false;
+    m_guiNonce.clear();
+    // A partial line left over from the dead connection would otherwise be
+    // prepended to the next helper's first message and swallow its challenge.
+    m_buf.clear();
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; }
     if (m_sock) { m_sock->abort(); m_sock->deleteLater(); m_sock = nullptr; }
     if (m_proc) { m_proc->kill(); m_proc->deleteLater(); m_proc = nullptr; }
@@ -195,6 +217,7 @@ void VpnHelperClient::abortStartup() {
 
 void VpnHelperClient::resetHelperTransport()
 {
+    m_buf.clear();
     if (m_sock) {
         m_sock->deleteLater();
         m_sock = nullptr;
@@ -259,6 +282,7 @@ void VpnHelperClient::wireHelperSocket(bool testHelper)
     connect(m_sock, &QTcpSocket::readyRead, this, &VpnHelperClient::onReadyRead);
     connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
         m_helloAcked = false;
+        m_peerProven = false;
         m_starting = false;
         if (m_state != State::Disconnected)
             setState(State::Disconnected);
@@ -417,7 +441,15 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
 
 void VpnHelperClient::onSocketConnected() {
     m_starting = false;
-    QJsonObject hello; hello["cmd"] = "hello"; hello["token"] = m_token;
+    // Open with a nonce and NO secret. The helper only starts listening once the
+    // elevation prompt is answered, so until then anything could be holding this
+    // port — it has to prove it knows the token before we send it anything.
+    m_guiNonce = QStringLiteral("%1%2")
+                         .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'))
+                         .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'));
+    QJsonObject hello;
+    hello["cmd"] = "hello";
+    hello["nonce"] = m_guiNonce;
     send(hello);
 }
 
@@ -428,16 +460,22 @@ void VpnHelperClient::send(const QJsonObject &obj) {
 
 void VpnHelperClient::onReadyRead() {
     m_buf += m_sock->readAll();
-    if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
-        fail(tr("VPN helper sent too much data"));
-        return;
-    }
+    // Drain complete lines FIRST, then judge what is left. The cap used to be
+    // applied to the whole accumulated buffer, so a single readAll() carrying a
+    // burst of perfectly well-formed events (the core emits one per flow) killed
+    // the helper — and because the buffer survived the teardown, every later
+    // connect failed instantly, after the user had re-entered their password.
     int nl;
     while ((nl = m_buf.indexOf('\n')) >= 0) {
         const QByteArray line = m_buf.left(nl);
         m_buf.remove(0, nl + 1);
         const auto doc = QJsonDocument::fromJson(line);
         if (doc.isObject()) handleEvent(doc.object());
+    }
+    // Only an unterminated remainder can be over-long: a real line never is.
+    if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
+        m_buf.clear();
+        fail(tr("VPN helper sent too much data"));
     }
 }
 
@@ -458,6 +496,44 @@ void VpnHelperClient::handleReadyEvent()
 
 void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     const QString type = ev.value("ev").toString();
+    if (type == "challenge") {
+        // Verify the peer before answering: a wrong proof means we are talking to
+        // something that squatted the port, not to our elevated helper. Failing
+        // closed here is what keeps the config TOML — and the VPN password in it
+        // — from ever reaching it.
+        if (m_helloAcked || m_guiNonce.isEmpty())
+            return;
+        if (!vpn_helper::tokensEqual(
+                    ev.value("proof").toString(),
+                    vpn_helper::authProof(m_token, QString::fromLatin1(vpn_helper::kHelperRole),
+                                          m_guiNonce))) {
+            fail(tr("The process answering on the helper port could not prove it is the "
+                    "FreeTunnel helper — refusing to send the config."));
+            return;
+        }
+        const QString helperNonce = ev.value("nonce").toString();
+        if (helperNonce.isEmpty()) {
+            fail(tr("VPN helper sent an invalid challenge"));
+            return;
+        }
+        m_peerProven = true;
+        QJsonObject auth;
+        auth["cmd"] = "auth";
+        auth["proof"] = vpn_helper::authProof(m_token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                              helperNonce);
+        send(auth);
+        return;
+    }
+    // Until the peer has proven it holds the token, NOTHING else it says means
+    // anything. Verifying the challenge but still acting on an unsolicited
+    // "ready" would defeat the whole handshake: a squatter could simply skip the
+    // challenge, claim to be ready, and be handed the config TOML — password
+    // included — and then report a tunnel that does not exist.
+    if (!m_peerProven) {
+        fail(tr("The process answering on the helper port did not authenticate — "
+                "refusing to continue."));
+        return;
+    }
     if (type == "ready") {
         handleReadyEvent();
         return;

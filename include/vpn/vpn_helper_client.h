@@ -77,6 +77,8 @@ private:
     QTcpSocket *m_sock = nullptr;
     quint16 m_tcpPort = 0;
     QString m_token;
+    QString m_guiNonce;        // our half of the mutual-auth handshake
+    bool m_peerProven = false; // peer answered our challenge with a valid proof
     QString m_tokenPath;
     QString m_configToml;
     std::vector<std::string> m_exclusions;

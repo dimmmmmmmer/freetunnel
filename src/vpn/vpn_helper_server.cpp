@@ -5,12 +5,15 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QHostAddress>
+#include <QRandomGenerator>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -24,6 +27,7 @@
 #if defined(Q_OS_WIN)
 #include <windows.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -86,8 +90,8 @@ QString stateName(QtTrustTunnelClient::State s) {
 // disconnects, so the elevated helper never lingers.
 class HelperServer : public QObject {
 public:
-    HelperServer(quint16 port, QString token)
-        : m_port(port), m_token(std::move(token)) {
+    HelperServer(quint16 port, QString token, qint64 ownerUid)
+        : m_port(port), m_token(std::move(token)), m_ownerUid(ownerUid) {
         m_client.moveToThread(&m_vpnThread);
         m_vpnThread.start();
         connect(&m_client, &QtTrustTunnelClient::stateChanged, this,
@@ -147,11 +151,33 @@ private:
     // blocking the real GUI from ever connecting. Each pending connection is
     // also dropped after a short deadline so it can't linger.
     static constexpr int kAuthDeadlineMs = 5000;
+    static constexpr int kMaxPendingConnections = 8;
+
+    static QString randomNonce() {
+        return QStringLiteral("%1%2")
+                .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'))
+                .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'));
+    }
 
     void onConnection() {
         while (QTcpSocket *s = m_server.nextPendingConnection()) {
             if (m_authed) { s->close(); s->deleteLater(); continue; }
+            // Pre-auth sockets are unauthenticated by definition and this is a
+            // root process: without a ceiling, a local process could open
+            // thousands during the (up to 60 s) elevation window and buffer
+            // hundreds of MB into it until the OOM killer takes the helper.
+            //
+            // Evict the OLDEST rather than refusing the newest: refusing would
+            // hand a squatter the very thing the pending set exists to prevent —
+            // hold the cap open with idle connections and the real GUI can never
+            // get in. The genuine client is always the most recent arrival.
+            while (m_pendingOrder.size() >= kMaxPendingConnections) {
+                QTcpSocket *oldest = m_pendingOrder.first();
+                dropPending(oldest);
+                m_pendingOrder.removeAll(oldest);
+            }
             m_pending.insert(s);
+            m_pendingOrder.append(s);
             connect(s, &QTcpSocket::readyRead, this, [this, s]() { onPendingRead(s); });
             connect(s, &QTcpSocket::disconnected, this, [this, s]() { dropPending(s); });
             // Context object = s, so the timer auto-cancels if s is destroyed first.
@@ -160,9 +186,11 @@ private:
     }
 
     void dropPending(QTcpSocket *s) {
+        m_pendingOrder.removeAll(s);
         if (!m_pending.remove(s))
             return;
         m_pendingBuf.remove(s);
+        m_pendingNonce.remove(s);
         s->close();
         s->deleteLater();
     }
@@ -188,9 +216,41 @@ private:
         const QByteArray rest = buf.mid(nl + 1);
         const auto doc = QJsonDocument::fromJson(line);
         const QJsonObject c = doc.object();
-        // Only a valid hello authenticates; any other first message drops the link.
-        if (!doc.isObject() || c.value("cmd").toString() != QLatin1String("hello")
-            || !vpn_helper::tokensEqual(c.value("token").toString(), m_token)) {
+        if (!doc.isObject()) {
+            dropPending(s);
+            return;
+        }
+        const QString cmd = c.value("cmd").toString();
+        // Step 1: the GUI opens with a nonce and no secret. We answer with our
+        // proof (so it can tell a real helper from whoever squatted the port)
+        // plus a nonce of our own for it to answer in turn.
+        if (cmd == QLatin1String("hello")) {
+            const QString guiNonce = c.value("nonce").toString();
+            if (guiNonce.isEmpty() || m_pendingNonce.contains(s)) {
+                dropPending(s);
+                return;
+            }
+            const QString ourNonce = randomNonce();
+            m_pendingNonce.insert(s, ourNonce);
+            m_pendingBuf[s] = rest;
+            QJsonObject e;
+            e["ev"] = "challenge";
+            e["proof"] = vpn_helper::authProof(m_token, QString::fromLatin1(vpn_helper::kHelperRole),
+                                               guiNonce);
+            e["nonce"] = ourNonce;
+            s->write(QJsonDocument(e).toJson(QJsonDocument::Compact) + '\n');
+            if (!m_pendingBuf[s].isEmpty())
+                onPendingRead(s); // the auth line may already be in the same burst
+            return;
+        }
+        // Step 2: the GUI proves it holds the same token. Only then does this
+        // socket become the privileged channel.
+        const auto it = m_pendingNonce.constFind(s);
+        if (cmd != QLatin1String("auth") || it == m_pendingNonce.constEnd()
+            || !vpn_helper::tokensEqual(
+                    c.value("proof").toString(),
+                    vpn_helper::authProof(m_token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                          it.value()))) {
             dropPending(s);
             return;
         }
@@ -200,7 +260,9 @@ private:
     void promoteToAuthed(QTcpSocket *s, const QByteArray &rest) {
         m_authed = true;
         m_pending.remove(s);
+        m_pendingOrder.removeAll(s);
         m_pendingBuf.remove(s);
+        m_pendingNonce.remove(s);
         const auto racing = m_pending;
         for (QTcpSocket *other : racing)
             dropPending(other);
@@ -232,16 +294,20 @@ private:
     }
 
     void processAuthedBuffer() {
-        if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
-            m_sock->close();
-            return;
-        }
+        // Cap the LINE, not the accumulated buffer: a legitimate pipelined burst
+        // (a large exclusion list followed by an inline config TOML) could
+        // exceed the cap while every individual message was well within it, and
+        // dropping the privileged socket makes the helper quit mid-session.
         int nl;
         while ((nl = m_buf.indexOf('\n')) >= 0) {
             const QByteArray line = m_buf.left(nl);
             m_buf.remove(0, nl + 1);
             const auto doc = QJsonDocument::fromJson(line);
             if (doc.isObject()) handleAuthed(doc.object());
+        }
+        if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
+            m_buf.clear();
+            m_sock->close();
         }
     }
 
@@ -324,7 +390,14 @@ private:
             send(e);
             return;
         }
-        const QString logPath = c.value(QStringLiteral("logPath")).toString();
+        // Same reasoning as the inline-config check above, and the one that got
+        // missed: this process is root, and the core opens (creating it, and
+        // creating its parent directory) whatever log path it is told to use.
+        // An unvalidated path here is a root file-write primitive — point it at
+        // /Library/LaunchDaemons or /etc/sudoers.d and the GUI side of a
+        // compromise turns into privilege escalation. Anything we don't like
+        // falls back to the core's own default rather than failing the connect.
+        const QString logPath = sanitizedLogPath(c.value(QStringLiteral("logPath")).toString());
         const bool loggingEnabled = c.value(QStringLiteral("loggingEnabled")).toBool(true);
         QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
                                   Q_ARG(QString, logPath), Q_ARG(bool, loggingEnabled));
@@ -332,13 +405,103 @@ private:
                                   Q_ARG(QString, toml));
     }
 
+    // Confine a GUI-supplied core log path to something the launching user
+    // already owns: an absolute, traversal-free *.log path whose existing parent
+    // directory belongs to that user (and is not a symlink into somewhere else).
+    // Returns an empty string to mean "use the core default".
+    QString sanitizedLogPath(const QString &requested) const {
+        const QString path = requested.trimmed();
+        if (path.isEmpty())
+            return QString();
+        const QFileInfo info(path);
+        if (!info.isAbsolute() || path.contains(QStringLiteral(".."))
+            || !path.endsWith(QStringLiteral(".log"))) {
+            qWarning("[helper] refusing core log path (shape): %s", qPrintable(path));
+            return QString();
+        }
+        // isSymLink() BEFORE exists(): a DANGLING symlink reports exists()==false
+        // (QFileInfo resolves the target), so an exists()-guarded symlink check
+        // waves through the most useful case for an attacker — the link's target
+        // does not exist yet, and root is about to create it.
+        if (info.isSymLink()) {
+            qWarning("[helper] refusing core log path (symlink): %s", qPrintable(path));
+            return QString();
+        }
+        if (info.exists() && !info.isFile()) {
+            qWarning("[helper] refusing core log path (not a regular file): %s", qPrintable(path));
+            return QString();
+        }
+        const QFileInfo parent(info.absolutePath());
+        if (!parent.exists() || !parent.isDir()) {
+            qWarning("[helper] refusing core log path (parent): %s", qPrintable(path));
+            return QString();
+        }
+        // A symlink anywhere in the parent chain redirects the whole write, so
+        // require the directory to be exactly what it claims to be.
+        if (parent.canonicalFilePath() != parent.absoluteFilePath()) {
+            qWarning("[helper] refusing core log path (parent is not canonical): %s",
+                     qPrintable(path));
+            return QString();
+        }
+#ifndef Q_OS_WIN
+        // The decisive check: root must not be talked into writing outside the
+        // unprivileged user's own tree. m_ownerUid comes from the 0600 token
+        // file the GUI created for this launch.
+        if (m_ownerUid < 0) {
+            qWarning("[helper] refusing core log path: launching user unknown");
+            return QString();
+        }
+        struct stat st {};
+        if (::lstat(QFile::encodeName(parent.absoluteFilePath()).constData(), &st) != 0
+            || !S_ISDIR(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid) {
+            qWarning("[helper] refusing core log path (owner): %s", qPrintable(path));
+            return QString();
+        }
+        // lstat, not stat: the target must not be reached through a link either.
+        if (::lstat(QFile::encodeName(info.absoluteFilePath()).constData(), &st) == 0
+            && (!S_ISREG(st.st_mode) || static_cast<qint64>(st.st_uid) != m_ownerUid)) {
+            qWarning("[helper] refusing core log path (file owner): %s", qPrintable(path));
+            return QString();
+        }
+#else
+        // No uid to anchor to on Windows, so confine by location instead: the
+        // helper is elevated there too, and an arbitrary absolute *.log path
+        // would still let the GUI side of a compromise write into system trees.
+        const QString canonicalParent = QDir::toNativeSeparators(parent.absoluteFilePath()).toLower();
+        const QStringList allowedRoots = {
+            QDir::toNativeSeparators(
+                    QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).toLower(),
+            QDir::toNativeSeparators(
+                    QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).toLower(),
+            QDir::toNativeSeparators(
+                    QStandardPaths::writableLocation(QStandardPaths::TempLocation)).toLower(),
+        };
+        bool underAllowedRoot = false;
+        for (const QString &root : allowedRoots) {
+            if (!root.isEmpty() && canonicalParent.startsWith(root)) {
+                underAllowedRoot = true;
+                break;
+            }
+        }
+        if (!underAllowedRoot) {
+            qWarning("[helper] refusing core log path (outside the app data roots): %s",
+                     qPrintable(path));
+            return QString();
+        }
+#endif
+        return path;
+    }
+
     quint16 m_port = 0;
     QString m_token;
+    qint64 m_ownerUid = -1;
     QTcpServer m_server;
     QTcpSocket *m_sock = nullptr;
     QByteArray m_buf;
     QSet<QTcpSocket *> m_pending;
+    QList<QTcpSocket *> m_pendingOrder; // arrival order, for oldest-first eviction
     QHash<QTcpSocket *, QByteArray> m_pendingBuf;
+    QHash<QTcpSocket *, QString> m_pendingNonce; // our challenge, per pending socket
     bool m_authed = false;
     QThread m_vpnThread;
     QtTrustTunnelClient m_client;
@@ -360,7 +523,7 @@ int runVpnHelper(int argc, char **argv) {
     if (!cfg.ok())
         return 2;
 
-    HelperServer server(cfg.port, cfg.token);
+    HelperServer server(cfg.port, cfg.token, cfg.ownerUid);
     if (!server.listen())
         return 3;
 
