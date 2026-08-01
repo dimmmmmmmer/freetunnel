@@ -90,7 +90,38 @@ private:
         std::atomic<quint64> attemptGen{0};
     };
     using GuardPtr = std::shared_ptr<LifetimeGuard>;
-    static bool attemptIsStale(const GuardPtr &guard, quint64 attemptGen);
+    // One connect attempt, owned entirely by the worker thread that runs it.
+    // Everything the attempt needs travels in here, and the worker touches the
+    // owner ONLY under the guard mutex — so an abandoned attempt cannot reach a
+    // destroyed QtTrustTunnelClient at all. The previous design checked
+    // staleness between touches, which left a narrow window where the owner
+    // could be destroyed after a check had already passed.
+    struct ConnectAttempt {
+        enum class Outcome { Connected, Retry, FatalStop, FatalKeepGoing };
+
+        QtTrustTunnelClient *owner = nullptr;
+        GuardPtr guard;
+        quint64 attemptGen = 0;
+        ag::TrustTunnelConfig config;
+        std::string boundIf;
+        ag::VpnCallbacks callbacks;
+        // The previous session, retired by the worker: disconnecting a live core
+        // client blocks, and must not run on the owner's event loop.
+        std::unique_ptr<ag::TrustTunnelClient> retiredClient;
+        std::unique_ptr<ag::AutoNetworkMonitor> retiredMonitor;
+        // Built by the worker, adopted by the owner only if it still wants them.
+        std::unique_ptr<ag::TrustTunnelClient> client;
+        std::unique_ptr<ag::AutoNetworkMonitor> monitor;
+        std::chrono::steady_clock::time_point startedAt{};
+        Outcome outcome = Outcome::Retry;
+        QString error;
+        bool privilegeHint = false;
+    };
+    using AttemptPtr = std::shared_ptr<ConnectAttempt>;
+
+    AttemptPtr prepareAttempt(quint64 attemptGen);      // owner thread
+    static void runAttempt(const AttemptPtr &ctx);      // worker thread, no `this`
+    void adoptAttempt(const AttemptPtr &ctx);           // owner thread
     // Hop a core event back onto this object's thread, dropping it if its
     // session has been superseded. Called with the guard mutex held.
     void postCoreStateChanged(quint64 session, int coreState, int errCode, const QString &errText);
@@ -98,7 +129,6 @@ private:
     void postConnectionInfo(quint64 session, const QString &line);
 
     ag::VpnCallbacks makeCallbacks(const GuardPtr &guard);
-    void doConnectAttempt(const GuardPtr &guard, quint64 attemptGen);
     bool joinOrAbandonConnectThread(int waitMs);
     void startConnectAttempt();
     void scheduleReconnect(const QString &reason);
@@ -118,10 +148,7 @@ private:
     void teardownClient();
     void checkFdHealth();
     bool reloadStoredConfigIfNeeded();
-    bool ensureClientReady(const GuardPtr &guard, quint64 attemptGen);
     void failConnectFatal(const QString &qErr, bool privilegeHint);
-    bool attemptTunnelConnect(const GuardPtr &guard, quint64 attemptGen);
-    void teardownIfReconnecting(bool isReconnect);
     void forceFdReconnect(const QString &logReason, const QString &userReason);
     void protectOutboundSocket(ag::SocketProtectEvent *event);
     static int countOpenFds();

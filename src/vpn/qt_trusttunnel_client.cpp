@@ -122,8 +122,12 @@ void QtTrustTunnelClient::teardownClient() {
 
     // Invalidate the session: any core events still queued (or emitted during
     // the disconnect below) belong to the client being destroyed and must not
-    // be attributed to a session started afterwards.
+    // be attributed to a session started afterwards. The attempt generation goes
+    // with it — a worker that finished just before this teardown must not get to
+    // install its client afterwards and leave a live tunnel behind a
+    // "Disconnected" state.
     ++m_sessionGen;
+    ++m_guard->attemptGen;
 
     if (m_networkMonitor) {
         m_networkMonitor->stop();
@@ -420,13 +424,6 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
     return callbacks;
 }
 
-bool QtTrustTunnelClient::attemptIsStale(const GuardPtr &guard, quint64 attemptGen)
-{
-    if (guard->attemptGen.load() != attemptGen)
-        return true;
-    std::lock_guard<std::mutex> lk(guard->mutex);
-    return !guard->alive;
-}
 
 void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
 {
