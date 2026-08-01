@@ -44,37 +44,6 @@ QString credentialServiceName()
 
 namespace {
 
-// Open @p path for writing with 0600 already in place. QFile has no mode
-// argument, and chmod-after-write leaves a window in which another local user
-// can open the file while it still holds a plaintext password; on POSIX we hand
-// QFile a descriptor that was created 0600, and O_NOFOLLOW so a symlink planted
-// under the path can't redirect the write either.
-bool openOwnerOnlyForWrite(QFile &f, const QString &path)
-{
-#if defined(Q_OS_UNIX)
-    const int fd = ::open(QFile::encodeName(path).constData(),
-                          O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0)
-        return false;
-    if (!f.open(fd, QIODevice::WriteOnly | QIODevice::Truncate, QFile::AutoCloseHandle)) {
-        ::close(fd);
-        return false;
-    }
-#else
-    // Windows: no mode bits on open — the file inherits the owner-only ACL of
-    // the config directory, and we tighten it before anything is written.
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-#endif
-    // An existing file keeps its old mode through O_CREAT, so still assert it —
-    // and don't pretend the write is safe when we couldn't.
-    if (!QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
-        f.close();
-        return false;
-    }
-    return true;
-}
-
 #if defined(Q_OS_WIN)
 QString winTargetPrefix()
 {
@@ -178,6 +147,37 @@ QString filePathForKey(const QString &key)
 }
 
 #if defined(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
+// Open @p path for writing with 0600 already in place. QFile has no mode
+// argument, and chmod-after-write leaves a window in which another local user
+// can open the file while it still holds a plaintext password; on POSIX we hand
+// QFile a descriptor that was created 0600, and O_NOFOLLOW so a symlink planted
+// under the path can't redirect the write either.
+bool openOwnerOnlyForWrite(QFile &f, const QString &path)
+{
+#if defined(Q_OS_UNIX)
+    const int fd = ::open(QFile::encodeName(path).constData(),
+                          O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    if (!f.open(fd, QIODevice::WriteOnly | QIODevice::Truncate, QFile::AutoCloseHandle)) {
+        ::close(fd);
+        return false;
+    }
+#else
+    // Windows: no mode bits on open — the file inherits the owner-only ACL of
+    // the config directory, and we tighten it before anything is written.
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+#endif
+    // An existing file keeps its old mode through O_CREAT, so still assert it —
+    // and don't pretend the write is safe when we couldn't.
+    if (!QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        f.close();
+        return false;
+    }
+    return true;
+}
+
 bool storePasswordFile(const QString &key, const QString &password)
 {
     const QString path = filePathForKey(key);

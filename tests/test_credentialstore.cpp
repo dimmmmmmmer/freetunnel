@@ -50,9 +50,14 @@ void TestCredentialStore::migrateStripsPassword()
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    QTemporaryFile tf(QDir(base).filePath(QStringLiteral("migrate-XXXXXX.toml")));
-    tf.setAutoRemove(true);
-    QVERIFY(tf.open());
+    // A plain file, not a QTemporaryFile: migrateConfigPassword() now commits by
+    // renaming over the target, and on Windows that cannot replace a path a live
+    // QTemporaryFile still owns. Production configs are plain files anyway.
+    const QString path = QDir(base).filePath(
+            QStringLiteral("migrate-%1.toml").arg(QCoreApplication::applicationPid()));
+    QFile::remove(path);
+    QFile tf(path);
+    QVERIFY(tf.open(QIODevice::WriteOnly | QIODevice::Truncate));
     ConfigToml c;
     c.hostname = "h.example";
     c.addresses = "1.2.3.4:443";
@@ -61,7 +66,6 @@ void TestCredentialStore::migrateStripsPassword()
     tf.write(buildConfigToml(c).toUtf8());
     tf.close();
 
-    const QString path = tf.fileName();
     QVERIFY(migrateConfigPassword(path));
 
     QFile rf(path);
@@ -70,6 +74,12 @@ void TestCredentialStore::migrateStripsPassword()
     QVERIFY(out.password.isEmpty());
     QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path)),
              QStringLiteral("pw"));
+
+    // Leave nothing behind: the credential entry is real (in the test-only
+    // service) and the file is ours.
+    CredentialStore::deletePassword(CredentialStore::keyForConfigPath(path));
+    rf.close();
+    QFile::remove(path);
 }
 
 QTEST_MAIN(TestCredentialStore)

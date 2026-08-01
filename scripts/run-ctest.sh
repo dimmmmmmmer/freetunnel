@@ -12,5 +12,12 @@ if [[ "$(uname -s)" == "Linux" ]] && [[ -n "${CI:-}" ]]; then
   ROOT="$(cd "$(dirname "$0")/.." && pwd)"
   dbus-run-session -- bash "$ROOT/scripts/run-ctest-keyring.sh" "$BUILD_DIR" "$@"
 else
-  ctest --test-dir "$BUILD_DIR" -j1 --output-on-failure "$@"
+  # Dump the per-test log too: on some runners ctest's --output-on-failure text
+  # does not survive into the job log, and a bare "***Failed" is not something
+  # anyone can act on.
+  if ! ctest --test-dir "$BUILD_DIR" -j1 --output-on-failure "$@"; then
+    echo "===== LastTest.log ====="
+    cat "$BUILD_DIR/Testing/Temporary/LastTest.log" 2>/dev/null || true
+    exit 1
+  fi
 fi
