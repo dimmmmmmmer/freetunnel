@@ -425,25 +425,25 @@ jobs:
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
           # These tools choose the libraries, AppRun and Qt plugins that end up in
           # the published .deb/.AppImage, so they are part of the shipped product
-          # and must not float. linuxdeploy only publishes a "continuous" release
-          # that is rewritten in place, so pin the immutable ASSET ID (bytes of one
-          # specific upload) and verify the digest on top. When upstream re-cuts
-          # the release the ID stops resolving and this step fails loudly — that is
-          # the intended behaviour: re-pin deliberately, don't drift silently.
-          # Refresh with:
-          #   gh api repos/linuxdeploy/linuxdeploy/releases/tags/continuous \
-          #     --jq '.assets[] | select(.name=="linuxdeploy-x86_64.AppImage") | .id'
-          fetch_asset() { # repo, asset id, output
-            curl -fsSL -o "$3" \
-              -H "Accept: application/octet-stream" \
-              ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
-              "https://api.github.com/repos/$1/releases/assets/$2" \
-              || { echo "::error::$3 is no longer available at the pinned asset id $2 — re-pin it (see the comment above)"; exit 1; }
-          }
-          fetch_asset linuxdeploy/linuxdeploy 462806018 "$ld"
-          fetch_asset linuxdeploy/linuxdeploy-plugin-qt 421996681 "$ldqt"
-          echo "e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf  $ld"   | sha256sum -c -
-          echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c -
+          # and must not float. linuxdeploy publishes only a "continuous" release
+          # that is rewritten in place — there is no immutable upstream reference
+          # to pin (asset ids turn over with each rebuild too), so the CONTENT is
+          # the pin: verify the bytes and fail closed on any change.
+          #
+          # A mismatch means either upstream rebuilt (frequent — re-hash, skim
+          # what changed, bump) or someone tampered with the download. Both
+          # deserve a human look, which is why this does not auto-accept.
+          # Re-pin with: curl -sL <url> | sha256sum
+          # The durable fix is mirroring a reviewed copy into a release of this
+          # repo and fetching that instead.
+          curl -fsSL -o "$ld" \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
+          curl -fsSL -o "$ldqt" \
+            "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
+          echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
+            || { echo "::error::$ld changed upstream — review and re-pin its sha256"; exit 1; }
+          echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \
+            || { echo "::error::$ldqt changed upstream — review and re-pin its sha256"; exit 1; }
           chmod +x "$ld" "$ldqt"
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/

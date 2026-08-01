@@ -35,8 +35,10 @@ private:
         QString token;
         QString payload;
     };
-    static Received readOne(QLocalServer &server, int timeoutMs = 2000);
+    Received readOne(QLocalServer &server, int timeoutMs = 3000);
+    void wireCollector(QLocalServer &server);
 
+    QByteArray m_received;
     QString m_socketName;
     QTemporaryDir m_configHome;
 };
@@ -63,30 +65,41 @@ void TestIntegrationSingleInstance::cleanupTestCase()
     QLocalServer::removeServer(m_socketName);
 }
 
+// Collect asynchronously rather than polling after the fact: the real sender
+// writes, flushes and disconnects, and on Windows named pipes a peer that has
+// already gone leaves nothing to accept — the message has to be picked up as it
+// arrives, which is also how the production listener works.
 TestIntegrationSingleInstance::Received
 TestIntegrationSingleInstance::readOne(QLocalServer &server, int timeoutMs)
 {
     Received out;
-    if (!server.waitForNewConnection(timeoutMs))
-        return out;
-    QLocalSocket *peer = server.nextPendingConnection();
-    if (!peer)
-        return out;
-    QByteArray buf;
     QElapsedTimer timer;
     timer.start();
-    while (timer.elapsed() < timeoutMs) {
-        if (peer->waitForReadyRead(200))
-            buf += peer->readAll();
-        if (freetunnel::parseInstanceMessage(buf, &out.token, &out.payload)) {
+    while (timer.elapsed() < timeoutMs && !out.got) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (m_received.isEmpty())
+            continue;
+        if (freetunnel::parseInstanceMessage(m_received, &out.token, &out.payload))
             out.got = true;
-            break;
-        }
-        if (peer->state() != QLocalSocket::ConnectedState)
-            break;
     }
-    peer->deleteLater();
+    Q_UNUSED(server);
     return out;
+}
+
+void TestIntegrationSingleInstance::wireCollector(QLocalServer &server)
+{
+    m_received.clear();
+    connect(&server, &QLocalServer::newConnection, this, [this, &server]() {
+        while (QLocalSocket *peer = server.nextPendingConnection()) {
+            connect(peer, &QLocalSocket::readyRead, this,
+                    [this, peer]() { m_received += peer->readAll(); });
+            connect(peer, &QLocalSocket::disconnected, this, [this, peer]() {
+                m_received += peer->readAll();
+                peer->deleteLater();
+            });
+            m_received += peer->readAll();
+        }
+    });
 }
 
 // The real second-launch path: find the session token, verify the listener
@@ -100,6 +113,7 @@ void TestIntegrationSingleInstance::forwardDeliversAuthenticatedCommand()
     QLocalServer server;
     server.setSocketOptions(QLocalServer::UserAccessOption);
     QVERIFY(server.listen(m_socketName));
+    wireCollector(server);
 
     QVERIFY(freetunnel::forwardToRunningInstance(m_socketName,
                                                  QStringLiteral("freetunnel://toggle")));

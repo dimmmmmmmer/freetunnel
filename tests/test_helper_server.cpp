@@ -79,6 +79,22 @@ void TestHelperServer::initTestCase()
     QVERIFY(m_dir.isValid());
     QVERIFY2(QFile::exists(QStringLiteral(FT_TEST_HELPER_BINARY)),
              "helper binary was not built next to this test");
+#if defined(Q_OS_WIN)
+    // runVpnHelper() refuses to start on Windows unless wintun.dll sits next to
+    // the executable — a real production requirement (the core loads it to make
+    // the tunnel adapter), but nothing to do with the IPC layer under test here.
+    // Drop a placeholder next to the helper so the handshake and the parser get
+    // exercised on Windows too; it is a build-directory artifact and is never
+    // packaged.
+    const QString stub = QFileInfo(QStringLiteral(FT_TEST_HELPER_BINARY)).absolutePath()
+            + QStringLiteral("/wintun.dll");
+    if (!QFile::exists(stub)) {
+        QFile f(stub);
+        QVERIFY2(f.open(QIODevice::WriteOnly), "could not place the wintun.dll placeholder");
+        f.write("placeholder for tests");
+        f.close();
+    }
+#endif
 }
 
 void TestHelperServer::init() {}
