@@ -691,6 +691,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # First: actions/checkout cleans the workspace, so it has to run before the
+      # artifacts land in it. Full history + tags — the notes come from
+      # CHANGELOG.md and the compare link needs the previous tag.
+      - name: Check out the changelog
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -736,6 +747,50 @@ jobs:
           rm -f ed25519.pem
           ls -la SHA256SUMS.txt.sig
 
+      # What changed comes from CHANGELOG.md, so every release says something
+      # about ITSELF. The install notes are the part that is identical every
+      # time, and they are appended AFTER the real notes — never instead of
+      # them. A tag with no matching section fails here rather than publishing
+      # yet another release whose description tells the user nothing.
+      - name: Assemble release notes
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          awk -v want="## $version" '
+            $0 == want { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          # Trim leading/trailing blank lines.
+          sed -i -e '/./,$!d' notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error title=No release notes::CHANGELOG.md has no '## $version' section. Write what changed for users before tagging."
+            exit 1
+          fi
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            echo
+            echo "### Installing"
+            echo
+            echo "- **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS"
+            echo "  (\`sudo apt install ./freetunnel-linux-x86_64.deb\`) — it bundles its own Qt"
+            echo "  and appears in the app menu. Or run the portable **AppImage**"
+            echo "  (\`chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage\`)."
+            echo "- **macOS**: open the **.dmg** and drag FreeTunnel to Applications. The app is"
+            echo "  ad-hoc signed but not notarized, so on first launch right-click it → Open"
+            echo "  (or run \`xattr -dr com.apple.quarantine /Applications/FreeTunnel.app\`)."
+            echo "- **Windows**: run the **Setup.exe**. SmartScreen may warn — choose"
+            echo "  \"More info\" → \"Run anyway\"."
+            echo
+            echo "Verify your download against \`SHA256SUMS.txt\` (signed as \`SHA256SUMS.txt.sig\`)."
+            if [ -n "$prev" ]; then
+              echo
+              echo "**Every commit in this release**: ${{ github.server_url }}/${{ github.repository }}/compare/$prev...${GITHUB_REF_NAME}"
+            fi
+          } >> notes.md
+          echo "--- release body ---"
+          cat notes.md
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
@@ -746,16 +801,4 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/SHA256SUMS.txt
             artifacts/SHA256SUMS.txt.sig
-          generate_release_notes: true
-          body: |
-            Builds are unsigned (see README for first-run notes).
-
-            - **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS
-              (`sudo apt install ./freetunnel-linux-x86_64.deb`) — it bundles its
-              own Qt and integrates into the app menu. Or run the portable
-              **AppImage** (`chmod +x freetunnel-linux-x86_64.AppImage &&
-              ./freetunnel-linux-x86_64.AppImage`).
-            - **macOS**: the app is ad-hoc signed but not notarized. On first launch
-              right-click the app → Open (or run
-              `xattr -dr com.apple.quarantine /Applications/FreeTunnel.app`).
-            - **Windows**: SmartScreen may warn — choose "More info" → "Run anyway".
+          body_path: notes.md
