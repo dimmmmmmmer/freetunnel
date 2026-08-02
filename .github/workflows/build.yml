@@ -186,16 +186,12 @@ jobs:
         run: |
           sudo apt-get update
           # Modern clang (the core is clang-only; 22.04's default clang is too old).
-          # From this repo's build-tools mirror, not apt.llvm.org: this script runs
-          # AS ROOT in the job that produces release binaries, and upstream can
-          # change it at any time. Digest verified after download as well.
-          curl -fsSL -o llvm.sh \
-            "https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02/llvm.sh"
-          echo "9474ecd78b52aba6e923976b1e9773f5613027cc7e237b9956986cb536e02a36  llvm.sh" \
-            | sha256sum -c - \
-            || { echo "::error::llvm.sh does not match its pinned digest"; exit 1; }
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
+          # The installer is vendored in this repo rather than fetched from
+          # apt.llvm.org: it runs AS ROOT in the job that produces the release
+          # binaries, so what it does has to be reviewable in a diff, not whatever
+          # upstream is serving today. It is 8 KB of shell — refresh it by opening
+          # a PR against scripts/llvm.sh.
+          sudo bash client/scripts/llvm.sh 18
           # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
           # transitive includes the core relies on (e.g. <algorithm>); clang-18
           # auto-selects the newest GCC, matching what works on ubuntu-24.04.
@@ -430,6 +426,9 @@ jobs:
           # tools pick the libraries, AppRun and Qt plugins that go into the
           # published .deb/.AppImage, so what they are must be a deliberate choice.
           # The digest is still verified — a corrupted mirror fails the build too.
+          # Not vendored the way scripts/llvm.sh is: these are 31 MB of binary
+          # that every clone would carry forever, and a release asset is the one
+          # place they can sit immutably without weighing down the repository.
           # To refresh: download upstream, review, upload under a new
           # build-tools-<date> tag, update the URLs and digests here.
           tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
