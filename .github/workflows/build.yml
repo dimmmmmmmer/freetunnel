@@ -767,7 +767,11 @@ jobs:
             echo "::error title=No release notes::CHANGELOG.md has no '## $version' section. Write what changed for users before tagging."
             exit 1
           fi
-          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          # --match: the nearest tag is not necessarily the previous RELEASE —
+          # the build-tools mirror tag sits on the same history and was picked
+          # first for 1.1.7, pointing the compare link at build tooling.
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' \
+                    "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           {
             echo
             echo "### Installing"
