@@ -596,7 +596,25 @@ jobs:
           codesign --verify --deep --strict "$APP"
           mkdir -p out
           RW=out/rw.dmg
-          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m -ov -format UDRW "$RW"
+          # "Resource busy" here is transient and it has failed a build: the .app
+          # was written seconds ago and Spotlight/fseventsd can still be walking
+          # it, and a /Volumes/FreeTunnel left attached by an earlier attempt
+          # holds the volume name. Clean up and retry — the detach below already
+          # does the same thing for the same reason, and a release build should
+          # not die on this.
+          for attempt in 1 2 3 4 5; do
+            hdiutil detach /Volumes/FreeTunnel -force >/dev/null 2>&1 || true
+            if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m \
+                 -ov -format UDRW "$RW"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::hdiutil create failed five times — not a transient"
+              exit 1
+            fi
+            echo "hdiutil create failed (attempt $attempt) — retrying in 15 s"
+            sleep 15
+          done
           MOUNT=$(hdiutil attach -readwrite -noverify -noautofsck "$RW" | awk '/\/Volumes\// {print $NF; exit}')
           cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
           SetFile -a C "$MOUNT/.VolumeIcon.icns"

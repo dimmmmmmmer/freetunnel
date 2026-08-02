@@ -49,6 +49,11 @@ QStringList loadStoredConfigs() {
     if (!f.open(QIODevice::ReadOnly))
         return rediscoverConfigs();
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    // Done reading. Closing here is not tidiness: the recovery below rewrites
+    // this very path through QSaveFile, and on Windows a rename cannot replace a
+    // file that is still open — the re-anchor would fail silently and every
+    // start would have to rediscover again.
+    f.close();
     if (!doc.isArray()) {
         // The file is there but unreadable as JSON — a truncated or half-written
         // index (crash / full disk mid-save). An *empty* array is a legitimate
