@@ -504,6 +504,50 @@ add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client)
 
 # Split-tunnel behaviour (routes, profiles, and which edits disturb a live
 # tunnel). Reuses the Backend source set — the logic under test lives on Backend.
+add_executable(test_backend_logs
+    test_backend_logs.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_logs PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn ../src)
+target_compile_definitions(test_backend_logs PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_logs PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_logs)
+if(WIN32)
+    target_link_libraries(test_backend_logs PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_logs PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_logs PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_logs COMMAND test_backend_logs)
+
+add_executable(test_backend_config
+    test_backend_config.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_config PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn ../src)
+target_compile_definitions(test_backend_config PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_config PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_config)
+if(WIN32)
+    target_link_libraries(test_backend_config PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_config PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_config PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_config COMMAND test_backend_config)
+
 add_executable(test_backend_split
     test_backend_split.cpp
     ${BACKEND_IMPORT_TEST_SOURCES}
