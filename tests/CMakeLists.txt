@@ -526,6 +526,28 @@ if(OpenSSL_FOUND)
 endif()
 add_test(NAME backend_logs COMMAND test_backend_logs)
 
+add_executable(test_backend_settings
+    test_backend_settings.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_settings PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn ../src)
+target_compile_definitions(test_backend_settings PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_settings PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_settings)
+if(WIN32)
+    target_link_libraries(test_backend_settings PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_settings PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_settings PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_settings COMMAND test_backend_settings)
+
 add_executable(test_backend_config
     test_backend_config.cpp
     ${BACKEND_IMPORT_TEST_SOURCES}

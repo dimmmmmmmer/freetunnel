@@ -22,6 +22,7 @@ private slots:
     void migrateStripsPassword();
     void keepsTheEventLoopRunningWhileItWaits();
     void worksOffTheMainThread();
+    void reentryDoesNotStackEventLoops();
 };
 
 void TestCredentialStore::init()
@@ -134,6 +135,41 @@ void TestCredentialStore::worksOffTheMainThread()
     QVERIFY(stored);
     QCOMPARE(loaded, QStringLiteral("from-worker"));
     QVERIFY(deleted);
+}
+
+// Keeping the UI painted means running an event loop, and an event loop can
+// dispatch a queued call that asks the credential store for something else. That
+// must not open a second nested loop on top of the first: nesting has to stay
+// bounded no matter what the dispatched code does.
+//
+// Observable as: a call posted from inside the re-entrant call is NOT dispatched
+// before it returns. If the inner call had spun its own loop, it would be.
+void TestCredentialStore::reentryDoesNotStackEventLoops()
+{
+    const QString key = QStringLiteral("/tmp/test-reentry.toml");
+    QVERIFY(CredentialStore::storePassword(key, QStringLiteral("s3cret")));
+
+    bool innerDispatched = false;
+    bool sawInnerDispatchedTooEarly = false;
+    QString reentrantResult;
+
+    QMetaObject::invokeMethod(
+            qApp,
+            [&]() {
+                QMetaObject::invokeMethod(
+                        qApp, [&innerDispatched]() { innerDispatched = true; },
+                        Qt::QueuedConnection);
+                reentrantResult = CredentialStore::loadPassword(key); // re-entry
+                sawInnerDispatchedTooEarly = innerDispatched;
+            },
+            Qt::QueuedConnection);
+
+    QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("s3cret"));
+    QCOMPARE(reentrantResult, QStringLiteral("s3cret")); // the re-entrant call still works
+    QVERIFY2(!sawInnerDispatchedTooEarly,
+             "the re-entrant call spun its own event loop — nesting is unbounded");
+
+    QVERIFY(CredentialStore::deletePassword(key));
 }
 
 QTEST_MAIN(TestCredentialStore)

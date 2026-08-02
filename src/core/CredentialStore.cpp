@@ -13,6 +13,7 @@
 #include <QLoggingCategory>
 #include <QProcess>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QThread>
 
@@ -346,6 +347,14 @@ namespace {
 // input is excluded, so the app stays painted and responsive-looking but nothing
 // can re-enter the operation that is already in flight. Off the GUI thread there
 // is nothing to keep alive, so the call is made directly.
+// Depth guard for the loop below. Only ever touched on the GUI thread, and only
+// between the check and the reset, so a plain bool is enough.
+inline bool &uiCallInFlight()
+{
+    static bool inFlight = false;
+    return inFlight;
+}
+
 template <typename Fn>
 auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
 {
@@ -353,6 +362,16 @@ auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
     QCoreApplication *app = QCoreApplication::instance();
     if (!app || QThread::currentThread() != app->thread())
         return fn();
+    // Already inside the loop below, re-entered from a queued call it dispatched.
+    // Run directly rather than stacking a second loop on top of the first: the
+    // window is already in its waiting state, so there is no responsiveness left
+    // to preserve, and nesting depth stays bounded at one no matter what the
+    // dispatched code does.
+    if (uiCallInFlight())
+        return fn();
+
+    uiCallInFlight() = true;
+    const auto reset = qScopeGuard([] { uiCallInFlight() = false; });
 
     Result result{};
     QEventLoop loop;
