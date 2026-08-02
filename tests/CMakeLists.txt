@@ -486,6 +486,19 @@ add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e)
 # connect/disconnect/config-switch/reconnect behavior without the native VPN
 # core. The mock include dir must come FIRST so "vpn/vpn.h", "net/*.h" and
 # <toml++/toml.h> resolve to the stubs.
+# The core-event translation layer on its own: pure functions that decide which
+# error the user is shown and how the core's log tail is folded into ours.
+add_executable(test_vpn_events
+    test_vpn_events.cpp
+    ../src/vpn/qt_trusttunnel_events.cpp
+    ../src/vpn/qt_trusttunnel_platform.cpp
+)
+target_include_directories(test_vpn_events PRIVATE
+    mock_core ../include ../include/vpn ../src/vpn)
+target_compile_definitions(test_vpn_events PRIVATE FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_vpn_events PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME vpn_events COMMAND test_vpn_events)
+
 add_executable(test_qt_trusttunnel_client
     test_qt_trusttunnel_client.cpp
     ../src/vpn/qt_trusttunnel_client.cpp
