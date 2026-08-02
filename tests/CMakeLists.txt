@@ -559,3 +559,29 @@ target_compile_definitions(test_helper_server PRIVATE FT_ENABLE_TEST_HOOKS
 target_link_libraries(test_helper_server PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
 add_dependencies(test_helper_server freetunnel_test_helper)
 add_test(NAME helper_server COMMAND test_helper_server)
+
+# Backend's update state machine: the code that ends in launching an installer
+# sat at 2.3% line coverage, and both bugs found in it were found by review.
+add_executable(test_backend_updates
+    test_backend_updates.cpp
+    mock_http_server.cpp
+    mock_http_server.h
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_updates PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_backend_updates PRIVATE FREETUNNEL_VERSION="1.0.0" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_updates PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+freetunnel_link_linux_secrets(test_backend_updates)
+if(WIN32)
+    target_link_libraries(test_backend_updates PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_updates PRIVATE Qt6::Svg "-framework Security")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_updates PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_updates COMMAND test_backend_updates)
