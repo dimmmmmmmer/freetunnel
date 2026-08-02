@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QThread>
 
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
@@ -275,15 +276,8 @@ void Backend::logConnectAttempt()
                            h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
 }
 
-bool Backend::loadConnectTomlOrFail(QString *tomlOut)
+void Backend::failConnectNoPassword()
 {
-    const QString connectToml = freetunnel::buildConnectConfigToml(
-            m_activePath,
-            m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
-    if (!connectToml.isEmpty()) {
-        *tomlOut = connectToml;
-        return true;
-    }
     m_connecting = false;
     // Nothing further will report Connected or Error for this attempt, so
     // clearReapplyingIfDone() would never run: a reapply that dies here used to
@@ -293,7 +287,6 @@ bool Backend::loadConnectTomlOrFail(QString *tomlOut)
     m_reapplying = false;
     emit stateChanged();
     emit errorOccurred(tr("Config has no password — edit it and try again"));
-    return false;
 }
 
 void Backend::connectVpn() {
@@ -313,11 +306,44 @@ void Backend::connectVpn() {
         emit stateChanged();
     }
     logConnectAttempt();
-    QString connectToml;
-    if (!loadConnectTomlOrFail(&connectToml))
+    buildConnectTomlAsync();
+}
+
+// Building the connect TOML reads the config's password out of the OS credential
+// store. That is a blocking IPC to securityd on macOS, and while the system is
+// asking the user whether this build of the app may read the item, it does not
+// return — which froze the whole UI, spinner and all, for as long as the dialog
+// was up. Do it on a worker thread and resume on ours.
+void Backend::buildConnectTomlAsync()
+{
+    const quint64 generation = ++m_connectGen;
+    const QString path = m_activePath;
+    const QString level =
+            m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");
+    auto *watcher = new QThread(this);
+    QObject::connect(watcher, &QThread::started, watcher, [this, watcher, generation, path, level]() {
+        const QString toml = freetunnel::buildConnectConfigToml(path, level);
+        QMetaObject::invokeMethod(
+                this, [this, generation, toml]() { onConnectTomlReady(generation, toml); },
+                Qt::QueuedConnection);
+        watcher->quit();
+    });
+    QObject::connect(watcher, &QThread::finished, watcher, &QObject::deleteLater);
+    watcher->start();
+}
+
+void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
+{
+    // Superseded by a disconnect, a config switch or a newer attempt while the
+    // credential store had us waiting.
+    if (generation != m_connectGen)
         return;
+    if (toml.isEmpty()) {
+        failConnectNoPassword();
+        return;
+    }
     m_inConnect = true;
-    m_client.loadConfigFromToml(connectToml);
+    m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.setLogLevel(m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
@@ -329,6 +355,7 @@ void Backend::connectVpn() {
 void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
+    ++m_connectGen; // a credential read still in flight must not start a session
     m_reapplying = false;
     m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".

@@ -274,7 +274,12 @@ private:
     void clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected);
     bool shouldSkipConnectAttempt() const;
     void logConnectAttempt();
-    bool loadConnectTomlOrFail(QString *tomlOut);
+    // The connect TOML is built off the GUI thread: assembling it reads the
+    // password out of the OS credential store, and that call blocks — on macOS
+    // it can sit in securityd for as long as an authorization dialog is up.
+    void buildConnectTomlAsync();
+    void onConnectTomlReady(quint64 generation, const QString &toml);
+    void failConnectNoPassword();
 
     VpnHelperClient m_client;
     AppSettings m_settings;
@@ -312,7 +317,10 @@ private:
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
-    bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
+    bool m_inConnect = false;
+    // Bumped by anything that supersedes an in-flight connect, so a credential
+    // read that finishes late cannot start a session nobody asked for any more.
+    quint64 m_connectGen = 0;     // inside connectVpn(): suppress live-reapply
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran
 };
