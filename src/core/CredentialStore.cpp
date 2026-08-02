@@ -7,12 +7,14 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
 #include <QProcess>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QThread>
 
 #if defined(Q_OS_MACOS)
 #include <CoreFoundation/CoreFoundation.h>
@@ -330,7 +332,42 @@ QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
     return QFileInfo(absoluteConfigPath).absoluteFilePath();
 }
 
-bool CredentialStore::secureStorageAvailable()
+namespace {
+
+// Every call below talks to the OS credential store, and every one of them
+// BLOCKS: on macOS the request goes to securityd and does not return while the
+// system is asking the user whether this build may touch the item; on Linux the
+// Secret Service probe shells out to secret-tool and waits up to five seconds.
+// Called straight from the GUI thread — which is what opening the edit form,
+// saving a config, copying a config link or exporting one used to do — that
+// freezes the whole window, spinner and all.
+//
+// So run it on a worker and keep our own event loop turning while we wait. User
+// input is excluded, so the app stays painted and responsive-looking but nothing
+// can re-enter the operation that is already in flight. Off the GUI thread there
+// is nothing to keep alive, so the call is made directly.
+template <typename Fn>
+auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
+{
+    using Result = decltype(fn());
+    QCoreApplication *app = QCoreApplication::instance();
+    if (!app || QThread::currentThread() != app->thread())
+        return fn();
+
+    Result result{};
+    QEventLoop loop;
+    QThread *worker = QThread::create([&result, &fn]() { result = fn(); });
+    QObject::connect(worker, &QThread::finished, &loop, &QEventLoop::quit);
+    worker->start();
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    worker->wait();
+    delete worker;
+    return result;
+}
+
+} // namespace
+
+static bool doSecureStorageAvailable()
 {
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     return true;
@@ -345,7 +382,7 @@ bool CredentialStore::secureStorageAvailable()
 #endif
 }
 
-bool CredentialStore::storePassword(const QString &key, const QString &password)
+static bool doStorePassword(const QString &key, const QString &password)
 {
     if (key.isEmpty())
         return false;
@@ -395,7 +432,7 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
 #endif
 }
 
-QString CredentialStore::loadPassword(const QString &key)
+static QString doLoadPassword(const QString &key)
 {
     if (key.isEmpty())
         return QString();
@@ -437,7 +474,7 @@ static bool deletePasswordLinuxAll(const QString &key)
 }
 #endif
 
-bool CredentialStore::deletePassword(const QString &key)
+static bool doDeletePassword(const QString &key)
 {
     if (key.isEmpty())
         return false;
@@ -536,6 +573,32 @@ void sweepStaleMaterializedConfigs()
 void sweepLegacyPlaintextStorage()
 {
     sweepStaleMaterializedConfigs();
+}
+
+
+
+// ---- public entry points -------------------------------------------------
+// Thin wrappers so no caller can accidentally block the GUI thread on the
+// credential store; see withoutFreezingTheUi above.
+
+bool CredentialStore::secureStorageAvailable()
+{
+    return withoutFreezingTheUi([] { return doSecureStorageAvailable(); });
+}
+
+bool CredentialStore::storePassword(const QString &key, const QString &password)
+{
+    return withoutFreezingTheUi([&] { return doStorePassword(key, password); });
+}
+
+QString CredentialStore::loadPassword(const QString &key)
+{
+    return withoutFreezingTheUi([&] { return doLoadPassword(key); });
+}
+
+bool CredentialStore::deletePassword(const QString &key)
+{
+    return withoutFreezingTheUi([&] { return doDeletePassword(key); });
 }
 
 } // namespace freetunnel

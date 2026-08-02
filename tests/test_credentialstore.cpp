@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTemporaryFile>
 
 #include "core/CredentialStore.h"
@@ -19,13 +20,15 @@ private slots:
     void init();
     void storeLoadDelete();
     void migrateStripsPassword();
+    void keepsTheEventLoopRunningWhileItWaits();
+    void worksOffTheMainThread();
 };
 
 void TestCredentialStore::init()
 {
-    // Hermetic file-fallback path: redirect standard paths away from the real
-    // user scope (the OS keychain service name is hardcoded, so each test still
-    // deletes the entries it creates).
+    // Hermetic: standard paths point away from the real user scope, and under
+    // FT_ENABLE_TEST_HOOKS credentialServiceName() is unique to this process, so
+    // nothing here can name — let alone overwrite — a real entry.
     QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
     QCoreApplication::setApplicationName(QStringLiteral("CredentialStoreTest"));
     QStandardPaths::setTestModeEnabled(true);
@@ -80,6 +83,57 @@ void TestCredentialStore::migrateStripsPassword()
     CredentialStore::deletePassword(CredentialStore::keyForConfigPath(path));
     rf.close();
     QFile::remove(path);
+}
+
+// The OS credential store BLOCKS its caller: on macOS the request goes to
+// securityd, which does not answer while the system is asking the user to
+// authorize this binary. Called straight from the GUI thread that meant a frozen
+// window with a spinning cursor — reported from a real session, on the edit
+// form, on save, and on copying a config link.
+//
+// Rather than time anything (the store answers in microseconds when it is not
+// asking a human, so a duration assert would prove nothing), assert the property
+// that makes the freeze impossible: while the call is in flight, the calling
+// thread's event loop keeps delivering. A queued call posted first is therefore
+// dispatched BEFORE loadPassword() returns. A direct, blocking implementation
+// cannot do that — it never reaches the event loop.
+void TestCredentialStore::keepsTheEventLoopRunningWhileItWaits()
+{
+    const QString key = QStringLiteral("/tmp/test-responsive.toml");
+    QVERIFY(CredentialStore::storePassword(key, QStringLiteral("s3cret")));
+
+    bool painted = false;
+    QMetaObject::invokeMethod(qApp, [&painted]() { painted = true; }, Qt::QueuedConnection);
+    QVERIFY2(!painted, "the queued call must still be pending when the store is entered");
+
+    QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("s3cret"));
+    QVERIFY2(painted, "the UI thread was blocked for the whole credential call");
+
+    QVERIFY(CredentialStore::deletePassword(key));
+}
+
+// ...and the same call off the main thread must still work, since that is the
+// path the connect sequence takes. There is no UI to keep alive there, so it
+// runs directly — the wrapper must not deadlock waiting on an event loop that
+// nobody is running.
+void TestCredentialStore::worksOffTheMainThread()
+{
+    const QString key = QStringLiteral("/tmp/test-worker.toml");
+    QString loaded;
+    bool stored = false;
+    bool deleted = false;
+    QThread *worker = QThread::create([&]() {
+        stored = CredentialStore::storePassword(key, QStringLiteral("from-worker"));
+        loaded = CredentialStore::loadPassword(key);
+        deleted = CredentialStore::deletePassword(key);
+    });
+    worker->start();
+    QVERIFY2(worker->wait(10000), "a credential call off the main thread hung");
+    delete worker;
+
+    QVERIFY(stored);
+    QCOMPARE(loaded, QStringLiteral("from-worker"));
+    QVERIFY(deleted);
 }
 
 QTEST_MAIN(TestCredentialStore)
