@@ -48,6 +48,7 @@ private:
     // A complete, valid create form; individual cases override what they exercise.
     static QVariantMap form(const QString &name, const QString &password);
     QString pathFor(const Backend &backend, int index) const;
+    static void assertOwnerOnly(const QString &path);
 
     QTemporaryDir m_home;
 };
@@ -99,6 +100,21 @@ QVariantMap TestBackendConfig::form(const QString &name, const QString &password
     return f;
 }
 
+// Owner-only is a POSIX-mode claim. On Windows the code relies on the config
+// directory's ACL instead of mode bits, and Qt does not consult NTFS ACLs unless
+// permission checking is explicitly enabled — it reports every file as readable
+// by everyone — so the check would test Qt's default, not our code.
+void TestBackendConfig::assertOwnerOnly(const QString &path)
+{
+#if defined(Q_OS_UNIX)
+    const QFile::Permissions perms = QFile::permissions(path);
+    QVERIFY2(!(perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther)),
+             qPrintable(QStringLiteral("%1 is readable by other local users").arg(path)));
+#else
+    QVERIFY(QFileInfo::exists(path));
+#endif
+}
+
 QString TestBackendConfig::pathFor(const Backend &backend, int index) const
 {
     // The list exposes display names; the file is the one that carries the name.
@@ -142,9 +158,7 @@ void TestBackendConfig::createdConfigIsOwnerOnly()
 {
     Backend backend;
     QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
-    const QFile::Permissions perms = QFile::permissions(pathFor(backend, 0));
-    QVERIFY2(!(perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther)),
-             "the config file is readable by other local users");
+    assertOwnerOnly(pathFor(backend, 0));
 }
 
 void TestBackendConfig::editInPlaceKeepsThePathAndUpdatesTheFields()
@@ -214,6 +228,8 @@ void TestBackendConfig::aFailedSaveLeavesTheExistingConfigIntact()
     QFile f(target);
     QVERIFY(f.open(QIODevice::ReadOnly));
     QCOMPARE(f.readAll(), QByteArrayLiteral("original\n"));
+    freetunnel::CredentialStore::deletePassword(
+            freetunnel::CredentialStore::keyForConfigPath(blocked));
     QDir().rmdir(blocked);
     QFile::remove(target);
 }
@@ -235,8 +251,7 @@ void TestBackendConfig::exportCarriesThePasswordAndStaysOwnerOnly()
     f.close();
     QCOMPARE(c.username, QStringLiteral("alice"));
     QCOMPARE(c.password, QStringLiteral("hunter2")); // pulled back out of the store
-    QVERIFY2(!(QFile::permissions(dest) & (QFileDevice::ReadGroup | QFileDevice::ReadOther)),
-             "the exported config is readable by other local users");
+    assertOwnerOnly(dest);
     QFile::remove(dest);
 }
 

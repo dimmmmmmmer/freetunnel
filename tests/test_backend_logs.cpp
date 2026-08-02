@@ -196,9 +196,14 @@ void TestBackendLogs::theLogFileIsOwnerOnly()
 {
     Backend backend;
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(logPath()), 5000);
+#if defined(Q_OS_UNIX)
+    // POSIX-mode claim only: on Windows the file inherits the ACL of the app data
+    // directory, and Qt reports NTFS files as world-readable unless permission
+    // checking is turned on — the check would test Qt's default, not our code.
     const QFile::Permissions perms = QFile::permissions(logPath());
     QVERIFY2(!(perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther)),
              "the log file is readable by other local users");
+#endif
 }
 
 QTEST_MAIN(TestBackendLogs)
