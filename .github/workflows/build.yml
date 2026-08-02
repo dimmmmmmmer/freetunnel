@@ -413,9 +413,6 @@ jobs:
       # ------------------------------------------------------------- Package
       - name: Prepare Linux bundle
         if: matrix.platform == 'linux'
-        env:
-          # Only to read the build-tools mirror below; see that comment.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
           mkdir -p out
@@ -433,14 +430,17 @@ jobs:
           # that every clone would carry forever, and a release asset is the one
           # place they can sit immutably without weighing down the repository.
           #
-          # Downloaded with the workflow's own token rather than a public URL so
-          # the mirror can stay a DRAFT release: build tooling has no business on
-          # the releases page next to the installers people actually download.
-          # To refresh: download upstream, review, upload to a new draft under a
-          # build-tools-<date> tag, update the tag and digests here.
-          gh release download build-tools-2026-08-02 \
-            --repo "${{ github.repository }}" \
-            --pattern "$ld" --pattern "$ldqt" --clobber
+          # Published as a PRE-release so it is never shown as the latest one —
+          # it used to be, which pointed the repo sidebar at build tooling instead
+          # of the installers. A draft would hide it from the releases page
+          # entirely, but drafts are invisible to a contents:read token and this
+          # job must not hold a write-capable one: it is the job that runs the
+          # third-party tooling below.
+          # To refresh: download upstream, review, upload under a new
+          # build-tools-<date> tag, update the URLs and digests here.
+          tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
+          curl -fsSL -o "$ld" "$tools/$ld"
+          curl -fsSL -o "$ldqt" "$tools/$ldqt"
           echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
             || { echo "::error::$ld does not match its pinned digest"; exit 1; }
           echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \
