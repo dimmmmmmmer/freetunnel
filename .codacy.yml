@@ -11,6 +11,11 @@ exclude_paths:
   - 'docs/**'
   - 'i18n/**'
   - 'SECURITY.md'
+  # Vendored verbatim from apt.llvm.org and digest-checked before it was
+  # committed (see .github/workflows/build.yml). Its shell style is upstream's
+  # business: patching it here would fork the file and turn every refresh into a
+  # merge, for warnings about code we did not write.
+  - 'scripts/llvm.sh'
 
 languages:
   typescript:

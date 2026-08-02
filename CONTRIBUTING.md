@@ -51,7 +51,7 @@ Required for live upload/download stats in the UI. Verified in CI via
 ### 3. Bootstrap Conan deps
 
 ```bash
-pip install -r requirements.txt "conan~=2.12"
+pip install -r requirements.txt "conan==2.31.1"  # same pin as CI
 ./scripts/bootstrap_conan_deps.py
 ```
 

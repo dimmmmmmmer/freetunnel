@@ -19,7 +19,13 @@ Item {
     // Dimmed backdrop — the main UI shows through; click to close.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
         MouseArea { anchors.fill: parent; onClicked: cform.tryClose() } }
-    Shortcut { sequences: ["Escape"]; enabled: !discardConfirm.visible; onActivated: cform.tryClose() }
+    // Escape closes the innermost thing first: stand down while the discard
+    // dialog or a window-level popup (protocol / split-profile dropdown, confirm
+    // dialog) already handles it — two enabled shortcuts on one key are
+    // ambiguous to Qt and then *neither* fires.
+    Shortcut { sequences: ["Escape"]
+               enabled: !discardConfirm.visible && !shell.windowPopupOpen
+               onActivated: cform.tryClose() }
 
     Rectangle {
         id: cform
@@ -41,10 +47,13 @@ Item {
         property string splitProfile: "Default"
         property string snap: ""
         readonly property bool editing: shell.editIndex >= 0
+        // Join on a separator no field can contain (U+001F): a plain join() lets
+        // a boundary-shifting edit (name "ab" + host "c" → name "a" + host "bc")
+        // rebuild the same string, so tryClose() would drop real edits silently.
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
                     protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
-                    skipVerification, antiDpi, splitProfile].join("")
+                    skipVerification, antiDpi, splitProfile].join("\u001f")
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
@@ -187,6 +196,9 @@ Item {
             }
         }
     }
+    // Read by the window so its own confirm dialog can stand down while this
+    // inner one owns Escape.
+    readonly property bool confirmVisible: discardConfirm.visible
     ConfirmDialog {
         id: discardConfirm
         theme: createRoot.theme

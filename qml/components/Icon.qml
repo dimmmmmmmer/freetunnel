@@ -9,6 +9,10 @@ Image {
     sourceSize: Qt.size(width * 2, height * 2)
     function reload() {
         if (svg == "") return
+        // Colour bindings still fire while an item is being torn down (page
+        // switch / list model reset), and by then its context no longer resolves
+        // the injected `backend` — re-rendering is pointless there anyway.
+        if (typeof backend === "undefined" || !backend) return
         // qrc-restricted read via the backend — avoids enabling QML XHR local
         // file access (QML_XHR_ALLOW_FILE_READ) for the whole engine.
         var text = backend.readBundledText(svg)

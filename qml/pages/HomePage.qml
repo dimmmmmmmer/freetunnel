@@ -17,17 +17,23 @@ Item {
         anchors.bottomMargin: 44
         spacing: 12
         Repeater {
-            model: [ { v: backend.downSpeed, c: theme.success, a: "↓" },
-                     { v: backend.upSpeed, c: theme.textDim, a: "↑" } ]
+            // Constant model — the live values are bound *inside* the delegate.
+            // Putting backend.downSpeed/upSpeed in the model instead made the
+            // model a fresh array on every tick (1 Hz), tearing both tiles down
+            // and rebuilding them each second.
+            model: [ { up: false, a: "↓" }, { up: true, a: "↑" } ]
             Rectangle {
+                id: speedTile
                 required property var modelData
                 Layout.preferredWidth: 116; Layout.preferredHeight: 44; radius: 8; color: theme.tile
                 Row {
                     anchors.centerIn: parent; spacing: 5
                     Text { anchors.verticalCenter: parent.verticalCenter
-                           text: parent.parent.modelData.a; color: parent.parent.modelData.c; font.pixelSize: 14 }
+                           text: speedTile.modelData.a
+                           color: speedTile.modelData.up ? theme.textDim : theme.success; font.pixelSize: 14 }
                     Text { anchors.verticalCenter: parent.verticalCenter
-                           text: parent.parent.modelData.v + qsTr(" MB/s"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                           text: (speedTile.modelData.up ? backend.upSpeed : backend.downSpeed) + qsTr(" MB/s")
+                           color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
                 }
             }
         }

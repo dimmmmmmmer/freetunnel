@@ -115,7 +115,15 @@ struct VpnCallbacks {
 };
 
 struct Logger {
-    static void set_log_level(LogLevel) {}
+    // Recorded so tests can assert that the Verbose-logs toggle actually reaches
+    // the core: the wrapper reads `loglevel` back out of the config TOML and
+    // pushes it here, and that readback silently regressed once already.
+    static LogLevel &last_level()
+    {
+        static LogLevel level = LOG_LEVEL_INFO;
+        return level;
+    }
+    static void set_log_level(LogLevel l) { last_level() = l; }
 };
 
 } // namespace ag

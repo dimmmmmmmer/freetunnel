@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QThread>
 
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
@@ -26,18 +27,19 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     }
 
     wireVpnClientSignals();
-    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
+    m_client.setSessionLogging(m_settings.logging_enabled);
 
     m_ticker.setInterval(1000);
     connect(&m_ticker, &QTimer::timeout, this, [this]() { onStatsTick(); });
     m_ticker.start();
 
-    // Re-check the log size hourly, but only while the tunnel is fully down:
-    // the core (in the elevated helper) appends to the same file through its
-    // own descriptor, and rewriting it under the core's feet would corrupt it.
+    // Re-check the log size hourly. This used to wait for a fully-down tunnel
+    // because the core appended to the same file through its own descriptor —
+    // it no longer does, so the trim can run during a long session, which is
+    // exactly when the file grows.
     m_logTrimTimer.setInterval(60 * 60 * 1000);
     connect(&m_logTrimTimer, &QTimer::timeout, this, [this]() {
-        if (m_settings.logging_enabled && !m_connected && !m_connecting && !m_disconnecting)
+        if (m_settings.logging_enabled)
             trimLogFile();
     });
     m_logTrimTimer.start();
@@ -96,10 +98,20 @@ void Backend::applyVpnClientState(VpnHelperClient::State st)
     if (nowConnected && !m_connected)
         m_session.restart();
     m_connected = nowConnected;
+    clearReapplyingIfDone(st, nowConnected);
+    // A config-switch / rule-reapply teardown is the first half of a reconnect,
+    // not an "Off" state. Reporting connected=connecting=disconnecting=false for
+    // that window made the UI show "Off" while the tunnel was still up, let
+    // toggle() start a connect that raced the pending one, and let removeConfig()
+    // miss its delete-active guard (leaving m_pendingReconnect to auto-connect a
+    // config the user never selected).
+    const bool switching = m_reapplying
+            && (st == VpnHelperClient::State::Disconnecting
+                || st == VpnHelperClient::State::Disconnected);
     m_connecting = st == VpnHelperClient::State::Connecting
                    || st == VpnHelperClient::State::Reconnecting
-                   || st == VpnHelperClient::State::WaitingForNetwork;
-    clearReapplyingIfDone(st, nowConnected);
+                   || st == VpnHelperClient::State::WaitingForNetwork
+                   || switching;
     m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
 }
 
@@ -264,19 +276,17 @@ void Backend::logConnectAttempt()
                            h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
 }
 
-bool Backend::loadConnectTomlOrFail(QString *tomlOut)
+void Backend::failConnectNoPassword()
 {
-    const QString connectToml = freetunnel::buildConnectConfigToml(
-            m_activePath,
-            m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
-    if (!connectToml.isEmpty()) {
-        *tomlOut = connectToml;
-        return true;
-    }
     m_connecting = false;
+    // Nothing further will report Connected or Error for this attempt, so
+    // clearReapplyingIfDone() would never run: a reapply that dies here used to
+    // latch m_reapplying forever, masking m_disconnecting, swallowing every
+    // vpnError toast and killing live rule reapply until some later connect
+    // happened to succeed.
+    m_reapplying = false;
     emit stateChanged();
     emit errorOccurred(tr("Config has no password — edit it and try again"));
-    return false;
 }
 
 void Backend::connectVpn() {
@@ -296,15 +306,48 @@ void Backend::connectVpn() {
         emit stateChanged();
     }
     logConnectAttempt();
-    QString connectToml;
-    if (!loadConnectTomlOrFail(&connectToml))
+    buildConnectTomlAsync();
+}
+
+// Building the connect TOML reads the config's password out of the OS credential
+// store. That is a blocking IPC to securityd on macOS, and while the system is
+// asking the user whether this build of the app may read the item, it does not
+// return — which froze the whole UI, spinner and all, for as long as the dialog
+// was up. Do it on a worker thread and resume on ours.
+void Backend::buildConnectTomlAsync()
+{
+    const quint64 generation = ++m_connectGen;
+    const QString path = m_activePath;
+    const QString level =
+            m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");
+    auto *watcher = new QThread(this);
+    QObject::connect(watcher, &QThread::started, watcher, [this, watcher, generation, path, level]() {
+        const QString toml = freetunnel::buildConnectConfigToml(path, level);
+        QMetaObject::invokeMethod(
+                this, [this, generation, toml]() { onConnectTomlReady(generation, toml); },
+                Qt::QueuedConnection);
+        watcher->quit();
+    });
+    QObject::connect(watcher, &QThread::finished, watcher, &QObject::deleteLater);
+    watcher->start();
+}
+
+void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
+{
+    // Superseded by a disconnect, a config switch or a newer attempt while the
+    // credential store had us waiting.
+    if (generation != m_connectGen)
         return;
+    if (toml.isEmpty()) {
+        failConnectNoPassword();
+        return;
+    }
     m_inConnect = true;
-    m_client.loadConfigFromToml(connectToml);
+    m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.setLogLevel(m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
-    m_client.setSessionLogging(logPath(), m_settings.logging_enabled);
+    m_client.setSessionLogging(m_settings.logging_enabled);
     m_client.connectVpn();
     m_inConnect = false;
 }
@@ -312,6 +355,7 @@ void Backend::connectVpn() {
 void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
+    ++m_connectGen; // a credential read still in flight must not start a session
     m_reapplying = false;
     m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".

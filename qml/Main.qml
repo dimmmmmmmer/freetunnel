@@ -45,10 +45,24 @@ Window {
             // Defer so tray/dock menu items can finish closing before we tear down.
             Qt.callLater(function() { tray.visible = false })
         }
-        function onDeepLinkImportConfirmationRequired(message, link) {
-            showConfirm(message, qsTr("Import anyway"), function() {
-                backend.confirmDeepLinkImport(link)
-            })
+        // Every deep-link import is confirmed, not just the ones that disable
+        // certificate verification — so the button is a plain «Import»; the
+        // backend's message carries any warning about the link itself.
+        function onDeepLinkImportConfirmationRequired(message, link, existingName) {
+            if (existingName === "") {
+                showConfirm(message, qsTr("Import"), function() {
+                    backend.confirmDeepLinkImport(link, false)
+                })
+                return
+            }
+            // Name collision: replacing is what the user usually means when a link
+            // updates a server they already have, but it is destructive, so it is
+            // an explicit third choice rather than the default.
+            // "Replace" is the destructive one, so it takes the danger-styled
+            // primary button; "Add copy" is the safe fallback and stays neutral.
+            showConfirmWithAlternate(message, qsTr("Replace"), qsTr("Add copy"),
+                                     function() { backend.confirmDeepLinkImport(link, true) },
+                                     function() { backend.confirmDeepLinkImport(link, false) })
         }
     }
 
@@ -144,6 +158,11 @@ Window {
     property int currentPage: 0
     property string overlay: "" // "", "create"
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
+    // True while a window-level popup already owns Escape (the select dropdown or
+    // the confirm dialog). Sub-screens must disable their own Escape shortcut
+    // then: two *enabled* shortcuts on the same key make Qt report the press as
+    // ambiguous and neither handler runs, so Escape would go dead entirely.
+    readonly property bool windowPopupOpen: selectPopup.open || winConfirm.visible
     // nav order: Home, Configs, Split, Settings, Logs (configs before split)
     readonly property var navIcons: ["connection", "configs", "network", "settings", "log"]
     readonly property var pagePaths: ["pages/HomePage.qml", "pages/ConfigsPage.qml",
@@ -471,7 +490,12 @@ Window {
         id: overlayLayer; anchors.fill: parent; z: 1500
         visible: selectPopup.open
         MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
-        Shortcut { sequence: "Escape"; enabled: selectPopup.open; onActivated: selectPopup.open = false }
+        // Stand down while a confirm dialog is up: it owns Escape then, and two
+        // enabled shortcuts on the same key make Qt report the press as
+        // ambiguous — Escape would do nothing at all.
+        Shortcut { sequence: "Escape"
+                   enabled: selectPopup.open && !winConfirm.visible
+                   onActivated: selectPopup.open = false }
         Rectangle {
             id: selectPopup
             property bool open: false
@@ -519,13 +543,22 @@ Window {
 
     // ---------- window-level confirm dialog (covers the whole window) --------
     property var confirmCb: null
+    property var confirmAltCb: null
     function showConfirm(message, confirmLabel, cb) {
+        showConfirmWithAlternate(message, confirmLabel, "", cb, null)
+    }
+    // altLabel === "" keeps the plain two-button dialog.
+    function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb) {
         winConfirm.text = message
         winConfirm.confirmText = confirmLabel
+        winConfirm.altText = altLabel
         win.confirmCb = cb
+        win.confirmAltCb = altCb
         winConfirm.open()
     }
     ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
-        onConfirmed: if (win.confirmCb) win.confirmCb() }
+                    escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
+        onConfirmed: if (win.confirmCb) win.confirmCb()
+        onAlternate: if (win.confirmAltCb) win.confirmAltCb() }
 
 }

@@ -147,20 +147,16 @@
         <translation>Не удалось сохранить пароль VPN безопасно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
     </message>
     <message>
-        <source>This link disables server certificate verification. Only import configs from sources you trust.</source>
-        <translation>Эта ссылка отключает проверку сертификата сервера. Импортируйте конфиги только из надёжных источников.</translation>
-    </message>
-    <message>
         <source>Connection lost — couldn&apos;t reach the server. Check the config or your network.</source>
-        <translation type="unfinished"></translation>
+        <translation>Соединение потеряно — сервер недоступен. Проверьте конфигурацию или сеть.</translation>
     </message>
     <message>
         <source>Server isn&apos;t responding (timed out).</source>
-        <translation type="unfinished"></translation>
+        <translation>Сервер не отвечает (истекло время ожидания).</translation>
     </message>
     <message>
         <source>Authentication failed — check the username and password.</source>
-        <translation type="unfinished"></translation>
+        <translation>Не удалось войти — проверьте имя пользователя и пароль.</translation>
     </message>
     <message>
         <source>Toggle VPN</source>
@@ -189,6 +185,22 @@
     <message>
         <source>Hotkey “%1” (%2) could not be registered [%3] — it may be in use by another app or the desktop.</source>
         <translation>Горячую клавишу «%1» (%2) не удалось зарегистрировать [%3] — возможно, занята другим приложением или системой.</translation>
+    </message>
+    <message>
+        <source>Update check failed: %1</source>
+        <translation>Не удалось проверить обновления: %1</translation>
+    </message>
+    <message>
+        <source>Add a VPN server from this link?</source>
+        <translation>Добавить VPN-сервер по этой ссылке?</translation>
+    </message>
+    <message>
+        <source>“%1” already exists. Replace it, or add this as a separate config?</source>
+        <translation>«%1» уже существует. Заменить или добавить отдельной конфигурацией?</translation>
+    </message>
+    <message>
+        <source>This link turns off server certificate verification.</source>
+        <translation>Эта ссылка отключает проверку сертификата сервера.</translation>
     </message>
 </context>
 <context>
@@ -448,8 +460,16 @@
         <translation>Конфиг добавлен: %1</translation>
     </message>
     <message>
-        <source>Import anyway</source>
-        <translation>Импортировать всё равно</translation>
+        <source>Import</source>
+        <translation>Импортировать</translation>
+    </message>
+    <message>
+        <source>Add copy</source>
+        <translation>Добавить копию</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Заменить</translation>
     </message>
 </context>
 <context>
@@ -464,7 +484,7 @@
     </message>
     <message>
         <source>wintun.dll is missing next to FreeTunnel.exe (%1). Reinstall from the official installer.</source>
-        <translation type="unfinished"></translation>
+        <translation>Рядом с FreeTunnel.exe нет wintun.dll (%1). Переустановите приложение через официальный установщик.</translation>
     </message>
 </context>
 <context>
@@ -612,6 +632,10 @@
         <source>Not available under Wayland — use an X11/Xorg session</source>
         <translation>Недоступно в Wayland — используйте сессию X11/Xorg</translation>
     </message>
+    <message>
+        <source>Kill switch</source>
+        <translation>Аварийное отключение</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>
@@ -701,6 +725,18 @@
     <message>
         <source>VPN helper sent too much data</source>
         <translation>VPN-помощник отправил слишком много данных</translation>
+    </message>
+    <message>
+        <source>The process answering on the helper port could not prove it is the FreeTunnel helper — refusing to send the config.</source>
+        <translation>Процесс, ответивший на порту помощника, не подтвердил, что он — помощник FreeTunnel. Конфигурация ему не отправлена.</translation>
+    </message>
+    <message>
+        <source>VPN helper sent an invalid challenge</source>
+        <translation>VPN-помощник прислал некорректный запрос подтверждения</translation>
+    </message>
+    <message>
+        <source>The process answering on the helper port did not authenticate — refusing to continue.</source>
+        <translation>Процесс, ответивший на порту помощника, не прошёл проверку подлинности — продолжение отменено.</translation>
     </message>
 </context>
 </TS>

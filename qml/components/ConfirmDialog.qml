@@ -5,11 +5,16 @@ Item {
     required property var theme
     property string text: ""
     property string confirmText: qsTr("Delete")
+    // Optional middle action, e.g. "Replace" alongside "Add copy". Empty hides it,
+    // so every existing two-button caller is unaffected.
+    property string altText: ""
     signal confirmed()
+    signal alternate()
     anchors.fill: parent
     visible: false
     z: 2000
     function open() { visible = true }
+    function close() { visible = false }
 
     TextMetrics { id: cdMetrics; font.pixelSize: 14; text: cd.text }
 
@@ -31,11 +36,20 @@ Item {
                    text: cd.text
                    color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
             Row { id: btnRow; anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
-                Rectangle { width: Math.max(76, c1t.implicitWidth + 26); height: 32; radius: 8
+                Rectangle { objectName: "cancelButton"
+                    width: Math.max(76, c1t.implicitWidth + 26); height: 32; radius: 8
                     color: c1.containsMouse ? theme.border : theme.surface
                     Text { id: c1t; anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
                     MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
-                Rectangle { width: Math.max(76, c2t.implicitWidth + 26); height: 32; radius: 8
+                Rectangle { objectName: "alternateButton"
+                    visible: cd.altText !== ""
+                    width: visible ? Math.max(76, c3t.implicitWidth + 26) : 0; height: 32; radius: 8
+                    color: c3.containsMouse ? theme.border : theme.surface
+                    Text { id: c3t; anchors.centerIn: parent; text: cd.altText; color: theme.text; font.pixelSize: 14 }
+                    MouseArea { id: c3; anchors.fill: parent; hoverEnabled: true
+                                onClicked: { cd.visible = false; cd.alternate() } } }
+                Rectangle { objectName: "confirmButton"
+                    width: Math.max(76, c2t.implicitWidth + 26); height: 32; radius: 8
                     color: c2.containsMouse ? Qt.darker(theme.danger, 1.15) : theme.danger
                     Text { id: c2t; anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14 }
                     MouseArea { id: c2; anchors.fill: parent; hoverEnabled: true
@@ -43,5 +57,11 @@ Item {
             }
         }
     }
-    Shortcut { sequences: ["Escape"]; enabled: cd.visible; onActivated: cd.visible = false }
+    // escapeOwner lets an outer dialog stand down while a more-inner one is up:
+    // two visible confirm dialogs would otherwise both claim Escape and Qt would
+    // report the press as ambiguous, so neither would close.
+    property bool escapeOwner: true
+    Shortcut { sequences: ["Escape"]
+               enabled: cd.visible && cd.escapeOwner
+               onActivated: cd.visible = false }
 }

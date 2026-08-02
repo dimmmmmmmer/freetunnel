@@ -31,10 +31,21 @@ concurrency:
 env:
   UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
   # Pinned ref in scripts/upstream_ref.txt (verified by scripts/verify_upstream_patch.sh).
-  CONAN_VER: '2.12'
+  # Exact pin: conan drives every native dependency fetch and build, so the
+  # version must not float. This is the latest 2.x — i.e. what the previous
+  # `conan~=2.12` range was actually resolving to; pinning to 2.12.x instead
+  # would have silently downgraded CI by ~19 minor versions.
+  CONAN_VER: '2.31.1'
   # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
   # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+# Least privilege by default: no job needs to write to the repo except the
+# release job, which asks for contents: write explicitly. Without this the
+# repo/org default applies, handing a write-capable token to every job —
+# including the ones that execute third-party tooling.
+permissions:
+  contents: read
 
 jobs:
   # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
@@ -111,7 +122,17 @@ jobs:
       - name: Read pinned upstream ref
         id: upstream_ref
         shell: bash
-        run: echo "value=$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -eu
+          ref="$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)"
+          # Only the security workflow asserted this shape, so a corrupted file
+          # (or a branch name) would build a MUTABLE ref with the build staying
+          # green. Check it where it is actually used.
+          case "$ref" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "upstream_ref.txt is not a 40-hex commit SHA: '$ref'" >&2; exit 1 ;;
+          esac
+          echo "value=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -151,11 +172,13 @@ jobs:
 
       # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
       # every runner (macOS/Windows ship one, but install to be safe + on PATH).
+      # Pinned action instead of `curl https://sh.rustup.rs | sh`: this toolchain
+      # compiles quiche into the shipped binary, and a piped installer script is
+      # an unpinnable remote dependency in the job that publishes releases.
       - name: Install Rust
-        shell: bash
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
 
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
@@ -163,9 +186,12 @@ jobs:
         run: |
           sudo apt-get update
           # Modern clang (the core is clang-only; 22.04's default clang is too old).
-          wget -q https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
+          # The installer is vendored in this repo rather than fetched from
+          # apt.llvm.org: it runs AS ROOT in the job that produces the release
+          # binaries, so what it does has to be reviewable in a diff, not whatever
+          # upstream is serving today. It is 8 KB of shell — refresh it by opening
+          # a PR against scripts/llvm.sh.
+          sudo bash client/scripts/llvm.sh 18
           # gcc-13 libstdc++ headers: 22.04's gcc-12 libstdc++ misses some
           # transitive includes the core relies on (e.g. <algorithm>); clang-18
           # auto-selects the newest GCC, matching what works on ubuntu-24.04.
@@ -184,7 +210,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey builds against xcb/X11
           pip install -r upstream/requirements.txt
-          pip install "conan~=${CONAN_VER}"
+          pip install "conan==${CONAN_VER}"
 
       # ---------------------------------------------------------------- macOS
       - name: Install dependencies (macOS)
@@ -199,7 +225,7 @@ jobs:
           # ninja is preinstalled on the macOS runner; only install if missing.
           brew list ninja >/dev/null 2>&1 || brew install ninja
           pip install -r upstream/requirements.txt
-          pip install "conan~=${CONAN_VER}"
+          pip install "conan==${CONAN_VER}"
 
       # -------------------------------------------------------------- Windows
       - name: Set up MSVC (Windows)
@@ -239,7 +265,7 @@ jobs:
           }
           if (-not (Test-Path $nsis)) { throw "NSIS failed to install via Chocolatey after 3 attempts" }
           pip install -r upstream/requirements.txt
-          pip install "conan~=$env:CONAN_VER"
+          pip install "conan==$env:CONAN_VER"
 
       # ------------------------------------------------------------- Caching
       - name: ccache
@@ -367,8 +393,19 @@ jobs:
         id: ver
         shell: bash
         run: |
+          set -eu
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF_NAME#v}"
+            # The tag names the artifacts and the installer, but the binary
+            # reports CMake's project(VERSION ...). If they drift, every shipped
+            # client keeps seeing its own release as an available update.
+            project_version="$(sed -nE 's/^project\(FreeTunnel VERSION ([0-9.]+).*/\1/p' client/CMakeLists.txt)"
+            if [[ "$version" != "$project_version" ]]; then
+              echo "Tag v$version does not match project(FreeTunnel VERSION $project_version)" >&2
+              echo "Bump CMakeLists.txt before tagging." >&2
+              exit 1
+            fi
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           else
             echo "version=1.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
@@ -383,8 +420,31 @@ jobs:
           export QML_SOURCES_PATHS="$PWD/client/qml"
           ld=linuxdeploy-x86_64.AppImage
           ldqt=linuxdeploy-plugin-qt-x86_64.AppImage
-          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$ld"
-          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/$ldqt"
+          # Mirrored in this repo's own build-tools release: linuxdeploy publishes
+          # only a "continuous" release that is rewritten in place, so upstream had
+          # no immutable reference to pin and every rebuild broke the digest. These
+          # tools pick the libraries, AppRun and Qt plugins that go into the
+          # published .deb/.AppImage, so what they are must be a deliberate choice.
+          # The digest is still verified — a corrupted mirror fails the build too.
+          # Not vendored the way scripts/llvm.sh is: these are 31 MB of binary
+          # that every clone would carry forever, and a release asset is the one
+          # place they can sit immutably without weighing down the repository.
+          #
+          # Published as a PRE-release so it is never shown as the latest one —
+          # it used to be, which pointed the repo sidebar at build tooling instead
+          # of the installers. A draft would hide it from the releases page
+          # entirely, but drafts are invisible to a contents:read token and this
+          # job must not hold a write-capable one: it is the job that runs the
+          # third-party tooling below.
+          # To refresh: download upstream, review, upload under a new
+          # build-tools-<date> tag, update the URLs and digests here.
+          tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
+          curl -fsSL -o "$ld" "$tools/$ld"
+          curl -fsSL -o "$ldqt" "$tools/$ldqt"
+          echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
+            || { echo "::error::$ld does not match its pinned digest"; exit 1; }
+          echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \
+            || { echo "::error::$ldqt does not match its pinned digest"; exit 1; }
           chmod +x "$ld" "$ldqt"
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
@@ -529,10 +589,32 @@ jobs:
           cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
           # Ad-hoc sign so the bundle launches once the user approves it in
           # Gatekeeper (no Developer ID available for full signing/notarization).
-          codesign --force --deep --sign - "$APP" || true
+          # NOT "|| true": an unsigned bundle is refused outright by macOS on
+          # Apple Silicon, and swallowing the failure ships a DMG that simply
+          # cannot launch — discovered only by users.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
           mkdir -p out
           RW=out/rw.dmg
-          hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m -ov -format UDRW "$RW"
+          # "Resource busy" here is transient and it has failed a build: the .app
+          # was written seconds ago and Spotlight/fseventsd can still be walking
+          # it, and a /Volumes/FreeTunnel left attached by an earlier attempt
+          # holds the volume name. Clean up and retry — the detach below already
+          # does the same thing for the same reason, and a release build should
+          # not die on this.
+          for attempt in 1 2 3 4 5; do
+            hdiutil detach /Volumes/FreeTunnel -force >/dev/null 2>&1 || true
+            if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m \
+                 -ov -format UDRW "$RW"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::hdiutil create failed five times — not a transient"
+              exit 1
+            fi
+            echo "hdiutil create failed (attempt $attempt) — retrying in 15 s"
+            sleep 15
+          done
           MOUNT=$(hdiutil attach -readwrite -noverify -noautofsck "$RW" | awk '/\/Volumes\// {print $NF; exit}')
           cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
           SetFile -a C "$MOUNT/.VolumeIcon.icns"
@@ -636,10 +718,17 @@ jobs:
         env:
           ED25519_SIGNING_KEY: ${{ secrets.ED25519_SIGNING_KEY }}
         run: |
-          set -eux
+          # NOTE: no -x here. Tracing this step would echo the raw private key
+          # into the job log, where only GitHub's best-effort masking stands
+          # between it and anyone who can read the run.
+          set -eu
           if [ -z "${ED25519_SIGNING_KEY:-}" ]; then
-            echo "ED25519_SIGNING_KEY not configured — skipping in-app signature"
-            exit 0
+            # Every shipped binary has the public key compiled in and the updater
+            # refuses an unsigned release, so publishing one would strand all
+            # installed clients. Fail the tag build instead.
+            echo "ED25519_SIGNING_KEY is not configured — refusing to publish an" >&2
+            echo "unsigned release: deployed clients would reject it as an update." >&2
+            exit 1
           fi
           cd artifacts
           printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem

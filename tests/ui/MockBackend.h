@@ -16,37 +16,42 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY stateChanged)
     Q_PROPERTY(bool connecting READ connecting WRITE setConnecting NOTIFY stateChanged)
     Q_PROPERTY(bool disconnecting READ disconnecting WRITE setDisconnecting NOTIFY stateChanged)
-    Q_PROPERTY(QString sessionTime READ sessionTime CONSTANT)
-    Q_PROPERTY(QString downSpeed READ downSpeed CONSTANT)
-    Q_PROPERTY(QString upSpeed READ upSpeed CONSTANT)
-    Q_PROPERTY(QString activeConfig READ activeConfig CONSTANT)
-    Q_PROPERTY(QStringList configs READ configs CONSTANT)
-    Q_PROPERTY(int activeIndex READ activeIndex CONSTANT)
-    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY settingsChanged)
+    // NOTIFY signals mirror Backend's so bindings re-evaluate the same way here
+    // (speeds/session time on tick, names on configsChanged, …).
+    Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
+    Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
+    Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY tick)
+    Q_PROPERTY(QString activeConfig READ activeConfig NOTIFY configChanged)
+    Q_PROPERTY(QStringList configs READ configs NOTIFY configsChanged)
+    Q_PROPERTY(int activeIndex READ activeIndex NOTIFY configChanged)
+    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
     Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged)
-    Q_PROPERTY(QStringList domains READ domains CONSTANT)
-    Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes CONSTANT)
-    Q_PROPERTY(QStringList profiles READ profiles CONSTANT)
-    Q_PROPERTY(QString activeProfile READ activeProfile CONSTANT)
+    Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
+    Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
+    Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
+    Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
+    Q_PROPERTY(bool hotkeysSupported READ hotkeysSupported CONSTANT)
     Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY hotkeysChanged)
-    Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle CONSTANT)
-    Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect CONSTANT)
-    Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect CONSTANT)
+    Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
+    Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
+    Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
-    Q_PROPERTY(QString updateState READ updateState CONSTANT)
-    Q_PROPERTY(QString updateMessage READ updateMessage CONSTANT)
-    Q_PROPERTY(QString latestVersion READ latestVersion CONSTANT)
+    Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged)
+    Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
+    Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool verboseLogs READ verboseLogs WRITE setVerboseLogs NOTIFY settingsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
-    Q_PROPERTY(QVariantList pings READ pings CONSTANT)
+    Q_PROPERTY(QVariantList pings READ pings NOTIFY pingsChanged)
+    Q_PROPERTY(QString credentialStorageWarning READ credentialStorageWarning NOTIFY
+                       credentialStorageChanged)
 
 public:
     explicit MockBackend(QObject *parent = nullptr);
@@ -97,11 +102,21 @@ public:
     QStringList profiles() const { return m_profiles; }
     QString activeProfile() const { return m_activeProfile; }
 
+    bool hotkeysSupported() const { return m_hotkeysSupported; }
     bool hotkeysEnabled() const { return m_hotkeysEnabled; }
     void setHotkeysEnabled(bool v);
-    QString hotkeyToggle() const { return QStringLiteral("Ctrl+Alt+T"); }
-    QString hotkeyConnect() const { return QString(); }
-    QString hotkeyDisconnect() const { return QString(); }
+    QString hotkeyToggle() const { return m_hotkeyToggle; }
+    QString hotkeyConnect() const { return m_hotkeyConnect; }
+    QString hotkeyDisconnect() const { return m_hotkeyDisconnect; }
+    void setHotkeyToggle(const QString &v);
+    void setHotkeyConnect(const QString &v);
+    void setHotkeyDisconnect(const QString &v);
+    // Backend maps a key's physical position to its Latin letter; nothing to map
+    // headlessly, so report "not a letter key" like the real one does.
+    Q_INVOKABLE QString physicalLetterForScanCode(quint32) const { return QString(); }
+
+    // Empty = the OS keychain works, which is the normal desktop case.
+    QString credentialStorageWarning() const { return m_credentialStorageWarning; }
 
     QString appVersion() const { return QStringLiteral("1.0.0-test"); }
     QString coreVersion() const { return QStringLiteral("test-core"); }
@@ -121,8 +136,9 @@ public:
     Q_INVOKABLE void disconnectVpn() { m_connected = false; emit stateChanged(); }
     Q_INVOKABLE void selectConfig(int index);
     Q_INVOKABLE void removeConfig(int index);
+    Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
-    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link) { Q_UNUSED(link); return true; }
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
@@ -151,8 +167,14 @@ public:
     Q_INVOKABLE void startWindowDrag(QObject *) {}
     Q_INVOKABLE void pingConfigs() {}
     Q_INVOKABLE bool importFromClipboard() { return false; }
-    Q_INVOKABLE void prepareQuit() { emit aboutToShutdown(); }
+    Q_INVOKABLE void prepareQuit()
+    {
+        m_shutdownPrepared = true;
+        emit aboutToShutdown();
+    }
     Q_INVOKABLE void quitApplication() { prepareQuit(); }
+    // Main.qml's onClosing asks this before treating a close as a real quit.
+    Q_INVOKABLE bool applicationClosingDown() const { return m_shutdownPrepared; }
 
 signals:
     void stateChanged();
@@ -166,8 +188,11 @@ signals:
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
+    void credentialStorageChanged();
     void errorOccurred(const QString &msg);
-    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
+                                            const QString &existingName);
+    void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
 private:
@@ -193,8 +218,14 @@ private:
     QStringList m_excludedRoutes = {QStringLiteral("10.0.0.0/8")};
     QStringList m_profiles = {QStringLiteral("Default")};
     QString m_activeProfile = QStringLiteral("Default");
+    bool m_hotkeysSupported = true;
     bool m_hotkeysEnabled = true;
+    QString m_hotkeyToggle = QStringLiteral("Ctrl+Alt+T");
+    QString m_hotkeyConnect;
+    QString m_hotkeyDisconnect;
     bool m_autoStart = false;
     QVariantList m_pings = {QStringLiteral("42 ms"), QStringLiteral("—")};
+    QString m_credentialStorageWarning;
+    bool m_shutdownPrepared = false;
     int m_toggleCount = 0;
 };

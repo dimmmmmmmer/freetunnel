@@ -40,7 +40,7 @@ public:
     void setVpnMode(bool selective);
     void setKillSwitch(bool enabled);
     void setLogLevel(const QString &level); // "warn"/"info"/… applied live, no reconnect
-    void setSessionLogging(const QString &path, bool enabled);
+    void setSessionLogging(bool enabled);
 
     void connectVpn();
     void disconnectVpn();
@@ -77,6 +77,8 @@ private:
     QTcpSocket *m_sock = nullptr;
     quint16 m_tcpPort = 0;
     QString m_token;
+    QString m_guiNonce;        // our half of the mutual-auth handshake
+    bool m_peerProven = false; // peer answered our challenge with a valid proof
     QString m_tokenPath;
     QString m_configToml;
     std::vector<std::string> m_exclusions;
@@ -84,7 +86,6 @@ private:
     bool m_selective = false;
     bool m_killSwitch = false;
     QString m_logLevel = QStringLiteral("warn");
-    QString m_logPath;
     bool m_loggingEnabled = true;
     State m_state = State::Disconnected;
     bool m_helloAcked = false;

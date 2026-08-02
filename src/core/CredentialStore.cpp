@@ -4,13 +4,18 @@
 #include "ConfigToml.h"
 #include "CredentialStoreLibsecret.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
 #include <QProcess>
+#include <QSaveFile>
+#include <QScopeGuard>
 #include <QStandardPaths>
+#include <QThread>
 
 #if defined(Q_OS_MACOS)
 #include <CoreFoundation/CoreFoundation.h>
@@ -20,14 +25,54 @@
 #include <wincred.h>
 #endif
 
+#if defined(Q_OS_UNIX)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace freetunnel {
 
+QString credentialServiceName()
+{
+#if defined(FT_ENABLE_TEST_HOOKS)
+    static const QString name = [] {
+        const QByteArray override = qgetenv("FT_TEST_CREDENTIAL_SERVICE");
+        if (!override.isEmpty())
+            return QString::fromUtf8(override);
+        // Unique per PROCESS, not just per build. An item in the OS store carries
+        // an ACL bound to the binary that created it, and test binaries are
+        // rebuilt constantly — so touching an entry a previous build left behind
+        // makes macOS raise an authorization dialog and the run hangs until a
+        // human answers it. A per-process service can never name an older item.
+        return QStringLiteral("com.freetunnel.app.test.%1")
+                .arg(QCoreApplication::applicationPid());
+    }();
+    return name;
+#else
+    return QStringLiteral("com.freetunnel.app");
+#endif
+}
+
 namespace {
+
+#if defined(Q_OS_WIN)
+QString winTargetPrefix()
+{
+#if defined(FT_ENABLE_TEST_HOOKS)
+    return QStringLiteral("FreeTunnelTest/");
+#else
+    return QStringLiteral("FreeTunnel/");
+#endif
+}
+#endif
 
 #if defined(Q_OS_MACOS)
 CFStringRef macServiceName()
 {
-    return CFSTR("com.freetunnel.app");
+    // Built once from credentialServiceName() and never released: a
+    // process-lifetime constant the Security framework keeps referencing.
+    static const CFStringRef name = credentialServiceName().toCFString();
+    return name;
 }
 
 CFDictionaryRef macLookupQuery(CFStringRef account)
@@ -92,11 +137,15 @@ bool macDeletePassword(CFStringRef account)
 
 QString credentialDir()
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-            + QStringLiteral("/credentials");
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString dir = base + QStringLiteral("/credentials");
     QDir().mkpath(dir);
     // Owner-only: the files inside are already 0600, but a 0700 dir also keeps
     // other local users from listing/stat-ing the per-config credential entries.
+    // The parent gets the same treatment — mkpath() would otherwise create the
+    // app config dir 0755 and leave the config .toml listing world-readable.
+    QFile::setPermissions(base, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                        | QFileDevice::ExeOwner);
     QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
                                        | QFileDevice::ExeOwner);
     return dir;
@@ -109,15 +158,49 @@ QString filePathForKey(const QString &key)
 }
 
 #if defined(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
-bool storePasswordFile(const QString &key, const QString &password)
+// Open @p path for writing with 0600 already in place. QFile has no mode
+// argument, and chmod-after-write leaves a window in which another local user
+// can open the file while it still holds a plaintext password; on POSIX we hand
+// QFile a descriptor that was created 0600, and O_NOFOLLOW so a symlink planted
+// under the path can't redirect the write either.
+bool openOwnerOnlyForWrite(QFile &f, const QString &path)
 {
-    QFile f(filePathForKey(key));
+#if defined(Q_OS_UNIX)
+    const int fd = ::open(QFile::encodeName(path).constData(),
+                          O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    if (!f.open(fd, QIODevice::WriteOnly | QIODevice::Truncate, QFile::AutoCloseHandle)) {
+        ::close(fd);
+        return false;
+    }
+#else
+    // Windows: no mode bits on open — the file inherits the owner-only ACL of
+    // the config directory, and we tighten it before anything is written.
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
-    f.write(password.toUtf8());
-    f.close();
-    QFile::setPermissions(f.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
+    // An existing file keeps its old mode through O_CREAT, so still assert it —
+    // and don't pretend the write is safe when we couldn't.
+    if (!QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        f.close();
+        return false;
+    }
     return true;
+}
+
+bool storePasswordFile(const QString &key, const QString &password)
+{
+    const QString path = filePathForKey(key);
+    QFile f(path);
+    if (!openOwnerOnlyForWrite(f, path))
+        return false;
+    const QByteArray secret = password.toUtf8();
+    const bool ok = f.write(secret) == secret.size();
+    f.close();
+    if (!ok)
+        QFile::remove(path); // never leave a half-written password behind
+    return ok;
 }
 #endif
 
@@ -149,7 +232,7 @@ bool secretServiceStore(const QString &key, const QString &password)
         return false;
     QProcess p;
     p.start(tool, {QStringLiteral("store"), QStringLiteral("--label=FreeTunnel"),
-                   QStringLiteral("service"), QStringLiteral("com.freetunnel.app"),
+                   QStringLiteral("service"), credentialServiceName(),
                    QStringLiteral("account"), key});
     if (!p.waitForStarted(3000))
         return false;
@@ -166,7 +249,7 @@ QString secretServiceLookup(const QString &key, bool *ok)
         return QString();
     QProcess p;
     p.start(tool, {QStringLiteral("lookup"), QStringLiteral("service"),
-                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"), key});
+                   credentialServiceName(), QStringLiteral("account"), key});
     if (!p.waitForFinished(5000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0)
         return QString();
     *ok = true;
@@ -180,7 +263,7 @@ bool secretServiceClear(const QString &key)
         return false;
     QProcess p;
     p.start(tool, {QStringLiteral("clear"), QStringLiteral("service"),
-                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"), key});
+                   credentialServiceName(), QStringLiteral("account"), key});
     return p.waitForFinished(5000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
@@ -190,12 +273,23 @@ bool secretServiceAvailable()
     if (tool.isEmpty())
         return false;
     QProcess p;
-    // Exit 0/1 both mean the Secret Service responded; no D-Bus gives a quick failure.
     p.start(tool, {QStringLiteral("lookup"), QStringLiteral("service"),
-                   QStringLiteral("com.freetunnel.app"), QStringLiteral("account"),
+                   credentialServiceName(), QStringLiteral("account"),
                    QStringLiteral("__freetunnel_probe__")});
-    return p.waitForStarted(2000) && p.waitForFinished(3000)
-            && p.exitStatus() == QProcess::NormalExit;
+    if (!p.waitForStarted(2000) || !p.waitForFinished(3000)
+        || p.exitStatus() != QProcess::NormalExit)
+        return false;
+    // Exit 0 means the probe item was found, so the service clearly answered.
+    if (p.exitCode() == 0)
+        return true;
+    // Exit 1 is ambiguous: it is also what a *working* service returns for "no
+    // such item". With no session bus (headless, ssh, no keyring daemon)
+    // secret-tool still starts and exits 1 — but it complains on stderr first,
+    // while a plain "not found" prints nothing at all. Treating the exit code
+    // alone as success reported storage that isn't there, which suppressed the
+    // "install gnome-keyring/KWallet" warning and let the legacy plaintext
+    // migration believe it had somewhere better to put the password.
+    return p.readAllStandardError().trimmed().isEmpty();
 }
 
 static QString migrateLegacyFilePassword(const QString &key, const QString &fromFile)
@@ -239,7 +333,60 @@ QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
     return QFileInfo(absoluteConfigPath).absoluteFilePath();
 }
 
-bool CredentialStore::secureStorageAvailable()
+namespace {
+
+// Every call below talks to the OS credential store, and every one of them
+// BLOCKS: on macOS the request goes to securityd and does not return while the
+// system is asking the user whether this build may touch the item; on Linux the
+// Secret Service probe shells out to secret-tool and waits up to five seconds.
+// Called straight from the GUI thread — which is what opening the edit form,
+// saving a config, copying a config link or exporting one used to do — that
+// freezes the whole window, spinner and all.
+//
+// So run it on a worker and keep our own event loop turning while we wait. User
+// input is excluded, so the app stays painted and responsive-looking but nothing
+// can re-enter the operation that is already in flight. Off the GUI thread there
+// is nothing to keep alive, so the call is made directly.
+// Depth guard for the loop below. Only ever reached on the GUI thread — every
+// other caller returns before touching it — so a plain bool needs no
+// synchronisation. It lives out here rather than as a static local inside the
+// template: a static local would be per-instantiation, so a QString-returning
+// call would not see the flag a bool-returning one had set, and the guard would
+// not hold between two different credential operations.
+bool g_uiCallInFlight = false;
+
+template <typename Fn>
+auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
+{
+    using Result = decltype(fn());
+    QCoreApplication *app = QCoreApplication::instance();
+    if (!app || QThread::currentThread() != app->thread())
+        return fn();
+    // Already inside the loop below, re-entered from a queued call it dispatched.
+    // Run directly rather than stacking a second loop on top of the first: the
+    // window is already in its waiting state, so there is no responsiveness left
+    // to preserve, and nesting depth stays bounded at one no matter what the
+    // dispatched code does.
+    if (g_uiCallInFlight)
+        return fn();
+
+    g_uiCallInFlight = true;
+    const auto reset = qScopeGuard([] { g_uiCallInFlight = false; });
+
+    Result result{};
+    QEventLoop loop;
+    QThread *worker = QThread::create([&result, &fn]() { result = fn(); });
+    QObject::connect(worker, &QThread::finished, &loop, &QEventLoop::quit);
+    worker->start();
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    worker->wait();
+    delete worker;
+    return result;
+}
+
+} // namespace
+
+static bool doSecureStorageAvailable()
 {
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     return true;
@@ -254,7 +401,7 @@ bool CredentialStore::secureStorageAvailable()
 #endif
 }
 
-bool CredentialStore::storePassword(const QString &key, const QString &password)
+static bool doStorePassword(const QString &key, const QString &password)
 {
     if (key.isEmpty())
         return false;
@@ -272,7 +419,7 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
     CFRelease(account);
     return ok;
 #elif defined(Q_OS_WIN)
-    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    const std::wstring target = (winTargetPrefix() + key).toStdWString();
     const QByteArray secret = password.toUtf8();
     CREDENTIALW cred{};
     cred.Type = CRED_TYPE_GENERIC;
@@ -304,7 +451,7 @@ bool CredentialStore::storePassword(const QString &key, const QString &password)
 #endif
 }
 
-QString CredentialStore::loadPassword(const QString &key)
+static QString doLoadPassword(const QString &key)
 {
     if (key.isEmpty())
         return QString();
@@ -317,7 +464,7 @@ QString CredentialStore::loadPassword(const QString &key)
     CFRelease(account);
     return out;
 #elif defined(Q_OS_WIN)
-    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    const std::wstring target = (winTargetPrefix() + key).toStdWString();
     PCREDENTIALW cred = nullptr;
     if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &cred) || !cred)
         return QString();
@@ -346,7 +493,7 @@ static bool deletePasswordLinuxAll(const QString &key)
 }
 #endif
 
-bool CredentialStore::deletePassword(const QString &key)
+static bool doDeletePassword(const QString &key)
 {
     if (key.isEmpty())
         return false;
@@ -359,7 +506,7 @@ bool CredentialStore::deletePassword(const QString &key)
     CFRelease(account);
     return ok;
 #elif defined(Q_OS_WIN)
-    const std::wstring target = (QStringLiteral("FreeTunnel/") + key).toStdWString();
+    const std::wstring target = (winTargetPrefix() + key).toStdWString();
     return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != FALSE;
 #else
     return deletePasswordLinuxAll(key);
@@ -376,13 +523,29 @@ static QString readConfigText(const QString &path)
 
 static bool writeConfigText(const QString &path, const QString &toml)
 {
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    // Atomic on purpose. migrateConfigPassword() rewrites the user's LIVE config,
+    // and by the time it does the password has already moved into the credential
+    // store and been stripped from the text — so a truncate-in-place that then
+    // fails half way (full disk, I/O error, power loss) leaves a config with no
+    // server details AND no password in it. Stage and rename instead.
+    //
+    // The rename also replaces a symlink sitting at the target rather than
+    // writing through it, so dropping the O_NOFOLLOW open loses nothing here.
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
         return false;
-    f.write(toml.toUtf8());
-    f.close();
-    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    return true;
+    // Owner-only before a single byte is written: this file carries the config
+    // during the window where the password may still be inline.
+    if (!f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        f.cancelWriting();
+        return false;
+    }
+    const QByteArray data = toml.toUtf8();
+    if (f.write(data) != data.size()) {
+        f.cancelWriting();
+        return false;
+    }
+    return f.commit();
 }
 
 bool migrateConfigPassword(const QString &configPath)
@@ -429,6 +592,32 @@ void sweepStaleMaterializedConfigs()
 void sweepLegacyPlaintextStorage()
 {
     sweepStaleMaterializedConfigs();
+}
+
+
+
+// ---- public entry points -------------------------------------------------
+// Thin wrappers so no caller can accidentally block the GUI thread on the
+// credential store; see withoutFreezingTheUi above.
+
+bool CredentialStore::secureStorageAvailable()
+{
+    return withoutFreezingTheUi([] { return doSecureStorageAvailable(); });
+}
+
+bool CredentialStore::storePassword(const QString &key, const QString &password)
+{
+    return withoutFreezingTheUi([&] { return doStorePassword(key, password); });
+}
+
+QString CredentialStore::loadPassword(const QString &key)
+{
+    return withoutFreezingTheUi([&] { return doLoadPassword(key); });
+}
+
+bool CredentialStore::deletePassword(const QString &key)
+{
+    return withoutFreezingTheUi([&] { return doDeletePassword(key); });
 }
 
 } // namespace freetunnel

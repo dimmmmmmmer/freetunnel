@@ -25,7 +25,13 @@ private slots:
     void downloadRejectsMissingChecksums();
     void downloadRejectsMissingSignature();
     void downloadRejectsInvalidSignature();
+    void rejectsAssetsFromAnotherRepo();
+    void rejectsAssetsWhosePathTagDiffersFromTheRelease();
+    void acceptsAssetsPublishedUnderThisReleaseTag();
+    void replacesHostileHtmlUrlWithTheCanonicalReleasePage();
+    void rejectsImplausibleTag();
 };
+
 
 static QString sha256HexOfBytes(const QByteArray &body)
 {
@@ -71,6 +77,44 @@ static QJsonObject makeReleaseJson(const QString &tag, const QString &baseUrl,
 
     release[QStringLiteral("assets")] = assets;
     return release;
+}
+
+// The URL/tag gatekeepers are SKIPPED for hosts matching FT_GITHUB_API_BASE, so
+// tests that build every URL from the mock's base never execute them — deleting
+// the checks would keep the suite green. These helpers keep the API on the mock
+// (so checkNow() still reaches it) while putting REAL github.com URLs in the
+// payload, which is what makes the validators run.
+static QJsonObject assetJson(const QString &name, const QString &url)
+{
+    QJsonObject a;
+    a[QStringLiteral("name")] = name;
+    a[QStringLiteral("browser_download_url")] = url;
+    return a;
+}
+
+static QJsonObject releaseWithAssetBase(const QString &tag, const QString &assetBase,
+                                        const QString &htmlUrl)
+{
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = tag;
+    release[QStringLiteral("html_url")] = htmlUrl;
+    QJsonArray assets;
+    assets.append(assetJson(QStringLiteral("SHA256SUMS.txt"), assetBase + QStringLiteral("/SHA256SUMS.txt")));
+    assets.append(assetJson(testInstallerAssetName(),
+                            assetBase + QStringLiteral("/") + testInstallerAssetName()));
+    release[QStringLiteral("assets")] = assets;
+    return release;
+}
+
+// Serve `release` from the mock and run a check against it.
+static bool runCheck(MockHttpServer &http, const QJsonObject &release, UpdateChecker &checker,
+                     QSignalSpy &available, QSignalSpy &none)
+{
+    MockHttpServer::Route route;
+    route.body = QJsonDocument(release).toJson(QJsonDocument::Compact);
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), route);
+    checker.checkNow();
+    return QTest::qWaitFor([&]() { return available.count() > 0 || none.count() > 0; }, 5000);
 }
 
 void TestUpdateCheckerE2e::checkNowFindsNewerRelease()
@@ -346,6 +390,136 @@ void TestUpdateCheckerE2e::downloadRejectsBadChecksum()
 
     qunsetenv("FT_GITHUB_API_BASE");
     qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
+}
+
+// An asset hosted under someone else's repo must not be picked up, even when the
+// tag matches — otherwise a hostile API response points the installer at a file
+// the attacker controls.
+void TestUpdateCheckerE2e::rejectsAssetsFromAnotherRepo()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http,
+                     releaseWithAssetBase(
+                             QStringLiteral("v2.0.0"),
+                             QStringLiteral("https://github.com/attacker/freetunnel/releases/download/v2.0.0"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/tag/v2.0.0")),
+                     checker, available, none));
+
+    // The release itself is newer, so it is announced — but nothing downloadable
+    // was accepted from it.
+    QCOMPARE(available.count(), 1);
+    QVERIFY(checker.latestRelease().installerUrl.isEmpty());
+    QVERIFY(checker.latestRelease().checksumsUrl.isEmpty());
+
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+// The tag in the asset path is what binds the manifest and the installer to the
+// advertised release; without it, tag v9.9.9 could serve an older signed build.
+void TestUpdateCheckerE2e::rejectsAssetsWhosePathTagDiffersFromTheRelease()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http,
+                     releaseWithAssetBase(
+                             QStringLiteral("v9.9.9"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v1.1.5"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/tag/v9.9.9")),
+                     checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    QVERIFY(checker.latestRelease().installerUrl.isEmpty());
+    QVERIFY(checker.latestRelease().checksumsUrl.isEmpty());
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+// The mirror of the two rejections: a genuine release's assets must be accepted,
+// so an over-strict validator (which would strand every user) fails here too.
+void TestUpdateCheckerE2e::acceptsAssetsPublishedUnderThisReleaseTag()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+
+    const QString assetBase =
+            QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v2.0.0");
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http,
+                     releaseWithAssetBase(
+                             QStringLiteral("v2.0.0"), assetBase,
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/tag/v2.0.0")),
+                     checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    QCOMPARE(checker.latestRelease().installerUrl,
+             assetBase + QStringLiteral("/") + testInstallerAssetName());
+    QCOMPARE(checker.latestRelease().checksumsUrl, assetBase + QStringLiteral("/SHA256SUMS.txt"));
+    QCOMPARE(checker.latestRelease().htmlUrl,
+             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/tag/v2.0.0"));
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+// html_url is handed to the user's browser and arrives in the same untrusted
+// JSON as everything else.
+void TestUpdateCheckerE2e::replacesHostileHtmlUrlWithTheCanonicalReleasePage()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http,
+                     releaseWithAssetBase(
+                             QStringLiteral("v2.0.0"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v2.0.0"),
+                             QStringLiteral("https://evil.example/phish")),
+                     checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    const QString shown = checker.latestRelease().htmlUrl;
+    QVERIFY2(!shown.contains(QStringLiteral("evil.example")), qPrintable(shown));
+    QVERIFY(shown.startsWith(QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/")));
+    qunsetenv("FT_GITHUB_API_BASE");
+}
+
+void TestUpdateCheckerE2e::rejectsImplausibleTag()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http,
+                     releaseWithAssetBase(
+                             QStringLiteral("../../etc/passwd"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v2.0.0"),
+                             QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/latest")),
+                     checker, available, none));
+
+    QCOMPARE(available.count(), 0);
+    QCOMPARE(none.count(), 1);
+    QVERIFY(none.first().at(0).toString().contains(QStringLiteral("Invalid response")));
+    qunsetenv("FT_GITHUB_API_BASE");
 }
 
 QTEST_MAIN(TestUpdateCheckerE2e)

@@ -16,6 +16,12 @@
 // (closing the rest); this mock uses the simpler, deterministic equivalent of
 // "the newest pre-auth connection takes the slot" so a token-less squatter that
 // connected first can never block the real client from authenticating.
+// Drive the mutual-auth handshake from the client side: send a nonce, verify the
+// server's proof, answer with ours. Returns false if any step fails. Tests that
+// want to exercise a REJECTED peer should not use this.
+bool mockHelperHandshake(class MockHelperServer &server, QTcpSocket &client,
+                         const QString &token);
+
 class MockHelperServer : public QObject {
     Q_OBJECT
 public:
@@ -43,6 +49,7 @@ private:
     QTcpSocket *m_sock = nullptr;
     QByteArray m_buf;
     bool m_authed = false;
+    QString m_challenge; // nonce we asked the client to answer
     QString m_lastCmd;
     int m_connectionCount = 0;
     int m_connectCount = 0;

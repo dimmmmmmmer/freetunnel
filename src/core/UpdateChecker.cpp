@@ -10,8 +10,16 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QUrl>
+
+#if defined(Q_OS_UNIX)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "ReleaseSigning.h"
 #include "ReleaseVerify.h"
@@ -36,16 +44,17 @@ bool signatureVerificationActive()
     return signatureVerificationConfigured();
 }
 
-// Release assets must be downloaded from GitHub's own hosts. The asset URLs come
-// from the GitHub API JSON, so without this an API/MITM that swapped a
-// browser_download_url could point the installer/manifest at an attacker host.
-// Integrity is still gated by the Ed25519-signed SHA256SUMS, but pinning the
-// host is cheap defense-in-depth (and matters if signing is ever unconfigured).
 bool isGithubHost(const QString &host)
 {
-    return host == QLatin1String("github.com")
-            || host.endsWith(QLatin1String(".github.com"))
-            || host.endsWith(QLatin1String(".githubusercontent.com"));
+    return host == QLatin1String("github.com") || host == QLatin1String("www.github.com");
+}
+
+// Tags end up in a URL path we compare against and in the version we show, so
+// keep them to what a real release tag can contain (v1.2.3, v1.2.3-rc1, …).
+bool isPlausibleTag(const QString &tag)
+{
+    static const QRegularExpression re(QStringLiteral("\\A[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\\z"));
+    return re.match(tag).hasMatch();
 }
 
 #ifdef FT_ENABLE_TEST_HOOKS
@@ -62,19 +71,127 @@ bool matchesTestBaseHost(const QString &host)
 }
 #endif
 
-bool isTrustedDownloadUrl(const QString &urlStr)
+// Split a GitHub URL into its path segments when it is an https URL on GitHub's
+// own host. Empty otherwise. The asset/page URLs all come out of the same
+// untrusted API JSON, so nothing below trusts them beyond what this returns.
+QStringList githubUrlSegments(const QString &urlStr)
 {
     const QUrl url(urlStr);
-    if (!url.isValid())
-        return false;
-    const QString host = url.host().toLower();
+    if (!url.isValid() || url.scheme() != QLatin1String("https"))
+        return {};
+    if (!isGithubHost(url.host().toLower()))
+        return {};
+    return url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+}
+
+// Release assets must come from *this* repo's release for *the advertised tag*:
+// https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>.
+//
+// Host pinning alone is not enough. The signature only covers SHA256SUMS.txt and
+// our asset names carry no version (freetunnel-linux-x86_64.deb, …), so anyone
+// able to serve the API response could advertise tag_name v9.9.9 while pointing
+// browser_download_url at a genuine, still-signed *older* release — every check
+// would pass and the user would be silently rolled back onto a known-vulnerable
+// build. GitHub itself puts the release tag in the asset path, so requiring the
+// path to match the advertised tag binds the manifest and the installer to that
+// tag; a forged tag has no real release to be served from. The owner/repo
+// segments are checked too, or the same trick would work from an attacker's own
+// repo with a tag named to match.
+bool isTrustedAssetUrl(const QString &urlStr, const QString &repo, const QString &tag)
+{
 #ifdef FT_ENABLE_TEST_HOOKS
-    if (matchesTestBaseHost(host))
+    if (matchesTestBaseHost(QUrl(urlStr).host().toLower()))
         return true;
 #endif
-    if (url.scheme() != QLatin1String("https"))
+    const QStringList seg = githubUrlSegments(urlStr);
+    if (seg.size() != 6)
         return false;
-    return isGithubHost(host);
+    if (seg.at(2) != QLatin1String("releases") || seg.at(3) != QLatin1String("download"))
+        return false;
+    if (QStringLiteral("%1/%2").arg(seg.at(0), seg.at(1)).compare(repo, Qt::CaseInsensitive) != 0)
+        return false;
+    return seg.at(4) == tag;
+}
+
+// html_url is handed straight to the user's browser, and it arrives in the same
+// untrusted JSON as everything else — a hostile API response would otherwise get
+// an arbitrary page opened for the user. Take it only when it really is this
+// repo's release page; otherwise fall back to the canonical releases URL, which
+// is built from the compiled-in repo and can't be influenced.
+QString sanitizedReleasePageUrl(const QString &urlStr, const QString &repo, const QString &tag)
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    if (matchesTestBaseHost(QUrl(urlStr).host().toLower()))
+        return urlStr;
+#endif
+    const QStringList seg = githubUrlSegments(urlStr);
+    const bool isReleasePage =
+            seg.size() == 5 && seg.at(2) == QLatin1String("releases")
+            && seg.at(3) == QLatin1String("tag") && seg.at(4) == tag
+            && QStringLiteral("%1/%2").arg(seg.at(0), seg.at(1)).compare(repo, Qt::CaseInsensitive) == 0;
+    if (isReleasePage)
+        return urlStr;
+    return QStringLiteral("https://github.com/%1/releases/latest").arg(repo);
+}
+
+// Where the verified installer is staged before it is executed. Not
+// TempLocation: on Linux that is the shared /tmp, where another local user can
+// pre-create (and therefore own) a fixed subdirectory — our chmod then silently
+// fails, and they can plant a symlink under the asset name or overwrite the
+// .AppImage/.deb after we verify it and before it runs. The per-user cache dir
+// lives inside the user's own home on every platform and cannot be squatted.
+QString updateStagingDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+            + QStringLiteral("/updates");
+}
+
+// Create the staging dir and prove we got what we asked for: a real directory
+// (not a symlink pointed elsewhere), owned by us, with nothing for group/other.
+// Refuse to download at all rather than stage an executable somewhere another
+// local user can reach.
+bool prepareStagingDir(const QString &dir, QString *error)
+{
+    if (!QDir().mkpath(dir)) {
+        *error = QStringLiteral("Could not create the update download directory");
+        return false;
+    }
+    if (!QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                            | QFileDevice::ExeOwner)) {
+        *error = QStringLiteral("Could not make the update download directory owner-only");
+        return false;
+    }
+#if defined(Q_OS_UNIX)
+    struct stat st = {};
+    if (::lstat(QFile::encodeName(dir).constData(), &st) != 0 || !S_ISDIR(st.st_mode)
+        || st.st_uid != ::geteuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        *error = QStringLiteral("The update download directory is not private to this user");
+        return false;
+    }
+#endif
+    return true;
+}
+
+// Create the installer file itself: owner-only from the moment it exists, and
+// never through a pre-planted symlink (O_NOFOLLOW) or an existing file
+// (O_EXCL) — the caller removes any leftover from a previous download first.
+bool createInstallerFile(QFile &f, const QString &path)
+{
+#if defined(Q_OS_UNIX)
+    const int fd = ::open(QFile::encodeName(path).constData(),
+                          O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    if (!f.open(fd, QIODevice::WriteOnly, QFile::AutoCloseHandle)) {
+        ::close(fd);
+        return false;
+    }
+    return true;
+#else
+    // Windows: the file inherits the (owner-only) directory ACL; NewOnly gives
+    // the same "must not exist already" guarantee as O_EXCL.
+    return f.open(QIODevice::WriteOnly | QIODevice::NewOnly);
+#endif
 }
 
 QString githubApiUrl(const QString &path)
@@ -141,6 +258,10 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         emit noUpdateAvailable(QStringLiteral("No releases found"));
         return;
     }
+    if (!isPlausibleTag(tagName)) {
+        emit noUpdateAvailable(QStringLiteral("Invalid response from GitHub API"));
+        return;
+    }
 
     // Strip leading 'v' from tag
     QString remoteVersion = tagName;
@@ -151,15 +272,17 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     m_latest = ReleaseInfo{};
     m_latest.tagName = tagName;
     m_latest.version = remoteVersion;
-    m_latest.htmlUrl = obj.value("html_url").toString();
+    m_latest.htmlUrl = sanitizedReleasePageUrl(obj.value("html_url").toString(),
+                                               m_githubRepo, tagName);
 
     const QJsonArray assets = obj.value("assets").toArray();
     for (const QJsonValue &val : assets) {
         const QJsonObject asset = val.toObject();
         const QString name = asset.value("name").toString();
         const QString downloadUrl = asset.value("browser_download_url").toString();
-        // Ignore any asset whose download URL isn't on a GitHub host.
-        if (!isTrustedDownloadUrl(downloadUrl))
+        // Ignore any asset that isn't published under this repo's release for
+        // the tag the response is advertising.
+        if (!isTrustedAssetUrl(downloadUrl, m_githubRepo, tagName))
             continue;
         if (name == QLatin1String("SHA256SUMS.txt")) {
             m_latest.checksumsUrl = downloadUrl;
@@ -196,13 +319,14 @@ void UpdateChecker::downloadLatest()
         return;
     }
 
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
-            + QStringLiteral("/freetunnel-update");
-    QDir().mkpath(dir);
     // Owner-only: the installer is verified (Ed25519 + SHA-256) and then executed,
     // so keep other local users from swapping it in the window between the two.
-    QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                                       | QFileDevice::ExeOwner);
+    const QString dir = updateStagingDir();
+    QString dirError;
+    if (!prepareStagingDir(dir, &dirError)) {
+        emit downloadFailed(dirError);
+        return;
+    }
     m_downloadPath = QDir(dir).filePath(m_latest.assetName);
 
     // Never install an asset we can't integrity-check. A release without a
@@ -288,26 +412,26 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
 
 void UpdateChecker::fetchInstaller()
 {
+    QFile::remove(m_downloadPath); // leftover from an earlier run; removes a symlink as itself
     m_installerOut = std::make_unique<QFile>(m_downloadPath);
-    if (!m_installerOut->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (!createInstallerFile(*m_installerOut, m_downloadPath)) {
         m_installerOut.reset();
         emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
         return;
     }
-    m_installerHash.reset();
 
     QNetworkRequest req(m_latest.installerUrl);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = m_nam->get(req);
-    // Stream each chunk straight to disk and into the running hash — an
-    // installer is 100+ MB and must never be buffered in RAM as one piece.
+    // Stream each chunk straight to disk — an installer is 100+ MB and must
+    // never be buffered in RAM as one piece. The hash is taken from the file
+    // afterwards, not from the stream (see onInstallerFetched).
     connect(reply, &QNetworkReply::readyRead, this, [this, reply]() {
         if (!m_installerOut)
             return;
         const QByteArray chunk = reply->readAll();
-        m_installerHash.addData(chunk);
         if (m_installerOut->write(chunk) != chunk.size()) {
             m_installerOut->close();
             m_installerOut.reset(); // disk full / IO error — fail in finished()
@@ -332,7 +456,6 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
     if (m_installerOut) { // drain whatever arrived after the last readyRead
         const QByteArray rest = reply->readAll();
         if (!rest.isEmpty()) {
-            m_installerHash.addData(rest);
             if (m_installerOut->write(rest) != rest.size())
                 m_installerOut.reset();
         }
@@ -355,10 +478,12 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
     }
 
     // Mandatory integrity check: the manifest must be present and the asset's
-    // SHA-256 must match before we hand the file off to be executed.
-    const QString expected = expectedSha256FromSums(m_checksumsData, m_latest.assetName);
-    const QString actual = QString::fromLatin1(m_installerHash.result().toHex());
-    if (expected.isEmpty() || actual.toLower() != expected) {
+    // SHA-256 must match before we hand the file off to be executed. Hash the
+    // file we just closed, not the bytes that came off the socket — the file on
+    // disk is what gets executed, and only re-reading it covers a truncated
+    // write or anything that touched the file while it was being written.
+    if (m_checksumsData.isEmpty()
+        || !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
         QFile::remove(m_downloadPath);
         emit downloadFailed(QStringLiteral("Download failed integrity check (SHA-256 mismatch)"));
         return;

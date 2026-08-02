@@ -12,6 +12,13 @@ concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default: no job needs to write to the repo except the
+# release job, which asks for contents: write explicitly. Without this the
+# repo/org default applies, handing a write-capable token to every job —
+# including the ones that execute third-party tooling.
+permissions:
+  contents: read
+
 jobs:
   cppcheck:
     name: cppcheck
@@ -46,6 +53,9 @@ jobs:
         run: bash scripts/check-pinned-deps.sh
 
   dependency-review:
+    permissions:
+      contents: read
+      pull-requests: read
     name: dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

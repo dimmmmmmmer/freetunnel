@@ -112,7 +112,7 @@ public:
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
     Q_INVOKABLE bool importDeepLink(const QString &link);
-    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link);
+    Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
@@ -201,7 +201,10 @@ signals:
     void languageChanged(const QString &lang);
     void credentialStorageChanged();
     void errorOccurred(const QString &msg);
-    void deepLinkImportConfirmationRequired(const QString &message, const QString &link);
+    // existingName is the config this link would collide with, or empty when the
+    // name is free — the UI offers "replace" only in the first case.
+    void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
+                                            const QString &existingName);
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
@@ -224,6 +227,8 @@ private:
     void wireHotkeyLifecycle();
     void ensureHotkeysRegistered();
     void appendLog(const QString &level, const QString &msg);
+    // Append one already-timestamped line to the model and the on-disk log.
+    void recordLogLine(const QString &time, const QString &level, const QString &msg);
     void appendCoreLog(const QString &raw); // parse the core's own time/level out
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
@@ -256,8 +261,12 @@ private:
     // endpoint exclusion, and a physical bind can stall there on Windows).
     void startPingProbe(int index, const QHostAddress &ip, quint16 port, bool physical);
     void pingConfigAtIndex(int index);
-    bool finalizeImportedConfig(const QString &target, bool hadNoActive);
-    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared);
+    bool finalizeImportedConfig(const QString &target, bool hadNoActive,
+                                bool targetPreExisted = false);
+    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
+                                bool replaceExisting);
+    QString deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const;
+    void restoreReplacedConfig(const QString &target, const QByteArray &previousToml);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
                                    bool wasActive);
     void maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx);
@@ -265,7 +274,12 @@ private:
     void clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected);
     bool shouldSkipConnectAttempt() const;
     void logConnectAttempt();
-    bool loadConnectTomlOrFail(QString *tomlOut);
+    // The connect TOML is built off the GUI thread: assembling it reads the
+    // password out of the OS credential store, and that call blocks — on macOS
+    // it can sit in securityd for as long as an authorization dialog is up.
+    void buildConnectTomlAsync();
+    void onConnectTomlReady(quint64 generation, const QString &toml);
+    void failConnectNoPassword();
 
     VpnHelperClient m_client;
     AppSettings m_settings;
@@ -277,6 +291,9 @@ private:
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    // Which side failed: m_latestVersion cannot answer that — it only says "this
+    // process has ever seen a release" and is never cleared.
+    bool m_updateErrorFromDownload = false;
     QVariantList m_pings;
     int m_pingGeneration = 0;  // bumped on every ping run / config reload so
                                // in-flight probe callbacks from a previous run
@@ -300,7 +317,10 @@ private:
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
     bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
-    bool m_inConnect = false;     // inside connectVpn(): suppress live-reapply
+    bool m_inConnect = false;
+    // Bumped by anything that supersedes an in-flight connect, so a credential
+    // read that finishes late cannot start a session nobody asked for any more.
+    quint64 m_connectGen = 0;     // inside connectVpn(): suppress live-reapply
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran
 };

@@ -64,14 +64,23 @@ void Backend::wireUpdaterSignals()
             });
     connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {
         m_updateState = QStringLiteral("error");
+        m_updateErrorFromDownload = true;
         m_updateMessage = msg;
         emit updateChanged();
     });
-    connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &) {
+    connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &message) {
         if (!m_updateCheckUserInitiated)
             return;
-        m_updateState = QStringLiteral("current");
-        m_updateMessage = tr("You have the latest version");
+        // noUpdateAvailable doubles as the checker's failure path — it also carries
+        // "Network error: …" / "Invalid response from GitHub API". Dropping the
+        // message told an offline user their check had succeeded and they were up
+        // to date; only the checker's own up-to-date line means we actually reached
+        // GitHub and compared versions.
+        const bool upToDate = message.contains(QLatin1String("latest version"),
+                                               Qt::CaseInsensitive);
+        m_updateState = upToDate ? QStringLiteral("current") : QStringLiteral("error");
+        m_updateMessage = upToDate ? tr("You have the latest version")
+                                   : tr("Update check failed: %1").arg(message);
         emit updateChanged();
     });
 }
@@ -90,6 +99,7 @@ void Backend::checkForUpdates(bool userInitiated)
         return;
     ensureUpdater();
     m_updateCheckUserInitiated = userInitiated;
+    m_updateErrorFromDownload = false;
     if (userInitiated) {
         m_updateState = QStringLiteral("checking");
         m_updateMessage = tr("Checking…");
@@ -99,9 +109,18 @@ void Backend::checkForUpdates(bool userInitiated)
 }
 
 void Backend::openLatestRelease() {
-    if (m_updateState == QLatin1String("available") || m_updateState == QLatin1String("error"))
+    // "error" covers a failed download (retry it — we know what to fetch) and a
+    // failed update *check*, where there is nothing resolved to download yet.
+    // Track which one it was explicitly: m_latestVersion was a bad proxy, because
+    // it is set on the first successful check and never cleared, so once ANY
+    // check had found a release every later CHECK failure was treated as a
+    // download failure and silently started downloading instead of retrying.
+    if (m_updateState == QLatin1String("error") && !m_updateErrorFromDownload) {
+        checkForUpdates(true);
+    } else if (m_updateState == QLatin1String("available")
+               || m_updateState == QLatin1String("error")) {
         downloadUpdate();
-    else {
+    } else {
         const QString url = m_latestUrl.isEmpty()
                 ? QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/latest")
                 : m_latestUrl;

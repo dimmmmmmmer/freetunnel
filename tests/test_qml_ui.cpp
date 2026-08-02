@@ -6,6 +6,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
+#include <QQuickItem>
 #include <QQuickWindow>
 
 #include "ui/MockBackend.h"
@@ -25,6 +26,9 @@ private slots:
     void createConfigOverlayLoads();
     void mainWindowLoads();
     void mainWindowPageNavigation();
+    void everyComponentLoadsOnItsOwn();
+    void everyComponentLoadsOnItsOwn_data();
+    void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -122,6 +126,69 @@ void TestQmlUi::mainWindowPageNavigation()
         QCOMPARE(root->property("currentPage").toInt(), page);
     }
     delete root;
+}
+
+// The pages instantiate most of these, but not all on every path — a component
+// behind a Loader or a conditional can be broken for weeks and only show up as
+// an empty panel when a user finally opens it. Loading each one on its own turns
+// that into a build failure.
+void TestQmlUi::everyComponentLoadsOnItsOwn_data()
+{
+    QTest::addColumn<QString>("path");
+    for (const char *p : {"components/ChipX.qml", "components/ConfirmDialog.qml",
+                          "components/Dropdown.qml", "components/HotkeyField.qml",
+                          "components/Icon.qml", "components/SectionLabel.qml",
+                          "components/Sep.qml", "Field.qml", "Toggle.qml"}) {
+        QTest::newRow(p) << QString::fromLatin1(p);
+    }
+}
+
+void TestQmlUi::everyComponentLoadsOnItsOwn()
+{
+    QFETCH(QString, path);
+    QObject *root = loadPage(path.toLatin1().constData());
+    QVERIFY(root);
+    delete root;
+}
+
+// The deep-link dialog grew a third button so a link that collides with an
+// existing config can offer Replace next to Add copy. Every other caller —
+// delete a config, remove a profile — must still get two buttons: an extra
+// destructive-looking action appearing in those would be its own bug.
+void TestQmlUi::confirmDialogShowsTheThirdButtonOnlyWhenItHasOne()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+
+    // A Quick item reports EFFECTIVE visibility, which stays false while it is
+    // not in a scene — so put it in a window before judging any of it.
+    auto *item = qobject_cast<QQuickItem *>(root);
+    QVERIFY(item);
+    QQuickWindow window;
+    item->setParentItem(window.contentItem());
+    window.show();
+
+    QObject *alternate = root->findChild<QObject *>(QStringLiteral("alternateButton"));
+    QVERIFY2(alternate, "the dialog has no alternate button at all");
+    QVERIFY(root->findChild<QObject *>(QStringLiteral("cancelButton")));
+    QVERIFY(root->findChild<QObject *>(QStringLiteral("confirmButton")));
+
+    // The dialog starts hidden and open()/close() drive it. A child item reports
+    // EFFECTIVE visibility, so the buttons can only be judged while it is open.
+    QVERIFY(!root->property("visible").toBool());
+    QMetaObject::invokeMethod(root, "open");
+    QVERIFY(root->property("visible").toBool());
+
+    // Default: a plain two-button confirmation, as every delete/remove uses.
+    QVERIFY2(!alternate->property("visible").toBool(),
+             "a third button showed up in an ordinary confirmation");
+
+    root->setProperty("altText", QStringLiteral("Add copy"));
+    QVERIFY2(alternate->property("visible").toBool(),
+             "the collision dialog offers no way to add a copy");
+
+    QMetaObject::invokeMethod(root, "close");
+    QVERIFY(!root->property("visible").toBool());
 }
 
 int main(int argc, char *argv[])

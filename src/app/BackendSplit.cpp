@@ -226,8 +226,14 @@ void Backend::firePendingReconnect() {
         return;
     m_pendingReconnect = false;
     // Don't resurrect a tunnel while the app is shutting down.
-    if (!m_quitting && !m_activePath.isEmpty())
-        connectVpn();
+    if (m_quitting || m_activePath.isEmpty()) {
+        // No connect attempt means no Connected/Error to clear the guard later
+        // (clearReapplyingIfDone), so drop it here rather than latch it forever.
+        m_reapplying = false;
+        emit stateChanged();
+        return;
+    }
+    connectVpn();
 }
 
 void Backend::reapplyIfConnected() {
@@ -237,9 +243,19 @@ void Backend::reapplyIfConnected() {
 }
 
 void Backend::setVpnMode(const QString &mode) {
-    if (m_settings.vpn_mode == mode) return;
-    m_settings.vpn_mode = mode;
+    // Only two modes exist, and this value is persisted and read back at startup —
+    // storing an unrecognised string would survive restarts and silently behave as
+    // "general" while the UI showed something else.
+    const QString normalized = mode == QLatin1String("selective")
+            ? QStringLiteral("selective")
+            : QStringLiteral("general");
+    if (m_settings.vpn_mode == normalized) return;
+    m_settings.vpn_mode = normalized;
+    // Mode binds when the tunnel is built, exactly like the other split settings —
+    // without the reapply, flipping general↔selective while connected changed
+    // nothing until the user reconnected by hand.
     persistSettings();
     applySplitRules();
+    reapplyIfConnected();
     emit splitChanged();
 }

@@ -29,8 +29,14 @@ struct TrustTunnelConfig {
     bool killswitch_enabled = false;
     std::string log_file_path;
 
-    static std::optional<TrustTunnelConfig> build_config(const toml::table &)
+    // The real build_config rejects a table that parses as TOML but isn't a
+    // config. Returning a value unconditionally made the wrapper's
+    // "Invalid TrustTunnel config structure" branch dead under test, so require
+    // the one field every real config has.
+    static std::optional<TrustTunnelConfig> build_config(const toml::table &t)
     {
+        if (!t.contains("hostname") && !t.contains("endpoint.hostname"))
+            return std::nullopt;
         return TrustTunnelConfig{};
     }
 };

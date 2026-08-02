@@ -48,7 +48,7 @@ private slots:
 
         m_thread = new QThread(this);
         m_client = new QtTrustTunnelClient();
-        m_client->setSessionLogging(QString(), false); // no core log tail in tests
+        m_client->setSessionLogging(false); // no core log tail in tests
         m_client->setReconnectBoundsMs(250, 250);      // fast retries
         connect(m_client, &QtTrustTunnelClient::stateChanged, this,
                 [this](State s) { m_lastState = s; });
@@ -79,12 +79,25 @@ private slots:
     void disconnectWhileConnectStuckAbandonsAttempt();
     void networkWaitTimeoutForcesReconnect();
     void fdWatchdogForcesReconnect();
+    void malformedConfigReportsErrorAndDoesNotConnect();
+    void structurallyInvalidConfigReportsError();
+    void logLevelIsReadBackFromConfig();
 
 private:
-    void beginConnect()
+    // A minimally realistic config: the mock toml parser and build_config now
+    // behave like the real ones, so a config has to actually look like one.
+    static QString validConfigToml(const QString &logLevel = QStringLiteral("warn"))
+    {
+        return QStringLiteral("loglevel = \"%1\"\n"
+                              "[endpoint]\n"
+                              "hostname = \"vpn.example\"\n")
+                .arg(logLevel);
+    }
+
+    void beginConnect(const QString &toml = validConfigToml())
     {
         QMetaObject::invokeMethod(m_client, "beginConnect", Qt::QueuedConnection,
-                                  Q_ARG(QString, QStringLiteral("mock = true")));
+                                  Q_ARG(QString, toml));
     }
 
     void requestDisconnect()
@@ -194,6 +207,7 @@ void TestQtTrustTunnelClient::disconnectWhileConnectBlockedStaysClean()
 
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1); // worker thread is now inside connect()
+    const quint64 probeId = ctl.lastClientId();
 
     // The user hits disconnect while the native connect is stuck. The command
     // must still be processed (the client's event loop is not blocked by the
@@ -208,6 +222,11 @@ void TestQtTrustTunnelClient::disconnectWhileConnectBlockedStaysClean()
     QCOMPARE(m_lastState, State::Disconnected);
     QVERIFY2(m_errors.filter(QStringLiteral("connect() failed")).isEmpty(),
              qPrintable(m_errors.join(QStringLiteral("; "))));
+    // A connect that succeeds while the user is disconnecting must still be
+    // brought DOWN, not merely dropped: the core had already installed the tun
+    // device, the routes and the DNS override, and letting the object fall out of
+    // scope leaves all of that in place behind a "Disconnected" UI.
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.disconnectCalls(probeId) >= 1, kLongWaitMs);
 }
 
 void TestQtTrustTunnelClient::disconnectWhileConnectStuckAbandonsAttempt()
@@ -229,6 +248,9 @@ void TestQtTrustTunnelClient::disconnectWhileConnectStuckAbandonsAttempt()
     // its result, and the abandoned core client must be cleaned up.
     ctl.releaseConnect();
     QTRY_VERIFY_WITH_TIMEOUT(!ctl.clientAlive(firstId), kLongWaitMs);
+    // Cleaned up means DISCONNECTED, not merely destructed: the abandoned attempt
+    // had finished connecting, so the tunnel it installed has to come down.
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.disconnectCalls(firstId) >= 1, kLongWaitMs);
     QTest::qWait(300);
     QCOMPARE(m_lastState, State::Disconnected); // stale result really dropped
 
@@ -286,6 +308,56 @@ void TestQtTrustTunnelClient::fdWatchdogForcesReconnect()
     ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
     QTRY_COMPARE(m_lastState, State::Connected);
 #endif
+}
+
+// A config that isn't TOML must surface as an error, not as a connect attempt.
+// This path was untestable while the mock parser could not fail.
+void TestQtTrustTunnelClient::malformedConfigReportsErrorAndDoesNotConnect()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const int before = ctl.connectCallCount();
+
+    beginConnect(QStringLiteral("this is not a config\n"));
+
+    QTRY_COMPARE(m_lastState, State::Error);
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QVERIFY(m_errors.join(QLatin1Char('|')).contains(QStringLiteral("Failed parsing config")));
+    QCOMPARE(ctl.connectCallCount(), before);
+}
+
+// Valid TOML that isn't a valid config: the core's build_config refuses it.
+void TestQtTrustTunnelClient::structurallyInvalidConfigReportsError()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const int before = ctl.connectCallCount();
+
+    beginConnect(QStringLiteral("unrelated = \"value\"\n"));
+
+    QTRY_COMPARE(m_lastState, State::Error);
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QVERIFY(m_errors.join(QLatin1Char('|'))
+                    .contains(QStringLiteral("Invalid TrustTunnel config structure")));
+    QCOMPARE(ctl.connectCallCount(), before);
+}
+
+// The Verbose-logs toggle works by writing `loglevel` into the config TOML and
+// having the wrapper read it back (the core's build_config does not surface it).
+// Without this the toggle silently did nothing.
+void TestQtTrustTunnelClient::logLevelIsReadBackFromConfig()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    ag::Logger::last_level() = ag::LOG_LEVEL_ERROR; // so a no-op would be visible
+    beginConnect(validConfigToml(QStringLiteral("info")));
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_COMPARE(ag::Logger::last_level(), ag::LOG_LEVEL_INFO);
+
+    requestDisconnect();
+    QTRY_COMPARE(m_lastState, State::Disconnected);
+
+    beginConnect(validConfigToml(QStringLiteral("warn")));
+    QTRY_VERIFY(ctl.connectCallCount() >= 2);
+    QTRY_COMPARE(ag::Logger::last_level(), ag::LOG_LEVEL_WARN);
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)

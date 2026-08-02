@@ -18,7 +18,7 @@ void Backend::setLoggingEnabled(bool v) {
         return;
     m_settings.logging_enabled = v;
     persistSettings();
-    m_client.setSessionLogging(logPath(), v);
+    m_client.setSessionLogging(v);
     emit settingsChanged();
 }
 
