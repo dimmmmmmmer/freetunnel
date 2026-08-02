@@ -151,6 +151,7 @@ void TestCredentialStore::reentryDoesNotStackEventLoops()
 
     bool innerDispatched = false;
     bool sawInnerDispatchedTooEarly = false;
+    bool reentrantAvailable = false;
     QString reentrantResult;
 
     QMetaObject::invokeMethod(
@@ -159,13 +160,20 @@ void TestCredentialStore::reentryDoesNotStackEventLoops()
                 QMetaObject::invokeMethod(
                         qApp, [&innerDispatched]() { innerDispatched = true; },
                         Qt::QueuedConnection);
-                reentrantResult = CredentialStore::loadPassword(key); // re-entry
+                // Deliberately a DIFFERENT operation from the outer one: it
+                // returns bool where the outer returns QString, so the two go
+                // through separate template instantiations. A guard kept as a
+                // static local would be per-instantiation and would not hold
+                // here — which is the whole failure mode being pinned.
+                reentrantAvailable = CredentialStore::secureStorageAvailable();
+                reentrantResult = CredentialStore::loadPassword(key);
                 sawInnerDispatchedTooEarly = innerDispatched;
             },
             Qt::QueuedConnection);
 
     QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("s3cret"));
     QCOMPARE(reentrantResult, QStringLiteral("s3cret")); // the re-entrant call still works
+    QVERIFY(reentrantAvailable);
     QVERIFY2(!sawInnerDispatchedTooEarly,
              "the re-entrant call spun its own event loop — nesting is unbounded");
 

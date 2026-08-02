@@ -347,13 +347,13 @@ namespace {
 // input is excluded, so the app stays painted and responsive-looking but nothing
 // can re-enter the operation that is already in flight. Off the GUI thread there
 // is nothing to keep alive, so the call is made directly.
-// Depth guard for the loop below. Only ever touched on the GUI thread, and only
-// between the check and the reset, so a plain bool is enough.
-inline bool &uiCallInFlight()
-{
-    static bool inFlight = false;
-    return inFlight;
-}
+// Depth guard for the loop below. Only ever reached on the GUI thread — every
+// other caller returns before touching it — so a plain bool needs no
+// synchronisation. It lives out here rather than as a static local inside the
+// template: a static local would be per-instantiation, so a QString-returning
+// call would not see the flag a bool-returning one had set, and the guard would
+// not hold between two different credential operations.
+bool g_uiCallInFlight = false;
 
 template <typename Fn>
 auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
@@ -367,11 +367,11 @@ auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
     // window is already in its waiting state, so there is no responsiveness left
     // to preserve, and nesting depth stays bounded at one no matter what the
     // dispatched code does.
-    if (uiCallInFlight())
+    if (g_uiCallInFlight)
         return fn();
 
-    uiCallInFlight() = true;
-    const auto reset = qScopeGuard([] { uiCallInFlight() = false; });
+    g_uiCallInFlight = true;
+    const auto reset = qScopeGuard([] { g_uiCallInFlight = false; });
 
     Result result{};
     QEventLoop loop;
