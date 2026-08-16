@@ -79,6 +79,7 @@ private slots:
     void disconnectWhileConnectStuckAbandonsAttempt();
     void networkWaitTimeoutForcesReconnect();
     void fdWatchdogForcesReconnect();
+    void killSwitchKeepsTheClientAliveWhileWaitingForNetwork();
     void malformedConfigReportsErrorAndDoesNotConnect();
     void structurallyInvalidConfigReportsError();
     void logLevelIsReadBackFromConfig();
@@ -277,6 +278,42 @@ void TestQtTrustTunnelClient::networkWaitTimeoutForcesReconnect()
     QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
 
     ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+}
+
+// With the kill switch on, the recovery watchdogs must not destroy the core
+// client: the block on non-tunnelled traffic lives on that object, so tearing it
+// down and then backing off (up to 30 s per round, doubling, forever) leaves the
+// machine sending everything in the clear — on the network the user just woke up
+// on, which is precisely when they were counting on it. Waiting longer for a core
+// that may be wedged is the safe direction, and the state stays
+// WaitingForNetwork so the UI keeps saying the tunnel is not up.
+void TestQtTrustTunnelClient::killSwitchKeepsTheClientAliveWhileWaitingForNetwork()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const uint64_t id = ctl.lastClientId();
+    ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_FOR_NETWORK);
+    QTRY_COMPARE(m_lastState, State::WaitingForNetwork);
+
+    // Well past the 400 ms test watchdog interval: without the kill switch this is
+    // exactly where networkWaitTimeoutForcesReconnect() sees a second connect.
+    QTest::qWait(1500);
+    QCOMPARE(ctl.connectCallCount(), 1);
+    QVERIFY(ctl.clientAlive(id));
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    QCOMPARE(m_lastState, State::WaitingForNetwork);
+
+    // The core recovering on its own must still be honoured — the watchdog is
+    // suppressed, not the state machine.
+    ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED);
     QTRY_COMPARE(m_lastState, State::Connected);
 }
 

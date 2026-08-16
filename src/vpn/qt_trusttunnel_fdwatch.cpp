@@ -49,6 +49,24 @@ int QtTrustTunnelClient::getFdLimit() {
 void QtTrustTunnelClient::forceFdReconnect(const QString &logReason, const QString &userReason)
 {
     qWarning("%s", qPrintable(logReason));
+    // The kill switch exists only as a flag on the live core client, so
+    // teardownClient() takes the traffic block down along with the tun device,
+    // the routes and the DNS override — and scheduleReconnect() then waits, up to
+    // 30 s per round and doubling. This watchdog is the sharp case: it fires while
+    // the tunnel is Connected and healthy, so a leaking fd counter would cost the
+    // user an unprotected window on a working connection. Leaking fds is a
+    // resource problem, not a connectivity one; it does not break the tunnel now,
+    // and it is not worth trading protection for. Keep the tunnel and keep saying
+    // so — loudly, every time the watchdog fires, so the condition is visible in
+    // the log rather than silently endured.
+    if (m_killSwitch) {
+        qWarning("[fd watchdog] kill switch is on — keeping the tunnel up rather than "
+                 "reconnecting, which would drop the traffic block for the whole backoff");
+        emit vpnError(QObject::tr("The connection is using an unusual number of system "
+                                  "resources. The tunnel is being kept up because the kill "
+                                  "switch is on — reconnect manually when convenient."));
+        return;
+    }
     emit vpnError(userReason);
     teardownClient();
     if (!m_stopRequested && m_autoReconnect)

@@ -75,10 +75,22 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     m_networkWaitTimer.setSingleShot(true);
     m_networkWaitTimer.setInterval(testHookMs("FT_TEST_NETWORK_WAIT_MS", 30000));
     connect(&m_networkWaitTimer, &QTimer::timeout, this, [this]() {
-        if (m_state == State::WaitingForNetwork && !m_stopRequested && m_autoReconnect) {
-            teardownClient();
-            scheduleReconnect(QStringLiteral("network wait timeout: forcing clean reconnect"));
+        if (m_state != State::WaitingForNetwork || m_stopRequested || !m_autoReconnect)
+            return;
+        // Same trade as the fd watchdog: destroying the core client destroys the
+        // kill switch with it, and the backoff that follows leaves the machine
+        // unprotected for up to 30 s per round — on the network the user just
+        // woke up on, which is exactly when they were relying on it. Waiting
+        // longer for a core that may be wedged is the safe direction; the state
+        // stays WaitingForNetwork, so the UI keeps saying the tunnel is not up.
+        if (m_killSwitch) {
+            qWarning("[network watchdog] still waiting for network, but the kill switch is on — "
+                     "not tearing the client down, since that would drop the traffic block");
+            m_networkWaitTimer.start(); // keep checking; do not give up silently
+            return;
         }
+        teardownClient();
+        scheduleReconnect(QStringLiteral("network wait timeout: forcing clean reconnect"));
     });
 }
 

@@ -490,6 +490,10 @@
         <source>wintun.dll is missing next to FreeTunnel.exe (%1). Reinstall from the official installer.</source>
         <translation>Рядом с FreeTunnel.exe нет wintun.dll (%1). Переустановите приложение через официальный установщик.</translation>
     </message>
+    <message>
+        <source>The connection is using an unusual number of system resources. The tunnel is being kept up because the kill switch is on — reconnect manually when convenient.</source>
+        <translation>Соединение расходует необычно много системных ресурсов. Туннель оставлен поднятым, потому что включён kill switch, — переподключитесь вручную, когда будет удобно.</translation>
+    </message>
 </context>
 <context>
     <name>QtTrustTunnelClient</name>
