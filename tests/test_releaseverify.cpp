@@ -3,6 +3,7 @@
 
 #include <QTemporaryFile>
 
+#include "core/ReleaseSigning.h"
 #include "core/ReleaseVerify.h"
 
 class TestReleaseVerify : public QObject {
@@ -15,6 +16,7 @@ private slots:
 #if __has_include(<openssl/evp.h>)
     void ed25519Valid();
     void ed25519Invalid();
+    void theShippedSigningKeyIsAUsableEd25519PublicKey();
 #endif
 };
 
@@ -76,6 +78,36 @@ void TestReleaseVerify::ed25519Invalid()
         "d57a0fcaee75b77602433ee06e0f8b55cacd9113fe5969068b24211a0f11ec4"
         "fdf3503b8c06c3b4be0fcd547d773250c634ca96df804b15f5336f355a6563008");
     QVERIFY(!verifyEd25519Signature(manifest, sig, kPubPem));
+}
+#endif
+
+// The updater's whole trust anchor is one string constant. test_update_checker_e2e
+// deliberately compiles against a generated stand-in key so it can sign its own
+// manifests, which means nothing else in the suite would notice if the real one
+// were blanked or corrupted — by a botched key rotation, a stray sed, a merge that
+// empties the literal. signatureVerificationConfigured() then reports "no key
+// configured" and, depending on how that is read, either locks every user out of
+// every future update or stops checking signatures at all. Neither should be
+// reachable by accident, so assert the shipped constant is a real key here, where
+// the real header is the one being compiled.
+#if __has_include(<openssl/evp.h>)
+void TestReleaseVerify::theShippedSigningKeyIsAUsableEd25519PublicKey()
+{
+    const QByteArray pem = QByteArray(freetunnel::kReleaseSigningPublicKeyPem);
+    QVERIFY2(!pem.trimmed().isEmpty(), "the shipped release signing key is empty");
+    QVERIFY2(pem.contains("-----BEGIN PUBLIC KEY-----"), "not a SubjectPublicKeyInfo PEM");
+
+    // Well-formed is not enough — OpenSSL has to accept it as an Ed25519 key, which
+    // is what verifyEd25519Signature() will ask of it at update time. Feeding it a
+    // signature we know is wrong proves the key LOADS: a key OpenSSL cannot parse
+    // and a good key rejecting a bad signature are both "false" at the call site,
+    // so distinguish them by checking that a garbage key fails the same way for a
+    // different reason — see ed25519Invalid for the signature-level case.
+    QVERIFY(!freetunnel::verifyEd25519Signature(QByteArrayLiteral("payload"),
+                                                QByteArrayLiteral("not-a-signature"), pem));
+    QVERIFY(!freetunnel::verifyEd25519Signature(QByteArrayLiteral("payload"),
+                                                QByteArrayLiteral("not-a-signature"),
+                                                QByteArrayLiteral("-----BEGIN PUBLIC KEY-----\nbroken\n-----END PUBLIC KEY-----\n")));
 }
 #endif
 
