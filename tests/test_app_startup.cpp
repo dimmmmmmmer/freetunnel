@@ -214,16 +214,27 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
 
     QSignalSpy imports(&backend, &Backend::deepLinkImportConfirmationRequired);
     QVERIFY(imports.isValid());
+    // Watched from the start so a failure can say WHICH of the two ways this can
+    // go wrong happened: the link never reached handleControl (both spies stay
+    // empty), or it reached it and was rejected (errorOccurred carries the reason).
+    // A bare count comparison reports neither, which cost several CI rounds.
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVERIFY(errors.isValid());
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), link));
 
-    QTRY_COMPARE_WITH_TIMEOUT(imports.count(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(imports.count() == 1 || errors.count() > 0, 10000);
+    QVERIFY2(imports.count() == 1,
+             qPrintable(QStringLiteral("no import confirmation: imports=%1 errors=%2 first=%3")
+                                .arg(imports.count())
+                                .arg(errors.count())
+                                .arg(errors.isEmpty() ? QStringLiteral("<none>")
+                                                      : errors.at(0).at(0).toString())));
     // The link the Backend was asked to import is the one that went over the
     // socket — not a truncated, re-encoded or substituted one.
     QCOMPARE(imports.at(0).at(1).toString(), link);
 
     // A second, different verb through the same listener: if the payload were
     // being replaced by a constant, both messages would produce the same effect.
-    QSignalSpy errors(&backend, &Backend::errorOccurred);
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(
                                       QStringLiteral("tok"),
                                       QStringLiteral("freetunnel://connect")));
