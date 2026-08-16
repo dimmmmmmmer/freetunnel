@@ -23,6 +23,11 @@ Window {
     readonly property bool isMac: Qt.platform.os === "osx"
     // Custom min/max/close on frameless Linux/Windows (must match nav offset below).
     readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
+    // Log view and certificate editor need a fixed-pitch face. "Menlo" exists only
+    // on macOS, so elsewhere it silently fell back to the proportional UI font and
+    // log columns stopped lining up.
+    readonly property string monoFont: Qt.platform.os === "windows" ? "Consolas"
+                                     : (isMac ? "Menlo" : "monospace")
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // The window's own ✕ never quits: on macOS the red traffic-light is retargeted
@@ -79,8 +84,15 @@ Window {
                                     : "FreeTunnel"
         // Right-click opens the menu (below). Double-click — or a single left-click
         // on Windows, the expected tray gesture there — brings the window forward.
-        // On macOS a single click opens the menu, so don't steal it.
+        // macOS is excluded outright: there the status item owns an NSMenu, so Qt
+        // emits activated() from NSMenuDidBeginTracking and derives the reason from
+        // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
+        // as DoubleClick even though the user only opened the menu, which popped the
+        // hidden window back open. The menu's «Show FreeTunnel» item and the Dock
+        // icon are the macOS ways back.
         onActivated: function(reason) {
+            if (win.isMac)
+                return
             if (reason === Platform.SystemTrayIcon.DoubleClick
                     || (reason === Platform.SystemTrayIcon.Trigger && Qt.platform.os === "windows")) {
                 win.show(); win.raise(); win.requestActivate()
@@ -544,11 +556,26 @@ Window {
     // ---------- window-level confirm dialog (covers the whole window) --------
     property var confirmCb: null
     property var confirmAltCb: null
+    // Requests that arrived while a dialog was already up, oldest first.
+    property var confirmQueue: []
     function showConfirm(message, confirmLabel, cb) {
         showConfirmWithAlternate(message, confirmLabel, "", cb, null)
     }
     // altLabel === "" keeps the plain two-button dialog.
     function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb) {
+        // A second request used to overwrite the live dialog in place, so the
+        // user answered a question they never read using the buttons of the
+        // previous one — and the callback that ran was the new one. Deep links
+        // arrive asynchronously and can legitimately land back to back, so
+        // queue instead of clobbering.
+        if (winConfirm.visible) {
+            confirmQueue.push({ message: message, confirmLabel: confirmLabel,
+                                altLabel: altLabel, cb: cb, altCb: altCb })
+            return
+        }
+        applyConfirm(message, confirmLabel, altLabel, cb, altCb)
+    }
+    function applyConfirm(message, confirmLabel, altLabel, cb, altCb) {
         winConfirm.text = message
         winConfirm.confirmText = confirmLabel
         winConfirm.altText = altLabel
@@ -556,9 +583,19 @@ Window {
         win.confirmAltCb = altCb
         winConfirm.open()
     }
+    function showNextConfirm() {
+        if (winConfirm.visible || confirmQueue.length === 0)
+            return
+        var next = confirmQueue.shift()
+        applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb)
+    }
     ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
                     escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
         onConfirmed: if (win.confirmCb) win.confirmCb()
-        onAlternate: if (win.confirmAltCb) win.confirmAltCb() }
+        onAlternate: if (win.confirmAltCb) win.confirmAltCb()
+        // Deferred: the dialog clears `visible` before it emits confirmed()/
+        // alternate(), so showing the next one inline would replace confirmCb
+        // before the answer to the current question had run.
+        onVisibleChanged: if (!visible) Qt.callLater(win.showNextConfirm) }
 
 }

@@ -102,21 +102,40 @@ void installMacDockReopenHandler(std::function<void()> onReopen) {
                      andEventID:kAEReopenApplication];
     };
     // -[NSApplication finishLaunching] installs the system's own Apple event
-    // handlers, silently replacing any earlier registration for the same event.
-    // This function runs before Qt starts the event loop (and thus before
-    // finishLaunching), so registering right away would be clobbered and Dock
-    // clicks would reopen nothing. Defer until the app has finished launching;
-    // install immediately only if that already happened.
-    if (NSApp.running) {
-        install();
-    } else {
-        [[NSNotificationCenter defaultCenter]
-                addObserverForName:NSApplicationDidFinishLaunchingNotification
-                            object:nil
-                             queue:[NSOperationQueue mainQueue]
-                        usingBlock:^(NSNotification *note) {
-                            (void)note;
-                            install();
-                        }];
-    }
+    // handlers, silently replacing any earlier registration for the same event,
+    // so ours has to land after that point.
+    //
+    // Do NOT gate on NSApp.running to decide whether that already happened: it is
+    // NO both *before* finishLaunching and *after* a completed-then-stopped
+    // [NSApp run]. Qt produces that second state from
+    // QCocoaEventDispatcherPrivate::ensureNSAppInitialized() for any nested
+    // QEventLoop::exec(ExcludeUserInputEvents) on the GUI thread, and
+    // runGuiApplication() spins two before reaching us — forwardToRunningInstance()
+    // and startSingleInstanceServer() both go through CredentialStore, whose
+    // withoutFreezingTheUi() wrapper is exactly such a loop. The old check
+    // therefore took the deferred branch and waited for a DidFinishLaunching
+    // notification that had already been posted: the handler was never installed
+    // and Dock clicks reopened nothing.
+    //
+    // NSAppleEventManager keeps one handler per (eventClass, eventID), so
+    // registering repeatedly is idempotent and last-writer-wins. Install now, and
+    // again from both launch notifications with queue:nil so the block runs
+    // synchronously on the posting thread — inside finishLaunching, right after
+    // AppKit's own registration — rather than at some later main-queue drain.
+    install();
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:NSApplicationWillFinishLaunchingNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        install();
+                    }];
+    [center addObserverForName:NSApplicationDidFinishLaunchingNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        install();
+                    }];
 }
