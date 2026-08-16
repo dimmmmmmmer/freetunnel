@@ -65,6 +65,35 @@ QString uniqueOwnerConfigPath(const QString &stem)
 }
 
 
+QString configEntryMatching(const QStringList &entries, const QString &fileName)
+{
+    // An exact match is the answer whenever there is one: on a case-insensitive
+    // filesystem "Work.toml" and "work.toml" cannot both exist, and on a
+    // case-sensitive one the exact name is the file the caller meant.
+    if (entries.contains(fileName))
+        return fileName;
+    for (const QString &entry : entries) {
+        if (entry.compare(fileName, Qt::CaseInsensitive) == 0)
+            return entry;
+    }
+    return QString();
+}
+
+QString existingConfigPath(const QString &dir, const QString &fileName)
+{
+    // Ask the filesystem first. It is the only thing that knows whether it folds
+    // case, and its answer is right on both kinds: on a case-sensitive filesystem
+    // "work.toml" simply does not exist next to "Work.toml", so those are two
+    // different configs and there is no collision to resolve.
+    if (!QFileInfo::exists(QDir(dir).filePath(fileName)))
+        return QString();
+    const QString actual = configEntryMatching(QDir(dir).entryList(QDir::Files), fileName);
+    // A directory listing that does not contain the name the filesystem just
+    // confirmed means something changed underneath us; fall back to the literal
+    // path rather than reporting no collision, which would overwrite blind.
+    return QDir(dir).filePath(actual.isEmpty() ? fileName : actual);
+}
+
 QString ownerConfigPathForSave(const QString &stem, const QString &existingPath)
 {
     if (!existingPath.isEmpty()) {

@@ -93,11 +93,18 @@ void Backend::restoreReplacedConfig(const QString &target, const QByteArray &pre
         freetunnel::backend_config::writeConfigFile(target, previousToml);
 }
 
-// Path this link would land on if it were allowed to keep its own name.
+// The existing config this link would land on top of, or empty when it collides
+// with nothing. Resolved against what is really on disk: on a case-insensitive
+// filesystem the link's "work.toml" collides with the user's "Work.toml", and
+// every path-keyed operation below — the credential entry to drop, the
+// configs.json membership test, the name shown in the dialog — has to use the
+// name the user's config actually has. Deriving them from the link's casing
+// instead let a link replace a config while its real password survived under the
+// other key, ready to be sent to the link author's server.
 QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    return QDir(base).filePath(prepared.fileName);
+    return freetunnel::existingConfigPath(base, prepared.fileName);
 }
 
 bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
@@ -112,7 +119,7 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
     // server you already have — but it is the USER's call, made in the dialog, not
     // the link's.
     const QString collision = deepLinkCollisionPath(prepared);
-    const bool replacing = replaceExisting && QFileInfo::exists(collision);
+    const bool replacing = replaceExisting && !collision.isEmpty();
     const QString target = replacing
             ? collision
             : freetunnel::uniqueOwnerConfigPath(QFileInfo(prepared.fileName).completeBaseName());
@@ -169,8 +176,7 @@ bool Backend::importDeepLink(const QString &link)
     // is therefore mandatory for ALL links, not only the ones that also turn off
     // certificate verification.
     const QString collision = deepLinkCollisionPath(*prepared);
-    const QString existingName =
-            QFileInfo::exists(collision) ? nameForPath(collision) : QString();
+    const QString existingName = collision.isEmpty() ? QString() : nameForPath(collision);
 
     // Say what is actually happening and nothing else. A collision replaces the
     // generic question rather than stacking on top of it — the buttons already
