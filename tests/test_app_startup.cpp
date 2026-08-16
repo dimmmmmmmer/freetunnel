@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QElapsedTimer>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QEvent>
@@ -236,7 +238,14 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     QVERIFY(conns.isValid());
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), link));
 
-    QTRY_VERIFY_WITH_TIMEOUT(imports.count() == 1 || errors.count() > 0, 10000);
+    // Hand-rolled rather than QTRY_*, because a QTRY that times out fails on the
+    // spot and the informative assertion below never runs — which is how the last
+    // round produced a diagnostic nobody got to read.
+    QElapsedTimer waited;
+    waited.start();
+    while (waited.elapsed() < 10000 && imports.count() == 0 && errors.count() == 0)
+        QTest::qWait(50);
+
     QVERIFY2(imports.count() == 1,
              qPrintable(QStringLiteral("no import confirmation: connections=%1 imports=%2 "
                                        "errors=%3 first=%4 linkBytes=%5")
