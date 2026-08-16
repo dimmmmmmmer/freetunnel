@@ -18,6 +18,24 @@ else
   if ! ctest --test-dir "$BUILD_DIR" -j1 --output-on-failure "$@"; then
     echo "===== LastTest.log ====="
     cat "$BUILD_DIR/Testing/Temporary/LastTest.log" 2>/dev/null || true
+    # On the Windows runner ctest captures nothing at all from the Qt Test
+    # binaries — every entry in the log above, passing ones included, carries an
+    # empty Output block — so a failure there arrives as "Test Failed" and not one
+    # word about which assertion broke. Ask the binaries themselves instead:
+    # Qt Test's -o writes its report to a destination it opens, which does not
+    # depend on whatever ctest does with the child's stdout.
+    echo "===== re-running failed tests directly ====="
+    ctest --test-dir "$BUILD_DIR" --rerun-failed -N 2>/dev/null \
+        | sed -n 's/^[[:space:]]*Test[[:space:]]*#[0-9]*:[[:space:]]*//p' \
+        | while read -r name; do
+      [ -n "$name" ] || continue
+      for bin in "$BUILD_DIR/test_$name" "$BUILD_DIR/test_$name.exe"; do
+        [ -x "$bin" ] || continue
+        echo "--- $name ---"
+        "$bin" -o -,txt || true
+        break
+      done
+    done
     exit 1
   fi
 fi
