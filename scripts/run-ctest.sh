@@ -36,7 +36,16 @@ else
         # a test that dies mid-run — which is what an empty log with a long elapsed
         # time looks like — takes its buffer with it. Qt Test flushes its file
         # writer as it goes, so the report up to the crash survives.
-        "$bin" -o "$BUILD_DIR/failed-$name.txt,txt" || true
+        #
+        # Up to three attempts, stopping at the first failure: a test that ctest
+        # just failed and that then passes here is flaky, and one clean re-run
+        # tells you nothing about why. The report kept is the failing one.
+        for attempt in 1 2 3; do
+          echo "(attempt $attempt)"
+          if ! (cd "$BUILD_DIR" && "$bin" -o "$BUILD_DIR/failed-$name.txt,txt"); then
+            break
+          fi
+        done
         cat "$BUILD_DIR/failed-$name.txt" 2>/dev/null || echo "(no report written)"
         break
       done
