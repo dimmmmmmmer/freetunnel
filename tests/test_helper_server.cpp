@@ -16,11 +16,15 @@
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+
+#include <string>
+#include <vector>
 
 #include "vpn/vpn_helper_client.h"
 #include "vpn/vpn_helper_protocol.h"
@@ -49,6 +53,26 @@ quint16 freePort()
     return port;
 }
 
+// The helper's mock core (tests/mock_core) writes the config it was handed to
+// FT_TEST_CORE_CONFIG_DUMP as one `key=value` record per line. It has to travel
+// through a file because the helper is a separate PROCESS: its core lives on the
+// far side of the privilege boundary this test exists to cross, so there is no
+// in-memory double the test could interrogate instead.
+QMap<QString, QString> readCoreConfigDump(const QString &path)
+{
+    QMap<QString, QString> out;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return out;
+    const QStringList lines = QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        const int eq = line.indexOf(QLatin1Char('='));
+        if (eq > 0)
+            out.insert(line.left(eq), line.mid(eq + 1));
+    }
+    return out;
+}
+
 } // namespace
 
 class TestHelperServer : public QObject {
@@ -66,6 +90,7 @@ private slots:
     void serverRefusesPathBasedConnect();
     void newestConnectionCanStillAuthenticateUnderPreAuthPressure();
     void connectIgnoresAnyLogPathTheClientSends();
+    void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
 
 private:
     bool startHelper(quint16 port, const QString &token);
@@ -73,6 +98,9 @@ private:
 
     QTemporaryDir m_dir;
     QProcess *m_helper = nullptr;
+    // Where the helper's core drops the config it was built with, one file per
+    // launch (see readCoreConfigDump above).
+    QString m_configDump;
 };
 
 void TestHelperServer::initTestCase()
@@ -112,6 +140,7 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
             writeTokenFile(QDir(m_dir.path()), QStringLiteral("token-%1").arg(++seq), token);
     if (tokenPath.isEmpty())
         return false;
+    m_configDump = QDir(m_dir.path()).filePath(QStringLiteral("core-config-%1").arg(seq));
 
     m_helper = new QProcess(this);
     m_helper->setProcessChannelMode(QProcess::ForwardedErrorChannel);
@@ -120,6 +149,9 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
     // would never reach it.
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("FT_TEST_SKIP_PRIVILEGE_CHECK"), QStringLiteral("1"));
+    // Same reasoning: the config the helper's core is built with can only be seen
+    // from out here if the child is told where to leave it.
+    env.insert(QStringLiteral("FT_TEST_CORE_CONFIG_DUMP"), m_configDump);
     m_helper->setProcessEnvironment(env);
     m_helper->start(QStringLiteral(FT_TEST_HELPER_BINARY),
                     {QStringLiteral("--helper"), QStringLiteral("--port"),
@@ -431,6 +463,56 @@ void TestHelperServer::connectIgnoresAnyLogPathTheClientSends()
     QVERIFY2(!QFile::exists(forbidden), "helper honoured a client-supplied log path");
     QVERIFY2(!QDir(m_dir.path()).exists(QStringLiteral("planted")),
              "helper created a directory a client named");
+}
+
+// The whole kill-switch chain across the privilege boundary, in one go: the real
+// GUI client encodes the setting, the real elevated server parses it, and the
+// core inside that server is built with it. Every link was untested, and each one
+// fails silently — the helper reads c.value("enabled").toBool(), which answers
+// false for a key that is absent or spelled differently, so a rename anywhere
+// along the way leaves the kill switch off in every session while the GUI toggle
+// still reads ON and the entire suite stays green. The routing mode and the split
+// routes ride the same path and fail the same quiet way.
+void TestHelperServer::killSwitchAndSplitSettingsReachTheCoreInsideTheHelper()
+{
+    const quint16 port = freePort();
+    const QString token = QStringLiteral("token-for-core-settings");
+    QVERIFY(startHelper(port, token));
+    QVERIFY(!QFile::exists(m_configDump));
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    VpnHelperClient client;
+    QSignalSpy errors(&client, &VpnHelperClient::vpnError);
+    // Set before the handshake, exactly as Backend does at startup: the client
+    // holds them and pushes them the moment the helper says it is ready.
+    client.setKillSwitch(true);
+    client.setVpnMode(true);
+    client.setExcludedRoutes(std::vector<std::string>{"10.66.0.0/16"});
+    client.setExtraExclusions(std::vector<std::string>{"intranet.example"});
+    client.loadConfigFromToml(QStringLiteral("loglevel = \"warn\"\n"
+                                             "[endpoint]\n"
+                                             "hostname = \"vpn.example\"\n"));
+    client.connectVpn();
+
+    // The dump appears only once the helper's core client is CONSTRUCTED, so its
+    // existence already proves the connect made it across.
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_configDump), 20000);
+    const QMap<QString, QString> cfg = readCoreConfigDump(m_configDump);
+
+    QCOMPARE(cfg.value(QStringLiteral("killswitch_enabled")), QStringLiteral("1"));
+    QCOMPARE(cfg.value(QStringLiteral("mode")), QStringLiteral("selective"));
+    QCOMPARE(cfg.value(QStringLiteral("excluded_routes")), QStringLiteral("10.66.0.0/16"));
+    QVERIFY2(cfg.value(QStringLiteral("exclusions")).contains(QStringLiteral("intranet.example")),
+             qPrintable(cfg.value(QStringLiteral("exclusions"))));
+
+    for (const auto &e : errors)
+        QVERIFY2(!e.at(0).toString().contains(QStringLiteral("authenticate")),
+                 qPrintable(e.at(0).toString()));
+
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
 }
 
 QTEST_MAIN(TestHelperServer)

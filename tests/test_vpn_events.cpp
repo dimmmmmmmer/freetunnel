@@ -9,6 +9,7 @@
 // different paths.
 #include <QtTest>
 
+#include "mock_core_controller.h"
 #include "qt_trusttunnel_events.h"
 #include "qt_trusttunnel_platform.h"
 
@@ -35,6 +36,10 @@ private slots:
     void coreLogTailSkipsLinesTheAppAlreadyWrote();
 
     void logLevelNamesMapToCoreLevels();
+
+    void aTrustedServerCertificateIsAccepted();
+    void aRefusedServerCertificateIsRejected();
+    void verifyingANullCertificateEventIsInert();
 };
 
 // WAITING_RECOVERY carries its error in waiting_recovery_info; every other state
@@ -217,6 +222,74 @@ void TestVpnEvents::logLevelNamesMapToCoreLevels()
     // Anything unrecognised (including empty) settles on the shipped default.
     QCOMPARE(qt_trusttunnel_parse_log_level(QStringLiteral("nonsense")), ag::LOG_LEVEL_INFO);
     QCOMPARE(qt_trusttunnel_parse_log_level(QString()), ag::LOG_LEVEL_INFO);
+}
+
+// This function is the only thing standing between the tunnel's TLS session and
+// whoever is on the path. It was compiled into two test targets and called by
+// neither, so its verdict — the single int it writes into event->result — was
+// never once compared against anything.
+void TestVpnEvents::aTrustedServerCertificateIsAccepted()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.reset(); // no scripted chain error: this peer is the real server
+
+    ag::VpnVerifyCertificateEvent ev;
+    ev.cert = "leaf-pem-of-the-real-server";
+    ev.chain = "intermediates-pem";
+    // Seeded with the reject value so a handler that writes nothing at all fails
+    // here instead of inheriting an accept it never decided on.
+    ev.result = -1;
+
+    qt_trusttunnel_verify_server_certificate(&ev);
+
+    QCOMPARE(ev.result, 0);
+    // The verdict has to come from checking THIS event's material. A handler that
+    // ignored the event and verified something else would still answer correctly
+    // for a good chain, and would keep answering correctly for a forged one.
+    QCOMPARE(QString::fromStdString(ctl.lastVerifiedCert()),
+             QStringLiteral("leaf-pem-of-the-real-server"));
+    QCOMPARE(QString::fromStdString(ctl.lastVerifiedChain()), QStringLiteral("intermediates-pem"));
+    QCOMPARE(ctl.verifyCallCount(), 1);
+}
+
+// The reject branch: a chain the TLS layer refuses must come back as -1, which is
+// what makes the core abort the handshake. An accept here is an on-path attacker
+// terminating the tunnel's TLS with the user none the wiser.
+void TestVpnEvents::aRefusedServerCertificateIsRejected()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.reset();
+    ctl.setCertError("self-signed certificate in certificate chain");
+
+    ag::VpnVerifyCertificateEvent ev;
+    ev.cert = "leaf-pem-of-the-impostor";
+    ev.chain = "attacker-chain-pem";
+    ev.result = 0; // the core's own starting value: accept unless told otherwise
+
+    // The refusal must also be audible: this warning is the only trace a user or
+    // a support log ever gets of a rejected tunnel certificate.
+    QTest::ignoreMessage(
+            QtWarningMsg,
+            "TrustTunnel certificate verification failed: self-signed certificate in "
+            "certificate chain");
+    qt_trusttunnel_verify_server_certificate(&ev);
+
+    QCOMPARE(ev.result, -1);
+    QCOMPARE(QString::fromStdString(ctl.lastVerifiedCert()),
+             QStringLiteral("leaf-pem-of-the-impostor"));
+}
+
+// The core owns the event pointer and the wrapper must not assume it is there —
+// a null deref inside a TLS callback takes down an elevated process.
+void TestVpnEvents::verifyingANullCertificateEventIsInert()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.reset();
+    ctl.setCertError("would have rejected"); // so a check that ran would be visible
+
+    qt_trusttunnel_verify_server_certificate(nullptr);
+
+    QCOMPARE(ctl.verifyCallCount(), 0);
 }
 
 QTEST_MAIN(TestVpnEvents)

@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
+#include <QHash>
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QObject>
@@ -36,6 +37,13 @@ public:
     bool processAvailable();
     bool authed() const { return m_authed; }
     QString lastCmd() const { return m_lastCmd; }
+    // The last WHOLE message received for a given command, empty if that command
+    // has not arrived yet. lastCmd() alone only ever proved that a name went past
+    // — it could not tell a kill switch sent as true from one sent as false, or
+    // from one whose payload key had been renamed and now decodes to false. The
+    // settings this carries decide whether traffic is blocked and what is routed,
+    // so the double has to keep the values, not just the verbs.
+    QJsonObject lastMessageFor(const QString &cmd) const { return m_lastByCmd.value(cmd); }
     int connectionCount() const { return m_connectionCount; }
 
 private:
@@ -51,6 +59,7 @@ private:
     bool m_authed = false;
     QString m_challenge; // nonce we asked the client to answer
     QString m_lastCmd;
+    QHash<QString, QJsonObject> m_lastByCmd;
     int m_connectionCount = 0;
     int m_connectCount = 0;
     bool m_tunnelUp = false;

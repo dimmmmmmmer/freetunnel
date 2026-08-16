@@ -177,6 +177,11 @@ void MockHelperServer::handle(const QJsonObject &c)
     }
 
     m_lastCmd = cmd;
+    // Keep the whole message, not just its name. The settings commands used to be
+    // swallowed here after recording the verb, so a test could confirm that a
+    // "setKillSwitch" had been sent and learn nothing about whether it carried
+    // enabled=true, enabled=false, or no such key at all.
+    m_lastByCmd.insert(cmd, c);
     if (cmd == QLatin1String("setExclusions") || cmd == QLatin1String("setRoutes")
         || cmd == QLatin1String("setMode") || cmd == QLatin1String("setKillSwitch")) {
         return;

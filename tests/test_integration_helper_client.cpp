@@ -6,12 +6,29 @@
 #include <QJsonObject>
 #include <QTcpSocket>
 
+#include <QJsonArray>
 #include <QSignalSpy>
+#include <QStringList>
 #include <QTcpServer>
+
+#include <string>
+#include <vector>
 
 #include "helper_ipc_mock_server.h"
 #include "vpn/vpn_helper_client.h"
 #include "vpn/vpn_helper_protocol.h"
+
+namespace {
+
+QStringList jsonStringArray(const QJsonObject &obj, const char *key)
+{
+    QStringList out;
+    for (const QJsonValue &v : obj.value(QLatin1String(key)).toArray())
+        out.append(v.toString());
+    return out;
+}
+
+} // namespace
 
 // GUI-side helper IPC client (no elevated process): mirrors VpnHelperClient handshake.
 class TestIntegrationHelperClient : public QObject {
@@ -21,6 +38,7 @@ private slots:
     void clientHandshakeAndConnectFlow();
     void realClientRefusesPeerThatCannotProveTheToken();
     void realClientRefusesPeerThatSkipsTheChallenge();
+    void securitySettingsAreSentAsValuesNotJustCommandNames();
 };
 
 void TestIntegrationHelperClient::clientHandshakeAndConnectFlow()
@@ -179,6 +197,75 @@ void TestIntegrationHelperClient::realClientRefusesPeerThatSkipsTheChallenge()
     }
     QTest::qWait(200);
     QVERIFY(client.state() != VpnHelperClient::State::Connected);
+
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The GUI half of the kill-switch chain: whatever Backend asks for has to leave
+// this process as a JSON value the elevated helper can read back. Asserting that
+// a "setKillSwitch" line was sent proves nothing — the helper reads
+// c.value("enabled").toBool(), and QJsonValue::toBool() answers false for a key
+// that is absent or misspelled, so a rename on either side silently disarms the
+// kill switch in every session while the toggle in the GUI still reads ON.
+// Assert the key is PRESENT and carries the value the caller asked for.
+void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandNames()
+{
+    const QString token = QStringLiteral("settings-value-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    VpnHelperClient client;
+    client.setKillSwitch(true);
+    client.setVpnMode(true);
+    client.setExcludedRoutes(std::vector<std::string>{"10.66.0.0/16"});
+    client.setExtraExclusions(std::vector<std::string>{"intranet.example"});
+    client.loadConfigFromToml(QStringLiteral("loglevel = \"warn\"\n"
+                                             "[endpoint]\n"
+                                             "hostname = \"vpn.example\"\n"));
+    client.connectVpn();
+
+    // The settings are pushed the moment the handshake completes, before connect.
+    QTRY_VERIFY_WITH_TIMEOUT(
+            !server.lastMessageFor(QStringLiteral("setKillSwitch")).isEmpty(), 10000);
+
+    const QJsonObject killSwitch = server.lastMessageFor(QStringLiteral("setKillSwitch"));
+    QVERIFY2(killSwitch.contains(QStringLiteral("enabled")),
+             "setKillSwitch carried no \"enabled\" key — the helper decodes a missing key as "
+             "false and turns the kill switch off without anything reporting it");
+    QCOMPARE(killSwitch.value(QStringLiteral("enabled")).toBool(), true);
+
+    const QJsonObject mode = server.lastMessageFor(QStringLiteral("setMode"));
+    QVERIFY2(mode.contains(QStringLiteral("selective")), "setMode carried no \"selective\" key");
+    QCOMPARE(mode.value(QStringLiteral("selective")).toBool(), true);
+
+    QCOMPARE(jsonStringArray(server.lastMessageFor(QStringLiteral("setRoutes")), "excluded"),
+             QStringList{QStringLiteral("10.66.0.0/16")});
+    QCOMPARE(jsonStringArray(server.lastMessageFor(QStringLiteral("setExclusions")), "domains"),
+             QStringList{QStringLiteral("intranet.example")});
+
+    // Turning them back off must travel just as faithfully: a sender that hardcodes
+    // true is exactly as broken as one that drops the value, and only this half of
+    // the assertion can tell them apart.
+    client.setKillSwitch(false);
+    client.setVpnMode(false);
+    QTRY_VERIFY_WITH_TIMEOUT(
+            server.lastMessageFor(QStringLiteral("setKillSwitch"))
+                    .value(QStringLiteral("enabled"))
+                    .toBool()
+                    == false,
+            10000);
+    QTRY_VERIFY_WITH_TIMEOUT(server.lastMessageFor(QStringLiteral("setMode"))
+                                     .value(QStringLiteral("selective"))
+                                     .toBool()
+                                     == false,
+                             10000);
+    // Still the right key, not merely a missing one decoding to false.
+    QVERIFY(server.lastMessageFor(QStringLiteral("setKillSwitch"))
+                    .contains(QStringLiteral("enabled")));
 
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");

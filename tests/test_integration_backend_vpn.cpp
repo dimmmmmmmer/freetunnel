@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QJsonObject>
+
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
@@ -25,6 +27,7 @@ private slots:
     void initTestCase();
     void init();
     void backendConnectsThroughMockHelper();
+    void connectPushesTheSecuritySettingsToTheHelper();
     void configSwitchSuppressesCoreDisconnectToast();
     void deletingActiveConfigWhileConnectedTearsDownTunnel();
     void exportRoundTrips();
@@ -119,6 +122,63 @@ void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
 
     // The keychain service name is hardcoded and not affected by test mode, so
     // drop the entry we created to avoid leaving it in the real OS credential store.
+    freetunnel::CredentialStore::deletePassword(configPath);
+}
+
+static bool writeTestConfig(const QString &base, const QString &hostname, QString *outPath);
+
+// The first link of the kill-switch chain: Backend must push the PERSISTED
+// settings to the helper on every connect. Deleting that push leaves the tunnel
+// coming up perfectly — connected, no error, session timer running — with the
+// kill switch simply never armed and split tunnelling never applied, which no
+// other test notices because they all assert on connectivity.
+void TestIntegrationBackendVpn::connectPushesTheSecuritySettingsToTheHelper()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QString configPath;
+    QVERIFY(writeTestConfig(base, QStringLiteral("kill.example"), &configPath));
+    QVERIFY(freetunnel::CredentialStore::storePassword(configPath, QStringLiteral("secret")));
+
+    saveStoredConfigs({configPath});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = configPath;
+    settings.killswitch_enabled = true;
+    settings.domain_bypass_enabled = true;
+    settings.vpn_mode = QStringLiteral("selective");
+    settings.profiles[QStringLiteral("Default")] = {QStringLiteral("example.com")};
+    settings.domain_bypass_rules = settings.profiles.value(QStringLiteral("Default"));
+    saveAppSettings(settings);
+
+    const QString token = QStringLiteral("backend-settings-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+
+    // The VALUE, not merely the command name: a key read under the wrong spelling
+    // decodes to false through QJsonValue::toBool() with nothing failing anywhere.
+    const QJsonObject killSwitch = server.lastMessageFor(QStringLiteral("setKillSwitch"));
+    QVERIFY2(!killSwitch.isEmpty(), "connect never sent setKillSwitch to the helper");
+    QVERIFY2(killSwitch.contains(QStringLiteral("enabled")),
+             "setKillSwitch carried no 'enabled' key — a renamed key decodes to false silently");
+    QCOMPARE(killSwitch.value(QStringLiteral("enabled")).toBool(), true);
+
+    // Selective mode is only requested when the rule list is non-empty; this
+    // profile has one, so it must arrive as on.
+    const QJsonObject mode = server.lastMessageFor(QStringLiteral("setMode"));
+    QVERIFY2(!mode.isEmpty(), "connect never sent setMode to the helper");
+    QCOMPARE(mode.value(QStringLiteral("selective")).toBool(), true);
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
     freetunnel::CredentialStore::deletePassword(configPath);
 }
 

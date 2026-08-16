@@ -14,6 +14,8 @@
 #include <unistd.h>
 #endif
 
+#include <algorithm>
+#include <string>
 #include <vector>
 
 #include "mock_core_controller.h"
@@ -83,8 +85,16 @@ private slots:
     void malformedConfigReportsErrorAndDoesNotConnect();
     void structurallyInvalidConfigReportsError();
     void logLevelIsReadBackFromConfig();
+    void killSwitchAndVpnModeReachTheCoreConfig();
+    void splitRoutesAndExclusionsReachTheCoreConfig();
+    void theCoreIsHandedAServerCertificateVerifier();
 
 private:
+    static bool listContains(const std::vector<std::string> &items, const char *needle)
+    {
+        return std::find(items.cbegin(), items.cend(), std::string(needle)) != items.cend();
+    }
+
     // A minimally realistic config: the mock toml parser and build_config now
     // behave like the real ones, so a config has to actually look like one.
     static QString validConfigToml(const QString &logLevel = QStringLiteral("warn"))
@@ -395,6 +405,106 @@ void TestQtTrustTunnelClient::logLevelIsReadBackFromConfig()
     beginConnect(validConfigToml(QStringLiteral("warn")));
     QTRY_VERIFY(ctl.connectCallCount() >= 2);
     QTRY_COMPARE(ag::Logger::last_level(), ag::LOG_LEVEL_WARN);
+}
+
+// The last link of the kill-switch chain (Backend -> IPC -> helper -> here):
+// setKillSwitch/setVpnMode have to land in the config the core is CONSTRUCTED
+// with. Nothing downstream of this object can put them back, and nothing in the
+// UI can tell that they went missing — the toggle keeps reading ON while every
+// session runs without the traffic block. Both directions are asserted, so a
+// wrapper that hardcodes a value fails just as loudly as one that drops it.
+void TestQtTrustTunnelClient::killSwitchAndVpnModeReachTheCoreConfig()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QVERIFY2(cfg.killswitch_enabled,
+             "the kill switch was on, but the core was built with it off — every session "
+             "would run without the traffic block while the GUI toggle still reads ON");
+    QCOMPARE(cfg.mode, int(ag::VPN_MODE_SELECTIVE));
+
+    // And the OFF direction, from a second session: selective routing left on by
+    // accident tunnels only the split list, so everything else leaves in the clear.
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, false));
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, false));
+
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    cfg = ctl.lastCoreConfig();
+    QVERIFY(!cfg.killswitch_enabled);
+    QCOMPARE(cfg.mode, int(ag::VPN_MODE_GENERAL));
+}
+
+// Same argument for the split-tunnel settings: the routes and the domain
+// exclusions decide what leaves the machine outside the tunnel, and until now
+// nothing checked that the lists the GUI sends survive as far as the core.
+void TestQtTrustTunnelClient::splitRoutesAndExclusionsReachTheCoreConfig()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    QMetaObject::invokeMethod(m_client, "setExcludedRouteStrings", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList,
+                                    QStringList({QStringLiteral("10.66.0.0/16"),
+                                                 QStringLiteral("192.168.7.0/24")})));
+    QMetaObject::invokeMethod(m_client, "setExtraExclusionDomains", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList,
+                                    QStringList({QStringLiteral("intranet.example"),
+                                                 QStringLiteral("printer.local")})));
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    const mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QVERIFY2(listContains(cfg.excluded_routes, "10.66.0.0/16"),
+             "an excluded route the user configured never reached the core");
+    QVERIFY(listContains(cfg.excluded_routes, "192.168.7.0/24"));
+    const QString exclusions = QString::fromStdString(cfg.exclusions);
+    QVERIFY2(exclusions.contains(QStringLiteral("intranet.example")), qPrintable(exclusions));
+    QVERIFY2(exclusions.contains(QStringLiteral("printer.local")), qPrintable(exclusions));
+}
+
+// The core asks the app to vet the server's certificate through the callbacks it
+// was handed at construction. If that one assignment goes missing the core is
+// left with no verifier, its event->result stays at 0, and every certificate is
+// accepted — an on-path attacker terminates the tunnel's TLS and the app reports
+// a healthy connection. Assert both that a verifier is installed AT ALL and that
+// it is the one that actually refuses a bad chain.
+void TestQtTrustTunnelClient::theCoreIsHandedAServerCertificateVerifier()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const uint64_t id = ctl.lastClientId();
+
+    const int accepted = ctl.fireVerifyCertificate(id, "leaf-pem", "chain-pem");
+    QVERIFY2(accepted != mockcore::Controller::kNoVerifyHandler,
+             "the core was given callbacks with no certificate verifier at all, so it would "
+             "accept whatever certificate the peer presents");
+    QCOMPARE(accepted, 0);
+    QCOMPARE(QString::fromStdString(ctl.lastVerifiedCert()), QStringLiteral("leaf-pem"));
+
+    // Same client, chain now refused: the verdict has to flip. An installed
+    // handler that answers 0 regardless is no better than none.
+    ctl.setCertError("certificate chain is not trusted");
+    QTest::ignoreMessage(
+            QtWarningMsg,
+            "TrustTunnel certificate verification failed: certificate chain is not trusted");
+    QCOMPARE(ctl.fireVerifyCertificate(id, "impostor-pem", "impostor-chain"), -1);
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)
