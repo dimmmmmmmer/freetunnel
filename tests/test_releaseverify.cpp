@@ -103,11 +103,11 @@ void TestReleaseVerify::theShippedSigningKeyIsAUsableEd25519PublicKey()
     // and a good key rejecting a bad signature are both "false" at the call site,
     // so distinguish them by checking that a garbage key fails the same way for a
     // different reason — see ed25519Invalid for the signature-level case.
-    QVERIFY(!freetunnel::verifyEd25519Signature(QByteArrayLiteral("payload"),
-                                                QByteArrayLiteral("not-a-signature"), pem));
-    QVERIFY(!freetunnel::verifyEd25519Signature(QByteArrayLiteral("payload"),
-                                                QByteArrayLiteral("not-a-signature"),
-                                                QByteArrayLiteral("-----BEGIN PUBLIC KEY-----\nbroken\n-----END PUBLIC KEY-----\n")));
+    QVERIFY(!verifyEd25519Signature(QByteArrayLiteral("payload"),
+                                    QByteArrayLiteral("not-a-signature"), pem));
+    QVERIFY(!verifyEd25519Signature(
+            QByteArrayLiteral("payload"), QByteArrayLiteral("not-a-signature"),
+            QByteArrayLiteral("-----BEGIN PUBLIC KEY-----\nbroken\n-----END PUBLIC KEY-----\n")));
 }
 #endif
 
