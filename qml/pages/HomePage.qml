@@ -158,7 +158,12 @@ Item {
     // Click-away backdrop + Esc to dismiss the config picker.
     MouseArea { anchors.fill: parent; z: 90; visible: cfgPopup.open
                 onClicked: cfgPopup.open = false }
-    Shortcut { sequence: "Escape"; enabled: cfgPopup.open; onActivated: cfgPopup.open = false }
+    // Stand down while a window-level popup or confirm dialog is up: it owns
+    // Escape then, and two enabled shortcuts on one key make Qt report the press
+    // as ambiguous, so Escape would do nothing at all — including not closing the
+    // dialog the user is actually looking at.
+    Shortcut { sequence: "Escape"; enabled: cfgPopup.open && !shell.windowPopupOpen
+               onActivated: cfgPopup.open = false }
     // Config picker dropdown, anchored under the selector.
     Rectangle {
         id: cfgPopup

@@ -216,7 +216,11 @@ Item {
     // Click-away backdrop + Esc to dismiss the import menu.
     MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open
                 onClicked: importMenu.open = false }
-    Shortcut { sequence: "Escape"; enabled: importMenu.open; onActivated: importMenu.open = false }
+    // Same standing-down rule as everywhere else: a confirm dialog opened over
+    // this menu (a deep link can do that unprompted) owns Escape, and leaving both
+    // enabled makes Qt call the press ambiguous and run neither.
+    Shortcut { sequence: "Escape"; enabled: importMenu.open && !shell.windowPopupOpen
+               onActivated: importMenu.open = false }
     // Import / create dropdown (collapsed by default).
     Rectangle {
         id: importMenu; property bool open: false

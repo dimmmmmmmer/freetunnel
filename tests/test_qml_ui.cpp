@@ -29,6 +29,7 @@ private slots:
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
+    void confirmDialogAnswersReturnAndEscape();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -155,6 +156,60 @@ void TestQmlUi::everyComponentLoadsOnItsOwn()
 // existing config can offer Replace next to Add copy. Every other caller —
 // delete a config, remove a profile — must still get two buttons: an extra
 // destructive-looking action appearing in those would be its own bug.
+// Return confirms and Escape cancels, but Return only after the dialog has been
+// on screen for a moment. A deep link can raise this dialog with no warning while
+// the user is typing, and a keystroke already in flight must not answer a
+// question nobody has read yet.
+void TestQmlUi::confirmDialogAnswersReturnAndEscape()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    auto *item = qobject_cast<QQuickItem *>(root);
+    QVERIFY(item);
+    QQuickWindow window;
+    item->setParentItem(window.contentItem());
+    item->setWidth(400);
+    item->setHeight(400);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    QSignalSpy confirmed(root, SIGNAL(confirmed()));
+    QVERIFY(confirmed.isValid());
+
+    QMetaObject::invokeMethod(root, "open");
+    QVERIFY(root->property("visible").toBool());
+
+    // Immediately after opening the dialog is deliberately deaf to Return.
+    QVERIFY(!root->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QCOMPARE(confirmed.count(), 0);
+    QVERIFY2(root->property("visible").toBool(),
+             "Return closed the dialog before it had been on screen long enough to read");
+
+    // Once armed, Return is the confirm button.
+    QTRY_VERIFY(root->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QCOMPARE(confirmed.count(), 1);
+    QVERIFY(!root->property("visible").toBool());
+
+    // Escape cancels: the dialog closes and confirmed() must NOT fire.
+    QMetaObject::invokeMethod(root, "open");
+    QTRY_VERIFY(root->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QVERIFY(!root->property("visible").toBool());
+    QCOMPARE(confirmed.count(), 1);
+
+    // The three-button form is the deep-link name collision: its primary action
+    // replaces an existing config with one a link chose, so there is no answer
+    // safe enough to be the keyboard default and Return must stay inert.
+    root->setProperty("altText", QStringLiteral("Add copy"));
+    QMetaObject::invokeMethod(root, "open");
+    QTRY_VERIFY(root->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QCOMPARE(confirmed.count(), 1);
+    QVERIFY(root->property("visible").toBool());
+}
+
 void TestQmlUi::confirmDialogShowsTheThirdButtonOnlyWhenItHasOne()
 {
     QObject *root = loadPage("components/ConfirmDialog.qml");

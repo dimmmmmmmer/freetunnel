@@ -72,10 +72,33 @@ Item {
         }
     }
     // escapeOwner lets an outer dialog stand down while a more-inner one is up:
-    // two visible confirm dialogs would otherwise both claim Escape and Qt would
-    // report the press as ambiguous, so neither would close.
+    // two visible confirm dialogs would otherwise both claim the key and Qt would
+    // report the press as ambiguous, so neither would fire. It governs Return as
+    // well as Escape, for the same reason.
     property bool escapeOwner: true
     Shortcut { sequences: ["Escape"]
                enabled: cd.visible && cd.escapeOwner
                onActivated: cd.visible = false }
+
+    // Return confirms — but not the instant the dialog appears. A deep link can
+    // put this dialog on screen with no warning while the user is typing, and a
+    // keystroke already on its way to something else must not answer a question
+    // the user has not seen yet. A moment's arming costs nothing to someone who
+    // actually reads the dialog.
+    property bool armed: false
+    Timer { id: armTimer; interval: 400; onTriggered: cd.armed = true }
+    onVisibleChanged: {
+        armed = false
+        if (visible)
+            armTimer.restart()
+        else
+            armTimer.stop()
+    }
+    // Only for the two-button form. The three-button one is the deep-link name
+    // collision, where the primary action replaces an existing config with one a
+    // link chose — there is no answer safe enough to be the default, so that one
+    // is decided by clicking.
+    Shortcut { sequences: ["Return", "Enter"]
+               enabled: cd.visible && cd.escapeOwner && cd.armed && cd.altText === ""
+               onActivated: { cd.visible = false; cd.confirmed() } }
 }

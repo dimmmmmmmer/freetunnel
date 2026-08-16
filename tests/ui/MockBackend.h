@@ -31,6 +31,11 @@ class MockBackend : public QObject {
     Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged)
+    // Mirrors Backend: "selective" with no rules would route nothing through the
+    // tunnel, so the Backend keeps the full tunnel and the Split page explains it.
+    // Derived here the same way, so the page under test sees the real relationship
+    // rather than a constant.
+    Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
@@ -96,6 +101,10 @@ public:
     bool splitEnabled() const { return m_splitEnabled; }
     void setSplitEnabled(bool v);
     QString vpnMode() const { return m_vpnMode; }
+    bool selectiveModeWouldLeak() const
+    {
+        return m_splitEnabled && m_vpnMode == QLatin1String("selective") && m_domains.isEmpty();
+    }
     void setVpnMode(const QString &v);
     QStringList domains() const { return m_domains; }
     QStringList excludedRoutes() const { return m_excludedRoutes; }
