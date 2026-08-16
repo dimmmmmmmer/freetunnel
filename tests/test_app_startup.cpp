@@ -175,6 +175,13 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     client.flush();
     client.waitForBytesWritten(2000);
     client.disconnectFromServer();
+    // And wait for the close to complete. disconnectFromServer() only *starts* it
+    // when bytes are still queued — which on Windows they are, the write having
+    // been completed asynchronously — so returning here would let the socket be
+    // destroyed with data still pending, and that data is simply dropped. Short
+    // payloads survived it and a deep link, the longest thing this channel
+    // carries, did not.
+    client.waitForDisconnected(5000);
     // No fixed wait here. Delivery is deliberately deferred by the listener
     // (kInstanceMessageIdleMs, 250 ms) and then has to cross the event loop, so
     // how long it takes depends on how loaded the machine is — a hardcoded second

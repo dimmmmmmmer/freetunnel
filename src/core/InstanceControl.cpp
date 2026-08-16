@@ -208,6 +208,14 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     probe.flush();
     probe.waitForBytesWritten(300);
     probe.disconnectFromServer();
+    // Wait for the close to finish. On Windows the named-pipe write is completed
+    // asynchronously, so waitForBytesWritten() above can return with the payload
+    // still queued; disconnectFromServer() then only *starts* the close, and this
+    // process exits immediately afterwards (runGuiApplication returns 0), taking
+    // the unsent bytes with it. Short commands got through and a tt:// deep link —
+    // the longest thing this channel carries, and the one where losing it means a
+    // link the user clicked does nothing at all — did not.
+    probe.waitForDisconnected(3000);
     return true;
 }
 
