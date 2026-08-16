@@ -171,7 +171,14 @@ void TestIntegrationSingleInstance::listenerRejectsWrongToken()
     forger.connectToServer(forgedSocket);
     QVERIFY(forger.waitForConnected(3000));
     QCOMPARE(forger.write(forged), static_cast<qint64>(forged.size()));
-    QVERIFY(forger.waitForBytesWritten(3000));
+    // Not QVERIFY(waitForBytesWritten(...)): on Windows a QLocalSocket is a named
+    // pipe and the write completes synchronously, so there is nothing pending by
+    // the time we ask and waitForBytesWritten() answers false — for a message that
+    // did arrive. Wait for the queue to drain instead, which says the same thing on
+    // every platform.
+    forger.flush();
+    while (forger.bytesToWrite() > 0 && forger.waitForBytesWritten(3000)) { }
+    QCOMPARE(forger.bytesToWrite(), qint64(0));
 
     QVERIFY(server.waitForNewConnection(3000));
     QLocalSocket *peer = server.nextPendingConnection();

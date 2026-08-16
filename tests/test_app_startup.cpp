@@ -156,7 +156,14 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     client.connectToServer(socketName);
     QVERIFY(client.waitForConnected(2000));
     QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
-    QVERIFY(client.waitForBytesWritten(2000));
+    // Not QVERIFY(waitForBytesWritten(...)): on Windows a QLocalSocket is a named
+    // pipe and the write completes synchronously, so there is nothing pending by
+    // the time we ask and waitForBytesWritten() answers false — for a message that
+    // did arrive. Wait for the queue to drain instead, which says the same thing on
+    // every platform.
+    client.flush();
+    while (client.bytesToWrite() > 0 && client.waitForBytesWritten(2000)) { }
+    QCOMPARE(client.bytesToWrite(), qint64(0));
     QTest::qWait(1000);
 }
 
