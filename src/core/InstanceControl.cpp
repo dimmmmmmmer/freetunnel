@@ -60,11 +60,19 @@ bool writeInstanceAuthToken(QString *tokenOut)
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
+    // Restrict BEFORE the token is written, not after: open() honours the umask,
+    // which on most desktops leaves the file world-readable, so tightening it
+    // afterwards leaves a window in which any local user can read a token that
+    // grants control over this instance. An empty file leaking is harmless; the
+    // token must never exist on disk at wider permissions than 0600.
+    if (!f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        f.remove();
+        return false;
+    }
     if (f.write(token.toUtf8()) != token.size()) {
         f.remove();
         return false;
     }
-    f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     if (tokenOut)
         *tokenOut = token;
     return true;

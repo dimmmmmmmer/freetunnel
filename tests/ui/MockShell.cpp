@@ -3,6 +3,17 @@
 
 MockShell::MockShell(QObject *parent) : QObject(parent) {}
 
+QString MockShell::monoFont() const
+{
+#if defined(Q_OS_WIN)
+    return QStringLiteral("Consolas");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("Menlo");
+#else
+    return QStringLiteral("monospace");
+#endif
+}
+
 void MockShell::setCurrentPage(int v)
 {
     if (m_currentPage == v)

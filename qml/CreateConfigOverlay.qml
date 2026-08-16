@@ -163,7 +163,7 @@ Item {
                     }
                     Rectangle { width: parent.width; height: 70; radius: 8; color: theme.inputBg; border.color: fCert.activeFocus ? theme.accent : theme.inputBorder; border.width: 1
                         Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
-                            TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: "Menlo"; color: theme.text; wrapMode: TextEdit.WrapAnywhere } }
+                            TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
                 }
                 Platform.FileDialog {

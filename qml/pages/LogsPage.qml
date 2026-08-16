@@ -51,7 +51,7 @@ Item {
                     width: logFlick.width
                     readOnly: true; selectByMouse: true; persistentSelection: true
                     wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
-                    font.family: "Menlo"; font.pixelSize: 11
+                    font.family: shell.monoFont; font.pixelSize: 11
                     color: theme.text; selectionColor: theme.accent
                     Component.onCompleted: text = backend.logText()
                     onTextChanged: Qt.callLater(logFlick.toBottom)

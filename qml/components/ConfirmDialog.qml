@@ -31,10 +31,24 @@ Item {
         radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
         Column {
             id: cdCol; width: parent.width - 28; anchors.centerIn: parent; spacing: 14
-            Text { id: cdText; width: parent.width
-                   wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
-                   text: cd.text
-                   color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
+            // The message must never be cut off. A deep-link confirmation carries
+            // the warning that the link disables certificate verification, and it
+            // sits at the end of the text — eliding at four lines dropped exactly
+            // the sentence the user needs in order to answer the question. Scroll
+            // instead, and only once the text outgrows the window.
+            Flickable {
+                id: cdFlick
+                width: parent.width
+                height: Math.min(cdText.implicitHeight, cd.height - 160)
+                contentHeight: cdText.implicitHeight
+                clip: true
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                Text { id: cdText; width: cdFlick.width
+                       wrapMode: Text.WordWrap
+                       text: cd.text
+                       color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
+            }
             Row { id: btnRow; anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
                 Rectangle { objectName: "cancelButton"
                     width: Math.max(76, c1t.implicitWidth + 26); height: 32; radius: 8

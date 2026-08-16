@@ -15,6 +15,9 @@ class MockShell : public QObject {
     // writable here so a test can put a sub-screen in that state.
     Q_PROPERTY(bool windowPopupOpen READ windowPopupOpen WRITE setWindowPopupOpen NOTIFY
                        windowPopupOpenChanged)
+    // Mirrors Main.qml's monoFont — the fixed-pitch family the log view and the
+    // certificate editor ask the shell for. Constant: pages only ever read it.
+    Q_PROPERTY(QString monoFont READ monoFont CONSTANT)
 
 public:
     explicit MockShell(QObject *parent = nullptr);
@@ -27,6 +30,7 @@ public:
     void setEditIndex(int v);
     bool windowPopupOpen() const { return m_windowPopupOpen; }
     void setWindowPopupOpen(bool v);
+    QString monoFont() const;
 
     QString lastToast() const { return m_lastToast; }
 

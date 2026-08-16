@@ -21,7 +21,12 @@ FreeTunnel splits privileges:
 
 The GUI talks to the helper over **loopback** (local-only) Transmission Control
 Protocol (TCP) on the Internet Protocol version 4 (IPv4) loopback address
-`127.0.0.1` with a one-time random token and a 64 kilobyte (KB) read cap.
+`127.0.0.1`. Both sides prove knowledge of a one-time random token over the
+other side's nonce before anything sensitive is sent, so the token itself never
+travels over the socket, and each protocol line is capped at 512 kilobytes (KB)
+— connect payloads carry a full config, certificates included. The separate
+single-instance socket, over which an already-running copy accepts control
+commands, caps a message at 64 KB.
 
 ## Credential storage
 
