@@ -183,8 +183,19 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         idle->start();
     });
     QObject::connect(c, &QLocalSocket::disconnected, c, deliver);
+    // The idle timer measures a gap BETWEEN chunks, so it must not be armed until
+    // there is a first chunk to measure from — the readyRead handler above starts
+    // it. Arming it here instead meant a peer whose first bytes took longer than
+    // kInstanceMessageIdleMs to show up had deliver() run against an empty buffer,
+    // which marked the message delivered and dropped every byte that arrived
+    // afterwards, without a word: a message that fails to parse is ignored by
+    // design. On Windows, where the peer's write completes asynchronously, a
+    // forwarded tt:// link lost this race routinely — the link did nothing at all,
+    // no error and no import prompt, while shorter commands got through.
+    //
+    // A peer that connects and then says nothing is still bounded, by the deadline
+    // below.
     QTimer::singleShot(kInstanceMessageDeadlineMs, c, deliver);
-    idle->start();
 }
 
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,

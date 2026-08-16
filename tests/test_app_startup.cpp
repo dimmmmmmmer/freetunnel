@@ -33,6 +33,7 @@ private slots:
     void applyLanguageLoadsRussian();
     void wireInstanceServerForwardsCommand();
     void wireInstanceServerIgnoresWrongToken();
+    void wireInstanceServerSurvivesASlowFirstChunk();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
 
 private:
@@ -248,6 +249,46 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, 10000);
     QCOMPARE(imports.count(), 1); // still one — connect is not an import
     QCOMPARE(errors.at(0).at(0).toString(), Backend::tr("Select a config first"));
+}
+
+// A peer whose first bytes are slow to arrive must still be heard. The listener
+// arms its idle timer when the connection opens, so a quiet first quarter-second
+// used to fire the delivery path against an empty buffer, mark the message
+// delivered, and drop everything that arrived afterwards — silently, because a
+// message that fails to parse is simply ignored.
+//
+// The gap here is deliberate and only slightly over the 250 ms idle interval; on
+// a loaded machine a real peer hits it by itself, which is how this was found —
+// a tt:// link forwarded to a running instance on Windows did nothing at all, no
+// error and no import prompt, while shorter commands on the same socket worked.
+void TestAppStartup::wireInstanceServerSurvivesASlowFirstChunk()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("slowchunk"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    freetunnel::wireInstanceServer(&server, backend, nullptr, QStringLiteral("tok"));
+
+    QSignalSpy spy(&backend, &Backend::errorOccurred);
+    QLocalSocket client;
+    client.connectToServer(name);
+    QVERIFY(client.waitForConnected(2000));
+
+    QTest::qWait(400); // > kInstanceMessageIdleMs (250 ms), < the 3 s deadline
+
+    const QByteArray msg = freetunnel::formatInstanceMessage(
+            QStringLiteral("tok"), QStringLiteral("freetunnel://connect"));
+    QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
+    client.flush();
+    client.waitForBytesWritten(2000);
+    client.disconnectFromServer();
+    client.waitForDisconnected(5000);
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+    QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
 }
 
 // This is the whole single-instance auth boundary. The local socket lives in a
