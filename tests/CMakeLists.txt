@@ -94,6 +94,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
     ../src/app/PlatformAutoStart.cpp
+    ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
     ../src/app/BackendConfigCreate.cpp
@@ -118,6 +119,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppImagePath.cpp
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
@@ -147,6 +149,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
     ../src/app/PlatformAutoStart.cpp
+    ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
     ../src/app/BackendConfigCreate.cpp
@@ -171,6 +174,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppImagePath.cpp
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
@@ -206,6 +210,15 @@ add_executable(test_vpn_helper_launch
 target_include_directories(test_vpn_helper_launch PRIVATE ../include ../include/vpn)
 target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch)
+
+add_executable(test_appimagepath
+    test_appimagepath.cpp
+    ../src/core/AppImagePath.cpp
+    ../src/app/PlatformAutoStart.cpp
+)
+target_include_directories(test_appimagepath PRIVATE ../include ../include/core ../include/app)
+target_link_libraries(test_appimagepath PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME appimagepath COMMAND test_appimagepath)
 
 add_executable(test_configpaths
     test_configpaths.cpp
@@ -401,6 +414,7 @@ add_executable(test_integration_helper_client
     # The real GUI-side client, so the handshake tests exercise production code
     # rather than two test doubles talking to each other.
     ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/AppUiUtils.cpp
     ../include/vpn/vpn_helper_client.h
 )
@@ -419,6 +433,7 @@ set(BACKEND_TEST_SOURCES
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
     ../src/app/PlatformAutoStart.cpp
+    ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
     ../src/app/BackendConfigCreate.cpp
@@ -443,6 +458,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppImagePath.cpp
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
@@ -629,6 +645,7 @@ target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network)
 add_executable(test_helper_server
     test_helper_server.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/AppUiUtils.cpp
     ../include/vpn/vpn_helper_client.h  # AUTOMOC needs the Q_OBJECT header listed
 )

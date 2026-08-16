@@ -32,7 +32,20 @@ on paths the GUI names. The connect command must carry an inline config (a file
 path is refused), the core's log path is chosen by the helper itself and is not
 part of the protocol at all — the GUI receives log lines over IPC and keeps the
 durable copy — and the elevated argv is derived from the running executable
-rather than from `$APPIMAGE`.
+rather than from the environment.
+
+That last part is the one worth spelling out, because it was wrong once. On Linux
+an AppImage build has to re-exec the `.AppImage` file rather than the executable
+inside its FUSE mount, since root cannot read that user-private mount. Naming the
+file from `$APPIMAGE` and validating it against `$APPDIR` is not validation at
+all — an attacker who can set the GUI's environment sets both sides, and `$APPDIR`
+only had to be a path *prefix* of the executable, so `APPDIR=/usr` passed for an
+ordinary `/usr/bin/FreeTunnel` install and `$APPIMAGE` was then run as root. The
+answer now comes from the kernel: `runningAppImagePath()` resolves
+`/proc/self/exe`, finds the FUSE mount containing it in `/proc/self/mountinfo`,
+and takes that mount's backing file. When the kernel does not name a regular file
+there, elevation falls back to the running executable rather than guessing — a
+prompt that is about to run something as root gets a definite answer or none.
 
 Mitigations already in place: no remote attack surface for control IPC, tokens
 rotate each session, helper binds to loopback only.

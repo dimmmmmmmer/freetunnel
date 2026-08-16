@@ -17,6 +17,7 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
+#include "core/AppImagePath.h" // runningAppImagePath (Linux elevation target)
 #include "core/AppUiUtils.h" // shellEscape / appleScriptEscape (macOS)
 #include "vpn/vpn_helper_protocol.h"
 
@@ -34,23 +35,17 @@ const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
 namespace {
 
-QStringList linuxHelperCommand(const QString &exe, quint16 port, const QString &tokenPath)
+QStringList linuxHelperCommand(const QString &exe, const QString &appImage, quint16 port,
+                               const QString &tokenPath)
 {
     QStringList cmd;
-    // $APPIMAGE names the binary the user is about to authorize as root, so it
-    // cannot be taken on faith: anything able to set the GUI's environment (a
-    // shell profile, a .desktop entry, the session launcher) would otherwise
-    // turn the elevation prompt into "run this arbitrary file as root". Accept
-    // it only when the AppImage runtime's own $APPDIR really does contain the
-    // executable we are running out of — that part an attacker cannot forge.
-    const QByteArray appImage = qgetenv("APPIMAGE");
-    const QByteArray appDir = qgetenv("APPDIR");
-    const bool runningFromAppImage = !appImage.isEmpty() && !appDir.isEmpty()
-            && exe.startsWith(QString::fromLocal8Bit(appDir) + QLatin1Char('/'))
-            && QFileInfo(QString::fromLocal8Bit(appImage)).isFile();
-    if (runningFromAppImage) {
-        cmd << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1")
-            << QString::fromLocal8Bit(appImage);
+    // `appImage` names the binary the user is about to authorize as root, so it
+    // must come from the kernel (freetunnel::runningAppImagePath) and never from
+    // $APPIMAGE/$APPDIR. Re-exec is needed at all because the running executable
+    // lives inside a user-private FUSE mount that root cannot read; the AppImage
+    // file behind it is a normal file that root can.
+    if (!appImage.isEmpty()) {
+        cmd << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1") << appImage;
     } else {
         cmd << exe;
     }
@@ -426,7 +421,8 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
     return launchWinElevatedHelper(exe, port, tokenPath, err);
 #else
     m_proc = new QProcess(this);
-    const QStringList helperCmd = linuxHelperCommand(exe, port, tokenPath);
+    const QStringList helperCmd =
+            linuxHelperCommand(exe, freetunnel::runningAppImagePath(), port, tokenPath);
 
     if (startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
         return true;

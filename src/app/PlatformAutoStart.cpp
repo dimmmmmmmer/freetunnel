@@ -7,6 +7,9 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringList>
+
+#include "core/AppImagePath.h"
 
 namespace freetunnel {
 
@@ -96,6 +99,18 @@ static QString desktopExecQuoted(const QString &path)
     return QLatin1Char('"') + out + QLatin1Char('"');
 }
 
+// What the autostart entry should launch. Under an AppImage,
+// applicationFilePath() points inside the runtime's temporary FUSE mount
+// (/tmp/.mount_FreeTuXXXXXX/usr/bin/FreeTunnel), which is unmounted on exit and
+// gets a fresh random suffix on every run — an autostart entry pointing there is
+// dead the moment it is written. The .AppImage file itself is stable, so record
+// that when the kernel confirms we are running from one.
+static QString autoStartTarget()
+{
+    const QString appImage = freetunnel::runningAppImagePath();
+    return appImage.isEmpty() ? QCoreApplication::applicationFilePath() : appImage;
+}
+
 static void writeDesktopAutostart(const QString &path)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -103,14 +118,52 @@ static void writeDesktopAutostart(const QString &path)
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QStringLiteral("[Desktop Entry]\nType=Application\nName=FreeTunnel\n"
                                "Exec=%1\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
-                        .arg(desktopExecQuoted(QCoreApplication::applicationFilePath()))
+                        .arg(desktopExecQuoted(autoStartTarget()))
                         .toUtf8());
     }
 }
 
+// The path an Exec= line launches, unquoted, or an empty string if the line
+// carries no program. Only the first word matters: everything after it is an
+// argument, and the entry this app writes never has any.
+QString autoStartExecTarget(const QString &desktopEntry)
+{
+    const QStringList lines = desktopEntry.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (!line.startsWith(QLatin1String("Exec=")))
+            continue;
+        const QString value = line.mid(5).trimmed();
+        if (!value.startsWith(QLatin1Char('"'))) // unquoted: the program is the first word
+            return value.section(QLatin1Char(' '), 0, 0);
+        // Quoted per the Desktop Entry spec: read to the closing quote, undoing
+        // the backslash escapes desktopExecQuoted() put in.
+        QString out;
+        for (int i = 1; i < value.size(); ++i) {
+            const QChar c = value.at(i);
+            if (c == QLatin1Char('"'))
+                break;
+            if (c == QLatin1Char('\\') && i + 1 < value.size()) {
+                out.append(value.at(++i));
+                continue;
+            }
+            out.append(c);
+        }
+        return out;
+    }
+    return QString();
+}
+
 bool platformAutoStartEnabled()
 {
-    return QFileInfo::exists(autoStartPath());
+    // The file existing is not the same as autostart working. An entry written by
+    // an earlier AppImage run points at a mount that no longer exists, and
+    // reporting that as "on" left the toggle lying to the user forever, with
+    // nothing ever rewriting the stale path.
+    QFile f(autoStartPath());
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    const QString target = autoStartExecTarget(QString::fromUtf8(f.readAll()));
+    return !target.isEmpty() && QFileInfo::exists(target);
 }
 
 void setPlatformAutoStart(bool enabled)
