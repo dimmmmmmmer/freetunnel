@@ -63,6 +63,12 @@ void TestBackendConfig::initTestCase()
     QStandardPaths::setTestModeEnabled(true);
     QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
     QCoreApplication::setApplicationName(QStringLiteral("BackendConfigTest"));
+    // See the same note in test_backend_split: the Backend writes through a
+    // default-constructed QSettings, which on Unix is NativeFormat (*.conf), so
+    // clearing the IniFormat store (*.ini) in init() never touched it. Redirect the
+    // default format into this run's temp dir so the store is genuinely per-run.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_home.path());
 }
 
 void TestBackendConfig::init()
