@@ -156,14 +156,17 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     client.connectToServer(socketName);
     QVERIFY(client.waitForConnected(2000));
     QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
-    // Not QVERIFY(waitForBytesWritten(...)): on Windows a QLocalSocket is a named
-    // pipe and the write completes synchronously, so there is nothing pending by
-    // the time we ask and waitForBytesWritten() answers false — for a message that
-    // did arrive. Wait for the queue to drain instead, which says the same thing on
-    // every platform.
+    // Send it exactly the way forwardToRunningInstance() does, and for the same
+    // reason: on Windows a QLocalSocket is a named pipe whose write is completed
+    // asynchronously, so it is still queued here — waitForBytesWritten() does not
+    // drive it and its answer means nothing, which is why the production code
+    // ignores the result too. disconnectFromServer() is the part that matters: it
+    // flushes what is pending and closes, and the listener's deliver path is
+    // driven by that disconnect. Letting the socket die with the scope instead
+    // dropped the write on Windows and delivered nothing.
     client.flush();
-    while (client.bytesToWrite() > 0 && client.waitForBytesWritten(2000)) { }
-    QCOMPARE(client.bytesToWrite(), qint64(0));
+    client.waitForBytesWritten(2000);
+    client.disconnectFromServer();
     QTest::qWait(1000);
 }
 
