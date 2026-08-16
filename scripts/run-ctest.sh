@@ -24,6 +24,19 @@ else
     # word about which assertion broke. Ask the binaries themselves instead:
     # Qt Test's -o writes its report to a destination it opens, which does not
     # depend on whatever ctest does with the child's stdout.
+    # Each test writes its own Qt Test report (see the -o in tests/CMakeLists.txt),
+    # which is the report from the run that actually failed — unlike a re-run,
+    # which may well pass.
+    echo "===== reports from the failed run ====="
+    BUILD_ABS0="$(cd "$BUILD_DIR" && pwd)"
+    ctest --test-dir "$BUILD_DIR" --rerun-failed -N 2>/dev/null \
+        | sed -n 's/^[[:space:]]*Test[[:space:]]*#[0-9]*:[[:space:]]*//p' \
+        | while read -r name; do
+      [ -n "$name" ] || continue
+      echo "--- $name ---"
+      cat "$BUILD_ABS0/report-$name.txt" 2>/dev/null || echo "(no report written)"
+    done
+
     echo "===== re-running failed tests directly ====="
     # Absolute, because the re-run below runs from inside the build directory to
     # match ctest, and BUILD_DIR is usually relative to where this script started.

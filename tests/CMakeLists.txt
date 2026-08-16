@@ -60,6 +60,12 @@ if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
         PROPERTY INTERFACE_LINK_LIBRARIES "OpenGL::GL")
 endif()
 
+# Every test writes its own Qt Test report next to the build tree. ctest on the
+# Windows runner captures nothing at all from these binaries — passing ones
+# included — so without this a failure there arrives as "***Failed" with no test
+# function, no assertion and no line number, and the only way to learn anything
+# is to re-run the binary by hand, which does not always reproduce it.
+# scripts/run-ctest.sh prints these reports for the tests that failed.
 enable_testing()
 
 add_executable(test_deeplink
@@ -68,7 +74,7 @@ add_executable(test_deeplink
 )
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME deeplink COMMAND test_deeplink)
+add_test(NAME deeplink COMMAND test_deeplink -o ${CMAKE_CURRENT_BINARY_DIR}/report-deeplink.txt,txt)
 
 add_executable(test_safe_fileread
     test_safe_fileread.cpp
@@ -76,7 +82,7 @@ add_executable(test_safe_fileread
 )
 target_include_directories(test_safe_fileread PRIVATE ../include ../include/core)
 target_link_libraries(test_safe_fileread PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
-add_test(NAME safe_fileread COMMAND test_safe_fileread)
+add_test(NAME safe_fileread COMMAND test_safe_fileread -o ${CMAKE_CURRENT_BINARY_DIR}/report-safe_fileread.txt,txt)
 
 add_executable(test_appuiutils
     test_appuiutils.cpp
@@ -84,7 +90,7 @@ add_executable(test_appuiutils
 )
 target_include_directories(test_appuiutils PRIVATE ../include ../include/core)
 target_link_libraries(test_appuiutils PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
-add_test(NAME appuiutils COMMAND test_appuiutils)
+add_test(NAME appuiutils COMMAND test_appuiutils -o ${CMAKE_CURRENT_BINARY_DIR}/report-appuiutils.txt,txt)
 
 set(APP_STARTUP_TEST_SOURCES
     test_app_startup.cpp
@@ -141,7 +147,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_app_startup PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME app_startup COMMAND test_app_startup)
+add_test(NAME app_startup COMMAND test_app_startup -o ${CMAKE_CURRENT_BINARY_DIR}/report-app_startup.txt,txt)
 
 set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/AppStartup.cpp
@@ -203,7 +209,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_deeplink_import PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_deeplink_import COMMAND test_backend_deeplink_import)
+add_test(NAME backend_deeplink_import COMMAND test_backend_deeplink_import -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_deeplink_import.txt,txt)
 
 add_executable(test_vpn_helper_launch
     test_vpn_helper_launch.cpp
@@ -211,7 +217,7 @@ add_executable(test_vpn_helper_launch
 )
 target_include_directories(test_vpn_helper_launch PRIVATE ../include ../include/vpn)
 target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch)
+add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch -o ${CMAKE_CURRENT_BINARY_DIR}/report-vpn_helper_launch.txt,txt)
 
 add_executable(test_appimagepath
     test_appimagepath.cpp
@@ -220,7 +226,7 @@ add_executable(test_appimagepath
 )
 target_include_directories(test_appimagepath PRIVATE ../include ../include/core ../include/app)
 target_link_libraries(test_appimagepath PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME appimagepath COMMAND test_appimagepath)
+add_test(NAME appimagepath COMMAND test_appimagepath -o ${CMAKE_CURRENT_BINARY_DIR}/report-appimagepath.txt,txt)
 
 add_executable(test_configpaths
     test_configpaths.cpp
@@ -228,7 +234,7 @@ add_executable(test_configpaths
 )
 target_include_directories(test_configpaths PRIVATE ../include ../include/core)
 target_link_libraries(test_configpaths PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME configpaths COMMAND test_configpaths)
+add_test(NAME configpaths COMMAND test_configpaths -o ${CMAKE_CURRENT_BINARY_DIR}/report-configpaths.txt,txt)
 
 add_executable(test_configimport
     test_configimport.cpp
@@ -238,7 +244,7 @@ add_executable(test_configimport
 )
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
 target_link_libraries(test_configimport PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME configimport COMMAND test_configimport)
+add_test(NAME configimport COMMAND test_configimport -o ${CMAKE_CURRENT_BINARY_DIR}/report-configimport.txt,txt)
 
 add_executable(test_appsettings
     test_appsettings.cpp
@@ -247,7 +253,7 @@ add_executable(test_appsettings
 )
 target_include_directories(test_appsettings PRIVATE ../include ../include/core)
 target_link_libraries(test_appsettings PRIVATE Qt6::Core Qt6::Network Qt6::Test)
-add_test(NAME appsettings COMMAND test_appsettings)
+add_test(NAME appsettings COMMAND test_appsettings -o ${CMAKE_CURRENT_BINARY_DIR}/report-appsettings.txt,txt)
 
 add_executable(test_configstore
     test_configstore.cpp
@@ -255,7 +261,7 @@ add_executable(test_configstore
 )
 target_include_directories(test_configstore PRIVATE ../include ../include/core)
 target_link_libraries(test_configstore PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME configstore COMMAND test_configstore)
+add_test(NAME configstore COMMAND test_configstore -o ${CMAKE_CURRENT_BINARY_DIR}/report-configstore.txt,txt)
 
 add_executable(test_control
     test_control.cpp
@@ -263,7 +269,7 @@ add_executable(test_control
 )
 target_include_directories(test_control PRIVATE ../include ../include/core)
 target_link_libraries(test_control PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME control COMMAND test_control)
+add_test(NAME control COMMAND test_control -o ${CMAKE_CURRENT_BINARY_DIR}/report-control.txt,txt)
 
 add_executable(test_instance_control
     test_instance_control.cpp
@@ -279,7 +285,7 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(test_instance_control PRIVATE advapi32)
 endif()
-add_test(NAME instance_control COMMAND test_instance_control)
+add_test(NAME instance_control COMMAND test_instance_control -o ${CMAKE_CURRENT_BINARY_DIR}/report-instance_control.txt,txt)
 
 add_executable(test_configtoml
     test_configtoml.cpp
@@ -287,7 +293,7 @@ add_executable(test_configtoml
 )
 target_include_directories(test_configtoml PRIVATE ../include ../include/core)
 target_link_libraries(test_configtoml PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME configtoml COMMAND test_configtoml)
+add_test(NAME configtoml COMMAND test_configtoml -o ${CMAKE_CURRENT_BINARY_DIR}/report-configtoml.txt,txt)
 
 add_executable(test_versioncompare
     test_versioncompare.cpp
@@ -295,7 +301,7 @@ add_executable(test_versioncompare
 )
 target_include_directories(test_versioncompare PRIVATE ../include ../include/core)
 target_link_libraries(test_versioncompare PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME versioncompare COMMAND test_versioncompare)
+add_test(NAME versioncompare COMMAND test_versioncompare -o ${CMAKE_CURRENT_BINARY_DIR}/report-versioncompare.txt,txt)
 
 add_executable(test_netbind
     test_netbind.cpp
@@ -303,7 +309,7 @@ add_executable(test_netbind
 )
 target_include_directories(test_netbind PRIVATE ../include ../include/core)
 target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test)
-add_test(NAME netbind COMMAND test_netbind)
+add_test(NAME netbind COMMAND test_netbind -o ${CMAKE_CURRENT_BINARY_DIR}/report-netbind.txt,txt)
 
 add_executable(test_releaseverify
     test_releaseverify.cpp
@@ -315,7 +321,7 @@ find_package(OpenSSL QUIET)
 if (OpenSSL_FOUND)
     target_link_libraries(test_releaseverify PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME releaseverify COMMAND test_releaseverify)
+add_test(NAME releaseverify COMMAND test_releaseverify -o ${CMAKE_CURRENT_BINARY_DIR}/report-releaseverify.txt,txt)
 
 add_executable(test_credentialstore
     test_credentialstore.cpp
@@ -330,7 +336,7 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(test_credentialstore PRIVATE advapi32)
 endif()
-add_test(NAME credentialstore COMMAND test_credentialstore)
+add_test(NAME credentialstore COMMAND test_credentialstore -o ${CMAKE_CURRENT_BINARY_DIR}/report-credentialstore.txt,txt)
 
 add_executable(test_helper_ipc
     test_helper_ipc.cpp
@@ -339,7 +345,7 @@ add_executable(test_helper_ipc
 )
 target_include_directories(test_helper_ipc PRIVATE ../include ../include/vpn)
 target_link_libraries(test_helper_ipc PRIVATE Qt6::Core Qt6::Test Qt6::Network)
-add_test(NAME helper_ipc COMMAND test_helper_ipc)
+add_test(NAME helper_ipc COMMAND test_helper_ipc -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_ipc.txt,txt)
 
 add_executable(test_helper_ipc_fuzz
     test_helper_ipc_fuzz.cpp
@@ -348,7 +354,7 @@ add_executable(test_helper_ipc_fuzz
 )
 target_include_directories(test_helper_ipc_fuzz PRIVATE ../include ../include/vpn)
 target_link_libraries(test_helper_ipc_fuzz PRIVATE Qt6::Core Qt6::Test Qt6::Network)
-add_test(NAME helper_ipc_fuzz COMMAND test_helper_ipc_fuzz)
+add_test(NAME helper_ipc_fuzz COMMAND test_helper_ipc_fuzz -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_ipc_fuzz.txt,txt)
 
 add_executable(test_logmodel
     test_logmodel.cpp
@@ -357,7 +363,7 @@ add_executable(test_logmodel
 )
 target_include_directories(test_logmodel PRIVATE ../include)
 target_link_libraries(test_logmodel PRIVATE Qt6::Core Qt6::Test)
-add_test(NAME logmodel COMMAND test_logmodel)
+add_test(NAME logmodel COMMAND test_logmodel -o ${CMAKE_CURRENT_BINARY_DIR}/report-logmodel.txt,txt)
 
 add_executable(test_qml_ui
     test_qml_ui.cpp
@@ -372,7 +378,7 @@ add_executable(test_qml_ui
 )
 target_include_directories(test_qml_ui PRIVATE . ui ../include)
 target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
-add_test(NAME qml_ui COMMAND test_qml_ui)
+add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
 
 add_executable(test_integration_config_workflow
     test_integration_config_workflow.cpp
@@ -391,7 +397,7 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(test_integration_config_workflow PRIVATE advapi32)
 endif()
-add_test(NAME integration_config_workflow COMMAND test_integration_config_workflow)
+add_test(NAME integration_config_workflow COMMAND test_integration_config_workflow -o ${CMAKE_CURRENT_BINARY_DIR}/report-integration_config_workflow.txt,txt)
 
 add_executable(test_integration_single_instance
     test_integration_single_instance.cpp
@@ -407,7 +413,7 @@ freetunnel_link_linux_secrets(test_integration_single_instance)
 if(APPLE)
     target_link_libraries(test_integration_single_instance PRIVATE "-framework Security")
 endif()
-add_test(NAME integration_single_instance COMMAND test_integration_single_instance)
+add_test(NAME integration_single_instance COMMAND test_integration_single_instance -o ${CMAKE_CURRENT_BINARY_DIR}/report-integration_single_instance.txt,txt)
 
 add_executable(test_integration_helper_client
     test_integration_helper_client.cpp
@@ -424,7 +430,7 @@ target_include_directories(test_integration_helper_client PRIVATE
     ../include ../include/core ../include/vpn)
 target_link_libraries(test_integration_helper_client PRIVATE
     Qt6::Core Qt6::Gui Qt6::Test Qt6::Network)
-add_test(NAME integration_helper_client COMMAND test_integration_helper_client)
+add_test(NAME integration_helper_client COMMAND test_integration_helper_client -o ${CMAKE_CURRENT_BINARY_DIR}/report-integration_helper_client.txt,txt)
 
 set(BACKEND_TEST_SOURCES
     test_integration_backend_vpn.cpp
@@ -482,7 +488,7 @@ find_package(OpenSSL QUIET)
 if(OpenSSL_FOUND)
     target_link_libraries(test_integration_backend_vpn PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME integration_backend_vpn COMMAND test_integration_backend_vpn)
+add_test(NAME integration_backend_vpn COMMAND test_integration_backend_vpn -o ${CMAKE_CURRENT_BINARY_DIR}/report-integration_backend_vpn.txt,txt)
 
 add_executable(test_update_checker_e2e
     test_update_checker_e2e.cpp
@@ -500,7 +506,7 @@ target_link_libraries(test_update_checker_e2e PRIVATE Qt6::Core Qt6::Test Qt6::N
 if(OpenSSL_FOUND)
     target_link_libraries(test_update_checker_e2e PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e)
+add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e -o ${CMAKE_CURRENT_BINARY_DIR}/report-update_checker_e2e.txt,txt)
 
 # QtTrustTunnelClient state machine against the mock core in tests/mock_core —
 # connect/disconnect/config-switch/reconnect behavior without the native VPN
@@ -517,7 +523,7 @@ target_include_directories(test_vpn_events PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(test_vpn_events PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_vpn_events PRIVATE Qt6::Core Qt6::Network Qt6::Test)
-add_test(NAME vpn_events COMMAND test_vpn_events)
+add_test(NAME vpn_events COMMAND test_vpn_events -o ${CMAKE_CURRENT_BINARY_DIR}/report-vpn_events.txt,txt)
 
 add_executable(test_qt_trusttunnel_client
     test_qt_trusttunnel_client.cpp
@@ -533,7 +539,7 @@ target_include_directories(test_qt_trusttunnel_client PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(test_qt_trusttunnel_client PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
-add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client)
+add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_trusttunnel_client.txt,txt)
 
 # Split-tunnel behaviour (routes, profiles, and which edits disturb a live
 # tunnel). Reuses the Backend source set — the logic under test lives on Backend.
@@ -557,7 +563,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_logs PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_logs COMMAND test_backend_logs)
+add_test(NAME backend_logs COMMAND test_backend_logs -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_logs.txt,txt)
 
 add_executable(test_backend_settings
     test_backend_settings.cpp
@@ -579,7 +585,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_settings PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_settings COMMAND test_backend_settings)
+add_test(NAME backend_settings COMMAND test_backend_settings -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_settings.txt,txt)
 
 add_executable(test_backend_config
     test_backend_config.cpp
@@ -601,7 +607,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_config PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_config COMMAND test_backend_config)
+add_test(NAME backend_config COMMAND test_backend_config -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_config.txt,txt)
 
 add_executable(test_backend_split
     test_backend_split.cpp
@@ -623,7 +629,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_split PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_split COMMAND test_backend_split)
+add_test(NAME backend_split COMMAND test_backend_split -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_split.txt,txt)
 
 # The REAL privileged helper server, built against the mock core so it needs
 # neither the VPN core nor root. Previously vpn_helper_server.cpp — the code that
@@ -658,7 +664,7 @@ target_compile_definitions(test_helper_server PRIVATE FT_ENABLE_TEST_HOOKS
     FT_TEST_HELPER_BINARY="$<TARGET_FILE:freetunnel_test_helper>")
 target_link_libraries(test_helper_server PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
 add_dependencies(test_helper_server freetunnel_test_helper)
-add_test(NAME helper_server COMMAND test_helper_server)
+add_test(NAME helper_server COMMAND test_helper_server -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_server.txt,txt)
 
 # Backend's update state machine: the code that ends in launching an installer
 # sat at 2.3% line coverage, and both bugs found in it were found by review.
@@ -684,7 +690,7 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_updates PRIVATE OpenSSL::Crypto)
 endif()
-add_test(NAME backend_updates COMMAND test_backend_updates)
+add_test(NAME backend_updates COMMAND test_backend_updates -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_updates.txt,txt)
 
 # Release-signing fixture for test_update_checker_e2e.
 #
