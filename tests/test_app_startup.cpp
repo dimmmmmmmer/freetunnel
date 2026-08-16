@@ -228,15 +228,24 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     // A bare count comparison reports neither, which cost several CI rounds.
     QSignalSpy errors(&backend, &Backend::errorOccurred);
     QVERIFY(errors.isValid());
+    // Counting only — the listener's own handler is what consumes the connection.
+    // Without this a failure cannot say whether the server ever accepted anything,
+    // which is the difference between "the peer never got the bytes out" and "the
+    // listener took the connection and then dropped the message".
+    QSignalSpy conns(&server, &QLocalServer::newConnection);
+    QVERIFY(conns.isValid());
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), link));
 
     QTRY_VERIFY_WITH_TIMEOUT(imports.count() == 1 || errors.count() > 0, 10000);
     QVERIFY2(imports.count() == 1,
-             qPrintable(QStringLiteral("no import confirmation: imports=%1 errors=%2 first=%3")
+             qPrintable(QStringLiteral("no import confirmation: connections=%1 imports=%2 "
+                                       "errors=%3 first=%4 linkBytes=%5")
+                                .arg(conns.count())
                                 .arg(imports.count())
                                 .arg(errors.count())
                                 .arg(errors.isEmpty() ? QStringLiteral("<none>")
-                                                      : errors.at(0).at(0).toString())));
+                                                      : errors.at(0).at(0).toString())
+                                .arg(link.size())));
     // The link the Backend was asked to import is the one that went over the
     // socket — not a truncated, re-encoded or substituted one.
     QCOMPARE(imports.at(0).at(1).toString(), link);
