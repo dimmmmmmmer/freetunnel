@@ -150,6 +150,14 @@ QString TestAppStartup::instanceSocketName(const QString &suffix)
 // is complete — so the wait afterwards is what makes a later "nothing happened"
 // assertion mean anything. Without it the test would simply be outrunning the
 // delivery timer and would stay green no matter how the auth gate behaves.
+// Long enough that a command which was going to be delivered has been. Proving a
+// negative needs this: without it, "the spy is empty" only says the listener had
+// not got round to it yet, which would be just as green if the auth gate were gone.
+static void waitOutInstanceDelivery()
+{
+    QTest::qWait(3000); // 12x the listener's 250 ms idle delay
+}
+
 void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteArray &msg)
 {
     QLocalSocket client;
@@ -167,7 +175,13 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     client.flush();
     client.waitForBytesWritten(2000);
     client.disconnectFromServer();
-    QTest::qWait(1000);
+    // No fixed wait here. Delivery is deliberately deferred by the listener
+    // (kInstanceMessageIdleMs, 250 ms) and then has to cross the event loop, so
+    // how long it takes depends on how loaded the machine is — a hardcoded second
+    // was enough on this developer box and not always enough on a Windows runner.
+    // Callers expecting something to arrive use QTRY_*; callers expecting silence
+    // wait out the delay explicitly with waitOutInstanceDelivery().
+    QTest::qWait(50);
 }
 
 // The authorised path: a peer holding the session token gets its command run —
@@ -202,7 +216,7 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     QVERIFY(imports.isValid());
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), link));
 
-    QCOMPARE(imports.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(imports.count(), 1, 10000);
     // The link the Backend was asked to import is the one that went over the
     // socket — not a truncated, re-encoded or substituted one.
     QCOMPARE(imports.at(0).at(1).toString(), link);
@@ -213,8 +227,8 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(
                                       QStringLiteral("tok"),
                                       QStringLiteral("freetunnel://connect")));
+    QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, 10000);
     QCOMPARE(imports.count(), 1); // still one — connect is not an import
-    QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), Backend::tr("Select a config first"));
 }
 
@@ -250,6 +264,7 @@ void TestAppStartup::wireInstanceServerIgnoresWrongToken()
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(
                                       forgedToken,
                                       QStringLiteral("freetunnel://connect")));
+    waitOutInstanceDelivery();
     QCOMPARE(spy.count(), 0);
 
     // Same listener, same command, correct token. Without this second half a
@@ -258,7 +273,7 @@ void TestAppStartup::wireInstanceServerIgnoresWrongToken()
     // reached the socket — the contrast is what makes the silence evidence.
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(
                                       realToken, QStringLiteral("freetunnel://connect")));
-    QCOMPARE(spy.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
 }
 
 // startSingleInstanceServer() clears the token when writeInstanceAuthToken()
@@ -280,12 +295,14 @@ void TestAppStartup::wireInstanceServerWithoutTokenRefusesEveryCommand()
     sendInstanceMessage(unarmedName, freetunnel::formatInstanceMessage(
                                              QStringLiteral("any-token"),
                                              QStringLiteral("freetunnel://connect")));
+    waitOutInstanceDelivery();
     QCOMPARE(spy.count(), 0);
 
     // An empty token on the wire must not be treated as matching the empty
     // stored one: "neither side has a token" is the one case where a naive
     // equality check would hand over control to an unauthenticated peer.
     sendInstanceMessage(unarmedName, QByteArray("\nfreetunnel://connect"));
+    waitOutInstanceDelivery();
     QCOMPARE(spy.count(), 0);
 
     // Control: the identical command on a listener that does hold a token is
