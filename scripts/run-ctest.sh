@@ -25,11 +25,14 @@ else
     # Qt Test's -o writes its report to a destination it opens, which does not
     # depend on whatever ctest does with the child's stdout.
     echo "===== re-running failed tests directly ====="
+    # Absolute, because the re-run below runs from inside the build directory to
+    # match ctest, and BUILD_DIR is usually relative to where this script started.
+    BUILD_ABS="$(cd "$BUILD_DIR" && pwd)"
     ctest --test-dir "$BUILD_DIR" --rerun-failed -N 2>/dev/null \
         | sed -n 's/^[[:space:]]*Test[[:space:]]*#[0-9]*:[[:space:]]*//p' \
         | while read -r name; do
       [ -n "$name" ] || continue
-      for bin in "$BUILD_DIR/test_$name" "$BUILD_DIR/test_$name.exe"; do
+      for bin in "$BUILD_ABS/test_$name" "$BUILD_ABS/test_$name.exe"; do
         [ -x "$bin" ] || continue
         echo "--- $name ---"
         # To a FILE, not to stdout. When stdout is a pipe it is block-buffered, so
@@ -42,11 +45,11 @@ else
         # tells you nothing about why. The report kept is the failing one.
         for attempt in 1 2 3; do
           echo "(attempt $attempt)"
-          if ! (cd "$BUILD_DIR" && "$bin" -o "$BUILD_DIR/failed-$name.txt,txt"); then
+          if ! (cd "$BUILD_ABS" && "$bin" -o "$BUILD_ABS/failed-$name.txt,txt"); then
             break
           fi
         done
-        cat "$BUILD_DIR/failed-$name.txt" 2>/dev/null || echo "(no report written)"
+        cat "$BUILD_ABS/failed-$name.txt" 2>/dev/null || echo "(no report written)"
         break
       done
     done
