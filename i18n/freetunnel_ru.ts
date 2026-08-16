@@ -206,6 +206,18 @@
         <source>&quot;Through VPN&quot; has no rules, so nothing would be routed through the tunnel. Keeping the full tunnel until you add a rule.</source>
         <translation>В режиме «Через VPN» нет ни одного правила — через туннель не пошло бы ничего. Оставляем полный туннель, пока вы не добавите правило.</translation>
     </message>
+    <message>
+        <source>Update downloaded. Finish installing it from the file manager — packages are installed by your package manager.</source>
+        <translation>Обновление скачано. Завершите установку из файлового менеджера — пакеты устанавливает ваш пакетный менеджер.</translation>
+    </message>
+    <message>
+        <source>Could not replace %1 — check that you can write to it.</source>
+        <translation>Не удалось заменить %1 — проверьте, что у вас есть права на запись.</translation>
+    </message>
+    <message>
+        <source>Update installed — restarting</source>
+        <translation>Обновление установлено — перезапуск</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

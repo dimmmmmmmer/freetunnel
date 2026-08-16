@@ -2,13 +2,79 @@
 #include "app/Backend.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QWindow>
 
+#include "core/AppImagePath.h"
 #include "core/AppUiUtils.h"
 #include "core/UpdateChecker.h"
 
 // ---------- updater ----------
+
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+// Open the folder holding the verified download, so "we could not install this
+// for you" comes with the file rather than just a path in a label.
+static void revealDownload(const QString &path)
+{
+    QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
+}
+
+// Install a verified Linux download, or say honestly that we cannot.
+//
+// The old code ran the downloaded .AppImage straight out of the cache. That
+// never updated anything: the new process reaches runGuiApplication, calls
+// forwardToRunningInstance(), finds this instance, sends it "focus" and exits —
+// so the window merely came forward while the UI announced "Update downloaded".
+// Even with no instance running, executing a copy in the cache replaces neither
+// the installed .deb nor the .AppImage the user launches.
+void Backend::applyLinuxUpdate(const QString &path)
+{
+    const QString current = freetunnel::runningAppImagePath();
+    if (!path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive) || current.isEmpty()) {
+        // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
+        // that is the package manager's job, and doing it silently would need root.
+        // Show the file and say so, instead of claiming success.
+        m_updateMessage = tr("Update downloaded. Finish installing it from the file manager — "
+                             "packages are installed by your package manager.");
+        emit updateChanged();
+        revealDownload(path);
+        return;
+    }
+
+    // Replace the AppImage the user actually launches, then restart from it. The
+    // path comes from the kernel (see runningAppImagePath), never from $APPIMAGE,
+    // so a hostile environment cannot redirect this write.
+    const QString backup = current + QStringLiteral(".old");
+    QFile::remove(backup);
+    if (!QFile::rename(current, backup)) {
+        m_updateMessage = tr("Could not replace %1 — check that you can write to it.").arg(current);
+        emit updateChanged();
+        revealDownload(path);
+        return;
+    }
+    if (!QFile::copy(path, current)) {
+        QFile::rename(backup, current); // put the working build back
+        m_updateMessage = tr("Could not replace %1 — check that you can write to it.").arg(current);
+        emit updateChanged();
+        revealDownload(path);
+        return;
+    }
+    QFile::setPermissions(current, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                           | QFileDevice::ExeOwner | QFileDevice::ReadGroup
+                                           | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                                           | QFileDevice::ExeOther);
+    QFile::remove(backup);
+
+    // Quit first: the replacement cannot start while this instance still owns the
+    // single-instance socket — it would forward "focus" and exit, which is the bug
+    // being fixed. startDetached survives our exit.
+    m_updateMessage = tr("Update installed — restarting");
+    emit updateChanged();
+    QProcess::startDetached(current, {});
+    quitApplication();
+}
+#endif
 
 QString Backend::appVersion() const {
 #ifdef FREETUNNEL_VERSION
@@ -53,13 +119,7 @@ void Backend::wireUpdaterSignals()
 #elif defined(Q_OS_MACOS)
                 QProcess::startDetached(QStringLiteral("open"), {path});
 #else
-                if (path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
-                    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                                                     | QFileDevice::ExeOwner);
-                    QProcess::startDetached(path, {});
-                } else {
-                    QProcess::startDetached(QStringLiteral("xdg-open"), {path});
-                }
+                applyLinuxUpdate(path);
 #endif
             });
     connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {

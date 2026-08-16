@@ -114,6 +114,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
     ../src/core/CredentialStore.cpp
@@ -169,6 +170,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
     ../src/core/CredentialStore.cpp
@@ -453,6 +455,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
     ../src/core/CredentialStore.cpp
@@ -486,6 +489,7 @@ add_executable(test_update_checker_e2e
     mock_http_server.cpp
     mock_http_server.h
     ../src/core/UpdateChecker.cpp
+    ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
     ../include/core/UpdateChecker.h

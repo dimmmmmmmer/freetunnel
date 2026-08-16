@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "UpdateChecker.h"
 
+#include "core/AppImagePath.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -276,6 +278,9 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
                                                m_githubRepo, tagName);
 
     const QJsonArray assets = obj.value("assets").toArray();
+#if !defined(_WIN32) && !defined(__APPLE__)
+    QString appImageUrl, appImageName, debUrl, debName;
+#endif
     for (const QJsonValue &val : assets) {
         const QJsonObject asset = val.toObject();
         const QString name = asset.value("name").toString();
@@ -294,16 +299,38 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         }
 #ifdef _WIN32
         if (name.endsWith(".exe", Qt::CaseInsensitive)) {
-#elif defined(__APPLE__)
-        if (name.endsWith(".dmg", Qt::CaseInsensitive)) {
-#else
-        if (name.endsWith(".AppImage", Qt::CaseInsensitive) || name.endsWith(".deb", Qt::CaseInsensitive)) {
-#endif
             m_latest.installerUrl = downloadUrl;
             // Basename only — never let a crafted asset name escape the temp dir.
             m_latest.assetName = QFileInfo(name).fileName();
         }
+#elif defined(__APPLE__)
+        if (name.endsWith(".dmg", Qt::CaseInsensitive)) {
+            m_latest.installerUrl = downloadUrl;
+            m_latest.assetName = QFileInfo(name).fileName();
+        }
+#else
+        // Linux ships two kinds of artifact, so remember both and choose after the
+        // loop. Taking whichever matched last meant the offered asset depended on
+        // the order GitHub happened to list them in — a .deb install could be sent
+        // an AppImage, which applyLinuxUpdate() then cannot install.
+        if (name.endsWith(".AppImage", Qt::CaseInsensitive)) {
+            appImageUrl = downloadUrl;
+            appImageName = QFileInfo(name).fileName();
+        } else if (name.endsWith(".deb", Qt::CaseInsensitive)) {
+            debUrl = downloadUrl;
+            debName = QFileInfo(name).fileName();
+        }
+#endif
     }
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+    // Prefer the artifact matching how this copy was installed; fall back to the
+    // other rather than offering nothing, since a release may publish only one.
+    const bool preferAppImage = !freetunnel::runningAppImagePath().isEmpty();
+    const bool useAppImage = preferAppImage ? !appImageUrl.isEmpty() : debUrl.isEmpty();
+    m_latest.installerUrl = useAppImage ? appImageUrl : debUrl;
+    m_latest.assetName = useAppImage ? appImageName : debName;
+#endif
 
     if (isVersionNewer(m_currentVersion, remoteVersion)) {
         emit updateAvailable(m_latest);

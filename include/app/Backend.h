@@ -272,6 +272,11 @@ private:
     bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
                                 bool replaceExisting);
     QString deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const;
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+    // Install a verified Linux download: replace the running .AppImage and
+    // restart, or explain why the user has to finish the job themselves.
+    void applyLinuxUpdate(const QString &path);
+#endif
     void restoreReplacedConfig(const QString &target, const QByteArray &previousToml);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
                                    bool wasActive);
