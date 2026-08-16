@@ -32,7 +32,12 @@ else
       for bin in "$BUILD_DIR/test_$name" "$BUILD_DIR/test_$name.exe"; do
         [ -x "$bin" ] || continue
         echo "--- $name ---"
-        "$bin" -o -,txt || true
+        # To a FILE, not to stdout. When stdout is a pipe it is block-buffered, so
+        # a test that dies mid-run — which is what an empty log with a long elapsed
+        # time looks like — takes its buffer with it. Qt Test flushes its file
+        # writer as it goes, so the report up to the crash survives.
+        "$bin" -o "$BUILD_DIR/failed-$name.txt,txt" || true
+        cat "$BUILD_DIR/failed-$name.txt" 2>/dev/null || echo "(no report written)"
         break
       done
     done
