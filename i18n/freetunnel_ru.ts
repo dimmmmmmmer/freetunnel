@@ -202,6 +202,10 @@
         <source>This link turns off server certificate verification.</source>
         <translation>Эта ссылка отключает проверку сертификата сервера.</translation>
     </message>
+    <message>
+        <source>&quot;Through VPN&quot; has no rules, so nothing would be routed through the tunnel. Keeping the full tunnel until you add a rule.</source>
+        <translation>В режиме «Через VPN» нет ни одного правила — через туннель не пошло бы ничего. Оставляем полный туннель, пока вы не добавите правило.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -698,6 +702,10 @@
     <message>
         <source>domain or domains (comma/space separated), then Enter</source>
         <translation>домен или домены (через запятую/пробел), затем Enter</translation>
+    </message>
+    <message>
+        <source>Add a rule to use &quot;Through VPN&quot; — with an empty list nothing would go through the tunnel, so the full tunnel stays on.</source>
+        <translation>Добавьте правило, чтобы режим «Через VPN» заработал: с пустым списком через туннель не пойдёт ничего, поэтому остаётся полный туннель.</translation>
     </message>
 </context>
 <context>

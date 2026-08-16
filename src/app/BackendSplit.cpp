@@ -182,6 +182,21 @@ QString Backend::activeConfigProfile() const {
 // Push the active CONFIG's profile domain-bypass list to the core (C2). Applied
 // on connect and whenever the relevant rules change. Does NOT reconnect on its
 // own — callers decide whether the change warrants a live rebuild.
+// Whether the core should actually be put in selective mode right now. Split out
+// so the UI can ask the same question the tunnel does, instead of re-deriving it
+// from the settings and drifting.
+bool Backend::selectiveModeActive() const {
+    if (!m_settings.domain_bypass_enabled || m_settings.vpn_mode != QLatin1String("selective"))
+        return false;
+    return !coreBypassRules(m_settings.profiles.value(activeConfigProfile())).isEmpty();
+}
+
+bool Backend::selectiveModeWouldLeak() const {
+    return m_settings.domain_bypass_enabled
+            && m_settings.vpn_mode == QLatin1String("selective")
+            && !selectiveModeActive();
+}
+
 void Backend::applySplitRules() {
     const bool on = m_settings.domain_bypass_enabled;
     const QStringList profileDomains = m_settings.profiles.value(activeConfigProfile());
@@ -193,12 +208,27 @@ void Backend::applySplitRules() {
                        [](const QString &d) { return d.toStdString(); });
     }
     m_client.setExtraExclusions(ex);
-    m_client.setVpnMode(on && m_settings.vpn_mode == QLatin1String("selective"));
+    // "selective" routes ONLY the listed rules through the tunnel, so an empty list
+    // routes nothing — every byte leaves in the clear while the UI still says
+    // Connected. That is a VPN failing open, and it is easy to reach: a fresh
+    // install has an empty Default profile, "Clear all" empties the active one, and
+    // addProfile() creates an empty profile. Fall back to the full tunnel, which is
+    // the safe direction, and let the caller tell the user why.
+    m_client.setVpnMode(selectiveModeActive());
     std::vector<std::string> routes;
     routes.reserve(static_cast<size_t>(m_settings.excluded_routes.size()));
     std::transform(m_settings.excluded_routes.cbegin(), m_settings.excluded_routes.cend(),
                     std::back_inserter(routes), [](const QString &r) { return r.toStdString(); });
     m_client.setExcludedRoutes(routes);
+
+    // Warned from here rather than from each of the six callers, so no future entry
+    // point can forget it. It only fires in the misconfigured state, and every
+    // caller is a moment the user just acted (toggled split, edited rules, changed
+    // mode, switched profile, connected), which is exactly when it is useful.
+    if (selectiveModeWouldLeak()) {
+        emit errorOccurred(tr("\"Through VPN\" has no rules, so nothing would be routed through "
+                              "the tunnel. Keeping the full tunnel until you add a rule."));
+    }
 }
 
 // Routing/exclusion changes only bind when the tunnel is (re)built. If we're

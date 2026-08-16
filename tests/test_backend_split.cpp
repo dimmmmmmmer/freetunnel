@@ -31,6 +31,8 @@ private slots:
     void removingAProfileFallsConfigsBackToDefault();
     void defaultProfileCannotBeRemoved();
     void vpnModeIsPersistedAndNormalized();
+    void selectiveModeWithNoRulesKeepsTheFullTunnel();
+    void selectiveModeIsInactiveWhileSplitIsOff();
 
 private:
     QTemporaryDir m_home;
@@ -45,6 +47,15 @@ void TestBackendSplit::initTestCase()
     QStandardPaths::setTestModeEnabled(true);
     QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
     QCoreApplication::setApplicationName(QStringLiteral("BackendSplitTest"));
+    // The Backend persists through a default-constructed QSettings, so the
+    // *default* format is what has to be redirected. Clearing
+    // QSettings(IniFormat, ...) by hand did nothing: on Unix NativeFormat writes
+    // BackendSplitTest.conf while IniFormat addresses BackendSplitTest.ini, so the
+    // store the Backend actually reads survived every "clean" init(). Any case that
+    // aborted mid-way then poisoned every later run of the suite — and the writes
+    // landed in the real ~/.qttest, not in this temp dir.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_home.path());
 }
 
 void TestBackendSplit::init()
@@ -222,6 +233,50 @@ void TestBackendSplit::vpnModeIsPersistedAndNormalized()
     // A new Backend reads the persisted value back.
     Backend reopened;
     QCOMPARE(reopened.vpnMode(), QStringLiteral("selective"));
+}
+
+void TestBackendSplit::selectiveModeWithNoRulesKeepsTheFullTunnel()
+{
+    Backend backend;
+    backend.setSplitEnabled(true);
+    backend.setVpnMode(QStringLiteral("selective"));
+    backend.clearDomains();
+
+    // "selective" routes only the listed rules through the tunnel, so an empty list
+    // would route nothing and every byte would leave in the clear while the UI still
+    // said Connected. The mode stays *chosen* — the user's setting is not silently
+    // rewritten — but it must not be what the core is told.
+    QCOMPARE(backend.vpnMode(), QStringLiteral("selective"));
+    QVERIFY(!backend.selectiveModeActive());
+    QVERIFY(backend.selectiveModeWouldLeak());
+
+    // One real rule is enough to make the chosen mode safe, and it must then
+    // actually take effect.
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QVERIFY(backend.selectiveModeActive());
+    QVERIFY(!backend.selectiveModeWouldLeak());
+
+    // Emptying the list again has to fall back, not leak: this is the "Clear all"
+    // path on an already-connected client.
+    backend.clearDomains();
+    QVERIFY(!backend.selectiveModeActive());
+    QVERIFY(backend.selectiveModeWouldLeak());
+
+    // Bypass mode with no rules is a perfectly ordinary full tunnel, not a leak.
+    backend.setVpnMode(QStringLiteral("general"));
+    QVERIFY(!backend.selectiveModeWouldLeak());
+}
+
+void TestBackendSplit::selectiveModeIsInactiveWhileSplitIsOff()
+{
+    Backend backend;
+    backend.setVpnMode(QStringLiteral("selective"));
+    backend.setSplitEnabled(false);
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    // The master toggle wins: with split tunneling off the core gets no rules at
+    // all, so selective mode must not be requested either.
+    QVERIFY(!backend.selectiveModeActive());
+    QVERIFY(!backend.selectiveModeWouldLeak());
 }
 
 QTEST_MAIN(TestBackendSplit)

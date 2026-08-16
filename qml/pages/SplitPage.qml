@@ -31,6 +31,25 @@ Item {
             Dropdown { label: qsTr("Mode"); value: backend.vpnMode; shell: splitRoot.shell; theme: splitRoot.theme
                 model: [{v:"general",t:qsTr("Bypass VPN")},{v:"selective",t:qsTr("Through VPN")}]
                 onPicked: function(v){ backend.vpnMode = v } }
+            // "Through VPN" with no rules would route nothing; the backend keeps the
+            // full tunnel instead. Standing notice rather than a one-off toast: the
+            // mode stays chosen but inactive, so the explanation has to stay visible
+            // for as long as that is true.
+            Rectangle {
+                Layout.fillWidth: true; Layout.topMargin: 6
+                visible: backend.selectiveModeWouldLeak
+                height: visible ? warnText.implicitHeight + 16 : 0
+                radius: 8; color: theme.infoBg
+                Text {
+                    id: warnText
+                    anchors.centerIn: parent; width: parent.width - 20
+                    wrapMode: Text.WordWrap; font.pixelSize: 12; color: theme.warn
+                    // One literal, not a concatenation: lupdate can only extract a
+                    // literal argument, and a split string silently drops out of the
+                    // catalogue.
+                    text: qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
+                }
+            }
             Item { Layout.preferredHeight: 6 }
             SectionLabel { text: qsTr("Profile"); theme: splitRoot.theme }
             Flow {

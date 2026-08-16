@@ -47,6 +47,10 @@ class Backend : public QObject {
     Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged) // general|selective
+    // True while "Through VPN" is selected with nothing to route through it. The
+    // tunnel is kept full in that state (see selectiveModeActive), so this is what
+    // the UI needs in order to explain why the chosen mode is not in effect.
+    Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
@@ -134,6 +138,8 @@ public:
     void setSplitEnabled(bool v);
     const QString &vpnMode() const { return m_settings.vpn_mode; }
     void setVpnMode(const QString &mode);
+    bool selectiveModeActive() const;    // what the core is actually told
+    bool selectiveModeWouldLeak() const; // selected, but with no rules to route
     Q_INVOKABLE bool addDomain(const QString &domain); // accepts a list; true if any added
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
