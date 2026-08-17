@@ -95,6 +95,7 @@ add_test(NAME appuiutils COMMAND test_appuiutils -o ${CMAKE_CURRENT_BINARY_DIR}/
 set(APP_STARTUP_TEST_SOURCES
     test_app_startup.cpp
     ../src/app/AppStartup.cpp
+    ../src/app/AppGuiMain.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
@@ -151,6 +152,7 @@ add_test(NAME app_startup COMMAND test_app_startup -o ${CMAKE_CURRENT_BINARY_DIR
 
 set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/AppStartup.cpp
+    ../src/app/AppGuiMain.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp

@@ -6,34 +6,15 @@
 #include <QString>
 #include <QStringList>
 
+#include <memory>
+#include <optional>
+
 class Backend;
 class QGuiApplication;
 class QLocalServer;
 class QQmlApplicationEngine;
 class QTranslator;
 class QWindow;
-
-namespace freetunnel {
-
-void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
-                   QTranslator *&translator, const QString &lang);
-
-QString controlArgFrom(int argc, char *argv[]);
-
-void raiseFdLimit();
-
-void setupMacDockIcon(QGuiApplication &app, Backend &backend);
-
-void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
-                        const QString &instanceToken);
-
-void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
-// Re-show the main window when the user activates the app from the dock/taskbar
-// while it was hidden to the tray (macOS Dock, Linux panel, etc.).
-
-int runGuiApplication(int argc, char *argv[]);
-
-} // namespace freetunnel
 
 class UrlOpenFilter : public QObject {
     Q_OBJECT
@@ -63,3 +44,53 @@ public:
 protected:
     bool eventFilter(QObject *o, QEvent *e) override;
 };
+
+namespace freetunnel {
+
+void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
+                   QTranslator *&translator, const QString &lang);
+
+QString controlArgFrom(int argc, char *argv[]);
+
+void raiseFdLimit();
+
+void setupMacDockIcon(QGuiApplication &app, Backend &backend);
+
+void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
+                        const QString &instanceToken);
+
+void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
+// Re-show the main window when the user activates the app from the dock/taskbar
+// while it was hidden to the tray (macOS Dock, Linux panel, etc.).
+
+// Everything runGuiApplication() builds and has to keep alive until exec()
+// returns. Declaration order is destruction order reversed, and it matters:
+// `engine` must go before `backend`, because the QML that engine owns holds
+// `backend` as a context property and touches it on teardown.
+struct GuiStartup {
+    std::unique_ptr<UrlOpenFilter> urlFilter;
+    std::unique_ptr<Backend> backend;
+    std::unique_ptr<QQmlApplicationEngine> engine;
+    QLocalServer *server = nullptr; // parented to the application
+    QWindow *win = nullptr;         // owned by the engine
+    QTranslator *translator = nullptr;
+    // Captured BY REFERENCE in the shutdown lambdas, so it has to outlive them —
+    // which is the reason this is a member and not a local in the caller.
+    bool appQuitting = false;
+    // The startup steps in the order they ran. The entry point is the one file
+    // no test compiled, and both macOS bugs found in it were about what happens
+    // before what; this lets a test say so out loud.
+    QStringList trace;
+};
+
+// Build the application: everything runGuiApplication() does except constructing
+// QGuiApplication and entering the event loop. Returns a value when the process
+// should exit immediately with it (0 when the command was handed to a running
+// instance, -1 when the QML failed to load), or nothing when it should exec().
+std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
+                                      GuiStartup *out);
+
+int runGuiApplication(int argc, char *argv[]);
+
+} // namespace freetunnel
+

@@ -97,61 +97,98 @@ static void setupMacApplicationQuit(Backend &backend)
 }
 #endif
 
-int runGuiApplication(int argc, char *argv[])
+std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
+                                      GuiStartup *out)
 {
-    QGuiApplication app(argc, argv);
+    // Each step is named as it happens. The order is the thing worth pinning: this
+    // file had no test at all, and both macOS defects found in it were about what
+    // ran before what, not about what any one line did.
+    const auto step = [out](const char *name) { out->trace << QLatin1String(name); };
+
     applyAppBranding(app);
+    step("branding");
 
     const QString controlArg = controlArgFrom(argc, argv);
-    if (forwardToRunningInstance(QStringLiteral("FreeTunnelInstance"), controlArg))
+    // Reads the credential store, which spins a nested event loop on the GUI
+    // thread — so by the time anything below runs, the event loop has already
+    // turned. Code after this point must not assume otherwise; assuming it is
+    // exactly how the Dock-reopen handler came to be registered too late.
+    if (forwardToRunningInstance(QStringLiteral("FreeTunnelInstance"), controlArg)) {
+        step("forwarded-to-running-instance");
         return 0;
+    }
+    step("forward-check");
 
     QString instanceToken;
-    QLocalServer *server = startSingleInstanceServer(app, &instanceToken);
+    out->server = startSingleInstanceServer(app, &instanceToken);
+    step("instance-server");
 
-    UrlOpenFilter urlFilter;
-    app.installEventFilter(&urlFilter);
+    out->urlFilter = std::make_unique<UrlOpenFilter>();
+    app.installEventFilter(out->urlFilter.get());
+    step("url-filter");
 
-    Backend backend;
+    out->backend = std::make_unique<Backend>();
+    Backend &backend = *out->backend;
 #ifdef Q_OS_MACOS
     setupMacDockIcon(app, backend);
 #endif
+    step("backend");
 
-    bool appQuitting = false;
-    wireBackendLifecycle(app, backend, appQuitting);
+    wireBackendLifecycle(app, backend, out->appQuitting);
 #ifdef Q_OS_MACOS
     setupMacApplicationQuit(backend);
 #endif
+    step("lifecycle");
 
-    QQmlApplicationEngine engine;
-    QWindow *win = loadMainWindow(engine, backend);
-    if (!win)
+    out->engine = std::make_unique<QQmlApplicationEngine>();
+    out->win = loadMainWindow(*out->engine, backend);
+    if (!out->win) {
+        step("qml-failed");
         return -1;
+    }
+    step("qml-loaded");
 
-    QTranslator *translator = nullptr;
-    wireLanguageChanges(app, engine, backend, translator);
+    wireLanguageChanges(app, *out->engine, backend, out->translator);
+    step("language");
 
 #ifdef Q_OS_MACOS
+    QWindow *win = out->win;
+    bool *appQuitting = &out->appQuitting;
     applyMacUnifiedTitlebar(win->winId());
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
     installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
     // Bring the hidden window back only on a real Dock-icon click — not on every
     // app activation (status-bar clicks, Cmd-Tab), which used to re-open it.
-    installMacDockReopenHandler([win, &appQuitting]() {
-        if (appQuitting)
+    installMacDockReopenHandler([win, appQuitting]() {
+        if (*appQuitting)
             return;
         win->show();
         win->raise();
         win->requestActivate();
     });
 #endif
-    urlFilter.ready(&backend, win);
+    step("mac-window");
+
+    out->urlFilter->ready(&backend, out->win);
     if (!controlArg.isEmpty())
         backend.handleControl(controlArg);
+    step("deferred-control");
 
-    setupDockReopen(app, win, appQuitting);
-    wireInstanceServer(server, backend, win, instanceToken);
+    setupDockReopen(app, out->win, out->appQuitting);
+    step("dock-reopen");
 
+    wireInstanceServer(out->server, backend, out->win, instanceToken);
+    step("instance-wired");
+
+    return std::nullopt;
+}
+
+int runGuiApplication(int argc, char *argv[])
+{
+    QGuiApplication app(argc, argv);
+    GuiStartup startup;
+    if (const std::optional<int> exitNow = wireGuiApplication(app, argc, argv, &startup))
+        return *exitNow;
     return app.exec();
 }
 

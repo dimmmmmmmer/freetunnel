@@ -33,6 +33,7 @@ private slots:
     void quitFilterEmitsShutdown();
     void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
+    void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
@@ -192,6 +193,65 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     // Callers expecting something to arrive use QTRY_*; callers expecting silence
     // wait out the delay explicitly with waitOutInstanceDelivery().
     QTest::qWait(50);
+}
+
+// The entry point was the one file no test compiled, and both macOS defects found
+// in it were about what ran before what — a Dock handler registered at a moment
+// that looked early and was not, and window setup that needs a window to exist.
+// This walks the real wiring and pins the sequence, so a reorder has to be
+// deliberate rather than incidental.
+//
+// It is a smoke test, and worth being honest about its reach: it would not have
+// caught either bug by itself, because neither was visible from the order alone.
+// What it gives is the first coverage this file has ever had, and a tripwire on
+// the property both bugs lived in.
+void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
+{
+    freetunnel::GuiStartup startup;
+    char arg0[] = "freetunnel";
+    char *argv[] = {arg0, nullptr};
+    int argc = 1;
+
+    const std::optional<int> exitNow =
+            freetunnel::wireGuiApplication(*qApp, argc, argv, &startup);
+
+    QVERIFY2(!exitNow.has_value(),
+             qPrintable(QStringLiteral("wiring asked to exit with %1; trace: %2")
+                                .arg(exitNow.value_or(0))
+                                .arg(startup.trace.join(QLatin1Char(' ')))));
+
+    // The QML has to have produced a window: "-1, could not load Main.qml" is the
+    // failure this file returns for a broken UI, and nothing else notices it.
+    QVERIFY(startup.win != nullptr);
+    QVERIFY(startup.backend != nullptr);
+    QVERIFY(startup.engine != nullptr);
+    QVERIFY(startup.urlFilter != nullptr);
+    QVERIFY(startup.server != nullptr);
+
+    const QStringList expected{
+            QStringLiteral("branding"),      QStringLiteral("forward-check"),
+            QStringLiteral("instance-server"), QStringLiteral("url-filter"),
+            QStringLiteral("backend"),       QStringLiteral("lifecycle"),
+            QStringLiteral("qml-loaded"),    QStringLiteral("language"),
+            QStringLiteral("mac-window"),    QStringLiteral("deferred-control"),
+            QStringLiteral("dock-reopen"),   QStringLiteral("instance-wired")};
+    QCOMPARE(startup.trace, expected);
+
+    // Two orderings the rest of the file depends on, stated so a future edit that
+    // breaks them fails here rather than at runtime on one platform:
+    // the window must exist before anything that configures it,
+    QVERIFY(startup.trace.indexOf(QStringLiteral("qml-loaded"))
+            < startup.trace.indexOf(QStringLiteral("mac-window")));
+    // and the listener must not accept commands before the Backend can serve them.
+    QVERIFY(startup.trace.indexOf(QStringLiteral("backend"))
+            < startup.trace.indexOf(QStringLiteral("instance-wired")));
+
+    // Shutdown must be reachable from what was wired: the quit path is what the
+    // tray item, ⌘Q and the window's close button all end up calling.
+    QSignalSpy shutdown(startup.backend.get(), &Backend::aboutToShutdown);
+    startup.backend->quitApplication();
+    QCOMPARE(shutdown.count(), 1);
+    QVERIFY(startup.backend->applicationClosingDown());
 }
 
 // The authorised path: a peer holding the session token gets its command run —
