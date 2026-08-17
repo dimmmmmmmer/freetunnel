@@ -17,14 +17,19 @@ namespace {
 const SecretSchema &libsecretSchema()
 {
     static const QByteArray name = credentialServiceName().toUtf8();
-    static const SecretSchema schema = {
-        name.constData(),
-        SECRET_SCHEMA_NONE,
-        {
-            {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
-            {nullptr, SecretSchemaAttributeType(0)},
-        },
-    };
+    // Zero-initialised first, then filled: SecretSchema ends with eight reserved
+    // members that libsecret requires to be zero and that callers are not meant to
+    // name. Listing only the fields we set makes -Wmissing-field-initializers
+    // complain about every one of them, and naming them would bind this code to a
+    // struct layout libsecret explicitly keeps to itself.
+    static const SecretSchema schema = [] {
+        SecretSchema s{};
+        s.name = name.constData();
+        s.flags = SECRET_SCHEMA_NONE;
+        s.attributes[0] = {"account", SECRET_SCHEMA_ATTRIBUTE_STRING};
+        s.attributes[1] = {nullptr, SecretSchemaAttributeType(0)};
+        return s;
+    }();
     return schema;
 }
 
