@@ -21,6 +21,17 @@ endif()
 add_compile_definitions(FT_ENABLE_TEST_HOOKS)
 set(CMAKE_AUTORCC ON)
 
+# The fast test workflow compiles every file under src/, and until now it did so
+# with no warning flags at all — so the only build that saw warnings was the heavy
+# release one, where nothing failed on them either. This job runs on every push and
+# is the earliest place a warning can be caught, so it is the one that should
+# refuse them. The tree is clean under these today; keeping it that way is the
+# point. MSVC is left alone: it does not speak these flags and its own /W4 set
+# disagrees enough to be a separate decision.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Werror)
+endif()
+
 option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)
 option(FT_ENABLE_SANITIZERS "Build tests with ASan+UBSan (Linux/clang recommended)" OFF)
 

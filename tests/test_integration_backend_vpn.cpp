@@ -232,10 +232,16 @@ void TestIntegrationBackendVpn::configSwitchSuppressesCoreDisconnectToast()
     QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
     QCOMPARE(backend.activeIndex(), 1);
 
-    for (const QVariant &v : errorSpy) {
-        const QString msg = v.toString().toLower();
+    // A QSignalSpy row is the argument LIST, not the argument. Binding it to a
+    // const QVariant& built a temporary QVariant wrapping the whole list, so this
+    // loop used to compare against something like "QVariantList(...)" and could
+    // never see the message it names — the check passed no matter what was emitted.
+    for (const QList<QVariant> &row : errorSpy) {
+        QVERIFY(!row.isEmpty());
+        const QString text = row.at(0).toString();
+        const QString msg = text.toLower();
         QVERIFY2(!msg.contains(QStringLiteral("connection lost")),
-                 qPrintable(QStringLiteral("unexpected toast: ") + v.toString()));
+                 qPrintable(QStringLiteral("unexpected toast: ") + text));
     }
 
     backend.prepareQuit();

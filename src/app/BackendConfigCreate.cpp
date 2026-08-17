@@ -116,7 +116,10 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
 }
 
-bool finalizeParsedCreateConfig(const QVariantMap &f, ParsedCreateConfig *out, QString *err)
+// Cannot fail: naming is the last step and sanitizeConfigBaseName() always
+// produces something, falling back to the hostname and then to a generated stem.
+// Returns bool only so parseCreateConfigFields() reads as one chain of steps.
+bool finalizeParsedCreateConfig(const QVariantMap &f, ParsedCreateConfig *out)
 {
     const QString name = f.value(QStringLiteral("name")).toString().trimmed();
     out->password = out->ct.password;
@@ -133,7 +136,7 @@ bool parseCreateConfigFields(const QVariantMap &f, ParsedCreateConfig *out, QStr
     assignOptionalCreateFields(f, out);
     if (!validateCreateOptionalFields(out->ct, err))
         return false;
-    return finalizeParsedCreateConfig(f, out, err);
+    return finalizeParsedCreateConfig(f, out);
 }
 
 } // namespace

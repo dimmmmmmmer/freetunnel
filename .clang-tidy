@@ -34,6 +34,11 @@ Checks: >
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -modernize-use-trailing-return-type
-WarningsAsErrors: ''
+# Empty meant clang-tidy exited 0 on every diagnostic, so the CI job that runs it
+# could not fail — it reported findings into a log nobody had to read. The enabled
+# check set is clean today, so make a finding stop the build the way any other
+# gate does. Narrow this to specific checks rather than widening it back to
+# nothing if a noisy check ever has to be tolerated.
+WarningsAsErrors: '*'
 HeaderFilterRegex: '(include|src)/.*'
 FormatStyle: none
