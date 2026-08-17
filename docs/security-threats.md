@@ -72,6 +72,33 @@ tunnel rather than the server. The consequence is that refreshing that page
 reveals the full list of configured endpoints, including servers never connected
 to, to the local network and the ISP. Traffic that is not a probe is unaffected.
 
+### Known limitation: a signed release can be replayed
+
+The update check trusts the GitHub Application Programming Interface (API)
+response for *which* release exists. Everything it names is then checked: asset
+Uniform Resource Locators (URLs) must sit under this repository's release
+download path for the advertised tag, `SHA256SUMS.txt` must carry a valid Ed25519
+signature from the compiled-in key, and the installer's SHA-256 must appear in
+that manifest.
+
+What none of that establishes is *which version* the signature belongs to. The
+signed material is the manifest, and neither it nor the asset names contain a
+version — `freetunnel-linux-x86_64.deb` is the same name in every release. So an
+attacker able to forge the API response (a compromised transport to
+`api.github.com`, not a passive network observer) can present an **older, real**
+release: its tag, its assets, its manifest and its genuine signature. Every check
+passes, because everything is authentic — just stale. `isVersionNewer()` keeps
+this above the version already installed, so it cannot roll a user backwards; the
+harm is pinning them short of the newest build, and so short of a fix they are
+waiting for.
+
+Closing this means putting the version inside the signed material — signing a
+file that names the release, and refusing a manifest whose version does not match
+the tag being offered. That is a change to how releases are produced, not to the
+client alone, and it has a failure mode worth respecting: get it wrong and every
+user is locked out of every future update. It is therefore recorded here as
+accepted rather than quietly patched.
+
 ## Deep links (`tt://`)
 
 Config import links use TrustTunnel's type-length-value (TLV) / base64url format.
@@ -86,7 +113,7 @@ downloads, documents, or desktop directories; symlinks are rejected.
 
 | Threat | Mitigation |
 | --- | --- |
-| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature |
+| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature (replay of an older signed release is accepted — see above) |
 | Malicious `tt://` link | TLV parser limits; cred store separation |
 | Other local user | Socket access-control list (ACL) + loopback-only helper |
 | Same-user malware | Documented limitation; OS credential APIs |
