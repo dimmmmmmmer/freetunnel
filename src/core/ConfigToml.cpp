@@ -55,6 +55,122 @@ static QString csvToTomlArray(const QString &csv) {
     return items.join(QStringLiteral(", "));
 }
 
+namespace {
+
+// True when this line opens a multi-line basic string and does not close it.
+bool opensMultiline(const QString &line)
+{
+    const int first = line.indexOf(QLatin1String("\"\"\""));
+    return first >= 0 && line.indexOf(QLatin1String("\"\"\""), first + 3) < 0;
+}
+
+// Split a TOML document into its top-level tables: pairs of (header, body), with
+// an empty header for the keys that precede the first table. Multi-line basic
+// strings are stepped over, so a certificate block whose content happens to look
+// like a table header or a key is never mistaken for one — and a pasted PEM is
+// exactly the kind of value that could.
+QList<QPair<QString, QString>> splitTomlTables(const QString &toml)
+{
+    QList<QPair<QString, QString>> out;
+    QString header;
+    QString body;
+    bool inMultiline = false;
+    const QStringList lines = toml.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (inMultiline) {
+            body += line + QLatin1Char('\n');
+            if (line.contains(QLatin1String("\"\"\"")))
+                inMultiline = false;
+            continue;
+        }
+        const QString t = line.trimmed();
+        if (t.startsWith(QLatin1Char('[')) && t.endsWith(QLatin1Char(']'))) {
+            out.append({header, body});
+            header = t.mid(1, t.size() - 2).trimmed();
+            body.clear();
+            continue;
+        }
+        body += line + QLatin1Char('\n');
+        if (opensMultiline(line))
+            inMultiline = true;
+    }
+    out.append({header, body});
+    return out;
+}
+
+// A captured table body ends with however many blank lines the file had before
+// the next header. Re-emitting them verbatim adds one more every save, so the
+// file grows without bound and no round trip is ever stable.
+QString normalizeBody(QString body)
+{
+    while (body.endsWith(QLatin1Char('\n')))
+        body.chop(1);
+    return body.isEmpty() ? body : body + QLatin1Char('\n');
+}
+
+QString keyOf(const QString &line)
+{
+    const QString t = line.trimmed();
+    if (t.isEmpty() || t.startsWith(QLatin1Char('#')))
+        return QString();
+    const int eq = t.indexOf(QLatin1Char('='));
+    return eq < 0 ? QString() : t.left(eq).trimmed();
+}
+
+// The lines of `body` whose key this editor does not write, with any multi-line
+// value kept whole. Blank lines and comments are dropped: they belong to the key
+// they sit next to, and there is no way to tell which one that is.
+QString unknownKeyLines(const QString &body, const QStringList &known)
+{
+    QString out;
+    bool keeping = false;
+    bool inMultiline = false;
+    const QStringList lines = body.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (inMultiline) {
+            if (keeping)
+                out += line + QLatin1Char('\n');
+            if (line.contains(QLatin1String("\"\"\"")))
+                inMultiline = false;
+            continue;
+        }
+        const QString key = keyOf(line);
+        if (key.isEmpty()) {
+            keeping = false;
+            continue;
+        }
+        keeping = !known.contains(key);
+        if (keeping)
+            out += line + QLatin1Char('\n');
+        if (opensMultiline(line))
+            inMultiline = true;
+    }
+    return out;
+}
+
+const QStringList &knownRootKeys()
+{
+    static const QStringList k{QStringLiteral("loglevel"), QStringLiteral("vpn_mode"),
+                               QStringLiteral("killswitch_enabled"),
+                               QStringLiteral("post_quantum_group_enabled"),
+                               QStringLiteral("dns_upstreams")};
+    return k;
+}
+
+const QStringList &knownEndpointKeys()
+{
+    static const QStringList k{
+            QStringLiteral("hostname"),     QStringLiteral("addresses"),
+            QStringLiteral("username"),     QStringLiteral("password"),
+            QStringLiteral("client_random"), QStringLiteral("custom_sni"),
+            QStringLiteral("has_ipv6"),     QStringLiteral("skip_verification"),
+            QStringLiteral("upstream_protocol"), QStringLiteral("anti_dpi"),
+            QStringLiteral("certificate")};
+    return k;
+}
+
+} // namespace
+
 QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     QString t;
     t += QStringLiteral("loglevel = \"%1\"\n").arg(logLevel);
@@ -62,6 +178,7 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     t += QStringLiteral("killswitch_enabled = false\n");
     t += QStringLiteral("post_quantum_group_enabled = true\n");
     t += QStringLiteral("dns_upstreams = [%1]\n").arg(csvToTomlArray(c.dns));
+    t += c.extraRootKeys;
     t += QStringLiteral("\n[endpoint]\n");
     t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEsc(c.hostname));
     t += QStringLiteral("addresses = [%1]\n").arg(csvToTomlArray(c.addresses));
@@ -79,11 +196,19 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
                      .arg(tomlEscMultiline(c.certificate.trimmed()));
     else
         t += QStringLiteral("certificate = \"\"\n");
+    t += c.extraEndpointKeys;
     t += QStringLiteral("\n[listener.tun]\n");
-    t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
-    t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
-    t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
-                        "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    if (!c.tunSection.isEmpty()) {
+        // The file already said how it wants to be routed. Overwriting that with
+        // our defaults is how an imported config quietly lost its routing.
+        t += c.tunSection;
+    } else {
+        t += QStringLiteral("bound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
+        t += QStringLiteral("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
+        t += QStringLiteral("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
+                            "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
+    }
+    t += c.extraSections;
     return t;
 }
 
@@ -137,6 +262,23 @@ ConfigToml parseConfigToml(const QString &toml) {
     // backslashes in the certificate block, and a PEM (which has neither) still
     // round-trips byte for byte.
     c.certificate = cm.hasMatch() ? unesc(cm.captured(1)) : QString();
+
+    // Carry out everything this struct has no field for, so buildConfigToml() can
+    // put it back. Without this the round trip is lossy in a way nobody sees: the
+    // file still parses, still connects, and quietly routes differently.
+    for (const auto &table : splitTomlTables(toml)) {
+        const QString &header = table.first;
+        const QString &body = table.second;
+        if (header.isEmpty()) {
+            c.extraRootKeys = unknownKeyLines(body, knownRootKeys());
+        } else if (header == QLatin1String("endpoint")) {
+            c.extraEndpointKeys = unknownKeyLines(body, knownEndpointKeys());
+        } else if (header == QLatin1String("listener.tun")) {
+            c.tunSection = normalizeBody(body);
+        } else {
+            c.extraSections += QStringLiteral("\n[%1]\n").arg(header) + normalizeBody(body);
+        }
+    }
     return c;
 }
 

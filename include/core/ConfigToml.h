@@ -23,6 +23,19 @@ struct ConfigToml {
     bool allowIpv6 = true;
     bool skipVerification = false; // accept the server's TLS cert without validation
     bool antiDpi = false;          // enable the core's anti-DPI obfuscation
+
+    // Everything in the file that this editor does not itself generate, kept
+    // verbatim so a round trip does not throw it away.
+    //
+    // A config is rewritten more often than it looks: migrateConfigPassword()
+    // parses and rebuilds every config on import, so a provider's .toml used to
+    // lose its routing and any section this struct has no field for the moment it
+    // was added — silently, with the file on disk still looking like a valid
+    // config. These carry that content back out through buildConfigToml().
+    QString tunSection;         // [listener.tun] body; empty = write the defaults
+    QString extraRootKeys;      // unknown keys before the first table
+    QString extraEndpointKeys;  // unknown keys inside [endpoint]
+    QString extraSections;      // whole tables other than [endpoint]/[listener.tun]
 };
 
 // Render a ConfigToml to the client TOML format.

@@ -11,6 +11,9 @@ class TestConfigToml : public QObject {
     Q_OBJECT
 
 private slots:
+    void roundTripKeepsWhatTheEditorDoesNotUnderstand();
+    void aCertificateCannotForgeSections();
+    void roundTripOfOurOwnOutputIsStable();
     void roundTrip();
     void escapesQuotes();
     void emptyCertificate();
@@ -96,6 +99,88 @@ void TestConfigToml::boolFlagsAreLineAnchored() {
     // And a genuine line-anchored flag is still read.
     ConfigToml on = parseConfigToml(QStringLiteral("skip_verification = true\n"));
     QCOMPARE(on.skipVerification, true);
+}
+
+// A config is rewritten far more often than it looks: migrateConfigPassword()
+// parses and rebuilds every config on import, so anything this editor has no
+// field for used to be dropped the moment a config entered the app — silently,
+// with the file still parsing and still connecting, just routing differently.
+void TestConfigToml::roundTripKeepsWhatTheEditorDoesNotUnderstand()
+{
+    const QString original = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "vpn_mode = \"general\"\n"
+            "provider_quirk = 42\n"           // unknown root key
+            "dns_upstreams = [\"1.1.1.1\"]\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "provider_tag = \"gold\"\n"      // unknown endpoint key
+            "\n[listener.tun]\n"
+            "bound_if = \"en0\"\n"
+            "mtu_size = 1280\n"
+            "excluded_routes = [\"10.9.0.0/16\"]\n"
+            "\n[listener.socks]\n"            // a table this editor never writes
+            "port = 1080\n");
+
+    const freetunnel::ConfigToml parsed = freetunnel::parseConfigToml(original);
+    QCOMPARE(parsed.hostname, QStringLiteral("vpn.example.com"));
+
+    const QString rebuilt = freetunnel::buildConfigToml(parsed);
+
+    // The user's routing, not our defaults.
+    QVERIFY2(rebuilt.contains(QStringLiteral("mtu_size = 1280")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("bound_if = \"en0\"")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("excluded_routes = [\"10.9.0.0/16\"]")),
+             qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("192.168.0.0/16")),
+             "our default routes were written over the config's own");
+
+    // Sections and keys we have no field for.
+    QVERIFY2(rebuilt.contains(QStringLiteral("[listener.socks]")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("port = 1080")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("provider_quirk = 42")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(rebuilt));
+
+    // Stable: a second trip changes nothing more.
+    QCOMPARE(freetunnel::buildConfigToml(freetunnel::parseConfigToml(rebuilt)), rebuilt);
+}
+
+// A certificate is the one value that can contain anything, and it is attacker
+// influenced on the import path. The splitter must step over it rather than read
+// its contents as structure.
+void TestConfigToml::aCertificateCannotForgeSections()
+{
+    freetunnel::ConfigToml c;
+    c.hostname = QStringLiteral("h");
+    c.certificate = QStringLiteral("-----BEGIN CERTIFICATE-----\n"
+                                   "[listener.tun]\n"
+                                   "excluded_routes = [\"203.0.113.7/32\"]\n"
+                                   "-----END CERTIFICATE-----");
+    const QString built = freetunnel::buildConfigToml(c);
+    const freetunnel::ConfigToml back = freetunnel::parseConfigToml(built);
+
+    // The forged table stayed inside the certificate: it was not lifted out into
+    // tunSection, and it did not become an "extra" section that we would then
+    // re-emit as real structure on the next save.
+    QVERIFY2(back.tunSection.contains(QStringLiteral("mtu_size")), qPrintable(back.tunSection));
+    QVERIFY2(!back.tunSection.contains(QStringLiteral("203.0.113.7")), qPrintable(back.tunSection));
+    QVERIFY2(!back.extraSections.contains(QStringLiteral("203.0.113.7")),
+             qPrintable(back.extraSections));
+    QCOMPARE(back.certificate, c.certificate);
+}
+
+// Nothing to preserve is the common case: a config this editor wrote itself must
+// come back byte for byte, or every save would grow the file.
+void TestConfigToml::roundTripOfOurOwnOutputIsStable()
+{
+    freetunnel::ConfigToml c;
+    c.hostname = QStringLiteral("vpn.example.com");
+    c.addresses = QStringLiteral("1.2.3.4:443");
+    c.username = QStringLiteral("u");
+    const QString once = freetunnel::buildConfigToml(c);
+    QCOMPARE(freetunnel::buildConfigToml(freetunnel::parseConfigToml(once)), once);
 }
 
 QTEST_MAIN(TestConfigToml)
