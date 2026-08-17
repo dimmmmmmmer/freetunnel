@@ -24,6 +24,14 @@ QString existingConfigPath(const QString &dir, const QString &fileName);
 /// case-sensitive host, where the collision itself cannot be reproduced.
 QString configEntryMatching(const QStringList &entries, const QString &fileName);
 
+/// True when @p name mixes writing systems — Latin letters next to Cyrillic ones,
+/// say. Legitimate names are written in one alphabet; a name that is not is the
+/// signature of a homoglyph, where "Wоrk" with a Cyrillic о reads exactly like a
+/// config the user already trusts. Restricting names to ASCII is not an option
+/// here: this app ships a Russian UI and Cyrillic names are ordinary.
+/// Digits, punctuation and spaces belong to no script and are ignored.
+bool nameMixesScripts(const QString &name);
+
 /// Sanitize a display name / hostname into a safe config filename stem.
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix = QStringLiteral("imported"));
 

@@ -17,6 +17,7 @@ private slots:
     void entryMatchingPrefersTheExactNameThenFoldsCase();
     void existingConfigPathFindsAnExactCollision();
     void existingConfigPathReportsNoCollisionForAFreeName();
+    void mixedScriptNamesAreFlaggedAndSingleScriptOnesAreNot();
 };
 
 void TestConfigPaths::sanitizeAndUniquePath()
@@ -83,6 +84,30 @@ void TestConfigPaths::existingConfigPathReportsNoCollisionForAFreeName()
     // collision. The filesystem is what decides, so this assertion holds on both
     // kinds of host: it is the same question the filesystem was just asked.
     QVERIFY(freetunnel::existingConfigPath(dir.path(), QStringLiteral("Work.toml")).isEmpty());
+}
+
+// A deep link chooses the name it shows the user, so a name that reads like a
+// config they already trust is the cheap half of a swap. Sanitizing the character
+// set away is not available — this app ships a Russian UI and Cyrillic names are
+// ordinary — so what is left is telling them.
+void TestConfigPaths::mixedScriptNamesAreFlaggedAndSingleScriptOnesAreNot()
+{
+    // "Work" with a Cyrillic о: identical on screen to the Latin one.
+    QVERIFY(freetunnel::nameMixesScripts(QStringLiteral("W\u043Erk")));
+    QVERIFY(freetunnel::nameMixesScripts(QStringLiteral("Работа Work")));
+
+    // Ordinary names in one alphabet must not be flagged, or the warning becomes
+    // noise and stops being read — including the non-Latin ones this app expects.
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("Work")));
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("Работа")));
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("東京")));
+
+    // Digits, punctuation and spaces belong to no script; a name made only of them
+    // has nothing to mix.
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("Work-2 (fast)")));
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("Работа-2")));
+    QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("12.34")));
+    QVERIFY(!freetunnel::nameMixesScripts(QString()));
 }
 
 QTEST_MAIN(TestConfigPaths)

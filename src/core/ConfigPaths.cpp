@@ -27,6 +27,25 @@ QString ensureOwnerConfigDir()
 
 } // namespace
 
+bool nameMixesScripts(const QString &name)
+{
+    QChar::Script seen = QChar::Script_Unknown;
+    for (const QChar &c : name) {
+        if (!c.isLetter())
+            continue; // digits, spaces and punctuation are shared by every script
+        const QChar::Script s = c.script();
+        if (s == QChar::Script_Common || s == QChar::Script_Inherited
+            || s == QChar::Script_Unknown)
+            continue;
+        if (seen == QChar::Script_Unknown) {
+            seen = s;
+        } else if (s != seen) {
+            return true;
+        }
+    }
+    return false;
+}
+
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix)
 {
     QString safe;

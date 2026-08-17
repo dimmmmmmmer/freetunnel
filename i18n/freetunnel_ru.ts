@@ -218,6 +218,14 @@
         <source>Update installed — restarting</source>
         <translation>Обновление установлено — перезапуск</translation>
     </message>
+    <message>
+        <source>Server: %1</source>
+        <translation>Сервер: %1</translation>
+    </message>
+    <message>
+        <source>This name mixes letters from different alphabets.</source>
+        <translation>В этом имени смешаны буквы разных алфавитов.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

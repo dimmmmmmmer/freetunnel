@@ -189,6 +189,17 @@ bool Backend::importDeepLink(const QString &link)
         lines << tr("“%1” already exists. Replace it, or add this as a separate config?")
                          .arg(existingName);
     }
+    // The server, not just the name. The name comes from the link and is the one
+    // thing an attacker fully controls, so a decision made on the name alone can
+    // be made on a lie; the hostname is what the config will actually connect to.
+    const freetunnel::ConfigToml incoming = freetunnel::parseConfigToml(prepared->tomlContent);
+    if (!incoming.hostname.isEmpty())
+        lines << tr("Server: %1").arg(incoming.hostname);
+    // A name in one alphabet is ordinary; a name in two is how "Wоrk" with a
+    // Cyrillic о is made to read like a config the user already has. Sanitizing it
+    // away is not possible — Cyrillic names are legitimate here — so say it.
+    if (freetunnel::nameMixesScripts(QFileInfo(prepared->fileName).completeBaseName()))
+        lines << tr("This name mixes letters from different alphabets.");
     if (prepared->skipVerification)
         lines << tr("This link turns off server certificate verification.");
     const QString message = lines.join(QLatin1Char('\n'));
