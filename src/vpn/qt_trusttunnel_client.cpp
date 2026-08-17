@@ -679,7 +679,11 @@ void QtTrustTunnelClient::pollCoreLogFile()
     const QByteArray chunk = f.readAll();
     m_coreLogOffset = f.pos();
     f.close();
-    if (chunk.isEmpty())
+    // Not "return when the file did not grow": the per-poll line cap leaves whole
+    // lines in the buffer, and they were only ever flushed by the NEXT chunk. A
+    // core that logged a burst and then went quiet — which is exactly what happens
+    // once a tunnel settles — left its last lines sitting in memory, never shown.
+    if (chunk.isEmpty() && m_coreLogLineBuffer.isEmpty())
         return;
 
     constexpr int kMaxLinesPerPoll = 24;

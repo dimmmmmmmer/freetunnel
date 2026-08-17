@@ -99,6 +99,28 @@ void drainCoreLogTailBytes(QByteArray *carry, const QByteArray &chunk, int maxLi
     }
     if (start > 0)
         carry->remove(0, start);
+
+    // What is left is either a partial line waiting for its newline, or complete
+    // lines held back by maxLines. Both are bounded here, because neither is
+    // bounded by anything else: this runs every poll for the whole life of a
+    // session, so a core that logs faster than the cap drains, or one that emits a
+    // line with no newline at all, would grow this buffer until the process dies.
+    // Dropping the oldest bytes is the right end to lose — the tail is what the
+    // user is watching — and saying so in the stream beats a silent gap.
+    constexpr int kMaxCarryBytes = 256 * 1024;
+    if (carry->size() > kMaxCarryBytes) {
+        const int dropped = carry->size() - kMaxCarryBytes;
+        carry->remove(0, dropped);
+        // Resync to a line boundary, so the first line after a drop is a whole one
+        // rather than the tail of the one that was cut.
+        const int nl = carry->indexOf('\n');
+        if (nl >= 0)
+            carry->remove(0, nl + 1);
+        else
+            carry->clear();
+        emitLine(QStringLiteral("[log] dropped %1 bytes — the core is logging faster "
+                                "than this view can read it").arg(dropped));
+    }
 }
 
 #ifdef Q_OS_WIN

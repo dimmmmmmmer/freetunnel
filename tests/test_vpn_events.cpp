@@ -19,6 +19,8 @@ class TestVpnEvents : public QObject {
     Q_OBJECT
 
 private slots:
+    void logTailHoldsBackLinesAndFlushesThemWithoutNewInput();
+    void logTailBufferIsBounded();
     void payloadComesFromTheStateSpecificErrorSlot();
     void payloadOfANullEventIsInert();
 
@@ -290,6 +292,53 @@ void TestVpnEvents::verifyingANullCertificateEventIsInert()
     qt_trusttunnel_verify_server_certificate(nullptr);
 
     QCOMPARE(ctl.verifyCallCount(), 0);
+}
+
+// The per-poll cap leaves whole lines behind, and the poller only used to drain
+// when the file had grown — so a core that logged a burst and then went quiet, the
+// normal shape once a tunnel settles, left its last lines in memory and never
+// showed them. Draining with nothing new must produce them.
+void TestVpnEvents::logTailHoldsBackLinesAndFlushesThemWithoutNewInput()
+{
+    QByteArray carry;
+    QStringList out;
+    const auto sink = [&out](const QString &s) { out << s; };
+
+    drainCoreLogTailBytes(&carry, QByteArrayLiteral("a\nb\nc\nd\n"), 2, sink);
+    QCOMPARE(out, QStringList({QStringLiteral("a"), QStringLiteral("b")}));
+    QVERIFY2(!carry.isEmpty(), "the held-back lines were dropped, not held");
+
+    // Nothing new arrived; the rest must still come out.
+    out.clear();
+    drainCoreLogTailBytes(&carry, QByteArray(), 2, sink);
+    QCOMPARE(out, QStringList({QStringLiteral("c"), QStringLiteral("d")}));
+    QVERIFY(carry.isEmpty());
+}
+
+// This buffer lives for the whole session and is fed every poll, so nothing else
+// bounds it: a core logging faster than the cap drains, or one emitting a line
+// with no newline at all, would grow it until the process died.
+void TestVpnEvents::logTailBufferIsBounded()
+{
+    QByteArray carry;
+    QStringList out;
+    const auto sink = [&out](const QString &s) { out << s; };
+
+    // One "line" with no newline in sight — the unbounded case.
+    for (int i = 0; i < 8; ++i)
+        drainCoreLogTailBytes(&carry, QByteArray(200 * 1024, 'x'), 24, sink);
+    QVERIFY2(carry.size() <= 256 * 1024,
+             qPrintable(QStringLiteral("carry grew to %1 bytes").arg(carry.size())));
+    QVERIFY2(!out.isEmpty(), "bytes were dropped without telling anyone");
+    QVERIFY(out.last().contains(QStringLiteral("dropped")));
+
+    // After a drop the stream resyncs to a line boundary, so what comes next is a
+    // whole line rather than the tail of the one that was cut in half.
+    out.clear();
+    drainCoreLogTailBytes(&carry, QByteArrayLiteral("\ncomplete line\n"), 24, sink);
+    QVERIFY2(out.contains(QStringLiteral("complete line")), qPrintable(out.join('|')));
+    for (const QString &line : out)
+        QVERIFY2(!line.contains(QStringLiteral("xxx")), qPrintable(line));
 }
 
 QTEST_MAIN(TestVpnEvents)
