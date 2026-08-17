@@ -228,6 +228,14 @@ target_include_directories(test_appimagepath PRIVATE ../include ../include/core 
 target_link_libraries(test_appimagepath PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME appimagepath COMMAND test_appimagepath -o ${CMAKE_CURRENT_BINARY_DIR}/report-appimagepath.txt,txt)
 
+add_executable(test_bypassrules
+    test_bypassrules.cpp
+    ../src/core/BypassRules.cpp
+)
+target_include_directories(test_bypassrules PRIVATE ../include ../include/core)
+target_link_libraries(test_bypassrules PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME bypassrules COMMAND test_bypassrules -o ${CMAKE_CURRENT_BINARY_DIR}/report-bypassrules.txt,txt)
+
 add_executable(test_configpaths
     test_configpaths.cpp
     ../src/core/ConfigPaths.cpp

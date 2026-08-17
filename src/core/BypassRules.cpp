@@ -63,7 +63,14 @@ QString coreBypassRuleFor(const QString &rule)
         wild = true;
         r = r.mid(2);
     } else if (r.startsWith(QLatin1Char('.'))) {
-        return {};
+        // ".example.com" means the same as "*.example.com" — isValidBypassRule()
+        // has always accepted both and stripped either prefix the same way. This
+        // branch used to drop the rule instead, so a rule written that way was
+        // accepted by the UI, stored, listed back to the user, and silently never
+        // reached the core: in bypass mode the traffic it named went through the
+        // tunnel anyway, and in "Through VPN" mode it did not go through at all.
+        wild = true;
+        r = r.mid(1);
     }
     if (isValidIpBypassRule(r))
         return rule.trimmed();
