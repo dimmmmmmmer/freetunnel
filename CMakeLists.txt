@@ -60,6 +60,20 @@ if (WIN32)
     configure_file(win/appicon.rc.in "${APP_ICON_RC}" @ONLY)
 endif ()
 
+# Indirect-branch tracking / shadow stack markers (CET). Harmless on CPUs without
+# CET, and required for the loader to enable it on those that do. The linker marks
+# an image CET-enabled only when EVERY input object carries the property, so this
+# has to be a directory-wide flag rather than one target's option — and therefore
+# has to be set BEFORE any target is created, because add_compile_options() only
+# applies to targets declared after it.
+if(UNIX AND NOT APPLE AND NOT MSVC)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-fcf-protection=full" FT_HAS_CF_PROTECTION)
+    if(FT_HAS_CF_PROTECTION)
+        add_compile_options(-fcf-protection=full)
+    endif()
+endif()
+
 add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
     src/app/AppStartup.cpp
@@ -169,10 +183,10 @@ else()
         # The linker only marks the image as CET-enabled when EVERY input object
         # carries the property, so this has to reach the whole compile, not just
         # this target's own sources.
-        check_cxx_compiler_flag("-fcf-protection=full" FT_HAS_CF_PROTECTION)
-        if(FT_HAS_CF_PROTECTION)
-            add_compile_options(-fcf-protection=full)
-        endif()
+        # Set at the top of this file, before any target exists — see the note there.
+        # add_compile_options() only reaches targets created after it runs, and
+        # FreeTunnel is created long before this block, so putting it here reached
+        # nothing at all: the flag was probed, reported as supported, and dropped.
     endif()
     # _FORTIFY_SOURCE only does anything in an optimizing build, and redefining it
     # (some distros pre-define it) warns — so undefine first, optimized configs only.
