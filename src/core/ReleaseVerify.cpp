@@ -24,6 +24,21 @@ QString expectedSha256FromSums(const QByteArray &sumsContent, const QString &ass
     return QString();
 }
 
+QString versionFromSums(const QByteArray &sumsContent)
+{
+    for (const QByteArray &line : sumsContent.split('\n')) {
+        const QByteArray t = line.trimmed();
+        if (!t.startsWith("version="))
+            continue;
+        // Deliberately the FIRST such line: a second one appended by an attacker
+        // must not be able to talk over the one the signer wrote. (The signature
+        // covers the whole file, so this is belt-and-braces — but the cost is a
+        // return statement.)
+        return QString::fromUtf8(t.mid(8)).trimmed();
+    }
+    return QString();
+}
+
 QString sha256HexOfFile(const QString &filePath)
 {
     QFile f(filePath);

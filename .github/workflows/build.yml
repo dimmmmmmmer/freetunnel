@@ -716,10 +716,22 @@ jobs:
         run: |
           set -eux
           cd artifacts
+          # The signature covers this file, so whatever is in it is what the
+          # signature attests to. Asset names carry no version — every release
+          # calls its installer freetunnel-linux-x86_64.deb — so without this line
+          # the signed bytes say "we built these" and nothing about WHICH release
+          # they came from, and an older release's manifest and signature verify
+          # perfectly when replayed. See docs/security-threats.md.
+          #
+          # One token, no space: the manifest parser shipped in existing clients
+          # skips any line with fewer than two fields, so this is invisible to
+          # them. Written as "version 1.1.8" they would read 1.1.8 as an asset
+          # name instead.
+          echo "version=${GITHUB_REF_NAME#v}" > SHA256SUMS.txt
           find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' \) \
             -exec sha256sum {} + \
             | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
-            | sort -k2 > SHA256SUMS.txt
+            | sort -k2 >> SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       # Sign the manifest with the Ed25519 release key so the in-app updater can

@@ -13,6 +13,7 @@ private slots:
     void parseSums();
     void verifyMatch();
     void verifyMismatch();
+    void versionFromSumsReadsTheSignedVersion();
 #if __has_include(<openssl/evp.h>)
     void ed25519Valid();
     void ed25519Invalid();
@@ -51,6 +52,37 @@ void TestReleaseVerify::verifyMismatch()
     tf.close();
     const QByteArray sums = "deadbeef  test.bin\n";
     QVERIFY(!verifyFileAgainstSums(tf.fileName(), sums, QStringLiteral("test.bin")));
+}
+
+// The version line is what makes a signature mean "this release" rather than
+// merely "we built these bytes". Parsing it is independent of OpenSSL, so unlike
+// the verification tests this one runs everywhere — which matters, because the
+// rest of this feature is only exercised on builds that have OpenSSL headers.
+void TestReleaseVerify::versionFromSumsReadsTheSignedVersion()
+{
+    const QByteArray versioned =
+            "version=1.1.8\n"
+            "abc123  freetunnel-linux-x86_64.deb\n";
+    QCOMPARE(versionFromSums(versioned), QStringLiteral("1.1.8"));
+    // The line must not eat the asset it sits above.
+    QCOMPARE(expectedSha256FromSums(versioned, QStringLiteral("freetunnel-linux-x86_64.deb")),
+             QStringLiteral("abc123"));
+
+    // Releases published before this existed carry no version, and must stay
+    // installable — refusing them would strand the clients this protects.
+    QVERIFY(versionFromSums("abc123  freetunnel-linux-x86_64.deb\n").isEmpty());
+    QVERIFY(versionFromSums(QByteArray()).isEmpty());
+
+    // An appended second line must not talk over the signer's. (The signature
+    // covers the whole file, so this is depth rather than the only defence.)
+    QCOMPARE(versionFromSums("version=1.1.8\nabc  x\nversion=9.9.9\n"),
+             QStringLiteral("1.1.8"));
+
+    // Trailing whitespace and CRLF from a text-mode pipeline.
+    QCOMPARE(versionFromSums("version=1.1.8  \r\nabc  x\n"), QStringLiteral("1.1.8"));
+
+    // A hash line is not a version line, whatever it contains.
+    QVERIFY(versionFromSums("abc  version=2.0.0\n").isEmpty());
 }
 
 #if __has_include(<openssl/evp.h>)

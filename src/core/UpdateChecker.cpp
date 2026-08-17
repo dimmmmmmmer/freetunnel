@@ -434,6 +434,22 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
         emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
         return;
     }
+
+    // The signature says the manifest is ours. This says which release it is for.
+    // Asset names carry no version, so a genuine manifest and signature from an
+    // OLDER release verify perfectly when replayed by whoever controls the release
+    // metadata — leaving the user short of the build they were told they were
+    // getting. An empty version means a release published before this line
+    // existed; those must keep updating, or the fix would strand exactly the
+    // clients it is meant to protect.
+    const QString manifestVersion = versionFromSums(m_checksumsData);
+    if (!manifestVersion.isEmpty() && manifestVersion != m_latest.version) {
+        emit downloadFailed(
+                QStringLiteral("This update is signed for version %1, but %2 was offered — "
+                               "aborting.")
+                        .arg(manifestVersion, m_latest.version));
+        return;
+    }
     fetchInstaller();
 }
 

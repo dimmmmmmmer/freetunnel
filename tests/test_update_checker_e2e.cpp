@@ -41,6 +41,8 @@ private slots:
     void downloadRejectsMissingSignature();
     void downloadRejectsInvalidSignature();
     void downloadAcceptsGenuinelySignedRelease();
+    void downloadRejectsAManifestSignedForAnotherVersion();
+    void downloadAcceptsAManifestFromBeforeVersionBinding();
     void downloadRejectsSignatureOverOtherContent();
     void rejectsAssetsFromAnotherRepo();
     void rejectsAssetsWhosePathTagDiffersFromTheRelease();
@@ -454,6 +456,15 @@ static QByteArray sumsManifestFor(const QByteArray &installerBody, const QString
             .toUtf8();
 }
 
+// The manifest a release built after version binding produces: the same content,
+// with the release it belongs to written into the bytes the signature covers.
+static QByteArray versionedSumsManifestFor(const QByteArray &installerBody,
+                                           const QString &assetName, const QString &version)
+{
+    return (QStringLiteral("version=") + version + QChar('\n')).toUtf8()
+            + sumsManifestFor(installerBody, assetName);
+}
+
 // Publish a complete release the way GitHub does: the installer, the manifest
 // covering it, and a detached SHA256SUMS.txt.sig. Every route is well formed, so
 // the only thing left to decide the outcome is whether @p signature really
@@ -771,6 +782,86 @@ void TestUpdateCheckerE2e::rejectsImplausibleTag()
     QCOMPARE(none.count(), 1);
     QVERIFY(none.first().at(0).toString().contains(QStringLiteral("Invalid response")));
     qunsetenv("FT_GITHUB_API_BASE");
+}
+
+// Replay: a manifest and signature that are entirely genuine, just from another
+// release. Everything an attacker who controls the release metadata can present
+// verifies — the key is real, the hashes are real, the assets are real — so the
+// version inside the signed bytes is the only thing that can catch it.
+void TestUpdateCheckerE2e::downloadRejectsAManifestSignedForAnotherVersion()
+{
+#ifndef FT_TEST_HAVE_OPENSSL
+    QSKIP("Built without OpenSSL headers, so no signature can be produced to replay.");
+#else
+    QVERIFY(signedReleaseFixtureIsWired());
+
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+    qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
+
+    const QByteArray installerBody = QByteArrayLiteral("older-release-payload");
+    // Offered as v2.0.0 (see serveSignedRelease), signed as 1.9.0.
+    const QByteArray sums =
+            versionedSumsManifestFor(installerBody, testInstallerAssetName(),
+                                     QStringLiteral("1.9.0"));
+    const QByteArray signature = signWithTestKey(sums);
+    QVERIFY(!signature.isEmpty());
+    serveSignedRelease(http, base, installerBody, sums, signature);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
+
+    QSignalSpy ready(&checker, &UpdateChecker::downloadReady);
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return ready.count() > 0 || failed.count() > 0; }, 10000));
+    QCOMPARE(ready.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    // Named versions, so the log says what was wrong rather than "invalid".
+    const QString msg = failed.at(0).at(0).toString();
+    QVERIFY2(msg.contains(QStringLiteral("1.9.0")) && msg.contains(QStringLiteral("2.0.0")),
+             qPrintable(msg));
+#endif
+}
+
+// Every release published before the version line existed has none, and those
+// clients have to keep updating — refusing them would strand exactly the users
+// this check exists to protect, on the build they already have.
+void TestUpdateCheckerE2e::downloadAcceptsAManifestFromBeforeVersionBinding()
+{
+#ifndef FT_TEST_HAVE_OPENSSL
+    QSKIP("Built without OpenSSL headers, so the accept path cannot be exercised.");
+#else
+    QVERIFY(signedReleaseFixtureIsWired());
+
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    const QString base = http.baseUrl();
+    qputenv("FT_GITHUB_API_BASE", base.toUtf8());
+    qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
+
+    const QByteArray installerBody = QByteArrayLiteral("legacy-unversioned-payload");
+    const QByteArray sums = sumsManifestFor(installerBody, testInstallerAssetName());
+    const QByteArray signature = signWithTestKey(sums);
+    serveSignedRelease(http, base, installerBody, sums, signature);
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0; }, 5000));
+
+    QSignalSpy ready(&checker, &UpdateChecker::downloadReady);
+    QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
+    checker.downloadLatest();
+    QVERIFY(QTest::qWaitFor([&]() { return ready.count() > 0 || failed.count() > 0; }, 10000));
+    QVERIFY2(failed.isEmpty(), qPrintable(failed.isEmpty() ? QString()
+                                                           : failed.at(0).at(0).toString()));
+    QCOMPARE(ready.count(), 1);
+#endif
 }
 
 QTEST_MAIN(TestUpdateCheckerE2e)

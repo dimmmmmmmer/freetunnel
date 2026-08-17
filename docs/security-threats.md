@@ -72,7 +72,7 @@ tunnel rather than the server. The consequence is that refreshing that page
 reveals the full list of configured endpoints, including servers never connected
 to, to the local network and the ISP. Traffic that is not a probe is unaffected.
 
-### Known limitation: a signed release can be replayed
+### Update manifests are bound to their release
 
 The update check trusts the GitHub Application Programming Interface (API)
 response for *which* release exists. Everything it names is then checked: asset
@@ -81,23 +81,31 @@ download path for the advertised tag, `SHA256SUMS.txt` must carry a valid Ed2551
 signature from the compiled-in key, and the installer's SHA-256 must appear in
 that manifest.
 
-What none of that establishes is *which version* the signature belongs to. The
-signed material is the manifest, and neither it nor the asset names contain a
+None of that used to establish *which version* the signature belonged to. The
+signed material is the manifest, and neither it nor the asset names carried a
 version — `freetunnel-linux-x86_64.deb` is the same name in every release. So an
 attacker able to forge the API response (a compromised transport to
-`api.github.com`, not a passive network observer) can present an **older, real**
+`api.github.com`, not a passive network observer) could present an **older, real**
 release: its tag, its assets, its manifest and its genuine signature. Every check
-passes, because everything is authentic — just stale. `isVersionNewer()` keeps
-this above the version already installed, so it cannot roll a user backwards; the
-harm is pinning them short of the newest build, and so short of a fix they are
+passed, because everything was authentic — just stale. `isVersionNewer()` kept it
+above the version already installed, so it could not roll a user backwards; the
+harm was pinning them short of the newest build, and so short of a fix they were
 waiting for.
 
-Closing this means putting the version inside the signed material — signing a
-file that names the release, and refusing a manifest whose version does not match
-the tag being offered. That is a change to how releases are produced, not to the
-client alone, and it has a failure mode worth respecting: get it wrong and every
-user is locked out of every future update. It is therefore recorded here as
-accepted rather than quietly patched.
+The manifest now opens with a `version=X` line, inside the bytes the signature
+covers, and the updater refuses a manifest whose version is not the one being
+offered. Two details are load-bearing:
+
+- **One token, no space.** The manifest parser in every already-shipped client
+  skips lines with fewer than two fields, so the new line is invisible to them and
+  old clients keep updating. Written as `version 1.1.8` they would read `1.1.8` as
+  an asset name instead.
+- **A missing version is accepted.** Releases published before this existed have
+  no such line. Refusing them would strand exactly the clients this protects on
+  the build they already have, which is worse than the replay it prevents — a
+  deployed client cannot be taught to enforce anything by changing the server
+  side. The check therefore tightens by itself as pre-migration releases age out
+  of being the newest thing on offer.
 
 ## Deep links (`tt://`)
 
@@ -113,7 +121,7 @@ downloads, documents, or desktop directories; symlinks are rejected.
 
 | Threat | Mitigation |
 | --- | --- |
-| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature (replay of an older signed release is accepted — see above) |
+| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature, bound to the release version |
 | Malicious `tt://` link | TLV parser limits; cred store separation |
 | Other local user | Socket access-control list (ACL) + loopback-only helper |
 | Same-user malware | Documented limitation; OS credential APIs |
