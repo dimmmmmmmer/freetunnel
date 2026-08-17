@@ -35,6 +35,7 @@ private slots:
     void applyLanguageLoadsRussian();
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
+    void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
@@ -360,6 +361,53 @@ void TestAppStartup::wireInstanceServerSurvivesASlowFirstChunk()
     const QByteArray msg = freetunnel::formatInstanceMessage(
             QStringLiteral("tok"), QStringLiteral("freetunnel://connect"));
     QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
+    client.flush();
+    client.waitForBytesWritten(2000);
+    client.disconnectFromServer();
+    client.waitForDisconnected(5000);
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+    QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
+}
+
+// A control message is not framed by length, so the listener has to decide when it
+// has all of it: a gap between chunks, the peer closing, or the size cap. Nothing
+// covered the gap path, and it is the one a real sender hits — a deep link is the
+// longest thing this channel carries, and on a loaded machine its bytes do not
+// necessarily arrive in one piece.
+//
+// The pause here is under the 250 ms idle interval, so the two chunks are one
+// message. A pause longer than that is a different case: the listener would then
+// deliver the first half on its own, which parses as a token plus a truncated
+// command and is reported as an error rather than silently obeyed.
+void TestAppStartup::aMessageSplitAcrossChunksStillArrives()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("split"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    freetunnel::wireInstanceServer(&server, backend, nullptr, QStringLiteral("tok"));
+
+    const QByteArray msg = freetunnel::formatInstanceMessage(
+            QStringLiteral("tok"), QStringLiteral("freetunnel://connect"));
+    // Split after the token line, so each half is meaningless alone.
+    const int cut = msg.indexOf('\n') + 3;
+    QVERIFY(cut > 0 && cut < msg.size());
+
+    QSignalSpy spy(&backend, &Backend::errorOccurred);
+    QLocalSocket client;
+    client.connectToServer(name);
+    QVERIFY(client.waitForConnected(2000));
+
+    QCOMPARE(client.write(msg.left(cut)), static_cast<qint64>(cut));
+    client.flush();
+    client.waitForBytesWritten(2000);
+    QTest::qWait(80); // a real gap, comfortably under the idle interval
+
+    QCOMPARE(client.write(msg.mid(cut)), static_cast<qint64>(msg.size() - cut));
     client.flush();
     client.waitForBytesWritten(2000);
     client.disconnectFromServer();

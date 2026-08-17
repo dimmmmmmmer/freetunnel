@@ -148,6 +148,12 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
     if (!c)
         return;
     if (!localSocketPeerIsSameUser(c)) {
+        // Loudly. Every rejection path here used to be silent, which is how a
+        // dropped control message could look exactly like one that was never sent:
+        // no error, no log line, nothing for the user or for us.
+        qWarning("single-instance: refused a peer that did not pass the same-user "
+                 "check (socket state %d)",
+                 static_cast<int>(c->state()));
         c->deleteLater();
         return;
     }
@@ -166,9 +172,21 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         c->deleteLater();
         QString recvToken;
         QString cmd;
-        if (!parseInstanceMessage(*buf, &recvToken, &cmd) || instanceToken.isEmpty()
-                || !instanceTokensEqual(recvToken, instanceToken))
+        if (!parseInstanceMessage(*buf, &recvToken, &cmd)) {
+            // Sizes only — the token itself must never reach a log.
+            qWarning("single-instance: dropping an unparseable message (%lld bytes)",
+                     static_cast<long long>(buf->size()));
             return;
+        }
+        if (instanceToken.isEmpty()) {
+            qWarning("single-instance: dropping a command because this instance has no "
+                     "token to check it against");
+            return;
+        }
+        if (!instanceTokensEqual(recvToken, instanceToken)) {
+            qWarning("single-instance: dropping a command whose token did not match");
+            return;
+        }
         be->handleControl(cmd);
         raiseMainWindow(win);
     };
