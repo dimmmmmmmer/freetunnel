@@ -59,7 +59,12 @@ void setupMacDockIcon(QGuiApplication &app, Backend &backend);
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken);
 
-void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
+// Returns the object that owns the reopen wiring, or nullptr where there is none
+// (macOS reopens through the native Dock event instead). The caller must keep it
+// alive no longer than @p appQuitting: the filter and the connections read that
+// flag by address, and an event filter installed on the application outlives any
+// scope but its own owner. Destroying the returned object unregisters everything.
+QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
 // Re-show the main window when the user activates the app from the dock/taskbar
 // while it was hidden to the tray (macOS Dock, Linux panel, etc.).
 
@@ -77,6 +82,9 @@ struct GuiStartup {
     // Captured BY REFERENCE in the shutdown lambdas, so it has to outlive them —
     // which is the reason this is a member and not a local in the caller.
     bool appQuitting = false;
+    // Declared after appQuitting so it is destroyed BEFORE it — it reads that flag
+    // by address from an event filter installed on the application.
+    std::unique_ptr<QObject> dockReopen;
     // The startup steps in the order they ran. The entry point is the one file
     // no test compiled, and both macOS bugs found in it were about what happens
     // before what; this lets a test say so out loud.

@@ -174,7 +174,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
         backend.handleControl(controlArg);
     step("deferred-control");
 
-    setupDockReopen(app, out->win, out->appQuitting);
+    out->dockReopen.reset(setupDockReopen(app, out->win, out->appQuitting));
     step("dock-reopen");
 
     wireInstanceServer(out->server, backend, out->win, instanceToken);

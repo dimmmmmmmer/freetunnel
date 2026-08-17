@@ -226,10 +226,10 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                      });
 }
 
-void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
+QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
 {
     if (!win)
-        return;
+        return nullptr;
 
 #ifdef Q_OS_MACOS
     // macOS reopens via the native Dock-icon Apple Event (installMacDockReopenHandler,
@@ -240,14 +240,22 @@ void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
     // minimized to the taskbar (not hidden) and these drive taskbar reopen.
     Q_UNUSED(app);
     Q_UNUSED(appQuitting);
+    return nullptr;
 #else
-    auto *filter = new HiddenWindowReopenFilter(&app);
+    // Unparented, and handed back to the caller: this filter reads appQuitting by
+    // address and is installed on the application, so parenting it to the
+    // application let it outlive the flag it dereferences. Harmless while the
+    // process exits right after — and a use-after-free the moment anything else
+    // builds the app and returns, which is what a test does.
+    auto *filter = new HiddenWindowReopenFilter();
     filter->win = win;
     filter->appQuitting = &appQuitting;
     app.installEventFilter(filter);
     win->installEventFilter(filter);
 
-    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &app,
+    // `filter` as the context object, not `&app`: these lambdas capture the same
+    // flag by reference, so they have to die with it too.
+    QObject::connect(&app, &QGuiApplication::applicationStateChanged, filter,
                      [win, &appQuitting](Qt::ApplicationState s) {
                          if (appQuitting)
                              return;
@@ -256,17 +264,18 @@ void setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
                      });
 
     // Panel/taskbar can activate a hidden window without changing application state.
-    QObject::connect(win, &QWindow::activeChanged, win, [win, &appQuitting]() {
+    QObject::connect(win, &QWindow::activeChanged, filter, [win, &appQuitting]() {
         if (appQuitting || !win->isActive())
             return;
         raiseMainWindow(win);
     });
-    QObject::connect(&app, &QGuiApplication::focusWindowChanged, &app,
+    QObject::connect(&app, &QGuiApplication::focusWindowChanged, filter,
                      [win, &appQuitting](QWindow *focus) {
                          if (appQuitting || focus != win)
                              return;
                          raiseMainWindow(win);
                      });
+    return filter;
 #endif
 }
 

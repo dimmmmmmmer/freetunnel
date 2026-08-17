@@ -148,6 +148,16 @@ endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_app_startup PRIVATE OpenSSL::Crypto)
 endif()
+# AppGuiMain.cpp calls into the Objective-C++ macOS glue, so the targets that
+# compile it need MacWindow.mm too — otherwise they link on Linux and Windows and
+# fail only on macOS. It also gives that file its first compilation under test.
+if(APPLE)
+    target_sources(test_app_startup PRIVATE ../src/app/MacWindow.mm)
+    target_sources(test_backend_deeplink_import PRIVATE ../src/app/MacWindow.mm)
+    target_link_libraries(test_app_startup PRIVATE "-framework AppKit")
+    target_link_libraries(test_backend_deeplink_import PRIVATE "-framework AppKit")
+endif()
+
 add_test(NAME app_startup COMMAND test_app_startup -o ${CMAKE_CURRENT_BINARY_DIR}/report-app_startup.txt,txt)
 
 set(BACKEND_IMPORT_TEST_SOURCES
