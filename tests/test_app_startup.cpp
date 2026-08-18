@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QScopeGuard>
+
 #include <QElapsedTimer>
 
 #include <QCoreApplication>
@@ -218,6 +220,20 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
     // does not exist.
     QSKIP("the macOS window setup needs a real window server, not offscreen");
 #else
+    // A name of our own. With the production one this drives the real
+    // single-instance path against whatever is listening on the machine — a
+    // FreeTunnel the developer is running, or a socket an earlier run of this very
+    // test left behind — and then reports success by exiting, which is how it
+    // started failing here.
+    const QByteArray instanceName =
+            QByteArrayLiteral("FreeTunnelStartupTest-") + QByteArray::number(QCoreApplication::applicationPid());
+    qputenv("FT_TEST_INSTANCE_NAME", instanceName);
+    QLocalServer::removeServer(QString::fromLatin1(instanceName));
+    auto dropName = qScopeGuard([&] {
+        qunsetenv("FT_TEST_INSTANCE_NAME");
+        QLocalServer::removeServer(QString::fromLatin1(instanceName));
+    });
+
     freetunnel::GuiStartup startup;
     char arg0[] = "freetunnel";
     char *argv[] = {arg0, nullptr};

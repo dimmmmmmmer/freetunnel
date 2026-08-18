@@ -173,9 +173,14 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         QString recvToken;
         QString cmd;
         if (!parseInstanceMessage(*buf, &recvToken, &cmd)) {
-            // Sizes only — the token itself must never reach a log.
-            qWarning("single-instance: dropping an unparseable message (%lld bytes)",
-                     static_cast<long long>(buf->size()));
+            // Sizes and state only — the token itself must never reach a log.
+            // bytesAvailable() separates "the peer sent nothing" from "bytes were
+            // sitting unread when we gave up", which are different bugs and cannot
+            // be told apart afterwards.
+            qWarning("single-instance: dropping an unparseable message (%lld bytes read, "
+                     "%lld still readable, socket state %d)",
+                     static_cast<long long>(buf->size()),
+                     static_cast<long long>(c->bytesAvailable()), static_cast<int>(c->state()));
             return;
         }
         if (instanceToken.isEmpty()) {

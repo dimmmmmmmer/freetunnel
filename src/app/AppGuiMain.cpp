@@ -35,9 +35,25 @@ static void applyAppBranding(QGuiApplication &app)
     QGuiApplication::setQuitOnLastWindowClosed(false);
 }
 
+// The rendezvous name a second launch looks for. Overridable only in test-hook
+// builds, and for a specific reason: the startup test drives this real wiring, and
+// under the production name it connects to whatever FreeTunnel the developer
+// happens to have running — forwarding a command into their live app and then
+// exiting as though it were the second instance. It also leaves a socket in a
+// namespace shared with every other process on the machine.
+static QString instanceServerName()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    const QByteArray override = qgetenv("FT_TEST_INSTANCE_NAME");
+    if (!override.isEmpty())
+        return QString::fromLocal8Bit(override);
+#endif
+    return QStringLiteral("FreeTunnelInstance");
+}
+
 static QLocalServer *startSingleInstanceServer(QGuiApplication &app, QString *instanceToken)
 {
-    const QString kInstanceKey = QStringLiteral("FreeTunnelInstance");
+    const QString kInstanceKey = instanceServerName();
     QLocalServer::removeServer(kInstanceKey);
     if (!writeInstanceAuthToken(instanceToken))
         instanceToken->clear();
@@ -113,7 +129,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     // thread — so by the time anything below runs, the event loop has already
     // turned. Code after this point must not assume otherwise; assuming it is
     // exactly how the Dock-reopen handler came to be registered too late.
-    if (forwardToRunningInstance(QStringLiteral("FreeTunnelInstance"), controlArg)) {
+    if (forwardToRunningInstance(instanceServerName(), controlArg)) {
         step("forwarded-to-running-instance");
         return 0;
     }
