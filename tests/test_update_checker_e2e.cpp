@@ -1,6 +1,10 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QDir>
+
+#include <QStandardPaths>
+
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -31,6 +35,8 @@ class TestUpdateCheckerE2e : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
     void checkNowFindsNewerRelease();
     void checkNowNoUpdateWhenCurrent();
     void checkNowNetworkError();
@@ -862,6 +868,27 @@ void TestUpdateCheckerE2e::downloadAcceptsAManifestFromBeforeVersionBinding()
                                                            : failed.at(0).at(0).toString()));
     QCOMPARE(ready.count(), 1);
 #endif
+}
+
+// This test downloads an installer and stages it under
+// QStandardPaths::CacheLocation, which without a test identity is the REAL user
+// cache — so running the suite left executables in ~/.cache and, worse, meant a
+// developer's own FreeTunnel cache was the directory under test. Give it a name
+// of its own and the test-mode redirect the rest of the suite uses.
+void TestUpdateCheckerE2e::initTestCase()
+{
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("UpdateCheckerE2eTest"));
+    QStandardPaths::setTestModeEnabled(true);
+}
+
+// And take the staged downloads with us. A test that leaves an executable behind
+// on every run is one nobody wants to run locally.
+void TestUpdateCheckerE2e::cleanupTestCase()
+{
+    const QString staging = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+            + QStringLiteral("/updates");
+    QDir(staging).removeRecursively();
 }
 
 QTEST_MAIN(TestUpdateCheckerE2e)

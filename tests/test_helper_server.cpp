@@ -44,6 +44,11 @@ QString writeTokenFile(const QDir &dir, const QString &name, const QString &toke
     return path;
 }
 
+// A port the kernel just handed out, which nothing can promise is still free by
+// the time the helper child gets round to binding it — the probe has to let go
+// before the child can take it. The gap is small but it is a real one on a busy
+// runner, so startHelper() detects the loss and the caller retries on another
+// port rather than spending twenty seconds failing to connect to a stranger.
 quint16 freePort()
 {
     QTcpServer probe;
@@ -94,6 +99,7 @@ private slots:
 
 private:
     bool startHelper(quint16 port, const QString &token);
+    bool startHelperOnAFreePort(const QString &token, quint16 *portOut);
     void stopHelper();
 
     QTemporaryDir m_dir;
@@ -161,6 +167,11 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
 
     // Wait for it to actually bind before anyone tries to connect.
     for (int i = 0; i < 100; ++i) {
+        // If the child is gone, waiting the full five seconds proves nothing: it
+        // either could not bind — someone took the port between freePort() and
+        // now — or it died on startup. Either way the answer is already in.
+        if (m_helper->state() == QProcess::NotRunning)
+            return false;
         QTcpSocket probe;
         probe.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
         if (probe.waitForConnected(100)) {
@@ -168,6 +179,23 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
             return true;
         }
         QTest::qWait(50);
+    }
+    return false;
+}
+
+// Start the helper on a port that is still free when it actually binds. Picking
+// one and hoping is what made this suite flaky: the kernel hands out a port, the
+// probe closes, and on a loaded machine something else can claim it before the
+// child does.
+bool TestHelperServer::startHelperOnAFreePort(const QString &token, quint16 *portOut)
+{
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const quint16 port = freePort();
+        if (startHelper(port, token)) {
+            *portOut = port;
+            return true;
+        }
+        stopHelper(); // clear the failed child before trying the next port
     }
     return false;
 }
@@ -186,9 +214,9 @@ void TestHelperServer::stopHelper()
 // mutual-auth handshake and reach a working session.
 void TestHelperServer::realClientCompletesHandshakeWithRealServer()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("0123456789abcdef0123456789abcdef");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
     qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
@@ -224,8 +252,8 @@ void TestHelperServer::realClientCompletesHandshakeWithRealServer()
 // scenario the handshake exists for.
 void TestHelperServer::serverRejectsPeerWithoutTheToken()
 {
-    const quint16 port = freePort();
-    QVERIFY(startHelper(port, QStringLiteral("the-real-token")));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(QStringLiteral("the-real-token"), &port));
 
     QTcpSocket rogue;
     rogue.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
@@ -259,9 +287,9 @@ void TestHelperServer::serverRejectsPeerWithoutTheToken()
 
 void TestHelperServer::serverRejectsAuthWithoutHello()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-for-skip-hello");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     QTcpSocket rogue;
     rogue.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
@@ -284,9 +312,9 @@ void TestHelperServer::serverRejectsAuthWithoutHello()
 // denial of service against a root process.
 void TestHelperServer::serverSurvivesGarbageAndOversizedInput()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-for-garbage");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     {
         QTcpSocket junk;
@@ -319,9 +347,9 @@ void TestHelperServer::serverSurvivesGarbageAndOversizedInput()
 // refused, because the helper would open it as root.
 void TestHelperServer::serverRefusesPathBasedConnect()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-for-path-connect");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     QTcpSocket sock;
     sock.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
@@ -371,9 +399,9 @@ void TestHelperServer::serverRefusesPathBasedConnect()
 // the cap evicts the oldest, so the newest arrival can always still authenticate.
 void TestHelperServer::newestConnectionCanStillAuthenticateUnderPreAuthPressure()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-under-pressure");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     std::vector<QTcpSocket *> squatters;
     for (int i = 0; i < 16; ++i) {
@@ -418,9 +446,9 @@ void TestHelperServer::newestConnectionCanStillAuthenticateUnderPreAuthPressure(
 // regression guard for the removal, not for a validator.
 void TestHelperServer::connectIgnoresAnyLogPathTheClientSends()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-for-logpath");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
 
     const QString forbidden = QDir(m_dir.path()).filePath(QStringLiteral("planted/evil.log"));
     QVERIFY(!QFile::exists(forbidden));
@@ -475,9 +503,9 @@ void TestHelperServer::connectIgnoresAnyLogPathTheClientSends()
 // routes ride the same path and fail the same quiet way.
 void TestHelperServer::killSwitchAndSplitSettingsReachTheCoreInsideTheHelper()
 {
-    const quint16 port = freePort();
     const QString token = QStringLiteral("token-for-core-settings");
-    QVERIFY(startHelper(port, token));
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
     QVERIFY(!QFile::exists(m_configDump));
 
     qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
