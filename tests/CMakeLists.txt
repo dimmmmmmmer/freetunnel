@@ -45,6 +45,12 @@ if (FT_ENABLE_SANITIZERS)
 endif ()
 
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network Svg REQUIRED)
+# Test-only. Main.qml uses Qt.labs.platform for the tray icon, which needs either
+# a native implementation or Qt Widgets to fall back to. Under QT_QPA_PLATFORM=
+# offscreen there is no native one, and without the fallback loading the real
+# window aborts — on macOS with a segfault. The shipped app does not link Widgets
+# and does not need to: it runs in a real session where the native path exists.
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS Widgets)
 
 include(FetchContent)
 set(QHOTKEY_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -159,6 +165,9 @@ target_include_directories(test_app_startup PRIVATE
 target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_app_startup PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+if(TARGET Qt6::Widgets)
+    target_link_libraries(test_app_startup PRIVATE Qt6::Widgets)
+endif()
 freetunnel_link_linux_secrets(test_app_startup)
 if(WIN32)
     target_link_libraries(test_app_startup PRIVATE shell32 advapi32)
@@ -223,6 +232,9 @@ target_include_directories(test_backend_deeplink_import PRIVATE
 target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_deeplink_import PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+if(TARGET Qt6::Widgets)
+    target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Widgets)
+endif()
 freetunnel_link_linux_secrets(test_backend_deeplink_import)
 if(WIN32)
     target_link_libraries(test_backend_deeplink_import PRIVATE shell32 advapi32)
@@ -409,6 +421,9 @@ add_executable(test_qml_ui
 )
 target_include_directories(test_qml_ui PRIVATE . ui ../include)
 target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
+if(TARGET Qt6::Widgets)
+    target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
+endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
 
 add_executable(test_integration_config_workflow
