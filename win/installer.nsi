@@ -196,4 +196,15 @@ Section "Uninstall"
   DeleteRegKey HKLM "Software\Classes\freetunnel"
   DeleteRegKey HKLM "Software\Classes\tt"
 
+  ; "Launch at system startup" is written by the app itself, under HKCU — the
+  ; uninstaller only ever cleared HKLM, so the entry outlived the program and
+  ; Windows went on trying to start a deleted executable at every logon. The value
+  ; name is the one PlatformAutoStart.cpp writes.
+  ;
+  ; HKCU here is the hive of whoever is running the uninstaller elevated, which is
+  ; not necessarily the user who turned the setting on. It covers the ordinary
+  ; single-user machine; a leftover entry in another user's hive is that user's to
+  ; clear, and is harmless beyond a failed launch.
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}"
+
 SectionEnd

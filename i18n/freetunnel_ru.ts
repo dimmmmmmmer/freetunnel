@@ -171,10 +171,6 @@
         <translation type="unfinished">Отключить</translation>
     </message>
     <message>
-        <source>Global hotkeys are not supported under Wayland. Log in to an X11/Xorg session (or run with QT_QPA_PLATFORM=xcb) to use them.</source>
-        <translation>Глобальные горячие клавиши не поддерживаются в Wayland. Войдите в сессию X11/Xorg (или запустите с QT_QPA_PLATFORM=xcb), чтобы использовать их.</translation>
-    </message>
-    <message>
         <source>Hotkey “%1” (%2) is not a valid key sequence — ignored.</source>
         <translation>Горячая клавиша «%1» (%2) — некорректная комбинация, игнорируется.</translation>
     </message>
@@ -225,6 +221,10 @@
     <message>
         <source>This name mixes letters from different alphabets.</source>
         <translation>В этом имени смешаны буквы разных алфавитов.</translation>
+    </message>
+    <message>
+        <source>Global hotkeys need an X11/Xorg session: a Wayland compositor keeps global shortcuts to itself, and running under XWayland does not change that.</source>
+        <translation>Глобальные горячие клавиши работают только в сессии X11/Xorg: композитор Wayland оставляет глобальные сочетания себе, и запуск через XWayland этого не меняет.</translation>
     </message>
 </context>
 <context>

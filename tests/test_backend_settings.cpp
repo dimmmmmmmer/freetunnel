@@ -9,6 +9,8 @@
 // looks correct in review and silently drops the preference on restart.
 #include <QtTest>
 
+#include <QScopeGuard>
+
 #include <QDir>
 #include <QFile>
 #include <QSettings>
@@ -36,6 +38,7 @@ private slots:
     void hotkeyFieldsPersistAndAnnounce_data();
     void physicalKeyPositionsMapToLetters();
     void unknownScanCodesMapToNothing();
+    void hotkeysAreUnsupportedOnAWaylandSessionEvenUnderXWayland();
 
     void autoStartWritesAnAutostartEntry();
     void autoStartRemovalTakesTheEntryAway();
@@ -308,6 +311,44 @@ void TestBackendSettings::autoStartRemovalTakesTheEntryAway()
             + QStringLiteral("/autostart/freetunnel.desktop");
     QVERIFY2(!QFileInfo::exists(entry), qPrintable(entry));
 #endif
+}
+
+// Global hotkeys are X11 grabs, and a Wayland compositor never feeds one. The
+// check used to look only at the Qt platform name, which says "xcb" under
+// XWayland — so on a Wayland session started that way the app reported hotkeys as
+// available, bound them, and they silently never fired. The warning even used to
+// send people down that road. What decides is the session, not the plugin.
+void TestBackendSettings::hotkeysAreUnsupportedOnAWaylandSessionEvenUnderXWayland()
+{
+    const QByteArray savedDisplay = qgetenv("WAYLAND_DISPLAY");
+    const QByteArray savedType = qgetenv("XDG_SESSION_TYPE");
+    auto restore = qScopeGuard([&] {
+        savedDisplay.isEmpty() ? qunsetenv("WAYLAND_DISPLAY")
+                               : qputenv("WAYLAND_DISPLAY", savedDisplay);
+        savedType.isEmpty() ? qunsetenv("XDG_SESSION_TYPE")
+                            : qputenv("XDG_SESSION_TYPE", savedType);
+    });
+
+    Backend backend;
+    // The test runs under the offscreen plugin, whose name contains no "wayland" —
+    // exactly the blind spot XWayland exploited.
+    qunsetenv("WAYLAND_DISPLAY");
+    qunsetenv("XDG_SESSION_TYPE");
+    QVERIFY2(backend.hotkeysSupported(), "no Wayland in sight, yet hotkeys were refused");
+
+    qputenv("WAYLAND_DISPLAY", "wayland-0");
+    QVERIFY2(!backend.hotkeysSupported(), "a running Wayland compositor was not noticed");
+
+    qunsetenv("WAYLAND_DISPLAY");
+    qputenv("XDG_SESSION_TYPE", "wayland");
+    QVERIFY2(!backend.hotkeysSupported(), "a Wayland session type was not noticed");
+
+    // Case is not the session's business to get right.
+    qputenv("XDG_SESSION_TYPE", "Wayland");
+    QVERIFY(!backend.hotkeysSupported());
+
+    qputenv("XDG_SESSION_TYPE", "x11");
+    QVERIFY(backend.hotkeysSupported());
 }
 
 QTEST_MAIN(TestBackendSettings)

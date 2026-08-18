@@ -38,9 +38,18 @@ QString Backend::physicalLetterForScanCode(quint32 nativeScanCode) const
 
 bool Backend::hotkeysSupported() const {
     // Global hotkeys go through X11 grabs; a Wayland compositor never delivers
-    // them to an X11 grab (even via XWayland). Report the feature as unavailable
-    // so it can be disabled in the UI instead of silently doing nothing.
-    return !QGuiApplication::platformName().contains(QLatin1String("wayland"), Qt::CaseInsensitive);
+    // them to an X11 grab. Report the feature as unavailable so it can be disabled
+    // in the UI instead of silently doing nothing.
+    if (QGuiApplication::platformName().contains(QLatin1String("wayland"), Qt::CaseInsensitive))
+        return false;
+    // XWayland reports itself as "xcb", and the platform name alone therefore said
+    // "supported" — so the app bound hotkeys the compositor would never deliver,
+    // and they failed silently. The session is what decides, not the plugin: these
+    // variables are set by a Wayland session and absent on Windows and macOS, so
+    // this costs those platforms nothing.
+    if (!qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"))
+        return false;
+    return qgetenv("XDG_SESSION_TYPE").toLower() != QByteArrayLiteral("wayland");
 }
 
 void Backend::unregisterHotkeys() {
@@ -64,9 +73,14 @@ void Backend::registerHotkeys() {
     if (!hotkeysSupported()) {
         if (!m_waylandHotkeyWarned) {
             m_waylandHotkeyWarned = true;
+            // Deliberately no longer suggests QT_QPA_PLATFORM=xcb. That gets you
+            // XWayland, where the compositor still owns the keyboard and an X11
+            // grab is never fed — so the advice led straight into a state where
+            // the UI said hotkeys worked and nothing ever fired.
             appendLog(QStringLiteral("WARN"),
-                      tr("Global hotkeys are not supported under Wayland. Log in to an "
-                         "X11/Xorg session (or run with QT_QPA_PLATFORM=xcb) to use them."));
+                      tr("Global hotkeys need an X11/Xorg session: a Wayland compositor keeps "
+                         "global shortcuts to itself, and running under XWayland does not "
+                         "change that."));
         }
         return;
     }
