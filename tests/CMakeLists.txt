@@ -103,6 +103,14 @@ target_include_directories(test_appuiutils PRIVATE ../include ../include/core)
 target_link_libraries(test_appuiutils PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME appuiutils COMMAND test_appuiutils -o ${CMAKE_CURRENT_BINARY_DIR}/report-appuiutils.txt,txt)
 
+# AppGuiMain.cpp calls into the Objective-C++ macOS glue, so anything compiling it
+# needs MacWindow.mm as well — on Linux and Windows those calls are compiled out.
+# Kept in the shared source lists rather than added per target: seven targets pull
+# these lists in, and a hand-maintained list of them went stale immediately.
+if(APPLE)
+    set(FT_MAC_GLUE_SOURCES ../src/app/MacWindow.mm ../include/app/MacWindow.h)
+endif()
+
 set(APP_STARTUP_TEST_SOURCES
     test_app_startup.cpp
     ../src/app/AppStartup.cpp
@@ -143,6 +151,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
+    ${FT_MAC_GLUE_SOURCES}
 )
 add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc)
 target_include_directories(test_app_startup PRIVATE
@@ -154,7 +163,7 @@ freetunnel_link_linux_secrets(test_app_startup)
 if(WIN32)
     target_link_libraries(test_app_startup PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_app_startup PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_app_startup PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_app_startup PRIVATE OpenSSL::Crypto)
@@ -200,6 +209,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
+    ${FT_MAC_GLUE_SOURCES}
 )
 
 add_executable(test_backend_deeplink_import
@@ -217,21 +227,11 @@ freetunnel_link_linux_secrets(test_backend_deeplink_import)
 if(WIN32)
     target_link_libraries(test_backend_deeplink_import PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_deeplink_import PRIVATE OpenSSL::Crypto)
 endif()
-# AppGuiMain.cpp calls into the Objective-C++ macOS glue, so the targets that
-# compile it need MacWindow.mm too — otherwise they link on Linux and Windows and
-# fail only on macOS. It also gives that file its first compilation under test.
-if(APPLE)
-    target_sources(test_app_startup PRIVATE ../src/app/MacWindow.mm)
-    target_sources(test_backend_deeplink_import PRIVATE ../src/app/MacWindow.mm)
-    target_link_libraries(test_app_startup PRIVATE "-framework AppKit")
-    target_link_libraries(test_backend_deeplink_import PRIVATE "-framework AppKit")
-endif()
-
 add_test(NAME backend_deeplink_import COMMAND test_backend_deeplink_import -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_deeplink_import.txt,txt)
 
 add_executable(test_vpn_helper_launch
@@ -312,7 +312,7 @@ target_include_directories(test_instance_control PRIVATE ../include ../include/c
 target_link_libraries(test_instance_control PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 freetunnel_link_linux_secrets(test_instance_control)
 if(APPLE)
-    target_link_libraries(test_instance_control PRIVATE "-framework Security")
+    target_link_libraries(test_instance_control PRIVATE "-framework Security" "-framework AppKit")
 elseif(WIN32)
     target_link_libraries(test_instance_control PRIVATE advapi32)
 endif()
@@ -363,7 +363,7 @@ target_include_directories(test_credentialstore PRIVATE ../include ../include/co
 target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
 freetunnel_link_linux_secrets(test_credentialstore)
 if(APPLE)
-    target_link_libraries(test_credentialstore PRIVATE "-framework Security")
+    target_link_libraries(test_credentialstore PRIVATE "-framework Security" "-framework AppKit")
 elseif(WIN32)
     target_link_libraries(test_credentialstore PRIVATE advapi32)
 endif()
@@ -424,7 +424,7 @@ target_include_directories(test_integration_config_workflow PRIVATE ../include .
 target_link_libraries(test_integration_config_workflow PRIVATE Qt6::Core Qt6::Test)
 freetunnel_link_linux_secrets(test_integration_config_workflow)
 if(APPLE)
-    target_link_libraries(test_integration_config_workflow PRIVATE "-framework Security")
+    target_link_libraries(test_integration_config_workflow PRIVATE "-framework Security" "-framework AppKit")
 elseif(WIN32)
     target_link_libraries(test_integration_config_workflow PRIVATE advapi32)
 endif()
@@ -442,7 +442,7 @@ target_include_directories(test_integration_single_instance PRIVATE ../include .
 target_link_libraries(test_integration_single_instance PRIVATE Qt6::Core Qt6::Test Qt6::Network)
 freetunnel_link_linux_secrets(test_integration_single_instance)
 if(APPLE)
-    target_link_libraries(test_integration_single_instance PRIVATE "-framework Security")
+    target_link_libraries(test_integration_single_instance PRIVATE "-framework Security" "-framework AppKit")
 endif()
 add_test(NAME integration_single_instance COMMAND test_integration_single_instance -o ${CMAKE_CURRENT_BINARY_DIR}/report-integration_single_instance.txt,txt)
 
@@ -513,7 +513,7 @@ freetunnel_link_linux_secrets(test_integration_backend_vpn)
 if(WIN32)
     target_link_libraries(test_integration_backend_vpn PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_integration_backend_vpn PRIVATE "-framework Security")
+    target_link_libraries(test_integration_backend_vpn PRIVATE "-framework Security" "-framework AppKit")
 endif()
 find_package(OpenSSL QUIET)
 if(OpenSSL_FOUND)
@@ -589,7 +589,7 @@ freetunnel_link_linux_secrets(test_backend_logs)
 if(WIN32)
     target_link_libraries(test_backend_logs PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_logs PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_logs PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_logs PRIVATE OpenSSL::Crypto)
@@ -611,7 +611,7 @@ freetunnel_link_linux_secrets(test_backend_settings)
 if(WIN32)
     target_link_libraries(test_backend_settings PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_settings PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_settings PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_settings PRIVATE OpenSSL::Crypto)
@@ -633,7 +633,7 @@ freetunnel_link_linux_secrets(test_backend_config)
 if(WIN32)
     target_link_libraries(test_backend_config PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_config PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_config PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_config PRIVATE OpenSSL::Crypto)
@@ -655,7 +655,7 @@ freetunnel_link_linux_secrets(test_backend_split)
 if(WIN32)
     target_link_libraries(test_backend_split PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_split PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_split PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_split PRIVATE OpenSSL::Crypto)
@@ -716,7 +716,7 @@ freetunnel_link_linux_secrets(test_backend_updates)
 if(WIN32)
     target_link_libraries(test_backend_updates PRIVATE shell32 advapi32)
 elseif(APPLE)
-    target_link_libraries(test_backend_updates PRIVATE Qt6::Svg "-framework Security")
+    target_link_libraries(test_backend_updates PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
 endif()
 if(OpenSSL_FOUND)
     target_link_libraries(test_backend_updates PRIVATE OpenSSL::Crypto)
