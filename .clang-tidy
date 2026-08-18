@@ -16,29 +16,39 @@ Checks: >
   bugprone-use-after-move,
   cert-err34-c,
   cert-err52-cpp,
-  cert-err58-cpp,
   cert-err60-cpp,
-  clang-analyzer-cplusplus.NewDelete,
-  clang-analyzer-cplusplus.NewDeleteLeaks,
   cppcoreguidelines-init-variables,
   misc-definitions-in-headers,
   modernize-use-nullptr,
   performance-for-range-copy,
   performance-noexcept-move-constructor,
-  readability-braces-around-statements,
   readability-container-size-empty,
-  readability-implicit-bool-conversion,
   readability-isolate-declaration,
   readability-redundant-control-flow,
-  readability-simplify-boolean-expr,
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -modernize-use-trailing-return-type
-# Empty meant clang-tidy exited 0 on every diagnostic, so the CI job that runs it
-# could not fail — it reported findings into a log nobody had to read. The enabled
-# check set is clean today, so make a finding stop the build the way any other
-# gate does. Narrow this to specific checks rather than widening it back to
-# nothing if a noisy check ever has to be tolerated.
+# A gate has to be a list of things we will actually fix. Enabled-but-tolerated is
+# how this one became decorative in the first place: it ran, reported, and exited
+# 0 whatever it found.
+#
+# Dropped rather than tolerated, with reasons:
+#   readability-braces-around-statements   578 hits. This codebase writes
+#   readability-implicit-bool-conversion    77 hits. `if (!p) return;` everywhere
+#     and means to. A check that fires that often against deliberate house style
+#     is not finding defects, it is guaranteeing the report goes unread.
+#   readability-simplify-boolean-expr — its one hit (NetBind.cpp) is a false
+#     positive of preprocessing: the "redundant" return is only redundant once the
+#     Q_OS_WIN branch between them is compiled out.
+#   cert-err58-cpp — fires on `static const QString`/`QHostAddress` at namespace
+#     scope, the ordinary Qt spelling. Avoiding it means Q_GLOBAL_STATIC churn for
+#     a throw-before-main risk this app does not have.
+#   clang-analyzer-cplusplus.NewDelete* — reported inside Qt's own headers
+#     (qobjectdefs.h, qhostinfo.h) along a path through our code, so
+#     HeaderFilterRegex cannot suppress it. The ASan+UBSan job covers this ground
+#     with far less noise.
 WarningsAsErrors: '*'
-HeaderFilterRegex: '(include|src)/.*'
+# Anchored: the old '(include|src)/.*' was unanchored, so /usr/include/glib-2.0/…
+# matched "include/" and third-party headers were linted as ours.
+HeaderFilterRegex: '(^|/)(include|src)/[^/]*\.h$'
 FormatStyle: none

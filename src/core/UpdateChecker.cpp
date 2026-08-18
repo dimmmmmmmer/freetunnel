@@ -279,7 +279,10 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 
     const QJsonArray assets = obj.value("assets").toArray();
 #if !defined(_WIN32) && !defined(__APPLE__)
-    QString appImageUrl, appImageName, debUrl, debName;
+    QString appImageUrl;
+    QString appImageName;
+    QString debUrl;
+    QString debName;
 #endif
     for (const QJsonValue &val : assets) {
         const QJsonObject asset = val.toObject();

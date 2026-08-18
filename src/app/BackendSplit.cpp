@@ -20,7 +20,8 @@ bool Backend::addDomain(const QString &domain) {
     // Accept a whole list pasted at once: split on commas / whitespace / newlines.
     const QStringList tokens = domain.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
                                             Qt::SkipEmptyParts);
-    QStringList added, invalid;
+    QStringList added;
+    QStringList invalid;
     for (const QString &raw : tokens) {
         const QString d = raw.trimmed();
         if (d.isEmpty() || m_settings.domain_bypass_rules.contains(d) || added.contains(d))
@@ -69,7 +70,8 @@ bool Backend::addExcludedRoute(const QString &route) {
     // Accept a whole list pasted at once.
     const QStringList tokens = route.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
                                            Qt::SkipEmptyParts);
-    QStringList added, invalid;
+    QStringList added;
+    QStringList invalid;
     for (const QString &raw : tokens) {
         const QString r = raw.trimmed();
         if (r.isEmpty() || m_settings.excluded_routes.contains(r) || added.contains(r))

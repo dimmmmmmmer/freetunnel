@@ -72,7 +72,8 @@ void pickInterfaceRouteAddresses(const QNetworkInterface &ni, QHostAddress *v4, 
 
 freetunnel::PhysicalRoute routeFromInterface(const QNetworkInterface &ni) {
     freetunnel::PhysicalRoute r;
-    QHostAddress v4, v6;
+    QHostAddress v4;
+    QHostAddress v6;
     pickInterfaceRouteAddresses(ni, &v4, &v6);
     if (!v4.isNull() || !v6.isNull()) {
         r.index = ni.index();

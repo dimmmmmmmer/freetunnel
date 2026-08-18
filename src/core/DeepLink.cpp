@@ -214,7 +214,8 @@ QString normalizeDeepLinkBody(QString s)
 bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &cfg,
                           DeepLinkFieldFlags &flags, QString *error)
 {
-    quint64 tag = 0, len = 0;
+    quint64 tag = 0;
+    quint64 len = 0;
     if (!readVarint(payload, *pos, tag) || !readVarint(payload, *pos, len)) {
         if (error)
             *error = QStringLiteral("truncated TLV header");

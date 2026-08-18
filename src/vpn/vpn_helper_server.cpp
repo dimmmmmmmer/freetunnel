@@ -296,7 +296,7 @@ private:
         // (a large exclusion list followed by an inline config TOML) could
         // exceed the cap while every individual message was well within it, and
         // dropping the privileged socket makes the helper quit mid-session.
-        int nl;
+        int nl = -1;
         while ((nl = m_buf.indexOf('\n')) >= 0) {
             const QByteArray line = m_buf.left(nl);
             m_buf.remove(0, nl + 1);

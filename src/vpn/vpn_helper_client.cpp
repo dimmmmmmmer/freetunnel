@@ -467,7 +467,7 @@ void VpnHelperClient::onReadyRead() {
     // burst of perfectly well-formed events (the core emits one per flow) killed
     // the helper — and because the buffer survived the teardown, every later
     // connect failed instantly, after the user had re-entered their password.
-    int nl;
+    int nl = -1;
     while ((nl = m_buf.indexOf('\n')) >= 0) {
         const QByteArray line = m_buf.left(nl);
         m_buf.remove(0, nl + 1);
