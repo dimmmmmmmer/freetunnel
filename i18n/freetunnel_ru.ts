@@ -395,6 +395,14 @@
         <source>Anti-DPI</source>
         <translation>Анти-DPI</translation>
     </message>
+    <message>
+        <source>Custom SNI</source>
+        <translation>Свой SNI</translation>
+    </message>
+    <message>
+        <source>Client random (hex)</source>
+        <translation>Client random (hex)</translation>
+    </message>
 </context>
 <context>
     <name>HomePage</name>

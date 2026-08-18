@@ -2,6 +2,13 @@
 ; Installs to Program Files, requests admin elevation, creates uninstaller,
 ; Start Menu shortcut, and optional Desktop shortcut.
 
+; NSIS 3 still defaults to an ANSI installer, which renders every non-Latin
+; string in the current code page — so the Russian language table this script
+; loads came out as mojibake for the users it was written for, and any install
+; path with non-Latin characters was mangled too. Must appear before anything
+; that emits strings.
+Unicode true
+
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 

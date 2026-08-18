@@ -498,6 +498,20 @@ jobs:
             'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > "$root/usr/share/applications/freetunnel.desktop"
           installed_kb=$(du -sk "$root" | cut -f1)
+          # The floor comes from the binary we just built, not from a number typed
+          # here: an unversioned libc6 let the package install on a distro too old
+          # to run it, and the failure then looks like a broken app rather than an
+          # unmet dependency. objdump lists the versioned glibc symbols the
+          # executable actually references; the highest one is the real minimum.
+          # Everything we ship, not just the executable: the bundled Qt libraries
+          # link glibc too, and the package is only installable where the highest
+          # requirement among them is met.
+          glibc_dep="$(find "$root/opt/freetunnel" -type f \( -name 'FreeTunnel' -o -name '*.so*' \) \
+            -exec objdump -T {} + 2>/dev/null \
+            | sed -nE 's/.*GLIBC_([0-9]+\.[0-9]+).*/\1/p' \
+            | sort -V | tail -1)"
+          : "${glibc_dep:?could not determine the glibc version the payload needs}"
+          echo "glibc floor: $glibc_dep"
           cat > "$root/DEBIAN/control" <<EOF
           Package: freetunnel
           Version: ${ver}
@@ -506,7 +520,7 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6, libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on
@@ -754,7 +768,11 @@ jobs:
             exit 1
           fi
           cd artifacts
-          printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem
+          # umask before the redirect, not chmod after: the shell creates the file
+          # with the ambient mode first, so a chmod afterwards leaves a window in
+          # which the release signing key is readable by anything else on the
+          # runner. It is removed below either way, but not before it is used.
+          (umask 077; printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem)
           openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS.txt -out SHA256SUMS.txt.sig
           rm -f ed25519.pem
           ls -la SHA256SUMS.txt.sig
