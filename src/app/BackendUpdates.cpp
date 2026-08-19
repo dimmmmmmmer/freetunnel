@@ -116,6 +116,15 @@ void Backend::wireUpdaterSignals()
                 emit updateChanged();
 #if defined(Q_OS_WIN)
                 QProcess::startDetached(path, {});
+                // Then get out of its way. The installer cannot replace files this
+                // process has open, and it should not have to force us out either:
+                // a forced kill would leave the tunnel up and the privileged helper
+                // running with nothing left to stop them. Quitting here runs the
+                // ordinary shutdown — tunnel down, helper stopped — while the
+                // installer waits for us (see win/installer.nsi).
+                m_updateMessage = tr("Update downloaded — closing FreeTunnel to install it");
+                emit updateChanged();
+                quitApplication();
 #elif defined(Q_OS_MACOS)
                 QProcess::startDetached(QStringLiteral("open"), {path});
 #else

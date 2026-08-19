@@ -105,6 +105,36 @@ FunctionEnd
 ; Installer Section
 
 Section "Install"
+  ; Close a running FreeTunnel before touching a single file. Without this the
+  ; install fails partway through on "file in use" — which is what everyone
+  ; upgrading over a running copy hit, whether they used the in-app updater or
+  ; downloaded the installer themselves.
+  ;
+  ; Politely first, and that matters: FreeTunnel holds a VPN tunnel and a
+  ; privileged helper, and a forced kill leaves both up with nothing left to shut
+  ; them down. taskkill without /F posts WM_CLOSE, which runs the app's own quit
+  ; path — tunnel down, helper stopped, tray icon gone.
+  DetailPrint "Closing FreeTunnel if it is running..."
+  StrCpy $1 0
+  closeLoop:
+    nsExec::Exec 'taskkill /IM "${PRODUCT_EXE}"'
+    Pop $0
+    ; Non-zero means "no such process": either it was never running or it has now
+    ; finished shutting down.
+    StrCmp $0 "0" 0 closed
+    IntOp $1 $1 + 1
+    ; ~10 s is generous for a clean shutdown; past that it is not coming down on
+    ; its own and a stuck process must not block the upgrade forever.
+    IntCmp $1 20 forceClose "" forceClose
+    Sleep 500
+    Goto closeLoop
+  forceClose:
+    DetailPrint "FreeTunnel did not exit; closing it forcibly."
+    nsExec::Exec 'taskkill /F /IM "${PRODUCT_EXE}"'
+    Pop $0
+    Sleep 1000
+  closed:
+
   SetOutPath "$INSTDIR"
 
   ; Install the entire windeployqt output tree: the exe, every Qt DLL, and all

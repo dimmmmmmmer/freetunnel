@@ -226,6 +226,10 @@
         <source>Global hotkeys need an X11/Xorg session: a Wayland compositor keeps global shortcuts to itself, and running under XWayland does not change that.</source>
         <translation>Глобальные горячие клавиши работают только в сессии X11/Xorg: композитор Wayland оставляет глобальные сочетания себе, и запуск через XWayland этого не меняет.</translation>
     </message>
+    <message>
+        <source>Update downloaded — closing FreeTunnel to install it</source>
+        <translation>Обновление загружено — закрываем FreeTunnel для установки</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
