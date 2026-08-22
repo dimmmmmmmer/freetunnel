@@ -321,13 +321,26 @@ void Backend::buildConnectTomlAsync()
     const QString level =
             m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");
     auto *watcher = new QThread(this);
-    QObject::connect(watcher, &QThread::started, watcher, [this, watcher, generation, path, level]() {
-        const QString toml = freetunnel::buildConnectConfigToml(path, level);
-        QMetaObject::invokeMethod(
-                this, [this, generation, toml]() { onConnectTomlReady(generation, toml); },
-                Qt::QueuedConnection);
-        watcher->quit();
-    });
+    // Qt::DirectConnection is what makes this actually asynchronous, and it is not
+    // decoration. A QThread OBJECT lives in the thread that created it — here the
+    // GUI thread — so an auto connection to one of its own signals is queued back
+    // to the GUI thread and the body runs there. This function exists to keep the
+    // blocking keychain read off the UI, and without this it did the opposite:
+    // spun up a thread, then froze the window on it anyway. Direct delivery runs
+    // the body in the emitting thread, which for started() is the worker.
+    QObject::connect(
+            watcher, &QThread::started, watcher,
+            [this, watcher, generation, path, level]() {
+#ifdef FT_ENABLE_TEST_HOOKS
+                m_lastTomlBuildThread.store(QThread::currentThread());
+#endif
+                const QString toml = freetunnel::buildConnectConfigToml(path, level);
+                QMetaObject::invokeMethod(
+                        this, [this, generation, toml]() { onConnectTomlReady(generation, toml); },
+                        Qt::QueuedConnection);
+                watcher->quit();
+            },
+            Qt::DirectConnection);
     QObject::connect(watcher, &QThread::finished, watcher, &QObject::deleteLater);
     watcher->start();
 }

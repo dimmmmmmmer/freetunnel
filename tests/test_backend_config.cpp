@@ -10,6 +10,10 @@
 // save failed halfway.
 #include <QtTest>
 
+#include <QScopeGuard>
+
+#include <QThread>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -43,6 +47,7 @@ private slots:
     void removeConfigForgetsThePassword();
     void readAccessorsRejectOutOfRangeIndexes();
     void pingsAreResetForEveryConfig();
+    void theConnectConfigIsBuiltOffTheGuiThread();
 
 private:
     // A complete, valid create form; individual cases override what they exercise.
@@ -360,6 +365,41 @@ void TestBackendConfig::pingsAreResetForEveryConfig()
     QCOMPARE(backend.pings().size(), backend.configs().size());
     QTest::qWait(600);
     QCOMPARE(backend.pings().size(), backend.configs().size());
+}
+
+// buildConnectTomlAsync() exists for one reason: building the connect config means
+// reading the password out of the OS keychain, which blocks — on Linux for as long
+// as the user takes to answer a keyring prompt. Doing that on the GUI thread
+// freezes the window mid-connect.
+//
+// It was doing exactly that. A QThread OBJECT lives in the thread that created it,
+// so connecting to its own started() signal with the default (auto) type queues the
+// body back to the GUI thread: the worker starts, emits, and the work happens on
+// the UI thread anyway. Nothing observable changes when this regresses — the app
+// still connects, it just stops responding while it does — so the thread it ran on
+// is recorded and asserted here.
+void TestBackendConfig::theConnectConfigIsBuiltOffTheGuiThread()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
+
+    // Point the VPN client at a port nothing answers on. Without this connectVpn()
+    // would try to spawn the privileged helper for real — an elevation prompt in
+    // the middle of a unit test. The config build under test happens first either
+    // way; what follows is expected to fail, and that is fine.
+    qputenv("FT_TEST_HELPER_PORT", QByteArrayLiteral("1"));
+    qputenv("FT_TEST_HELPER_TOKEN", QByteArrayLiteral("unused"));
+    auto restore = qScopeGuard([] {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+    });
+
+    backend.connectVpn();
+    QTRY_VERIFY_WITH_TIMEOUT(backend.lastTomlBuildThread() != nullptr, 10000);
+    QVERIFY2(backend.lastTomlBuildThread() != QThread::currentThread(),
+             "the connect config was built on the GUI thread — the keychain read blocks it");
+
+    backend.disconnectVpn();
 }
 
 QTEST_MAIN(TestBackendConfig)

@@ -8,6 +8,8 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+
+#include <atomic>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -289,6 +291,17 @@ private:
     // password out of the OS credential store, and that call blocks — on macOS
     // it can sit in securityd for as long as an authorization dialog is up.
     void buildConnectTomlAsync();
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Which thread actually built the config. The point of buildConnectTomlAsync()
+    // is that this is never the GUI thread — it reads the keychain, which blocks —
+    // and getting that wrong is invisible from the outside: the app still works,
+    // it just freezes. Recorded so a test can say so out loud.
+public:
+    QThread *lastTomlBuildThread() const { return m_lastTomlBuildThread; }
+
+private:
+    std::atomic<QThread *> m_lastTomlBuildThread{nullptr};
+#endif
     void onConnectTomlReady(quint64 generation, const QString &toml);
     void failConnectNoPassword();
 
