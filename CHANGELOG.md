@@ -5,6 +5,58 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
+## 1.1.8
+
+### Fixed
+
+- macOS: clicking the menu-bar icon no longer opens the main window. It only
+  shows the menu, as it always should have.
+- macOS: clicking the Dock icon brings the window back after you close it. This
+  stopped working in 1.1.7 and did nothing at all until now.
+- Windows: installing an update over a running FreeTunnel no longer fails partway
+  through. The installer now closes it first — cleanly, so your connection is
+  taken down properly rather than cut — and this works whether you update from
+  inside the app or run the installer yourself.
+- Windows: a link opened while FreeTunnel is already running no longer does
+  nothing. Longer links were being dropped on their way to the running copy.
+- Windows: uninstalling now removes the "launch at startup" entry. It used to be
+  left behind, so Windows kept trying to start a program that was gone.
+- Windows: the installer is no longer garbled when shown in Russian.
+- "Through VPN" with no rules no longer sends all of your traffic outside the
+  tunnel while showing you as connected. The full tunnel stays on, and the app
+  says why.
+- A split-tunnel rule written as ".example.com" now works. It was accepted,
+  listed back to you, and quietly never applied.
+- The kill switch is no longer taken down while the app reconnects after a
+  network change or sleep.
+- Linux: the update button now installs the update, or tells you it cannot.
+  It used to report success and do nothing.
+- Linux: "launch at system startup" now works for AppImage builds, and the
+  switch no longer reports "on" when the entry it wrote can no longer start
+  anything.
+- Linux: global hotkeys are correctly reported as unavailable on Wayland,
+  including when the app runs through XWayland. The previous advice on how to
+  make them work led into exactly the case where they silently do not.
+- Pressing Enter now confirms a dialog, and Escape reliably cancels one — on some
+  screens Escape did nothing at all.
+- Update checks no longer skip a release: 1.2.0-rc10 is now correctly newer than
+  1.2.0-rc9.
+- The Downloads/upgrade path no longer offers a package that cannot run on your
+  system: the Linux package now states the system version it actually needs.
+
+### Security
+
+- Linux: the elevated helper is now started from a path the kernel confirms,
+  not one named by environment variables. A process able to set the app's
+  environment could previously have the administrator prompt run a file of its
+  choosing.
+- A link that adds a server now shows which server it is, and warns when the name
+  mixes alphabets — the trick behind a name that looks like one you already
+  trust.
+- An update is now verified to belong to the release being offered, not merely to
+  be signed by us. Older releases can no longer be replayed to hold you back on
+  an earlier build.
+
 ## 1.1.7
 
 ### Fixed
