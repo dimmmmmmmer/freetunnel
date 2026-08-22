@@ -87,19 +87,29 @@ static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &eng
                      });
 }
 
-static void wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &appQuitting)
+// Returns the quit filter, which the caller owns. Not parented to the application:
+// it holds a Backend* and reads a bool by address, and an event filter installed on
+// the application outlives every scope but its own owner's. In the shipped app that
+// is invisible because the process exits moments later; anything that builds the
+// application and returns — a test — leaves a filter installed over freed memory,
+// ready to swallow the next Quit event and dereference what is gone. Same shape as
+// setupDockReopen(), same fix.
+static QuitFilter *wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &appQuitting)
 {
-    auto *quitFilter = new QuitFilter(&app);
+    auto *quitFilter = new QuitFilter();
     quitFilter->backend = &backend;
     app.installEventFilter(quitFilter);
 
-    QObject::connect(&backend, &Backend::aboutToShutdown, &app, [&appQuitting]() {
+    // Bound to the filter's lifetime for the same reason: this lambda captures
+    // appQuitting by reference.
+    QObject::connect(&backend, &Backend::aboutToShutdown, quitFilter, [&appQuitting]() {
         appQuitting = true;
     });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &app, []() {
         removeInstanceAuthToken();
     });
+    return quitFilter;
 }
 
 #ifdef Q_OS_MACOS
@@ -150,7 +160,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 #endif
     step("backend");
 
-    wireBackendLifecycle(app, backend, out->appQuitting);
+    out->quitFilter.reset(wireBackendLifecycle(app, backend, out->appQuitting));
 #ifdef Q_OS_MACOS
     setupMacApplicationQuit(backend);
 #endif

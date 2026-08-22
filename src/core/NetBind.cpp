@@ -94,8 +94,18 @@ bool interfaceEligibleForRoute(const QNetworkInterface &ni, bool requireRunning)
     return true;
 }
 
-QHostAddress queryRouteSourceOnSocket(int fd, bool v6)
+// qintptr, not int: on Win64 a SOCKET is a 64-bit UINT_PTR, so taking an int here
+// narrowed the handle at every call. Windows documents socket handles as fitting
+// in 32 bits for interop, which is why this worked — but a handle silently losing
+// half its width is not something to leave resting on that. The syscalls want the
+// platform's own type back, so the cast happens once, here.
+QHostAddress queryRouteSourceOnSocket(qintptr fdArg, bool v6)
 {
+#if defined(Q_OS_WIN)
+    const SOCKET fd = static_cast<SOCKET>(fdArg);
+#else
+    const int fd = static_cast<int>(fdArg);
+#endif
     if (v6) {
         sockaddr_in6 sa{};
         sa.sin6_family = AF_INET6;

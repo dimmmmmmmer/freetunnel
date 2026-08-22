@@ -214,6 +214,11 @@ private:
     // disconnect arrives — atomic for the same reason as m_state.
     std::atomic<std::chrono::steady_clock::time_point> m_lastConnectAttempt{};
 #ifdef Q_OS_WIN
-    uint32_t m_winPhysicalIfIndex = 0;
+    // Written on the thread that starts a connect attempt, read from the core's
+    // socket-protect callback, which runs on a core thread — so a plain uint32_t
+    // was a data race. Aligned 32-bit loads happen not to tear on the platforms
+    // this ships to, which is exactly why it would never show up as a bug; it is
+    // still undefined behaviour and the fix costs nothing.
+    std::atomic<uint32_t> m_winPhysicalIfIndex{0};
 #endif
 };

@@ -85,6 +85,8 @@ struct GuiStartup {
     // Declared after appQuitting so it is destroyed BEFORE it — it reads that flag
     // by address from an event filter installed on the application.
     std::unique_ptr<QObject> dockReopen;
+    // Also after appQuitting: it captures that flag and points at the backend.
+    std::unique_ptr<QuitFilter> quitFilter;
     // The startup steps in the order they ran. The entry point is the one file
     // no test compiled, and both macOS bugs found in it were about what happens
     // before what; this lets a test say so out loud.

@@ -274,8 +274,9 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     ctx->guard = m_guard;
     ctx->attemptGen = attemptGen;
 #if defined(Q_OS_WIN)
-    m_winPhysicalIfIndex = captureWindowsPhysicalOutbound();
-    ctx->boundIf = m_winPhysicalIfIndex != 0 ? std::to_string(m_winPhysicalIfIndex) : std::string{};
+    const uint32_t ifIndex = captureWindowsPhysicalOutbound();
+    m_winPhysicalIfIndex.store(ifIndex);
+    ctx->boundIf = ifIndex != 0 ? std::to_string(ifIndex) : std::string{};
 #endif
     {
         // Take the config out under the lock: the GUI's setKillSwitch /

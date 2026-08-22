@@ -150,7 +150,7 @@ void QtTrustTunnelClient::teardownClient() {
     }
     m_client.reset();
 #ifdef Q_OS_WIN
-    m_winPhysicalIfIndex = 0;
+    m_winPhysicalIfIndex.store(0);
 #endif
 }
 
@@ -440,7 +440,7 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
 void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
 {
 #ifdef Q_OS_WIN
-    pinWindowsPhysicalOutbound(m_winPhysicalIfIndex);
+    pinWindowsPhysicalOutbound(m_winPhysicalIfIndex.load());
 #endif
     qt_trusttunnel_protect_outbound_socket(event);
 }
