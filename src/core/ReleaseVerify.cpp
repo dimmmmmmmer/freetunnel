@@ -27,7 +27,11 @@ QString expectedSha256FromSums(const QByteArray &sumsContent, const QString &ass
 QString versionFromSums(const QByteArray &sumsContent)
 {
     for (const QByteArray &line : sumsContent.split('\n')) {
-        const QByteArray t = line.trimmed();
+        QByteArray t = line.trimmed();
+        // The line is written as a comment so `sha256sum -c` does not report the
+        // manifest as malformed; the marker is what identifies it, not the '#'.
+        if (t.startsWith('#'))
+            t = t.mid(1).trimmed();
         if (!t.startsWith("version="))
             continue;
         // Deliberately the FIRST such line: a second one appended by an attacker

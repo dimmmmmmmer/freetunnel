@@ -96,10 +96,12 @@ The manifest now opens with a `version=X` line, inside the bytes the signature
 covers, and the updater refuses a manifest whose version is not the one being
 offered. Two details are load-bearing:
 
-- **One token, no space.** The manifest parser in every already-shipped client
-  skips lines with fewer than two fields, so the new line is invisible to them and
-  old clients keep updating. Written as `version 1.1.8` they would read `1.1.8` as
-  an asset name instead.
+- **Written as `#version=X`.** The `#` is for the people who verify the file by
+  hand: `sha256sum -c` calls any line it cannot parse "improperly formatted",
+  which reads like tampering and fails outright under `--strict`. It tolerates
+  comments. The absence of a space keeps the line a single field, and the manifest
+  parser in every already-shipped client skips lines with fewer than two fields —
+  so old clients neither trip over it nor mistake it for an asset name.
 - **A missing version is accepted.** Releases published before this existed have
   no such line. Refusing them would strand exactly the clients this protects on
   the build they already have, which is worse than the replay it prevents — a

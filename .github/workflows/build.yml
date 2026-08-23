@@ -737,11 +737,19 @@ jobs:
           # they came from, and an older release's manifest and signature verify
           # perfectly when replayed. See docs/security-threats.md.
           #
-          # One token, no space: the manifest parser shipped in existing clients
-          # skips any line with fewer than two fields, so this is invisible to
-          # them. Written as "version 1.1.8" they would read 1.1.8 as an asset
-          # name instead.
-          echo "version=${GITHUB_REF_NAME#v}" > SHA256SUMS.txt
+          # Two things decide the exact spelling.
+          #
+          # It starts with '#', because people verify this file by hand with
+          # `sha256sum -c SHA256SUMS.txt`, and coreutils reports any line it
+          # cannot parse as "improperly formatted" — a warning that reads like
+          # tampering, and an outright failure under --strict. It tolerates
+          # comment lines.
+          #
+          # And it carries no space, so it stays a single field: the manifest
+          # parser shipped in existing clients skips lines with fewer than two
+          # fields, which makes this invisible to them rather than something they
+          # mistake for an asset name.
+          echo "#version=${GITHUB_REF_NAME#v}" > SHA256SUMS.txt
           find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' \) \
             -exec sha256sum {} + \
             | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \

@@ -60,8 +60,11 @@ void TestReleaseVerify::verifyMismatch()
 // rest of this feature is only exercised on builds that have OpenSSL headers.
 void TestReleaseVerify::versionFromSumsReadsTheSignedVersion()
 {
+    // Written as a comment: people verify this file with `sha256sum -c`, which
+    // calls any line it cannot parse "improperly formatted" — a warning that reads
+    // like tampering, and a failure under --strict.
     const QByteArray versioned =
-            "version=1.1.8\n"
+            "#version=1.1.8\n"
             "abc123  freetunnel-linux-x86_64.deb\n";
     QCOMPARE(versionFromSums(versioned), QStringLiteral("1.1.8"));
     // The line must not eat the asset it sits above.
@@ -75,11 +78,14 @@ void TestReleaseVerify::versionFromSumsReadsTheSignedVersion()
 
     // An appended second line must not talk over the signer's. (The signature
     // covers the whole file, so this is depth rather than the only defence.)
-    QCOMPARE(versionFromSums("version=1.1.8\nabc  x\nversion=9.9.9\n"),
+    QCOMPARE(versionFromSums("#version=1.1.8\nabc  x\n#version=9.9.9\n"),
              QStringLiteral("1.1.8"));
 
     // Trailing whitespace and CRLF from a text-mode pipeline.
-    QCOMPARE(versionFromSums("version=1.1.8  \r\nabc  x\n"), QStringLiteral("1.1.8"));
+    QCOMPARE(versionFromSums("#version=1.1.8  \r\nabc  x\n"), QStringLiteral("1.1.8"));
+    // The bare form stays readable too — releases signed before the comment
+    // spelling was adopted must keep verifying.
+    QCOMPARE(versionFromSums("version=1.1.8\nabc  x\n"), QStringLiteral("1.1.8"));
 
     // A hash line is not a version line, whatever it contains.
     QVERIFY(versionFromSums("abc  version=2.0.0\n").isEmpty());
