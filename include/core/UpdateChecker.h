@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
+class QJsonObject;
+
 #include <QFile> // full type: std::unique_ptr<QFile> member needs it for ~UpdateChecker
 #include <QObject>
 #include <QString>
@@ -62,6 +64,7 @@ signals:
     void downloadFailed(const QString &message);
 
 private slots:
+    void selectReleaseAssets(const QJsonObject &release, const QString &tagName);
     void onCheckFinished(QNetworkReply *reply);
 
 private:

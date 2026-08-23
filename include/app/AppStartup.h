@@ -1,4 +1,10 @@
 // cppcheck-suppress-file missingIncludeSystem
+// GuiStartup below is a bag of ownership handles: members that are never read
+// because their whole job is to exist and then be destroyed in the right order.
+// cppcheck calls those unused, which here would mean "delete the thing keeping
+// the application alive", so the check is off for this file rather than argued
+// with at each member.
+// cppcheck-suppress-file unusedStructMember
 #pragma once
 
 #include <QEvent>
@@ -72,6 +78,10 @@ QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
 // returns. Declaration order is destruction order reversed, and it matters:
 // `engine` must go before `backend`, because the QML that engine owns holds
 // `backend` as a context property and touches it on teardown.
+//
+// Most of these are never read, and that is the point: they are ownership
+// handles, doing their whole job by existing and then being destroyed in the
+// right order. See the file-level suppression at the top.
 struct GuiStartup {
     std::unique_ptr<UrlOpenFilter> urlFilter;
     std::unique_ptr<Backend> backend;

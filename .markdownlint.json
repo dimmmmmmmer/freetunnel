@@ -1,0 +1,6 @@
+{
+  "//": "Keep a Changelog repeats '### Added' / '### Fixed' under every version, which is the format working as intended. siblings_only limits MD024 to duplicates within the SAME section, where a repeat really is a mistake.",
+  "MD024": { "siblings_only": true },
+  "//line-length": "Prose here wraps at 80 by hand; tables and links legitimately exceed it.",
+  "MD013": false
+}

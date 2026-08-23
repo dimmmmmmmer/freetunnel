@@ -123,6 +123,30 @@ static void setupMacApplicationQuit(Backend &backend)
 }
 #endif
 
+// The native macOS window setup, lifted out of the wiring so that function stays
+// readable — it is four calls that only exist on one platform and only make sense
+// once the window does.
+static void setupMacWindow(QWindow *win, bool *appQuitting)
+{
+#ifdef Q_OS_MACOS
+    applyMacUnifiedTitlebar(win->winId());
+    // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
+    installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
+    // Bring the hidden window back only on a real Dock-icon click — not on every
+    // app activation (status-bar clicks, Cmd-Tab), which used to re-open it.
+    installMacDockReopenHandler([win, appQuitting]() {
+        if (*appQuitting)
+            return;
+        win->show();
+        win->raise();
+        win->requestActivate();
+    });
+#else
+    Q_UNUSED(win);
+    Q_UNUSED(appQuitting);
+#endif
+}
+
 std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
                                       GuiStartup *out)
 {
@@ -177,22 +201,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     wireLanguageChanges(app, *out->engine, backend, out->translator);
     step("language");
 
-#ifdef Q_OS_MACOS
-    QWindow *win = out->win;
-    bool *appQuitting = &out->appQuitting;
-    applyMacUnifiedTitlebar(win->winId());
-    // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
-    installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
-    // Bring the hidden window back only on a real Dock-icon click — not on every
-    // app activation (status-bar clicks, Cmd-Tab), which used to re-open it.
-    installMacDockReopenHandler([win, appQuitting]() {
-        if (*appQuitting)
-            return;
-        win->show();
-        win->raise();
-        win->requestActivate();
-    });
-#endif
+    setupMacWindow(out->win, &out->appQuitting);
     step("mac-window");
 
     out->urlFilter->ready(&backend, out->win);

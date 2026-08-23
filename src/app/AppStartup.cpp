@@ -139,6 +139,38 @@ constexpr int kInstanceMessageDeadlineMs = 3000; // hard stop for a peer that dr
 
 } // namespace
 
+// Decide whether a buffered message may act on this instance, and say why not
+// when it may not. Every refusal here used to be silent, which made a dropped
+// control message indistinguishable from one that was never sent: no error, no
+// log line, nothing for the user or for whoever has to work out why a tt:// link
+// did nothing.
+static bool authorizeInstanceMessage(const QByteArray &buf, QLocalSocket *c,
+                                     const QString &instanceToken, QString *cmdOut)
+{
+    QString recvToken;
+    if (!parseInstanceMessage(buf, &recvToken, cmdOut)) {
+        // Sizes and state only — the token itself must never reach a log.
+        // bytesAvailable() separates "the peer sent nothing" from "bytes were
+        // sitting unread when we gave up", which are different bugs and cannot be
+        // told apart afterwards.
+        qWarning("single-instance: dropping an unparseable message (%lld bytes read, "
+                 "%lld still readable, socket state %d)",
+                 static_cast<long long>(buf.size()),
+                 static_cast<long long>(c->bytesAvailable()), static_cast<int>(c->state()));
+        return false;
+    }
+    if (instanceToken.isEmpty()) {
+        qWarning("single-instance: dropping a command because this instance has no "
+                 "token to check it against");
+        return false;
+    }
+    if (!instanceTokensEqual(recvToken, instanceToken)) {
+        qWarning("single-instance: dropping a command whose token did not match");
+        return false;
+    }
+    return true;
+}
+
 // Collect the message without blocking: the old waitForReadyRead(200) loop froze
 // the GUI thread for up to 200 ms per chunk (64 KB worth) while a same-user peer
 // took its time. Buffer on readyRead instead and deliver from the event loop.
@@ -170,28 +202,9 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         *delivered = true;
         *buf += c->readAll();
         c->deleteLater();
-        QString recvToken;
         QString cmd;
-        if (!parseInstanceMessage(*buf, &recvToken, &cmd)) {
-            // Sizes and state only — the token itself must never reach a log.
-            // bytesAvailable() separates "the peer sent nothing" from "bytes were
-            // sitting unread when we gave up", which are different bugs and cannot
-            // be told apart afterwards.
-            qWarning("single-instance: dropping an unparseable message (%lld bytes read, "
-                     "%lld still readable, socket state %d)",
-                     static_cast<long long>(buf->size()),
-                     static_cast<long long>(c->bytesAvailable()), static_cast<int>(c->state()));
+        if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
             return;
-        }
-        if (instanceToken.isEmpty()) {
-            qWarning("single-instance: dropping a command because this instance has no "
-                     "token to check it against");
-            return;
-        }
-        if (!instanceTokensEqual(recvToken, instanceToken)) {
-            qWarning("single-instance: dropping a command whose token did not match");
-            return;
-        }
         be->handleControl(cmd);
         raiseMainWindow(win);
     };
