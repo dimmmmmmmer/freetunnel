@@ -423,9 +423,13 @@ void TestAppShortcut::aWindowsShortcutResolvesToWhatItPointsAt()
     QVERIFY(dir.isValid());
     const QString self = QCoreApplication::applicationFilePath();
 
+    // Not a skip: writing a shortcut through the shell is not an optional
+    // capability of Windows, and a test that quietly skips is indistinguishable
+    // in a run log from one that passed — which for a path nobody here can
+    // execute by hand is the same as having no test.
     const QString plain = dir.filePath(QStringLiteral("plain.lnk"));
-    if (!writeShortcut(plain, QDir::toNativeSeparators(self)))
-        QSKIP("the shell would not write a shortcut here");
+    QVERIFY2(writeShortcut(plain, QDir::toNativeSeparators(self)),
+             "the shell would not write a shortcut");
     QCOMPARE(freetunnel::resolveApplicationTarget(plain), expectedRule(self));
 
     // The same, reached the way a drop delivers it.
