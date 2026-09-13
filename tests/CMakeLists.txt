@@ -31,9 +31,10 @@ add_library(ft_apps STATIC
     ../src/core/ProcessLookup.cpp
     ../src/core/ProcessLookupSockets.cpp
     ../src/core/InstalledApps.cpp
+    ../src/core/NetBind.cpp
 )
 target_include_directories(ft_apps PUBLIC ../include ../include/core)
-target_link_libraries(ft_apps PUBLIC Qt6::Core)
+target_link_libraries(ft_apps PUBLIC Qt6::Core Qt6::Network)
 if (WIN32)
     target_link_libraries(ft_apps PUBLIC iphlpapi ws2_32 ole32 uuid shell32)
 endif ()
@@ -161,7 +162,6 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -222,7 +222,6 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -394,10 +393,9 @@ add_test(NAME versioncompare COMMAND test_versioncompare -o ${CMAKE_CURRENT_BINA
 
 add_executable(test_netbind
     test_netbind.cpp
-    ../src/core/NetBind.cpp
 )
 target_include_directories(test_netbind PRIVATE ../include ../include/core)
-target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test ft_apps)
 add_test(NAME netbind COMMAND test_netbind -o ${CMAKE_CURRENT_BINARY_DIR}/report-netbind.txt,txt)
 
 add_executable(test_releaseverify
@@ -550,7 +548,6 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -625,7 +622,6 @@ add_executable(test_qt_trusttunnel_client
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
-    ../src/core/NetBind.cpp
     ../include/vpn/qt_trusttunnel_client.h
 )
 target_include_directories(test_qt_trusttunnel_client PRIVATE
@@ -738,7 +734,6 @@ add_executable(freetunnel_test_helper
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
-    ../src/core/NetBind.cpp
     ../include/vpn/qt_trusttunnel_client.h  # AUTOMOC needs the Q_OBJECT header listed
 )
 target_include_directories(freetunnel_test_helper PRIVATE
