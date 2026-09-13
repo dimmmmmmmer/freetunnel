@@ -113,7 +113,20 @@ QString canonicalOrSelf(const QString &path)
 // symlinked directory. macOS puts every temporary directory behind one.
 QString storedRuleForm(const QString &path)
 {
-    return QDir::toNativeSeparators(canonicalOrSelf(path));
+    QString resolved = canonicalOrSelf(path);
+#ifdef Q_OS_WIN
+    // QFileInfo::canonicalFilePath() follows links and cleans the path, and
+    // leaves an 8.3 short name exactly as it found it — C:\PROGRA~1\... stays
+    // that way. A shortcut can store one, and the running process is reported
+    // under its long name, so such a rule matches nothing at all.
+    const QString native = QDir::toNativeSeparators(resolved);
+    wchar_t longName[MAX_PATH * 2] = {};
+    const DWORD n = ::GetLongPathNameW(reinterpret_cast<LPCWSTR>(native.utf16()), longName,
+                                       static_cast<DWORD>(std::size(longName)));
+    if (n > 0 && n < std::size(longName))
+        resolved = QString::fromWCharArray(longName, static_cast<int>(n));
+#endif
+    return QDir::toNativeSeparators(resolved);
 }
 
 QString absoluteExecutable(const QString &program)

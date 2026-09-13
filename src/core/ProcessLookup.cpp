@@ -330,8 +330,17 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
                     // and recording it would displace a row that can.
                     if (row.dwOwningPid == 0)
                         continue;
-                    owners->insert(ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort))),
-                            static_cast<qint64>(row.dwOwningPid));
+                    // First one wins, as on the other two platforms. The four
+                    // tables are read IPv4 before IPv6, and one local port can
+                    // appear in both owned by different programs; inserting over
+                    // the top made whichever table was read last decide, so a
+                    // rule about the program holding the IPv4 socket stopped
+                    // applying because something unrelated held the same port
+                    // on IPv6.
+                    const std::uint32_t key =
+                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+                    if (!owners->contains(key))
+                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
                 }
             });
     collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true,
@@ -343,8 +352,17 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
                     // and recording it would displace a row that can.
                     if (row.dwOwningPid == 0)
                         continue;
-                    owners->insert(ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort))),
-                            static_cast<qint64>(row.dwOwningPid));
+                    // First one wins, as on the other two platforms. The four
+                    // tables are read IPv4 before IPv6, and one local port can
+                    // appear in both owned by different programs; inserting over
+                    // the top made whichever table was read last decide, so a
+                    // rule about the program holding the IPv4 socket stopped
+                    // applying because something unrelated held the same port
+                    // on IPv6.
+                    const std::uint32_t key =
+                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+                    if (!owners->contains(key))
+                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
                 }
             });
     collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false,
@@ -356,8 +374,17 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
                     // and recording it would displace a row that can.
                     if (row.dwOwningPid == 0)
                         continue;
-                    owners->insert(ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort))),
-                            static_cast<qint64>(row.dwOwningPid));
+                    // First one wins, as on the other two platforms. The four
+                    // tables are read IPv4 before IPv6, and one local port can
+                    // appear in both owned by different programs; inserting over
+                    // the top made whichever table was read last decide, so a
+                    // rule about the program holding the IPv4 socket stopped
+                    // applying because something unrelated held the same port
+                    // on IPv6.
+                    const std::uint32_t key =
+                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+                    if (!owners->contains(key))
+                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
                 }
             });
     collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false,
@@ -369,8 +396,17 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
                     // and recording it would displace a row that can.
                     if (row.dwOwningPid == 0)
                         continue;
-                    owners->insert(ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort))),
-                            static_cast<qint64>(row.dwOwningPid));
+                    // First one wins, as on the other two platforms. The four
+                    // tables are read IPv4 before IPv6, and one local port can
+                    // appear in both owned by different programs; inserting over
+                    // the top made whichever table was read last decide, so a
+                    // rule about the program holding the IPv4 socket stopped
+                    // applying because something unrelated held the same port
+                    // on IPv6.
+                    const std::uint32_t key =
+                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+                    if (!owners->contains(key))
+                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
                 }
             });
 
