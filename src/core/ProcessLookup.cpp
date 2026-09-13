@@ -118,11 +118,14 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto)
 // identityForPid
 // ---------------------------------------------------------------------------
 
-AppIdentity identityForPid(qint64 pid)
-{
-    if (pid <= 0)
-        return {};
+namespace {
 
+// What the system says a process is running, or empty when it will not say.
+// Split from identityForPid so that each platform's answer is one function
+// rather than one branch of three inside another — every branch is compiled
+// away except one, but they are all read, and all counted.
+QString executablePathOf(qint64 pid)
+{
 #if defined(Q_OS_WIN)
     // PROCESS_QUERY_LIMITED_INFORMATION is the weakest right that answers this,
     // and the only one a few protected system processes will grant at all.
@@ -168,7 +171,16 @@ AppIdentity identityForPid(qint64 pid)
     if (path.endsWith(QLatin1String(" (deleted)")))
         path.chop(10);
 #endif
+    return path;
+}
 
+} // namespace
+
+AppIdentity identityForPid(qint64 pid)
+{
+    if (pid <= 0)
+        return {};
+    const QString path = executablePathOf(pid);
     if (path.isEmpty())
         return {};
     AppIdentity id;
@@ -366,6 +378,109 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
 
 #elif defined(Q_OS_MACOS)
 
+namespace {
+
+// Every process on the machine. Named and shaped like the Linux one below, and
+// empty when the system refused, with errno left as the failed call set it.
+QList<qint64> listProcessIds()
+{
+    QList<qint64> pids;
+    int count = ::proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0);
+    if (count <= 0)
+        return pids;
+    QByteArray buffer(count, Qt::Uninitialized);
+    count = ::proc_listpids(PROC_ALL_PIDS, 0, buffer.data(), buffer.size());
+    if (count <= 0)
+        return pids;
+    const int found = count / static_cast<int>(sizeof(pid_t));
+    const auto *raw = reinterpret_cast<const pid_t *>(buffer.constData());
+    pids.reserve(found);
+    for (int i = 0; i < found; ++i) {
+        if (raw[i] > 0)
+            pids.append(static_cast<qint64>(raw[i]));
+    }
+    return pids;
+}
+
+// The protocol and local port one socket descriptor is bound to, or false when
+// it is not an internet socket with a port.
+bool socketEndpointOf(const socket_fdinfo &info, int *proto, std::uint16_t *port)
+{
+    const int family = info.psi.soi_family;
+    if (family != AF_INET && family != AF_INET6)
+        return false;
+    if (info.psi.soi_kind == SOCKINFO_TCP) {
+        *proto = IPPROTO_TCP;
+        *port = ntohs(info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport);
+    } else if (info.psi.soi_kind == SOCKINFO_IN) {
+        *proto = IPPROTO_UDP;
+        *port = ntohs(info.psi.soi_proto.pri_in.insi_lport);
+    } else {
+        return false;
+    }
+    return *port != 0;
+}
+
+// The ports one process holds open. The counterpart of collectSocketInodes() on
+// Linux, and asked of every process for the reason given in walk().
+void collectSocketsOfProcess(pid_t pid, QHash<std::uint32_t, qint64> *owners,
+                             ProcessLookup::ScanReport *report)
+{
+    errno = 0;
+    int bufSize = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
+    if (bufSize <= 0) {
+        // A process that has gone is not a process that refused. As root the
+        // refusals should be none, so a count here is itself the answer to why
+        // nothing matches.
+        if (errno == ESRCH)
+            ++report->pidsWithoutProgram;
+        else
+            ++report->pidsSkipped;
+        report->lastErrno = errno;
+        return;
+    }
+    QByteArray fdBuf(bufSize, Qt::Uninitialized);
+    bufSize = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fdBuf.data(), fdBuf.size());
+    if (bufSize <= 0)
+        return;
+    const int nFds = bufSize / static_cast<int>(sizeof(proc_fdinfo));
+    const auto *fds = reinterpret_cast<const proc_fdinfo *>(fdBuf.constData());
+    for (int f = 0; f < nFds; ++f) {
+        if (fds[f].proc_fdtype != PROX_FDTYPE_SOCKET)
+            continue;
+        ++report->socketsSeen;
+        // Over-allocated as insurance, and nothing more than that. It was
+        // committed as "the macOS cause" on the theory that a kernel newer than
+        // the build SDK would refuse an exact-sized buffer with ENOMEM and skip
+        // every socket on the machine. The refusal mechanism is real, but the
+        // premise is not: sizeof(struct socket_fdinfo) has been 792 bytes at
+        // every XNU release from macOS 10.14 to now — the union is sized by
+        // un_sockinfo, which has not moved — and the structs sit outside any
+        // PRIVATE/KERNEL guard, so the SDK header and the kernel header cannot
+        // disagree. The exact-sized version was correct. This is kept because it
+        // costs nothing and removes the question, not because it fixed anything.
+        alignas(socket_fdinfo) char raw[sizeof(socket_fdinfo) + 1024] = {};
+        const int got = ::proc_pidfdinfo(pid, fds[f].proc_fd, PROC_PIDFDSOCKETINFO, raw,
+                                         static_cast<int>(sizeof(raw)));
+        if (got <= 0)
+            continue;
+        int proto = 0;
+        std::uint16_t port = 0;
+        if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &proto, &port))
+            continue;
+        // Does not overwrite: two processes can legitimately hold the same
+        // (protocol, port) — a listener and an accepted connection, or a socket
+        // one of them is about to close — and letting whichever pid the scan
+        // happened to reach last win makes the answer depend on process
+        // enumeration order.
+        const std::uint32_t key = ownerKey(proto, port);
+        if (!owners->contains(key))
+            owners->insert(key, static_cast<qint64>(pid));
+    }
+}
+
+} // namespace
+
 void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
 {
     // macOS has no socket table to read; the ports have to be gathered from each
@@ -380,8 +495,8 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // say "this port is open and belongs to nobody you named" settles them
     // outright, while a table that omits them makes each one look like a table
     // too old to trust and buy another walk.
-    int count = ::proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0);
-    if (count <= 0) {
+    const QList<qint64> pids = listProcessIds();
+    if (pids.isEmpty()) {
         // Not cached: m_everBuilt stays false so the next connection tries
         // again, instead of every connection for the next TTL inheriting one
         // failed call's emptiness.
@@ -389,86 +504,10 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
         finishScan(now, false);
         return;
     }
-    QByteArray pidBuf(count, Qt::Uninitialized);
-    count = ::proc_listpids(PROC_ALL_PIDS, 0, pidBuf.data(), pidBuf.size());
-    if (count <= 0) {
-        m_report.lastErrno = errno;
-        finishScan(now, false);
-        return;
-    }
-    const int nPids = count / static_cast<int>(sizeof(pid_t));
-    const auto *pids = reinterpret_cast<const pid_t *>(pidBuf.constData());
 
-    for (int i = 0; i < nPids; ++i) {
-        const pid_t pid = pids[i];
-        if (pid <= 0)
-            continue;
+    for (const qint64 pid : pids) {
         ++m_report.pidsScanned;
-        errno = 0;
-        int bufSize = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
-        if (bufSize <= 0) {
-            // A process that has gone is not a process that refused. As root the
-            // refusals should be none, so a count here is itself the answer to
-            // why nothing matches.
-            if (errno == ESRCH)
-                ++m_report.pidsWithoutProgram;
-            else
-                ++m_report.pidsSkipped;
-            m_report.lastErrno = errno;
-            continue;
-        }
-        QByteArray fdBuf(bufSize, Qt::Uninitialized);
-        bufSize = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fdBuf.data(), fdBuf.size());
-        if (bufSize <= 0)
-            continue;
-        const int nFds = bufSize / static_cast<int>(sizeof(proc_fdinfo));
-        const auto *fds = reinterpret_cast<const proc_fdinfo *>(fdBuf.constData());
-        for (int f = 0; f < nFds; ++f) {
-            if (fds[f].proc_fdtype != PROX_FDTYPE_SOCKET)
-                continue;
-            ++m_report.socketsSeen;
-            // Over-allocated as insurance, and nothing more than that. It was
-            // committed as "the macOS cause" on the theory that a kernel newer
-            // than the build SDK would refuse an exact-sized buffer with ENOMEM
-            // and skip every socket on the machine. The refusal mechanism is
-            // real, but the premise is not: sizeof(struct socket_fdinfo) has
-            // been 792 bytes at every XNU release from macOS 10.14 to now — the
-            // union is sized by un_sockinfo, which has not moved — and the
-            // structs sit outside any PRIVATE/KERNEL guard, so the SDK header
-            // and the kernel header cannot disagree. The exact-sized version was
-            // correct. This is kept because it costs nothing and removes the
-            // question, not because it fixed anything.
-            alignas(socket_fdinfo) char raw[sizeof(socket_fdinfo) + 1024] = {};
-            const int got = ::proc_pidfdinfo(pid, fds[f].proc_fd, PROC_PIDFDSOCKETINFO, raw,
-                                             static_cast<int>(sizeof(raw)));
-            if (got <= 0)
-                continue;
-            const socket_fdinfo &si = *reinterpret_cast<const socket_fdinfo *>(raw);
-            const int family = si.psi.soi_family;
-            if (family != AF_INET && family != AF_INET6)
-                continue;
-            int proto = 0;
-            std::uint16_t port = 0;
-            if (si.psi.soi_kind == SOCKINFO_TCP) {
-                proto = IPPROTO_TCP;
-                port = ntohs(si.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport);
-            } else if (si.psi.soi_kind == SOCKINFO_IN) {
-                proto = IPPROTO_UDP;
-                port = ntohs(si.psi.soi_proto.pri_in.insi_lport);
-            } else {
-                continue;
-            }
-            if (port == 0)
-                continue;
-            // Does not overwrite: two processes can legitimately hold the same
-            // (protocol, port) — a listener and an accepted connection, or a
-            // socket one of them is about to close — and letting whichever pid
-            // the scan happened to reach last win makes the answer depend on
-            // process enumeration order.
-            const std::uint32_t key = ownerKey(proto, port);
-            if (!m_owners.contains(key))
-                m_owners.insert(key, static_cast<qint64>(pid));
-        }
+        collectSocketsOfProcess(static_cast<pid_t>(pid), &m_owners, &m_report);
     }
 
     finishScan(now, true);
@@ -513,6 +552,70 @@ constexpr SocketTable kSocketTables[] = {
         {"/proc/net/udp6", AF_INET6, IPPROTO_UDP},
 };
 
+// What one message in a dump turns out to be.
+enum class DiagStep {
+    Recorded, // an ordinary socket, appended to out
+    Ignored,  // not ours: a leftover from a dump abandoned earlier
+    Finished, // the kernel says that is all of them
+    Failed,   // the kernel says it will not answer
+};
+
+// Read one message of a dump.
+DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
+                         QList<SocketOwner> *out, int *error)
+{
+    // A dump abandoned earlier would leave its remaining messages in the
+    // socket; they are recognised by the sequence number and dropped.
+    if (header->nlmsg_seq != seq)
+        return DiagStep::Ignored;
+    if (header->nlmsg_type == NLMSG_DONE)
+        return DiagStep::Finished;
+    if (header->nlmsg_type == NLMSG_ERROR) {
+        const auto *failure = static_cast<const nlmsgerr *>(NLMSG_DATA(header));
+        // The kernel reports errors as negative errno. A kernel built without
+        // the matching diag module answers here rather than failing the send.
+        *error = failure->error < 0 ? -failure->error : EIO;
+        return DiagStep::Failed;
+    }
+    const auto *entry = static_cast<const inet_diag_msg *>(NLMSG_DATA(header));
+    SocketOwner owner;
+    owner.port = ntohs(entry->id.idiag_sport);
+    owner.proto = proto;
+    owner.inode = entry->idiag_inode;
+    if (owner.port != 0)
+        out->append(owner);
+    return DiagStep::Recorded;
+}
+
+// Read every message in one datagram of a dump, and say what the last one was.
+//
+// Walked by hand rather than with NLMSG_OK/NLMSG_NEXT. Those macros compare the
+// kernel's unsigned length against the caller's, which the client build rejects
+// outright (-Wsign-compare -Werror), and the obvious way round it — an unsigned
+// counter — is worse than a warning: NLMSG_ALIGN can round a message up past
+// what is left, and the subtraction would then wrap to an enormous value and
+// walk off the end of the buffer. Both bounds are checked here instead.
+DiagStep walkDatagram(char *data, ssize_t length, std::uint32_t seq, int proto,
+                      QList<SocketOwner> *out, int *error)
+{
+    char *cursor = data;
+    ssize_t remaining = length;
+    while (remaining >= static_cast<ssize_t>(sizeof(nlmsghdr))) {
+        auto *header = reinterpret_cast<nlmsghdr *>(cursor);
+        const ssize_t declared = static_cast<ssize_t>(header->nlmsg_len);
+        if (declared < static_cast<ssize_t>(sizeof(nlmsghdr)) || declared > remaining)
+            break;
+        const ssize_t step = static_cast<ssize_t>(NLMSG_ALIGN(header->nlmsg_len));
+        cursor += step;
+        remaining = step > remaining ? 0 : remaining - step;
+
+        const DiagStep outcome = readDiagMessage(header, seq, proto, out, error);
+        if (outcome == DiagStep::Finished || outcome == DiagStep::Failed)
+            return outcome;
+    }
+    return DiagStep::Recorded;
+}
+
 // One sock_diag dump: every socket of one family and protocol, appended to out.
 // Returns 0, or the error the kernel replied with.
 int dumpOneFamily(int fd, const SocketTable &table, std::uint32_t seq, QByteArray *buffer,
@@ -554,45 +657,13 @@ int dumpOneFamily(int fd, const SocketTable &table, std::uint32_t seq, QByteArra
             return errno != 0 ? errno : EIO;
         if (got > buffer->size())
             return EMSGSIZE;
-        // Walked by hand rather than with NLMSG_OK/NLMSG_NEXT. Those macros
-        // compare the kernel's unsigned length against the caller's, which the
-        // client build rejects outright (-Wsign-compare -Werror), and the
-        // obvious way round it — an unsigned counter — is worse than a warning:
-        // NLMSG_ALIGN can round a message up past what is left, and the
-        // subtraction would then wrap to an enormous value and walk off the end
-        // of the buffer. Both bounds are checked here instead.
-        char *cursor = buffer->data();
-        ssize_t remaining = got;
-        while (remaining >= static_cast<ssize_t>(sizeof(nlmsghdr))) {
-            auto *header = reinterpret_cast<nlmsghdr *>(cursor);
-            const ssize_t declared = static_cast<ssize_t>(header->nlmsg_len);
-            if (declared < static_cast<ssize_t>(sizeof(nlmsghdr)) || declared > remaining)
-                break;
-            const ssize_t step = static_cast<ssize_t>(NLMSG_ALIGN(header->nlmsg_len));
-            cursor += step;
-            remaining = step > remaining ? 0 : remaining - step;
 
-            // A dump abandoned earlier would leave its remaining messages in the
-            // socket; they are recognised by the sequence number and dropped.
-            if (header->nlmsg_seq != seq)
-                continue;
-            if (header->nlmsg_type == NLMSG_DONE)
-                return 0;
-            if (header->nlmsg_type == NLMSG_ERROR) {
-                const auto *error = static_cast<const nlmsgerr *>(NLMSG_DATA(header));
-                // The kernel reports errors as negative errno. A kernel built
-                // without the matching diag module answers here rather than
-                // failing the send.
-                return error->error < 0 ? -error->error : EIO;
-            }
-            const auto *entry = static_cast<const inet_diag_msg *>(NLMSG_DATA(header));
-            SocketOwner owner;
-            owner.port = ntohs(entry->id.idiag_sport);
-            owner.proto = table.proto;
-            owner.inode = entry->idiag_inode;
-            if (owner.port != 0)
-                out->append(owner);
-        }
+        int failure = 0;
+        const DiagStep outcome = walkDatagram(buffer->data(), got, seq, table.proto, out, &failure);
+        if (outcome == DiagStep::Finished)
+            return 0;
+        if (outcome == DiagStep::Failed)
+            return failure;
     }
 }
 
@@ -678,6 +749,15 @@ QString readWholeFile(const char *path, QByteArray *buffer)
     return QString::fromLatin1(buffer->constData(), static_cast<int>(total));
 }
 
+// The socket inodes held by the processes a rule names, and nobody else's.
+//
+// Reading the executable is one readlink; reading a process's descriptors is a
+// directory listing and a readlink each. Asking the cheap question first is what
+// keeps the walk affordable enough to happen on a connection.
+QHash<std::uint64_t, qint64> watchedSocketInodes(const QList<qint64> &pids,
+                                                 const QStringList &watch,
+                                                 ProcessLookup::ScanReport *report);
+
 // The socket inodes one process holds open, by reading its /proc/<pid>/fd
 // links. This is what `ss -p` does, and it is the expensive half of a Linux
 // lookup — a directory listing plus one readlink per descriptor — which is why
@@ -712,6 +792,34 @@ void collectSocketInodes(qint64 pid, QHash<std::uint64_t, qint64> *out,
     }
 }
 
+QHash<std::uint64_t, qint64> watchedSocketInodes(const QList<qint64> &pids,
+                                                 const QStringList &watch,
+                                                 ProcessLookup::ScanReport *report)
+{
+    QHash<std::uint64_t, qint64> byInode;
+    for (const qint64 pid : pids) {
+        ++report->pidsScanned;
+        errno = 0;
+        const AppIdentity id = identityForPid(pid);
+        if (id.executablePath.isEmpty()) {
+            // Two different things, and telling them apart is the whole value of
+            // the count. A kernel thread has no executable and never will —
+            // there are hundreds of them on an ordinary desktop — while a
+            // refusal means this walk cannot see the machine it is on.
+            if (errno == ENOENT || errno == ESRCH)
+                ++report->pidsWithoutProgram;
+            else
+                ++report->pidsSkipped;
+            continue;
+        }
+        if (!appMatchesRules(id, watch))
+            continue;
+        ++report->pidsWatched;
+        collectSocketInodes(pid, &byInode, report);
+    }
+    return byInode;
+}
+
 } // namespace
 
 void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
@@ -728,27 +836,7 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
         return;
     }
 
-    QHash<std::uint64_t, qint64> byInode;
-    for (const qint64 pid : pids) {
-        ++m_report.pidsScanned;
-        errno = 0;
-        const AppIdentity id = identityForPid(pid);
-        if (id.executablePath.isEmpty()) {
-            // Two different things, and telling them apart is the whole value of
-            // the count. A kernel thread has no executable and never will —
-            // there are hundreds of them on an ordinary desktop — while a
-            // refusal means this walk cannot see the machine it is on.
-            if (errno == ENOENT || errno == ESRCH)
-                ++m_report.pidsWithoutProgram;
-            else
-                ++m_report.pidsSkipped;
-            continue;
-        }
-        if (!appMatchesRules(id, m_watch))
-            continue;
-        ++m_report.pidsWatched;
-        collectSocketInodes(pid, &byInode, &m_report);
-    }
+    const QHash<std::uint64_t, qint64> byInode = watchedSocketInodes(pids, m_watch, &m_report);
 
     // Every socket on the machine, whether or not anything watched holds it. The
     // ones nothing holds are the point: they are what lets a connection from

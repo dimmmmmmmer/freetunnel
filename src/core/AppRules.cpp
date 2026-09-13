@@ -35,10 +35,6 @@ bool looksLikePath(const QString &rule)
     return rule.contains(QLatin1Char('/')) || rule.contains(QLatin1Char('\\'));
 }
 
-// The directory a path is in, in the one spelling both sides of a comparison
-// use. QFileInfo::path() answers with forward slashes whatever it was given, so
-// without bringing it back to native separators a rule and a process path would
-// disagree on Windows and no directory rule would ever match there.
 QString directoryOfPath(const QString &path)
 {
     const QString directory = QFileInfo(QDir::fromNativeSeparators(path)).path();
@@ -64,6 +60,31 @@ bool isPlausibleFileName(const QString &name)
     return true;
 }
 
+// The directory a path is in, in the one spelling both sides of a comparison
+// use. QFileInfo::path() answers with forward slashes whatever it was given, so
+// without bringing it back to native separators a rule and a process path would
+// disagree on Windows and no directory rule would ever match there.
+// A rule that is a path, in storage and comparison form. Empty when it is not
+// one: a relative path, or something whose last segment cannot be a file name.
+QString normalizedPathRule(const QString &rule)
+{
+    // QDir::cleanPath resolves "." and ".." segments and collapses repeated
+    // separators, so two spellings of the same path compare equal. It leaves
+    // symlinks alone, which is correct here: we are naming a rule, not opening
+    // a file, and resolving links at rule-entry time would bake in whatever the
+    // link pointed at that day.
+    QString path = QDir::cleanPath(QDir::fromNativeSeparators(rule));
+    if (path.endsWith(QLatin1Char('/')) && path.size() > 1)
+        path.chop(1);
+
+    const QFileInfo info(path);
+    if (!info.isAbsolute())
+        return {};
+    if (!isPlausibleFileName(info.fileName()))
+        return {};
+    return QDir::toNativeSeparators(path);
+}
+
 } // namespace
 
 QString normalizedAppRule(const QString &rule)
@@ -81,23 +102,7 @@ QString normalizedAppRule(const QString &rule)
 
     if (!looksLikePath(r))
         return isPlausibleFileName(r) ? r : QString();
-
-    // QDir::cleanPath resolves "." and ".." segments and collapses repeated
-    // separators, so two spellings of the same path compare equal. It leaves
-    // symlinks alone, which is correct here: we are naming a rule, not opening
-    // a file, and resolving links at rule-entry time would bake in whatever the
-    // link pointed at that day.
-    QString path = QDir::cleanPath(QDir::fromNativeSeparators(r));
-    if (path.endsWith(QLatin1Char('/')) && path.size() > 1)
-        path.chop(1);
-
-    const QFileInfo info(path);
-    if (!info.isAbsolute())
-        return {};
-    if (!isPlausibleFileName(info.fileName()))
-        return {};
-
-    return QDir::toNativeSeparators(path);
+    return normalizedPathRule(r);
 }
 
 bool isValidAppRule(const QString &rule)

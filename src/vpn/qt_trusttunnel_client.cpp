@@ -454,6 +454,82 @@ QString describeScan(const freetunnel::ProcessLookup &lookup)
             .arg(source);
 }
 
+// The core's own vocabulary for what the rules decided.
+ag::VpnConnectAction coreAction(freetunnel::AppAction action)
+{
+    switch (action) {
+    case freetunnel::AppAction::ForceBypass:
+        return ag::VPN_CA_FORCE_BYPASS;
+    case freetunnel::AppAction::ForceTunnel:
+        return ag::VPN_CA_FORCE_REDIRECT;
+    case freetunnel::AppAction::Default:
+        break;
+    }
+    return ag::VPN_CA_DEFAULT;
+}
+
+// Said once per session, in the app's own log, because the helper's stderr goes
+// to a root-owned temp file nobody reporting a problem will ever read.
+//
+// Without this the feature is unobservable: a rule that never matched and a rule
+// that matched and was overruled look identical from outside, and the first
+// question anyone asks — "did it even see my program?" — has no answer.
+QString scanReportLine(const freetunnel::ProcessLookup &lookup, const QStringList &rules)
+{
+    QString line = describeScan(lookup);
+    // When the walk saw the machine and none of it matched, the rules themselves
+    // are the next thing anyone would ask for, and asking costs a round trip
+    // through whoever is reporting the problem. This is what a real one turned
+    // on: a rule naming the file a menu entry points at, which is a launcher
+    // that execs something else and so is never a running program.
+    //
+    // Only where the walk decides which processes to open, which is Linux: the
+    // other two read every process and leave pidsWatched at zero whatever the
+    // rules say, so the same test there would print this on every session
+    // including the ones that work.
+#ifdef Q_OS_LINUX
+    const freetunnel::ProcessLookup::ScanReport &r = lookup.lastScan();
+    if (r.ok && r.pidsWatched == 0 && r.pidsScanned > 0) {
+        line += QStringLiteral("\n  no running program matches: %1")
+                        .arg(rules.join(QStringLiteral(", ")));
+    }
+#else
+    Q_UNUSED(rules)
+#endif
+    return line;
+}
+
+// Where a flow came from, for the one line a person reads to find out what
+// happened to it.
+QString sourceEndpoint(const ag::VpnConnectRequestSnapshot &req)
+{
+    const QString src = QString::fromStdString(req.src_ip);
+    if (src.isEmpty())
+        return QStringLiteral("port %1").arg(req.src_port);
+    if (src.contains(QLatin1Char(':'))) // an IPv6 address needs brackets to be read
+        return QStringLiteral("[%1]:%2").arg(src).arg(req.src_port);
+    return QStringLiteral("%1:%2").arg(src).arg(req.src_port);
+}
+
+// What was decided about one connection.
+//
+// An unnamed flow means one of two things, and the source endpoint is what tells
+// them apart in a report: either no rule names the program — the walk
+// deliberately never opened it, which is the ordinary case and the reason this
+// line only appears in verbose mode — or a rule does name it and the walk could
+// not see it, which the scan line reports as refusals.
+QString decisionLine(const ag::VpnConnectRequestSnapshot &req, const freetunnel::AppIdentity &app,
+                     ag::VpnConnectAction action)
+{
+    const QString who = app.name.isEmpty()
+            ? QStringLiteral("unknown (%1)").arg(sourceEndpoint(req))
+            : app.name;
+    const QString what = action == ag::VPN_CA_FORCE_BYPASS ? QStringLiteral("bypass")
+            : action == ag::VPN_CA_FORCE_REDIRECT          ? QStringLiteral("tunnel")
+                                                           : QStringLiteral("no rule");
+    return QStringLiteral("app %1 → %2").arg(who, what);
+}
+
 } // namespace
 
 // Split out of makeCallbacks, which had grown to 145 lines around it. The seam
@@ -499,16 +575,7 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         const freetunnel::LocalFlow flow{req.family, req.proto, req.src_port,
                                          QString::fromStdString(req.src_ip)};
         const freetunnel::AppIdentity app = lookup->resolve(flow);
-        switch (freetunnel::appActionFor(app, rules, selective)) {
-        case freetunnel::AppAction::ForceBypass:
-            decision->action = ag::VPN_CA_FORCE_BYPASS;
-            break;
-        case freetunnel::AppAction::ForceTunnel:
-            decision->action = ag::VPN_CA_FORCE_REDIRECT;
-            break;
-        case freetunnel::AppAction::Default:
-            break;
-        }
+        decision->action = coreAction(freetunnel::appActionFor(app, rules, selective));
         // decision->app_name is deliberately NOT set. It looks like a harmless way
         // to get the program into the core's own log, and it is not: the core
         // passes it to the upstream, which puts it in the CONNECT request sent
@@ -518,38 +585,9 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // telling anyone. The line below puts it in the local log instead, which
         // is where the user was going to look anyway.
 
-        // And say so in the app's own log. Without this the feature is
-        // unobservable: a rule that never matched and a rule that matched and
-        // was overruled look identical from outside, and the first question
-        // anyone asks — "did it even see my program?" — has no answer.
-        // Said once per session, in the app's own log, because the helper's
-        // stderr goes to a root-owned temp file nobody reporting a problem will
-        // ever read. The numbers are the point: distinct is what distinguishes
-        // "this process cannot see other processes" (1) from "the table is full
-        // and the port simply was not in it" (hundreds), and those need
-        // completely different fixes. It replaces a yes/no that could not fire
-        // in either case.
         if (!*scanWarned) {
             *scanWarned = true;
-            QString line = describeScan(*lookup);
-            // When the walk saw the machine and none of it matched, the rules
-            // themselves are the next thing anyone would ask for, and asking
-            // costs a round trip through whoever is reporting the problem. This
-            // is what a real one turned on: a rule naming the file a menu entry
-            // points at, which is a launcher that execs something else and so is
-            // never a running program.
-            //
-            // Only where the walk decides which processes to open, which is
-            // Linux: the other two read every process and leave pidsWatched at
-            // zero whatever the rules say, so the same test there would print
-            // this on every session including the ones that work.
-#ifdef Q_OS_LINUX
-            if (lookup->lastScan().ok && lookup->lastScan().pidsWatched == 0
-                && lookup->lastScan().pidsScanned > 0) {
-                line += QStringLiteral("\n  no running program matches: %1")
-                                .arg(rules.join(QStringLiteral(", ")));
-            }
-#endif
+            const QString line = scanReportLine(*lookup, rules);
             std::lock_guard<std::mutex> lk(guard->mutex);
             if (guard->alive)
                 postConnectionInfo(session, line);
@@ -562,26 +600,12 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // the machine. Verbose is where that question gets answered.
         if (!routed && !verbose)
             return;
-        // An unnamed flow now means one of two things, and the source endpoint is
-        // what tells them apart in a report: either no rule names the program —
-        // the walk deliberately never opened it, which is the ordinary case and
-        // the reason this line only appears in verbose mode — or a rule does
-        // name it and the walk could not see it, which the scan line above
-        // reports as refusals.
-        const QString src = QString::fromStdString(req.src_ip);
-        const QString where = src.isEmpty()          ? QStringLiteral("port %1").arg(req.src_port)
-                : src.contains(QLatin1Char(':'))     ? QStringLiteral("[%1]:%2").arg(src).arg(req.src_port)
-                                                     : QStringLiteral("%1:%2").arg(src).arg(req.src_port);
-        const QString who =
-                app.name.isEmpty() ? QStringLiteral("unknown (%1)").arg(where) : app.name;
-        const QString what = decision->action == ag::VPN_CA_FORCE_BYPASS ? QStringLiteral("bypass")
-                : decision->action == ag::VPN_CA_FORCE_REDIRECT          ? QStringLiteral("tunnel")
-                                                                         : QStringLiteral("no rule");
+        const QString line = decisionLine(req, app, decision->action);
         // The lookup above may be slow; the guard is taken only now, and only
         // to reach back into an object that may have been destroyed meanwhile.
         std::lock_guard<std::mutex> lk(guard->mutex);
         if (guard->alive)
-            postConnectionInfo(session, QStringLiteral("app %1 → %2").arg(who, what));
+            postConnectionInfo(session, line);
     };
 }
 

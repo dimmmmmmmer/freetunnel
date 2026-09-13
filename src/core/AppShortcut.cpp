@@ -354,6 +354,25 @@ QString droppedPathOf(const QString &pathOrUrl)
 
 } // namespace
 
+namespace {
+
+// The program a .desktop entry stands for.
+QString targetFromDesktopEntry(const QString &path)
+{
+    QFile entry(path);
+    if (!entry.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    const QString contents = QString::fromUtf8(entry.readAll());
+    // Checked first: for a sandboxed program the launcher path is a real file
+    // and would resolve perfectly well — to the wrong thing.
+    const QString sandboxed = sandboxedProgramFromDesktopEntry(contents);
+    if (!sandboxed.isEmpty())
+        return sandboxed;
+    return absoluteExecutable(executableFromDesktopEntry(contents));
+}
+
+} // namespace
+
 QString resolveApplicationTarget(const QString &pathOrUrl)
 {
     const QString path = droppedPathOf(pathOrUrl);
@@ -363,18 +382,8 @@ QString resolveApplicationTarget(const QString &pathOrUrl)
     const QFileInfo info(path);
     const QString suffix = info.suffix().toLower();
 
-    if (suffix == QLatin1String("desktop") && info.isFile()) {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-            return {};
-        const QString contents = QString::fromUtf8(f.readAll());
-        // Checked first: for a sandboxed program the launcher path is a real
-        // file and would resolve perfectly well — to the wrong thing.
-        const QString sandboxed = sandboxedProgramFromDesktopEntry(contents);
-        if (!sandboxed.isEmpty())
-            return sandboxed;
-        return absoluteExecutable(executableFromDesktopEntry(contents));
-    }
+    if (suffix == QLatin1String("desktop") && info.isFile())
+        return targetFromDesktopEntry(path);
 
     if (suffix == QLatin1String("app") && info.isDir())
         return executableInsideBundle(path);
