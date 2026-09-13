@@ -60,7 +60,7 @@ Item {
             // Non-Latin layout (e.g. Russian): key()/text() are Cyrillic. Recover
             // the Latin letter from the physical key position so the captured
             // shortcut is the same whatever layout was active.
-            kn = backend.physicalLetterForScanCode(e.nativeScanCode)
+            kn = backend.physicalLetterForKey(e.nativeScanCode, e.nativeVirtualKey)
         }
         if (kn === "") return
         parts.push(kn)

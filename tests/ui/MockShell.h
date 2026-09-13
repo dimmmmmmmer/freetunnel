@@ -42,7 +42,7 @@ public:
     Q_INVOKABLE QString keyGlyphs(const QString &seq) const { return seq; }
     // Mirrors Main.qml's keyName(): a portable QKeySequence name for a key code,
     // or "" when the layout gives a non-Latin character (HotkeyField then falls
-    // back to backend.physicalLetterForScanCode).
+    // back to backend.physicalLetterForKey).
     Q_INVOKABLE QString keyName(int key, const QString &text) const;
     Q_INVOKABLE void startWindowDrag(QObject *) {}
 

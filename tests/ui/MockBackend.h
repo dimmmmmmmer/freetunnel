@@ -135,7 +135,7 @@ public:
     void setHotkeyDisconnect(const QString &v);
     // Backend maps a key's physical position to its Latin letter; nothing to map
     // headlessly, so report "not a letter key" like the real one does.
-    Q_INVOKABLE QString physicalLetterForScanCode(quint32) const { return QString(); }
+    Q_INVOKABLE QString physicalLetterForKey(quint32, quint32) const { return QString(); }
 
     // Empty = the OS keychain works, which is the normal desktop case.
     QString credentialStorageWarning() const { return m_credentialStorageWarning; }

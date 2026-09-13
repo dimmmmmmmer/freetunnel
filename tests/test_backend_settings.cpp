@@ -237,17 +237,22 @@ void TestBackendSettings::physicalKeyPositionsMapToLetters()
 {
     Backend backend;
 #if defined(Q_OS_MACOS)
-    QCOMPARE(backend.physicalLetterForScanCode(12), QStringLiteral("Q"));
-    QCOMPARE(backend.physicalLetterForScanCode(0), QStringLiteral("A"));
-    QCOMPARE(backend.physicalLetterForScanCode(6), QStringLiteral("Z"));
+    // Qt's cocoa plugin leaves nativeScanCode at zero and puts the kVK_* code in
+    // nativeVirtualKey, so the scan code is deliberately given as something that
+    // would be wrong if it were read: every key used to capture as "A", because
+    // the zero it was reading IS kVK_ANSI_A.
+    QCOMPARE(backend.physicalLetterForKey(0, 12), QStringLiteral("Q"));
+    QCOMPARE(backend.physicalLetterForKey(0, 0), QStringLiteral("A"));
+    QCOMPARE(backend.physicalLetterForKey(0, 6), QStringLiteral("Z"));
+    QCOMPARE(backend.physicalLetterForKey(0x1E, 3), QStringLiteral("F"));
 #elif defined(Q_OS_WIN)
-    QCOMPARE(backend.physicalLetterForScanCode(0x10), QStringLiteral("Q"));
-    QCOMPARE(backend.physicalLetterForScanCode(0x1E), QStringLiteral("A"));
-    QCOMPARE(backend.physicalLetterForScanCode(0x2C), QStringLiteral("Z"));
+    QCOMPARE(backend.physicalLetterForKey(0x10, 0), QStringLiteral("Q"));
+    QCOMPARE(backend.physicalLetterForKey(0x1E, 0), QStringLiteral("A"));
+    QCOMPARE(backend.physicalLetterForKey(0x2C, 0), QStringLiteral("Z"));
 #else
-    QCOMPARE(backend.physicalLetterForScanCode(24), QStringLiteral("Q"));
-    QCOMPARE(backend.physicalLetterForScanCode(38), QStringLiteral("A"));
-    QCOMPARE(backend.physicalLetterForScanCode(52), QStringLiteral("Z"));
+    QCOMPARE(backend.physicalLetterForKey(24, 0), QStringLiteral("Q"));
+    QCOMPARE(backend.physicalLetterForKey(38, 0), QStringLiteral("A"));
+    QCOMPARE(backend.physicalLetterForKey(52, 0), QStringLiteral("Z"));
 #endif
 }
 
@@ -257,8 +262,8 @@ void TestBackendSettings::physicalKeyPositionsMapToLetters()
 void TestBackendSettings::unknownScanCodesMapToNothing()
 {
     Backend backend;
-    QVERIFY(backend.physicalLetterForScanCode(9999).isEmpty());
-    QVERIFY(backend.physicalLetterForScanCode(0xFFFFFFFFu).isEmpty());
+    QVERIFY(backend.physicalLetterForKey(9999, 9999).isEmpty());
+    QVERIFY(backend.physicalLetterForKey(0xFFFFFFFFu, 0xFFFFFFFFu).isEmpty());
 }
 
 // Launch at login. Only exercised where the entry is a file under a directory

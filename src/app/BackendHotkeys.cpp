@@ -8,11 +8,25 @@
 
 #include <QHotkey>
 
-// Physical key position → Latin letter. nativeScanCode is layout-independent, so
-// the same physical key yields the same shortcut regardless of the active layout.
-// macOS: kVK_* virtual key code. Windows: set-1 scan code. X11/xcb: evdev keycode.
-QString Backend::physicalLetterForScanCode(quint32 nativeScanCode) const
+// Physical key position → Latin letter, so the same physical key yields the same
+// shortcut whatever layout is active.
+//
+// Both codes are taken because the platforms do not agree on which one carries
+// the position. Windows fills in a set-1 scan code and xcb an evdev keycode;
+// macOS leaves nativeScanCode at zero and puts the kVK_* virtual key in
+// nativeVirtualKey instead (Qt's cocoa plugin assigns nativeVirtualKey =
+// nsevent.keyCode and never touches the other). Reading the scan code there gave
+// zero for every key, and kVK_ANSI_A IS zero — so on a Russian layout every key
+// captured as "A", one hotkey could be bound and the second silently collided
+// with the first.
+QString Backend::physicalLetterForKey(quint32 nativeScanCode, quint32 nativeVirtualKey) const
 {
+#if defined(Q_OS_MACOS)
+    const quint32 position = nativeVirtualKey;
+#else
+    const quint32 position = nativeScanCode;
+    Q_UNUSED(nativeVirtualKey)
+#endif
     static const QHash<quint32, char> kMap = {
 #if defined(Q_OS_MACOS)
         {0, 'A'},  {11, 'B'}, {8, 'C'},  {2, 'D'},  {14, 'E'}, {3, 'F'},  {5, 'G'},
@@ -32,7 +46,7 @@ QString Backend::physicalLetterForScanCode(quint32 nativeScanCode) const
         {55, 'V'}, {25, 'W'}, {53, 'X'}, {29, 'Y'}, {52, 'Z'},
 #endif
     };
-    const auto it = kMap.constFind(nativeScanCode);
+    const auto it = kMap.constFind(position);
     return it == kMap.cend() ? QString() : QString(QChar::fromLatin1(it.value()));
 }
 

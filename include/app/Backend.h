@@ -203,7 +203,7 @@ public:
     // Maps a key's physical position (QKeyEvent::nativeScanCode) to its Latin
     // letter "A".."Z", or "" if it isn't a letter key. Lets hotkey capture work
     // under a non-Latin layout (e.g. Russian), where key()/text() are Cyrillic.
-    Q_INVOKABLE QString physicalLetterForScanCode(quint32 nativeScanCode) const;
+    Q_INVOKABLE QString physicalLetterForKey(quint32 nativeScanCode, quint32 nativeVirtualKey) const;
 
     QString appVersion() const;
     QString coreVersion() const;
