@@ -136,6 +136,13 @@ void TestInstanceControl::peerCredentialCheckNeedsALiveSocket()
     QVERIFY(peer != nullptr);
 
     // This process is trivially the same user as itself, on both ends.
+    //
+    // On Windows this stopped being trivial: the check used to return true for
+    // any connected socket, and now asks the pipe which process is serving it
+    // and compares that process's user against ours. The value of these two
+    // lines there is that the real check still says yes to the legitimate case —
+    // failing closed is the whole design, and a check that refuses everything
+    // would silently stop a second launch from reaching the running instance.
     QVERIFY(freetunnel::localSocketPeerIsSameUser(peer));
     QVERIFY(freetunnel::localSocketPeerIsSameUser(&client));
 

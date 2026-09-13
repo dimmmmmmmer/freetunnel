@@ -9,7 +9,12 @@
 #include <QRandomGenerator>
 #include <QStandardPaths>
 
-#if !defined(Q_OS_WIN)
+#if defined(Q_OS_WIN)
+// clang-format off
+#include <windows.h>
+#include <namedpipeapi.h>
+// clang-format on
+#else
 #include <unistd.h>
 #if defined(Q_OS_LINUX)
 #include <sys/socket.h>
@@ -153,13 +158,68 @@ bool instanceTokensEqual(const QString &a, const QString &b)
     return diff == 0;
 }
 
+#if defined(Q_OS_WIN)
+namespace {
+
+// The SID of the user a process is running as, or empty when it cannot be read.
+QByteArray processUserSid(HANDLE process)
+{
+    HANDLE token = nullptr;
+    if (::OpenProcessToken(process, TOKEN_QUERY, &token) == 0)
+        return {};
+    DWORD size = 0;
+    ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    QByteArray sid;
+    if (size > 0) {
+        QByteArray buffer(static_cast<int>(size), Qt::Uninitialized);
+        if (::GetTokenInformation(token, TokenUser, buffer.data(), size, &size) != 0) {
+            const auto *user = reinterpret_cast<const TOKEN_USER *>(buffer.constData());
+            if (user->User.Sid != nullptr && ::IsValidSid(user->User.Sid) != 0) {
+                sid = QByteArray(reinterpret_cast<const char *>(user->User.Sid),
+                                 static_cast<int>(::GetLengthSid(user->User.Sid)));
+            }
+        }
+    }
+    ::CloseHandle(token);
+    return sid;
+}
+
+} // namespace
+#endif
+
 bool localSocketPeerIsSameUser(QLocalSocket *socket)
 {
     if (!socket)
         return false;
 #if defined(Q_OS_WIN)
-    // QLocalServer::UserAccessOption restricts the named pipe to the same user.
-    return socket->state() == QLocalSocket::ConnectedState;
+    // Ask who is on the other end, rather than assuming.
+    //
+    // What stood here was "QLocalServer::UserAccessOption restricts the named
+    // pipe to the same user", and returned true for any connected socket. That
+    // is true of the pipe this application CREATES and says nothing about this
+    // side, which opens a name another user may have created first: Qt opens it
+    // with CreateFile and default security, checking nothing about the server.
+    // The caller then sends the instance token and the contents of a tt:// link
+    // — a VPN username and password — to whoever answered, and exits as though
+    // an instance were already running, so the application never starts.
+    //
+    // Failing closed is deliberate at every step. A process belonging to another
+    // user normally cannot even be opened for query, and that refusal is the
+    // answer.
+    const auto pipe = reinterpret_cast<HANDLE>(socket->socketDescriptor());
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE)
+        return false;
+    ULONG serverPid = 0;
+    if (::GetNamedPipeServerProcessId(pipe, &serverPid) == 0 || serverPid == 0)
+        return false;
+    HANDLE server = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                  static_cast<DWORD>(serverPid));
+    if (server == nullptr)
+        return false;
+    const QByteArray theirs = processUserSid(server);
+    ::CloseHandle(server);
+    const QByteArray ours = processUserSid(::GetCurrentProcess());
+    return !ours.isEmpty() && ours == theirs;
 #else
     const qintptr fd = socket->socketDescriptor();
     if (fd < 0)
