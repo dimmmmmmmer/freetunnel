@@ -857,5 +857,9 @@
         <source>The process answering on the helper port did not authenticate — refusing to continue.</source>
         <translation>Процесс, ответивший на порту помощника, не прошёл проверку подлинности — продолжение отменено.</translation>
     </message>
+    <message>
+        <source>The VPN helper didn&apos;t start — authorization was declined, or the elevation failed.</source>
+        <translation>Служба VPN не запустилась — в правах отказано или повышение не удалось.</translation>
+    </message>
 </context>
 </TS>

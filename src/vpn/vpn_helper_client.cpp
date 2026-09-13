@@ -279,7 +279,50 @@ bool VpnHelperClient::configureProductionHelper()
         fail(err.isEmpty() ? tr("Could not start the VPN helper") : err);
         return false;
     }
+    watchElevationOutcome();
     return true;
+}
+
+// Notice when the elevation prompt was answered with "no".
+//
+// Reaching the helper is a poll — a quarter-second apart, for sixty seconds,
+// because the prompt blocks the helper from starting until someone has finished
+// typing a password. Nothing watched the launcher itself, so a cancelled prompt
+// looked exactly like a slow one: the launcher exited at once and the interface
+// sat on "Connecting…" for the full minute before saying anything.
+void VpnHelperClient::watchElevationOutcome()
+{
+    if (!m_proc)
+        return; // Windows elevates through ShellExecuteEx, which already says no
+    connect(m_proc, &QProcess::finished, this,
+            [this](int code, QProcess::ExitStatus status) {
+                if (!m_starting)
+                    return; // already connected, or torn down
+                if (m_sock && m_sock->state() == QAbstractSocket::ConnectedState)
+                    return;
+#if defined(Q_OS_MACOS)
+                // osascript's job is to put the helper in the background and
+                // leave; finishing cleanly says nothing about whether the helper
+                // came up, and the poll is still the thing that decides. A
+                // refusal is what it reports as an error — "User canceled" is
+                // AppleScript error -128.
+                if (status == QProcess::NormalExit && code == 0)
+                    return;
+#else
+                // pkexec and sudo exec INTO the helper, so while it runs they
+                // are it. Either of them exiting before the connection is made
+                // means there is nothing left to connect to, whatever the code.
+                Q_UNUSED(code)
+                Q_UNUSED(status)
+#endif
+                if (m_attempt) {
+                    m_attempt->stop();
+                    m_attempt->deleteLater();
+                    m_attempt = nullptr;
+                }
+                fail(tr("The VPN helper didn't start — authorization was declined, "
+                        "or the elevation failed."));
+            });
 }
 
 bool VpnHelperClient::configureTestHelper()

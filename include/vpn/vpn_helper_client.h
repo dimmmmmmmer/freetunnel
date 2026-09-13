@@ -64,6 +64,9 @@ private:
     void resetHelperTransport();
     bool configureTestHelper();
     bool configureProductionHelper();
+    // Fail fast when the elevation prompt is answered with "no", instead of
+    // polling a port nothing will ever listen on for a full minute.
+    void watchElevationOutcome();
     void wireHelperSocket(bool testHelper);
     void startHelperConnectRetry();
     void abortStartup();
