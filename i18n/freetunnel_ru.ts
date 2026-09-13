@@ -277,6 +277,10 @@
         <source>That is not a program. Drop an application here, or pick one with Choose…</source>
         <translation>Это не программа. Перетащите приложение сюда или выберите через «Выбрать…»</translation>
     </message>
+    <message>
+        <source>A profile called “%1” already exists</source>
+        <translation>Профиль «%1» уже существует</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

@@ -194,6 +194,16 @@ void TestBackendSplit::profileCreateSelectAndRemove()
     backend.addProfile(QStringLiteral("   "));
     QCOMPARE(backend.profiles().size(), baseCount + 1);
 
+    // And a name that differs only in case, which the storage cannot tell apart.
+    // A profile's name is the key it is written under, and on Windows that is a
+    // registry value name: "Work" and "work" land in the same place, the second
+    // write wins, and after a restart both profiles hold one domain list — so a
+    // config silently gets the rules meant for the other profile. Refused on
+    // every platform, because settings travel between them.
+    backend.addProfile(QStringLiteral("work"));
+    backend.addProfile(QStringLiteral("WORK"));
+    QCOMPARE(backend.profiles().size(), baseCount + 1);
+
     backend.removeProfile(QStringLiteral("Work"));
     QCOMPARE(backend.profiles().size(), baseCount);
     QCOMPARE(backend.activeProfile(), QStringLiteral("Default"));

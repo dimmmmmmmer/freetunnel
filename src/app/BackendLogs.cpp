@@ -165,11 +165,27 @@ void Backend::openLogFolder() {
     else
         QProcess::startDetached(QStringLiteral("open"), {dir});
 #elif defined(Q_OS_WIN)
-    if (QFileInfo::exists(path))
-        QProcess::startDetached(QStringLiteral("explorer.exe"),
-                                {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
-    else
-        QProcess::startDetached(QStringLiteral("explorer.exe"), {QDir::toNativeSeparators(dir)});
+    if (QFileInfo::exists(path)) {
+        // Not an argument list. Explorer does not parse its command line the way
+        // everything else does: it wants /select,"<path>" with the quotes around
+        // the path alone, and Qt — correctly, for any other program — quotes an
+        // argument containing spaces as a whole, producing "/select,C:\Users\John
+        // Doe\...". Explorer makes nothing of that and opens its default
+        // location instead, so the button did nothing useful for anyone whose
+        // account name has a space in it. setNativeArguments is the documented
+        // way to hand Windows the string it actually wants.
+        QProcess explorer;
+        explorer.setProgram(QStringLiteral("explorer.exe"));
+        explorer.setNativeArguments(QStringLiteral("/select,\"") + QDir::toNativeSeparators(path)
+                                    + QLatin1Char('"'));
+        explorer.startDetached();
+    } else {
+        QProcess explorer;
+        explorer.setProgram(QStringLiteral("explorer.exe"));
+        explorer.setNativeArguments(QLatin1Char('"') + QDir::toNativeSeparators(dir)
+                                    + QLatin1Char('"'));
+        explorer.startDetached();
+    }
 #else
     QProcess::startDetached(QStringLiteral("xdg-open"), {dir});
 #endif

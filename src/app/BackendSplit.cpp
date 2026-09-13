@@ -322,6 +322,20 @@ void Backend::selectProfile(const QString &name) {
 void Backend::addProfile(const QString &name) {
     const QString n = name.trimmed();
     if (n.isEmpty() || m_settings.profiles.contains(n)) return;
+    // Nor one that differs only in case. A profile's name becomes the key it is
+    // stored under, and on Windows that is a registry value name, where case is
+    // not distinguishing: "Work" and "work" are written to the same place, the
+    // second write wins, and after a restart both profiles hold the same domain
+    // list — so a config silently gets rules the user assigned to the other one.
+    // In "Through VPN" mode that is the set of destinations that go through the
+    // tunnel. Refused on every platform, because settings travel between them
+    // and because two names a person cannot tell apart is a trap of its own.
+    for (auto it = m_settings.profiles.constBegin(); it != m_settings.profiles.constEnd(); ++it) {
+        if (it.key().compare(n, Qt::CaseInsensitive) == 0) {
+            emit errorOccurred(tr("A profile called “%1” already exists").arg(it.key()));
+            return;
+        }
+    }
     m_settings.profiles.insert(n, {});
     m_settings.profile_order << n;
     m_settings.active_profile = n; // edit the newly created profile
