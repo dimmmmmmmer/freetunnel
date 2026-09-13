@@ -31,6 +31,7 @@ private slots:
     void createConfigOverlayLoads();
     void mainWindowLoads();
     void mainWindowPageNavigation();
+    void closingTheWindowQuitsWhenThereIsNoTray();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -291,6 +292,52 @@ void TestQmlUi::everyComponentLoadsOnItsOwn_data()
                           "components/Sep.qml", "Field.qml", "Toggle.qml"}) {
         QTest::newRow(p) << QString::fromLatin1(p);
     }
+}
+
+// ✕ minimizes rather than quits, because the tray icon is how you come back and
+// how you quit. Qt.labs.platform shows that icon through a StatusNotifier host
+// or not at all — it has no other implementation available to an application
+// that does not link Qt Widgets — so on GNOME without an AppIndicator extension,
+// or on a plain window manager, there is no icon and no tray menu. Minimizing
+// there can put the window somewhere with nothing to bring it back from.
+//
+// Which way this goes depends on the machine, so the test asks the tray what it
+// is and requires the matching behaviour, rather than assuming either.
+void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
+{
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QObject *root = component.create();
+    QVERIFY2(root, qPrintable(component.errorString()));
+
+    QObject *tray = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY2(tray, "the tray icon");
+    const bool trayAvailable = tray->property("available").toBool();
+
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto *close = root->findChild<QQuickItem *>(QStringLiteral("windowCloseButton"));
+    QVERIFY2(close, "the window's own close button");
+    QVERIFY(!m_backend.applicationClosingDown());
+
+    // A real click rather than the signal: what is being tested is the handler
+    // the button actually has, reached the way a person reaches it.
+    const QPointF centre =
+            close->mapToScene(QPointF(close->width() / 2.0, close->height() / 2.0));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
+    QCoreApplication::processEvents();
+
+    if (trayAvailable) {
+        QVERIFY2(!m_backend.applicationClosingDown(),
+                 "with a tray to minimize alongside, the window must not quit");
+    } else {
+        QVERIFY2(m_backend.applicationClosingDown(),
+                 "with no tray there is no way back and no Quit — so it has to quit");
+    }
+    delete root;
 }
 
 void TestQmlUi::everyComponentLoadsOnItsOwn()

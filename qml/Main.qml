@@ -30,11 +30,14 @@ Window {
                                      : (isMac ? "Menlo" : "monospace")
     flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
-    // The window's own ✕ never quits: on macOS the red traffic-light is retargeted
-    // to hide natively (installMacWindowCloseToTray); on Linux and Windows the
-    // custom ✕ minimizes (keeps the taskbar entry and the VPN running). So any
-    // close event that actually reaches this handler is a real quit — tray «Quit»,
-    // ⌘Q (macOS), Ctrl+Q / Alt+F4.
+    // The window's own ✕ normally never quits: on macOS the red traffic-light is
+    // retargeted to hide natively (installMacWindowCloseToTray); on Linux and
+    // Windows the custom ✕ minimizes (keeps the taskbar entry and the VPN
+    // running). So a close event that reaches this handler is usually a real
+    // quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
+    //
+    // The exception is a desktop with no system tray, where ✕ does quit. See the
+    // ✕ itself, below.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
@@ -76,6 +79,7 @@ Window {
     // ---------- system tray ----------
     Platform.SystemTrayIcon {
         id: tray
+        objectName: "systemTray"
         visible: true
         // Green mark when connected — the configs-page "connected" badge
         // color — dimmed when off.
@@ -288,8 +292,16 @@ Window {
         // close: minimize to the taskbar/dock (Linux and Windows alike) rather than
         // hide. A hidden window vanishes from the taskbar entirely, which is
         // disorienting (and on Linux/GNOME a hidden window can't be reliably
-        // brought back). Minimizing keeps the entry and the VPN running; the tray
-        // icon is always present too.
+        // brought back). Minimizing keeps the entry and the VPN running.
+        //
+        // Unless there is no tray to minimize alongside. Qt.labs.platform shows a
+        // tray icon through a StatusNotifier host or not at all — it has no other
+        // implementation available to this application, which does not link Qt
+        // Widgets — so on GNOME without an AppIndicator extension, or on a plain
+        // window manager, there is no icon, no tray menu and therefore no «Quit»
+        // in it. Minimizing there can put the window somewhere with nothing to
+        // bring it back from. ✕ quits instead, which is what a ✕ means anyway
+        // when nothing else is holding the application open.
         Rectangle { width: 30; height: 24; radius: 6
             color: closeMa.containsMouse ? theme.danger : Qt.rgba(theme.danger.r, theme.danger.g, theme.danger.b, 0)
             Behavior on color { ColorAnimation { duration: 100 } }
@@ -299,9 +311,10 @@ Window {
                 Rectangle { anchors.centerIn: parent; width: 13; height: 1.4; radius: 1; rotation: -45
                             color: closeMa.containsMouse ? "white" : theme.textDim }
             }
-            MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true
+            MouseArea { id: closeMa; objectName: "windowCloseButton"
+                        anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: win.showMinimized() }
+                        onClicked: tray.available ? win.showMinimized() : backend.quitApplication() }
         }
     }
 
