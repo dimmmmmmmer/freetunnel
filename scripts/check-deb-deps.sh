@@ -21,9 +21,10 @@ control="$root/DEBIAN/control"
 # ldd exits non-zero for anything that is not an ELF object — an icon, a
 # .desktop file, a shell script — and the tree is full of those, so each file is
 # asked separately and a refusal is not an error.
+# shellcheck disable=SC2016  # $0 is the inner sh's argument, not ours to expand
 mapfile -t external < <(
   find -L "$root" -type f \( -name '*.so' -o -name '*.so.*' -o -perm -u+x \) -print0 \
-    | xargs -0 -r -n1 sh -c 'ldd "$0" 2>/dev/null || true' \
+    | xargs -0 -r -n1 sh -c 'ldd "$1" 2>/dev/null || true' _ \
     | awk '/=>/ {print $3}' \
     | grep -v '^$' \
     | grep -v "^$root" \
@@ -56,7 +57,8 @@ done
 
 if [ -n "$missing" ]; then
   echo "::error::the package needs these but does not depend on them:$missing"
-  echo "declared:"; printf '  %s\n' $declared
+  echo "declared:"
+  while IFS= read -r pkg; do echo "  $pkg"; done <<< "$declared"
   exit 1
 fi
 echo "deb dependencies cover every external library"

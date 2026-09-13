@@ -23,6 +23,7 @@ QString Backend::physicalLetterForKey(quint32 nativeScanCode, quint32 nativeVirt
 {
 #if defined(Q_OS_MACOS)
     const quint32 position = nativeVirtualKey;
+    Q_UNUSED(nativeScanCode)
 #else
     const quint32 position = nativeScanCode;
     Q_UNUSED(nativeVirtualKey)
