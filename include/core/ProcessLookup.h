@@ -42,6 +42,17 @@ constexpr qint64 kUnattributed = -1;
 // protocol it is — the file name does.
 QList<SocketOwner> parseProcNetTable(const QString &contents, int proto);
 
+#ifdef Q_OS_LINUX
+// Every inet socket the kernel will describe, with the protocol and local port
+// each one is bound to. `viaNetlink` says which of the two ways answered: the
+// binary one costs about a third of the text one, and a report that does not
+// say which is a report nobody can read.
+//
+// Defined in ProcessLookupSockets.cpp — a different question, asked of a
+// different interface, from the walk that decides which process owns what.
+QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno);
+#endif
+
 // Resolves connections to the program that opened them.
 //
 // The operating system binds a socket's local port before the first packet that

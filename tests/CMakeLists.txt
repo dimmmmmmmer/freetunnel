@@ -29,6 +29,7 @@ add_library(ft_apps STATIC
     ../src/core/AppRules.cpp
     ../src/core/AppShortcut.cpp
     ../src/core/ProcessLookup.cpp
+    ../src/core/ProcessLookupSockets.cpp
     ../src/core/InstalledApps.cpp
 )
 target_include_directories(ft_apps PUBLIC ../include ../include/core)

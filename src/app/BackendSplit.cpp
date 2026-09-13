@@ -141,6 +141,7 @@ QVariantList Backend::installedApplications() {
             row[QStringLiteral("path")] = app.executablePath;
             m_installedApps.append(row);
         }
+        indexInstalledApps();
     }
     return m_installedApps;
 }
@@ -175,6 +176,26 @@ void Backend::startInstalledAppsScan() {
     });
 }
 
+// path -> the name the picker shows, keyed the way paths are compared on this
+// platform. Built once when the list arrives rather than searched per rule per
+// signal: appRuleLabels() is a property binding, so it is re-read on every
+// splitChanged — a domain added, a mode flipped, a keystroke in the suggestion
+// field — and a linear scan there is the whole list walked for each rule, every
+// time, for an answer that cannot change until the list does.
+static QString labelKey(const QString &path) {
+    return freetunnel::appPathCaseSensitivity() == Qt::CaseSensitive ? path : path.toCaseFolded();
+}
+
+void Backend::indexInstalledApps() {
+    m_installedAppNames.clear();
+    m_installedAppNames.reserve(m_installedApps.size());
+    for (const QVariant &entry : std::as_const(m_installedApps)) {
+        const QVariantMap row = entry.toMap();
+        m_installedAppNames.insert(labelKey(row.value(QStringLiteral("path")).toString()),
+                                   row.value(QStringLiteral("name")).toString());
+    }
+}
+
 void Backend::adoptInstalledApps(const QVariantList &apps) {
     m_installedAppsScanning = false;
     // Discarded if the picker has already scanned synchronously in the
@@ -182,6 +203,7 @@ void Backend::adoptInstalledApps(const QVariantList &apps) {
     if (m_installedAppsScanned) return;
     m_installedApps = apps;
     m_installedAppsScanned = true;
+    indexInstalledApps();
     // The labels on the Split page are derived from this list, and until it
     // arrived they were showing the file name instead.
     emit splitChanged();
@@ -202,18 +224,10 @@ static QString labelFromPath(const QString &rule) {
 
 QStringList Backend::appRuleLabels() {
     startInstalledAppsScan();
-    const Qt::CaseSensitivity cs = freetunnel::appPathCaseSensitivity();
     QStringList labels;
     labels.reserve(m_settings.app_rules.size());
     for (const QString &rule : std::as_const(m_settings.app_rules)) {
-        QString label;
-        for (const QVariant &entry : std::as_const(m_installedApps)) {
-            const QVariantMap row = entry.toMap();
-            if (row.value(QStringLiteral("path")).toString().compare(rule, cs) == 0) {
-                label = row.value(QStringLiteral("name")).toString();
-                break;
-            }
-        }
+        const QString label = m_installedAppNames.value(labelKey(rule));
         labels << (label.isEmpty() ? labelFromPath(rule) : label);
     }
     return labels;

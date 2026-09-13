@@ -348,6 +348,9 @@ private:
     // milliseconds and this costs nothing either way.
     void startInstalledAppsScan();
     void adoptInstalledApps(const QVariantList &apps);
+    void indexInstalledApps();
+    // path -> displayed name, for the chips. See indexInstalledApps().
+    QHash<QString, QString> m_installedAppNames;
     QHotkey *m_hkToggle = nullptr;
     QHotkey *m_hkConnect = nullptr;
     QHotkey *m_hkDisconnect = nullptr;
