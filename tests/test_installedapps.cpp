@@ -6,6 +6,9 @@
 
 #include "core/InstalledApps.h"
 
+#include <QDir>
+#include <QSet>
+
 class TestInstalledApps : public QObject {
     Q_OBJECT
 
@@ -14,6 +17,7 @@ private slots:
     void offersOnlyEntriesMeantToBeSeen_data();
     void readsTheDisplayName();
     void theScanIsSaneOnThisMachine();
+    void looksWhereThisSystemActuallyKeepsApplications();
 };
 
 void TestInstalledApps::offersOnlyEntriesMeantToBeSeen_data()
@@ -81,6 +85,47 @@ void TestInstalledApps::theScanIsSaneOnThisMachine()
     // Generous, because a CI runner is not a desktop and Windows resolves every
     // Start Menu shortcut through the shell.
     QVERIFY2(elapsed < 10000, qPrintable(QStringLiteral("scan took %1 ms").arg(elapsed)));
+}
+
+// Qt's idea of where applications live is incomplete on two of the three
+// platforms, in a way that is invisible until somebody looks for a program that
+// is not in the list — which is how both of these were reported. Read out of
+// Qt's own source rather than guessed at, and pinned here on the platform each
+// one is about, because that is the only place the fact can be checked.
+void TestInstalledApps::looksWhereThisSystemActuallyKeepsApplications()
+{
+    const QStringList dirs = freetunnel::applicationDirectories();
+    QVERIFY2(!dirs.isEmpty(), "a system keeps its applications somewhere");
+    for (const QString &dir : dirs)
+        QVERIFY2(QDir::isAbsolutePath(dir), qPrintable(QStringLiteral("not absolute: %1").arg(dir)));
+    QCOMPARE(dirs.size(), QSet<QString>(dirs.cbegin(), dirs.cend()).size()); // no duplicates
+
+#if defined(Q_OS_MACOS)
+    // standardLocations() adds NSSystemDomainMask for fonts and caches only, so
+    // /System/Applications — Safari, Mail, Messages, and everything in
+    // Utilities — was missing from the picker entirely.
+    QVERIFY2(dirs.contains(QStringLiteral("/System/Applications")),
+             "the system's own applications have to be offered too");
+    QVERIFY(dirs.contains(QStringLiteral("/Applications")));
+#elif defined(Q_OS_WIN)
+    // standardLocations() returns writableLocation() alone here, which is the
+    // CURRENT USER's Start Menu. Most installers write to the machine-wide one,
+    // so the list was missing the majority of what is installed.
+    QVERIFY2(dirs.size() >= 2,
+             "both the per-user and the machine-wide Start Menu, not just one of them");
+    int startMenus = 0;
+    for (const QString &dir : dirs) {
+        if (dir.contains(QLatin1String("Start Menu"), Qt::CaseInsensitive))
+            ++startMenus;
+    }
+    QVERIFY2(startMenus >= 2, "one of them is the machine-wide Start Menu");
+#else
+    // Nothing to add here: the list comes from XDG_DATA_DIRS, which is how a
+    // desktop says where Flatpak and Snap put their entries. Measured on a real
+    // one: it covers /usr/share/applications, the user's own, and the flatpak
+    // exports.
+    QVERIFY(!dirs.isEmpty());
+#endif
 }
 
 QTEST_MAIN(TestInstalledApps)

@@ -4,6 +4,13 @@
 #include "core/AppRules.h"
 #include "core/AppShortcut.h"
 
+#ifdef Q_OS_WIN
+// clang-format off
+#include <windows.h>
+#include <shlobj.h>
+// clang-format on
+#endif
+
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -17,6 +24,21 @@ namespace freetunnel {
 
 namespace {
 
+#ifdef Q_OS_WIN
+// The machine-wide Start Menu. SHGetKnownFolderPath rather than %ProgramData%
+// because the folder can be redirected, and a redirected one is exactly the
+// case where guessing the path finds nothing.
+QString commonStartMenuPrograms()
+{
+    PWSTR raw = nullptr;
+    if (FAILED(::SHGetKnownFolderPath(FOLDERID_CommonPrograms, 0, nullptr, &raw)))
+        return {};
+    const QString path = QString::fromWCharArray(raw);
+    ::CoTaskMemFree(raw);
+    return path;
+}
+#endif
+
 bool isTrue(const QString &v)
 {
     return v.compare(QLatin1String("true"), Qt::CaseInsensitive) == 0;
@@ -25,8 +47,7 @@ bool isTrue(const QString &v)
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 void appendLinuxApps(QList<InstalledApp> *out)
 {
-    const QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    for (const QString &dirPath : dirs) {
+    for (const QString &dirPath : applicationDirectories()) {
         QDir dir(dirPath);
         if (!dir.exists())
             continue;
@@ -57,8 +78,7 @@ void appendWindowsApps(QList<InstalledApp> *out)
     // The Start Menu is the list a person already has in their head, which is
     // why it is used rather than the uninstall registry: the registry knows
     // about installed packages, not about the things someone clicks.
-    const QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    for (const QString &dirPath : dirs) {
+    for (const QString &dirPath : applicationDirectories()) {
         if (!QDir(dirPath).exists())
             continue;
         QDirIterator it(dirPath, {QStringLiteral("*.lnk")}, QDir::Files,
@@ -81,8 +101,7 @@ void appendWindowsApps(QList<InstalledApp> *out)
 #ifdef Q_OS_MACOS
 void appendMacApps(QList<InstalledApp> *out)
 {
-    const QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    for (const QString &dirPath : dirs) {
+    for (const QString &dirPath : applicationDirectories()) {
         QDir dir(dirPath);
         if (!dir.exists())
             continue;
@@ -112,6 +131,23 @@ void appendMacApps(QList<InstalledApp> *out)
 #endif
 
 } // namespace
+
+QStringList applicationDirectories()
+{
+    QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
+#if defined(Q_OS_MACOS)
+    // Where the system's own applications live since Catalina, and the folder
+    // Qt's list leaves out. Utilities inside it is reached by the one-level-down
+    // walk, the same as /Applications/Utilities.
+    dirs << QStringLiteral("/System/Applications");
+#elif defined(Q_OS_WIN)
+    const QString common = commonStartMenuPrograms();
+    if (!common.isEmpty())
+        dirs << common;
+#endif
+    dirs.removeDuplicates();
+    return dirs;
+}
 
 bool desktopEntryIsVisibleApplication(const QString &contents)
 {

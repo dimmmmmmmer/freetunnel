@@ -1,6 +1,11 @@
 import QtQuick
 import QtQuick.Layouts
-import Qt.labs.platform as Platform
+// QtQuick.Dialogs, not Qt.labs.platform. The labs one shows a NATIVE dialog or
+// nothing: where the desktop provides no helper it falls back to Qt Widgets,
+// which this application does not link — it is a QGuiApplication — and the only
+// sign is a line on stderr nobody sees. Reported as "no file manager opens at
+// all" on Linux. This one draws its own when there is no native dialog to show.
+import QtQuick.Dialogs as Dialogs
 import "components"
 
 // Pick a program from the ones the system already knows about, so nobody has to
@@ -161,14 +166,15 @@ Item {
         }
     }
 
-    Platform.FileDialog {
+    Dialogs.FileDialog {
         id: fileDlg
+        objectName: "appFileDialog"
         title: qsTr("Choose an application")
         nameFilters: Qt.platform.os === "windows"
                      ? [qsTr("Programs and shortcuts (*.exe *.lnk)"), qsTr("All files (*)")]
                      : [qsTr("Applications (*.desktop *.app)"), qsTr("All files (*)")]
         onAccepted: {
-            pickerRoot.backend.addApplicationFromPath(fileDlg.file.toString())
+            pickerRoot.backend.addApplicationFromPath(fileDlg.selectedFile.toString())
             pickerRoot.shell.overlay = ""
         }
     }

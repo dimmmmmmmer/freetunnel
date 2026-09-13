@@ -24,6 +24,8 @@ private slots:
     void splitPageLoads();
     void splitPageNamesApplicationsTheWayThePickerDoes();
     void typingAProgramNameOffersTheProgram();
+    void everyFileDialogActuallyOpens();
+    void everyFileDialogActuallyOpens_data();
     void settingsPageLoads();
     void logsPageLoads();
     void createConfigOverlayLoads();
@@ -48,6 +50,10 @@ void TestQmlUi::initTestCase()
 {
     // Icons load through backend.readBundledText — no QML XHR file access needed.
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
+    // The drawn dialog rather than the platform's own: it is the one that has to
+    // work where the desktop offers nothing, and it does not put a modal native
+    // window in front of a CI runner.
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
 }
 
 // Every `text` in the tree. Chips are built by a Repeater inside a Flow, so
@@ -157,6 +163,72 @@ void TestQmlUi::typingAProgramNameOffersTheProgram()
     // A name that matches nothing offers nothing, rather than everything.
     input->setProperty("text", QStringLiteral("nothing-is-called-this"));
     QVERIFY(suggestions->property("rows").toList().isEmpty());
+    delete root;
+}
+
+void TestQmlUi::everyFileDialogActuallyOpens_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::addColumn<QString>("dialog");
+
+    QTest::newRow("choose an application") << QStringLiteral("AppPickerOverlay.qml")
+                                           << QStringLiteral("appFileDialog");
+    QTest::newRow("import a config") << QStringLiteral("pages/ConfigsPage.qml")
+                                     << QStringLiteral("configImportDialog");
+    QTest::newRow("export a config") << QStringLiteral("pages/ConfigsPage.qml")
+                                     << QStringLiteral("configExportDialog");
+    QTest::newRow("pick a certificate") << QStringLiteral("CreateConfigOverlay.qml")
+                                        << QStringLiteral("certificateDialog");
+}
+
+// Every one of these opened nothing at all on a desktop with no native file
+// dialog, and said so only on stderr: Qt.labs.platform falls back to Qt Widgets,
+// which this application does not link — it is a QGuiApplication. Reported as
+// "no file manager opens" for the application picker; choosing a config file or
+// a certificate had been broken the same way for as long as they existed.
+//
+// AA_DontUseNativeDialogs is set for the whole test binary, so this exercises
+// the drawn dialog — the one that has to exist when the desktop offers nothing —
+// rather than opening a native modal window on a CI runner.
+void TestQmlUi::everyFileDialogActuallyOpens()
+{
+    QFETCH(QString, page);
+    QFETCH(QString, dialog);
+
+    QQuickWindow window;
+    window.resize(520, 640);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    m_shell.setEditIndex(-1);
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/%1").arg(page)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+    // The window has to be in place BEFORE creation finishes: a dialog looks for
+    // it once, on component-complete. A Loader parents its item first, so this is
+    // what the running application does; reparenting afterwards is not.
+    QObject *root = component.beginCreate(m_engine.rootContext());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVariantMap props;
+    props[QStringLiteral("shell")] = QVariant::fromValue(static_cast<QObject *>(&m_shell));
+    props[QStringLiteral("backend")] = QVariant::fromValue(static_cast<QObject *>(&m_backend));
+    props[QStringLiteral("theme")] = QVariant::fromValue(static_cast<QObject *>(&m_theme));
+    component.setInitialProperties(root, props);
+    auto *item = qobject_cast<QQuickItem *>(root);
+    QVERIFY(item);
+    item->setParentItem(window.contentItem());
+    item->setWidth(window.width());
+    item->setHeight(window.height());
+    component.completeCreate();
+
+    QObject *fileDialog = root->findChild<QObject *>(dialog);
+    QVERIFY2(fileDialog, qPrintable(QStringLiteral("no dialog called %1").arg(dialog)));
+    QVERIFY2(!fileDialog->property("visible").toBool(), "not open before it is opened");
+
+    QVERIFY(QMetaObject::invokeMethod(fileDialog, "open"));
+    QTRY_VERIFY_WITH_TIMEOUT(fileDialog->property("visible").toBool(), 5000);
+    QVERIFY(QMetaObject::invokeMethod(fileDialog, "close"));
+    QTRY_VERIFY(!fileDialog->property("visible").toBool());
     delete root;
 }
 
