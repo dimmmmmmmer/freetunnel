@@ -184,6 +184,24 @@ QByteArray processUserSid(HANDLE process)
     return sid;
 }
 
+// Whether the process serving this pipe runs as the user we do.
+bool pipeServerIsSameUser(HANDLE pipe)
+{
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE)
+        return false;
+    ULONG serverPid = 0;
+    if (::GetNamedPipeServerProcessId(pipe, &serverPid) == 0 || serverPid == 0)
+        return false;
+    HANDLE server = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                  static_cast<DWORD>(serverPid));
+    if (server == nullptr)
+        return false;
+    const QByteArray theirs = processUserSid(server);
+    ::CloseHandle(server);
+    const QByteArray ours = processUserSid(::GetCurrentProcess());
+    return !ours.isEmpty() && ours == theirs;
+}
+
 } // namespace
 #endif
 
@@ -206,20 +224,7 @@ bool localSocketPeerIsSameUser(QLocalSocket *socket)
     // Failing closed is deliberate at every step. A process belonging to another
     // user normally cannot even be opened for query, and that refusal is the
     // answer.
-    const auto pipe = reinterpret_cast<HANDLE>(socket->socketDescriptor());
-    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE)
-        return false;
-    ULONG serverPid = 0;
-    if (::GetNamedPipeServerProcessId(pipe, &serverPid) == 0 || serverPid == 0)
-        return false;
-    HANDLE server = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                  static_cast<DWORD>(serverPid));
-    if (server == nullptr)
-        return false;
-    const QByteArray theirs = processUserSid(server);
-    ::CloseHandle(server);
-    const QByteArray ours = processUserSid(::GetCurrentProcess());
-    return !ours.isEmpty() && ours == theirs;
+    return pipeServerIsSameUser(reinterpret_cast<HANDLE>(socket->socketDescriptor()));
 #else
     const qintptr fd = socket->socketDescriptor();
     if (fd < 0)
