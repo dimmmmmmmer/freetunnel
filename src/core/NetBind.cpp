@@ -4,9 +4,12 @@
 // On Windows winsock2.h must be included before anything that may pull in
 // windows.h (some Qt headers do), or the old winsock.h gets in first and clashes.
 #if defined(Q_OS_WIN)
+// clang-format off
 #include <winsock2.h>
 #include <ws2ipdef.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
+// clang-format on
 #endif
 
 #include "core/NetBind.h"
@@ -38,6 +41,34 @@ using ft_socklen = socklen_t;
 #endif
 
 namespace {
+
+#if defined(Q_OS_WIN)
+// Ask the system what an adapter IS, instead of reading a name for clues.
+//
+// The clues are not there. Qt's QNetworkInterface::name() on Windows is a LUID
+// alias, not the adapter's title — ConvertInterfaceLuidToNameW, which has a
+// prefix only for the interface types it knows and falls back to
+// "iftype<N>_<M>" for the rest. Wintun declares IfType 53, IF_TYPE_PROP_VIRTUAL
+// (wintun.inf: *IfType = 53, Characteristics = NCF_VIRTUAL), and Qt's Windows
+// switch has no case for that either, so type() is Unknown as well. Neither the
+// prefixes below nor a search for "wintun" could ever match, and the tunnel this
+// application had just created was eligible to be chosen as the physical uplink
+// it should be bound around.
+//
+// Type is the question that has an answer. Not Unknown-means-virtual: mobile
+// broadband is IF_TYPE_WWANPP, which Qt also maps to Unknown, and excluding a
+// tethered uplink would be the same fault pointing the other way.
+bool windowsInterfaceIsVirtual(int index)
+{
+    if (index <= 0)
+        return false;
+    MIB_IF_ROW2 row{};
+    row.InterfaceIndex = static_cast<NET_IFINDEX>(index);
+    if (::GetIfEntry2(&row) != NO_ERROR)
+        return false;
+    return row.Type == IF_TYPE_PROP_VIRTUAL || row.Type == IF_TYPE_TUNNEL;
+}
+#endif
 
 bool interfaceIsVirtual(const QString &name) {
     static const QStringList kVirt = {QStringLiteral("utun"), QStringLiteral("tun"),
@@ -89,6 +120,10 @@ bool interfaceEligibleForRoute(const QNetworkInterface &ni, bool requireRunning)
     if (!flags.testFlag(QNetworkInterface::IsUp) || flags.testFlag(QNetworkInterface::IsLoopBack)
             || interfaceIsVirtual(ni.name()))
         return false;
+#if defined(Q_OS_WIN)
+    if (windowsInterfaceIsVirtual(ni.index()))
+        return false;
+#endif
     if (requireRunning && !flags.testFlag(QNetworkInterface::IsRunning))
         return false;
     return true;

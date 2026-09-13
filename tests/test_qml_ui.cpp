@@ -22,11 +22,16 @@ private slots:
     void homePageLoads();
     void configsPageLoads();
     void splitPageLoads();
+    void splitPageNamesApplicationsTheWayThePickerDoes();
+    void typingAProgramNameOffersTheProgram();
+    void everyFileDialogActuallyOpens();
+    void everyFileDialogActuallyOpens_data();
     void settingsPageLoads();
     void logsPageLoads();
     void createConfigOverlayLoads();
     void mainWindowLoads();
     void mainWindowPageNavigation();
+    void closingTheWindowQuitsWhenThereIsNoTray();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -46,6 +51,40 @@ void TestQmlUi::initTestCase()
 {
     // Icons load through backend.readBundledText — no QML XHR file access needed.
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
+    // The drawn dialog rather than the platform's own: it is the one that has to
+    // work where the desktop offers nothing, and it does not put a modal native
+    // window in front of a CI runner.
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+}
+
+// Every `text` in the tree. Chips are built by a Repeater inside a Flow, so
+// there is no single object to ask; what a person would read off the screen is
+// the union of all of them.
+//
+// Visual children as well as QObject ones: a Repeater's delegates are parented
+// into the layout as items, and a walk that only followed QObject::children()
+// found the page's fixed labels and not one chip — which is exactly the half
+// that matters here.
+static QStringList everyText(QObject *node)
+{
+    QStringList out;
+    const QVariant text = node->property("text");
+    if (text.isValid() && !text.toString().isEmpty())
+        out << text.toString();
+    QSet<QObject *> visited;
+    const QObjectList children = node->children();
+    for (QObject *child : children) {
+        visited.insert(child);
+        out << everyText(child);
+    }
+    if (auto *item = qobject_cast<QQuickItem *>(node)) {
+        const QList<QQuickItem *> items = item->childItems();
+        for (QQuickItem *child : items) {
+            if (!visited.contains(child))
+                out << everyText(child);
+        }
+    }
+    return out;
 }
 
 QObject *TestQmlUi::loadPage(const char *qmlPath)
@@ -82,6 +121,115 @@ void TestQmlUi::splitPageLoads()
 {
     QObject *root = loadPage("pages/SplitPage.qml");
     QVERIFY(root);
+    delete root;
+}
+
+// A rule is stored as a path, and the file at the end of that path is not what
+// the person recognises: they picked "Firefox Web Browser" from a list and the
+// file is called firefox. The mock's labels are deliberately not derivable from
+// its rules, so a page that ignored them could not pass this by accident.
+void TestQmlUi::splitPageNamesApplicationsTheWayThePickerDoes()
+{
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    const QStringList texts = everyText(root);
+    QVERIFY2(texts.contains(QStringLiteral("Firefox Web Browser")),
+             "the chip must say what the picker said");
+    QVERIFY2(texts.contains(QStringLiteral("Some App")), "and so must the second one");
+    QVERIFY2(!texts.contains(QStringLiteral("firefox")),
+             "not the file name the rule happens to end with");
+    delete root;
+}
+
+// Typing a name has to find the program. A name on its own is not a rule anyone
+// should be asked to spell — it is only a way of pointing at one of the
+// installed applications — so what the field offers comes from the same list the
+// picker shows.
+void TestQmlUi::typingAProgramNameOffersTheProgram()
+{
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+
+    QObject *input = root->findChild<QObject *>(QStringLiteral("appPathInput"));
+    QVERIFY2(input, "the path field");
+    QObject *suggestions = root->findChild<QObject *>(QStringLiteral("appSuggestions"));
+    QVERIFY2(suggestions, "the suggestion list");
+    QVERIFY2(suggestions->property("rows").toList().isEmpty(), "nothing offered before anything is typed");
+
+    input->setProperty("text", QStringLiteral("fire"));
+    const QVariantList rows = suggestions->property("rows").toList();
+    QCOMPARE(rows.size(), 1);
+    QCOMPARE(rows.first().toMap().value(QStringLiteral("name")).toString(), QStringLiteral("Firefox"));
+
+    // A name that matches nothing offers nothing, rather than everything.
+    input->setProperty("text", QStringLiteral("nothing-is-called-this"));
+    QVERIFY(suggestions->property("rows").toList().isEmpty());
+    delete root;
+}
+
+void TestQmlUi::everyFileDialogActuallyOpens_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::addColumn<QString>("dialog");
+
+    QTest::newRow("choose an application") << QStringLiteral("AppPickerOverlay.qml")
+                                           << QStringLiteral("appFileDialog");
+    QTest::newRow("import a config") << QStringLiteral("pages/ConfigsPage.qml")
+                                     << QStringLiteral("configImportDialog");
+    QTest::newRow("export a config") << QStringLiteral("pages/ConfigsPage.qml")
+                                     << QStringLiteral("configExportDialog");
+    QTest::newRow("pick a certificate") << QStringLiteral("CreateConfigOverlay.qml")
+                                        << QStringLiteral("certificateDialog");
+}
+
+// Every one of these opened nothing at all on a desktop with no native file
+// dialog, and said so only on stderr: Qt.labs.platform falls back to Qt Widgets,
+// which this application does not link — it is a QGuiApplication. Reported as
+// "no file manager opens" for the application picker; choosing a config file or
+// a certificate had been broken the same way for as long as they existed.
+//
+// AA_DontUseNativeDialogs is set for the whole test binary, so this exercises
+// the drawn dialog — the one that has to exist when the desktop offers nothing —
+// rather than opening a native modal window on a CI runner.
+void TestQmlUi::everyFileDialogActuallyOpens()
+{
+    QFETCH(QString, page);
+    QFETCH(QString, dialog);
+
+    QQuickWindow window;
+    window.resize(520, 640);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    m_shell.setEditIndex(-1);
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/%1").arg(page)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+    // The window has to be in place BEFORE creation finishes: a dialog looks for
+    // it once, on component-complete. A Loader parents its item first, so this is
+    // what the running application does; reparenting afterwards is not.
+    QObject *root = component.beginCreate(m_engine.rootContext());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVariantMap props;
+    props[QStringLiteral("shell")] = QVariant::fromValue(static_cast<QObject *>(&m_shell));
+    props[QStringLiteral("backend")] = QVariant::fromValue(static_cast<QObject *>(&m_backend));
+    props[QStringLiteral("theme")] = QVariant::fromValue(static_cast<QObject *>(&m_theme));
+    component.setInitialProperties(root, props);
+    auto *item = qobject_cast<QQuickItem *>(root);
+    QVERIFY(item);
+    item->setParentItem(window.contentItem());
+    item->setWidth(window.width());
+    item->setHeight(window.height());
+    component.completeCreate();
+
+    QObject *fileDialog = root->findChild<QObject *>(dialog);
+    QVERIFY2(fileDialog, qPrintable(QStringLiteral("no dialog called %1").arg(dialog)));
+    QVERIFY2(!fileDialog->property("visible").toBool(), "not open before it is opened");
+
+    QVERIFY(QMetaObject::invokeMethod(fileDialog, "open"));
+    QTRY_VERIFY_WITH_TIMEOUT(fileDialog->property("visible").toBool(), 5000);
+    QVERIFY(QMetaObject::invokeMethod(fileDialog, "close"));
+    QTRY_VERIFY(!fileDialog->property("visible").toBool());
     delete root;
 }
 
@@ -144,6 +292,64 @@ void TestQmlUi::everyComponentLoadsOnItsOwn_data()
                           "components/Sep.qml", "Field.qml", "Toggle.qml"}) {
         QTest::newRow(p) << QString::fromLatin1(p);
     }
+}
+
+// ✕ minimizes rather than quits, because the tray icon is how you come back and
+// how you quit. Qt.labs.platform shows that icon through a StatusNotifier host
+// or not at all — it has no other implementation available to an application
+// that does not link Qt Widgets — so on GNOME without an AppIndicator extension,
+// or on a plain window manager, there is no icon and no tray menu. Minimizing
+// there can put the window somewhere with nothing to bring it back from.
+//
+// Which way this goes depends on the machine, so the test asks the tray what it
+// is and requires the matching behaviour, rather than assuming either.
+void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
+{
+#ifdef Q_OS_MACOS
+    // There is no ✕ of ours there. macOS keeps its native traffic lights, the
+    // window controls this is about are drawn only where the window is
+    // frameless, and closing goes through installMacWindowCloseToTray instead —
+    // to a Dock icon, which is always a way back whatever the tray is doing.
+    QSKIP("the custom window controls exist only on Linux and Windows");
+#else
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QObject *root = component.create();
+    QVERIFY2(root, qPrintable(component.errorString()));
+
+    QObject *tray = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY2(tray, "the tray icon");
+    const bool trayAvailable = tray->property("available").toBool();
+
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto *close = root->findChild<QQuickItem *>(QStringLiteral("windowCloseButton"));
+    QVERIFY2(close, "the window's own close button");
+    // A click on something invisible lands nowhere and proves nothing, which is
+    // how this first passed everywhere and then failed on the platform that does
+    // not draw it.
+    QVERIFY2(close->isVisible(), "and it has to be on screen for a click to mean anything");
+    QVERIFY(!m_backend.applicationClosingDown());
+
+    // A real click rather than the signal: what is being tested is the handler
+    // the button actually has, reached the way a person reaches it.
+    const QPointF centre =
+            close->mapToScene(QPointF(close->width() / 2.0, close->height() / 2.0));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
+    QCoreApplication::processEvents();
+
+    if (trayAvailable) {
+        QVERIFY2(!m_backend.applicationClosingDown(),
+                 "with a tray to minimize alongside, the window must not quit");
+    } else {
+        QVERIFY2(m_backend.applicationClosingDown(),
+                 "with no tray there is no way back and no Quit — so it has to quit");
+    }
+    delete root;
+#endif
 }
 
 void TestQmlUi::everyComponentLoadsOnItsOwn()

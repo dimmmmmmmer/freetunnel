@@ -38,6 +38,9 @@ public:
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setExcludedRoutes(const std::vector<std::string> &routes);
     void setVpnMode(bool selective);
+    // Per-application split tunnelling; read the same way as the routes list,
+    // with setVpnMode deciding which way a match goes.
+    void setAppRules(const std::vector<std::string> &rules);
     void setKillSwitch(bool enabled);
     void setLogLevel(const QString &level); // "warn"/"info"/… applied live, no reconnect
     void setSessionLogging(bool enabled);
@@ -61,6 +64,9 @@ private:
     void resetHelperTransport();
     bool configureTestHelper();
     bool configureProductionHelper();
+    // Fail fast when the elevation prompt is answered with "no", instead of
+    // polling a port nothing will ever listen on for a full minute.
+    void watchElevationOutcome();
     void wireHelperSocket(bool testHelper);
     void startHelperConnectRetry();
     void abortStartup();
@@ -87,6 +93,7 @@ private:
     std::vector<std::string> m_exclusions;
     std::vector<std::string> m_excludedRoutes;
     bool m_selective = false;
+    std::vector<std::string> m_appRules;
     bool m_killSwitch = false;
     QString m_logLevel = QStringLiteral("warn");
     bool m_loggingEnabled = true;

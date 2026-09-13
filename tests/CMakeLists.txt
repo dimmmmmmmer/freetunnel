@@ -19,6 +19,25 @@ endif()
 # files only, so without this a test run rewrites and deletes the real app's
 # secrets (the single-instance auth token, per-config passwords).
 add_compile_definitions(FT_ENABLE_TEST_HOOKS)
+
+# The per-application split-tunnel units, as a library rather than a source list
+# repeated in seven places. They carry platform link requirements — iphlpapi for
+# the Windows socket tables, ole32/uuid for following a .lnk — and with a source
+# list every target had to remember those separately. Three targets in a row
+# were missed that way; a library states the requirement once and propagates it.
+add_library(ft_apps STATIC
+    ../src/core/AppRules.cpp
+    ../src/core/AppShortcut.cpp
+    ../src/core/ProcessLookup.cpp
+    ../src/core/ProcessLookupSockets.cpp
+    ../src/core/InstalledApps.cpp
+    ../src/core/NetBind.cpp
+)
+target_include_directories(ft_apps PUBLIC ../include ../include/core)
+target_link_libraries(ft_apps PUBLIC Qt6::Core Qt6::Network)
+if (WIN32)
+    target_link_libraries(ft_apps PUBLIC iphlpapi ws2_32 ole32 uuid shell32)
+endif ()
 set(CMAKE_AUTORCC ON)
 
 # The fast test workflow compiles every file under src/, and until now it did so
@@ -143,7 +162,6 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -164,7 +182,7 @@ target_include_directories(test_app_startup PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_app_startup PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_app_startup PRIVATE Qt6::Widgets)
 endif()
@@ -204,7 +222,6 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -231,7 +248,7 @@ target_include_directories(test_backend_deeplink_import PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_deeplink_import PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Widgets)
 endif()
@@ -262,6 +279,34 @@ add_executable(test_appimagepath
 target_include_directories(test_appimagepath PRIVATE ../include ../include/core ../include/app)
 target_link_libraries(test_appimagepath PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME appimagepath COMMAND test_appimagepath -o ${CMAKE_CURRENT_BINARY_DIR}/report-appimagepath.txt,txt)
+
+add_executable(test_appshortcut
+    test_appshortcut.cpp
+)
+
+add_executable(test_installedapps
+    test_installedapps.cpp
+)
+target_include_directories(test_installedapps PRIVATE ../include ../include/core)
+target_link_libraries(test_installedapps PRIVATE Qt6::Core Qt6::Test ft_apps)
+add_test(NAME installedapps COMMAND test_installedapps -o ${CMAKE_CURRENT_BINARY_DIR}/report-installedapps.txt,txt)
+target_include_directories(test_appshortcut PRIVATE ../include ../include/core)
+target_link_libraries(test_appshortcut PRIVATE Qt6::Core Qt6::Test ft_apps)
+add_test(NAME appshortcut COMMAND test_appshortcut -o ${CMAKE_CURRENT_BINARY_DIR}/report-appshortcut.txt,txt)
+
+add_executable(test_apprules
+    test_apprules.cpp
+)
+target_include_directories(test_apprules PRIVATE ../include ../include/core)
+target_link_libraries(test_apprules PRIVATE Qt6::Core Qt6::Test ft_apps)
+add_test(NAME apprules COMMAND test_apprules -o ${CMAKE_CURRENT_BINARY_DIR}/report-apprules.txt,txt)
+
+add_executable(test_processlookup
+    test_processlookup.cpp
+)
+target_include_directories(test_processlookup PRIVATE ../include ../include/core)
+target_link_libraries(test_processlookup PRIVATE Qt6::Core Qt6::Network Qt6::Test ft_apps)
+add_test(NAME processlookup COMMAND test_processlookup -o ${CMAKE_CURRENT_BINARY_DIR}/report-processlookup.txt,txt)
 
 add_executable(test_bypassrules
     test_bypassrules.cpp
@@ -348,10 +393,9 @@ add_test(NAME versioncompare COMMAND test_versioncompare -o ${CMAKE_CURRENT_BINA
 
 add_executable(test_netbind
     test_netbind.cpp
-    ../src/core/NetBind.cpp
 )
 target_include_directories(test_netbind PRIVATE ../include ../include/core)
-target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_link_libraries(test_netbind PRIVATE Qt6::Core Qt6::Network Qt6::Test ft_apps)
 add_test(NAME netbind COMMAND test_netbind -o ${CMAKE_CURRENT_BINARY_DIR}/report-netbind.txt,txt)
 
 add_executable(test_releaseverify
@@ -504,7 +548,6 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
-    ../src/core/NetBind.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -523,7 +566,7 @@ target_include_directories(test_integration_backend_vpn PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_integration_backend_vpn PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_integration_backend_vpn)
 if(WIN32)
     target_link_libraries(test_integration_backend_vpn PRIVATE shell32 advapi32)
@@ -579,13 +622,12 @@ add_executable(test_qt_trusttunnel_client
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
-    ../src/core/NetBind.cpp
     ../include/vpn/qt_trusttunnel_client.h
 )
 target_include_directories(test_qt_trusttunnel_client PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(test_qt_trusttunnel_client PRIVATE FT_ENABLE_TEST_HOOKS)
-target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test ft_apps)
 add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_trusttunnel_client.txt,txt)
 
 # Split-tunnel behaviour (routes, profiles, and which edits disturb a live
@@ -600,7 +642,7 @@ target_include_directories(test_backend_logs PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_logs PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_logs PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_backend_logs)
 if(WIN32)
     target_link_libraries(test_backend_logs PRIVATE shell32 advapi32)
@@ -622,7 +664,7 @@ target_include_directories(test_backend_settings PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_settings PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_settings PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_backend_settings)
 if(WIN32)
     target_link_libraries(test_backend_settings PRIVATE shell32 advapi32)
@@ -644,7 +686,7 @@ target_include_directories(test_backend_config PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_config PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_config PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_backend_config)
 if(WIN32)
     target_link_libraries(test_backend_config PRIVATE shell32 advapi32)
@@ -666,7 +708,7 @@ target_include_directories(test_backend_split PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_split PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_split PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_backend_split)
 if(WIN32)
     target_link_libraries(test_backend_split PRIVATE shell32 advapi32)
@@ -692,13 +734,12 @@ add_executable(freetunnel_test_helper
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
-    ../src/core/NetBind.cpp
     ../include/vpn/qt_trusttunnel_client.h  # AUTOMOC needs the Q_OBJECT header listed
 )
 target_include_directories(freetunnel_test_helper PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(freetunnel_test_helper PRIVATE FT_ENABLE_TEST_HOOKS)
-target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network)
+target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network ft_apps)
 
 add_executable(test_helper_server
     test_helper_server.cpp
@@ -728,7 +769,7 @@ target_include_directories(test_backend_updates PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_updates PRIVATE FREETUNNEL_VERSION="1.0.0" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_updates PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_backend_updates)
 if(WIN32)
     target_link_libraries(test_backend_updates PRIVATE shell32 advapi32)

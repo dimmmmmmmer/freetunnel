@@ -172,7 +172,15 @@ jobs:
 
       - name: Patch core wrapper (surface tunnel stats)
         shell: bash
-        run: patch -p1 -d upstream < client/vendor/trusttunnel/tunnel-stats-handler.patch
+        run: |
+          set -eu
+          # Every vendored patch, in filename order — they build on each other's
+          # context, which is why they are numbered. Naming one file here is what
+          # broke the build when a second patch was added and the first was renamed.
+          for p in client/vendor/trusttunnel/*.patch; do
+            echo "==> $(basename "$p")"
+            patch -p1 -d upstream < "$p"
+          done
 
       # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
       # every runner (macOS/Windows ship one, but install to be safe + on PATH).
@@ -534,7 +542,7 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6 (>= ${glibc_dep}), libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on
@@ -550,6 +558,13 @@ jobs:
           exit 0
           EOF
           chmod 0755 "$root/DEBIAN/postinst"
+          # Does the package ask for everything the binaries actually need? It
+          # did not: libgl1 was declared, libOpenGL.so.0 is linked, and libgl1
+          # does not pull libopengl0 — so dpkg reported every dependency
+          # satisfied and the application died in the dynamic linker on any
+          # machine without a system Qt. Checked here rather than trusted,
+          # because the machines this is developed on all have one.
+          bash client/scripts/check-deb-deps.sh "$root"
           dpkg-deb --build --root-owner-group "$root" \
             "out/${{ matrix.artifact }}.deb"
           ls -la out
@@ -671,7 +686,32 @@ jobs:
             echo "::error::DMG volume still mounted at $MOUNT after five detach attempts"
             exit 1
           fi
-          hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o out/${{ matrix.artifact }}.dmg
+          # The mount point disappearing is not the same as the image being free.
+          # Detaching unmounts the volume first and releases the backing device a
+          # moment later, so the loop above can legitimately succeed while
+          # out/rw.dmg is still attached — and convert then fails outright:
+          #
+          #   hdiutil: convert failed - Resource temporarily unavailable
+          #
+          # Wait for the device to actually let go, then convert. Retried rather
+          # than slept through blindly, so the usual case stays instant.
+          for i in 1 2 3 4 5 6; do
+            if ! hdiutil info 2>/dev/null | grep -qF "$RW"; then break; fi
+            sleep 5
+          done
+          for i in 1 2 3 4 5; do
+            if hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 \
+                 -o out/${{ matrix.artifact }}.dmg; then
+              break
+            fi
+            if [ "$i" = 5 ]; then
+              echo "::error::hdiutil convert failed five times — not a transient"
+              exit 1
+            fi
+            echo "hdiutil convert failed (attempt $i) — retrying in 10 s"
+            rm -f out/${{ matrix.artifact }}.dmg
+            sleep 10
+          done
           rm -f "$RW"
 
       - name: Package (Windows)

@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Effects
-import Qt.labs.platform as Platform
+// See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
+// has no native helper and the application does not link Qt Widgets.
+import QtQuick.Dialogs as Dialogs
 import "components"
 
 Item {
@@ -166,10 +168,10 @@ Item {
                             TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
                 }
-                Platform.FileDialog {
-                    id: certFileDlg; title: qsTr("Select a certificate")
+                Dialogs.FileDialog {
+                    id: certFileDlg; objectName: "certificateDialog"; title: qsTr("Select a certificate")
                     nameFilters: ["PEM (*.pem *.crt *.cer)", qsTr("All files (*)")]
-                    onAccepted: fCert.text = backend.readTextFile(certFileDlg.file.toString())
+                    onAccepted: fCert.text = backend.readTextFile(certFileDlg.selectedFile.toString())
                 }
                 Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8
                         topPadding: 6; bottomPadding: 12

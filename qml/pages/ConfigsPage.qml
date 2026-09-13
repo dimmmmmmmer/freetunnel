@@ -1,7 +1,10 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Effects
-import Qt.labs.platform as Platform
+// See AppPickerOverlay.qml: Qt.labs.platform's FileDialog needs either a native
+// helper or Qt Widgets, and on a desktop with neither it opens nothing at all.
+// Choosing a config file was broken the same way, on the same platforms.
+import QtQuick.Dialogs as Dialogs
 import "../components"
 
 Item {
@@ -258,17 +261,17 @@ Item {
                 onTriggered: { importMenu.open = false; shell.editIndex = -1; shell.overlay = "create" } }
         }
     }
-    Platform.FileDialog {
-        id: fileDlg; title: qsTr("Select a config")
+    Dialogs.FileDialog {
+        id: fileDlg; objectName: "configImportDialog"; title: qsTr("Select a config")
         nameFilters: ["TOML (*.toml)", qsTr("All files (*)")]
-        onAccepted: backend.importFile(fileDlg.file.toString())
+        onAccepted: backend.importFile(fileDlg.selectedFile.toString())
     }
-    Platform.FileDialog {
-        id: tomlSaveDlg; title: qsTr("Export config")
-        fileMode: Platform.FileDialog.SaveFile
+    Dialogs.FileDialog {
+        id: tomlSaveDlg; objectName: "configExportDialog"; title: qsTr("Export config")
+        fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
-        currentFile: "file:" + cfgRoot.exportFileName(cfgRoot.exportName) + ".toml"
-        onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.file.toString())
+        selectedFile: "file:" + cfgRoot.exportFileName(cfgRoot.exportName) + ".toml"
+        onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.selectedFile.toString())
                                     ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
     }
 }

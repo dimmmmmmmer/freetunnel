@@ -347,6 +347,8 @@ private:
             return applyExclusions(c);
         if (cmd == "setRoutes")
             return applyRoutes(c);
+        if (cmd == "setAppRules")
+            return applyAppRules(c);
         if (applyClientSetting(cmd, c))
             return;
         if (cmd == "connect") {
@@ -375,6 +377,14 @@ private:
             routes.append(v.toString());
         QMetaObject::invokeMethod(&m_client, "setExcludedRouteStrings", Qt::QueuedConnection,
                                   Q_ARG(QStringList, routes));
+    }
+
+    void applyAppRules(const QJsonObject &c) {
+        QStringList rules;
+        for (const QJsonValue &v : c.value(QStringLiteral("rules")).toArray())
+            rules.append(v.toString());
+        QMetaObject::invokeMethod(&m_client, "setAppRules", Qt::QueuedConnection,
+                                  Q_ARG(QStringList, rules));
     }
 
     void handleConnect(const QJsonObject &c) {
@@ -433,12 +443,22 @@ namespace {
 // handler — write() is on the short list of what POSIX allows, so the handler
 // writes one byte and a QSocketNotifier turns it back into an ordinary event on
 // the main loop. This is the pattern Qt's own documentation prescribes.
+// pipe() fills [0] with the READ end and [1] with the WRITE end. Named, because
+// they were the wrong way round: the handler wrote to the read end, where write()
+// can only fail with EBADF, and the notifier watched the write end, which never
+// becomes readable. Both halves failed silently — the failed write is discarded
+// below and a notifier that never fires looks exactly like a signal that never
+// came — so the handler was installed, the default action was replaced by it,
+// and SIGTERM did nothing at all. A root process holding the tunnel could not be
+// asked to stop.
 int g_termPipe[2] = {-1, -1};
+constexpr int kTermRead = 0;
+constexpr int kTermWrite = 1;
 
 void onTerminatingSignal(int)
 {
     const char byte = 1;
-    const ssize_t written = ::write(g_termPipe[0], &byte, 1);
+    const ssize_t written = ::write(g_termPipe[kTermWrite], &byte, 1);
     Q_UNUSED(written); // nothing safe left to do about a failed write here
 }
 
@@ -455,7 +475,7 @@ void installTerminationHandlers(QCoreApplication *app)
 {
     if (::pipe(g_termPipe) != 0)
         return;
-    auto *notifier = new QSocketNotifier(g_termPipe[1], QSocketNotifier::Read, app);
+    auto *notifier = new QSocketNotifier(g_termPipe[kTermRead], QSocketNotifier::Read, app);
     QObject::connect(notifier, &QSocketNotifier::activated, app, [notifier]() {
         // Not drained on purpose. The notifier is off, so it cannot refire, and
         // the process is already on its way out of exec() — reading the byte back
