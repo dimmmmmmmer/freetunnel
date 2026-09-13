@@ -8,6 +8,7 @@
 #include <QtGlobal>
 
 #include <cerrno>
+#include <QFile>
 #include <QFileInfo>
 
 #if defined(Q_OS_WIN)
@@ -725,29 +726,6 @@ bool socketsViaNetlink(QList<SocketOwner> *out, QByteArray *buffer, int *lastErr
     return true;
 }
 
-// A whole /proc file in one read, into a buffer the caller reuses.
-//
-// QFile would do, and did, but a /proc file reports a size of zero, so Qt reads
-// it in growing chunks and copies the result; with the four socket tables read
-// on most walks, that is a third of the cost of reading them at all. Nothing
-// here is Qt's fault — it cannot know the file is generated rather than stored.
-QString readWholeFile(const char *path, QByteArray *buffer)
-{
-    const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-        return {};
-    qint64 total = 0;
-    for (;;) {
-        if (total == buffer->size())
-            buffer->resize(buffer->size() * 2);
-        const ssize_t got = ::read(fd, buffer->data() + total, buffer->size() - total);
-        if (got <= 0)
-            break;
-        total += got;
-    }
-    ::close(fd);
-    return QString::fromLatin1(buffer->constData(), static_cast<int>(total));
-}
 
 // The socket inodes held by the processes a rule names, and nobody else's.
 //
@@ -857,8 +835,19 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     QList<SocketOwner> sockets;
     m_report.netlink = socketsViaNetlink(&sockets, &buffer, &m_report.lastErrno);
     if (!m_report.netlink) {
-        for (const SocketTable &table : kSocketTables)
-            sockets.append(parseProcNetTable(readWholeFile(table.path, &buffer), table.proto));
+        // QFile, though a raw read of these files measured a millisecond
+        // quicker across the four of them. That mattered while this was how the
+        // sockets were read; it does not now that it is the path taken only on a
+        // kernel without the diag modules, and a hand-rolled read loop over a
+        // growing buffer is a thing a reader — and a security scanner — has to
+        // take on trust.
+        for (const SocketTable &table : kSocketTables) {
+            QFile file(QString::fromLatin1(table.path));
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+                continue;
+            sockets.append(
+                    parseProcNetTable(QString::fromLatin1(file.readAll()), table.proto));
+        }
     }
 
     for (const SocketOwner &sock : sockets) {
