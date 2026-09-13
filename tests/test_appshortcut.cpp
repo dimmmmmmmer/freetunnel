@@ -5,11 +5,22 @@
 // stored, listed back to the user, and never matches anything.
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
+#include <QUrl>
 
 #include "core/AppShortcut.h"
+
+#ifdef Q_OS_WIN
+// clang-format off
+#include <windows.h>
+#include <shlobj.h>
+#include <objidl.h>
+// clang-format on
+#endif
 
 
 namespace {
@@ -44,6 +55,7 @@ private slots:
     void aBundleDeclaresItsOwnExecutableName();
     void aSymlinkedProgramIsStoredAsWhatTheKernelWillReport();
     void aBundleReachedThroughASymlinkIsStoredResolved();
+    void aWindowsShortcutResolvesToWhatItPointsAt();
 };
 
 void TestAppShortcut::readsTheProgramOutOfADesktopEntry_data()
@@ -363,6 +375,75 @@ void TestAppShortcut::aBundleReachedThroughASymlinkIsStoredResolved()
     // Dropped by its symlinked path, stored by its real one.
     QCOMPARE(freetunnel::resolveApplicationTarget(linkedDir + QStringLiteral("/Some App.app")),
              expectedRule(bundle + QStringLiteral("/Contents/MacOS/Some App")));
+#endif
+}
+
+#ifdef Q_OS_WIN
+namespace {
+
+// Write a .lnk the way an installer does, so the reader can be tested against
+// something it did not also write. Returns false when the shell will not play
+// along, which is a reason to skip rather than to fail.
+bool writeShortcut(const QString &linkPath, const QString &target)
+{
+    const HRESULT init = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool weInitialised = SUCCEEDED(init);
+    bool ok = false;
+    IShellLinkW *link = nullptr;
+    if (SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                     IID_IShellLinkW, reinterpret_cast<void **>(&link)))) {
+        if (SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(target.utf16())))) {
+            IPersistFile *file = nullptr;
+            if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&file)))) {
+                const QString native = QDir::toNativeSeparators(linkPath);
+                ok = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(native.utf16()), TRUE));
+                file->Release();
+            }
+        }
+        link->Release();
+    }
+    if (weInitialised)
+        ::CoUninitialize();
+    return ok;
+}
+
+} // namespace
+#endif
+
+// The one Windows path with nothing behind it: a shortcut is what the picker
+// resolves and what lands when someone drags one onto the window, and it is read
+// through the shell. Written here rather than described, because this is a
+// platform nobody working on this can run.
+void TestAppShortcut::aWindowsShortcutResolvesToWhatItPointsAt()
+{
+#ifndef Q_OS_WIN
+    QSKIP("a .lnk is a Windows shortcut");
+#else
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString self = QCoreApplication::applicationFilePath();
+
+    const QString plain = dir.filePath(QStringLiteral("plain.lnk"));
+    if (!writeShortcut(plain, QDir::toNativeSeparators(self)))
+        QSKIP("the shell would not write a shortcut here");
+    QCOMPARE(freetunnel::resolveApplicationTarget(plain), expectedRule(self));
+
+    // The same, reached the way a drop delivers it.
+    QCOMPARE(freetunnel::resolveApplicationTarget(QUrl::fromLocalFile(plain).toString()),
+             expectedRule(self));
+
+    // And one whose target is stored with an environment variable in it, which
+    // is how installers write Start Menu entries. Unexpanded, the file does not
+    // exist and the application cannot be added at all — from the list or by
+    // dropping its shortcut.
+    const QString withVariable = dir.filePath(QStringLiteral("expanded.lnk"));
+    const QString viaVariable = QStringLiteral("%SystemRoot%\\system32\\notepad.exe");
+    const QString notepad = QStringLiteral("C:\\Windows\\System32\\notepad.exe");
+    if (QFileInfo::exists(notepad) && writeShortcut(withVariable, viaVariable)) {
+        const QString resolved = freetunnel::resolveApplicationTarget(withVariable);
+        QVERIFY2(!resolved.isEmpty(), "a shortcut stored with %SystemRoot% must still resolve");
+        QCOMPARE(resolved.toLower(), expectedRule(notepad).toLower());
+    }
 #endif
 }
 
