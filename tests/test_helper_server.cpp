@@ -19,6 +19,11 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QProcess>
+
+#ifdef Q_OS_UNIX
+#include <csignal>
+#include <sys/types.h>
+#endif
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -99,6 +104,7 @@ private slots:
     void newestConnectionCanStillAuthenticateUnderPreAuthPressure();
     void connectIgnoresAnyLogPathTheClientSends();
     void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
+    void sigtermStopsTheHelperOnItsOwn();
 
 private:
     bool startHelper(quint16 port, const QString &token);
@@ -631,6 +637,33 @@ void TestHelperServer::killSwitchAndSplitSettingsReachTheCoreInsideTheHelper()
 
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The helper runs as root and owns the tunnel: routes, DNS and the kill switch
+// are torn down on the way out of its event loop, and a process that ignores
+// SIGTERM is SIGKILLed by the system at logout or shutdown with all of that left
+// installed.
+//
+// It did ignore it. The self-pipe was wired backwards — the handler wrote to the
+// read end, the notifier watched the write end — and both halves failed
+// silently, so the only visible sign was that this suite's own stopHelper() had
+// been falling through to kill() after its three-second wait, every time, for as
+// long as it has existed.
+void TestHelperServer::sigtermStopsTheHelperOnItsOwn()
+{
+#ifndef Q_OS_UNIX
+    QSKIP("SIGTERM is a POSIX signal");
+#else
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(QStringLiteral("token-for-sigterm"), &port));
+    QCOMPARE(m_helper->state(), QProcess::Running);
+
+    QCOMPARE(::kill(static_cast<pid_t>(m_helper->processId()), SIGTERM), 0);
+
+    QVERIFY2(m_helper->waitForFinished(5000), "the helper has to stop when it is asked to");
+    QCOMPARE(m_helper->exitStatus(), QProcess::NormalExit);
+    QCOMPARE(m_helper->exitCode(), 0);
+#endif
 }
 
 QTEST_MAIN(TestHelperServer)
