@@ -542,7 +542,7 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6 (>= ${glibc_dep}), libgl1, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on
@@ -558,6 +558,13 @@ jobs:
           exit 0
           EOF
           chmod 0755 "$root/DEBIAN/postinst"
+          # Does the package ask for everything the binaries actually need? It
+          # did not: libgl1 was declared, libOpenGL.so.0 is linked, and libgl1
+          # does not pull libopengl0 — so dpkg reported every dependency
+          # satisfied and the application died in the dynamic linker on any
+          # machine without a system Qt. Checked here rather than trusted,
+          # because the machines this is developed on all have one.
+          bash client/scripts/check-deb-deps.sh "$root"
           dpkg-deb --build --root-owner-group "$root" \
             "out/${{ matrix.artifact }}.deb"
           ls -la out
