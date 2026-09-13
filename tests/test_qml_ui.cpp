@@ -305,6 +305,13 @@ void TestQmlUi::everyComponentLoadsOnItsOwn_data()
 // is and requires the matching behaviour, rather than assuming either.
 void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
 {
+#ifdef Q_OS_MACOS
+    // There is no ✕ of ours there. macOS keeps its native traffic lights, the
+    // window controls this is about are drawn only where the window is
+    // frameless, and closing goes through installMacWindowCloseToTray instead —
+    // to a Dock icon, which is always a way back whatever the tray is doing.
+    QSKIP("the custom window controls exist only on Linux and Windows");
+#else
     QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
     QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QObject *root = component.create();
@@ -321,6 +328,10 @@ void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
 
     auto *close = root->findChild<QQuickItem *>(QStringLiteral("windowCloseButton"));
     QVERIFY2(close, "the window's own close button");
+    // A click on something invisible lands nowhere and proves nothing, which is
+    // how this first passed everywhere and then failed on the platform that does
+    // not draw it.
+    QVERIFY2(close->isVisible(), "and it has to be on screen for a click to mean anything");
     QVERIFY(!m_backend.applicationClosingDown());
 
     // A real click rather than the signal: what is being tested is the handler
@@ -338,6 +349,7 @@ void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
                  "with no tray there is no way back and no Quit — so it has to quit");
     }
     delete root;
+#endif
 }
 
 void TestQmlUi::everyComponentLoadsOnItsOwn()
