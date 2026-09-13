@@ -293,11 +293,37 @@ void ProcessLookup::invalidate()
 
 namespace {
 
+// Every row of one Windows socket table. The four tables hold different row
+// types, and all four of them spell the two fields this needs the same way,
+// which is what lets one function read all of them — it was four copies of this
+// loop, and the copies drifted apart the moment one of them was corrected.
+template <typename TableT>
+void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners, int proto)
+{
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        const auto &row = table->table[i];
+        // A row the system attributes to nobody — a connection in TIME_WAIT is
+        // reported that way — can never name a program, and recording it would
+        // displace a row that can.
+        if (row.dwOwningPid == 0)
+            continue;
+        // First one wins, as on the other two platforms. The four tables are
+        // read IPv4 before IPv6, and one local port can appear in both owned by
+        // different programs; inserting over the top made whichever table was
+        // read last decide, so a rule about the program holding the IPv4 socket
+        // stopped applying because something unrelated held the same port on
+        // IPv6.
+        const std::uint32_t key = ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+        if (!owners->contains(key))
+            owners->insert(key, static_cast<qint64>(row.dwOwningPid));
+    }
+}
+
 // One pass over a Windows socket table. GetExtended*Table returns the whole
 // table in one buffer, which is exactly the shape we want: one syscall per
 // refresh rather than one per connection.
-template <typename TableT, typename RowGetter>
-void collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp, RowGetter rows)
+template <typename TableT>
+void collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
 {
     ULONG size = 0;
     DWORD rc = tcp ? ::GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
@@ -309,7 +335,7 @@ void collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int pro
              : ::GetExtendedUdpTable(buf.data(), &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
     if (rc != NO_ERROR)
         return;
-    rows(reinterpret_cast<const TableT *>(buf.constData()), owners, proto);
+    recordWindowsRows(reinterpret_cast<const TableT *>(buf.constData()), owners, proto);
 }
 
 } // namespace
@@ -321,94 +347,10 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // every port is attributed here, and which of them a rule names is decided
     // in resolve(), for the one port being asked about rather than for the
     // hundreds that were not.
-    collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true,
-            [](const MIB_TCPTABLE_OWNER_PID *t, QHash<std::uint32_t, qint64> *owners, int proto) {
-                for (DWORD i = 0; i < t->dwNumEntries; ++i) {
-                    const auto &row = t->table[i];
-                    // A row the system attributes to nobody — a connection in
-                    // TIME_WAIT is reported that way — can never name a program,
-                    // and recording it would displace a row that can.
-                    if (row.dwOwningPid == 0)
-                        continue;
-                    // First one wins, as on the other two platforms. The four
-                    // tables are read IPv4 before IPv6, and one local port can
-                    // appear in both owned by different programs; inserting over
-                    // the top made whichever table was read last decide, so a
-                    // rule about the program holding the IPv4 socket stopped
-                    // applying because something unrelated held the same port
-                    // on IPv6.
-                    const std::uint32_t key =
-                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
-                    if (!owners->contains(key))
-                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
-                }
-            });
-    collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true,
-            [](const MIB_TCP6TABLE_OWNER_PID *t, QHash<std::uint32_t, qint64> *owners, int proto) {
-                for (DWORD i = 0; i < t->dwNumEntries; ++i) {
-                    const auto &row = t->table[i];
-                    // A row the system attributes to nobody — a connection in
-                    // TIME_WAIT is reported that way — can never name a program,
-                    // and recording it would displace a row that can.
-                    if (row.dwOwningPid == 0)
-                        continue;
-                    // First one wins, as on the other two platforms. The four
-                    // tables are read IPv4 before IPv6, and one local port can
-                    // appear in both owned by different programs; inserting over
-                    // the top made whichever table was read last decide, so a
-                    // rule about the program holding the IPv4 socket stopped
-                    // applying because something unrelated held the same port
-                    // on IPv6.
-                    const std::uint32_t key =
-                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
-                    if (!owners->contains(key))
-                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
-                }
-            });
-    collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false,
-            [](const MIB_UDPTABLE_OWNER_PID *t, QHash<std::uint32_t, qint64> *owners, int proto) {
-                for (DWORD i = 0; i < t->dwNumEntries; ++i) {
-                    const auto &row = t->table[i];
-                    // A row the system attributes to nobody — a connection in
-                    // TIME_WAIT is reported that way — can never name a program,
-                    // and recording it would displace a row that can.
-                    if (row.dwOwningPid == 0)
-                        continue;
-                    // First one wins, as on the other two platforms. The four
-                    // tables are read IPv4 before IPv6, and one local port can
-                    // appear in both owned by different programs; inserting over
-                    // the top made whichever table was read last decide, so a
-                    // rule about the program holding the IPv4 socket stopped
-                    // applying because something unrelated held the same port
-                    // on IPv6.
-                    const std::uint32_t key =
-                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
-                    if (!owners->contains(key))
-                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
-                }
-            });
-    collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false,
-            [](const MIB_UDP6TABLE_OWNER_PID *t, QHash<std::uint32_t, qint64> *owners, int proto) {
-                for (DWORD i = 0; i < t->dwNumEntries; ++i) {
-                    const auto &row = t->table[i];
-                    // A row the system attributes to nobody — a connection in
-                    // TIME_WAIT is reported that way — can never name a program,
-                    // and recording it would displace a row that can.
-                    if (row.dwOwningPid == 0)
-                        continue;
-                    // First one wins, as on the other two platforms. The four
-                    // tables are read IPv4 before IPv6, and one local port can
-                    // appear in both owned by different programs; inserting over
-                    // the top made whichever table was read last decide, so a
-                    // rule about the program holding the IPv4 socket stopped
-                    // applying because something unrelated held the same port
-                    // on IPv6.
-                    const std::uint32_t key =
-                            ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
-                    if (!owners->contains(key))
-                        owners->insert(key, static_cast<qint64>(row.dwOwningPid));
-                }
-            });
+    collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true);
+    collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true);
+    collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false);
+    collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false);
 
     finishScan(now, true);
 }
