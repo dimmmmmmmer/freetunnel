@@ -72,6 +72,25 @@ tunnel rather than the server. The consequence is that refreshing that page
 reveals the full list of configured endpoints, including servers never connected
 to, to the local network and the ISP. Traffic that is not a probe is unaffected.
 
+### Per-application rules read the system's socket tables
+
+A split-tunnel rule that names a program has to be answered per connection: which
+process owns the local socket this packet came from. That question is put to the
+operating system — `GetExtendedTcpTable` / `GetExtendedUdpTable` on Windows,
+`proc_pidinfo`/`proc_pidfdinfo` on macOS, the `inet_diag` netlink tables (or
+`/proc/net`) plus the descriptor lists of the named processes on Linux — from the
+elevated helper, which can therefore see processes belonging to other OS users.
+Nothing is installed to do it: no driver, no system extension, no entitlement.
+
+The program's name is deliberately **not** handed back to the core with the routing
+decision. The core forwards that field into the CONNECT request it sends the VPN
+endpoint, which would tell the operator which application opened every connection —
+the one thing this app exists not to tell anyone. It goes to the local log instead.
+
+That local log does name the program for connections a rule matched, and in verbose
+mode for every connection. It is the same log the Logs page shows and the same file
+a bug report attaches, so a log shared with someone else describes what was running.
+
 ### Update manifests are bound to their release
 
 The update check trusts the GitHub Application Programming Interface (API)
@@ -128,4 +147,5 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | Other local user | Socket access-control list (ACL) + loopback-only helper |
 | Same-user malware | Documented limitation; OS credential APIs |
 | TOML injection | `tomlEsc()` strips control chars |
+| Operator learns which app opened a flow | Program name kept out of the core decision, local log only |
 | Unsigned installer | User warnings; in-app hash verify before install |
