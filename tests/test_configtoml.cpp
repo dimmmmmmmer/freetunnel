@@ -21,6 +21,9 @@ private slots:
     void boolFlagsAreLineAnchored();
     void securityFlagsDefaultClosed();
     void fieldValuesCannotInjectTomlKeys();
+    void multiLineValuesTheEditorDoesNotOwnSurviveARoundTrip();
+    void literalStringsAndMultiLineArraysAreRead();
+    void aCertificateIsReadInEverySpelling();
 };
 
 void TestConfigToml::roundTrip() {
@@ -235,6 +238,97 @@ void TestConfigToml::fieldValuesCannotInjectTomlKeys() {
     QVERIFY2(!back.skipVerification, "injected skip_verification survived the round trip");
     QVERIFY2(!back.antiDpi, "injected anti_dpi survived the round trip");
     QCOMPARE(back.hostname, c.hostname);
+}
+
+// A value the editor does not own can span lines: an array, an inline table, a
+// ''' block. Only """ was stepped over, so the continuation lines were taken for
+// the end of the value and dropped along with the bracket that closed it. What
+// came back was `exclusions = [` and nothing after it - a file that no longer
+// parses, written over the original by migrateConfigPassword() and handed to the
+// root helper on the next connect.
+void TestConfigToml::multiLineValuesTheEditorDoesNotOwnSurviveARoundTrip() {
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "exclusions = [\n"
+            "  \"*.example.com\",\n"
+            "  \"*.corp\"\n"
+            "]\n"
+            "\n"
+            "[endpoint]\n"
+            "hostname = \"vpn.example.org\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "provider_meta = {\n"
+            "  tier = \"gold\"\n"
+            "}\n"
+            "provider_note = '''\n"
+            "line one\n"
+            "line two\n"
+            "'''\n"
+            "\n"
+            "[listener.tun]\n"
+            "mtu = 1400\n");
+
+    const QString out = buildConfigToml(parseConfigToml(src));
+    QVERIFY2(out.contains(QStringLiteral("\"*.example.com\"")), qPrintable(out));
+    QVERIFY2(out.contains(QStringLiteral("\"*.corp\"")), qPrintable(out));
+    QVERIFY2(out.contains(QStringLiteral("tier = \"gold\"")), qPrintable(out));
+    QVERIFY2(out.contains(QStringLiteral("line two")), qPrintable(out));
+    // Every opener is closed again. Counting is what catches the actual failure:
+    // the old output kept the `[` and lost the `]`.
+    QCOMPARE(out.count(QLatin1Char('[')) , out.count(QLatin1Char(']')));
+    QCOMPARE(out.count(QStringLiteral("'''")) % 2, 0);
+
+    // And it is stable: a second pass over our own output changes nothing, which
+    // is what says the recovered text is understood and not merely copied once.
+    QCOMPARE(buildConfigToml(parseConfigToml(out)), out);
+}
+
+// TOML has more than one way to write a string, and a provider's file is under
+// no obligation to pick ours. These are keys the rebuild writes itself, so a
+// spelling the reader did not know was not skipped - it was replaced with an
+// empty value, and the config was emptied in place.
+void TestConfigToml::literalStringsAndMultiLineArraysAreRead() {
+    const QString src = QStringLiteral(
+            "loglevel = 'info'\n"
+            "\n"
+            "[endpoint]\n"
+            "hostname = 'vpn.example.org'\n"
+            "addresses = [\n"
+            "  '1.2.3.4:443',\n"
+            "  \"[2001:db8::1]:443\"\n"
+            "]\n"
+            "username = 'bob'\n"
+            "password = 'secret'\n"
+            "\n"
+            "[listener.tun]\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.org"));
+    QCOMPARE(c.username, QStringLiteral("bob"));
+    QCOMPARE(c.password, QStringLiteral("secret"));
+    QCOMPARE(c.addresses, QStringLiteral("1.2.3.4:443, [2001:db8::1]:443"));
+}
+
+// The certificate is the one field where losing the read costs something that
+// cannot be typed again from memory: it is the trust anchor the connection is
+// pinned to.
+void TestConfigToml::aCertificateIsReadInEverySpelling() {
+    const QString pem = QStringLiteral("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----");
+
+    const QString singleLine = QStringLiteral(
+            "[endpoint]\nhostname = \"h\"\naddresses = [\"1.2.3.4:443\"]\nusername = \"u\"\n"
+            "certificate = \"-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----\"\n");
+    QCOMPARE(parseConfigToml(singleLine).certificate, pem);
+
+    const QString literalBlock = QStringLiteral(
+            "[endpoint]\nhostname = \"h\"\naddresses = [\"1.2.3.4:443\"]\nusername = \"u\"\n"
+            "certificate = '''\n-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n'''\n");
+    QCOMPARE(parseConfigToml(literalBlock).certificate, pem);
+
+    // And it comes back out, rather than being written over with an empty value.
+    QVERIFY(buildConfigToml(parseConfigToml(singleLine)).contains(QStringLiteral("MIIB")));
+    QVERIFY(buildConfigToml(parseConfigToml(literalBlock)).contains(QStringLiteral("MIIB")));
 }
 
 QTEST_MAIN(TestConfigToml)
