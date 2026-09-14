@@ -43,6 +43,8 @@ private slots:
     void autoStartWritesAnAutostartEntry();
     void autoStartRemovalTakesTheEntryAway();
 
+    void theCredentialWarningIsStableAndOnlyAnnouncedWhenItMoves();
+
 private:
     QTemporaryDir m_home;
 };
@@ -357,4 +359,26 @@ void TestBackendSettings::hotkeysAreUnsupportedOnAWaylandSessionEvenUnderXWaylan
 }
 
 QTEST_MAIN(TestBackendSettings)
+// The credential-storage banner is read from three separate bindings on the
+// Settings page, and answering it spawns a subprocess behind a nested event loop
+// on the GUI thread — so every visit to that page stalled the interface three
+// times for an answer that had not changed. It is answered once now.
+//
+// The other half is the signal. It was declared as the property's NOTIFY and had
+// no sender anywhere in the tree, so the banner never cleared and never appeared
+// while the app was running. Asking again has to announce a change and stay
+// quiet otherwise, or a cached value that never announces is strictly worse than
+// no cache at all.
+void TestBackendSettings::theCredentialWarningIsStableAndOnlyAnnouncedWhenItMoves()
+{
+    Backend backend;
+    const QString first = backend.credentialStorageWarning();
+    QCOMPARE(backend.credentialStorageWarning(), first);
+
+    QSignalSpy changed(&backend, &Backend::credentialStorageChanged);
+    backend.recheckCredentialStorage();
+    QCOMPARE(backend.credentialStorageWarning(), first);
+    QCOMPARE(changed.count(), 0); // nothing about this machine changed in between
+}
+
 #include "test_backend_settings.moc"

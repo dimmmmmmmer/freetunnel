@@ -208,6 +208,9 @@ QVariantMap Backend::configFields(int index) const
     f[QStringLiteral("skipVerification")] = c.skipVerification;
     f[QStringLiteral("antiDpi")] = c.antiDpi;
     f[QStringLiteral("certificate")] = c.certificate;
+    // The file this row is, so the editor can say WHICH config it is saving
+    // rather than which position it was at when it opened. See createConfig().
+    f[QStringLiteral("path")] = configPath;
     const QString prof = m_settings.config_profiles.value(configPath);
     f[QStringLiteral("splitProfile")] =
             (prof.isEmpty() || !m_settings.profiles.contains(prof)) ? QStringLiteral("Default") : prof;

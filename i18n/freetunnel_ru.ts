@@ -281,6 +281,10 @@
         <source>Not a valid IP or subnet: %1</source>
         <translation>Неверный IP-адрес или подсеть: %1</translation>
     </message>
+    <message>
+        <source>That configuration is no longer there — it may have been deleted while you were editing it.</source>
+        <translation>Этой конфигурации больше нет — возможно, её удалили, пока вы её редактировали.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

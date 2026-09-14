@@ -38,7 +38,13 @@ Item {
             Rectangle {
                 Layout.fillWidth: true; Layout.topMargin: 6
                 visible: backend.selectiveModeWouldLeak
-                height: visible ? warnText.implicitHeight + 16 : 0
+                // Layout.preferredHeight, not height: a Rectangle's implicitHeight
+                // is 0, so a ColumnLayout sizes this slot from the first pass —
+                // before the Text has its final width and has re-wrapped — and a
+                // plain height binding never invalidates that. The slot then stays
+                // at the first-pass size while the panel paints the real one, over
+                // the section below it. The Settings banner already does this.
+                Layout.preferredHeight: visible ? warnText.implicitHeight + 16 : 0
                 radius: 8; color: theme.infoBg
                 Text {
                     id: warnText

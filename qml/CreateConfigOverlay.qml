@@ -48,6 +48,11 @@ Item {
         property bool antiDpi: false
         property string splitProfile: "Default"
         property string snap: ""
+        // The config being edited, by file rather than by row. The row can move
+        // under an open editor — an imported config is prepended to the list —
+        // and saving against the old number then writes over whatever is at that
+        // position now. See Backend::createConfig().
+        property string editPath: ""
         readonly property bool editing: shell.editIndex >= 0
         // Join on a separator no field can contain (U+001F): a plain join() lets
         // a boundary-shifting edit (name "ab" + host "c" → name "a" + host "bc")
@@ -63,6 +68,7 @@ Item {
         Component.onCompleted: {
             if (editing) {
                 var f = backend.configFields(shell.editIndex)
+                cform.editPath = f.path || ""
                 fName.text = f.name || ""; fHost.text = f.hostname || ""
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""
                 fPass.text = f.password || ""; fDns.text = f.dns || ""
@@ -186,7 +192,8 @@ Item {
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
                                 allowIpv6: cform.ipv6, skipVerification: cform.skipVerification,
                                 antiDpi: cform.antiDpi, certificate: fCert.text,
-                                splitProfile: cform.splitProfile, editIndex: shell.editIndex });
+                                splitProfile: cform.splitProfile, editIndex: shell.editIndex,
+                                editPath: cform.editPath });
                             if (ok) cform.close()
                         } } }
                     Rectangle { width: 88; height: 32; radius: 8
