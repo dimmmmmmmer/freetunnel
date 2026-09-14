@@ -102,6 +102,18 @@ private:
     bool m_connectPending = false;
     bool m_starting = false;
     QTimer *m_attempt = nullptr;
+    // Deadline for the peer to prove itself once the socket is up.
+    //
+    // Connecting disarmed every other failure detector: the retry budget that
+    // produces the only user-visible "could not reach the helper" message deletes
+    // itself on ConnectedState, and the elevation-outcome watcher returns early
+    // once the socket is connected. So a port answered by anything that accepts
+    // and then says nothing left the window on "Connecting…" with no error, ever
+    // — after the user had already typed their administrator password. The port
+    // is a random pick that nothing reserves, so an unrelated local service is
+    // enough to cause it by accident, and a local process camping on the range is
+    // enough to cause it on purpose.
+    QTimer *m_handshake = nullptr;
     int m_tries = 0;
     QByteArray m_buf;
 };

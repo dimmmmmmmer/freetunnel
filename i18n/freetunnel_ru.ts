@@ -861,5 +861,9 @@
         <source>The VPN helper didn&apos;t start — authorization was declined, or the elevation failed.</source>
         <translation>Служба VPN не запустилась — в правах отказано или повышение не удалось.</translation>
     </message>
+    <message>
+        <source>The process answering on the helper port never finished the handshake — something else may be using that port. Try connecting again.</source>
+        <translation>Тот, кто отвечает на порту помощника, не завершил рукопожатие — возможно, порт занят чем-то другим. Попробуйте подключиться ещё раз.</translation>
+    </message>
 </context>
 </TS>
