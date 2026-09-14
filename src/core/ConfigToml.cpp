@@ -74,6 +74,48 @@ struct OpenValue {
     bool open() const { return basic || literal || brackets > 0 || braces > 0; }
 };
 
+// Step past a single-line quoted string, and say where it ends.
+int endOfQuoted(const QString &line, int i)
+{
+    const QChar quote = line.at(i);
+    const int n = line.size();
+    ++i;
+    while (i < n && line.at(i) != quote) {
+        // Only a basic string has escapes; inside '...' a backslash is a
+        // backslash, which is the entire point of the literal spelling.
+        if (quote == QLatin1Char('"') && line.at(i) == QLatin1Char('\\'))
+            ++i;
+        ++i;
+    }
+    return i + 1;
+}
+
+// Inside a multi-line string already: step to just past its closing delimiter,
+// or to the end of the line when it does not close here.
+int endOfOpenMultiline(OpenValue *v, const QString &line, int i)
+{
+    const QLatin1String fence =
+            v->basic ? QLatin1String("\"\"\"") : QLatin1String("'''");
+    const int end = line.indexOf(fence, i);
+    if (end < 0)
+        return line.size(); // all of what is left belongs to the string
+    v->basic = false;
+    v->literal = false;
+    return end + 3;
+}
+
+void countBracket(OpenValue *v, QChar c)
+{
+    if (c == QLatin1Char('['))
+        ++v->brackets;
+    else if (c == QLatin1Char(']') && v->brackets > 0)
+        --v->brackets;
+    else if (c == QLatin1Char('{'))
+        ++v->braces;
+    else if (c == QLatin1Char('}') && v->braces > 0)
+        --v->braces;
+}
+
 // Walk one line, updating what it leaves open. Quoted text is stepped over, so a
 // bracket inside a string does not count - an IPv6 address is nothing but
 // brackets - and a # outside a string ends the line.
@@ -82,20 +124,8 @@ void advanceOpenValue(OpenValue &v, const QString &line)
     const int n = line.size();
     int i = 0;
     while (i < n) {
-        if (v.basic) {
-            const int end = line.indexOf(QLatin1String("\"\"\""), i);
-            if (end < 0)
-                return;
-            v.basic = false;
-            i = end + 3;
-            continue;
-        }
-        if (v.literal) {
-            const int end = line.indexOf(QLatin1String("'''"), i);
-            if (end < 0)
-                return;
-            v.literal = false;
-            i = end + 3;
+        if (v.basic || v.literal) {
+            i = endOfOpenMultiline(&v, line, i);
             continue;
         }
         const QStringView rest = QStringView(line).mid(i);
@@ -113,26 +143,10 @@ void advanceOpenValue(OpenValue &v, const QString &line)
         if (c == QLatin1Char('#'))
             return;
         if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
-            const QChar quote = c;
-            ++i;
-            while (i < n && line.at(i) != quote) {
-                // Only a basic string has escapes; inside '...' a backslash is a
-                // backslash, which is the entire point of the literal spelling.
-                if (quote == QLatin1Char('"') && line.at(i) == QLatin1Char('\\'))
-                    ++i;
-                ++i;
-            }
-            ++i;
+            i = endOfQuoted(line, i);
             continue;
         }
-        if (c == QLatin1Char('['))
-            ++v.brackets;
-        else if (c == QLatin1Char(']') && v.brackets > 0)
-            --v.brackets;
-        else if (c == QLatin1Char('{'))
-            ++v.braces;
-        else if (c == QLatin1Char('}') && v.braces > 0)
-            --v.braces;
+        countBracket(&v, c);
         ++i;
     }
 }
@@ -300,148 +314,170 @@ static void carryOverUnknownTables(const QString &toml, ConfigToml &c) {
     }
 }
 
-ConfigToml parseConfigToml(const QString &toml) {
-    ConfigToml c;
-    // Character by character rather than two chained replaces. The old pair ran
-    // \" first and \\ second, so a value ending in an escaped backslash was
-    // decoded by the wrong rule; and neither knew about \n, which is the only way
-    // a newline can appear in a single-line basic string - the spelling a
-    // certificate arrives in when the file did not come from here.
-    auto unesc = [](const QString &v) {
-        QString o;
-        o.reserve(v.size());
-        for (int i = 0; i < v.size(); ++i) {
-            const QChar ch = v.at(i);
-            if (ch != QLatin1Char('\\') || i + 1 >= v.size()) {
-                o += ch;
-                continue;
-            }
-            const QChar next = v.at(++i);
-            switch (next.unicode()) {
-            case 'n': o += QLatin1Char('\n'); break;
-            case 't': o += QLatin1Char('\t'); break;
-            case 'r': break; // a CR is not content anything here wants
-            case '"': o += QLatin1Char('"'); break;
-            case '\\': o += QLatin1Char('\\'); break;
-            default: o += QLatin1Char('\\'); o += next; break; // leave the rest alone
-            }
-        }
-        return o;
-    };
-    // Both spellings of a TOML string. This editor writes "...", but a file it did
-    // not write is free to use '...', where nothing is an escape. Reading one of
-    // those as "absent" did not merely skip it: these are keys the rebuild writes
-    // itself, so the value it could not read was replaced with an empty one and
-    // the config was emptied in place.
-    auto str = [&](const char *key) -> QString {
-        const QRegularExpression basic(
-                QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-                        .arg(QLatin1String(key)));
-        const auto bm = basic.match(toml);
-        if (bm.hasMatch())
-            return unesc(bm.captured(1));
-        const QRegularExpression literal(
-                QStringLiteral("(?m)^%1\\s*=\\s*'([^']*)'").arg(QLatin1String(key)));
-        const auto lm = literal.match(toml);
-        return lm.hasMatch() ? lm.captured(1) : QString();
-    };
-    auto arr = [&](const char *key) -> QString {
-        // From the opening [ to the ] that matches it, however many lines that
-        // takes. A provider formats an array one entry per line as readily as on
-        // one, and the single-line read that was here returned nothing for the
-        // other spelling - which, for `addresses`, is the whole config.
-        const QRegularExpression open(
-                QStringLiteral("(?m)^%1\\s*=\\s*\\[").arg(QLatin1String(key)));
-        const auto m = open.match(toml);
-        if (!m.hasMatch())
-            return QString();
-        const int start = m.capturedEnd();
-        int i = start;
-        int depth = 1;
-        const int n = toml.size();
-        while (i < n && depth > 0) {
-            const QChar ch = toml.at(i);
-            if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
-                const QChar quote = ch;
-                ++i;
-                while (i < n && toml.at(i) != quote) {
-                    if (quote == QLatin1Char('"') && toml.at(i) == QLatin1Char('\\'))
-                        ++i;
-                    ++i;
-                }
-                ++i;
-                continue;
-            }
-            if (ch == QLatin1Char('#')) { // a comment inside the array
-                while (i < n && toml.at(i) != QLatin1Char('\n'))
-                    ++i;
-                continue;
-            }
-            if (ch == QLatin1Char('['))
-                ++depth;
-            else if (ch == QLatin1Char(']'))
-                --depth;
-            ++i;
-        }
-        if (depth != 0)
-            return QString();
-        const QString body = toml.mid(start, i - 1 - start);
-        QStringList out;
-        static const QRegularExpression item(
-                QStringLiteral("\"((?:[^\"\\\\]|\\\\.)*)\"|'([^']*)'"));
-        auto it = item.globalMatch(body);
-        while (it.hasNext()) {
-            const auto im = it.next();
-            out << (im.capturedStart(1) >= 0 ? unesc(im.captured(1)) : im.captured(2));
-        }
-        return out.join(QStringLiteral(", "));
-    };
+namespace {
 
-    c.hostname = str("hostname");
-    c.addresses = arr("addresses");
-    c.username = str("username");
-    c.password = str("password");
-    c.protocol = str("upstream_protocol");
-    if (c.protocol.isEmpty()) c.protocol = QStringLiteral("http2");
-    c.dns = arr("dns_upstreams");
-    c.customSni = str("custom_sni");
-    c.clientRandom = str("client_random");
-    // Anchored to the start of a line so a `true`/`false` token sitting inside the
-    // certificate block or a comment can't flip a flag (skip_verification in
-    // particular is security-significant — it disables server cert checking).
-    auto boolKey = [&](const char *key, bool dflt) -> bool {
-        const QRegularExpression re(
-                QStringLiteral("(?m)^%1\\s*=\\s*(true|false)\\b").arg(QLatin1String(key)));
-        const auto m = re.match(toml);
-        return m.hasMatch() ? (m.captured(1) == QLatin1String("true")) : dflt;
-    };
-    c.allowIpv6 = boolKey("has_ipv6", true);
-    c.skipVerification = boolKey("skip_verification", false);
-    c.antiDpi = boolKey("anti_dpi", false);
-    // Every spelling a certificate can arrive in, not only the one written here.
-    // `certificate` is a key the rebuild writes itself, so a spelling the reader
-    // did not know was not merely skipped: it was written back as an empty value,
-    // and the pinned trust anchor was gone from the file on disk.
-    static const QRegularExpression certBasic(
+// Character by character rather than two chained replaces. The old pair ran \"
+// first and \\ second, so a value ending in an escaped backslash was decoded by
+// the wrong rule; and neither knew about \n, which is the only way a newline can
+// appear in a single-line basic string — the spelling a certificate arrives in
+// when the file did not come from here.
+QString unescapeBasic(const QString &v)
+{
+    QString o;
+    o.reserve(v.size());
+    for (int i = 0; i < v.size(); ++i) {
+        const QChar ch = v.at(i);
+        if (ch != QLatin1Char('\\') || i + 1 >= v.size()) {
+            o += ch;
+            continue;
+        }
+        const QChar next = v.at(++i);
+        switch (next.unicode()) {
+        case 'n': o += QLatin1Char('\n'); break;
+        case 't': o += QLatin1Char('\t'); break;
+        case 'r': break; // a CR is not content anything here wants
+        case '"': o += QLatin1Char('"'); break;
+        case '\\': o += QLatin1Char('\\'); break;
+        default: o += QLatin1Char('\\'); o += next; break; // leave the rest alone
+        }
+    }
+    return o;
+}
+
+// Both spellings of a TOML string. This editor writes "...", but a file it did
+// not write is free to use '...', where nothing is an escape. Reading one of
+// those as "absent" did not merely skip it: these are keys the rebuild writes
+// itself, so the value it could not read was replaced with an empty one and the
+// config was emptied in place.
+QString readString(const QString &toml, const char *key)
+{
+    const QRegularExpression basic(
+            QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").arg(QLatin1String(key)));
+    const auto bm = basic.match(toml);
+    if (bm.hasMatch())
+        return unescapeBasic(bm.captured(1));
+    const QRegularExpression literal(
+            QStringLiteral("(?m)^%1\\s*=\\s*'([^']*)'").arg(QLatin1String(key)));
+    const auto lm = literal.match(toml);
+    return lm.hasMatch() ? lm.captured(1) : QString();
+}
+
+// Where the array opened at `start` closes, or -1 when it never does. Quoted
+// items and comments are stepped over so a bracket inside either does not count.
+int endOfArray(const QString &toml, int start)
+{
+    const int n = toml.size();
+    int depth = 1;
+    int i = start;
+    while (i < n && depth > 0) {
+        const QChar ch = toml.at(i);
+        if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
+            const QChar quote = ch;
+            ++i;
+            while (i < n && toml.at(i) != quote) {
+                if (quote == QLatin1Char('"') && toml.at(i) == QLatin1Char('\\'))
+                    ++i;
+                ++i;
+            }
+            ++i;
+            continue;
+        }
+        if (ch == QLatin1Char('#')) {
+            while (i < n && toml.at(i) != QLatin1Char('\n'))
+                ++i;
+            continue;
+        }
+        if (ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(']'))
+            --depth;
+        ++i;
+    }
+    return depth == 0 ? i - 1 : -1;
+}
+
+// An array as the CSV the form holds, from the opening [ to the ] that matches
+// it, however many lines that takes. A provider formats an array one entry per
+// line as readily as on one, and the single-line read that was here returned
+// nothing for the other spelling — which, for `addresses`, is the whole config.
+QString readArray(const QString &toml, const char *key)
+{
+    const QRegularExpression open(
+            QStringLiteral("(?m)^%1\\s*=\\s*\\[").arg(QLatin1String(key)));
+    const auto m = open.match(toml);
+    if (!m.hasMatch())
+        return QString();
+    const int start = m.capturedEnd();
+    const int close = endOfArray(toml, start);
+    if (close < 0)
+        return QString();
+    static const QRegularExpression item(
+            QStringLiteral("\"((?:[^\"\\\\]|\\\\.)*)\"|'([^']*)'"));
+    QStringList out;
+    auto it = item.globalMatch(toml.mid(start, close - start));
+    while (it.hasNext()) {
+        const auto im = it.next();
+        out << (im.capturedStart(1) >= 0 ? unescapeBasic(im.captured(1)) : im.captured(2));
+    }
+    return out.join(QStringLiteral(", "));
+}
+
+// Anchored to the start of a line so a `true`/`false` token sitting inside the
+// certificate block or a comment can't flip a flag (skip_verification in
+// particular is security-significant — it disables server cert checking).
+bool readBool(const QString &toml, const char *key, bool dflt)
+{
+    const QRegularExpression re(
+            QStringLiteral("(?m)^%1\\s*=\\s*(true|false)\\b").arg(QLatin1String(key)));
+    const auto m = re.match(toml);
+    return m.hasMatch() ? (m.captured(1) == QLatin1String("true")) : dflt;
+}
+
+// Every spelling a certificate can arrive in, not only the one written here.
+// `certificate` is a key the rebuild writes itself, so a spelling the reader did
+// not know was not merely skipped: it was written back as an empty value, and
+// the pinned trust anchor was gone from the file on disk.
+QString readCertificate(const QString &toml)
+{
+    static const QRegularExpression basicBlock(
             QStringLiteral("(?m)^certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
             QRegularExpression::DotMatchesEverythingOption);
-    static const QRegularExpression certLiteral(
+    const auto bm = basicBlock.match(toml);
+    // Same unescaping as the quoted fields: buildConfigToml() escapes quotes and
+    // backslashes in the block, and a PEM (which has neither) still round trips
+    // byte for byte.
+    if (bm.hasMatch())
+        return unescapeBasic(bm.captured(1));
+    static const QRegularExpression literalBlock(
             QStringLiteral("(?m)^certificate\\s*=\\s*'''\\n?(.*?)\\n?'''"),
             QRegularExpression::DotMatchesEverythingOption);
-    const auto cm = certBasic.match(toml);
-    if (cm.hasMatch()) {
-        // Same unescaping as the quoted fields: buildConfigToml() escapes quotes
-        // and backslashes in the block, and a PEM (which has neither) still round
-        // trips byte for byte.
-        c.certificate = unesc(cm.captured(1));
-    } else {
-        const auto lm = certLiteral.match(toml);
-        // A literal block is literal: no escape is processed inside one.
-        c.certificate = lm.hasMatch() ? lm.captured(1) : str("certificate");
-    }
+    const auto lm = literalBlock.match(toml);
+    // A literal block is literal: no escape is processed inside one.
+    if (lm.hasMatch())
+        return lm.captured(1);
+    return readString(toml, "certificate");
+}
+
+} // namespace
+
+ConfigToml parseConfigToml(const QString &toml) {
+    ConfigToml c;
+    c.hostname = readString(toml, "hostname");
+    c.addresses = readArray(toml, "addresses");
+    c.username = readString(toml, "username");
+    c.password = readString(toml, "password");
+    c.protocol = readString(toml, "upstream_protocol");
+    if (c.protocol.isEmpty())
+        c.protocol = QStringLiteral("http2");
+    c.dns = readArray(toml, "dns_upstreams");
+    c.customSni = readString(toml, "custom_sni");
+    c.clientRandom = readString(toml, "client_random");
+    c.allowIpv6 = readBool(toml, "has_ipv6", true);
+    c.skipVerification = readBool(toml, "skip_verification", false);
+    c.antiDpi = readBool(toml, "anti_dpi", false);
+    c.certificate = readCertificate(toml);
 
     carryOverUnknownTables(toml, c);
     return c;
 }
-
 } // namespace freetunnel
