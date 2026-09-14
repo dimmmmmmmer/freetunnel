@@ -542,7 +542,7 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, policykit-1 | polkit
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, pkexec | policykit-1
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on

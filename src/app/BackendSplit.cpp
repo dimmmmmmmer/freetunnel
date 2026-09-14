@@ -88,8 +88,11 @@ bool Backend::addExcludedRoute(const QString &route) {
         if (!isValidSubnet(r)) { invalid << r; continue; }
         added << r;
     }
+    // Name what was refused. The field's placeholder already carries the example,
+    // so the one thing this message can add is WHICH of a pasted list was wrong —
+    // and that is exactly what the domain field next to it has always said.
     if (!invalid.isEmpty())
-        emit errorOccurred(tr("Enter a valid IP or subnet, e.g. 10.0.0.0/8"));
+        emit errorOccurred(tr("Not a valid IP or subnet: %1").arg(invalid.join(QStringLiteral(", "))));
     if (added.isEmpty())
         return false;
     m_settings.excluded_routes << added;
@@ -124,7 +127,8 @@ bool Backend::addAppRule(const QString &rule) {
             return false; // already listed; silently, because re-adding is not an error
     }
     m_settings.app_rules << norm;
-    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
+    m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
     return true;
 }
 
@@ -267,13 +271,15 @@ bool Backend::addApplicationFromPath(const QString &pathOrUrl) {
 void Backend::removeAppRule(int index) {
     if (index < 0 || index >= m_settings.app_rules.size()) return;
     m_settings.app_rules.removeAt(index);
-    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
+    m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
 }
 
 void Backend::clearAppRules() {
     if (m_settings.app_rules.isEmpty()) return;
     m_settings.app_rules.clear();
-    persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
+    m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
+    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
 }
 
 void Backend::restoreDefaultExcludedRoutes() {
@@ -316,6 +322,7 @@ void Backend::selectProfile(const QString &name) {
     if (!m_settings.profiles.contains(name) || m_settings.active_profile == name) return;
     m_settings.active_profile = name;
     m_settings.domain_bypass_rules = m_settings.profiles.value(name);
+    m_settings.app_rules = m_settings.profile_app_rules.value(name);
     persistSettings(); emit splitChanged();
 }
 
@@ -337,9 +344,11 @@ void Backend::addProfile(const QString &name) {
         }
     }
     m_settings.profiles.insert(n, {});
+    m_settings.profile_app_rules.insert(n, {});
     m_settings.profile_order << n;
     m_settings.active_profile = n; // edit the newly created profile
     m_settings.domain_bypass_rules.clear();
+    m_settings.app_rules.clear();  // both mirrors, or the page shows the old profile's
     persistSettings(); emit splitChanged();
 }
 
@@ -347,6 +356,7 @@ void Backend::removeProfile(const QString &name) {
     if (name == QLatin1String("Default") || !m_settings.profiles.contains(name)) return;
     const bool affectedActiveConfig = (activeConfigProfile() == name);
     m_settings.profiles.remove(name);
+    m_settings.profile_app_rules.remove(name);
     m_settings.profile_order.removeAll(name);
     // Any config that used this profile falls back to Default.
     for (auto it = m_settings.config_profiles.begin(); it != m_settings.config_profiles.end(); ++it)
@@ -355,6 +365,7 @@ void Backend::removeProfile(const QString &name) {
     if (m_settings.active_profile == name) {
         m_settings.active_profile = QStringLiteral("Default");
         m_settings.domain_bypass_rules = m_settings.profiles.value(QStringLiteral("Default"));
+        m_settings.app_rules = m_settings.profile_app_rules.value(QStringLiteral("Default"));
     }
     persistSettings();
     if (affectedActiveConfig) { applySplitRules(); reapplyIfConnected(); }
@@ -384,7 +395,7 @@ bool Backend::selectiveModeActive() const {
     // with applications and no domains would be told their configuration routes
     // nothing and be forced back to the full tunnel — while the app rules alone
     // are a complete and perfectly reasonable setup.
-    if (!m_settings.app_rules.isEmpty())
+    if (!m_settings.profile_app_rules.value(activeConfigProfile()).isEmpty())
         return true;
     return !coreBypassRules(m_settings.profiles.value(activeConfigProfile())).isEmpty();
 }
@@ -426,10 +437,16 @@ void Backend::applySplitRules() {
     // whole feature off, expecting everything to go through the VPN, got the
     // opposite for firefox: its traffic left the tunnel while the interface said
     // split tunnelling was disabled.
+    //
+    // From the CONFIG's profile, exactly like the domain list above, and not from
+    // the one the Split page happens to be showing. Those differ whenever someone
+    // edits a profile they are not connected on, and taking the edited one would
+    // route the running tunnel by rules meant for a different config.
+    const QStringList profileApps = m_settings.profile_app_rules.value(activeConfigProfile());
     std::vector<std::string> appRules;
     if (on) {
-        appRules.reserve(static_cast<size_t>(m_settings.app_rules.size()));
-        std::transform(m_settings.app_rules.cbegin(), m_settings.app_rules.cend(),
+        appRules.reserve(static_cast<size_t>(profileApps.size()));
+        std::transform(profileApps.cbegin(), profileApps.cend(),
                        std::back_inserter(appRules),
                        [](const QString &r) { return r.toStdString(); });
     }

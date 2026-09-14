@@ -19,6 +19,7 @@ private slots:
     void legacyInstanceAuthFileMigratesWhenSecure();
     void rejectsMismatchedToken();
     void peerCredentialCheckNeedsALiveSocket();
+    void quittingDoesNotDeleteASuccessorsToken();
 };
 
 void TestInstanceControl::roundTripMessage()
@@ -115,11 +116,12 @@ void TestInstanceControl::rejectsMismatchedToken()
 // single-instance forwarding altogether.
 void TestInstanceControl::peerCredentialCheckNeedsALiveSocket()
 {
-    QVERIFY(!freetunnel::localSocketPeerIsSameUser(nullptr));
+    QVERIFY(!freetunnel::localSocketPeerIsSameUser(nullptr, freetunnel::SocketEnd::WeConnected));
+    QVERIFY(!freetunnel::localSocketPeerIsSameUser(nullptr, freetunnel::SocketEnd::WeAccepted));
 
     // Never connected: there is no peer to identify, so there is no one to trust.
     QLocalSocket unconnected;
-    QVERIFY(!freetunnel::localSocketPeerIsSameUser(&unconnected));
+    QVERIFY(!freetunnel::localSocketPeerIsSameUser(&unconnected, freetunnel::SocketEnd::WeConnected));
 
     const QString name =
             QStringLiteral("freetunnel-peercred-test-%1").arg(QCoreApplication::applicationPid());
@@ -138,13 +140,17 @@ void TestInstanceControl::peerCredentialCheckNeedsALiveSocket()
     // This process is trivially the same user as itself, on both ends.
     //
     // On Windows this stopped being trivial: the check used to return true for
-    // any connected socket, and now asks the pipe which process is serving it
-    // and compares that process's user against ours. The value of these two
+    // any connected socket, and now asks the pipe which process is on the other
+    // end and compares that process's user against ours. The value of these two
     // lines there is that the real check still says yes to the legitimate case —
     // failing closed is the whole design, and a check that refuses everything
     // would silently stop a second launch from reaching the running instance.
-    QVERIFY(freetunnel::localSocketPeerIsSameUser(peer));
-    QVERIFY(freetunnel::localSocketPeerIsSameUser(&client));
+    //
+    // Each end is asked as itself. The two Windows APIs are not interchangeable:
+    // asking who SERVES the pipe while holding the server end names this very
+    // process, so the check compares us with ourselves and can never say no.
+    QVERIFY(freetunnel::localSocketPeerIsSameUser(peer, freetunnel::SocketEnd::WeAccepted));
+    QVERIFY(freetunnel::localSocketPeerIsSameUser(&client, freetunnel::SocketEnd::WeConnected));
 
     client.disconnectFromServer();
     delete peer;
@@ -153,4 +159,40 @@ void TestInstanceControl::peerCredentialCheckNeedsALiveSocket()
 }
 
 QTEST_MAIN(TestInstanceControl)
+// A quitting instance must not take a successor's token with it.
+//
+// The self-update path overlaps two processes on purpose: the replacement is
+// started before the old one is gone, and it writes its own token at startup. If
+// the old one's aboutToQuit lands afterwards and deletes whatever is stored, the
+// new instance is left reachable by nothing — every later deep link starts a
+// second copy instead of being forwarded, until the next restart.
+void TestInstanceControl::quittingDoesNotDeleteASuccessorsToken()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+
+    QString mine;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&mine));
+
+    // The successor replaces it with its own.
+    QString successor;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&successor));
+    QVERIFY(successor != mine);
+
+    // Now the old instance quits.
+    freetunnel::removeInstanceAuthToken(mine);
+
+    QString stored;
+    QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the successor's token must survive");
+    QCOMPARE(stored, successor);
+
+    // And its own quit does remove it.
+    freetunnel::removeInstanceAuthToken(successor);
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+}
+
 #include "test_instance_control.moc"

@@ -126,12 +126,38 @@ static void loadConfigProfileAssignments(const QSettings &s, AppSettings &out)
         out.config_profiles.insert(it.key(), it.value().toString());
 }
 
+static void loadProfileAppRules(const QSettings &s, AppSettings &out)
+{
+    // Before 1.2.0 there was one application list for the whole program, under
+    // routing/app_rules, and it applied whichever profile you were on. Moving it
+    // into the profiles must not read as "my rules are gone", so until the first
+    // save in the new shape that one list becomes the starting list of every
+    // profile — which is exactly the behaviour it used to have.
+    //
+    // The marker is what makes the seeding one-time. Without it a profile whose
+    // application list the user had deliberately emptied would be refilled from
+    // the old key on every launch.
+    const bool seeded = s.value("bypass/profile_apps_seeded", false).toBool();
+    const QStringList legacy = s.value("routing/app_rules").toStringList();
+    out.profile_app_rules.clear();
+    for (auto it = out.profiles.constBegin(); it != out.profiles.constEnd(); ++it) {
+        const QStringList rules = seeded
+                ? s.value(QStringLiteral("bypass/profile_apps/") + it.key()).toStringList()
+                : legacy;
+        // Stored as written, the way the single list was: validation happens
+        // where a rule is added, and re-deriving it here would drag the whole
+        // AppRules unit into every target that only wants to read settings.
+        out.profile_app_rules.insert(it.key(), rules);
+    }
+}
+
 static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
 {
     out.active_profile = s.value("bypass/active_profile", QStringLiteral("Default")).toString();
     if (!out.profiles.contains(out.active_profile))
         out.active_profile = out.profiles.firstKey();
     out.domain_bypass_rules = out.profiles.value(out.active_profile);
+    out.app_rules = out.profile_app_rules.value(out.active_profile);
 
     const QStringList names = out.profiles.keys();
     out.profile_order = mergedProfileOrder(s, names, out);
@@ -141,6 +167,7 @@ static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
 static void loadBypassProfiles(const QSettings &s, AppSettings &out)
 {
     loadProfileMap(s, out);
+    loadProfileAppRules(s, out);
     loadProfileOrderAndAssignments(s, out);
 }
 
@@ -162,8 +189,7 @@ AppSettings loadAppSettings() {
     out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
-    out.app_rules = s.value("routing/app_rules").toStringList();
-    loadBypassProfiles(s, out);
+    loadBypassProfiles(s, out); // and, inside it, the per-profile application lists
     out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
     out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
     out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
@@ -187,7 +213,6 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("bypass/enabled", cfg.domain_bypass_enabled);
     s.setValue("bypass/mode", cfg.vpn_mode);
     s.setValue("routing/excluded_routes", cfg.excluded_routes);
-    s.setValue("routing/app_rules", cfg.app_rules);
     s.setValue("bypass/rules", cfg.domain_bypass_rules); // active mirror (core)
     s.setValue("bypass/active_profile", cfg.active_profile);
     s.setValue("bypass/profile_names", QStringList(cfg.profiles.keys()));
@@ -195,6 +220,13 @@ void saveAppSettings(const AppSettings &cfg) {
     s.remove("bypass/profile"); // drop stale per-profile entries, then rewrite
     for (auto it = cfg.profiles.constBegin(); it != cfg.profiles.constEnd(); ++it)
         s.setValue("bypass/profile/" + it.key(), it.value());
+    s.remove("bypass/profile_apps");
+    for (auto it = cfg.profile_app_rules.constBegin(); it != cfg.profile_app_rules.constEnd(); ++it)
+        s.setValue("bypass/profile_apps/" + it.key(), it.value());
+    // Set after the lists are written, so a save interrupted half way leaves the
+    // pre-1.2.0 key still authoritative rather than an empty list looking final.
+    s.setValue("bypass/profile_apps_seeded", true);
+    s.remove("routing/app_rules"); // the one global list, now split across profiles
     QVariantMap cp;
     for (auto it = cfg.config_profiles.constBegin(); it != cfg.config_profiles.constEnd(); ++it)
         cp.insert(it.key(), it.value());

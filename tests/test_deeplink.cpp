@@ -25,6 +25,7 @@ private slots:
     void rejectsOversizedTlvLength();
     void rejectsATlvLengthPastTheEndOfThePayload();
     void acceptsTrustTunnelQrFragment();
+    void aCertificateChainSurvivesTheLink();
 };
 
 void TestDeepLink::roundTrip() {
@@ -321,4 +322,60 @@ void TestDeepLink::acceptsTrustTunnelQrFragment()
 }
 
 QTEST_MAIN(TestDeepLink)
+// Tag 0x08 is a chain — the header says so, DEEP_LINK.md says so, and the export
+// side means it: pemCertsToDer() concatenates the DER of every PEM block it
+// finds. The import side wrapped the whole blob in one BEGIN/END pair, so a
+// config pinning a leaf and its intermediate came back through its OWN share
+// link as a single block that is not a certificate at all. Nothing caught it
+// because no test here ever set a certificate.
+void TestDeepLink::aCertificateChainSurvivesTheLink()
+{
+    // ASN.1 SEQUENCEs rather than real certificates: what broke is the framing,
+    // and framing is what this checks. One short-form length, one long.
+    auto sequence = [](int n) {
+        QByteArray out;
+        out += char(0x30);
+        if (n < 0x80) {
+            out += char(n);
+        } else {
+            out += char(0x82);
+            out += char((n >> 8) & 0xFF);
+            out += char(n & 0xFF);
+        }
+        return out + QByteArray(n, 'A');
+    };
+
+    freetunnel::DeepLinkConfig cfg;
+    cfg.version = freetunnel::kDeepLinkMaxVersion;
+    cfg.hostname = QStringLiteral("vpn.example.org");
+    cfg.addresses = {QStringLiteral("1.2.3.4:443")};
+    cfg.username = QStringLiteral("u");
+    cfg.password = QStringLiteral("p");
+    cfg.certificate = sequence(300) + sequence(120);
+
+    QString err;
+    const auto back = freetunnel::parseDeepLink(freetunnel::encodeDeepLink(cfg), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->certificate, cfg.certificate);
+
+    const QString toml = freetunnel::deepLinkConfigToToml(*back);
+    QCOMPARE(toml.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 2);
+    QCOMPARE(toml.count(QStringLiteral("-----END CERTIFICATE-----")), 2);
+
+    // A single certificate still comes out as exactly one block.
+    freetunnel::DeepLinkConfig one = cfg;
+    one.certificate = sequence(64);
+    QCOMPARE(freetunnel::deepLinkConfigToToml(one)
+                     .count(QStringLiteral("-----BEGIN CERTIFICATE-----")),
+             1);
+
+    // And a blob that is not a sequence of elements is still emitted rather than
+    // dropped: no worse than before, and losing it silently would be worse.
+    freetunnel::DeepLinkConfig junk = cfg;
+    junk.certificate = QByteArray("not der at all");
+    QCOMPARE(freetunnel::deepLinkConfigToToml(junk)
+                     .count(QStringLiteral("-----BEGIN CERTIFICATE-----")),
+             1);
+}
+
 #include "test_deeplink.moc"

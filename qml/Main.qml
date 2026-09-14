@@ -418,6 +418,10 @@ Window {
 
         Loader {
             id: pageLoader
+            // Named so a test can ask what navigation actually produced. Writing
+            // currentPage and reading it back cannot fail; whether the page it
+            // names then loaded is the thing worth knowing.
+            objectName: "pageLoader"
             Layout.fillWidth: true
             Layout.fillHeight: true
             Component.onCompleted: setSource(win.pagePaths[win.currentPage], win.pageProps())

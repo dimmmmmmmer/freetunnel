@@ -48,6 +48,8 @@ private slots:
     void readAccessorsRejectOutOfRangeIndexes();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
+    void anEditSavesTheConfigItOpenedEvenIfTheListMoved();
+    void anEditOfADeletedConfigIsRefused();
 
 private:
     // A complete, valid create form; individual cases override what they exercise.
@@ -424,4 +426,67 @@ void TestBackendConfig::theConnectConfigIsBuiltOffTheGuiThread()
 }
 
 QTEST_MAIN(TestBackendConfig)
+// The editor opens on a row and saves minutes later, and the list does not hold
+// still under it: an imported config is prepended, which shifts every position
+// by one. Saving against the number the editor opened with then wrote the form
+// over a DIFFERENT config — silently, and over one the user never opened.
+//
+// Reproduced here by moving the row the same way the import does, which is what
+// moveConfig() already exists to do.
+void TestBackendConfig::anEditSavesTheConfigItOpenedEvenIfTheListMoved()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("alpha-pass"))));
+    QVERIFY(backend.createConfig(form(QStringLiteral("Beta"), QStringLiteral("beta-pass"))));
+
+    // The editor opens on Beta, and takes its identity with the fields.
+    const int openedAt = backend.configs().indexOf(QStringLiteral("Beta"));
+    QVERIFY(openedAt >= 0);
+    const QVariantMap opened = backend.configFields(openedAt);
+    const QString editPath = opened.value(QStringLiteral("path")).toString();
+    QVERIFY2(!editPath.isEmpty(), "the fields have to say which file they came from");
+
+    // Now the list moves under it.
+    backend.moveConfig(0, 1);
+    QVERIFY(backend.configs().indexOf(QStringLiteral("Beta")) != openedAt);
+
+    QVariantMap edit = form(QStringLiteral("Beta"), QStringLiteral("beta-pass"));
+    edit[QStringLiteral("username")] = QStringLiteral("edited");
+    edit[QStringLiteral("editIndex")] = openedAt; // the stale one, as the UI would send
+    edit[QStringLiteral("editPath")] = editPath;
+    QVERIFY(backend.createConfig(edit));
+
+    QCOMPARE(backend.configs().size(), 2); // no third entry forked off
+    const int beta = backend.configs().indexOf(QStringLiteral("Beta"));
+    const int alpha = backend.configs().indexOf(QStringLiteral("Alpha"));
+    QVERIFY(beta >= 0 && alpha >= 0);
+    QCOMPARE(backend.configFields(beta).value(QStringLiteral("username")).toString(),
+             QStringLiteral("edited"));
+    QVERIFY2(backend.configFields(alpha).value(QStringLiteral("username")).toString()
+                     != QStringLiteral("edited"),
+             "the config the user did not open must be untouched");
+    QCOMPARE(backend.configFields(alpha).value(QStringLiteral("password")).toString(),
+             QStringLiteral("alpha-pass"));
+}
+
+// And a config deleted while its editor was open is refused rather than written
+// back as a new one.
+void TestBackendConfig::anEditOfADeletedConfigIsRefused()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("alpha-pass"))));
+    const QVariantMap opened = backend.configFields(0);
+
+    backend.removeConfig(0);
+    QCOMPARE(backend.configs().size(), 0);
+
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVariantMap edit = form(QStringLiteral("Alpha"), QStringLiteral("alpha-pass"));
+    edit[QStringLiteral("editIndex")] = 0;
+    edit[QStringLiteral("editPath")] = opened.value(QStringLiteral("path")).toString();
+    QVERIFY(!backend.createConfig(edit));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(backend.configs().size(), 0);
+}
+
 #include "test_backend_config.moc"

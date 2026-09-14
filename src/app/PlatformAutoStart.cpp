@@ -11,7 +11,37 @@
 
 #include "core/AppImagePath.h"
 
+#include <cstring>
+
 namespace freetunnel {
+
+// The program a LaunchAgent plist launches: the first <string> inside the
+// ProgramArguments <array>, with the XML escaping undone.
+//
+// Deliberately outside the platform guards, and compiled everywhere, so the
+// parsing can be checked where the tests actually run rather than only on a Mac.
+// Read by hand rather than with an XML parser: the file this reads is the one
+// written a few lines below, its shape is fixed, and QtXml is not linked.
+QString autoStartProgramFromPlist(const QString &plistXml)
+{
+    const int array = plistXml.indexOf(QLatin1String("<array>"));
+    if (array < 0)
+        return QString();
+    const int open = plistXml.indexOf(QLatin1String("<string>"), array);
+    if (open < 0)
+        return QString();
+    const int from = open + int(strlen("<string>"));
+    const int close = plistXml.indexOf(QLatin1String("</string>"), from);
+    if (close < 0)
+        return QString();
+    QString value = plistXml.mid(from, close - from);
+    // The inverse of plistEscaped(), and in the inverse order: &amp; last, or it
+    // would turn "&amp;lt;" — a literal "&lt;" in the path — into "<".
+    value.replace(QLatin1String("&lt;"), QLatin1String("<"));
+    value.replace(QLatin1String("&gt;"), QLatin1String(">"));
+    value.replace(QLatin1String("&amp;"), QLatin1String("&"));
+    return value;
+}
 
 #if defined(Q_OS_WIN)
 static const char *kRunKey =
@@ -53,7 +83,18 @@ static QString plistEscaped(const QString &s)
 
 bool platformAutoStartEnabled()
 {
-    return QFileInfo::exists(autoStartPath());
+    // The file existing is not the same as autostart working — the same thing the
+    // Linux branch below had to learn. The path baked into the plist is the one
+    // the app was run from when the toggle was set, and on macOS that is very
+    // often not where it ends up: people launch from the mounted disk image or
+    // from Downloads and drag the bundle to /Applications afterwards. Nothing
+    // ever rewrites it, and nothing resyncs at startup, so reporting "on" for a
+    // plist pointing at a bundle that is gone leaves the toggle lying for good.
+    QFile f(autoStartPath());
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    const QString target = autoStartProgramFromPlist(QString::fromUtf8(f.readAll()));
+    return !target.isEmpty() && QFileInfo::exists(target);
 }
 
 void setPlatformAutoStart(bool enabled)

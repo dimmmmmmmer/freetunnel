@@ -26,6 +26,12 @@ namespace {
 
 const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
 
+// How long the peer on the helper port has to answer the hello. The real helper
+// replies out of its newConnection handler, so this is orders of magnitude more
+// than it needs; it is sized to be unmistakably a failure rather than a slow
+// machine.
+constexpr int kHandshakeDeadlineMs = 15000;
+
 } // namespace
 
 #ifdef Q_OS_WIN
@@ -224,6 +230,7 @@ void VpnHelperClient::abortStartup() {
     // prepended to the next helper's first message and swallow its challenge.
     m_buf.clear();
     if (m_attempt) { m_attempt->stop(); m_attempt->deleteLater(); m_attempt = nullptr; }
+    if (m_handshake) { m_handshake->stop(); m_handshake->deleteLater(); m_handshake = nullptr; }
     if (m_sock) { m_sock->abort(); m_sock->deleteLater(); m_sock = nullptr; }
     // On macOS m_proc is osascript, not the helper — the helper was exec'd into
     // the background and survives this kill. Two things bound it: deleting the
@@ -458,7 +465,11 @@ static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QStr
                                  .arg(QString::number(port), tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    // No SEE_MASK_NOCLOSEPROCESS. It makes ShellExecuteExW hand back a process
+    // handle the caller then owns, and nothing here ever read it or closed it —
+    // so every elevation attempt leaked one and pinned the exited helper's kernel
+    // object for the life of this process. Asking for what is not used is the
+    // whole of the cost; the value-initialised mask asks for nothing.
     sei.lpVerb = L"runas";
     const std::wstring wexe = exe.toStdWString();
     const std::wstring wargs = args.toStdWString();
@@ -518,6 +529,26 @@ void VpnHelperClient::onSocketConnected() {
     hello["cmd"] = "hello";
     hello["nonce"] = m_guiNonce;
     send(hello);
+
+    // And a deadline on the answer. The helper writes its challenge straight out
+    // of newConnection, so this is generous by a wide margin for the real one and
+    // is the only thing watching anything else.
+    if (m_handshake) { m_handshake->stop(); m_handshake->deleteLater(); }
+    m_handshake = new QTimer(this);
+    m_handshake->setSingleShot(true);
+    connect(m_handshake, &QTimer::timeout, this, [this]() {
+        if (m_helloAcked)
+            return;
+        fail(tr("The process answering on the helper port never finished the handshake — "
+                "something else may be using that port. Try connecting again."));
+    });
+    int deadlineMs = kHandshakeDeadlineMs;
+#ifdef FT_ENABLE_TEST_HOOKS
+    // A test cannot wait fifteen seconds to find out that nothing happened.
+    if (qEnvironmentVariableIsSet("FT_TEST_HANDSHAKE_MS"))
+        deadlineMs = qEnvironmentVariableIntValue("FT_TEST_HANDSHAKE_MS");
+#endif
+    m_handshake->start(deadlineMs);
 }
 
 void VpnHelperClient::send(const QJsonObject &obj) {
@@ -549,6 +580,7 @@ void VpnHelperClient::onReadyRead() {
 void VpnHelperClient::handleReadyEvent()
 {
     m_helloAcked = true;
+    if (m_handshake) { m_handshake->stop(); m_handshake->deleteLater(); m_handshake = nullptr; }
     clearTokenFile();
     setVpnMode(m_selective);
     setKillSwitch(m_killSwitch);

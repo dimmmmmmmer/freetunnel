@@ -43,6 +43,7 @@ private slots:
     void realClientRefusesAChallengeCarryingNoNonce();
     void securitySettingsAreSentAsValuesNotJustCommandNames();
     void theElevatedArgvComesFromItsArgumentsAndNotTheEnvironment();
+    void aPeerThatNeverAnswersIsGivenUpOn();
 };
 
 // linuxHelperCommand() builds the argv pkexec is asked to run AS ROOT, and until
@@ -404,4 +405,47 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
 }
 
 QTEST_MAIN(TestIntegrationHelperClient)
+// A peer that accepts the connection and then says nothing at all.
+//
+// Connecting used to disarm every other failure detector: the retry budget that
+// produces the only "could not reach the helper" message deletes itself the
+// moment the socket reaches ConnectedState, and the elevation-outcome watcher
+// returns early for the same reason. So this left the window on "Connecting…"
+// with no error ever — after the user had already typed their administrator
+// password. The helper port is a random pick that nothing reserves, so an
+// unrelated local service answering there is enough to cause it by accident.
+void TestIntegrationHelperClient::aPeerThatNeverAnswersIsGivenUpOn()
+{
+    QTcpServer mute;
+    QVERIFY(mute.listen(QHostAddress(QStringLiteral("127.0.0.1")), 0));
+
+    QByteArray received;
+    QTcpSocket *peer = nullptr;
+    connect(&mute, &QTcpServer::newConnection, this, [&]() {
+        peer = mute.nextPendingConnection();
+        connect(peer, &QTcpSocket::readyRead, this, [&]() { received += peer->readAll(); });
+    });
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(mute.serverPort()));
+    qputenv("FT_TEST_HELPER_TOKEN", "the-real-token");
+    qputenv("FT_TEST_HANDSHAKE_MS", "300");
+    const auto clear = qScopeGuard([]() {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+        qunsetenv("FT_TEST_HANDSHAKE_MS");
+    });
+
+    VpnHelperClient client;
+    QSignalSpy errors(&client, &VpnHelperClient::vpnError);
+    client.loadConfigFromToml(QStringLiteral("password = \"super-secret\"\n"));
+    client.connectVpn();
+
+    QTRY_VERIFY_WITH_TIMEOUT(!errors.isEmpty(), 5000);
+    // It really did talk to this peer, so the silence is the thing being tested.
+    QVERIFY(received.contains("\"cmd\":\"hello\""));
+    QVERIFY2(!received.contains("super-secret"), "and it sent nothing else");
+    // And it does not sit in a state the user cannot leave.
+    QVERIFY(client.state() != VpnHelperClient::State::Connected);
+}
+
 #include "test_integration_helper_client.moc"

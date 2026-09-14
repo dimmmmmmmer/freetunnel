@@ -19,6 +19,7 @@ private slots:
     void decodesOctalEscapesInPaths();
     void autoStartTargetIsUnquoted();
     void autoStartTargetHandlesAMissingExecLine();
+    void autoStartProgramIsReadBackOutOfThePlist();
 };
 
 namespace {
@@ -112,4 +113,37 @@ void TestAppImagePath::autoStartTargetHandlesAMissingExecLine()
 #endif
 
 QTEST_MAIN(TestAppImagePath)
+// The macOS half of the same question, checked here because this is where the
+// tests run. A plist naming a bundle that has moved must not read as "on": that
+// is what left the Linux toggle lying until it was fixed, and the macOS branch
+// answered with nothing but "the file exists" until now.
+void TestAppImagePath::autoStartProgramIsReadBackOutOfThePlist()
+{
+    const QString plist = QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<plist version=\"1.0\"><dict>\n"
+            "  <key>Label</key><string>com.freetunnel.app</string>\n"
+            "  <key>ProgramArguments</key><array><string>%1</string></array>\n"
+            "  <key>RunAtLoad</key><true/>\n"
+            "</dict></plist>\n");
+
+    // Not the Label, which is the <string> that comes first in the file: the one
+    // inside the array is the program.
+    QCOMPARE(freetunnel::autoStartProgramFromPlist(
+                     plist.arg(QStringLiteral("/Applications/FreeTunnel.app/Contents/MacOS/FreeTunnel"))),
+             QStringLiteral("/Applications/FreeTunnel.app/Contents/MacOS/FreeTunnel"));
+
+    // And the escaping the writer applies is undone, including a path whose own
+    // text contains the escape sequence.
+    QCOMPARE(freetunnel::autoStartProgramFromPlist(
+                     plist.arg(QStringLiteral("/Users/u/Rock &amp; Roll/&lt;app&gt;/FreeTunnel"))),
+             QStringLiteral("/Users/u/Rock & Roll/<app>/FreeTunnel"));
+    QCOMPARE(freetunnel::autoStartProgramFromPlist(plist.arg(QStringLiteral("/a/&amp;lt;b/FreeTunnel"))),
+             QStringLiteral("/a/&lt;b/FreeTunnel"));
+
+    QVERIFY(freetunnel::autoStartProgramFromPlist(QStringLiteral("<plist><dict></dict></plist>"))
+                    .isEmpty());
+    QVERIFY(freetunnel::autoStartProgramFromPlist(QString()).isEmpty());
+}
+
 #include "test_appimagepath.moc"

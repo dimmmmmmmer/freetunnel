@@ -40,6 +40,8 @@ private slots:
     void appRulesAreValidatedDedupedAndPersisted();
     void aDroppedShortcutBecomesARuleForTheProgramItNames();
     void turningSplitTunnellingOffDoesNotInvertTheAppRules();
+    void appRulesBelongToTheProfile();
+    void theOneOldApplicationListSeedsEveryProfileOnce();
 
 private:
     QTemporaryDir m_home;
@@ -111,6 +113,9 @@ void TestBackendSplit::addExcludedRouteAcceptsAPastedList()
     QCOMPARE(errors.count(), 1);
     QVERIFY(backend.excludedRoutes().contains(QStringLiteral("8.8.8.8")));
     QVERIFY(!backend.excludedRoutes().contains(QStringLiteral("nonsense")));
+    // And it says which entry it refused. Paste a dozen subnets with one typo and
+    // a message that only restates the format leaves you to find the typo yourself.
+    QVERIFY(errors.at(0).at(0).toString().contains(QStringLiteral("nonsense")));
 }
 
 void TestBackendSplit::addExcludedRouteIgnoresDuplicates()
@@ -431,4 +436,74 @@ void TestBackendSplit::turningSplitTunnellingOffDoesNotInvertTheAppRules()
 }
 
 QTEST_MAIN(TestBackendSplit)
+// Applications belong to the profile, the same as the addresses. Without that,
+// a profile switch changed half of what the tunnel would do and left the other
+// half behind, with nothing on screen to say so.
+void TestBackendSplit::appRulesBelongToTheProfile()
+{
+    {
+        Backend backend;
+        QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
+        QCOMPARE(backend.appRules(), QStringList{QStringLiteral("firefox")});
+
+        backend.addProfile(QStringLiteral("Work"));
+        backend.selectProfile(QStringLiteral("Work"));
+        QVERIFY2(backend.appRules().isEmpty(), "a new profile starts with none of its own");
+
+        QVERIFY(backend.addAppRule(QStringLiteral("thunderbird")));
+        QCOMPARE(backend.appRules(), QStringList{QStringLiteral("thunderbird")});
+
+        backend.selectProfile(QStringLiteral("Default"));
+        QCOMPARE(backend.appRules(), QStringList{QStringLiteral("firefox")});
+    }
+
+    // And each list is stored under its own profile, not merged on the way out.
+    Backend reopened;
+    QCOMPARE(reopened.appRules(), QStringList{QStringLiteral("firefox")});
+    reopened.selectProfile(QStringLiteral("Work"));
+    QCOMPARE(reopened.appRules(), QStringList{QStringLiteral("thunderbird")});
+
+    // Deleting a profile takes its applications with it, and leaves the ones
+    // that were never its own alone.
+    reopened.selectProfile(QStringLiteral("Default"));
+    reopened.removeProfile(QStringLiteral("Work"));
+    QCOMPARE(reopened.appRules(), QStringList{QStringLiteral("firefox")});
+    Backend afterDelete;
+    QCOMPARE(afterDelete.profiles(), QStringList{QStringLiteral("Default")});
+    QCOMPARE(afterDelete.appRules(), QStringList{QStringLiteral("firefox")});
+}
+
+// Before 1.2.0 there was one application list for the whole program. Splitting it
+// across the profiles must not read as "my rules are gone", so the old list is
+// what every profile that already existed starts from — which is the behaviour it
+// had. And the seeding happens once: a profile whose list the user then empties
+// stays empty across a restart.
+void TestBackendSplit::theOneOldApplicationListSeedsEveryProfileOnce()
+{
+    {
+        QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("FreeTunnelTest"), QStringLiteral("BackendSplitTest"));
+        s.setValue(QStringLiteral("bypass/profile_names"),
+                   QStringList{QStringLiteral("Default"), QStringLiteral("Work")});
+        s.setValue(QStringLiteral("routing/app_rules"), QStringList{QStringLiteral("firefox")});
+        s.sync();
+    }
+
+    {
+        Backend migrated;
+        QCOMPARE(migrated.appRules(), QStringList{QStringLiteral("firefox")});
+        migrated.selectProfile(QStringLiteral("Work"));
+        QVERIFY2(migrated.appRules().contains(QStringLiteral("firefox")),
+                 "the profile that already existed keeps what used to apply to it");
+        migrated.clearAppRules();
+        QVERIFY(migrated.appRules().isEmpty());
+    }
+
+    Backend reopened;
+    reopened.selectProfile(QStringLiteral("Work"));
+    QVERIFY2(reopened.appRules().isEmpty(), "and the old list does not come back");
+    reopened.selectProfile(QStringLiteral("Default"));
+    QCOMPARE(reopened.appRules(), QStringList{QStringLiteral("firefox")});
+}
+
 #include "test_backend_split.moc"

@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QObject>
 
+#include <optional>
 #include <atomic>
 #include <QString>
 #include <QStringList>
@@ -225,6 +226,8 @@ public:
     Q_INVOKABLE bool importFromClipboard();
 
     QString credentialStorageWarning() const;
+    // Ask again, and tell QML if the answer moved. See the definition.
+    void recheckCredentialStorage();
 
 signals:
     void stateChanged();
@@ -371,6 +374,10 @@ private:
     QString m_activePath;
     bool m_connected = false;
     bool m_connecting = false; // Connecting / Reconnecting / WaitingForNetwork
+    // Answered once and kept: the probe behind it spawns a subprocess and runs a
+    // nested event loop on this thread. mutable because the property reader is
+    // const, as a property reader has to be.
+    mutable std::optional<QString> m_credentialWarning;
     bool m_disconnecting = false; // Disconnecting (tearing down / cancelling)
     LogModel m_logModel;
 

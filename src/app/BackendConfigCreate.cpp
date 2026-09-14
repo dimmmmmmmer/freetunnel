@@ -163,7 +163,25 @@ bool Backend::createConfig(const QVariantMap &f)
     }
 
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
-    const int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
+    int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
+    // The editor opens on a row and saves minutes later, and the list is not
+    // still under it: finalizeImportedConfig() prepends an imported config and
+    // shifts every position by one. Nothing re-resolved the number, so a save
+    // that landed after an import wrote the form over a DIFFERENT config —
+    // silently, and over one the user had not opened.
+    //
+    // The path is what the editor actually means. The index stays as the
+    // fallback for a save that carries no path (an editor opened before this
+    // existed cannot, and neither can a test that predates it).
+    const QString editPath = f.value(QStringLiteral("editPath")).toString();
+    if (!editPath.isEmpty()) {
+        editIndex = m_paths.indexOf(editPath);
+        if (editIndex < 0) {
+            emit errorOccurred(tr("That configuration is no longer there — it may have been "
+                                  "deleted while you were editing it."));
+            return false;
+        }
+    }
     const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
     const QString &oldPath = edit.oldPath;
 
@@ -172,11 +190,16 @@ bool Backend::createConfig(const QVariantMap &f)
     QString saveErr;
     if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(),
                                                             parsed.password, &saveErr)) {
-        if (saveErr == QLatin1String("password"))
+        if (saveErr == QLatin1String("password")) {
             emit errorOccurred(tr("Could not store the VPN password securely. Install "
                                  "gnome-keyring or KWallet, then try again."));
-        else
+            // The moment the app learns the credential store is not working. Ask
+            // again so the Settings banner matches what just happened instead of
+            // whatever was true when the process started.
+            recheckCredentialStorage();
+        } else {
             emit errorOccurred(tr("Could not write config"));
+        }
         return false;
     }
     if (!oldPath.isEmpty() && oldPath != target)
@@ -225,6 +248,9 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
     assignSplitProfile(m_settings, ctx.oldPath, ctx.target, newProfile);
     persistSettings();
     emit configChanged();
+    // The config-to-profile assignment just moved, so what the tunnel would do
+    // moved with it. See the note in Backend::selectConfig().
+    emit splitChanged();
 
     const bool editing = ctx.editIndex >= 0;
     const bool noChange = ctx.editingSnapshot && ctx.oldPath == ctx.target

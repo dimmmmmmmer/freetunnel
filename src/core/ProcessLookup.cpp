@@ -55,9 +55,16 @@ namespace {
 
 // ntohs is called unqualified on purpose: on Darwin it is a macro
 // (__DARWIN_OSSwapInt16), and ::ntohs does not parse there.
-constexpr std::uint32_t ownerKey(int proto, std::uint16_t port)
+//
+// The family is part of the key, not a detail. IPv4 and IPv6 carry separate port
+// spaces on every platform here, so one number can be two different sockets held
+// by two different programs at the same moment — and without the family in the
+// key the second one is either invisible or answers for the first. Both failures
+// end the same way: a connection routed by a rule written about another program.
+constexpr std::uint32_t ownerKey(int family, int proto, std::uint16_t port)
 {
-    return (static_cast<std::uint32_t>(proto) << 16) | port;
+    return (static_cast<std::uint32_t>(family & 0xFF) << 24)
+            | (static_cast<std::uint32_t>(proto & 0xFF) << 16) | port;
 }
 
 // How much of this machine walking the process table may have. A quarter of
@@ -84,7 +91,7 @@ constexpr qint64 kLookCreditCapUs = 150000;
 // /proc/net table parsing. Pure, and built on every platform for the tests.
 // ---------------------------------------------------------------------------
 
-QList<SocketOwner> parseProcNetTable(const QString &contents, int proto)
+QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int family)
 {
     QList<SocketOwner> out;
     const QList<QStringView> lines = QStringView(contents).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -109,6 +116,7 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto)
         SocketOwner owner;
         owner.port = static_cast<std::uint16_t>(port);
         owner.proto = proto;
+        owner.family = family;
         owner.inode = inode;
         out.append(owner);
     }
@@ -298,7 +306,8 @@ namespace {
 // which is what lets one function read all of them — it was four copies of this
 // loop, and the copies drifted apart the moment one of them was corrected.
 template <typename TableT>
-void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners, int proto)
+void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners, int family,
+                       int proto)
 {
     for (DWORD i = 0; i < table->dwNumEntries; ++i) {
         const auto &row = table->table[i];
@@ -307,13 +316,12 @@ void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners
         // displace a row that can.
         if (row.dwOwningPid == 0)
             continue;
-        // First one wins, as on the other two platforms. The four tables are
-        // read IPv4 before IPv6, and one local port can appear in both owned by
-        // different programs; inserting over the top made whichever table was
-        // read last decide, so a rule about the program holding the IPv4 socket
-        // stopped applying because something unrelated held the same port on
-        // IPv6.
-        const std::uint32_t key = ownerKey(proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
+        // First one wins, as on the other two platforms — among rows of the same
+        // family and protocol, where a listener and a connection accepted on it
+        // legitimately share a port. Rows from different families no longer
+        // compete at all: the family is in the key.
+        const std::uint32_t key =
+                ownerKey(family, proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
         if (!owners->contains(key))
             owners->insert(key, static_cast<qint64>(row.dwOwningPid));
     }
@@ -322,20 +330,40 @@ void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners
 // One pass over a Windows socket table. GetExtended*Table returns the whole
 // table in one buffer, which is exactly the shape we want: one syscall per
 // refresh rather than one per connection.
+//
+// Asked twice per attempt — once for the size, once for the contents — and the
+// table is a live thing that gains rows in between. When it does, the second
+// call answers ERROR_INSUFFICIENT_BUFFER with the new size rather than filling
+// the old buffer, and a single attempt then returns having recorded nothing.
+// That is not a row lost, it is every port of this family and protocol lost for
+// the whole walk, while the scan still reports success: a machine that looks
+// like it has no IPv4 TCP sockets at all. Microsoft's own pattern for these APIs
+// is the retry, and the answer is reported so a walk that gave up does not read
+// as a walk that found nothing.
 template <typename TableT>
-void collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
+bool collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
 {
-    ULONG size = 0;
-    DWORD rc = tcp ? ::GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
-                   : ::GetExtendedUdpTable(nullptr, &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
-    if (rc != ERROR_INSUFFICIENT_BUFFER || size == 0)
-        return;
-    QByteArray buf(static_cast<int>(size), Qt::Uninitialized);
-    rc = tcp ? ::GetExtendedTcpTable(buf.data(), &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
-             : ::GetExtendedUdpTable(buf.data(), &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
-    if (rc != NO_ERROR)
-        return;
-    recordWindowsRows(reinterpret_cast<const TableT *>(buf.constData()), owners, proto);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        ULONG size = 0;
+        DWORD rc = tcp ? ::GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
+                       : ::GetExtendedUdpTable(nullptr, &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
+        if (rc != ERROR_INSUFFICIENT_BUFFER || size == 0)
+            return rc == NO_ERROR; // nothing to read is not a failure
+        // Room for a few more rows than were there a moment ago, so the ordinary
+        // case of the table growing slightly does not cost another round trip.
+        QByteArray buf(static_cast<int>(size) + 4096, Qt::Uninitialized);
+        ULONG given = static_cast<ULONG>(buf.size());
+        rc = tcp ? ::GetExtendedTcpTable(buf.data(), &given, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
+                 : ::GetExtendedUdpTable(buf.data(), &given, FALSE, af, UDP_TABLE_OWNER_PID, 0);
+        if (rc == NO_ERROR) {
+            recordWindowsRows(reinterpret_cast<const TableT *>(buf.constData()), owners,
+                              static_cast<int>(af), proto);
+            return true;
+        }
+        if (rc != ERROR_INSUFFICIENT_BUFFER)
+            return false;
+    }
+    return false;
 }
 
 } // namespace
@@ -347,12 +375,15 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // every port is attributed here, and which of them a rule names is decided
     // in resolve(), for the one port being asked about rather than for the
     // hundreds that were not.
-    collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true);
-    collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true);
-    collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false);
-    collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false);
-
-    finishScan(now, true);
+    bool ok = collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true);
+    ok &= collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true);
+    ok &= collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false);
+    ok &= collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false);
+    // A walk that lost a whole table is not a walk that completed. Reporting it
+    // as one leaves resolve() treating a port it never saw as a port nobody
+    // owns, and the scan line printing a plausible entry count for a machine it
+    // saw three quarters of.
+    finishScan(now, ok);
 }
 
 #elif defined(Q_OS_MACOS)
@@ -383,10 +414,10 @@ QList<qint64> listProcessIds()
 
 // The protocol and local port one socket descriptor is bound to, or false when
 // it is not an internet socket with a port.
-bool socketEndpointOf(const socket_fdinfo &info, int *proto, std::uint16_t *port)
+bool socketEndpointOf(const socket_fdinfo &info, int *family, int *proto, std::uint16_t *port)
 {
-    const int family = info.psi.soi_family;
-    if (family != AF_INET && family != AF_INET6)
+    *family = info.psi.soi_family;
+    if (*family != AF_INET && *family != AF_INET6)
         return false;
     if (info.psi.soi_kind == SOCKINFO_TCP) {
         *proto = IPPROTO_TCP;
@@ -443,16 +474,17 @@ void collectSocketsOfProcess(pid_t pid, QHash<std::uint32_t, qint64> *owners,
                                          static_cast<int>(sizeof(raw)));
         if (got <= 0)
             continue;
+        int family = 0;
         int proto = 0;
         std::uint16_t port = 0;
-        if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &proto, &port))
+        if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &family, &proto, &port))
             continue;
         // Does not overwrite: two processes can legitimately hold the same
-        // (protocol, port) — a listener and an accepted connection, or a socket
-        // one of them is about to close — and letting whichever pid the scan
-        // happened to reach last win makes the answer depend on process
+        // (family, protocol, port) — a listener and an accepted connection, or a
+        // socket one of them is about to close — and letting whichever pid the
+        // scan happened to reach last win makes the answer depend on process
         // enumeration order.
-        const std::uint32_t key = ownerKey(proto, port);
+        const std::uint32_t key = ownerKey(family, proto, port);
         if (!owners->contains(key))
             owners->insert(key, static_cast<qint64>(pid));
     }
@@ -628,7 +660,7 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     m_report.netlink = viaNetlink;
 
     for (const SocketOwner &sock : sockets) {
-        const std::uint32_t key = ownerKey(sock.proto, sock.port);
+        const std::uint32_t key = ownerKey(sock.family, sock.proto, sock.port);
         const auto owner = byInode.constFind(sock.inode);
         if (owner == byInode.constEnd()) {
             // Seen, and nobody watched holds it. Recorded only if no watched
@@ -688,8 +720,10 @@ bool ProcessLookup::shouldLookAgain(std::chrono::steady_clock::time_point asked)
     return m_credit >= std::max<qint64>(m_report.elapsedUs, 0);
 }
 
-AppIdentity ProcessLookup::resolve(const LocalFlow &flow)
+AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
 {
+    if (lookWasSkipped != nullptr)
+        *lookWasSkipped = false;
     // No rules means no watched processes, and the walk would have nothing to
     // look for. This is also what makes the feature cost nothing when it is off.
     if (flow.port == 0 || m_watch.isEmpty())
@@ -703,12 +737,38 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow)
     accrueLookCredit(asked);
     refreshIfStale();
 
-    const std::uint32_t key = ownerKey(flow.proto, flow.port);
-    auto owner = m_owners.constFind(key);
-    if (owner == m_owners.constEnd() && shouldLookAgain(asked)) {
-        m_everBuilt = false;
-        refreshIfStale();
-        owner = m_owners.constFind(key);
+    // The asked-for family first, and the other one only when the first is not
+    // in the table at all.
+    //
+    // Exact-first is what removes the collision: when both families really do
+    // hold this port, each answers for itself instead of whichever the walk
+    // recorded first. The fallback is for the case that is not a collision - a
+    // socket the kernel keeps in its IPv6 table while the connection on it is
+    // v4-mapped, where the family the core reports and the family the table
+    // files it under are legitimately different. A row found under the asked
+    // family is always preferred, including an unattributed one: "seen, owned by
+    // nobody watched" is an answer, and falling through it to the other family
+    // would reintroduce exactly the mix-up this key exists to prevent.
+    auto find = [&]() {
+        const auto exact = m_owners.constFind(ownerKey(flow.family, flow.proto, flow.port));
+        if (exact != m_owners.constEnd())
+            return exact;
+        const int other = flow.family == AF_INET6 ? AF_INET : AF_INET6;
+        return m_owners.constFind(ownerKey(other, flow.proto, flow.port));
+    };
+    auto owner = find();
+    if (owner == m_owners.constEnd()) {
+        if (shouldLookAgain(asked)) {
+            m_everBuilt = false;
+            refreshIfStale();
+            owner = find();
+        } else if (lookWasSkipped != nullptr && (!m_everBuilt || m_builtAt < asked)) {
+            // Not "looked and found nothing" — never looked, or looked and came
+            // back incomplete. Either way the socket may well be in the system's
+            // tables right now: what stopped us was the budget or a failed walk,
+            // not the answer.
+            *lookWasSkipped = true;
+        }
     }
     if (owner == m_owners.constEnd())
         return {};

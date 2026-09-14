@@ -5,7 +5,7 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
-## 1.1.10
+## 1.2.0
 
 ### Added
 
@@ -27,6 +27,11 @@ compare link at the bottom of its release notes.
   connection itself, so a rule added while the VPN is up applies to the next
   connection rather than the next session.
 
+  Programs belong to the profile, the same as the addresses above them, so a set
+  for work and a set for everything else switch together. Any list you had before
+  this release becomes the starting list of every profile you already had, which
+  is what it used to mean.
+
 ### Security
 
 - If you chose **HTTP/3** as the protocol for a config, the server's certificate
@@ -47,8 +52,59 @@ compare link at the bottom of its release notes.
   or have verification switched off. Re-import the config from its link — the
   certificate travels inside it — or turn verification off deliberately.
 
+- **Windows: a program running as another user of this computer could give
+  FreeTunnel orders.** A second launch forwards `freetunnel://` and `tt://` links
+  to the window already open, over a local channel that is supposed to accept
+  only connections from you. On the receiving side that check was asking about
+  the wrong end of the connection, so it described this very process and could
+  never refuse anything. Anything that reached the channel could switch the VPN
+  on or off, or hand it a server link to import.
+
 ### Fixed
 
+- **The Linux `.deb` could not be installed on a current system.** It asked for a
+  package Debian 13 and Ubuntu 25.04 no longer ship, with a fallback name that
+  has never existed in either. It asks for `pkexec` now — the program that
+  actually starts the privileged part.
+- **Updating on Linux could leave nothing running.** The replacement was started
+  while the copy being replaced still held the channel above, so it handed itself
+  over to a program that was in the middle of quitting and then exited. Both
+  disappeared, and the app had to be started again by hand.
+- **Editing a server could save over a different one.** The editor remembered
+  which row of the list it opened on, and a config imported meanwhile is added to
+  the top and moves every row down. Saving after that wrote the form over
+  whichever server had taken that place — silently, and leaving the original
+  behind as a duplicate. It remembers the file now, and says so plainly if that
+  file has been deleted in the meantime.
+- **A config file could be rewritten into something nothing can read.** Anything
+  in it this app does not itself write — a setting from your provider spread over
+  several lines — was cut off after its first line whenever the file was saved
+  back, which happens on import and on every connect. A certificate written in
+  any form other than the one this app uses was read as empty and then written
+  back as empty, so a pinned server certificate was lost from the file.
+  Configurations that use single quotes, which are perfectly ordinary, were read
+  as blank entirely.
+- **Sharing a config as a link dropped all but the first certificate** when it
+  pinned a chain rather than a single one.
+- **The app could sit on "Connecting…" for good.** If something else on the
+  computer was already using the port the privileged helper picks, the app would
+  connect to it, wait for an answer that was never coming, and show nothing —
+  after you had already entered your administrator password. It now gives up and
+  says what happened.
+- **macOS: "Start at login" could say it was on while doing nothing.** The entry
+  records where the app was when you switched it on, and on macOS that is usually
+  not where it ends up — people run it from the disk image or from Downloads and
+  move it to Applications afterwards. Nothing rewrote it, and the switch went on
+  claiming to be on for good.
+- **Windows: the Start menu and desktop shortcuts went into one account.** The
+  program is installed for the whole machine, but its shortcuts landed in the
+  profile of whichever account Windows ran the installer as — often not the one
+  that asked for it. They are made for all users now, and an upgrade clears the
+  old ones rather than leaving a second copy of each.
+- **Settings no longer freezes while it opens.** It was checking for a password
+  keyring three times over, each check stopping the interface while it ran. It
+  asks once; and the notice about a missing keyring now goes away once one is
+  there, instead of staying until the app is restarted.
 - HTTP/3: the app could keep saying it was connected after the connection had
   actually died, leaving traffic going nowhere until you reconnected by hand.
 - HTTP/3: a config listing several server addresses could crash the privileged

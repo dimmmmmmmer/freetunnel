@@ -188,7 +188,7 @@ void TestIntegrationSingleInstance::listenerRejectsWrongToken()
 
     // Gate 1 lets it through, and is supposed to: the uid check only keeps out
     // OTHER users, and this attacker is us.
-    QVERIFY(freetunnel::localSocketPeerIsSameUser(peer));
+    QVERIFY(freetunnel::localSocketPeerIsSameUser(peer, freetunnel::SocketEnd::WeAccepted));
     // Gate 2 lets it through too: the message is well-formed and the command is
     // one the running instance would happily execute.
     QString parsedToken;

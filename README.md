@@ -57,6 +57,24 @@ admin password the first time you connect in a session.
 - **Configs → ＋** — create a new TOML, import from file, or paste a `tt://`
   link from the clipboard.
 
+## Split tunnelling
+
+The **Split tunnelling** tab decides what goes through the tunnel. Rules are
+either addresses — a domain, an IP, a subnet — or programs, and both obey the
+**Mode** switch at the top of the page: under *Bypass VPN* what is listed goes
+around the tunnel, under *Through VPN* it is the only thing inside it.
+
+Add a program from the list of what is installed, by dragging its icon onto the
+page, or by picking the file yourself. Which program a connection belongs to is
+worked out by asking the operating system who owns the socket, so a rule added
+while the VPN is up applies to the next connection rather than the next session.
+Nothing extra is installed for this: no driver, no system extension, no
+permission dialog.
+
+Rules are grouped into profiles — addresses and programs both — and a config can
+be tied to one, so a set for work and a set for everything else can be switched
+between without retyping either.
+
 ## External control
 
 - **Deep links**: `freetunnel://toggle`, `freetunnel://connect`,

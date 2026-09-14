@@ -83,8 +83,40 @@ bool writeInstanceAuthToken(QString *tokenOut)
     return true;
 }
 
-void removeInstanceAuthToken()
+// The name this application's single-instance socket listens on.
+//
+// Lives here rather than beside the listener because more than the listener
+// needs it: the self-update path has to stop owning the socket before it starts
+// the replacement, and a second copy of the string is a second thing to keep in
+// step with the test override below.
+//
+// The override matters during development: run a debug build from a checkout
+// under the production name and it connects to whatever FreeTunnel the developer
+// happens to have running — forwarding a command into their live app and then
+// exiting as though it were the second instance. It also leaves a socket in a
+// namespace shared with every other process on the machine.
+QString instanceServerName()
 {
+#ifdef FT_ENABLE_TEST_HOOKS
+    const QByteArray override = qgetenv("FT_TEST_INSTANCE_NAME");
+    if (!override.isEmpty())
+        return QString::fromLocal8Bit(override);
+#endif
+    return QStringLiteral("FreeTunnelInstance");
+}
+
+void removeInstanceAuthToken(const QString &onlyIfItMatches)
+{
+    // A quitting instance must not delete a token that is no longer its own.
+    // The self-update path deliberately overlaps two processes: the replacement
+    // writes its own token at startup, and this runs from the old one's
+    // aboutToQuit, which can land afterwards. Deleting then leaves the new
+    // instance with no token at all — reachable by nothing, so every later
+    // deep link starts a second copy instead of being forwarded, until the
+    // next restart.
+    if (!onlyIfItMatches.isEmpty()
+        && CredentialStore::loadPassword(kInstanceAuthKey) != onlyIfItMatches)
+        return;
     CredentialStore::deletePassword(kInstanceAuthKey);
     QFile::remove(instanceAuthFilePath());
 }
@@ -184,20 +216,29 @@ QByteArray processUserSid(HANDLE process)
     return sid;
 }
 
-// Whether the process serving this pipe runs as the user we do.
-bool pipeServerIsSameUser(HANDLE pipe)
+// Whether the process on the OTHER end of this pipe runs as the user we do.
+//
+// Which end to ask is not a detail. GetNamedPipeServerProcessId names the
+// process that created the pipe, which is the peer only when this handle is the
+// CLIENT end. Asked on a handle from CreateNamedPipe — the one Qt hands back
+// from nextPendingConnection() — it names this very process, so the comparison
+// is with ourselves and cannot fail. The check then passed for every inbound
+// connection whoever opened it, which is the whole thing it exists to refuse.
+bool pipePeerIsSameUser(HANDLE pipe, bool weAreTheServer)
 {
     if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE)
         return false;
-    ULONG serverPid = 0;
-    if (::GetNamedPipeServerProcessId(pipe, &serverPid) == 0 || serverPid == 0)
+    ULONG peerPid = 0;
+    const BOOL asked = weAreTheServer ? ::GetNamedPipeClientProcessId(pipe, &peerPid)
+                                      : ::GetNamedPipeServerProcessId(pipe, &peerPid);
+    if (asked == 0 || peerPid == 0)
         return false;
-    HANDLE server = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                  static_cast<DWORD>(serverPid));
-    if (server == nullptr)
+    HANDLE peer = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                static_cast<DWORD>(peerPid));
+    if (peer == nullptr)
         return false;
-    const QByteArray theirs = processUserSid(server);
-    ::CloseHandle(server);
+    const QByteArray theirs = processUserSid(peer);
+    ::CloseHandle(peer);
     const QByteArray ours = processUserSid(::GetCurrentProcess());
     return !ours.isEmpty() && ours == theirs;
 }
@@ -205,7 +246,7 @@ bool pipeServerIsSameUser(HANDLE pipe)
 } // namespace
 #endif
 
-bool localSocketPeerIsSameUser(QLocalSocket *socket)
+bool localSocketPeerIsSameUser(QLocalSocket *socket, SocketEnd end)
 {
     if (!socket)
         return false;
@@ -224,8 +265,12 @@ bool localSocketPeerIsSameUser(QLocalSocket *socket)
     // Failing closed is deliberate at every step. A process belonging to another
     // user normally cannot even be opened for query, and that refusal is the
     // answer.
-    return pipeServerIsSameUser(reinterpret_cast<HANDLE>(socket->socketDescriptor()));
+    return pipePeerIsSameUser(reinterpret_cast<HANDLE>(socket->socketDescriptor()),
+                              end == SocketEnd::WeAccepted);
 #else
+    // Unix answers the same question from either end: SO_PEERCRED and getpeereid
+    // both describe the peer, not the socket's role.
+    Q_UNUSED(end)
     const qintptr fd = socket->socketDescriptor();
     if (fd < 0)
         return false;
@@ -263,7 +308,7 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     // Sending the auth token there would leak it and make this launch exit as
     // if an instance were already running (silent startup DoS). Only talk to a
     // listener owned by the same user.
-    if (!localSocketPeerIsSameUser(&probe))
+    if (!localSocketPeerIsSameUser(&probe, SocketEnd::WeConnected))
         return false;
 
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;

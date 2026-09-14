@@ -434,13 +434,35 @@ void Backend::quitApplication() {
 
 QString Backend::credentialStorageWarning() const
 {
+    // Answered once per process, because answering costs a subprocess. On Linux
+    // the probe runs `secret-tool lookup` behind a nested event loop on the GUI
+    // thread, and the Settings page reads this property from three separate
+    // bindings — so every visit to that page stalled the interface three times
+    // over for an answer that had not changed.
+    if (m_credentialWarning.has_value())
+        return *m_credentialWarning;
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
     if (!freetunnel::CredentialStore::secureStorageAvailable()) {
-        return tr("Secure credential storage is unavailable. Install gnome-keyring or "
-                  "KWallet (with secret-tool) before saving VPN passwords.");
+        m_credentialWarning = tr("Secure credential storage is unavailable. Install gnome-keyring or "
+                                 "KWallet (with secret-tool) before saving VPN passwords.");
+        return *m_credentialWarning;
     }
 #endif
-    return QString();
+    m_credentialWarning = QString();
+    return *m_credentialWarning;
+}
+
+void Backend::recheckCredentialStorage()
+{
+    // The declared NOTIFY signal had no sender anywhere, so a banner shown at
+    // startup stayed shown for the life of the process even after the user
+    // installed or unlocked a keyring — and, with the cache above, would now stay
+    // shown for a second reason. Called from the one place that learns the
+    // storage is not working: a save that failed on the password.
+    const QString before = m_credentialWarning.value_or(QString());
+    m_credentialWarning.reset();
+    if (credentialStorageWarning() != before)
+        emit credentialStorageChanged();
 }
 
 void Backend::handleControl(const QString &command) {
@@ -464,6 +486,12 @@ void Backend::selectConfig(int index) {
     m_settings.last_config_path = m_activePath;
     persistSettings();
     emit configChanged();
+    // And splitChanged, because which config is active decides which profile the
+    // tunnel uses, and therefore whether "Through VPN" has any rules at all. The
+    // Split page's standing warning is bound to that and read nothing here, so it
+    // kept describing the config before this one. removeProfile() emits both for
+    // the same reason.
+    emit splitChanged();
     if (m_connected || m_connecting)
         reconnectActiveConfig();
 }

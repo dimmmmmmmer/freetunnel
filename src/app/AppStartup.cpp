@@ -179,7 +179,7 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
 {
     if (!c)
         return;
-    if (!localSocketPeerIsSameUser(c)) {
+    if (!localSocketPeerIsSameUser(c, freetunnel::SocketEnd::WeAccepted)) {
         // Loudly. Every rejection path here used to be silent, which is how a
         // dropped control message could look exactly like one that was never sent:
         // no error, no log line, nothing for the user or for us.

@@ -170,10 +170,6 @@
         <translation>Неверный домен или подсеть: %1</translation>
     </message>
     <message>
-        <source>Enter a valid IP or subnet, e.g. 10.0.0.0/8</source>
-        <translation>Введите корректный IP или подсеть, например 10.0.0.0/8</translation>
-    </message>
-    <message>
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
@@ -280,6 +276,14 @@
     <message>
         <source>A profile called “%1” already exists</source>
         <translation>Профиль «%1» уже существует</translation>
+    </message>
+    <message>
+        <source>Not a valid IP or subnet: %1</source>
+        <translation>Неверный IP-адрес или подсеть: %1</translation>
+    </message>
+    <message>
+        <source>That configuration is no longer there — it may have been deleted while you were editing it.</source>
+        <translation>Этой конфигурации больше нет — возможно, её удалили, пока вы её редактировали.</translation>
     </message>
 </context>
 <context>
@@ -860,6 +864,10 @@
     <message>
         <source>The VPN helper didn&apos;t start — authorization was declined, or the elevation failed.</source>
         <translation>Служба VPN не запустилась — в правах отказано или повышение не удалось.</translation>
+    </message>
+    <message>
+        <source>The process answering on the helper port never finished the handshake — something else may be using that port. Try connecting again.</source>
+        <translation>Тот, кто отвечает на порту помощника, не завершил рукопожатие — возможно, порт занят чем-то другим. Попробуйте подключиться ещё раз.</translation>
     </message>
 </context>
 </TS>
