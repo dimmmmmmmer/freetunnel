@@ -186,6 +186,18 @@ Item {
                         cursorShape: Qt.PointingHandCursor; onClicked: shell.showConfirm(qsTr("Clear all applications?"),
                         qsTr("Clear"), function(){ backend.clearAppRules() }) } }
             }
+            // The addresses above belong to the profile; this list does not, the
+            // same way excluded routes do not. Worth saying only once there is a
+            // second profile to switch to — until then there is nothing to be
+            // confused about, and a line explaining it would be the noise.
+            Text {
+                objectName: "appsSharedNote"
+                Layout.fillWidth: true; Layout.topMargin: 2
+                visible: backend.profiles.length > 1
+                height: visible ? implicitHeight : 0
+                wrapMode: Text.WordWrap; font.pixelSize: 12; color: theme.textFaint
+                text: qsTr("The same applications apply to every profile.")
+            }
             Flow {
                 Layout.fillWidth: true; spacing: 6
                 visible: backend.appRules.length > 0

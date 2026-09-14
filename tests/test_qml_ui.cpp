@@ -26,6 +26,7 @@ private slots:
     void splitPageLoads();
     void splitPageNamesApplicationsTheWayThePickerDoes();
     void typingAProgramNameOffersTheProgram();
+    void theApplicationListSaysWhenItIsSharedByProfiles();
     void everyFileDialogActuallyOpens();
     void everyFileDialogActuallyOpens_data();
     void settingsPageLoads();
@@ -181,6 +182,27 @@ void TestQmlUi::splitPageNamesApplicationsTheWayThePickerDoes()
     QVERIFY2(texts.contains(QStringLiteral("Some App")), "and so must the second one");
     QVERIFY2(!texts.contains(QStringLiteral("firefox")),
              "not the file name the rule happens to end with");
+    delete root;
+}
+
+// The addresses above the application list belong to the active profile; the
+// applications do not. With one profile there is nothing to be confused about,
+// so the line is not shown — and a line that is always there is a line nobody
+// reads by the time it matters.
+void TestQmlUi::theApplicationListSaysWhenItIsSharedByProfiles()
+{
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    QObject *note = root->findChild<QObject *>(QStringLiteral("appsSharedNote"));
+    QVERIFY2(note, "the note under the Applications heading");
+    QVERIFY2(!note->property("visible").toBool(), "not while there is only one profile");
+
+    // On the open page, not on a freshly loaded one: what a person does is add a
+    // profile while looking at this, and the question is whether the line appears
+    // then rather than after a restart.
+    m_backend.addProfile(QStringLiteral("Work"));
+    QCoreApplication::processEvents();
+    QVERIFY2(note->property("visible").toBool(), "but yes once there is a second one");
     delete root;
 }
 

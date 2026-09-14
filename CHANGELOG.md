@@ -5,7 +5,7 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
-## 1.1.10
+## 1.2.0
 
 ### Added
 

@@ -205,7 +205,15 @@ public:
     Q_INVOKABLE void restoreDefaultExcludedRoutes() {}
     Q_INVOKABLE void addRecommendedRussia() {}
     Q_INVOKABLE void selectProfile(const QString &) {}
-    Q_INVOKABLE void addProfile(const QString &) {}
+    // Real, unlike its neighbours: the Applications section says it is shared by
+    // every profile, and that line is only shown once a second profile exists —
+    // which a stub that stores nothing can never produce.
+    Q_INVOKABLE void addProfile(const QString &name) {
+        if (name.isEmpty() || m_profiles.contains(name))
+            return;
+        m_profiles << name;
+        emit splitChanged();
+    }
     Q_INVOKABLE void removeProfile(const QString &) {}
     Q_INVOKABLE void checkForUpdates() {}
     Q_INVOKABLE void downloadUpdate() {}
