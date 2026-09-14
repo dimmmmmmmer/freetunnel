@@ -71,9 +71,9 @@ while the VPN is up applies to the next connection rather than the next session.
 Nothing extra is installed for this: no driver, no system extension, no
 permission dialog.
 
-Address rules are grouped into profiles, and a config can be tied to one, so a
-set for work and a set for everything else can be switched between without
-retyping either. The application list is shared by every profile.
+Rules are grouped into profiles — addresses and programs both — and a config can
+be tied to one, so a set for work and a set for everything else can be switched
+between without retyping either.
 
 ## External control
 

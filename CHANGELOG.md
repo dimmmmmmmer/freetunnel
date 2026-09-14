@@ -27,6 +27,11 @@ compare link at the bottom of its release notes.
   connection itself, so a rule added while the VPN is up applies to the next
   connection rather than the next session.
 
+  Programs belong to the profile, the same as the addresses above them, so a set
+  for work and a set for everything else switch together. Any list you had before
+  this release becomes the starting list of every profile you already had, which
+  is what it used to mean.
+
 ### Security
 
 - If you chose **HTTP/3** as the protocol for a config, the server's certificate

@@ -818,10 +818,6 @@
         <source>Drop an application here, or paste its full path</source>
         <translation>Перетащите приложение сюда или вставьте полный путь</translation>
     </message>
-    <message>
-        <source>The same applications apply to every profile.</source>
-        <translation>Список приложений общий для всех профилей.</translation>
-    </message>
 </context>
 <context>
     <name>VpnHelperClient</name>

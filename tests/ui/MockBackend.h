@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QMap>
 #include <QStringList>
 #include <QUrl>
 #include <QVariantList>
@@ -204,14 +205,25 @@ public:
     Q_INVOKABLE void clearAppRules() {}
     Q_INVOKABLE void restoreDefaultExcludedRoutes() {}
     Q_INVOKABLE void addRecommendedRussia() {}
-    Q_INVOKABLE void selectProfile(const QString &) {}
-    // Real, unlike its neighbours: the Applications section says it is shared by
-    // every profile, and that line is only shown once a second profile exists —
-    // which a stub that stores nothing can never produce.
+    // These two are real, unlike their neighbours: the page has to show that
+    // applications belong to the profile, and a stub that stores nothing can
+    // never switch a list it does not keep.
+    Q_INVOKABLE void selectProfile(const QString &name) {
+        if (!m_profiles.contains(name) || m_activeProfile == name)
+            return;
+        m_profileApps.insert(m_activeProfile, m_appRules);
+        m_profileAppLabels.insert(m_activeProfile, m_appRuleLabels);
+        m_activeProfile = name;
+        m_appRules = m_profileApps.value(name);
+        m_appRuleLabels = m_profileAppLabels.value(name);
+        emit splitChanged();
+    }
     Q_INVOKABLE void addProfile(const QString &name) {
         if (name.isEmpty() || m_profiles.contains(name))
             return;
         m_profiles << name;
+        m_profileApps.insert(name, {});
+        m_profileAppLabels.insert(name, {});
         emit splitChanged();
     }
     Q_INVOKABLE void removeProfile(const QString &) {}
@@ -280,6 +292,8 @@ private:
                                    QStringLiteral("Some App")};
     QStringList m_profiles = {QStringLiteral("Default")};
     QString m_activeProfile = QStringLiteral("Default");
+    QMap<QString, QStringList> m_profileApps;
+    QMap<QString, QStringList> m_profileAppLabels;
     bool m_hotkeysSupported = true;
     bool m_hotkeysEnabled = true;
     QString m_hotkeyToggle = QStringLiteral("Ctrl+Alt+T");

@@ -26,7 +26,7 @@ private slots:
     void splitPageLoads();
     void splitPageNamesApplicationsTheWayThePickerDoes();
     void typingAProgramNameOffersTheProgram();
-    void theApplicationListSaysWhenItIsSharedByProfiles();
+    void switchingProfileSwitchesTheApplicationList();
     void everyFileDialogActuallyOpens();
     void everyFileDialogActuallyOpens_data();
     void settingsPageLoads();
@@ -185,24 +185,26 @@ void TestQmlUi::splitPageNamesApplicationsTheWayThePickerDoes()
     delete root;
 }
 
-// The addresses above the application list belong to the active profile; the
-// applications do not. With one profile there is nothing to be confused about,
-// so the line is not shown — and a line that is always there is a line nobody
-// reads by the time it matters.
-void TestQmlUi::theApplicationListSaysWhenItIsSharedByProfiles()
+// Applications belong to the profile, the same as the addresses above them. The
+// page has to show that: switch profile and the chips have to change, or the
+// list is lying about what the tunnel will do.
+void TestQmlUi::switchingProfileSwitchesTheApplicationList()
 {
     QObject *root = loadPage("pages/SplitPage.qml");
     QVERIFY(root);
-    QObject *note = root->findChild<QObject *>(QStringLiteral("appsSharedNote"));
-    QVERIFY2(note, "the note under the Applications heading");
-    QVERIFY2(!note->property("visible").toBool(), "not while there is only one profile");
+    QVERIFY2(everyText(root).contains(QStringLiteral("Firefox Web Browser")),
+             "the Default profile's applications");
 
-    // On the open page, not on a freshly loaded one: what a person does is add a
-    // profile while looking at this, and the question is whether the line appears
-    // then rather than after a restart.
     m_backend.addProfile(QStringLiteral("Work"));
+    m_backend.selectProfile(QStringLiteral("Work"));
     QCoreApplication::processEvents();
-    QVERIFY2(note->property("visible").toBool(), "but yes once there is a second one");
+    QVERIFY2(!everyText(root).contains(QStringLiteral("Firefox Web Browser")),
+             "a new profile starts with no applications of its own");
+
+    m_backend.selectProfile(QStringLiteral("Default"));
+    QCoreApplication::processEvents();
+    QVERIFY2(everyText(root).contains(QStringLiteral("Firefox Web Browser")),
+             "and switching back brings them back");
     delete root;
 }
 
