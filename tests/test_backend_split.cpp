@@ -111,6 +111,9 @@ void TestBackendSplit::addExcludedRouteAcceptsAPastedList()
     QCOMPARE(errors.count(), 1);
     QVERIFY(backend.excludedRoutes().contains(QStringLiteral("8.8.8.8")));
     QVERIFY(!backend.excludedRoutes().contains(QStringLiteral("nonsense")));
+    // And it says which entry it refused. Paste a dozen subnets with one typo and
+    // a message that only restates the format leaves you to find the typo yourself.
+    QVERIFY(errors.at(0).at(0).toString().contains(QStringLiteral("nonsense")));
 }
 
 void TestBackendSplit::addExcludedRouteIgnoresDuplicates()

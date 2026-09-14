@@ -88,8 +88,11 @@ bool Backend::addExcludedRoute(const QString &route) {
         if (!isValidSubnet(r)) { invalid << r; continue; }
         added << r;
     }
+    // Name what was refused. The field's placeholder already carries the example,
+    // so the one thing this message can add is WHICH of a pasted list was wrong —
+    // and that is exactly what the domain field next to it has always said.
     if (!invalid.isEmpty())
-        emit errorOccurred(tr("Enter a valid IP or subnet, e.g. 10.0.0.0/8"));
+        emit errorOccurred(tr("Not a valid IP or subnet: %1").arg(invalid.join(QStringLiteral(", "))));
     if (added.isEmpty())
         return false;
     m_settings.excluded_routes << added;

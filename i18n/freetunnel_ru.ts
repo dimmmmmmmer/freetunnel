@@ -170,10 +170,6 @@
         <translation>Неверный домен или подсеть: %1</translation>
     </message>
     <message>
-        <source>Enter a valid IP or subnet, e.g. 10.0.0.0/8</source>
-        <translation>Введите корректный IP или подсеть, например 10.0.0.0/8</translation>
-    </message>
-    <message>
         <source>Link error: %1</source>
         <translation>Ошибка ссылки: %1</translation>
     </message>
@@ -280,6 +276,10 @@
     <message>
         <source>A profile called “%1” already exists</source>
         <translation>Профиль «%1» уже существует</translation>
+    </message>
+    <message>
+        <source>Not a valid IP or subnet: %1</source>
+        <translation>Неверный IP-адрес или подсеть: %1</translation>
     </message>
 </context>
 <context>
