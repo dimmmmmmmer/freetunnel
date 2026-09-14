@@ -113,14 +113,67 @@ QString tomlEscape(const QString &s) {
     return out;
 }
 
-QString derToPem(const QByteArray &der) {
+// One PEM block per line of 64 base64 characters, which is what every tool that
+// reads PEM expects.
+QString onePemBlock(const QByteArray &der)
+{
     const QByteArray b64 = der.toBase64();
     QString body;
-    for (int i = 0; i < b64.size(); i += 64) {
+    for (int i = 0; i < b64.size(); i += 64)
         body += QString::fromLatin1(b64.mid(i, 64)) + '\n';
-    }
     return QStringLiteral("-----BEGIN CERTIFICATE-----\n") + body
             + QStringLiteral("-----END CERTIFICATE-----\n");
+}
+
+// Where the DER element starting at `pos` ends, or -1 when the bytes there are
+// not one. A certificate is an ASN.1 SEQUENCE: the tag 0x30, then a length that
+// is either one short byte or a count byte followed by that many big-endian
+// length bytes.
+int derElementEnd(const QByteArray &der, int pos)
+{
+    if (pos + 2 > der.size() || static_cast<unsigned char>(der.at(pos)) != 0x30)
+        return -1;
+    const auto first = static_cast<unsigned char>(der.at(pos + 1));
+    int header = 2;
+    qint64 length = first;
+    if ((first & 0x80) != 0) {
+        const int count = first & 0x7F;
+        // Zero is the indefinite form, which DER forbids; more than four bytes
+        // is a certificate larger than this has any business accepting.
+        if (count == 0 || count > 4 || pos + 2 + count > der.size())
+            return -1;
+        length = 0;
+        for (int i = 0; i < count; ++i)
+            length = (length << 8) | static_cast<unsigned char>(der.at(pos + 2 + i));
+        header = 2 + count;
+    }
+    const qint64 end = static_cast<qint64>(pos) + header + length;
+    return end > der.size() ? -1 : static_cast<int>(end);
+}
+
+// The inverse of the export side, which concatenates the DER of every PEM block
+// it finds (pemCertsToDer in BackendConfig.cpp) — tag 0x08 is a chain, and the
+// header and DEEP_LINK.md both say so.
+//
+// This used to base64 the whole blob into a single BEGIN/END pair, so a config
+// pinning a leaf and its intermediate came back through its own share link as
+// one block that is not a certificate at all: the export split the chain
+// correctly and the import had no way to put it back. A blob that does not parse
+// as a sequence of elements is emitted whole, exactly as before, because that is
+// no worse than the old behaviour and the alternative is discarding it.
+QString derToPem(const QByteArray &der) {
+    if (der.isEmpty())
+        return QString();
+    QString out;
+    int pos = 0;
+    while (pos < der.size()) {
+        const int end = derElementEnd(der, pos);
+        if (end <= pos)
+            return out.isEmpty() ? onePemBlock(der) : out + onePemBlock(der.mid(pos));
+        out += onePemBlock(der.mid(pos, end - pos));
+        pos = end;
+    }
+    return out;
 }
 
 struct DeepLinkFieldFlags {
