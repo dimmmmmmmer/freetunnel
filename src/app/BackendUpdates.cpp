@@ -6,7 +6,10 @@
 #include <QProcess>
 #include <QWindow>
 
+#include <QLocalServer>
+
 #include "core/AppImagePath.h"
+#include "core/InstanceControl.h"
 #include "core/AppUiUtils.h"
 #include "core/UpdateChecker.h"
 
@@ -66,9 +69,21 @@ void Backend::applyLinuxUpdate(const QString &path)
                                            | QFileDevice::ExeOther);
     QFile::remove(backup);
 
-    // Quit first: the replacement cannot start while this instance still owns the
-    // single-instance socket — it would forward "focus" and exit, which is the bug
-    // being fixed. startDetached survives our exit.
+    // Give up the single-instance socket BEFORE the replacement starts, because
+    // quitting does not do it. quitApplication() only posts an exit; the listening
+    // QLocalServer is owned by the application and is destroyed after the event
+    // loop returns, behind prepareQuit() and a credential-store round trip that
+    // can sit on a locked keyring for as long as it likes. A replacement started
+    // in that window connects, forwards "focus", and exits — which leaves nothing
+    // running at all, and is the bug this ordering was written to avoid.
+    //
+    // Unlinking the name is enough and is the least it can be: the socket this
+    // process still holds keeps working for anything already connected, while a
+    // new connectToServer() finds nothing and the replacement starts normally.
+    // The token is deliberately left alone — the replacement writes its own, and
+    // the quit handler now removes only a token that is still ours.
+    QLocalServer::removeServer(freetunnel::instanceServerName());
+
     m_updateMessage = tr("Update installed — restarting");
     emit updateChanged();
     QProcess::startDetached(current, {});

@@ -19,6 +19,7 @@ private slots:
     void legacyInstanceAuthFileMigratesWhenSecure();
     void rejectsMismatchedToken();
     void peerCredentialCheckNeedsALiveSocket();
+    void quittingDoesNotDeleteASuccessorsToken();
 };
 
 void TestInstanceControl::roundTripMessage()
@@ -153,4 +154,40 @@ void TestInstanceControl::peerCredentialCheckNeedsALiveSocket()
 }
 
 QTEST_MAIN(TestInstanceControl)
+// A quitting instance must not take a successor's token with it.
+//
+// The self-update path overlaps two processes on purpose: the replacement is
+// started before the old one is gone, and it writes its own token at startup. If
+// the old one's aboutToQuit lands afterwards and deletes whatever is stored, the
+// new instance is left reachable by nothing — every later deep link starts a
+// second copy instead of being forwarded, until the next restart.
+void TestInstanceControl::quittingDoesNotDeleteASuccessorsToken()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+
+    QString mine;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&mine));
+
+    // The successor replaces it with its own.
+    QString successor;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&successor));
+    QVERIFY(successor != mine);
+
+    // Now the old instance quits.
+    freetunnel::removeInstanceAuthToken(mine);
+
+    QString stored;
+    QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the successor's token must survive");
+    QCOMPARE(stored, successor);
+
+    // And its own quit does remove it.
+    freetunnel::removeInstanceAuthToken(successor);
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+}
+
 #include "test_instance_control.moc"
