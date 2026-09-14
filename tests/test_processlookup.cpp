@@ -58,6 +58,7 @@ private slots:
     void connectionsFromUnnamedProgramsDoNotEachBuyAWalk();
     void aBurstFromTheWatchedProgramSharesOneWalk();
     void bothWaysOfReadingTheSocketTablesAgree();
+    void anIpv6SocketIsFoundWhicheverFamilyTheFlowClaims();
 };
 
 // The whole chain, on the real operating system: a socket exists, therefore the
@@ -138,8 +139,10 @@ void TestProcessLookup::parsesAProcNetTable()
             "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 41234 1 0000 100 0\n"
             "   1: 0100007F:C350 0100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 41235 1 0000 20 4 30 10 -1\n");
 
-    const QList<freetunnel::SocketOwner> rows = freetunnel::parseProcNetTable(table, IPPROTO_TCP);
+    const QList<freetunnel::SocketOwner> rows =
+            freetunnel::parseProcNetTable(table, IPPROTO_TCP, AF_INET);
     QCOMPARE(rows.size(), 2);
+    QCOMPARE(rows[0].family, AF_INET);
     QCOMPARE(rows[0].port, quint16(8080)); // 0x1F90
     QCOMPARE(rows[0].inode, quint64(41234));
     QCOMPARE(rows[0].proto, IPPROTO_TCP);
@@ -155,10 +158,17 @@ void TestProcessLookup::parsesAnIpv6ProcNetTable()
             "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
             "   0: 00000000000000000000000000000000:0016 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 22 1 0000 100 0\n");
 
-    const QList<freetunnel::SocketOwner> rows = freetunnel::parseProcNetTable(table, IPPROTO_TCP);
+    const QList<freetunnel::SocketOwner> rows =
+            freetunnel::parseProcNetTable(table, IPPROTO_TCP, AF_INET6);
     QCOMPARE(rows.size(), 1);
     QCOMPARE(rows[0].port, quint16(22)); // 0x0016
     QCOMPARE(rows[0].inode, quint64(22));
+    // The family is stamped from the file the rows came out of, and it has to
+    // reach the row: /proc/net/tcp and /proc/net/tcp6 have identical columns and
+    // separate port spaces, so a row is only meaningful with the family attached.
+    // Without it one port number means two sockets and the table keeps whichever
+    // was read first — which is one program answering for another's connection.
+    QCOMPARE(rows[0].family, AF_INET6);
 }
 
 // A parser that accepts the header line would invent a socket on some port and
@@ -166,21 +176,21 @@ void TestProcessLookup::parsesAnIpv6ProcNetTable()
 // same leniency is what turns a truncated read into a wrong answer.
 void TestProcessLookup::ignoresTheHeaderAndAnythingMalformed()
 {
-    QVERIFY(freetunnel::parseProcNetTable(QString(), IPPROTO_TCP).isEmpty());
+    QVERIFY(freetunnel::parseProcNetTable(QString(), IPPROTO_TCP, AF_INET).isEmpty());
     QVERIFY(freetunnel::parseProcNetTable(
                     QStringLiteral("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"),
-                    IPPROTO_TCP)
+                    IPPROTO_TCP, AF_INET)
                     .isEmpty());
     // Too few fields, no colon in the local address, and a zero port.
-    QVERIFY(freetunnel::parseProcNetTable(QStringLiteral("   0: 0100007F:1F90 00000000:0000\n"), IPPROTO_TCP)
+    QVERIFY(freetunnel::parseProcNetTable(QStringLiteral("   0: 0100007F:1F90 00000000:0000\n"), IPPROTO_TCP, AF_INET)
                     .isEmpty());
     QVERIFY(freetunnel::parseProcNetTable(
                     QStringLiteral("   0: nonsense 00000000:0000 0A 0:0 00:0 0 1000 0 41234 1 0000 100 0\n"),
-                    IPPROTO_TCP)
+                    IPPROTO_TCP, AF_INET)
                     .isEmpty());
     QVERIFY(freetunnel::parseProcNetTable(
                     QStringLiteral("   0: 0100007F:0000 00000000:0000 0A 0:0 00:0 0 1000 0 41234 1 0000 100 0\n"),
-                    IPPROTO_TCP)
+                    IPPROTO_TCP, AF_INET)
                     .isEmpty());
 }
 
@@ -445,4 +455,34 @@ void TestProcessLookup::bothWaysOfReadingTheSocketTablesAgree()
 }
 
 QTEST_MAIN(TestProcessLookup)
+// A socket the system files under IPv6 has to be findable, and findable whether
+// or not the family the core reports agrees with the one the table used.
+//
+// The two are not always the same thing. A connection carried on a dual-stack
+// socket is v4-mapped: the kernel keeps the socket in its IPv6 table while the
+// flow on it is, by address, IPv4. So the family is asked for first — that is
+// what stops one program's IPv4 socket from answering for another program's
+// IPv6 socket on the same port number — and the other family is tried only when
+// the asked-for one holds no row at all.
+void TestProcessLookup::anIpv6SocketIsFoundWhicheverFamilyTheFlowClaims()
+{
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHostIPv6, 0))
+        QSKIP("no IPv6 loopback on this machine");
+    const quint16 port = server.serverPort();
+    QVERIFY(port != 0);
+
+    ProcessLookup lookup;
+    lookup.setWatchList(watchSelf());
+
+    const AppIdentity asSix =
+            lookup.resolve(LocalFlow{AF_INET6, IPPROTO_TCP, port, QStringLiteral("::1")});
+    QVERIFY2(!asSix.executablePath.isEmpty(), "the family the table filed it under");
+
+    const AppIdentity asFour =
+            lookup.resolve(LocalFlow{AF_INET, IPPROTO_TCP, port, QStringLiteral("127.0.0.1")});
+    QVERIFY2(!asFour.executablePath.isEmpty(),
+             "and the one a v4-mapped flow on the same socket would claim");
+}
+
 #include "test_processlookup.moc"

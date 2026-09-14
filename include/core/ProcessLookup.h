@@ -25,6 +25,7 @@ struct LocalFlow {
 // A socket table entry, in the one shape the three platforms agree on.
 struct SocketOwner {
     std::uint16_t port = 0;
+    int family = 0; // AF_INET / AF_INET6
     int proto = 0;
     qint64 pid = -1;
     std::uint64_t inode = 0; // Linux only; 0 elsewhere
@@ -38,9 +39,12 @@ constexpr qint64 kUnattributed = -1;
 // platform so the parsing can be tested where the tests actually run rather
 // than only on the machine that has a /proc.
 //
-// `proto` is stamped onto every row because the table itself does not say which
-// protocol it is — the file name does.
-QList<SocketOwner> parseProcNetTable(const QString &contents, int proto);
+// `proto` and `family` are stamped onto every row because the table itself says
+// neither — the file name does. /proc/net/tcp and /proc/net/tcp6 have the same
+// columns, and a row from one is not interchangeable with a row from the other:
+// the two carry separate port spaces, and one number can name a different
+// socket in each.
+QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int family);
 
 #ifdef Q_OS_LINUX
 // Every inet socket the kernel will describe, with the protocol and local port
@@ -87,7 +91,17 @@ public:
     // The program that owns this flow's local socket, or an empty identity when
     // it is not one of the watched ones — or, on the rare occasions the system
     // will not say, when it cannot be attributed at all.
-    AppIdentity resolve(const LocalFlow &flow);
+    //
+    // `lookWasSkipped`, when given, separates the last two. An empty identity
+    // usually means the walk looked and no watched program owns this socket,
+    // which is a real answer. It can also mean the walk had no budget left to
+    // look again — in a burst long enough to exhaust it, which is measurable:
+    // on this machine a walk costs about 2.8 ms, so a few dozen back-to-back
+    // connections spend the lot. Those two look identical to the caller and are
+    // not the same thing at all: one is "not yours", the other is "not known",
+    // and in "Through VPN" mode answering the second as the first sends traffic
+    // out of the tunnel that may well have belonged in it.
+    AppIdentity resolve(const LocalFlow &flow, bool *lookWasSkipped = nullptr);
 
     // Drop the cached table. For tests, and for reconnects, where every socket
     // the previous session saw is gone.

@@ -5,6 +5,8 @@
 // timer thread-affinity and cross-thread command handling are exercised too.
 #include <QtTest>
 
+#include <QElapsedTimer>
+
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QTcpServer>
@@ -89,6 +91,7 @@ private slots:
     void anAppRuleTakesItsOwnConnectionOutOfTheTunnel();
     void selectiveModeSendsAMatchedAppTheOtherWay();
     void withNoAppRulesNothingIsForcedAndNothingIsLookedUp();
+    void aBurstPastTheLookupBudgetIsKeptInTheTunnel();
     void staleEventFromPreviousSessionIsIgnored();
     void failedAttemptSchedulesWorkingRetry();
     void coreDropTriggersAutoReconnect();
@@ -664,4 +667,43 @@ void TestQtTrustTunnelClient::theCoreIsHandedAServerCertificateVerifier()
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)
+// What happens once the lookup has spent its budget, which a long enough burst
+// will do: on this machine a walk costs about 2.8 ms, and a few dozen
+// back-to-back connections exhaust the credit that pays for them.
+//
+// Before this, such a connection was answered exactly like one the walk had
+// examined and found unlisted — VPN_CA_DEFAULT — and in "Through VPN" the core's
+// default is to leave the tunnel. So a burst from a listed program put its own
+// traffic on the open network, which is the one thing the rule was written to
+// prevent, and nothing said so. An unexamined connection is kept in the tunnel
+// instead: wrong only for a program nobody listed, and wrong there in the
+// direction that costs bandwidth rather than privacy.
+void TestQtTrustTunnelClient::aBurstPastTheLookupBudgetIsKeptInTheTunnel()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    m_client->setVpnMode(true); // "Through VPN": default means OUT of the tunnel
+    m_client->setAppRules({QFileInfo(QCoreApplication::applicationFilePath()).fileName()});
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const quint64 id = ctl.lastClientId();
+
+    // Ports nobody holds, so every one of them is a miss that buys a fresh walk
+    // until there is nothing left to buy one with.
+    bool keptIn = false;
+    QElapsedTimer clock;
+    clock.start();
+    for (int i = 0; i < 4000 && !keptIn && clock.elapsed() < 20000; ++i) {
+        ag::VpnConnectRequestSnapshot req;
+        req.id = static_cast<std::uint64_t>(100 + i);
+        req.proto = IPPROTO_TCP;
+        req.family = AF_INET;
+        req.src_port = static_cast<std::uint16_t>(20000 + i);
+        req.src_ip = "127.0.0.1";
+        keptIn = ctl.fireConnectRequest(id, req).action == ag::VPN_CA_FORCE_REDIRECT;
+    }
+    QVERIFY2(keptIn, "the budget must run out and unexamined connections stay in the tunnel");
+}
+
 #include "test_qt_trusttunnel_client.moc"

@@ -72,6 +72,10 @@ DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
     SocketOwner owner;
     owner.port = ntohs(entry->id.idiag_sport);
     owner.proto = proto;
+    // From the kernel's own answer rather than from which table was asked: the
+    // dump is per family, so the two agree, and reading it here means the field
+    // cannot drift if that ever stops being true.
+    owner.family = entry->idiag_family;
     owner.inode = entry->idiag_inode;
     if (owner.port != 0)
         out->append(owner);
@@ -235,7 +239,8 @@ QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno)
         QFile file(QString::fromLatin1(table.path));
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
             continue;
-        sockets.append(parseProcNetTable(QString::fromLatin1(file.readAll()), table.proto));
+        sockets.append(parseProcNetTable(QString::fromLatin1(file.readAll()), table.proto,
+                                         table.family));
     }
     return sockets;
 }

@@ -544,10 +544,11 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
     // end, to log, and only under the liveness guard.
     auto lookup = std::make_shared<freetunnel::ProcessLookup>();
     auto scanWarned = std::make_shared<bool>(false);
+    auto skipWarned = std::make_shared<bool>(false);
     auto appRules = m_appRules;
-    return [this, guard, session, appRules, lookup,
-            scanWarned](const ag::VpnConnectRequestSnapshot &req,
-                                                 ag::VpnConnectDecision *decision) {
+    return [this, guard, session, appRules, lookup, scanWarned,
+            skipWarned](const ag::VpnConnectRequestSnapshot &req,
+                        ag::VpnConnectDecision *decision) {
         if (decision == nullptr)
             return;
         QStringList rules;
@@ -574,8 +575,27 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
 
         const freetunnel::LocalFlow flow{req.family, req.proto, req.src_port,
                                          QString::fromStdString(req.src_ip)};
-        const freetunnel::AppIdentity app = lookup->resolve(flow);
-        decision->action = coreAction(freetunnel::appActionFor(app, rules, selective));
+        bool lookWasSkipped = false;
+        const freetunnel::AppIdentity app = lookup->resolve(flow, &lookWasSkipped);
+        freetunnel::AppAction act = freetunnel::appActionFor(app, rules, selective);
+        // A connection we could not afford to look at is not a connection we
+        // established nothing about — it is one we know nothing about, and the
+        // two must not be answered the same way.
+        //
+        // In "Through VPN" the core's default is to leave the tunnel, so
+        // answering "no rule" for an unexamined connection puts it on the open
+        // network; if it did belong to a listed program, that is the exact leak
+        // this feature exists to prevent. Keeping it in the tunnel is the wrong
+        // answer only for a program nobody listed, and being wrong in that
+        // direction costs bandwidth rather than privacy. It is also what the
+        // rest of this client already does when it cannot tell: an empty rule
+        // set falls back to the full tunnel for the same reason.
+        //
+        // Only in selective mode. In bypass mode the default already keeps the
+        // connection inside the tunnel, so there is nothing to correct.
+        if (lookWasSkipped && selective && act == freetunnel::AppAction::Default)
+            act = freetunnel::AppAction::ForceTunnel;
+        decision->action = coreAction(act);
         // decision->app_name is deliberately NOT set. It looks like a harmless way
         // to get the program into the core's own log, and it is not: the core
         // passes it to the upstream, which puts it in the CONNECT request sent
@@ -584,6 +604,22 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // application opened every connection — a thing this app exists to avoid
         // telling anyone. The line below puts it in the local log instead, which
         // is where the user was going to look anyway.
+
+        // Once per session, and only when it happens. Without this the budget
+        // running out is invisible: the rules keep being listed, the walk keeps
+        // reporting success, and the only symptom is that the feature works for
+        // the first few dozen connections of a burst and then appears not to.
+        if (lookWasSkipped && !*skipWarned) {
+            *skipWarned = true;
+            const QString line =
+                    QStringLiteral("app rules: no budget left to look again — connections are "
+                                   "being answered without one%1")
+                            .arg(selective ? QStringLiteral(", and kept in the tunnel")
+                                           : QString());
+            std::lock_guard<std::mutex> lk(guard->mutex);
+            if (guard->alive)
+                postConnectionInfo(session, line);
+        }
 
         if (!*scanWarned) {
             *scanWarned = true;
