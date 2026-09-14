@@ -152,6 +152,23 @@ Section "Install"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   ; Start Menu shortcut
+  ;
+  ; All Users, to match the install. Everything else here is per-machine —
+  ; $PROGRAMFILES64, RequestExecutionLevel admin, every registry write to HKLM —
+  ; but NSIS defaults $SMPROGRAMS and $DESKTOP to the *current* profile, which
+  ; under elevation is whichever account UAC ran the installer as. The program
+  ; then lands in Program Files for everyone while its shortcuts appear for one
+  ; account, often not the one that asked for it.
+  ; An install from before this was fixed left its copies in the running
+  ; account's own folders. Take those away first, or upgrading leaves two of
+  ; every shortcut.
+  SetShellVarContext current
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"
+  RMDir  "$SMPROGRAMS\${PRODUCT_NAME}"
+  Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
+
+  SetShellVarContext all
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\assets\logo.ico"
   CreateShortCut  "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"       "$INSTDIR\Uninstall.exe" "" "$INSTDIR\assets\logo.ico"
@@ -219,7 +236,15 @@ Section "Uninstall"
   RMDir "$INSTDIR"   ; unrecognised directory: only remove it if it is empty
   uninst_root_done:
 
-  ; Remove shortcuts
+  ; Remove shortcuts, from both places they may be. All Users is where this
+  ; installer writes them; the current profile is where every build before it
+  ; did, and an uninstall that leaves those behind leaves dead shortcuts.
+  SetShellVarContext all
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"
+  RMDir  "$SMPROGRAMS\${PRODUCT_NAME}"
+  Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
+  SetShellVarContext current
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"
   RMDir  "$SMPROGRAMS\${PRODUCT_NAME}"

@@ -465,7 +465,11 @@ static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QStr
                                  .arg(QString::number(port), tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    // No SEE_MASK_NOCLOSEPROCESS. It makes ShellExecuteExW hand back a process
+    // handle the caller then owns, and nothing here ever read it or closed it —
+    // so every elevation attempt leaked one and pinned the exited helper's kernel
+    // object for the life of this process. Asking for what is not used is the
+    // whole of the cost; the value-initialised mask asks for nothing.
     sei.lpVerb = L"runas";
     const std::wstring wexe = exe.toStdWString();
     const std::wstring wargs = args.toStdWString();

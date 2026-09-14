@@ -330,21 +330,40 @@ void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners
 // One pass over a Windows socket table. GetExtended*Table returns the whole
 // table in one buffer, which is exactly the shape we want: one syscall per
 // refresh rather than one per connection.
+//
+// Asked twice per attempt — once for the size, once for the contents — and the
+// table is a live thing that gains rows in between. When it does, the second
+// call answers ERROR_INSUFFICIENT_BUFFER with the new size rather than filling
+// the old buffer, and a single attempt then returns having recorded nothing.
+// That is not a row lost, it is every port of this family and protocol lost for
+// the whole walk, while the scan still reports success: a machine that looks
+// like it has no IPv4 TCP sockets at all. Microsoft's own pattern for these APIs
+// is the retry, and the answer is reported so a walk that gave up does not read
+// as a walk that found nothing.
 template <typename TableT>
-void collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
+bool collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
 {
-    ULONG size = 0;
-    DWORD rc = tcp ? ::GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
-                   : ::GetExtendedUdpTable(nullptr, &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
-    if (rc != ERROR_INSUFFICIENT_BUFFER || size == 0)
-        return;
-    QByteArray buf(static_cast<int>(size), Qt::Uninitialized);
-    rc = tcp ? ::GetExtendedTcpTable(buf.data(), &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
-             : ::GetExtendedUdpTable(buf.data(), &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
-    if (rc != NO_ERROR)
-        return;
-    recordWindowsRows(reinterpret_cast<const TableT *>(buf.constData()), owners,
-                      static_cast<int>(af), proto);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        ULONG size = 0;
+        DWORD rc = tcp ? ::GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
+                       : ::GetExtendedUdpTable(nullptr, &size, FALSE, af, UDP_TABLE_OWNER_PID, 0);
+        if (rc != ERROR_INSUFFICIENT_BUFFER || size == 0)
+            return rc == NO_ERROR; // nothing to read is not a failure
+        // Room for a few more rows than were there a moment ago, so the ordinary
+        // case of the table growing slightly does not cost another round trip.
+        QByteArray buf(static_cast<int>(size) + 4096, Qt::Uninitialized);
+        ULONG given = static_cast<ULONG>(buf.size());
+        rc = tcp ? ::GetExtendedTcpTable(buf.data(), &given, FALSE, af, TCP_TABLE_OWNER_PID_ALL, 0)
+                 : ::GetExtendedUdpTable(buf.data(), &given, FALSE, af, UDP_TABLE_OWNER_PID, 0);
+        if (rc == NO_ERROR) {
+            recordWindowsRows(reinterpret_cast<const TableT *>(buf.constData()), owners,
+                              static_cast<int>(af), proto);
+            return true;
+        }
+        if (rc != ERROR_INSUFFICIENT_BUFFER)
+            return false;
+    }
+    return false;
 }
 
 } // namespace
@@ -356,12 +375,15 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // every port is attributed here, and which of them a rule names is decided
     // in resolve(), for the one port being asked about rather than for the
     // hundreds that were not.
-    collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true);
-    collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true);
-    collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false);
-    collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false);
-
-    finishScan(now, true);
+    bool ok = collectWindowsTable<MIB_TCPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_TCP, true);
+    ok &= collectWindowsTable<MIB_TCP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_TCP, true);
+    ok &= collectWindowsTable<MIB_UDPTABLE_OWNER_PID>(&m_owners, AF_INET, IPPROTO_UDP, false);
+    ok &= collectWindowsTable<MIB_UDP6TABLE_OWNER_PID>(&m_owners, AF_INET6, IPPROTO_UDP, false);
+    // A walk that lost a whole table is not a walk that completed. Reporting it
+    // as one leaves resolve() treating a port it never saw as a port nobody
+    // owns, and the scan line printing a plausible entry count for a machine it
+    // saw three quarters of.
+    finishScan(now, ok);
 }
 
 #elif defined(Q_OS_MACOS)
@@ -740,10 +762,11 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
             m_everBuilt = false;
             refreshIfStale();
             owner = find();
-        } else if (lookWasSkipped != nullptr && m_builtAt < asked) {
-            // Not "looked and found nothing" — never looked. The table predates
-            // the question, so the socket may well be in the system's tables
-            // right now; what stopped us was the budget, not the answer.
+        } else if (lookWasSkipped != nullptr && (!m_everBuilt || m_builtAt < asked)) {
+            // Not "looked and found nothing" — never looked, or looked and came
+            // back incomplete. Either way the socket may well be in the system's
+            // tables right now: what stopped us was the budget or a failed walk,
+            // not the answer.
             *lookWasSkipped = true;
         }
     }

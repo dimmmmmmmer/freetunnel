@@ -34,8 +34,16 @@ bool parseInstanceMessage(const QByteArray &data, QString *tokenOut, QString *pa
 
 bool instanceTokensEqual(const QString &a, const QString &b);
 
-/// Defense-in-depth: verify the peer UID matches this process (Unix only).
-bool localSocketPeerIsSameUser(QLocalSocket *socket);
+/// Which end of the connection this socket is. On Windows the API that names
+/// the peer is a different one for each — asking the wrong one names this very
+/// process, and the check then cannot fail. Unix answers either way.
+enum class SocketEnd {
+    WeConnected, ///< we opened it with connectToServer()
+    WeAccepted,  ///< it came from QLocalServer::nextPendingConnection()
+};
+
+/// Defense-in-depth: verify the peer runs as the same user as this process.
+bool localSocketPeerIsSameUser(QLocalSocket *socket, SocketEnd end);
 
 /// Forward a control command to an already-running instance; returns false if none.
 bool forwardToRunningInstance(const QString &socketName, const QString &controlArg);
