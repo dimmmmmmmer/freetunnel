@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QDirIterator>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QQmlComponent>
@@ -19,6 +20,7 @@ class TestQmlUi : public QObject {
 
 private slots:
     void initTestCase();
+    void cleanup();
     void homePageLoads();
     void configsPageLoads();
     void splitPageLoads();
@@ -47,6 +49,36 @@ private:
     UiTheme m_theme;
 };
 
+namespace {
+
+// A QML binding that names something which does not exist is not an error to the
+// engine — it warns, leaves the property undefined, and carries on. On screen
+// that is a blank where a value should be, or a control that does nothing, and it
+// survives every test that only asks whether the page loaded. So the warnings are
+// collected and a test that produced one fails.
+//
+// Only the engine's own diagnostics. "does not have a property called shell" is a
+// different thing entirely — it comes from handing every component the same three
+// initial properties on purpose, and is expected on the ones that take fewer.
+QStringList g_qmlErrors;
+QtMessageHandler g_previousHandler = nullptr;
+
+void collectQmlErrors(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
+{
+    static const char *const kEngineErrors[] = {"ReferenceError", "TypeError",
+                                                "Unable to assign", "Cannot assign"};
+    for (const char *needle : kEngineErrors) {
+        if (msg.contains(QLatin1String(needle))) {
+            g_qmlErrors << msg;
+            break;
+        }
+    }
+    if (g_previousHandler != nullptr)
+        g_previousHandler(type, ctx, msg);
+}
+
+} // namespace
+
 void TestQmlUi::initTestCase()
 {
     // Icons load through backend.readBundledText — no QML XHR file access needed.
@@ -55,6 +87,17 @@ void TestQmlUi::initTestCase()
     // work where the desktop offers nothing, and it does not put a modal native
     // window in front of a CI runner.
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+    // Chained, not replaced: the one already installed is Qt Test's, and it is
+    // what turns a qWarning into the QWARN lines in the report.
+    g_previousHandler = qInstallMessageHandler(collectQmlErrors);
+}
+
+void TestQmlUi::cleanup()
+{
+    const QStringList errors = g_qmlErrors;
+    g_qmlErrors.clear();
+    QVERIFY2(errors.isEmpty(), qPrintable(QStringLiteral("QML engine errors:\n  ")
+                                          + errors.join(QStringLiteral("\n  "))));
 }
 
 // Every `text` in the tree. Chips are built by a Repeater inside a Flow, so
@@ -286,12 +329,24 @@ void TestQmlUi::mainWindowPageNavigation()
 void TestQmlUi::everyComponentLoadsOnItsOwn_data()
 {
     QTest::addColumn<QString>("path");
-    for (const char *p : {"components/ChipX.qml", "components/ConfirmDialog.qml",
-                          "components/Dropdown.qml", "components/HotkeyField.qml",
-                          "components/Icon.qml", "components/SectionLabel.qml",
-                          "components/Sep.qml", "Field.qml", "Toggle.qml"}) {
-        QTest::newRow(p) << QString::fromLatin1(p);
+    // Read out of the resource rather than listed here. A hand-written list
+    // covers the components that existed when it was written, and the next one
+    // added is exactly the one nobody thinks to add to it — so the check would
+    // be weakest against the newest code, which is where it is needed most.
+    QDirIterator it(QStringLiteral(":/components"), {QStringLiteral("*.qml")}, QDir::Files);
+    int found = 0;
+    while (it.hasNext()) {
+        const QString path = it.next().mid(2); // ":/components/Foo.qml" -> "components/Foo.qml"
+        QTest::newRow(path.toUtf8().constData()) << path;
+        ++found;
     }
+    // An empty iteration would report a pass for every component at once, which
+    // is the one result this test must never be able to give.
+    QVERIFY(found > 0);
+    // These two predate components/ and still sit at the top of the tree, where
+    // everything else is a page or a window that needs a whole context.
+    for (const char *p : {"Field.qml", "Toggle.qml"})
+        QTest::newRow(p) << QString::fromLatin1(p);
 }
 
 // ✕ minimizes rather than quits, because the tray icon is how you come back and
