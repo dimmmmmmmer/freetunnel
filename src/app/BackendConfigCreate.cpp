@@ -248,6 +248,9 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
     assignSplitProfile(m_settings, ctx.oldPath, ctx.target, newProfile);
     persistSettings();
     emit configChanged();
+    // The config-to-profile assignment just moved, so what the tunnel would do
+    // moved with it. See the note in Backend::selectConfig().
+    emit splitChanged();
 
     const bool editing = ctx.editIndex >= 0;
     const bool noChange = ctx.editingSnapshot && ctx.oldPath == ctx.target

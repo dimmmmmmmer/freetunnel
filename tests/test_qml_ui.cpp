@@ -338,10 +338,21 @@ void TestQmlUi::mainWindowPageNavigation()
     QVERIFY2(component.isReady(), component.errorString().toUtf8().constData());
     QObject *root = component.create();
     QVERIFY(root);
+    // Writing an int and reading it back cannot fail. What navigation is FOR is
+    // the Loader the property drives — onCurrentPageChanged calls setSource with
+    // pagePaths[currentPage] and pageProps(), and neither of those was observed
+    // by anything: the per-page tests build each page directly with their own
+    // property map and never go through this path at all. A page that failed to
+    // load left this green.
+    QObject *loader = root->findChild<QObject *>(QStringLiteral("pageLoader"));
+    QVERIFY2(loader, "the page Loader");
     for (int page = 0; page < 5; ++page) {
         root->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         QCOMPARE(root->property("currentPage").toInt(), page);
+        QCOMPARE(loader->property("status").toInt(), 1); // Loader.Ready
+        QVERIFY2(loader->property("item").value<QObject *>() != nullptr,
+                 "navigation has to produce a page, not just set a number");
     }
     delete root;
 }

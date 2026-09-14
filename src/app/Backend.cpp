@@ -486,6 +486,12 @@ void Backend::selectConfig(int index) {
     m_settings.last_config_path = m_activePath;
     persistSettings();
     emit configChanged();
+    // And splitChanged, because which config is active decides which profile the
+    // tunnel uses, and therefore whether "Through VPN" has any rules at all. The
+    // Split page's standing warning is bound to that and read nothing here, so it
+    // kept describing the config before this one. removeProfile() emits both for
+    // the same reason.
+    emit splitChanged();
     if (m_connected || m_connecting)
         reconnectActiveConfig();
 }
