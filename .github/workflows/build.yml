@@ -429,8 +429,14 @@ jobs:
             fi
             echo "version=$version" >> "$GITHUB_OUTPUT"
           else
-            echo "version=1.0.0-dev" >> "$GITHUB_OUTPUT"
+            version="1.0.0-dev"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
+          # The same thing as four numbers, for the Windows VERSIONINFO resource,
+          # which takes nothing else. A build that is not from a tag is
+          # "1.0.0-dev", and makensis rejects that, so the suffix comes off here
+          # rather than being picked apart in NSIS.
+          echo "version_num=${version%%-*}.0" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------- Package
       - name: Prepare Linux bundle
@@ -755,7 +761,7 @@ jobs:
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
           if (-not (Test-Path $nsis)) { throw "NSIS not found at $nsis" }
           $distAbs = (Resolve-Path dist).Path
-          & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" client\win\installer.nsi
+          & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" "/DPRODUCT_VERSION_NUM=${{ steps.ver.outputs.version_num }}" client\win\installer.nsi
           $setup = Get-ChildItem -Path "client\win" -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
           if (-not $setup) { throw "NSIS did not produce FreeTunnel-*-Setup.exe" }
           Move-Item $setup.FullName "out\${{ matrix.artifact }}-Setup.exe" -Force

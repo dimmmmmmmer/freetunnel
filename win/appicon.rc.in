@@ -1,1 +1,43 @@
 IDI_ICON1 ICON "@APP_ICON_PATH@"
+
+// Until now this file held that one line, so the shipped executable carried no
+// metadata at all: Properties -> Details was blank, and the UAC prompt this app
+// raises to start its privileged helper said "Unknown" where a program's name
+// belongs. That prompt is the moment a person decides whether to trust it.
+//
+// It is also one of the things the heuristics that judge an unsigned download
+// weigh, and 1.2.0 was reported as Trojan:Win32/Bearfoos.B!ml (#34). Metadata
+// alone does not clear a machine-learning verdict and is not offered as a fix
+// for one — but its absence is a penalty this had no reason to be paying.
+//
+// Numeric literals rather than the VOS_/VFT_ names so the resource compiler does
+// not need windows.h on its include path. 0x40004 is VOS_NT_WINDOWS32 and 1 is
+// VFT_APP.
+1 VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          0x40004L
+FILETYPE        0x1L
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"  // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "pnsrc"
+            VALUE "FileDescription",  "FreeTunnel VPN client"
+            VALUE "FileVersion",      "@PROJECT_VERSION@.0"
+            VALUE "InternalName",     "FreeTunnel"
+            VALUE "LegalCopyright",   "Licensed under the Apache License 2.0"
+            VALUE "OriginalFilename", "FreeTunnel.exe"
+            VALUE "ProductName",      "FreeTunnel"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

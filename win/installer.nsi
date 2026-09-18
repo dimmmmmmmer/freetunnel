@@ -25,6 +25,14 @@ Unicode true
   !define PRODUCT_VERSION "1.0.0"
 !endif
 
+; The same version as four numbers, which is the only form VIProductVersion
+; takes. It cannot be derived from PRODUCT_VERSION here: a build that is not from
+; a tag carries "1.0.0-dev", and makensis rejects that outright — so it arrives
+; already numeric, computed alongside the display version.
+!ifndef PRODUCT_VERSION_NUM
+  !define PRODUCT_VERSION_NUM "1.0.0.0"
+!endif
+
 ; Build dir containing compiled binaries — passed via /DBUILD_DIR=...
 !ifndef BUILD_DIR
   !define BUILD_DIR "build\FreeTunnel"
@@ -36,6 +44,21 @@ InstallDir "$PROGRAMFILES64\${PRODUCT_NAME}"
 InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" "InstallLocation"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
+
+; The installer had no version metadata of its own, so Setup.exe was a nameless
+; unsigned binary asking for administrator rights — blank in Properties, and
+; "Unknown" in the UAC prompt. This is also the file that was reported as
+; Trojan:Win32/Bearfoos.B!ml (#34); an unidentified binary is one of the things
+; those heuristics weigh.
+VIProductVersion "${PRODUCT_VERSION_NUM}"
+VIAddVersionKey "CompanyName"      "${PRODUCT_PUBLISHER}"
+VIAddVersionKey "FileDescription"  "${PRODUCT_NAME} installer"
+VIAddVersionKey "FileVersion"      "${PRODUCT_VERSION}"
+VIAddVersionKey "InternalName"     "${PRODUCT_NAME}"
+VIAddVersionKey "LegalCopyright"   "Licensed under the Apache License 2.0"
+VIAddVersionKey "OriginalFilename" "FreeTunnel-${PRODUCT_VERSION}-Setup.exe"
+VIAddVersionKey "ProductName"      "${PRODUCT_NAME}"
+VIAddVersionKey "ProductVersion"   "${PRODUCT_VERSION}"
 
 ;--------------------------------
 ; Interface
