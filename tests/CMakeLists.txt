@@ -560,6 +560,9 @@ set(BACKEND_TEST_SOURCES
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
+    # Backend::startWindowDrag moves the window through the macOS glue, so this
+    # list needs it too — the same reason as the two lists above.
+    ${FT_MAC_GLUE_SOURCES}
 )
 add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})
 target_include_directories(test_integration_backend_vpn PRIVATE

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
+  <!-- macOS menu-bar mark, disconnected. The same arches, drawn as outlines:
+       state is carried by shape, because a template image has no colour to
+       carry it and a dimmed copy is hard to read on Tahoe's transparent bar. -->
+  <g fill="none" stroke="#000" stroke-width="7" stroke-linejoin="round">
+    <path d="M15 86 L15 46 A35 35 0 0 1 85 46 L85 86"/>
+    <path d="M37 86 L37 55 A13 13 0 0 1 63 55 L63 86"/>
+  </g>
+</svg>

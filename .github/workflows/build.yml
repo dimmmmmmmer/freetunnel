@@ -90,10 +90,18 @@ jobs:
           # Universal macOS: built on the Apple-Silicon runner; the x86_64 slice
           # is cross-compiled (Apple clang) and lipo-merged, so no Intel runner
           # is needed. Qt comes from aqt (clang_64 is a universal build).
+          #
+          # The Xcode is named, not inherited. The SDK an app is linked against
+          # decides how macOS draws its window: 1.2.0 was built with this image's
+          # default Xcode 16.4 (SDK 15.5), and macOS 26 and later draw anything
+          # linked against an SDK older than 26 in a compatibility mode — old
+          # traffic lights, old corners. 26.3 is the newest this image carries and
+          # keeps Apple clang 17, the compiler everything here is already built with.
           - os: macos-15
             platform: macos
             qt_host: mac
             qt_arch: clang_64
+            xcode: '26.3'
             artifact: freetunnel-macos-universal
           - os: windows-latest
             platform: windows
@@ -228,9 +236,25 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.platform == 'macos'
         run: |
-          # Target macOS 11 (Big Sur, first Apple-Silicon release) for broad
-          # compatibility. Set early so conan-built deps and the app share it.
-          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          # Select the Xcode the matrix names, before anything compiles: conan's
+          # profile detection, the core deps and the app all go through the xcrun
+          # shim, which honours DEVELOPER_DIR. A missing Xcode is a failure, not a
+          # quiet fallback to the image default — the fallback is exactly how an
+          # app ends up drawn in the old style without anyone deciding it.
+          X="/Applications/Xcode_${{ matrix.xcode }}.app"
+          if [ ! -d "$X" ]; then
+            echo "::error::$X is not on this runner image. Installed:"
+            ls -d /Applications/Xcode_*.app
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$X/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$X/Contents/Developer" xcodebuild -version
+          echo "SDK: $(DEVELOPER_DIR="$X/Contents/Developer" xcrun --show-sdk-version)"
+          # macOS 12 is the oldest Qt 6.8 supports — its own frameworks are built
+          # for 12 and will not load on 11 — so claiming 11 promised a launch that
+          # could not happen. Set early so conan-built deps and the app share it,
+          # and keep it equal to LSMinimumSystemVersion in macos/Info.plist.in.
+          echo "MACOSX_DEPLOYMENT_TARGET=12.0" >> "$GITHUB_ENV"
           # The runner ships preinstalled aws/azure taps that Homebrew now warns
           # are "not trusted"; we don't use them, so drop them to silence it.
           brew untap aws/tap azure/bicep 2>/dev/null || true
@@ -296,14 +320,19 @@ jobs:
         with:
           # Key includes the runner OS so deps/objects built against one glibc
           # are never reused on another (e.g. ubuntu-24.04 -> ubuntu-22.04).
-          key: ${{ matrix.os }}-${{ matrix.artifact }}-ccache
+          # The Xcode too, on macOS. ccache compiles through the /usr/bin/c++ xcrun
+          # shim, whose bytes do not change when DEVELOPER_DIR does, so without it
+          # a new compiler's objects would be mixed with the old one's unnoticed.
+          key: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-ccache
 
       - name: Conan cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.conan2
-          key: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
-          restore-keys: ${{ matrix.os }}-${{ matrix.artifact }}-conan2-
+          # Keyed on the Xcode as well, for the same reason as ccache: conan
+          # records only the apple-clang major, which is 17 for Xcode 16.4 and 26.3.
+          key: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
+          restore-keys: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-
 
       - name: Patch bootstrap for Windows (run .sh via sh)
         if: matrix.platform == 'windows'
@@ -599,7 +628,14 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
             -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF
             -DBUILD_TRUSTTUNNEL_QT=ON
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR")
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+            # Qt 6.8.3's FindWrapOpenGL links AGL.framework, which Apple removed
+            # from the macOS 26 SDK, so every Qt GUI app fails to link against it
+            # (QTBUG-137687). The fix is in 6.8.4, a commercial-only release; the
+            # open-source 6.8 line ends at 6.8.3. The module only looks for AGL
+            # when this cache variable is unset, so naming OpenGL.framework here
+            # skips the search and links OpenGL a second time instead — harmless.
+            -DWrapOpenGL_AGL="$(xcrun --show-sdk-path)/System/Library/Frameworks/OpenGL.framework")
 
           # The core deps include quiche (Rust); cross-building the x86_64 slice
           # needs that Rust target installed (the runner only has the native one).
@@ -630,12 +666,32 @@ jobs:
             -output "$APP/Contents/MacOS/FreeTunnel"
           lipo -info "$APP/Contents/MacOS/FreeTunnel"
 
+          # The reason the Xcode is pinned, checked on the thing we ship: every
+          # slice has to be linked against SDK 26 or newer, or macOS draws the
+          # window in its compatibility mode and nobody notices until a user does.
+          xcrun vtool -show-build "$APP/Contents/MacOS/FreeTunnel"
+          old_sdk=$(xcrun vtool -show-build "$APP/Contents/MacOS/FreeTunnel" \
+                      | awk '$1 == "sdk" { split($2, v, "."); if (v[1] + 0 < 26) print $2 }')
+          if [ -n "$old_sdk" ]; then
+            echo "::error::a slice is linked against SDK $old_sdk; macOS would draw it in the old style"
+            exit 1
+          fi
+
           # macdeployqt aborts (exit 16) trying to deploy Qt's SQL driver plugins,
           # which link Homebrew libs (libpq/libiodbc/libmimerapi) that aren't on the
           # runner image. The app uses no SQL, so drop those plugins first.
           rm -rf "$QT_ROOT_DIR/plugins/sqldrivers"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
           cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
+          # UIDesignRequiresCompatibility makes an app built with the new SDK look
+          # as if it were built with an old one. It is a documented, copy-pasted
+          # workaround — Qt's own Tahoe notes suggest it — so refuse it outright
+          # rather than trust nobody ever pastes it in.
+          if /usr/libexec/PlistBuddy -c 'Print :UIDesignRequiresCompatibility' \
+               "$APP/Contents/Info.plist" >/dev/null 2>&1; then
+            echo "::error::Info.plist opts out of the current macOS design (UIDesignRequiresCompatibility)"
+            exit 1
+          fi
           # Ad-hoc sign so the bundle launches once the user approves it in
           # Gatekeeper (no Developer ID available for full signing/notarization).
           # NOT "|| true": an unsigned bundle is refused outright by macOS on

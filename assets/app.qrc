@@ -6,6 +6,8 @@
         <file>logo-dim.svg</file>
         <file>logo-green.svg</file>
         <file>logo-light.svg</file>
+        <file>tray-mac-on.svg</file>
+        <file>tray-mac-off.svg</file>
         <file alias="LICENSE">../LICENSE</file>
     </qresource>
     <qresource prefix="/icons">

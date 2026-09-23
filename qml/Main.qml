@@ -102,7 +102,17 @@ Window {
         visible: true
         // Green mark when connected — the configs-page "connected" badge
         // color — dimmed when off.
-        icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
+        //
+        // Except on macOS, where a menu-bar item is a template image: black on
+        // clear, recoloured by the system for a light or dark bar and inverted
+        // while its menu is open. A coloured bitmap there is the one icon on the
+        // bar that does none of that, and on macOS 26's transparent bar the dark
+        // inner arches of the green mark all but vanish. With no colour to carry
+        // the state, the shape carries it: filled when connected, outlined when not.
+        icon.source: win.isMac
+                     ? (backend.connected ? "qrc:/assets/tray-mac-on.svg" : "qrc:/assets/tray-mac-off.svg")
+                     : (backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg")
+        icon.mask: win.isMac
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
         // Right-click opens the menu (below). Double-click — or a single left-click

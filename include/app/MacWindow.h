@@ -40,4 +40,11 @@ struct MacRect {
     double height = 0;
 };
 MacRect macWindowControlsRect(unsigned long long nsViewPtr);
+
+// A press on the window's title band, which the QML draws itself because the
+// content view covers the whole window. Moves the window, or — on the second
+// click of a double-click — does what the user chose in System Settings for a
+// title-bar double-click: zoom, minimise, or nothing. Returns false when it could
+// do neither, so the caller can fall back to QWindow::startSystemMove().
+bool macHandleTitlebarPress(unsigned long long nsViewPtr);
 #endif

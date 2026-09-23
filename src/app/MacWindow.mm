@@ -56,6 +56,62 @@ MacRect macWindowControlsRect(unsigned long long nsViewPtr) {
     return out;
 }
 
+// What a double-click on a title bar does, as the user set it in Desktop & Dock.
+// AppKit applies this itself to a real title bar; ours is QML, so it has to be
+// asked. "Fill" has no public API of its own and zooms, as the agent of the same
+// name did before it existed.
+static void performTitlebarDoubleClick(NSWindow *window) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *action = [defaults stringForKey:@"AppleActionOnDoubleClick"];
+    if (!action && [defaults boolForKey:@"AppleMiniaturizeOnDoubleClick"])
+        action = @"Minimize"; // the older, boolean spelling of the same setting
+    if ([action isEqualToString:@"None"])
+        return;
+    if ([action isEqualToString:@"Minimize"]) {
+        [window miniaturize:nil];
+        return;
+    }
+    [window zoom:nil]; // "Maximize", "Fill", or never set: the system default
+}
+
+bool macHandleTitlebarPress(unsigned long long nsViewPtr) {
+    NSView *view = reinterpret_cast<NSView *>(nsViewPtr);
+    NSWindow *window = view ? view.window : nil;
+    if (!window || (window.styleMask & NSWindowStyleMaskFullScreen))
+        return false;
+    NSEvent *event = NSApp.currentEvent;
+    // Type first: asking a non-mouse event for its click count raises.
+    if (event && event.type == NSEventTypeLeftMouseDown) {
+        if (event.clickCount == 2) {
+            performTitlebarDoubleClick(window);
+            return true;
+        }
+        [window performWindowDragWithEvent:event];
+        return true;
+    }
+    // The current event is not the press. On a trackpad it is often a pressure
+    // event, and from macOS 27 a gesture recogniser can deliver the press after
+    // the event that caused it; Qt 6.8's startSystemMove gives up in both cases
+    // and the window simply does not move. Qt 6.12 answers this by making the
+    // mouse-down the drag needs, which is what happens here — but only while the
+    // button really is down, or the window would follow a pointer nobody holds.
+    if ((NSEvent.pressedMouseButtons & 1) == 0)
+        return false;
+    NSEvent *down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                                       location:window.mouseLocationOutsideOfEventStream
+                                  modifierFlags:0
+                                      timestamp:NSProcessInfo.processInfo.systemUptime
+                                   windowNumber:window.windowNumber
+                                        context:nil
+                                    eventNumber:0
+                                     clickCount:1
+                                       pressure:1.0];
+    if (!down)
+        return false;
+    [window performWindowDragWithEvent:down];
+    return true;
+}
+
 // Target object for the retargeted close button. NSButton holds its target
 // weakly, so we keep the single instance alive for the process lifetime below.
 @interface FTCloseButtonTarget : NSObject {
