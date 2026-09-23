@@ -7,6 +7,7 @@
 #include <QLocalServer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QRectF>
 #include <QTranslator>
 #include <QUrl>
 #include <QWindow>
@@ -117,6 +118,17 @@ static void setupMacWindow(QWindow *win, bool *appQuitting)
 {
 #ifdef Q_OS_MACOS
     applyMacUnifiedTitlebar(win->winId());
+    // Tell the QML where the traffic lights really are, and keep telling it: the
+    // buttons are laid out once the window is on screen, and full screen hides
+    // them. See macWindowControlsRect() for why this is asked, not assumed.
+    const auto publishControls = [win]() {
+        const MacRect r = macWindowControlsRect(win->winId());
+        win->setProperty("macControlsRect", QRectF(r.x, r.y, r.width, r.height));
+    };
+    publishControls();
+    QObject::connect(win, &QWindow::visibleChanged, win, publishControls);
+    QObject::connect(win, &QWindow::widthChanged, win, publishControls);
+    QObject::connect(win, &QWindow::windowStateChanged, win, publishControls);
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
     installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
     // Bring the hidden window back only on a real Dock-icon click — not on every

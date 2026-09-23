@@ -23,6 +23,25 @@ Window {
     readonly property bool isMac: Qt.platform.os === "osx"
     // Custom min/max/close on frameless Linux/Windows (must match nav offset below).
     readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
+
+    // Where macOS actually put the traffic lights, set from C++ (setupMacWindow)
+    // by asking AppKit. Empty until the window is on screen, in full screen, and
+    // everywhere that is not macOS.
+    //
+    // Everything that has to stay clear of the buttons is derived from this rather
+    // than written down. The numbers that used to stand in for it were measured
+    // against one macOS style, and the style an app gets depends on the SDK it was
+    // built with as much as on the OS it runs on — so a rebuild with a newer Xcode
+    // moves the buttons while the numbers stay where they were.
+    property rect macControlsRect: Qt.rect(0, 0, 0, 0)
+    readonly property real macControlsBottom: macControlsRect.height > 0
+                                              ? macControlsRect.y + macControlsRect.height : 0
+    // The old hand-tuned values stay as floors, so nothing moves on the geometry
+    // they were measured against; a taller titlebar only ever pushes content down.
+    readonly property int navTopMargin: isMac ? Math.max(26, Math.ceil(macControlsBottom + 6)) : 36
+    readonly property int titleDragHeight: isMac ? Math.max(70, Math.ceil(macControlsBottom + 8)) : 52
+    // Read by the overlays through `shell`, so each does not keep its own guess.
+    readonly property int titlebarSafeTop: isMac ? Math.max(32, Math.ceil(macControlsBottom + 12)) : 40
     // Log view and certificate editor need a fixed-pitch face. "Menlo" exists only
     // on macOS, so elsewhere it silently fell back to the proportional UI font and
     // log columns stopped lining up.
@@ -256,7 +275,7 @@ Window {
     // the empty top band and starts a native window move.
     MouseArea {
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-        height: Qt.platform.os === "osx" ? 70 : 52
+        height: win.titleDragHeight
         onPressed: backend.startWindowDrag(win)
     }
 
@@ -347,7 +366,7 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: Qt.platform.os === "osx" ? 26 : 36
+            Layout.topMargin: win.navTopMargin
             Layout.bottomMargin: 6
             spacing: 0
 

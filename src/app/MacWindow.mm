@@ -23,6 +23,39 @@ void applyMacUnifiedTitlebar(unsigned long long nsViewPtr) {
     // so the whole background is not draggable.
 }
 
+MacRect macWindowControlsRect(unsigned long long nsViewPtr) {
+    MacRect out;
+    NSView *view = reinterpret_cast<NSView *>(nsViewPtr);
+    if (!view)
+        return out;
+    NSWindow *window = view.window;
+    if (!window || (window.styleMask & NSWindowStyleMaskFullScreen))
+        return out;
+    NSView *content = window.contentView;
+    if (!content)
+        return out;
+    NSRect all = NSZeroRect;
+    for (NSWindowButton kind : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton}) {
+        NSButton *button = [window standardWindowButton:kind];
+        if (!button || button.hidden || !button.superview)
+            continue;
+        const NSRect frame = [content convertRect:button.frame fromView:button.superview];
+        all = NSIsEmptyRect(all) ? frame : NSUnionRect(all, frame);
+    }
+    if (NSIsEmptyRect(all))
+        return out;
+    // The content view spans the whole window here (full-size content view), so
+    // its coordinates are the window's. Qt's own view is flipped; the content view
+    // need not be, so the flip is done explicitly rather than assumed.
+    const double top = content.isFlipped ? all.origin.y
+                                         : content.bounds.size.height - NSMaxY(all);
+    out.x = all.origin.x;
+    out.y = top;
+    out.width = all.size.width;
+    out.height = all.size.height;
+    return out;
+}
+
 // Target object for the retargeted close button. NSButton holds its target
 // weakly, so we keep the single instance alive for the process lifetime below.
 @interface FTCloseButtonTarget : NSObject {

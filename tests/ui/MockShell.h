@@ -18,6 +18,10 @@ class MockShell : public QObject {
     // Mirrors Main.qml's monoFont — the fixed-pitch family the log view and the
     // certificate editor ask the shell for. Constant: pages only ever read it.
     Q_PROPERTY(QString monoFont READ monoFont CONSTANT)
+    // Mirrors Main.qml's titlebarSafeTop: how far down an overlay's card has to
+    // start to clear the window's own buttons. The non-macOS value, which is what
+    // Main.qml answers wherever the tests run.
+    Q_PROPERTY(int titlebarSafeTop READ titlebarSafeTop CONSTANT)
 
 public:
     explicit MockShell(QObject *parent = nullptr);
@@ -31,6 +35,7 @@ public:
     bool windowPopupOpen() const { return m_windowPopupOpen; }
     void setWindowPopupOpen(bool v);
     QString monoFont() const;
+    int titlebarSafeTop() const { return 40; }
 
     QString lastToast() const { return m_lastToast; }
 
