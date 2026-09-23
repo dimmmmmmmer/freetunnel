@@ -8,12 +8,13 @@
 
 #include <QDBusArgument>
 #include <QDBusConnection>
+#include <QDBusError>
 #include <QDBusMessage>
-#include <QDBusMetaType>
 #include <QDBusPendingCallWatcher>
-#include <QDBusPendingReply>
 #include <QDBusVariant>
 #include <QGuiApplication>
+#include <QPair>
+#include <QSet>
 #include <QWindow>
 #include <QtGui/qguiapplication_platform.h>
 
@@ -21,6 +22,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace freetunnel {
 
@@ -62,12 +64,69 @@ private:
 
 } // namespace
 
+namespace {
+
+// The portal's ReadAll answer, applied in the order it arrived, keeping the first
+// value given for each setting. xdg-desktop-portal 1.14 asks every backend and
+// puts their answers side by side, so on Pop!_OS each namespace comes back twice,
+// once from the GNOME backend and once from the GTK one. The portal's own Read
+// method answers with the first; so does this. A QMap would have kept the last.
+void applyReadAll(DesktopChrome *desktop, const QDBusMessage &reply)
+{
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty())
+        return; // no portal, or none with Settings: keep what the window had
+    const QVariant first = reply.arguments().constFirst();
+    if (first.metaType() != QMetaType::fromType<QDBusArgument>())
+        return;
+    const auto all = first.value<QDBusArgument>();
+    if (all.currentSignature() != QLatin1String("a{sa{sv}}"))
+        return;
+    QSet<QPair<QString, QString>> seen;
+    all.beginMap();
+    while (!all.atEnd()) {
+        QString ns;
+        QVariantMap values;
+        all.beginMapEntry();
+        all >> ns >> values;
+        all.endMapEntry();
+        for (auto it = values.cbegin(); it != values.cend(); ++it) {
+            if (seen.contains({ns, it.key()}))
+                continue;
+            seen.insert({ns, it.key()});
+            desktop->applySetting(ns, it.key(), unwrapped(it.value()));
+        }
+    }
+    all.endMap();
+}
+
+bool timedOut(const QDBusMessage &reply)
+{
+    if (reply.type() != QDBusMessage::ErrorMessage)
+        return false;
+    const QDBusError::ErrorType type = QDBusError(reply).type();
+    return type == QDBusError::NoReply || type == QDBusError::Timeout || type == QDBusError::TimedOut;
+}
+
+} // namespace
+
 void watchPortalSettings(DesktopChrome *desktop)
 {
-    QDBusConnection bus = QDBusConnection::sessionBus();
+    watchPortalSettings(desktop, QDBusConnection::sessionBus());
+}
+
+void watchPortalSettings(DesktopChrome *desktop, const QDBusConnection &bus)
+{
     if (!bus.isConnected())
         return;
-    qDBusRegisterMetaType<QMap<QString, QVariantMap>>();
+    QDBusConnection connection = bus;
+
+    // Following first, reading second: a change that lands while the read is on
+    // its way is then applied after it rather than lost. Moving the buttons to the
+    // left in Tweaks, or switching to dark, should not need the app restarted.
+    auto *listener = new PortalListener(desktop);
+    connection.connect(QLatin1String(kPortalService), QLatin1String(kPortalPath),
+                       QLatin1String(kPortalSettings), QStringLiteral("SettingChanged"), listener,
+                       SLOT(onSettingChanged(QDBusMessage)));
 
     // ReadAll, not ReadOne: ReadOne arrived in xdg-desktop-portal 1.17.1, and the
     // 1.14 on a current Pop!_OS answers it with UnknownMethod.
@@ -76,27 +135,26 @@ void watchPortalSettings(DesktopChrome *desktop)
                                                        QLatin1String(kPortalSettings),
                                                        QStringLiteral("ReadAll"));
     call << QStringList{QStringLiteral("org.gnome.desktop.wm.preferences"),
-                        QStringLiteral("org.gnome.desktop.interface")};
-    auto *watcher = new QDBusPendingCallWatcher(bus.asyncCall(call), desktop);
+                        QStringLiteral("org.gnome.desktop.interface"),
+                        QStringLiteral("org.freedesktop.appearance")};
+    const QDBusMessage reply = connection.call(call, QDBus::Block, kPortalReadTimeoutMs);
+    if (!timedOut(reply)) {
+        applyReadAll(desktop, reply);
+        return;
+    }
+    // A portal still starting up, or stuck. Not worth holding the window for any
+    // longer, but its answer is still worth having whenever it comes — so no time
+    // limit of our own this time. The default one, libdbus's 25 seconds, would give
+    // up on a portal that a slow login is still starting, and it announces nothing
+    // when it does come up: only later changes. INT_MAX is libdbus's "no limit";
+    // the bus still fails the call if the portal never starts at all.
+    auto *watcher = new QDBusPendingCallWatcher(
+            connection.asyncCall(call, std::numeric_limits<int>::max()), desktop);
     QObject::connect(watcher, &QDBusPendingCallWatcher::finished, desktop,
                      [desktop](QDBusPendingCallWatcher *w) {
                          w->deleteLater();
-                         const QDBusPendingReply<QMap<QString, QVariantMap>> reply = *w;
-                         if (reply.isError())
-                             return; // no portal, or none with Settings: keep what the window had
-                         const QMap<QString, QVariantMap> all = reply.value();
-                         for (auto ns = all.cbegin(); ns != all.cend(); ++ns) {
-                             for (auto it = ns->cbegin(); it != ns->cend(); ++it)
-                                 desktop->applySetting(ns.key(), it.key(), unwrapped(it.value()));
-                         }
+                         applyReadAll(desktop, w->reply());
                      });
-
-    // And follow it: moving the buttons to the left in Tweaks, or switching theme,
-    // should not need the app restarted to take effect.
-    auto *listener = new PortalListener(desktop);
-    bus.connect(QLatin1String(kPortalService), QLatin1String(kPortalPath),
-                QLatin1String(kPortalSettings), QStringLiteral("SettingChanged"), listener,
-                SLOT(onSettingChanged(QDBusMessage)));
 }
 
 namespace {

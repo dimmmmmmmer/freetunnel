@@ -193,7 +193,19 @@ Window {
     }
 
     // Active palette: light/dark, or follow the OS when themeMode === "system".
-    readonly property bool systemDark: Application.styleHints.colorScheme === Qt.Dark
+    //
+    // Qt's answer when it has one. It does not always: on GNOME and Pop!_OS outside
+    // Flatpak, Qt 6.8 starts out Unknown and stays there until the GTK theme's
+    // *name* changes, so a dark desktop got a light window. Only then does the
+    // desktop's own setting (desktop.colorScheme, from the settings portal) decide.
+    // Off Linux desktop.colorScheme is always Unknown, so there this is exactly the
+    // old test of Qt's answer — including where Qt cannot tell either, as under
+    // Windows high contrast.
+    function systemDarkFrom(hint, desktopScheme) {
+        return hint === Qt.Dark || (hint === Qt.Unknown && desktopScheme === Qt.Dark)
+    }
+    readonly property bool systemDark: systemDarkFrom(Application.styleHints.colorScheme,
+                                                      desktop.colorScheme)
     readonly property QtObject theme: QtObject {
         readonly property bool dark: backend.themeMode === "dark"
                                      || (backend.themeMode === "system" && win.systemDark)

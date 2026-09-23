@@ -482,7 +482,9 @@ add_executable(test_qml_ui
     ../i18n/i18n.qrc
 )
 target_include_directories(test_qml_ui PRIVATE . ui ../include)
-target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
+# GuiPrivate for one thing only: standing in for the platform theme, so a test can
+# say what Qt reports about light and dark (see QtSays in test_qml_ui.cpp).
+target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
@@ -490,6 +492,11 @@ add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-q
 
 add_executable(test_desktopchrome test_desktopchrome.cpp)
 target_link_libraries(test_desktopchrome PRIVATE ft_desktop Qt6::Test)
+if(UNIX AND NOT APPLE)
+    # The portal tests drive the Linux half directly, on a private bus.
+    target_include_directories(test_desktopchrome PRIVATE ../src/app)
+    target_compile_definitions(test_desktopchrome PRIVATE FT_TEST_PORTAL)
+endif()
 add_test(NAME desktopchrome COMMAND test_desktopchrome -o ${CMAKE_CURRENT_BINARY_DIR}/report-desktopchrome.txt,txt)
 
 add_executable(test_integration_config_workflow

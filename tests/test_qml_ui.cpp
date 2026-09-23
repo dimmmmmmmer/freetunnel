@@ -4,6 +4,10 @@
 #include <QDirIterator>
 #include <QGuiApplication>
 #include <QStandardPaths>
+#include <QStyleHints>
+#include <QtGui/private/qguiapplication_p.h>
+#include <qpa/qplatformtheme.h>
+#include <qpa/qwindowsysteminterface.h>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
@@ -41,6 +45,7 @@ private slots:
     void theTitleBarStepsAsideForOverlays();
     void titleBarClicksDoWhatTheDesktopSays();
     void aTitleBarPressIsNotYetAMove();
+    void theDesktopDecidesDarkOnlyWhenQtCannot();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -785,9 +790,113 @@ void TestQmlUi::aTitleBarPressIsNotYetAMove()
     delete root;
 }
 
+namespace {
+
+// Says what Qt tells the QML about light and dark, for as long as it lives. The
+// offscreen platform's own theme cannot be asked to change its answer — it
+// ignores QStyleHints::setColorScheme — so it is stood in for, and put back.
+class QtSays : public QPlatformTheme {
+public:
+    explicit QtSays(Qt::ColorScheme scheme)
+        : m_scheme(scheme), m_previous(QGuiApplicationPrivate::platform_theme)
+    {
+        QGuiApplicationPrivate::platform_theme = this;
+        announce();
+    }
+    ~QtSays() override
+    {
+        QGuiApplicationPrivate::platform_theme = m_previous;
+        announce();
+    }
+    Qt::ColorScheme colorScheme() const override { return m_scheme; }
+    void set(Qt::ColorScheme scheme)
+    {
+        m_scheme = scheme;
+        announce();
+    }
+
+private:
+    static void announce()
+    {
+        QWindowSystemInterface::handleThemeChange<QWindowSystemInterface::SynchronousDelivery>();
+    }
+    Qt::ColorScheme m_scheme;
+    QPlatformTheme *m_previous;
+};
+
+} // namespace
+
+// On GNOME and Pop!_OS outside Flatpak Qt 6.8 reports Unknown, and a dark desktop
+// got a light window. The desktop's own setting fills in then, and only then.
+void TestQmlUi::theDesktopDecidesDarkOnlyWhenQtCannot()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+
+    // Every pairing of what Qt says with what the desktop says.
+    const int unknown = int(Qt::ColorScheme::Unknown);
+    const int light = int(Qt::ColorScheme::Light);
+    const int dark = int(Qt::ColorScheme::Dark);
+    const struct {
+        int qt;
+        int desktop;
+        bool isDark;
+    } cases[] = {
+        {unknown, unknown, false}, {unknown, light, false}, {unknown, dark, true},
+        // Where Qt knows, it is right — including against the desktop.
+        {light, unknown, false}, {light, light, false}, {light, dark, false},
+        {dark, unknown, true}, {dark, light, true}, {dark, dark, true},
+    };
+    for (const auto &c : cases) {
+        QVariant isDark;
+        QVERIFY(QMetaObject::invokeMethod(root, "systemDarkFrom", Q_RETURN_ARG(QVariant, isDark),
+                                          Q_ARG(QVariant, c.qt), Q_ARG(QVariant, c.desktop)));
+        QVERIFY2(isDark.toBool() == c.isDark,
+                 qPrintable(QStringLiteral("Qt %1, desktop %2").arg(c.qt).arg(c.desktop)));
+    }
+
+    // And through to the palette, on a platform where Qt does not know — the
+    // offscreen one the tests run on reports Unknown, as Qt's GNOME theme does.
+    QCOMPARE(QGuiApplication::styleHints()->colorScheme(), Qt::ColorScheme::Unknown);
+    auto *theme = root->property("theme").value<QObject *>();
+    QVERIFY(theme);
+    m_backend.setThemeMode(QStringLiteral("system"));
+    m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Dark));
+    QVERIFY(theme->property("dark").toBool());
+    m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Light));
+    QVERIFY(!theme->property("dark").toBool());
+    m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Unknown));
+    QVERIFY(!theme->property("dark").toBool());
+    // Where Qt does know, its answer decides, through the window's own binding —
+    // and on Windows and macOS it is the only thing that ever does.
+    {
+        QtSays qt(Qt::ColorScheme::Dark);
+        QCOMPARE(QGuiApplication::styleHints()->colorScheme(), Qt::ColorScheme::Dark);
+        m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Light));
+        QVERIFY(theme->property("dark").toBool());
+        qt.set(Qt::ColorScheme::Light);
+        m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Dark));
+        QVERIFY(!theme->property("dark").toBool());
+    }
+    QCOMPARE(QGuiApplication::styleHints()->colorScheme(), Qt::ColorScheme::Unknown);
+    QVERIFY(theme->property("dark").toBool()); // Qt knows nothing again: the desktop's dark
+
+    // A choice made in the app is not overruled by the desktop.
+    m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Dark));
+    m_backend.setThemeMode(QStringLiteral("light"));
+    QVERIFY(!theme->property("dark").toBool());
+
+    m_backend.setThemeMode(QStringLiteral("dark"));
+    m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Unknown));
+    delete root;
+}
+
 int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
+    // Nor the machine's platform theme, which Qt loads even under offscreen: the
+    // palette tests need Qt to know nothing of light and dark unless a test says so.
+    qunsetenv("QT_QPA_PLATFORMTHEME");
     // Isolate from the real app's on-disk state: never read or clobber the
     // user's configs.json / settings under the production app/org names.
     QStandardPaths::setTestModeEnabled(true);

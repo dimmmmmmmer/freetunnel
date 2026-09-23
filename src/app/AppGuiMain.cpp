@@ -196,6 +196,12 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     step("lifecycle");
 
     out->desktop = std::make_unique<freetunnel::DesktopChrome>();
+    // Before the QML is loaded, so the first frame already has the desktop's
+    // buttons and its light or dark. Not under offscreen, which has no desktop to
+    // follow — and is what the tests run on, which must not take on the look of
+    // whatever desktop they happen to run under.
+    if (QGuiApplication::platformName() != QLatin1String("offscreen"))
+        out->desktop->followDesktop();
     out->engine = std::make_unique<QQmlApplicationEngine>();
     out->engine->rootContext()->setContextProperty(QStringLiteral("desktop"), out->desktop.get());
 #if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)

@@ -65,6 +65,10 @@ DesktopChrome::DesktopChrome(QObject *parent)
 #ifndef Q_OS_MACOS
     m_layout.right = drawnButtons();
 #endif
+}
+
+void DesktopChrome::followDesktop()
+{
 #ifdef Q_OS_LINUX
     watchPortalSettings(this);
 #endif
@@ -93,6 +97,19 @@ void DesktopChrome::applySetting(const QString &ns, const QString &key, const QV
             set(m_middleClick, text);
         } else if (key == QLatin1String("action-right-click-titlebar")) {
             set(m_rightClick, text);
+        }
+    } else if (ns == QLatin1String("org.freedesktop.appearance") && key == QLatin1String("color-scheme")) {
+        // 1 prefers dark, 2 prefers light; 0 is "no preference", and anything else
+        // is a value this was not written for. Neither is a reason to guess.
+        bool ok = false;
+        const uint scheme = value.toUInt(&ok);
+        const Qt::ColorScheme next = !ok ? Qt::ColorScheme::Unknown
+                : scheme == 1 ? Qt::ColorScheme::Dark
+                : scheme == 2 ? Qt::ColorScheme::Light
+                              : Qt::ColorScheme::Unknown;
+        if (next != m_colorScheme) {
+            m_colorScheme = next;
+            moved = true;
         }
     } else if (ns == QLatin1String("org.gnome.desktop.interface") && key == QLatin1String("gtk-theme")) {
         // Only the two looks this window can draw. Pop draws a filled close button

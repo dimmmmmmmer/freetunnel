@@ -16,6 +16,7 @@ class MockDesktop : public QObject {
     Q_PROPERTY(QString doubleClickAction MEMBER m_doubleClick NOTIFY changed)
     Q_PROPERTY(QString middleClickAction MEMBER m_middleClick NOTIFY changed)
     Q_PROPERTY(QString rightClickAction MEMBER m_rightClick NOTIFY changed)
+    Q_PROPERTY(Qt::ColorScheme colorScheme MEMBER m_colorScheme NOTIFY changed)
 
 public:
     using QObject::QObject;
@@ -47,4 +48,5 @@ private:
     QString m_doubleClick = QStringLiteral("toggle-maximize");
     QString m_middleClick = QStringLiteral("none");
     QString m_rightClick = QStringLiteral("menu");
+    Qt::ColorScheme m_colorScheme = Qt::ColorScheme::Unknown;
 };
