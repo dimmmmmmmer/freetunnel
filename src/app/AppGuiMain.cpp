@@ -117,6 +117,7 @@ static void setupMacApplicationQuit(Backend &backend)
 static void setupMacWindow(QWindow *win, bool *appQuitting)
 {
 #ifdef Q_OS_MACOS
+    installMacStatusItemCrashGuard();
     applyMacUnifiedTitlebar(win->winId());
     // Tell the QML where the traffic lights really are, and keep telling it: the
     // buttons are laid out once the window is on screen, and full screen hides

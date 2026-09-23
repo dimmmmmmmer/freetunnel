@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 #import <CoreServices/CoreServices.h> // kCoreEventClass / kAEReopenApplication
+#import <objc/runtime.h>
 
 #include <functional>
 #include <utility>
@@ -110,6 +111,53 @@ bool macHandleTitlebarPress(unsigned long long nsViewPtr) {
         return false;
     [window performWindowDragWithEvent:down];
     return true;
+}
+
+// Replace an NSEvent accessor that is only defined for mouse events with one
+// that answers 0 where the original would raise, and behaves identically
+// everywhere else.
+//
+// Deliberately not a list of event types: the original is called every time,
+// and the one thing caught is the exception it raises for an event it does not
+// describe. So no event the original handles today can get a different answer.
+static void answerZeroInsteadOfRaising(SEL selector) {
+    Method method = class_getInstanceMethod([NSEvent class], selector);
+    if (!method)
+        return;
+    using Accessor = NSInteger (*)(id, SEL);
+    const auto original = reinterpret_cast<Accessor>(method_getImplementation(method));
+    IMP guarded = imp_implementationWithBlock(^NSInteger(NSEvent *event) {
+        @try {
+            return original(event, selector);
+        } @catch (NSException *e) {
+            if (![e.name isEqualToString:NSInternalInconsistencyException])
+                @throw;
+            return 0;
+        }
+    });
+    method_setImplementation(method, guarded);
+}
+
+// Qt 6.8's menu-bar item asks NSApp.currentEvent for its click count whenever
+// the icon is clicked or its menu starts tracking. From macOS 26 status items are
+// scene-based, and from 27 controls are driven by gesture recognisers that can
+// deliver the action after the event that caused it — so the current event is
+// often not a mouse event at all, -clickCount raises, and nothing catches it:
+// the app quits the moment someone clicks its menu-bar icon (QTBUG-147449). With
+// the window hidden to the menu bar, that icon is the way back in.
+//
+// Qt fixed it in 6.12 by checking the event type first, and no open-source Qt
+// 6.8 will carry that. This is the same fix from the outside. It only runs where
+// the OS can produce the failure, and where it cannot, it changes nothing.
+void installMacStatusItemCrashGuard() {
+    static bool installed = false;
+    if (installed)
+        return;
+    installed = true;
+    if (![NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:{26, 0, 0}])
+        return;
+    answerZeroInsteadOfRaising(@selector(clickCount));
+    answerZeroInsteadOfRaising(@selector(buttonNumber));
 }
 
 // Target object for the retargeted close button. NSButton holds its target

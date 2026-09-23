@@ -47,4 +47,8 @@ MacRect macWindowControlsRect(unsigned long long nsViewPtr);
 // title-bar double-click: zoom, minimise, or nothing. Returns false when it could
 // do neither, so the caller can fall back to QWindow::startSystemMove().
 bool macHandleTitlebarPress(unsigned long long nsViewPtr);
+
+// Keep a click on the menu-bar icon from crashing the app on macOS 26 and later.
+// See the definition. Idempotent; call once, before the event loop.
+void installMacStatusItemCrashGuard();
 #endif
