@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QString>
 
+#include <algorithm>
 #include <cerrno>
 #include <utility>
 
@@ -22,6 +23,7 @@
 #include <unistd.h>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <linux/sock_diag.h>
 // clang-format on
 
@@ -51,6 +53,26 @@ enum class DiagStep {
     Failed,   // the kernel says it will not answer
 };
 
+// Whether an IPv6 socket takes no IPv4 (IPV6_V6ONLY). The kernel says so in an
+// attribute after the message, for every IPv6 socket it describes. Walked by
+// hand for the reason walkDatagram() gives, with both bounds checked.
+bool ipv6OnlyOf(const nlmsghdr *header)
+{
+    const auto *base = reinterpret_cast<const char *>(header);
+    const auto total = static_cast<qsizetype>(header->nlmsg_len);
+    auto offset = static_cast<qsizetype>(NLMSG_ALIGN(NLMSG_LENGTH(sizeof(inet_diag_msg))));
+    while (offset + static_cast<qsizetype>(sizeof(rtattr)) <= total) {
+        const auto *attribute = reinterpret_cast<const rtattr *>(base + offset);
+        const auto length = static_cast<qsizetype>(attribute->rta_len);
+        if (length < static_cast<qsizetype>(sizeof(rtattr)) || offset + length > total)
+            break;
+        if (attribute->rta_type == INET_DIAG_SKV6ONLY && length >= static_cast<qsizetype>(RTA_LENGTH(1)))
+            return base[offset + static_cast<qsizetype>(RTA_LENGTH(0))] != 0;
+        offset += static_cast<qsizetype>(RTA_ALIGN(attribute->rta_len));
+    }
+    return false;
+}
+
 // Read one message of a dump.
 DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
                          QList<SocketOwner> *out, int *error)
@@ -77,6 +99,11 @@ DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
     // cannot drift if that ever stops being true.
     owner.family = entry->idiag_family;
     owner.inode = entry->idiag_inode;
+    // idiag_src is four network-order words: all of them for IPv6, the first for
+    // IPv4.
+    std::copy_n(reinterpret_cast<const std::uint8_t *>(entry->id.idiag_src), owner.family == AF_INET6 ? 16 : 4,
+                owner.address.begin());
+    owner.v6only = owner.family == AF_INET6 && ipv6OnlyOf(header);
     if (owner.port != 0)
         out->append(owner);
     return DiagStep::Recorded;
