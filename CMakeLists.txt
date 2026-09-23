@@ -27,6 +27,39 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(QHotkey)
 
+# QWindowKit, Windows only: gives the frameless window back the shadow, corners,
+# Aero Snap and Snap Layouts that Qt::FramelessWindowHint takes away (see
+# src/app/WindowsChrome.cpp). A library rather than our own WM_NCCALCSIZE and
+# WM_NCHITTEST, because nobody working on this can test Windows by hand, and this
+# one has years of field use in Jami's Qt Quick client.
+#
+# Configured the way Jami ships it: static, the Quick module only, and Windows
+# system borders OFF — which keeps the Windows 10 top-border artefact away at the
+# price of an 8 px resize band inside the window's edge. Turning borders ON is a
+# one-line change here, and one that needs a Windows hand test after it.
+#
+# Pinned to the commit behind release 1.5.0 rather than to main: main carries
+# Windows code no shipped application has run yet, and the library uses Qt's
+# private API, so a bump is a deliberate change, not a drift.
+if (WIN32)
+    set(QWINDOWKIT_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_BUILD_QUICK ON CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_BUILD_WIDGETS OFF CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_BUILD_DOCUMENTATIONS OFF CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_INSTALL OFF CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_ENABLE_STYLE_AGENT OFF CACHE BOOL "" FORCE)
+    set(QWINDOWKIT_ENABLE_WINDOWS_SYSTEM_BORDERS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        QWindowKit
+        GIT_REPOSITORY https://github.com/stdware/qwindowkit.git
+        GIT_TAG 35e88f3655720ed0537c7dd1dde243bf4a70c94c # 1.5.0
+        # qmsetup is a submodule, and has one of its own.
+        GIT_SUBMODULES_RECURSE ON
+    )
+    FetchContent_MakeAvailable(QWindowKit)
+endif ()
+
 set(FREETUNNEL_GIT_VERSION "unknown")
 set(FREETUNNEL_CORE_REF "unknown")
 find_package(Git QUIET)
@@ -92,6 +125,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendConfigShared.cpp
     src/app/BackendConfigShared.h
     src/app/BackendSplit.cpp
+    src/app/DesktopChrome.cpp
+    include/app/DesktopChrome.h
     src/app/LogModel.cpp
     include/app/LogModel.h
     include/app/Backend.h
@@ -261,7 +296,19 @@ if (WIN32)
     # split tunnelling finds the process behind a connection on Windows.
     # ole32/uuid: IShellLink, which is how a dropped .lnk is followed to its target.
     target_link_libraries(FreeTunnel PRIVATE shell32 iphlpapi ole32 uuid)
+    target_sources(FreeTunnel PRIVATE src/app/WindowsChrome.cpp include/app/WindowsChrome.h)
+    target_link_libraries(FreeTunnel PRIVATE QWindowKit::Quick)
+    target_compile_definitions(FreeTunnel PRIVATE FT_HAVE_QWINDOWKIT)
 endif()
+
+# Linux: the desktop's title-bar settings come over the settings portal (QtDBus),
+# and a right-click on our title bar asks the window manager for its window menu
+# with an X11 client message (xcb). See src/app/DesktopChrome.cpp.
+if (UNIX AND NOT APPLE)
+    find_package(Qt6 COMPONENTS DBus REQUIRED)
+    target_sources(FreeTunnel PRIVATE src/app/DesktopChromeLinux.cpp src/app/DesktopChromeLinux.h)
+    target_link_libraries(FreeTunnel PRIVATE Qt6::DBus xcb)
+endif ()
 
 # OpenSSL for in-app Ed25519 verification (UpdateChecker). On Linux the VPN
 # core links Conan BoringSSL statically; FindOpenSSL would pick distro libcrypto

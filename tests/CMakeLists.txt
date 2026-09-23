@@ -64,6 +64,23 @@ if (FT_ENABLE_SANITIZERS)
 endif ()
 
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network Svg REQUIRED)
+if(UNIX AND NOT APPLE)
+    find_package(Qt6 COMPONENTS DBus REQUIRED)
+endif()
+
+# What the desktop expects of the window's own title bar (DesktopChrome), as a
+# library for the same reason as ft_apps: on Linux it carries QtDBus and xcb with
+# it, and every target that compiles AppGuiMain.cpp needs both.
+add_library(ft_desktop STATIC
+    ../src/app/DesktopChrome.cpp
+    ../include/app/DesktopChrome.h
+)
+target_include_directories(ft_desktop PUBLIC ../include)
+target_link_libraries(ft_desktop PUBLIC Qt6::Core Qt6::Gui)
+if(UNIX AND NOT APPLE)
+    target_sources(ft_desktop PRIVATE ../src/app/DesktopChromeLinux.cpp ../src/app/DesktopChromeLinux.h)
+    target_link_libraries(ft_desktop PUBLIC Qt6::DBus xcb)
+endif()
 # Test-only. Main.qml uses Qt.labs.platform for the tray icon, which needs either
 # a native implementation or Qt Widgets to fall back to. Under QT_QPA_PLATFORM=
 # offscreen there is no native one, and without the fallback loading the real
@@ -182,7 +199,7 @@ target_include_directories(test_app_startup PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_app_startup PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_app_startup PRIVATE Qt6::Widgets)
 endif()
@@ -248,7 +265,7 @@ target_include_directories(test_backend_deeplink_import PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_deeplink_import PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_backend_deeplink_import PRIVATE Qt6::Widgets)
 endif()
@@ -456,6 +473,7 @@ add_executable(test_qml_ui
     test_qml_ui.cpp
     ui/MockBackend.cpp
     ui/MockShell.cpp
+    ui/MockDesktop.h
     ui/UiTheme.cpp
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
@@ -469,6 +487,10 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
+
+add_executable(test_desktopchrome test_desktopchrome.cpp)
+target_link_libraries(test_desktopchrome PRIVATE ft_desktop Qt6::Test)
+add_test(NAME desktopchrome COMMAND test_desktopchrome -o ${CMAKE_CURRENT_BINARY_DIR}/report-desktopchrome.txt,txt)
 
 add_executable(test_integration_config_workflow
     test_integration_config_workflow.cpp
@@ -645,7 +667,7 @@ target_include_directories(test_backend_logs PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_logs PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_logs PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 freetunnel_link_linux_secrets(test_backend_logs)
 if(WIN32)
     target_link_libraries(test_backend_logs PRIVATE shell32 advapi32)
@@ -667,7 +689,7 @@ target_include_directories(test_backend_settings PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_settings PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_settings PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 freetunnel_link_linux_secrets(test_backend_settings)
 if(WIN32)
     target_link_libraries(test_backend_settings PRIVATE shell32 advapi32)
@@ -689,7 +711,7 @@ target_include_directories(test_backend_config PRIVATE
     . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_config PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_config PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 freetunnel_link_linux_secrets(test_backend_config)
 if(WIN32)
     target_link_libraries(test_backend_config PRIVATE shell32 advapi32)
@@ -711,7 +733,7 @@ target_include_directories(test_backend_split PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_split PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_split PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 freetunnel_link_linux_secrets(test_backend_split)
 if(WIN32)
     target_link_libraries(test_backend_split PRIVATE shell32 advapi32)
@@ -772,7 +794,7 @@ target_include_directories(test_backend_updates PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_backend_updates PRIVATE FREETUNNEL_VERSION="1.0.0" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_updates PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
 freetunnel_link_linux_secrets(test_backend_updates)
 if(WIN32)
     target_link_libraries(test_backend_updates PRIVATE shell32 advapi32)

@@ -7,6 +7,8 @@
 // cppcheck-suppress-file unusedStructMember
 #pragma once
 
+#include "app/DesktopChrome.h"
+
 #include <QEvent>
 #include <QObject>
 #include <QString>
@@ -85,6 +87,9 @@ QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting);
 struct GuiStartup {
     std::unique_ptr<UrlOpenFilter> urlFilter;
     std::unique_ptr<Backend> backend;
+    // Before the engine, so it is destroyed after it: the QML holds it as a
+    // context property until the root objects are gone.
+    std::unique_ptr<freetunnel::DesktopChrome> desktop;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QLocalServer *server = nullptr; // parented to the application
     QWindow *win = nullptr;         // owned by the engine

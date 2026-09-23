@@ -99,7 +99,8 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-tidy libssl-dev libsecret-1-dev pkg-config
+          sudo apt-get install -y cmake ninja-build clang-tidy libssl-dev libsecret-1-dev pkg-config \
+            libxcb1-dev
 
       - name: Install Qt
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4

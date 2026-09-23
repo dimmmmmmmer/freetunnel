@@ -17,5 +17,6 @@
     <file alias="components/ChipX.qml">qml/components/ChipX.qml</file>
     <file alias="components/SectionLabel.qml">qml/components/SectionLabel.qml</file>
     <file alias="components/Sep.qml">qml/components/Sep.qml</file>
+    <file alias="components/WindowControls.qml">qml/components/WindowControls.qml</file>
   </qresource>
 </RCC>

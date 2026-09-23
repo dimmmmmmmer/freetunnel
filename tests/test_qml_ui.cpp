@@ -12,6 +12,7 @@
 #include <QQuickWindow>
 
 #include "ui/MockBackend.h"
+#include "ui/MockDesktop.h"
 #include "ui/MockShell.h"
 #include "ui/UiTheme.h"
 
@@ -35,6 +36,11 @@ private slots:
     void mainWindowLoads();
     void mainWindowPageNavigation();
     void closingTheWindowQuitsWhenThereIsNoTray();
+    void everythingTheWindowsAgentLooksForCanBeFound();
+    void theWindowButtonsFollowTheDesktopLayout();
+    void theTitleBarStepsAsideForOverlays();
+    void titleBarClicksDoWhatTheDesktopSays();
+    void aTitleBarPressIsNotYetAMove();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -46,6 +52,7 @@ private:
 
     QQmlEngine m_engine;
     MockBackend m_backend;
+    MockDesktop m_desktop;
     MockShell m_shell;
     UiTheme m_theme;
 };
@@ -84,6 +91,7 @@ void TestQmlUi::initTestCase()
 {
     // Icons load through backend.readBundledText — no QML XHR file access needed.
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
+    m_engine.rootContext()->setContextProperty(QStringLiteral("desktop"), &m_desktop);
     // The drawn dialog rather than the platform's own: it is the one that has to
     // work where the desktop offers nothing, and it does not put a modal native
     // window in front of a CI runner.
@@ -633,6 +641,148 @@ void TestQmlUi::aSecondConfirmQueuesInsteadOfReplacingTheLiveOne()
     dialog->setProperty("visible", false);
     QVERIFY(QMetaObject::invokeMethod(dialog, "confirmed"));
     QCOMPARE(m_backend.property("confirmLog").toString(), QStringLiteral("AB"));
+}
+
+namespace {
+
+QObject *createMainWindow(QQmlEngine &engine)
+{
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    if (!component.isReady())
+        qWarning("%s", qPrintable(component.errorString()));
+    QObject *root = component.create();
+    // Positions are only meaningful once the window has been laid out: until the
+    // platform has sized it, the content item is 0 wide and everything anchored to
+    // its right edge sits at x = 0.
+    if (auto *window = qobject_cast<QQuickWindow *>(root)) {
+        if (!QTest::qWaitFor([window] { return window->contentItem()->width() > 0; }, 3000))
+            qWarning("the main window was never laid out");
+    }
+    return root;
+}
+
+} // namespace
+
+// The Windows window agent finds the title bar, the three buttons and the nav row
+// by objectName with findChild(). Anything it cannot find it silently leaves
+// unregistered — and an unregistered maximise button is Snap Layouts never
+// appearing, on a platform nobody here can look at. This is the contract, checked
+// on the platform that can run it. It is not hypothetical: the buttons were first
+// written with a Repeater, whose delegates findChild() cannot reach.
+void TestQmlUi::everythingTheWindowsAgentLooksForCanBeFound()
+{
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    for (const char *name : {"titleBar", "windowMinButton", "windowMaxButton", "windowCloseRect", "navRow"})
+        QVERIFY2(root->findChild<QQuickItem *>(QLatin1String(name)), name);
+    delete root;
+}
+
+// Which buttons exist, and on which side, is the desktop's choice. Pop!_OS has no
+// maximise button; a layout set in Tweaks can put everything on the left.
+void TestQmlUi::theWindowButtonsFollowTheDesktopLayout()
+{
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    // No maximise where the desktop has none — and nothing left answering to its
+    // name either, or the Windows agent would register a button nobody can see.
+    QVERIFY2(!root->findChild<QQuickItem *>(QStringLiteral("windowMaxButton")),
+             "no maximise button where the desktop has none");
+    auto *close = root->findChild<QQuickItem *>(QStringLiteral("windowCloseRect"));
+    QVERIFY(close && close->isVisible());
+    const qreal width = root->property("width").toReal();
+    QVERIFY2(close->mapToScene(QPointF(0, 0)).x() > width / 2, "close on the right");
+    delete root;
+
+    m_desktop.setLayout({QStringLiteral("close"), QStringLiteral("minimize")}, {});
+    root = createMainWindow(m_engine);
+    QVERIFY(root);
+    close = root->findChild<QQuickItem *>(QStringLiteral("windowCloseRect"));
+    auto *min = root->findChild<QQuickItem *>(QStringLiteral("windowMinButton"));
+    QVERIFY(close && min && close->isVisible() && min->isVisible());
+    QVERIFY2(close->mapToScene(QPointF(0, 0)).x() < width / 2, "close moved to the left");
+    QVERIFY2(close->mapToScene(QPointF(0, 0)).x() < min->mapToScene(QPointF(0, 0)).x(),
+             "and in the order the layout gives");
+    delete root;
+
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+}
+
+// The agent decides what is title bar by geometry alone, knowing nothing of what
+// is drawn over it, so the item it uses has to be switched off while an overlay
+// or a popup covers the band — or the click meant to close the overlay would
+// drag the window instead.
+void TestQmlUi::theTitleBarStepsAsideForOverlays()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *bar = root->findChild<QQuickItem *>(QStringLiteral("titleBar"));
+    QVERIFY(bar);
+    QVERIFY(bar->isEnabled());
+    root->setProperty("overlay", QStringLiteral("create"));
+    QCoreApplication::processEvents();
+    QVERIFY2(!bar->isEnabled(), "not a drag handle under an open overlay");
+    root->setProperty("overlay", QString());
+    QCoreApplication::processEvents();
+    QVERIFY(bar->isEnabled());
+    delete root;
+}
+
+// What a title bar does when clicked is the desktop's setting, dispatched by name.
+void TestQmlUi::titleBarClicksDoWhatTheDesktopSays()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    const int before = m_desktop.menuRequests;
+    QMetaObject::invokeMethod(root, "titlebarAction", Q_ARG(QVariant, QStringLiteral("menu")));
+    QCOMPARE(m_desktop.menuRequests, before + 1);
+    // Actions this window cannot perform do nothing at all, rather than something
+    // else — a shade request must not, say, maximise.
+    QMetaObject::invokeMethod(root, "titlebarAction", Q_ARG(QVariant, QStringLiteral("toggle-shade")));
+    QCOMPARE(m_desktop.menuRequests, before + 1);
+    delete root;
+}
+
+// Driven with real mouse events rather than by calling titlebarAction, because
+// what matters is which gesture reaches which action. A move hands the pointer to
+// the window manager; started on the press, as it once was, it would swallow the
+// second click of every double-click.
+void TestQmlUi::aTitleBarPressIsNotYetAMove()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    // Mid-band: below the resize grip, above the nav, clear of the buttons.
+    const QPoint at(window->width() / 2, 20);
+    const int drags = m_backend.windowDrags;
+    const int menus = m_desktop.menuRequests;
+
+    QTest::mousePress(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_backend.windowDrags, drags);
+    QTest::mouseMove(window, at + QPoint(2, 0));
+    QCOMPARE(m_backend.windowDrags, drags); // a tremor is not a drag
+    QTest::mouseMove(window, at + QPoint(40, 0));
+    QCOMPARE(m_backend.windowDrags, drags + 1);
+    QTest::mouseMove(window, at + QPoint(80, 0));
+    QCOMPARE(m_backend.windowDrags, drags + 1); // one move per press
+    QTest::mouseRelease(window, Qt::LeftButton, {}, at + QPoint(80, 0));
+
+    // A double-click does what the desktop says, and moves nothing. "menu" here
+    // only because it is the action the mock can count.
+    m_desktop.setProperty("doubleClickAction", QStringLiteral("menu"));
+    QTest::mouseDClick(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_desktop.menuRequests, menus + 1);
+    QCOMPARE(m_backend.windowDrags, drags + 1);
+    m_desktop.setProperty("doubleClickAction", QStringLiteral("toggle-maximize"));
+
+    // A right-click is the window menu on the press, as on a real title bar.
+    QTest::mousePress(window, Qt::RightButton, {}, at);
+    QCOMPARE(m_desktop.menuRequests, menus + 2);
+    QTest::mouseRelease(window, Qt::RightButton, {}, at);
+    delete root;
 }
 
 int main(int argc, char *argv[])

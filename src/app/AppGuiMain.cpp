@@ -17,6 +17,11 @@
 
 #include "app/Backend.h"
 #include "app/MacWindow.h"
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+#include "app/WindowsChrome.h"
+
+#include <QQuickWindow>
+#endif
 #include "core/InstanceControl.h"
 
 namespace freetunnel {
@@ -190,7 +195,16 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 #endif
     step("lifecycle");
 
+    out->desktop = std::make_unique<freetunnel::DesktopChrome>();
     out->engine = std::make_unique<QQmlApplicationEngine>();
+    out->engine->rootContext()->setContextProperty(QStringLiteral("desktop"), out->desktop.get());
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+    // Only on the real Windows platform: under offscreen the window's id is a
+    // counter, not an HWND, and the agent would hand it to Win32 as one.
+    const bool windowsAgent = QGuiApplication::platformName() == QLatin1String("windows");
+    if (windowsAgent)
+        out->engine->setInitialProperties({{QStringLiteral("windowsAgent"), true}});
+#endif
     out->win = loadMainWindow(*out->engine, backend);
     if (!out->win) {
         step("qml-failed");
@@ -203,6 +217,13 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 
     setupMacWindow(out->win, &out->appQuitting);
     step("mac-window");
+
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+    if (windowsAgent) {
+        setupWindowsChrome(qobject_cast<QQuickWindow *>(out->win));
+        step("windows-chrome");
+    }
+#endif
 
     out->urlFilter->ready(&backend, out->win);
     if (!controlArg.isEmpty())

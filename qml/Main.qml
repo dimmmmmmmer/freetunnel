@@ -9,20 +9,36 @@ import "components"
 // Consumes a `backend` context object injected from C++ (main.cpp).
 Window {
     id: win
-    visible: true
+    // Set from C++ before the window is created, and only in the real app on
+    // Windows, where QWindowKit takes the frame off (see WindowsChrome.cpp). The
+    // agent has to be set up before the window is first shown and before any size
+    // constraint is applied, so in that case C++ shows the window and sets the
+    // minimum size itself, afterwards. Everywhere else — Linux, macOS, and every
+    // test — this stays false and nothing about the window changes.
+    property bool windowsAgent: false
+    visible: !windowsAgent
     // Default size; 400px min keeps frameless nav clear of window controls on Linux/Windows.
     width: 400
     height: 460
-    minimumWidth: 400
-    minimumHeight: 460
+    minimumWidth: windowsAgent ? 0 : 400
+    minimumHeight: windowsAgent ? 0 : 460
     color: theme.bg
     title: "FreeTunnel"
 
     // macOS keeps its native (unified) title bar; Linux/Windows go frameless
     // with our own window controls + drag/resize, so the chrome matches macOS.
     readonly property bool isMac: Qt.platform.os === "osx"
-    // Custom min/max/close on frameless Linux/Windows (must match nav offset below).
-    readonly property int framelessChromeWidth: 108 // 9 + 3×30 + 2×3 + 9
+    // The width the nav has to keep clear of on each side so it stays centred:
+    // the wider of the two control groups, plus its margin. Measured from the
+    // controls, because what they are is now the desktop's choice — three
+    // Windows caption cells, two Pop circles, one GNOME close — not a constant.
+    readonly property int framelessChromeWidth: isMac ? 0
+            : Math.max(controlsLeft.visible ? controlsLeft.width + controlsLeft.sideInset : 0,
+                       controlsRight.visible ? controlsRight.width + controlsRight.sideInset : 0)
+    // Whether the chrome should be dark. The Windows window agent follows it, so
+    // the thin system border and the window menu match FreeTunnel's own theme
+    // rather than the OS setting.
+    readonly property bool darkChrome: theme.dark
 
     // Where macOS actually put the traffic lights, set from C++ (setupMacWindow)
     // by asking AppKit. Empty until the window is on screen, in full screen, and
@@ -47,7 +63,11 @@ Window {
     // log columns stopped lining up.
     readonly property string monoFont: Qt.platform.os === "windows" ? "Consolas"
                                      : (isMac ? "Menlo" : "monospace")
-    flags: isMac ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
+    // Frameless on Linux, where the window draws its own title bar. On Windows the
+    // window agent takes the frame off itself and needs a normal window to do it
+    // with: a FramelessWindowHint window has no WS_CAPTION/WS_THICKFRAME, which is
+    // exactly what DWM reads to give it corners, a shadow and Snap.
+    flags: (isMac || windowsAgent) ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // The window's own ✕ normally never quits: on macOS the red traffic-light is
     // retargeted to hide natively (installMacWindowCloseToTray); on Linux and
@@ -283,73 +303,144 @@ Window {
     // ---------- title-bar drag region ----------
     // Sits above the back-catcher but below the nav buttons; catches presses on
     // the empty top band and starts a native window move.
+    //
+    // On Linux it also does what the desktop says a title bar does when it is
+    // double-, middle- or right-clicked (DesktopChrome reads those settings). On
+    // macOS the double-click is handled natively inside startWindowDrag, and on
+    // Windows the window agent makes this band real title bar, so none of these
+    // handlers ever see a click there.
+    //
+    // Elsewhere a press is not yet a move: the move starts once the pointer has
+    // travelled the system's drag distance, as GTK does it. A move hands the
+    // pointer to the window manager, and one started on the press itself would
+    // take the second click of a double-click with it.
     MouseArea {
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
         height: win.titleDragHeight
-        onPressed: backend.startWindowDrag(win)
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+        property bool moveArmed: false
+        property point pressedAt
+        onPressed: function(mouse) {
+            if (mouse.button !== Qt.LeftButton) {
+                if (!win.isMac)
+                    win.titlebarAction(mouse.button === Qt.RightButton ? desktop.rightClickAction
+                                                                       : desktop.middleClickAction)
+            } else if (win.isMac) {
+                backend.startWindowDrag(win)
+            } else {
+                moveArmed = true
+                pressedAt = Qt.point(mouse.x, mouse.y)
+            }
+        }
+        onPositionChanged: function(mouse) {
+            if (moveArmed && Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
+                                 >= Qt.styleHints.startDragDistance) {
+                moveArmed = false
+                backend.startWindowDrag(win)
+            }
+        }
+        onReleased: moveArmed = false
+        onCanceled: moveArmed = false
+        onDoubleClicked: function(mouse) {
+            if (!win.isMac && mouse.button === Qt.LeftButton)
+                win.titlebarAction(desktop.doubleClickAction)
+        }
+    }
+
+    // The same band, for the Windows window agent: the item it treats as the title
+    // bar. A separate, inert Item rather than the MouseArea above, so that it can be
+    // switched off without touching dragging elsewhere.
+    //
+    // It has to be switched off while anything covers the band. The agent decides
+    // what is title bar by geometry alone — it knows nothing of what is drawn on
+    // top — so an overlay's dimmed backdrop or a popup over the band would become a
+    // drag handle, and the click meant to close it would move the window instead.
+    Item {
+        objectName: "titleBar"
+        anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+        height: win.titleDragHeight
+        enabled: win.overlay === "" && !win.windowPopupOpen
+    }
+
+    // A title bar's click actions, by GNOME's names. The ones a frameless window
+    // cannot perform — shade, maximise in one direction — do nothing rather than
+    // something else.
+    function titlebarAction(action) {
+        if (action === "toggle-maximize")
+            win.toggleMaximized()
+        else if (action === "minimize")
+            win.showMinimized()
+        else if (action === "lower")
+            win.lower()
+        else if (action === "menu")
+            desktop.showWindowMenu(win)
     }
 
     // ---------- custom window controls (Linux/Windows) ----------
-    // macOS keeps its native traffic lights; elsewhere we draw our own so the
-    // frameless window can still minimize / maximize / close.
-    Row {
-        visible: !win.isMac
+    // The window's own buttons, where the desktop puts them. macOS keeps its native
+    // traffic lights. On Linux the layout comes from the desktop's button-layout
+    // setting, so a group can be empty — or both, on a layout with no buttons.
+    //
+    // Close minimises to the taskbar/dock (Linux and Windows alike) rather than
+    // hiding. A hidden window vanishes from the taskbar entirely, which is
+    // disorienting (and on Linux/GNOME a hidden window can't be reliably brought
+    // back). Minimising keeps the entry and the VPN running.
+    //
+    // Unless there is no tray to minimise alongside. Qt.labs.platform shows a tray
+    // icon through a StatusNotifier host or not at all — it has no other
+    // implementation available to this application, which does not link Qt
+    // Widgets — so on GNOME without an AppIndicator extension, or on a plain window
+    // manager, there is no icon, no tray menu and therefore no «Quit» in it.
+    // Minimising there can put the window somewhere with nothing to bring it back
+    // from. Close quits instead, which is what it means anyway when nothing else is
+    // holding the application open.
+    function toggleMaximized() {
+        win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
+    }
+    function closeFromTitleBar() {
+        if (tray.available)
+            win.showMinimized()
+        else
+            backend.quitApplication()
+    }
+    WindowControls {
+        id: controlsRight
+        // Windows 11 caption buttons sit flush in the corner; the Linux ones are
+        // circles set in from it.
+        visible: !win.isMac && buttons.length > 0
         z: 60
         anchors.top: parent.top; anchors.right: parent.right
-        anchors.topMargin: 9; anchors.rightMargin: 9
-        spacing: 3
-        // minimize
-        Rectangle { width: 30; height: 24; radius: 6
-            // Fade out to a *transparent surface* (same RGB, 0 alpha), not to
-            // "transparent" (= transparent black): a ColorAnimation to/from black
-            // lerps the RGB channels and flashes dark before reaching the light hue.
-            color: minMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
-            Behavior on color { ColorAnimation { duration: 100 } }
-            Rectangle { anchors.centerIn: parent; width: 11; height: 1.4; radius: 1; color: theme.textDim }
-            MouseArea { id: minMa; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: win.showMinimized() }
-        }
-        // maximize / restore
-        Rectangle { width: 30; height: 24; radius: 6
-            color: maxMa.containsMouse ? theme.surface : Qt.rgba(theme.surface.r, theme.surface.g, theme.surface.b, 0)
-            Behavior on color { ColorAnimation { duration: 100 } }
-            Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2
-                        color: "transparent"; border.color: theme.textDim; border.width: 1.4 }
-            MouseArea { id: maxMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized) }
-        }
-        // close: minimize to the taskbar/dock (Linux and Windows alike) rather than
-        // hide. A hidden window vanishes from the taskbar entirely, which is
-        // disorienting (and on Linux/GNOME a hidden window can't be reliably
-        // brought back). Minimizing keeps the entry and the VPN running.
-        //
-        // Unless there is no tray to minimize alongside. Qt.labs.platform shows a
-        // tray icon through a StatusNotifier host or not at all — it has no other
-        // implementation available to this application, which does not link Qt
-        // Widgets — so on GNOME without an AppIndicator extension, or on a plain
-        // window manager, there is no icon, no tray menu and therefore no «Quit»
-        // in it. Minimizing there can put the window somewhere with nothing to
-        // bring it back from. ✕ quits instead, which is what a ✕ means anyway
-        // when nothing else is holding the application open.
-        Rectangle { width: 30; height: 24; radius: 6
-            color: closeMa.containsMouse ? theme.danger : Qt.rgba(theme.danger.r, theme.danger.g, theme.danger.b, 0)
-            Behavior on color { ColorAnimation { duration: 100 } }
-            Item { anchors.centerIn: parent; width: 12; height: 12
-                Rectangle { anchors.centerIn: parent; width: 13; height: 1.4; radius: 1; rotation: 45
-                            color: closeMa.containsMouse ? "white" : theme.textDim }
-                Rectangle { anchors.centerIn: parent; width: 13; height: 1.4; radius: 1; rotation: -45
-                            color: closeMa.containsMouse ? "white" : theme.textDim }
-            }
-            MouseArea { id: closeMa; objectName: "windowCloseButton"
-                        anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: tray.available ? win.showMinimized() : backend.quitApplication() }
-        }
+        anchors.topMargin: topInset; anchors.rightMargin: sideInset
+        buttons: desktop.controlsRight
+        controlStyle: desktop.controlStyle
+        window: win
+        theme: win.theme
+        onMinimizeRequested: win.showMinimized()
+        onMaximizeToggleRequested: win.toggleMaximized()
+        onCloseRequested: win.closeFromTitleBar()
+    }
+    WindowControls {
+        id: controlsLeft
+        visible: !win.isMac && buttons.length > 0
+        z: 60
+        anchors.top: parent.top; anchors.left: parent.left
+        anchors.topMargin: topInset; anchors.leftMargin: sideInset
+        buttons: desktop.controlsLeft
+        controlStyle: desktop.controlStyle
+        window: win
+        theme: win.theme
+        onMinimizeRequested: win.showMinimized()
+        onMaximizeToggleRequested: win.toggleMaximized()
+        onCloseRequested: win.closeFromTitleBar()
     }
 
     // ---------- resize grips (frameless Linux/Windows) ----------
     Item {
-        visible: !win.isMac; anchors.fill: parent; z: 55
+        // Linux only: on Windows the window agent resizes from the real frame.
+        // And only for a window that can be resized — maximised or full screen,
+        // they were resize cursors over content that led nowhere.
+        visible: !win.isMac && !win.windowsAgent; anchors.fill: parent; z: 55
+        enabled: win.visibility === Window.Windowed
         MouseArea { height: 5; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
             cursorShape: Qt.SizeVerCursor; onPressed: win.startSystemResize(Qt.TopEdge) }
         MouseArea { height: 5; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -366,6 +457,21 @@ Window {
             cursorShape: Qt.SizeBDiagCursor; onPressed: win.startSystemResize(Qt.BottomEdge | Qt.LeftEdge) }
         MouseArea { width: 11; height: 11; anchors.bottom: parent.bottom; anchors.right: parent.right
             cursorShape: Qt.SizeFDiagCursor; onPressed: win.startSystemResize(Qt.BottomEdge | Qt.RightEdge) }
+    }
+
+    // A 1px edge on Linux. A frameless window gets no border from the window
+    // manager, and on KDE no shadow either, so a dark FreeTunnel over a dark window
+    // had no visible edge at all. Drawn inside the window — nothing outside it
+    // belongs to us — and in libadwaita's own inner-outline colour, which is also
+    // what GNOME draws for its client-side windows. Not when maximised, where every
+    // desktop drops it too.
+    Rectangle {
+        anchors.fill: parent
+        z: 70
+        visible: !win.isMac && !win.windowsAgent && win.visibility === Window.Windowed
+        color: "transparent"
+        border.width: 1
+        border.color: theme.dark ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(0, 0, 0, 0.12)
     }
 
     // ---------- main content (nav + page) ----------
@@ -389,6 +495,10 @@ Window {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 38
                 Row {
+                    // Named for the Windows window agent: the nav tiles reach into
+                    // the title band, and the agent has to be told they are buttons
+                    // there, not something to drag the window by.
+                    objectName: "navRow"
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 8
                     Repeater {
