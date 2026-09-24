@@ -146,7 +146,8 @@ int holdASocket(int argc, char **argv)
     std::printf("PORT %u\n", static_cast<unsigned>(udp ? datagrams.localPort() : server.serverPort()));
     std::fflush(stdout);
     // Until the test lets go: its end of our stdin closing.
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+    // Parenthesised: <winsock2.h> above brings <windows.h>'s max macro with it.
+    std::cin.ignore((std::numeric_limits<std::streamsize>::max)());
     return 0;
 }
 

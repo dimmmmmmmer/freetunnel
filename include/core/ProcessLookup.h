@@ -1,4 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
+// The plain structs here are filled and read in the .cpp files; cppcheck, looking
+// at the header on its own, sees none of that and calls their members unused.
+// cppcheck-suppress-file unusedStructMember
 #pragma once
 
 #include "core/AppRules.h"
