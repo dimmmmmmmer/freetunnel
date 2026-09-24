@@ -688,6 +688,9 @@ void TestQmlUi::everythingTheWindowsAgentLooksForCanBeFound()
 // maximise button; a layout set in Tweaks can put everything on the left.
 void TestQmlUi::theWindowButtonsFollowTheDesktopLayout()
 {
+#ifdef Q_OS_MACOS
+    QSKIP("macOS keeps AppKit's own window buttons; these are drawn only on Linux and Windows");
+#endif
     m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("close")});
     QObject *root = createMainWindow(m_engine);
     QVERIFY(root);
@@ -764,6 +767,22 @@ void TestQmlUi::aTitleBarPressIsNotYetAMove()
     const QPoint at(window->width() / 2, 20);
     const int drags = m_backend.windowDrags;
     const int menus = m_desktop.menuRequests;
+
+#ifdef Q_OS_MACOS
+    // macOS is the exception, on purpose: the press goes straight to AppKit
+    // (macHandleTitlebarPress), which tells a drag from a double-click itself and
+    // does what Desktop & Dock says for the latter. So the move is handed over at
+    // once, and nothing here acts on a double-click on top of AppKit.
+    QTest::mousePress(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_backend.windowDrags, drags + 1);
+    QTest::mouseRelease(window, Qt::LeftButton, {}, at);
+    m_desktop.setProperty("doubleClickAction", QStringLiteral("menu"));
+    QTest::mouseDClick(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_desktop.menuRequests, menus);
+    m_desktop.setProperty("doubleClickAction", QStringLiteral("toggle-maximize"));
+    delete root;
+    return;
+#endif
 
     QTest::mousePress(window, Qt::LeftButton, {}, at);
     QCOMPARE(m_backend.windowDrags, drags);
