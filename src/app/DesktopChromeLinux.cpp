@@ -21,8 +21,8 @@
 #include <xcb/xcb.h>
 
 #include <cstdlib>
-#include <cstring>
 #include <limits>
+#include <string_view>
 
 namespace freetunnel {
 
@@ -159,10 +159,11 @@ void watchPortalSettings(DesktopChrome *desktop, const QDBusConnection &bus)
 
 namespace {
 
-xcb_atom_t internAtom(xcb_connection_t *c, const char *name)
+// Atom names are literals, so their length is known without scanning for the end.
+xcb_atom_t internAtom(xcb_connection_t *c, std::string_view name)
 {
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(
-            c, xcb_intern_atom(c, 0, static_cast<uint16_t>(std::strlen(name)), name), nullptr);
+            c, xcb_intern_atom(c, 0, static_cast<uint16_t>(name.size()), name.data()), nullptr);
     const xcb_atom_t atom = reply ? reply->atom : static_cast<xcb_atom_t>(XCB_ATOM_NONE);
     std::free(reply);
     return atom;

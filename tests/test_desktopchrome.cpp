@@ -313,6 +313,8 @@ void TestDesktopChrome::onlyAChangedSettingIsAnnounced()
     desktop.applySetting(prefs, QStringLiteral("action-double-click-titlebar"), QStringLiteral("minimize"));
     QCOMPARE(desktop.doubleClickAction(), QStringLiteral("minimize"));
     QCOMPARE(changed.count(), afterFirst + 1);
+    desktop.applySetting(prefs, QStringLiteral("action-double-click-titlebar"), QStringLiteral("minimize"));
+    QCOMPARE(changed.count(), afterFirst + 1); // the same action again is no change
 
     // A key this does not use is ignored, and says nothing.
     desktop.applySetting(prefs, QStringLiteral("focus-mode"), QStringLiteral("sloppy"));

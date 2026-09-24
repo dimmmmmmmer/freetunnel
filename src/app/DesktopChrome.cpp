@@ -32,6 +32,29 @@ QString initialStyle()
 #endif
 }
 
+// Whether this changed the field.
+bool assign(QString &field, const QString &next)
+{
+    if (field == next)
+        return false;
+    field = next;
+    return true;
+}
+
+// org.freedesktop.appearance's color-scheme: 1 prefers dark, 2 prefers light; 0
+// is "no preference", and anything else is a value this was not written for.
+// Neither is a reason to guess.
+Qt::ColorScheme colorSchemeFrom(const QVariant &value)
+{
+    bool ok = false;
+    const uint scheme = value.toUInt(&ok);
+    if (ok && scheme == 1)
+        return Qt::ColorScheme::Dark;
+    if (ok && scheme == 2)
+        return Qt::ColorScheme::Light;
+    return Qt::ColorScheme::Unknown;
+}
+
 QStringList buttonsIn(const QString &side, const QStringList &alreadyPlaced)
 {
     QStringList out;
@@ -74,51 +97,41 @@ void DesktopChrome::followDesktop()
 #endif
 }
 
+bool DesktopChrome::applyWindowManagerSetting(const QString &key, const QString &text)
+{
+    if (key == QLatin1String("button-layout")) {
+        const ButtonLayout next = parseButtonLayout(text);
+        if (next.left == m_layout.left && next.right == m_layout.right)
+            return false;
+        m_layout = next;
+        return true;
+    }
+    if (key == QLatin1String("action-double-click-titlebar"))
+        return assign(m_doubleClick, text);
+    if (key == QLatin1String("action-middle-click-titlebar"))
+        return assign(m_middleClick, text);
+    if (key == QLatin1String("action-right-click-titlebar"))
+        return assign(m_rightClick, text);
+    return false;
+}
+
 void DesktopChrome::applySetting(const QString &ns, const QString &key, const QVariant &value)
 {
-    const QString text = value.toString();
     bool moved = false;
-    auto set = [&moved](QString &field, const QString &next) {
-        if (field != next) {
-            field = next;
-            moved = true;
-        }
-    };
     if (ns == QLatin1String("org.gnome.desktop.wm.preferences")) {
-        if (key == QLatin1String("button-layout")) {
-            const ButtonLayout next = parseButtonLayout(text);
-            if (next.left != m_layout.left || next.right != m_layout.right) {
-                m_layout = next;
-                moved = true;
-            }
-        } else if (key == QLatin1String("action-double-click-titlebar")) {
-            set(m_doubleClick, text);
-        } else if (key == QLatin1String("action-middle-click-titlebar")) {
-            set(m_middleClick, text);
-        } else if (key == QLatin1String("action-right-click-titlebar")) {
-            set(m_rightClick, text);
-        }
+        moved = applyWindowManagerSetting(key, value.toString());
     } else if (ns == QLatin1String("org.freedesktop.appearance") && key == QLatin1String("color-scheme")) {
-        // 1 prefers dark, 2 prefers light; 0 is "no preference", and anything else
-        // is a value this was not written for. Neither is a reason to guess.
-        bool ok = false;
-        const uint scheme = value.toUInt(&ok);
-        const Qt::ColorScheme next = !ok ? Qt::ColorScheme::Unknown
-                : scheme == 1 ? Qt::ColorScheme::Dark
-                : scheme == 2 ? Qt::ColorScheme::Light
-                              : Qt::ColorScheme::Unknown;
-        if (next != m_colorScheme) {
-            m_colorScheme = next;
-            moved = true;
-        }
+        const Qt::ColorScheme next = colorSchemeFrom(value);
+        moved = next != m_colorScheme;
+        m_colorScheme = next;
     } else if (ns == QLatin1String("org.gnome.desktop.interface") && key == QLatin1String("gtk-theme")) {
         // Only the two looks this window can draw. Pop draws a filled close button
         // and bare circles for the others; every other GNOME-family theme gets
         // libadwaita's, which is also the closest this has to KDE's.
         if (m_style == QLatin1String("pop") || m_style == QLatin1String("adwaita"))
-            set(m_style, text.startsWith(QLatin1String("Pop"), Qt::CaseInsensitive)
-                                 ? QStringLiteral("pop")
-                                 : QStringLiteral("adwaita"));
+            moved = assign(m_style, value.toString().startsWith(QLatin1String("Pop"), Qt::CaseInsensitive)
+                                            ? QStringLiteral("pop")
+                                            : QStringLiteral("adwaita"));
     }
     if (moved)
         emit changed();

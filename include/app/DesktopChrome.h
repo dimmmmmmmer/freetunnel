@@ -86,6 +86,9 @@ signals:
     void changed();
 
 private:
+    // The org.gnome.desktop.wm.preferences keys; whether one changed anything.
+    bool applyWindowManagerSetting(const QString &key, const QString &text);
+
     QString m_style;
     ButtonLayout m_layout;
     QString m_doubleClick = QStringLiteral("toggle-maximize");

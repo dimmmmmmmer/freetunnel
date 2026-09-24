@@ -64,6 +64,12 @@ if (FT_ENABLE_SANITIZERS)
 endif ()
 
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network Svg REQUIRED)
+# Qt 6.9 and later ship the private modules as packages of their own, to be asked
+# for by name (the macOS job builds against Homebrew's current Qt); before that,
+# finding Gui brought GuiPrivate with it.
+if(NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6 COMPONENTS GuiPrivate REQUIRED)
+endif()
 if(UNIX AND NOT APPLE)
     find_package(Qt6 COMPONENTS DBus REQUIRED)
 endif()
