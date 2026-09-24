@@ -1,12 +1,18 @@
 // cppcheck-suppress-file missingIncludeSystem
+// The plain structs here are filled and read in the .cpp files; cppcheck, looking
+// at the header on its own, sees none of that and calls their members unused.
+// cppcheck-suppress-file unusedStructMember
 #pragma once
 
 #include "core/AppRules.h"
 
 #include <QHash>
+#include <QHashFunctions>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 
@@ -22,6 +28,10 @@ struct LocalFlow {
     QString ip;          // local address, presentation form; may be empty
 };
 
+// A local address in network byte order: IPv4 in the first four bytes, IPv6 in
+// all sixteen. All zero is a socket bound to every address of its family.
+using SocketAddress = std::array<std::uint8_t, 16>;
+
 // A socket table entry, in the one shape the three platforms agree on.
 struct SocketOwner {
     std::uint16_t port = 0;
@@ -29,11 +39,85 @@ struct SocketOwner {
     int proto = 0;
     qint64 pid = -1;
     std::uint64_t inode = 0; // Linux only; 0 elsewhere
+    SocketAddress address{}; // local
+    // An IPv6 socket that takes no IPv4 (IPV6_V6ONLY), where the system says so:
+    // Linux over netlink, and macOS. Elsewhere false, as if it did.
+    bool v6only = false;
 };
 
-// The pid recorded for a port the walk saw and could not attribute to any
-// watched program. See ProcessLookup::m_owners.
+// The pid recorded for a socket the walk saw and could not attribute to any
+// watched program. See SocketOwnerTable.
 constexpr qint64 kUnattributed = -1;
+
+// Which program, if any a rule names, holds each socket the last walk saw.
+//
+// Kept by local address as well as port, because a port number is not a socket.
+// The kernel lets two programs hold the same number at once, on different local
+// addresses or in the two families, and on an ordinary desktop they do: a
+// service bound to the LAN address, a container bridge, an IPv6 link-local
+// listener. Keyed by the number alone, the table answered a new socket with a row
+// about somebody else's, in both directions: a watched program's connection
+// "belongs to nobody you named", and another program's connection belongs to the
+// watched one. Measured here at one question in three hundred.
+//
+// What this still cannot settle:
+// - Two connections on the same local address and port, to different
+//   destinations, which the kernel allows for ports picked by connect(). Only the
+//   destination tells them apart, and the core does not pass it.
+// - An IPv6-only socket on [::] where the system does not say it is one — the
+//   /proc/net fallback and Windows. It is taken to carry IPv4 as well, and so
+//   answers an IPv4 socket on the same port number.
+// - A connection whose source address was rewritten before it reached the tunnel
+//   (NAT on the way out, which neither FreeTunnel nor the core sets up). Its
+//   address matches no socket, and it is answered "nobody".
+class SocketOwnerTable {
+public:
+    // One socket, and who holds it: a pid, or kUnattributed for "seen, and no
+    // watched program holds it". A second row for the same socket — a listener
+    // and the connections accepted on it share one — does not displace the
+    // first, except that a real owner displaces kUnattributed: on Linux, which
+    // records unwatched sockets that way, the program being asked about wins
+    // over the ones that are not. macOS and Windows record every socket's real
+    // owner, and there the first one stays.
+    void record(int family, int proto, std::uint16_t port, const SocketAddress &address, qint64 pid,
+                bool v6only = false);
+    void clear();
+    int size() const { return static_cast<int>(m_sockets.size()); }
+    int distinctPids() const;
+
+    struct Match {
+        bool found = false;
+        qint64 pid = kUnattributed;
+        // Whether the flow's own address chose the row. When it did not, the row
+        // is only some socket on that port number: see ProcessLookup::resolve.
+        bool byAddress = false;
+    };
+    // The row that can be the socket behind this flow, most specific first: its
+    // own address, then a socket bound to every address, then the same two in
+    // an IPv6 socket's spelling of IPv4 — ::ffff:a.b.c.d and ::ffff:0.0.0.0 —
+    // and last a dual-stack socket on ::, unless the system said that one takes
+    // no IPv4. A flow without an address is matched by port number alone, its
+    // own family first.
+    Match find(const LocalFlow &flow) const;
+
+private:
+    struct Key {
+        std::uint32_t endpoint = 0; // family, protocol and port
+        SocketAddress address{};
+        friend bool operator==(const Key &, const Key &) = default;
+        friend size_t qHash(const Key &key, size_t seed = 0) noexcept
+        {
+            return qHashMulti(seed, key.endpoint, qHashBits(key.address.data(), key.address.size()));
+        }
+    };
+    QHash<Key, qint64> m_sockets;
+    // The same, by port number alone, for a flow that arrives without its
+    // address. The core always gives one; this is what a flow that did not
+    // would have to be matched by.
+    QHash<std::uint32_t, qint64> m_ports;
+    // Ports with an IPv6-only socket on :: — which cannot be an IPv4 flow's.
+    QSet<std::uint32_t> m_ipv6OnlyWildcards;
+};
 
 // Parse one /proc/net/{tcp,tcp6,udp,udp6} table. Pure, and compiled on every
 // platform so the parsing can be tested where the tests actually run rather
@@ -140,7 +224,7 @@ public:
         int pidsSkipped = 0;  // processes the system would not describe
         int socketsSeen = 0;  // descriptors examined; 0 on Windows, which hands
                               // over a finished table instead of being walked
-        int entries = 0;      // (protocol, port) -> pid pairs recorded
+        int entries = 0;      // sockets recorded: (family, protocol, address, port) -> pid
         int distinctPids = 0;
         int lastErrno = 0;
         // Linux only: whether the sockets came from the kernel in binary
@@ -178,6 +262,8 @@ private:
     // the question, or unless looking again would spend more of this machine
     // than the feature is worth.
     bool shouldLookAgain(std::chrono::steady_clock::time_point asked) const;
+    // Whether a row the table found for a flow asked at `asked` is the answer.
+    bool settles(const SocketOwnerTable::Match &match, std::chrono::steady_clock::time_point asked) const;
     // Hand back the time that has passed since the last question, as credit
     // towards looking again. See the definition.
     void accrueLookCredit(std::chrono::steady_clock::time_point now);
@@ -191,19 +277,20 @@ private:
     qint64 m_credit = 0;
     qint64 m_walks = 0;
     std::chrono::steady_clock::time_point m_creditAt{};
-    // (proto << 16) | port  ->  pid. Ports are unique per protocol on a host,
-    // which is what makes this key enough.
+    // Every socket the last walk saw, and who holds it.
     //
-    // A value of kUnattributed means the walk SAW this port and established
-    // that no watched program owns it. That is not the same as the port being
-    // absent, and the difference is what stops the machine from being walked
-    // once per connection: absent means the table is older than the socket and
-    // must be rebuilt, while present-and-unattributed is a final answer for
-    // every connection whose socket already existed when the walk ran. Without
-    // it, a page's worth of connections from programs nobody wrote a rule about
-    // would each force their own walk, and the walks that matter would be the
-    // ones left without budget.
-    QHash<std::uint32_t, qint64> m_owners;
+    // A socket recorded as kUnattributed was SEEN, and no watched program owns
+    // it. That is not the same as the socket being absent, and the difference is
+    // what stops the machine from being walked once per connection: absent
+    // means the table is older than the socket and must be rebuilt, while
+    // present-and-unattributed is a final answer for every connection whose
+    // socket already existed when the walk ran. Without it, a page's worth of
+    // connections from programs nobody wrote a rule about would each force their
+    // own walk, and the walks that matter would be the ones left without budget.
+    //
+    // It is only final because the row is found by the flow's own address. A
+    // row found by port number alone may be somebody else's socket; see resolve().
+    SocketOwnerTable m_owners;
     ScanReport m_report;
 
     // How long a table that DOES contain the flow is trusted without looking

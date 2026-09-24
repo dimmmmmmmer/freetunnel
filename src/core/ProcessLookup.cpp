@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 
 #if defined(Q_OS_WIN)
 // <windows.h> defines min and max as function-like macros, so every later
@@ -67,6 +68,39 @@ constexpr std::uint32_t ownerKey(int family, int proto, std::uint16_t port)
             | (static_cast<std::uint32_t>(proto & 0xFF) << 16) | port;
 }
 
+// A socket's owner is kept unless the new one is a real owner and the kept one
+// is not. See SocketOwnerTable::record.
+template <typename KeyT>
+void keepFirstOwner(QHash<KeyT, qint64> *owners, const KeyT &key, qint64 pid)
+{
+    const auto it = owners->find(key);
+    if (it == owners->end())
+        owners->insert(key, pid);
+    else if (it.value() == kUnattributed && pid != kUnattributed)
+        it.value() = pid;
+}
+
+SocketAddress ipv4Address(quint32 hostOrder)
+{
+    SocketAddress out{};
+    out[0] = static_cast<std::uint8_t>(hostOrder >> 24);
+    out[1] = static_cast<std::uint8_t>(hostOrder >> 16);
+    out[2] = static_cast<std::uint8_t>(hostOrder >> 8);
+    out[3] = static_cast<std::uint8_t>(hostOrder);
+    return out;
+}
+
+// How an IPv6 socket spells an IPv4 address: ::ffff:a.b.c.d.
+SocketAddress v4MappedAddress(quint32 hostOrder)
+{
+    SocketAddress out{};
+    out[10] = 0xff;
+    out[11] = 0xff;
+    const SocketAddress v4 = ipv4Address(hostOrder);
+    std::copy_n(v4.begin(), 4, out.begin() + 12);
+    return out;
+}
+
 // How much of this machine walking the process table may have. A quarter of
 // real time, saved up to fifty milliseconds' worth.
 //
@@ -88,8 +122,108 @@ constexpr qint64 kLookCreditCapUs = 150000;
 } // namespace
 
 // ---------------------------------------------------------------------------
+// SocketOwnerTable
+// ---------------------------------------------------------------------------
+
+void SocketOwnerTable::record(int family, int proto, std::uint16_t port, const SocketAddress &address,
+                              qint64 pid, bool v6only)
+{
+    const std::uint32_t endpoint = ownerKey(family, proto, port);
+    keepFirstOwner(&m_sockets, Key{endpoint, address}, pid);
+    keepFirstOwner(&m_ports, endpoint, pid);
+    if (v6only && family == AF_INET6 && address == SocketAddress{})
+        m_ipv6OnlyWildcards.insert(endpoint);
+}
+
+void SocketOwnerTable::clear()
+{
+    m_sockets.clear();
+    m_ports.clear();
+    m_ipv6OnlyWildcards.clear();
+}
+
+int SocketOwnerTable::distinctPids() const
+{
+    QSet<qint64> pids;
+    for (const qint64 pid : m_sockets) {
+        if (pid != kUnattributed)
+            pids.insert(pid);
+    }
+    return static_cast<int>(pids.size());
+}
+
+SocketOwnerTable::Match SocketOwnerTable::find(const LocalFlow &flow) const
+{
+    const QHostAddress address(flow.ip);
+    if (address.isNull()) {
+        const int other = flow.family == AF_INET6 ? AF_INET : AF_INET6;
+        for (const int family : {flow.family, other}) {
+            const auto it = m_ports.constFind(ownerKey(family, flow.proto, flow.port));
+            if (it != m_ports.constEnd())
+                return {true, it.value(), false};
+        }
+        return {};
+    }
+
+    // The address in both spellings it can be recorded under.
+    bool isV4 = false;
+    const quint32 v4 = address.toIPv4Address(&isV4); // also true for ::ffff:a.b.c.d
+    SocketAddress v6{};
+    if (!isV4 || address.protocol() == QAbstractSocket::IPv6Protocol) {
+        const Q_IPV6ADDR raw = address.toIPv6Address();
+        std::copy_n(raw.c, 16, v6.begin());
+    }
+    const SocketAddress any{};
+    QList<Key> candidates;
+    if (isV4) {
+        const std::uint32_t six = ownerKey(AF_INET6, flow.proto, flow.port);
+        candidates = {{ownerKey(AF_INET, flow.proto, flow.port), ipv4Address(v4)},
+                      {ownerKey(AF_INET, flow.proto, flow.port), any},
+                      {six, v4MappedAddress(v4)},
+                      // An IPv6 socket bound to the IPv4 wildcard, as .NET's dual-mode
+                      // sockets are when bound to IPAddress.Any.
+                      {six, v4MappedAddress(0)}};
+        if (!m_ipv6OnlyWildcards.contains(six))
+            candidates.append({six, any});
+    } else {
+        candidates = {{ownerKey(AF_INET6, flow.proto, flow.port), v6},
+                      {ownerKey(AF_INET6, flow.proto, flow.port), any}};
+    }
+    for (const Key &candidate : candidates) {
+        const auto it = m_sockets.constFind(candidate);
+        if (it != m_sockets.constEnd())
+            return {true, it.value(), true};
+    }
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // /proc/net table parsing. Pure, and built on every platform for the tests.
 // ---------------------------------------------------------------------------
+
+namespace {
+
+// The local address column of a /proc/net table. The kernel prints each 32-bit
+// word of the address as it lies in memory, with %08X — so on this machine's
+// byte order, which is the one that wrote the file: eight hex digits for IPv4,
+// thirty-two for IPv6.
+bool parseProcNetAddress(QStringView hex, int family, SocketAddress *out)
+{
+    const qsizetype words = family == AF_INET6 ? 4 : 1;
+    if (hex.size() != words * 8)
+        return false;
+    *out = {};
+    for (qsizetype w = 0; w < words; ++w) {
+        bool ok = false;
+        const quint32 word = hex.mid(w * 8, 8).toUInt(&ok, 16);
+        if (!ok)
+            return false;
+        std::copy_n(reinterpret_cast<const std::uint8_t *>(&word), 4, out->begin() + w * 4);
+    }
+    return true;
+}
+
+} // namespace
 
 QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int family)
 {
@@ -114,6 +248,8 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int fam
             continue;
 
         SocketOwner owner;
+        if (!parseProcNetAddress(local[0], family, &owner.address))
+            continue;
         owner.port = static_cast<std::uint16_t>(port);
         owner.proto = proto;
         owner.family = family;
@@ -274,13 +410,8 @@ void ProcessLookup::finishScan(std::chrono::steady_clock::time_point startedAt, 
 #else
     m_report.euid = static_cast<int>(::geteuid());
 #endif
-    m_report.entries = static_cast<int>(m_owners.size());
-    QSet<qint64> pids;
-    for (const qint64 pid : m_owners) {
-        if (pid != kUnattributed)
-            pids.insert(pid);
-    }
-    m_report.distinctPids = static_cast<int>(pids.size());
+    m_report.entries = m_owners.size();
+    m_report.distinctPids = m_owners.distinctPids();
     m_report.elapsedUs =
             std::chrono::duration_cast<std::chrono::microseconds>(done - startedAt).count();
     // Stamped now rather than with the time taken before the walk: stamping
@@ -301,13 +432,40 @@ void ProcessLookup::invalidate()
 
 namespace {
 
+// The local address of a row. The IPv4 rows hold it as a DWORD in network byte
+// order, the IPv6 ones as sixteen bytes; the byte order is the same either way,
+// so it is copied as it lies.
+SocketAddress localAddressOf(const MIB_TCPROW_OWNER_PID &row)
+{
+    SocketAddress out{};
+    std::copy_n(reinterpret_cast<const std::uint8_t *>(&row.dwLocalAddr), 4, out.begin());
+    return out;
+}
+SocketAddress localAddressOf(const MIB_UDPROW_OWNER_PID &row)
+{
+    SocketAddress out{};
+    std::copy_n(reinterpret_cast<const std::uint8_t *>(&row.dwLocalAddr), 4, out.begin());
+    return out;
+}
+SocketAddress localAddressOf(const MIB_TCP6ROW_OWNER_PID &row)
+{
+    SocketAddress out{};
+    std::copy_n(row.ucLocalAddr, 16, out.begin());
+    return out;
+}
+SocketAddress localAddressOf(const MIB_UDP6ROW_OWNER_PID &row)
+{
+    SocketAddress out{};
+    std::copy_n(row.ucLocalAddr, 16, out.begin());
+    return out;
+}
+
 // Every row of one Windows socket table. The four tables hold different row
-// types, and all four of them spell the two fields this needs the same way,
-// which is what lets one function read all of them — it was four copies of this
-// loop, and the copies drifted apart the moment one of them was corrected.
+// types, and all four of them spell the port and the pid the same way, which is
+// what lets one function read all of them — it was four copies of this loop,
+// and the copies drifted apart the moment one of them was corrected.
 template <typename TableT>
-void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners, int family,
-                       int proto)
+void recordWindowsRows(const TableT *table, SocketOwnerTable *owners, int family, int proto)
 {
     for (DWORD i = 0; i < table->dwNumEntries; ++i) {
         const auto &row = table->table[i];
@@ -316,14 +474,10 @@ void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners
         // displace a row that can.
         if (row.dwOwningPid == 0)
             continue;
-        // First one wins, as on the other two platforms — among rows of the same
-        // family and protocol, where a listener and a connection accepted on it
-        // legitimately share a port. Rows from different families no longer
-        // compete at all: the family is in the key.
-        const std::uint32_t key =
-                ownerKey(family, proto, ntohs(static_cast<u_short>(row.dwLocalPort)));
-        if (!owners->contains(key))
-            owners->insert(key, static_cast<qint64>(row.dwOwningPid));
+        // First one wins, as on the other two platforms, among rows for the same
+        // socket: a listener and the connections accepted on it share one.
+        owners->record(family, proto, ntohs(static_cast<u_short>(row.dwLocalPort)),
+                       localAddressOf(row), static_cast<qint64>(row.dwOwningPid));
     }
 }
 
@@ -341,7 +495,7 @@ void recordWindowsRows(const TableT *table, QHash<std::uint32_t, qint64> *owners
 // is the retry, and the answer is reported so a walk that gave up does not read
 // as a walk that found nothing.
 template <typename TableT>
-bool collectWindowsTable(QHash<std::uint32_t, qint64> *owners, ULONG af, int proto, bool tcp)
+bool collectWindowsTable(SocketOwnerTable *owners, ULONG af, int proto, bool tcp)
 {
     for (int attempt = 0; attempt < 4; ++attempt) {
         ULONG size = 0;
@@ -412,29 +566,46 @@ QList<qint64> listProcessIds()
     return pids;
 }
 
-// The protocol and local port one socket descriptor is bound to, or false when
-// it is not an internet socket with a port.
-bool socketEndpointOf(const socket_fdinfo &info, int *family, int *proto, std::uint16_t *port)
+// The protocol, local port and local address one socket descriptor is bound
+// to, or false when it is not an internet socket with a port.
+bool socketEndpointOf(const socket_fdinfo &info, int *family, int *proto, std::uint16_t *port,
+                      SocketAddress *address, bool *v6only)
 {
     *family = info.psi.soi_family;
     if (*family != AF_INET && *family != AF_INET6)
         return false;
+    const in_sockinfo *ini = nullptr;
     if (info.psi.soi_kind == SOCKINFO_TCP) {
         *proto = IPPROTO_TCP;
-        *port = ntohs(info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport);
+        ini = &info.psi.soi_proto.pri_tcp.tcpsi_ini;
     } else if (info.psi.soi_kind == SOCKINFO_IN) {
         *proto = IPPROTO_UDP;
-        *port = ntohs(info.psi.soi_proto.pri_in.insi_lport);
+        ini = &info.psi.soi_proto.pri_in;
     } else {
         return false;
+    }
+    *port = ntohs(static_cast<std::uint16_t>(ini->insi_lport));
+    // An IPv6 socket carrying IPv4 keeps the address in the IPv4 half of the
+    // union and says so in insi_vflag; it is recorded the way Linux and Windows
+    // report the same socket, as ::ffff:a.b.c.d.
+    const in_addr &v4 = ini->insi_laddr.ina_46.i46a_addr4;
+    // INI_IPV4 is set on an IPv6 socket exactly when it can carry IPv4: cleared
+    // by IPV6_V6ONLY, set for a dual-stack one.
+    *v6only = *family == AF_INET6 && (ini->insi_vflag & INI_IPV4) == 0;
+    *address = {};
+    if (*family == AF_INET) {
+        std::copy_n(reinterpret_cast<const std::uint8_t *>(&v4), 4, address->begin());
+    } else if ((ini->insi_vflag & INI_IPV4) != 0 && (ini->insi_vflag & INI_IPV6) == 0) {
+        *address = v4MappedAddress(ntohl(v4.s_addr));
+    } else {
+        std::copy_n(reinterpret_cast<const std::uint8_t *>(&ini->insi_laddr.ina_6), 16, address->begin());
     }
     return *port != 0;
 }
 
 // The ports one process holds open. The counterpart of collectSocketInodes() on
 // Linux, and asked of every process for the reason given in walk().
-void collectSocketsOfProcess(pid_t pid, QHash<std::uint32_t, qint64> *owners,
-                             ProcessLookup::ScanReport *report)
+void collectSocketsOfProcess(pid_t pid, SocketOwnerTable *owners, ProcessLookup::ScanReport *report)
 {
     errno = 0;
     int bufSize = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
@@ -477,16 +648,17 @@ void collectSocketsOfProcess(pid_t pid, QHash<std::uint32_t, qint64> *owners,
         int family = 0;
         int proto = 0;
         std::uint16_t port = 0;
-        if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &family, &proto, &port))
+        SocketAddress address{};
+        bool v6only = false;
+        if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &family, &proto, &port,
+                              &address, &v6only))
             continue;
         // Does not overwrite: two processes can legitimately hold the same
-        // (family, protocol, port) — a listener and an accepted connection, or a
-        // socket one of them is about to close — and letting whichever pid the
-        // scan happened to reach last win makes the answer depend on process
+        // socket address — a listener and an accepted connection, or a socket
+        // one of them is about to close — and letting whichever pid the scan
+        // happened to reach last win makes the answer depend on process
         // enumeration order.
-        const std::uint32_t key = ownerKey(family, proto, port);
-        if (!owners->contains(key))
-            owners->insert(key, static_cast<qint64>(pid));
+        owners->record(family, proto, port, address, static_cast<qint64>(pid), v6only);
     }
 }
 
@@ -660,22 +832,21 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     m_report.netlink = viaNetlink;
 
     for (const SocketOwner &sock : sockets) {
-        const std::uint32_t key = ownerKey(sock.family, sock.proto, sock.port);
-        const auto owner = byInode.constFind(sock.inode);
-        if (owner == byInode.constEnd()) {
-            // Seen, and nobody watched holds it. Recorded only if no watched
-            // process has claimed this port already: one port can carry two
-            // sockets — a listener and a connection accepted on it — and the
-            // program that was asked about must win over the one that was not.
-            if (!m_owners.contains(key))
-                m_owners.insert(key, kUnattributed);
+        // A socket no process holds — one in TIME_WAIT, or closed and still
+        // finishing, or half-open on a listener — is reported with inode 0. It
+        // can never be the socket behind a new connection, and a row for it
+        // would answer "nobody you named" for whichever new socket takes its
+        // address and port next, which the kernel allows. Windows leaves these
+        // out the same way; macOS never sees them, having no descriptor to find.
+        if (sock.inode == 0)
             continue;
-        }
-        // First one wins among watched owners, for the same reason as the macOS
-        // walk above; an unattributed marker is overwritten.
-        const auto claimed = m_owners.constFind(key);
-        if (claimed == m_owners.constEnd() || claimed.value() == kUnattributed)
-            m_owners.insert(key, owner.value());
+        // Seen, and held by a watched program or by nobody watched. One address
+        // can carry several sockets — a listener and the connections accepted
+        // on it — and the program that was asked about wins over the ones that
+        // were not; among watched owners the first one does, as on macOS.
+        const auto owner = byInode.constFind(sock.inode);
+        m_owners.record(sock.family, sock.proto, sock.port, sock.address,
+                        owner == byInode.constEnd() ? kUnattributed : owner.value(), sock.v6only);
     }
 
     finishScan(now, true);
@@ -720,6 +891,24 @@ bool ProcessLookup::shouldLookAgain(std::chrono::steady_clock::time_point asked)
     return m_credit >= std::max<qint64>(m_report.elapsedUs, 0);
 }
 
+// Whether a row the table found is the answer, or only looks like one.
+//
+// Found by the flow's own address, it is the answer whoever it names, including
+// nobody: the walk saw this very socket and established that no watched program
+// holds it. That is final, and it is the answer to most connections.
+//
+// Found by port number alone — a flow that came without its address — the row is
+// only some socket on that number, which a socket opened since the walk may
+// share. It is trusted only from a table built after the question was asked, when
+// the socket behind the flow is certain to be among the ones on that number —
+// which of them the row names is then SocketOwnerTable::record's rule. Otherwise
+// it is treated as the miss it may well be.
+bool ProcessLookup::settles(const SocketOwnerTable::Match &match,
+                            std::chrono::steady_clock::time_point asked) const
+{
+    return match.found && (match.byAddress || (m_everBuilt && m_builtAt >= asked));
+}
+
 AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
 {
     if (lookWasSkipped != nullptr)
@@ -737,31 +926,14 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
     accrueLookCredit(asked);
     refreshIfStale();
 
-    // The asked-for family first, and the other one only when the first is not
-    // in the table at all.
-    //
-    // Exact-first is what removes the collision: when both families really do
-    // hold this port, each answers for itself instead of whichever the walk
-    // recorded first. The fallback is for the case that is not a collision - a
-    // socket the kernel keeps in its IPv6 table while the connection on it is
-    // v4-mapped, where the family the core reports and the family the table
-    // files it under are legitimately different. A row found under the asked
-    // family is always preferred, including an unattributed one: "seen, owned by
-    // nobody watched" is an answer, and falling through it to the other family
-    // would reintroduce exactly the mix-up this key exists to prevent.
-    auto find = [&]() {
-        const auto exact = m_owners.constFind(ownerKey(flow.family, flow.proto, flow.port));
-        if (exact != m_owners.constEnd())
-            return exact;
-        const int other = flow.family == AF_INET6 ? AF_INET : AF_INET6;
-        return m_owners.constFind(ownerKey(other, flow.proto, flow.port));
-    };
-    auto owner = find();
-    if (owner == m_owners.constEnd()) {
+    // Which socket this is: by its own address — see SocketOwnerTable::find for
+    // the order, and for why a port number alone is not enough.
+    SocketOwnerTable::Match owner = m_owners.find(flow);
+    if (!settles(owner, asked)) {
         if (shouldLookAgain(asked)) {
             m_everBuilt = false;
             refreshIfStale();
-            owner = find();
+            owner = m_owners.find(flow);
         } else if (lookWasSkipped != nullptr && (!m_everBuilt || m_builtAt < asked)) {
             // Not "looked and found nothing" — never looked, or looked and came
             // back incomplete. Either way the socket may well be in the system's
@@ -770,14 +942,9 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
             *lookWasSkipped = true;
         }
     }
-    if (owner == m_owners.constEnd())
+    if (!owner.found || owner.pid == kUnattributed)
         return {};
-
-    const qint64 pid = owner.value();
-    // The walk saw this port and established that nobody named holds it. That is
-    // an answer, not a gap, and it is the answer to most connections.
-    if (pid == kUnattributed)
-        return {};
+    const qint64 pid = owner.pid;
 
     // Asked now, not remembered. A pid is only the number of a process, and
     // exec() keeps the number while replacing the program behind it — so a

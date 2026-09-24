@@ -94,6 +94,14 @@ jobs:
       - name: Build
         run: cmake --build build-tests -j
 
+      # The process-lookup tests put another program on 127.0.0.2 beside a socket
+      # of their own on 127.0.0.1. Linux and Windows answer the whole of 127/8 out
+      # of the box; macOS configures only 127.0.0.1 on lo0, and without this those
+      # tests would skip there, leaving macOS's reading of IPv4 addresses untested.
+      - name: A second loopback address (macOS)
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
+
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
