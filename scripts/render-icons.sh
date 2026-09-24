@@ -5,6 +5,10 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 svg=$root/assets/logo.svg
+# macOS gets the mark on a plate: from macOS 26 an app icon that is not already
+# the rounded-square shape is drawn inside a grey one by the system. See the
+# comment in logo-macos.svg. Every other platform keeps the bare mark.
+mac_svg=$root/assets/logo-macos.svg
 out=${1:-$root/assets}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -14,9 +18,9 @@ trap 'rm -rf "$tmp"' EXIT
 # tray icon use that same full SVG. Padding the bundle icons further made the
 # Dock/taskbar mark visibly smaller than everywhere else — keep them unified.
 pad_png() {
-  local size=$1 dest=$2
+  local size=$1 dest=$2 src=${3:-$svg}
   local inner=$size
-  rsvg-convert -w "$inner" -h "$inner" "$svg" -o "$tmp/mark.png"
+  rsvg-convert -w "$inner" -h "$inner" "$src" -o "$tmp/mark.png"
   # Force true RGBA: the mark is pure grey, so otherwise ImageMagick (esp. the
   # v6 build on the CI runner) stores grayscale PNGs and the .ico's 256px PNG
   # layer renders with a white background at large sizes (e.g. under CrossOver).
@@ -28,6 +32,7 @@ pad_png() {
 
 for s in 16 32 48 64 128 256 512 1024; do
   pad_png "$s" "$tmp/logo-$s.png"
+  pad_png "$s" "$tmp/mac-$s.png" "$mac_svg"
 done
 
 mkdir -p "$out"
@@ -39,8 +44,8 @@ cp "$tmp/logo-256.png" "$out/logo.png"
 
 # Fallback .icns for local builds; CI macOS job rebuilds via iconutil.
 png2icns "$out/logo.icns" \
-  "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
-  "$tmp/logo-128.png" "$tmp/logo-256.png" "$tmp/logo-512.png" "$tmp/logo-1024.png"
+  "$tmp/mac-16.png" "$tmp/mac-32.png" "$tmp/mac-48.png" \
+  "$tmp/mac-128.png" "$tmp/mac-256.png" "$tmp/mac-512.png" "$tmp/mac-1024.png"
 
 convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
   "$tmp/logo-64.png" "$tmp/logo-128.png" "$tmp/logo-256.png" \
@@ -50,16 +55,16 @@ convert "$tmp/logo-16.png" "$tmp/logo-32.png" "$tmp/logo-48.png" \
 ic=$out/icon.iconset
 rm -rf "$ic"
 mkdir "$ic"
-cp "$tmp/logo-16.png"  "$ic/icon_16x16.png"
-cp "$tmp/logo-32.png"  "$ic/icon_16x16@2x.png"
-cp "$tmp/logo-32.png"  "$ic/icon_32x32.png"
-cp "$tmp/logo-64.png"  "$ic/icon_32x32@2x.png"
-cp "$tmp/logo-128.png" "$ic/icon_128x128.png"
-cp "$tmp/logo-256.png" "$ic/icon_128x128@2x.png"
-cp "$tmp/logo-256.png" "$ic/icon_256x256.png"
-cp "$tmp/logo-512.png" "$ic/icon_256x256@2x.png"
-cp "$tmp/logo-512.png" "$ic/icon_512x512.png"
-cp "$tmp/logo-1024.png" "$ic/icon_512x512@2x.png"
+cp "$tmp/mac-16.png"  "$ic/icon_16x16.png"
+cp "$tmp/mac-32.png"  "$ic/icon_16x16@2x.png"
+cp "$tmp/mac-32.png"  "$ic/icon_32x32.png"
+cp "$tmp/mac-64.png"  "$ic/icon_32x32@2x.png"
+cp "$tmp/mac-128.png" "$ic/icon_128x128.png"
+cp "$tmp/mac-256.png" "$ic/icon_128x128@2x.png"
+cp "$tmp/mac-256.png" "$ic/icon_256x256.png"
+cp "$tmp/mac-512.png" "$ic/icon_256x256@2x.png"
+cp "$tmp/mac-512.png" "$ic/icon_512x512.png"
+cp "$tmp/mac-1024.png" "$ic/icon_512x512@2x.png"
 
 # NSIS Modern UI bitmaps (installer wizard branding).
 convert -size 164x314 xc:'#ececec' \

@@ -7,6 +7,7 @@
 #include <QLocalServer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QRectF>
 #include <QTranslator>
 #include <QUrl>
 #include <QWindow>
@@ -16,6 +17,11 @@
 
 #include "app/Backend.h"
 #include "app/MacWindow.h"
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+#include "app/WindowsChrome.h"
+
+#include <QQuickWindow>
+#endif
 #include "core/InstanceControl.h"
 
 namespace freetunnel {
@@ -116,7 +122,19 @@ static void setupMacApplicationQuit(Backend &backend)
 static void setupMacWindow(QWindow *win, bool *appQuitting)
 {
 #ifdef Q_OS_MACOS
+    installMacStatusItemCrashGuard();
     applyMacUnifiedTitlebar(win->winId());
+    // Tell the QML where the traffic lights really are, and keep telling it: the
+    // buttons are laid out once the window is on screen, and full screen hides
+    // them. See macWindowControlsRect() for why this is asked, not assumed.
+    const auto publishControls = [win]() {
+        const MacRect r = macWindowControlsRect(win->winId());
+        win->setProperty("macControlsRect", QRectF(r.x, r.y, r.width, r.height));
+    };
+    publishControls();
+    QObject::connect(win, &QWindow::visibleChanged, win, publishControls);
+    QObject::connect(win, &QWindow::widthChanged, win, publishControls);
+    QObject::connect(win, &QWindow::windowStateChanged, win, publishControls);
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
     installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
     // Bring the hidden window back only on a real Dock-icon click — not on every
@@ -177,7 +195,22 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 #endif
     step("lifecycle");
 
+    out->desktop = std::make_unique<freetunnel::DesktopChrome>();
+    // Before the QML is loaded, so the first frame already has the desktop's
+    // buttons and its light or dark. Not under offscreen, which has no desktop to
+    // follow — and is what the tests run on, which must not take on the look of
+    // whatever desktop they happen to run under.
+    if (QGuiApplication::platformName() != QLatin1String("offscreen"))
+        out->desktop->followDesktop();
     out->engine = std::make_unique<QQmlApplicationEngine>();
+    out->engine->rootContext()->setContextProperty(QStringLiteral("desktop"), out->desktop.get());
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+    // Only on the real Windows platform: under offscreen the window's id is a
+    // counter, not an HWND, and the agent would hand it to Win32 as one.
+    const bool windowsAgent = QGuiApplication::platformName() == QLatin1String("windows");
+    if (windowsAgent)
+        out->engine->setInitialProperties({{QStringLiteral("windowsAgent"), true}});
+#endif
     out->win = loadMainWindow(*out->engine, backend);
     if (!out->win) {
         step("qml-failed");
@@ -190,6 +223,13 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 
     setupMacWindow(out->win, &out->appQuitting);
     step("mac-window");
+
+#if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
+    if (windowsAgent) {
+        setupWindowsChrome(qobject_cast<QQuickWindow *>(out->win));
+        step("windows-chrome");
+    }
+#endif
 
     out->urlFilter->ready(&backend, out->win);
     if (!controlArg.isEmpty())

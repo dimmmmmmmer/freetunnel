@@ -1,5 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
+#ifdef Q_OS_MACOS
+#include "app/MacWindow.h"
+#endif
 
 #include <QFile>
 #include <QFileInfo>
@@ -228,6 +231,15 @@ void Backend::openUrl(const QString &url) {
 void Backend::startWindowDrag(QObject *window) {
     // The QQuickWindow content view eats mouse events, so AppKit's
     // movableByWindowBackground never fires; drive the native move directly.
-    if (auto *w = qobject_cast<QWindow *>(window))
-        w->startSystemMove();
+    auto *w = qobject_cast<QWindow *>(window);
+    if (!w)
+        return;
+#ifdef Q_OS_MACOS
+    // Natively on macOS, which also gives the band the title-bar double-click the
+    // user configured and survives presses Qt 6.8 cannot turn into a move. See
+    // macHandleTitlebarPress(); Qt's own move is the fallback, not the path.
+    if (macHandleTitlebarPress(w->winId()))
+        return;
+#endif
+    w->startSystemMove();
 }

@@ -53,7 +53,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring
+            dbus-x11 gnome-keyring libxcb1-dev
 
       - name: Install Qt (Linux)
         if: runner.os == 'Linux'
@@ -118,7 +118,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config lcov \
             libfuse2 libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 git python3-pip \
-            dbus-x11 gnome-keyring
+            dbus-x11 gnome-keyring libxcb1-dev
           # Vendored, not fetched: this runs as root. See scripts/llvm.sh.
           sudo bash scripts/llvm.sh 18
           sudo apt-get install -y g++-13
@@ -186,7 +186,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring
+            dbus-x11 gnome-keyring libxcb1-dev
 
       - name: Install Qt
         uses: jurplel/install-qt-action@bcb88e3bed2e992f5f9e24c0f9e364a231d278eb # v4

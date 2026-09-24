@@ -231,7 +231,8 @@ public:
     Q_INVOKABLE void downloadUpdate() {}
     Q_INVOKABLE void openLatestRelease() {}
     Q_INVOKABLE void openUrl(const QString &) {}
-    Q_INVOKABLE void startWindowDrag(QObject *) {}
+    Q_INVOKABLE void startWindowDrag(QObject *) { ++windowDrags; }
+    int windowDrags = 0;
     Q_INVOKABLE void pingConfigs() {}
     Q_INVOKABLE bool importFromClipboard() { return false; }
     Q_INVOKABLE void prepareQuit()

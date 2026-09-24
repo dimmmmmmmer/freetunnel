@@ -18,8 +18,8 @@ Item {
     required property var backend
     required property var theme
 
-    readonly property bool isMac: Qt.platform.os === "osx"
-    readonly property int safeTop: isMac ? 32 : 40
+    // Below the window's own buttons, wherever the window says they are.
+    readonly property int safeTop: shell.titlebarSafeTop
     readonly property int cardWidth: Math.min(width - 28, 420)
 
     anchors.fill: parent

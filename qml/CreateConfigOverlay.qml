@@ -12,9 +12,9 @@ Item {
     required property var backend
     required property var theme
 
-    readonly property bool isMac: Qt.platform.os === "osx"
-    // Keep the card below native traffic lights / frameless window controls.
-    readonly property int safeTop: isMac ? 32 : 40
+    // Keep the card below native traffic lights / frameless window controls. The
+    // window works that out from where the buttons really are; see Main.qml.
+    readonly property int safeTop: shell.titlebarSafeTop
     readonly property int cardWidth: Math.min(width - 28, 372)
 
     anchors.fill: parent
