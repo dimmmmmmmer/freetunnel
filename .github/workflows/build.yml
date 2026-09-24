@@ -720,7 +720,12 @@ jobs:
             echo "hdiutil create failed (attempt $attempt) — retrying in 15 s"
             sleep 15
           done
-          MOUNT=$(hdiutil attach -readwrite -noverify -noautofsck "$RW" | awk '/\/Volumes\// {print $NF; exit}')
+          ATTACHED=$(hdiutil attach -readwrite -noverify -noautofsck "$RW")
+          echo "$ATTACHED"
+          MOUNT=$(echo "$ATTACHED" | awk '/\/Volumes\// {print $NF; exit}')
+          # The whole-disk node, which is what has to be let go of before the image
+          # can be converted: see below.
+          DEV=$(echo "$ATTACHED" | awk '$1 ~ /^\/dev\/disk[0-9]+$/ {print $1; exit}')
           cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
           SetFile -a C "$MOUNT/.VolumeIcon.icns"
           ln -sf /Applications "$MOUNT/Applications"
@@ -749,18 +754,31 @@ jobs:
             exit 1
           fi
           # The mount point disappearing is not the same as the image being free.
-          # Detaching unmounts the volume first and releases the backing device a
-          # moment later, so the loop above can legitimately succeed while
-          # out/rw.dmg is still attached — and convert then fails outright:
+          # Unmounting the volume and releasing the disk device behind it are two
+          # steps, and the second does not always follow. On a failed build the
+          # first detach reported an error, the volume went a moment later, and
+          # hdiutil info went on listing out/rw.dmg for the whole thirty seconds
+          # this used to wait. Convert then failed five times with
           #
           #   hdiutil: convert failed - Resource temporarily unavailable
           #
-          # Wait for the device to actually let go, then convert. Retried rather
-          # than slept through blindly, so the usual case stays instant.
+          # So detach the device itself, forcing it on the last attempt, until the
+          # image is not attached at all, and stop with the device's state if it
+          # never lets go.
           for i in 1 2 3 4 5 6; do
             if ! hdiutil info 2>/dev/null | grep -qF "$RW"; then break; fi
+            if [ "$i" = 6 ]; then
+              hdiutil detach "$DEV" -force >/dev/null 2>&1 || true
+            else
+              hdiutil detach "$DEV" >/dev/null 2>&1 || true
+            fi
             sleep 5
           done
+          if hdiutil info 2>/dev/null | grep -qF "$RW"; then
+            echo "::error::out/rw.dmg is still attached (as ${DEV:-an unknown device}) after six detach attempts"
+            hdiutil info || true
+            exit 1
+          fi
           for i in 1 2 3 4 5; do
             if hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 \
                  -o out/${{ matrix.artifact }}.dmg; then
@@ -770,7 +788,8 @@ jobs:
               echo "::error::hdiutil convert failed five times — not a transient"
               exit 1
             fi
-            echo "hdiutil convert failed (attempt $i) — retrying in 10 s"
+            echo "hdiutil convert failed (attempt $i) — retrying in 10 s; what has it open:"
+            lsof "$RW" || true
             rm -f out/${{ matrix.artifact }}.dmg
             sleep 10
           done

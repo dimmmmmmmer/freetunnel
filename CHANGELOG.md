@@ -5,6 +5,73 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
+## 1.2.1
+
+### Security
+
+- **Split tunnelling by application could send a connection the wrong way.** To
+  tell which program a connection belongs to, the app looked its port number up
+  in the system's list of open sockets. But one number can be in use by two
+  programs at once: on different network addresses, or once over IPv4 and once
+  over IPv6. This is not rare, because local services, containers and the system
+  itself hold ports of their own. When the two collided, the app could answer
+  about the wrong one.
+
+  It went wrong both ways. A connection from a program you listed could be taken
+  for "not one of yours": with the mode set to "Through VPN", it went outside the
+  tunnel instead of through it, unless an address or domain on your list also
+  covered where it was going. And a connection from some other program could be
+  taken for yours, and follow your rule instead of the rest of your settings.
+
+  Sockets are now told apart by address as well as by number. Two cases are still
+  beyond what the app can see: two connections from the same address and port to
+  different places, and, on Windows, an IPv6 socket that takes no IPv4 traffic.
+
+### Changed
+
+- **The window fits in with your system.**
+  - **macOS 26 and 27:** the window buttons and corners now match other current
+    apps, where they looked like an older macOS. The app icon has a dark
+    rounded-square background of its own, so macOS no longer puts it inside a
+    grey one. The menu-bar icon is drawn the way the system's own are: it follows
+    a light or dark menu bar, and it is filled while connected and outlined while
+    not. Dragging the window by its top edge works on a trackpad, and
+    double-clicking there zooms or minimises it as set in System Settings.
+  - **Windows:** the window no longer gives up what Windows gives an ordinary
+    window. It has a shadow, and on Windows 11 rounded corners. It snaps when you
+    drag it to an edge of the screen, and on Windows 11 hovering over the maximise
+    button shows the Snap Layouts choices. Right-clicking the empty part of the
+    top of the window, or pressing Alt+Space, opens the window menu. The buttons
+    in the corner are drawn to match Windows 11's. This is new on Windows; if the
+    window misbehaves, please open an issue.
+  - **Linux:** on GNOME and Pop!_OS 22.04 the window buttons are the ones your
+    desktop uses, in the places it puts them. On Pop!_OS 22.04 as it comes that
+    is minimise and close, with no maximise, and on GNOME as it comes only close.
+    Where there is no tray icon, closing still quits the app; Super+H hides the
+    window instead. With Pop's theme or GNOME's standard look the buttons also
+    look like the desktop's own. Double-, middle- and right-clicking the top of
+    the window do what the desktop is set to do, except rolling the window up or
+    maximising it in one direction only. A right-click opens the window manager's
+    own menu where the window manager supports that, as GNOME's does. Change the
+    layout in Tweaks and the window follows at once. On other desktops, such as
+    KDE or XFCE, the app cannot read these settings, and keeps three buttons on
+    the right.
+- **Windows: the program says what it is.** The app and its installer now carry
+  their name and version, and File Properties shows them. Before, the name and
+  version fields there were empty.
+- **FreeTunnel now needs macOS 12 or later.** 1.2.0 said it needed macOS 11, but
+  it could not start there either: the Qt libraries it is built on need 12.
+
+### Fixed
+
+- **Linux: the "System" theme showed a light window on a dark desktop** on GNOME
+  and Pop!_OS. It follows the desktop's light or dark setting now, including when
+  you switch it while the app is open. Other desktops are followed the same way
+  if they tell apps whether they are light or dark; not all of them do.
+- **macOS 27: clicking the menu-bar icon could make the app quit.** This is a
+  fault in the Qt version FreeTunnel is built on, and the app now works around
+  it.
+
 ## 1.2.0
 
 ### Added
