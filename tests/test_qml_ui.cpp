@@ -88,6 +88,8 @@ private slots:
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
+    void headingLinksStayOnANarrowPage_data();
+    void headingLinksStayOnANarrowPage();
     void russianFitsAtTheDefaultWidth_data();
     void russianFitsAtTheDefaultWidth();
     void everyComponentLoadsOnItsOwn();
@@ -1587,14 +1589,16 @@ void TestQmlUi::aClickInsideTheConfirmCardDoesNotCancelIt()
     delete root;
 }
 
-// Buttons cannot wrap the way text does. At a width where the old cap left the
-// row wider than the card's content, the three touched or crossed its border.
+// Buttons cannot wrap the way text does, and three of them ran into the card's
+// edges, or past them, when the window was narrow for the language and font:
+// Russian at the default width on Linux, and wider fonts elsewhere. Checked at
+// the widths where each way of fitting them has to work.
 void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
 {
     QObject *root = loadPage("components/ConfirmDialog.qml");
     QVERIFY(root);
     QQuickWindow window;
-    QVERIFY(showInWindow(root, window, 400, 400));
+    QVERIFY(showInWindow(root, window, 600, 400));
     root->setProperty("text", QStringLiteral("«Работа» уже есть."));
     root->setProperty("confirmText", QStringLiteral("Заменить"));
     root->setProperty("altText", QStringLiteral("Добавить копию"));
@@ -1609,17 +1613,21 @@ void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
         buttons << b;
         row += b->width();
     }
-    // Wide enough for the row and the card's own padding, not for the old margin.
-    auto *item = qobject_cast<QQuickItem *>(root);
-    item->setWidth(row + 28 + 40);
     auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
     QVERIFY(card);
-    QTRY_VERIFY(card->width() >= row + 28 - 0.5);
-    for (QQuickItem *b : std::as_const(buttons)) {
-        const QPointF at = b->mapToItem(card, QPointF(0, 0));
-        QVERIFY2(at.x() >= 13 && at.x() + b->width() <= card->width() - 13,
-                 qPrintable(b->objectName() + QStringLiteral(" runs into the card's edge")));
-    }
+    const auto inside = [&]() {
+        for (QQuickItem *b : std::as_const(buttons)) {
+            const QPointF at = b->mapToItem(card, QPointF(0, 0));
+            if (at.x() < 13 || at.x() + b->width() > card->width() - 13)
+                return false;
+        }
+        return true;
+    };
+    // The dialog fills its window, so the window is what is narrowed.
+    window.resize(int(row + 28 + 40), 400); // room for the row, not for the usual margin
+    QTRY_VERIFY2(inside(), "full-size buttons run into the card's edges");
+    window.resize(int(row * 0.8), 400); // not enough for them at all
+    QTRY_VERIFY2(inside(), "compact buttons run into the card's edges");
     delete root;
 }
 
@@ -1959,6 +1967,71 @@ void TestQmlUi::textOnTheAccentIsReadableInTheDarkTheme()
     const QColor fill = m_theme.property("accent").value<QColor>();
     QVERIFY2(contrast(label, fill) >= 4.5,
              qPrintable(QStringLiteral("contrast %1:1").arg(contrast(label, fill), 0, 'f', 1)));
+    delete root;
+}
+
+void TestQmlUi::headingLinksStayOnANarrowPage_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::newRow("Settings") << QStringLiteral("pages/SettingsPage.qml");
+    QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
+}
+
+namespace {
+
+// A language whose words for the heading links are much longer than English's,
+// which is what a wider font does to them as well.
+class LongLinks : public QTranslator {
+public:
+    bool isEmpty() const override { return false; }
+    QString translate(const char *, const char *source, const char *, int) const override
+    {
+        static const QByteArrayList links{"Restore defaults", "Clear all", "Recommended for Russia",
+                                          "Choose…"};
+        if (links.contains(QByteArray(source)))
+            return QString::fromUtf8(source)
+                    + QStringLiteral(" in a much longer language, too long for any window to hold");
+        return QString();
+    }
+};
+
+} // namespace
+
+// A link beside a section heading that did not fill kept its full width however
+// little room there was, and ran off the page: with the fonts the Windows tests
+// get, «Restore defaults» sat past the right edge of a 400 px window.
+void TestQmlUi::headingLinksStayOnANarrowPage()
+{
+    QFETCH(QString, page);
+    LongLinks longLinks;
+    QCoreApplication::installTranslator(&longLinks);
+    m_engine.retranslate();
+    const auto restore = qScopeGuard([this, &longLinks] {
+        QCoreApplication::removeTranslator(&longLinks);
+        m_engine.retranslate();
+    });
+    m_backend.setDomains({QStringLiteral("example.com")}); // so both rules links show
+    const auto domains = qScopeGuard([this] { m_backend.setDomains({}); });
+
+    QObject *root = loadPage(page.toUtf8().constData());
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *item = showInWindow(root, window, 400, 1400);
+    QVERIFY(item);
+    QStringList out;
+    int links = 0;
+    const auto texts = root->findChildren<QQuickItem *>();
+    for (QQuickItem *text : texts) {
+        if (!text->inherits("QQuickText") || !text->isVisible()
+            || !text->property("text").toString().endsWith(QLatin1String("any window to hold")))
+            continue;
+        ++links;
+        const qreal right = text->mapToItem(item, QPointF(text->width(), 0)).x();
+        if (right > item->width() + 0.5)
+            out << QStringLiteral("%1 (to %2)").arg(text->property("text").toString()).arg(right);
+    }
+    QVERIFY2(links >= 2, "the links were not found");
+    QVERIFY2(out.isEmpty(), qPrintable(QStringLiteral("past the edge: ") + out.join(QStringLiteral(" | "))));
     delete root;
 }
 

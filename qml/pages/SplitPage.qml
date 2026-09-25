@@ -126,13 +126,18 @@ Item {
             }
             Item { Layout.preferredHeight: 14 }
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: splitRoot.theme
+                // Every item fills, the links up to their own width: a link that does
+                // not fill keeps its full width however little room is left, and ran
+                // off the edge. Short of room, they all narrow and elide instead.
+                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
-                Text { text: qsTr("Recommended for Russia"); font.pixelSize: 12
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Recommended for Russia"); font.pixelSize: 12
                        color: recMa.containsMouse ? theme.text : theme.accent; font.underline: recMa.containsMouse
                     MouseArea { id: recMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor; onClicked: backend.addRecommendedRussia() } }
-                Text { text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
                        color: clrDomMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                        font.underline: clrDomMa.containsMouse
                     MouseArea { id: clrDomMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
@@ -190,14 +195,16 @@ Item {
             // it". A list whose meaning is flipped from another screen is a list
             // nobody can read with confidence.
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: splitRoot.theme
+                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Applications — via VPN")
                                                           : qsTr("Applications — bypass VPN") }
-                Text { text: qsTr("Choose…"); font.pixelSize: 12
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Choose…"); font.pixelSize: 12
                        color: pickMa.containsMouse ? theme.text : theme.accent; font.underline: pickMa.containsMouse
                     MouseArea { id: pickMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor; onClicked: shell.overlay = "apps" } }
-                Text { text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.appRules.length > 0
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.appRules.length > 0
                        color: clrApMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                        font.underline: clrApMa.containsMouse
                     MouseArea { id: clrApMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true

@@ -80,9 +80,14 @@ Item {
             // ----- Excluded routes (subnets that bypass the tunnel) -----
             RowLayout { Layout.fillWidth: true; spacing: 10
                 SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: settingsRoot.theme; text: qsTr("Excluded routes") }
-                // The links keep their full width and the heading gives way: capped,
-                // the Russian ones were cut to «Вернуть по умолча…» and «Очистить …».
-                Text { elide: Text.ElideRight
+                // Every item fills, the links up to their own width (rounded up: the
+                // layout deals in whole pixels, and 91 px for a 91.4 px word elides
+                // it), and short of room they all narrow and elide. Capped at fixed
+                // widths the links were cut in Russian («Вернуть по умолча…»); not
+                // filling, they kept their width however little room was left, and
+                // ran off the edge.
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
+                       elide: Text.ElideRight
                        text: qsTr("Restore defaults"); font.pixelSize: 12
                        color: rdMa.containsMouse ? theme.text : theme.accent; font.underline: rdMa.containsMouse
                     // Asked first, like Clear all beside it: it replaces the whole
@@ -91,7 +96,8 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: shell.showConfirm(qsTr("Replace the excluded routes with the defaults?"),
                                                      qsTr("Replace"), function() { backend.restoreDefaultExcludedRoutes() }) } }
-                Text { elide: Text.ElideRight
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
+                    elide: Text.ElideRight
                     visible: backend.excludedRoutes.length > 0
                     text: qsTr("Clear all"); font.pixelSize: 12
                     color: clrRtMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
