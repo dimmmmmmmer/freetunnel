@@ -11,6 +11,7 @@
 #include <QDBusError>
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
+#include <QDBusServiceWatcher>
 #include <QDBusVariant>
 #include <QGuiApplication>
 #include <QPair>
@@ -112,6 +113,22 @@ bool timedOut(const QDBusMessage &reply)
 void watchPortalSettings(DesktopChrome *desktop)
 {
     watchPortalSettings(desktop, QDBusConnection::sessionBus());
+    watchTrayHost(desktop, QDBusConnection::sessionBus());
+}
+
+// Qt decides whether there is a tray once, when the icon is made, by asking
+// whether a StatusNotifierWatcher is on the bus at that moment. Started ahead of
+// the panel, at login, or before the AppIndicator extension was turned on, the
+// icon never appeared for the rest of the session, and ✕ quit the app because
+// there was no tray to go to.
+void watchTrayHost(DesktopChrome *desktop, const QDBusConnection &bus)
+{
+    if (!bus.isConnected())
+        return;
+    auto *watcher = new QDBusServiceWatcher(QStringLiteral("org.kde.StatusNotifierWatcher"), bus,
+                                            QDBusServiceWatcher::WatchForRegistration, desktop);
+    QObject::connect(watcher, &QDBusServiceWatcher::serviceRegistered, desktop,
+                     &DesktopChrome::trayHostAppeared);
 }
 
 void watchPortalSettings(DesktopChrome *desktop, const QDBusConnection &bus)

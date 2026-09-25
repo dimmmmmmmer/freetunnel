@@ -50,6 +50,7 @@ private slots:
     void withNoPortalNothingChangesAndNothingWaits();
     void aSlowPortalDoesNotHoldTheWindowButIsStillHeard();
     void aChangeRightAfterTheFirstReadIsNotLost();
+    void aTrayHostThatArrivesLateIsReported();
     // Last: it is the one test that points this process's session bus somewhere.
     void followingTheDesktopReadsTheSessionBus();
 #endif
@@ -509,6 +510,33 @@ void TestDesktopChrome::aChangeRightAfterTheFirstReadIsNotLost()
     DesktopChrome desktop;
     freetunnel::watchPortalSettings(&desktop, setup.client());
     QTRY_COMPARE(desktop.colorScheme(), Qt::ColorScheme::Dark);
+}
+
+// Qt asks whether a tray host is on the bus once, when the tray icon is made. A
+// panel that comes up after the app — at login, or the AppIndicator extension
+// turned on later — has to be noticed, or the icon never appears.
+void TestDesktopChrome::aTrayHostThatArrivesLateIsReported()
+{
+    PrivateBus bus;
+    if (!bus.start()) {
+        if (qEnvironmentVariableIsSet("CI"))
+            QFAIL("could not start a private dbus-daemon");
+        QSKIP("no dbus-daemon to run a stand-in tray host on");
+    }
+    const QString clientName = QStringLiteral("tray-client");
+    const QString hostName = QStringLiteral("tray-host");
+    {
+        DesktopChrome desktop;
+        QSignalSpy appeared(&desktop, &DesktopChrome::trayHostAppeared);
+        freetunnel::watchTrayHost(&desktop, QDBusConnection::connectToBus(bus.address, clientName));
+        QCOMPARE(appeared.count(), 0);
+
+        QDBusConnection host = QDBusConnection::connectToBus(bus.address, hostName);
+        QVERIFY(host.registerService(QStringLiteral("org.kde.StatusNotifierWatcher")));
+        QTRY_COMPARE(appeared.count(), 1);
+    }
+    QDBusConnection::disconnectFromBus(hostName);
+    QDBusConnection::disconnectFromBus(clientName);
 }
 
 // What the app itself calls: followDesktop(), on the session bus.

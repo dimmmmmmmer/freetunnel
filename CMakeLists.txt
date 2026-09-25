@@ -356,7 +356,8 @@ if (APPLE)
     target_sources(FreeTunnel PRIVATE assets/logo.icns)
     # Unified title bar (transparent bar + full-size content) needs a tiny bit of
     # Objective-C++ talking to AppKit.
-    target_sources(FreeTunnel PRIVATE src/app/MacWindow.mm include/app/MacWindow.h)
+    target_sources(FreeTunnel PRIVATE src/app/MacWindow.mm include/app/MacWindow.h
+                                      src/app/DesktopChromeMac.mm src/app/DesktopChromeMac.h)
     target_link_libraries(FreeTunnel PRIVATE "-framework AppKit" "-framework Security")
 endif()
 

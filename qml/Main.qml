@@ -90,7 +90,7 @@ Window {
         function onAboutToShutdown() {
             shuttingDown = true
             // Defer so tray/dock menu items can finish closing before we tear down.
-            Qt.callLater(function() { tray.visible = false })
+            Qt.callLater(function() { if (win.tray) win.tray.visible = false })
         }
         // Every deep-link import is confirmed, not just the ones that disable
         // certificate verification — so the button is a plain «Import»; the
@@ -114,6 +114,10 @@ Window {
     }
 
     Shortcut { sequences: [StandardKey.Quit]; onActivated: backend.quitApplication() }
+    // macOS: ⌘W does what the red button does, and ⌘M minimises. Neither reached
+    // anything before: this application has no Window menu to carry them.
+    Shortcut { enabled: win.isMac; sequences: [StandardKey.Close]; onActivated: desktop.hideToTray(win) }
+    Shortcut { enabled: win.isMac; sequence: "Ctrl+M"; onActivated: desktop.minimize(win) }
 
     // ---------- system tray ----------
     // A config name as a menu shows it: as typed. Every platform's menus read '&'
@@ -123,88 +127,105 @@ Window {
         const escaped = name.replace(/&/g, "&&")
         return Qt.platform.os === "linux" ? escaped.replace(/_/g, "__") : escaped
     }
-    Platform.SystemTrayIcon {
-        id: tray
-        objectName: "systemTray"
-        visible: true
-        // Green mark when connected — the configs-page "connected" badge
-        // color — dimmed when off. On macOS too: a monochrome template image was
-        // tried there, and it drew a plain white mark that said nothing about the
-        // state at a glance, which is what this icon is for.
-        icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
-        tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
-                                    : "FreeTunnel"
-        // Right-click opens the menu (below). The icon's own gesture brings the
-        // window forward: a left click on Windows, a double-click too. On Linux
-        // every host reports it as Trigger, never DoubleClick — Qt's
-        // StatusNotifierItem turns the host's Activate call into Trigger — and
-        // hosts send Activate for a left click (KDE) or a double-click (GNOME's
-        // AppIndicator extension, where one click opens the menu).
-        //
-        // macOS is excluded outright: there the status item owns an NSMenu, so Qt
-        // emits activated() from NSMenuDidBeginTracking and derives the reason from
-        // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
-        // as DoubleClick even though the user only opened the menu, which popped the
-        // hidden window back open. The menu's «Show FreeTunnel» item and the Dock
-        // icon are the macOS ways back.
-        onActivated: function(reason) {
-            if (win.isMac)
+    // The tray icon, made again when a tray host appears after start. Qt decides
+    // once, when the icon is made, whether there is a tray on the session bus
+    // (see DesktopChrome::trayHostAppeared); an icon made before the panel was up
+    // stayed without one for good, and ✕ quit instead of going to the tray.
+    readonly property var tray: trayMaker.object
+    Connections {
+        target: desktop
+        function onTrayHostAppeared() {
+            if (win.tray && win.tray.available)
                 return
-            if (reason === Platform.SystemTrayIcon.Trigger
-                    || reason === Platform.SystemTrayIcon.DoubleClick) {
-                desktop.bringToFront(win)
-            }
+            trayMaker.active = false
+            trayMaker.active = true
         }
-        menu: Platform.Menu {
-            // Plain connect/disconnect action button.
-            Platform.MenuItem {
-                text: backend.disconnecting ? qsTr("Disconnecting…")
-                      : backend.connecting ? qsTr("Connecting…")
-                      : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
-                enabled: backend.configs.length > 0
-                onTriggered: backend.toggle()
-            }
-            // Active config + session time on one line (only while connected).
-            Platform.MenuItem {
-                enabled: false; visible: backend.connected
-                text: win.menuLabel(backend.activeConfig) + "  ·  " + backend.sessionTime
-            }
-            Platform.MenuSeparator {}
-            // Configs listed inline; the active one carries a checkmark.
+    }
+    Instantiator {
+        id: trayMaker
+        delegate: Platform.SystemTrayIcon {
+            id: tray
+            objectName: "systemTray"
+            visible: true
+            // Green mark when connected — the configs-page "connected" badge
+            // color — dimmed when off. On macOS too: a monochrome template image was
+            // tried there, and it drew a plain white mark that said nothing about the
+            // state at a glance, which is what this icon is for.
+            icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
+            tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
+                                        : "FreeTunnel"
+            // Right-click opens the menu (below). The icon's own gesture brings the
+            // window forward: a left click on Windows, a double-click too. On Linux
+            // every host reports it as Trigger, never DoubleClick — Qt's
+            // StatusNotifierItem turns the host's Activate call into Trigger — and
+            // hosts send Activate for a left click (KDE) or a double-click (GNOME's
+            // AppIndicator extension, where one click opens the menu).
             //
-            // Choosing the one already ticked turns it on or off, as the user
-            // expects of it; choosing another switches to that one, reconnecting
-            // if connected. Either way the tick is put back on its binding: the
-            // menu flips a checkable item's tick by itself on a click, which broke
-            // the binding and left the active config unticked while nothing else
-            // changed.
-            Instantiator {
-                model: backend.configs
-                delegate: Platform.MenuItem {
-                    required property int index
-                    required property string modelData
-                    text: win.menuLabel(modelData)
-                    checkable: true
-                    checked: index === backend.activeIndex
-                    onTriggered: {
-                        if (index === backend.activeIndex)
-                            backend.toggle()
-                        else
-                            backend.selectConfig(index)
-                        checked = Qt.binding(() => index === backend.activeIndex)
-                    }
+            // macOS is excluded outright: there the status item owns an NSMenu, so Qt
+            // emits activated() from NSMenuDidBeginTracking and derives the reason from
+            // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
+            // as DoubleClick even though the user only opened the menu, which popped the
+            // hidden window back open. The menu's «Show FreeTunnel» item and the Dock
+            // icon are the macOS ways back.
+            onActivated: function(reason) {
+                if (win.isMac)
+                    return
+                if (reason === Platform.SystemTrayIcon.Trigger
+                        || reason === Platform.SystemTrayIcon.DoubleClick) {
+                    desktop.bringToFront(win)
                 }
-                onObjectAdded: (i, obj) => tray.menu.insertItem(i + 3, obj)
-                onObjectRemoved: (i, obj) => tray.menu.removeItem(obj)
             }
-            Platform.MenuSeparator { visible: backend.configs.length > 0 }
-            Platform.MenuItem {
-                text: qsTr("Show FreeTunnel")
-                onTriggered: desktop.bringToFront(win)
-            }
-            Platform.MenuItem {
-                text: qsTr("Quit")
-                onTriggered: backend.quitApplication()
+            menu: Platform.Menu {
+                // Plain connect/disconnect action button.
+                Platform.MenuItem {
+                    text: backend.disconnecting ? qsTr("Disconnecting…")
+                          : backend.connecting ? qsTr("Connecting…")
+                          : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
+                    enabled: backend.configs.length > 0
+                    onTriggered: backend.toggle()
+                }
+                // Active config + session time on one line (only while connected).
+                Platform.MenuItem {
+                    enabled: false; visible: backend.connected
+                    text: win.menuLabel(backend.activeConfig) + "  ·  " + backend.sessionTime
+                }
+                Platform.MenuSeparator {}
+                // Configs listed inline; the active one carries a checkmark.
+                //
+                // Choosing the one already ticked turns it on or off, as the user
+                // expects of it; choosing another switches to that one, reconnecting
+                // if connected. Either way the tick is put back on its binding: the
+                // menu flips a checkable item's tick by itself on a click, which broke
+                // the binding and left the active config unticked while nothing else
+                // changed.
+                Instantiator {
+                    model: backend.configs
+                    delegate: Platform.MenuItem {
+                        required property int index
+                        required property string modelData
+                        text: win.menuLabel(modelData)
+                        checkable: true
+                        checked: index === backend.activeIndex
+                        onTriggered: {
+                            if (index === backend.activeIndex)
+                                backend.toggle()
+                            else
+                                backend.selectConfig(index)
+                            checked = Qt.binding(() => index === backend.activeIndex)
+                        }
+                    }
+                    onObjectAdded: (i, obj) => tray.menu.insertItem(i + 3, obj)
+                    onObjectRemoved: (i, obj) => tray.menu.removeItem(obj)
+                }
+                Platform.MenuSeparator { visible: backend.configs.length > 0 }
+                Platform.MenuItem {
+                    text: qsTr("Show FreeTunnel")
+                    onTriggered: desktop.bringToFront(win)
+                }
+                Platform.MenuItem {
+                    text: qsTr("Quit")
+                    onTriggered: backend.quitApplication()
+                }
             }
         }
     }
@@ -398,7 +419,7 @@ Window {
         if (action === "toggle-maximize")
             win.toggleMaximized()
         else if (action === "minimize")
-            win.showMinimized()
+            desktop.minimize(win)
         else if (action === "lower")
             win.lower()
         else if (action === "menu")
@@ -427,8 +448,8 @@ Window {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
     function closeFromTitleBar() {
-        if (tray.available)
-            win.showMinimized()
+        if (win.tray && win.tray.available)
+            desktop.minimize(win)
         else
             backend.quitApplication()
     }
@@ -444,7 +465,7 @@ Window {
         controlStyle: desktop.controlStyle
         window: win
         theme: win.theme
-        onMinimizeRequested: win.showMinimized()
+        onMinimizeRequested: desktop.minimize(win)
         onMaximizeToggleRequested: win.toggleMaximized()
         onCloseRequested: win.closeFromTitleBar()
     }
@@ -458,7 +479,7 @@ Window {
         controlStyle: desktop.controlStyle
         window: win
         theme: win.theme
-        onMinimizeRequested: win.showMinimized()
+        onMinimizeRequested: desktop.minimize(win)
         onMaximizeToggleRequested: win.toggleMaximized()
         onCloseRequested: win.closeFromTitleBar()
     }
@@ -610,8 +631,8 @@ Window {
             toast.show(msg)
             // An action started from the tray fails where nobody is looking. The
             // toast waits for the window (below); the tray says it now.
-            if (!win.onScreen && tray.available && tray.supportsMessages)
-                tray.showMessage("FreeTunnel", msg)
+            if (!win.onScreen && win.tray && win.tray.available && win.tray.supportsMessages)
+                win.tray.showMessage("FreeTunnel", msg)
         }
         function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
         function onUpdateChanged() {

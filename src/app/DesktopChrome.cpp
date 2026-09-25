@@ -1,10 +1,14 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/DesktopChrome.h"
 
+#include <QTimer>
 #include <QWindow>
 
 #ifdef Q_OS_LINUX
 #include "DesktopChromeLinux.h"
+#endif
+#ifdef Q_OS_MACOS
+#include "DesktopChromeMac.h"
 #endif
 
 namespace freetunnel {
@@ -141,6 +145,9 @@ void bringWindowForward(QWindow *window)
 {
     if (!window)
         return;
+#ifdef Q_OS_MACOS
+    unhideMacApplication();
+#endif
     if (window->windowStates() & Qt::WindowMinimized)
         window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
     // setVisible, not show(): show() is showNormal() here, and a window minimised
@@ -154,9 +161,50 @@ void bringWindowForward(QWindow *window)
     window->requestActivate();
 }
 
+void minimizeWindow(QWindow *window)
+{
+    if (window)
+        window->setWindowStates(window->windowStates() | Qt::WindowMinimized);
+}
+
+void hideWindowToTray(QWindow *window)
+{
+    if (!window)
+        return;
+    if (!(window->windowStates() & Qt::WindowFullScreen)) {
+        window->hide();
+        return;
+    }
+    // Leaving full screen is animated, and the window is hidden once it is over.
+    // The timer is for a platform that never says so.
+    auto *pending = new QObject(window);
+    const auto hideOnce = [window, pending]() {
+        pending->deleteLater();
+        QObject::disconnect(window, nullptr, pending, nullptr);
+        window->hide();
+    };
+    QObject::connect(window, &QWindow::windowStateChanged, pending,
+                     [hideOnce](Qt::WindowState state) {
+                         if (state != Qt::WindowFullScreen)
+                             hideOnce();
+                     });
+    QTimer::singleShot(2000, pending, hideOnce);
+    window->setWindowStates(window->windowStates() & ~Qt::WindowFullScreen);
+}
+
 void DesktopChrome::bringToFront(QObject *window)
 {
     bringWindowForward(qobject_cast<QWindow *>(window));
+}
+
+void DesktopChrome::minimize(QObject *window)
+{
+    minimizeWindow(qobject_cast<QWindow *>(window));
+}
+
+void DesktopChrome::hideToTray(QObject *window)
+{
+    hideWindowToTray(qobject_cast<QWindow *>(window));
 }
 
 bool DesktopChrome::showWindowMenu(QObject *window)

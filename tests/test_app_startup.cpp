@@ -39,6 +39,7 @@ private slots:
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
     void aSecondLaunchBringsTheWindowBack();
+    void aForwardedToggleLeavesTheWindowAlone();
     void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
@@ -379,6 +380,33 @@ void TestAppStartup::aSecondLaunchBringsTheWindowBack()
     sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), QStringLiteral("focus")));
     QTRY_VERIFY_WITH_TIMEOUT(!(window.windowStates() & Qt::WindowMinimized), 10000);
     QVERIFY(window.isVisible());
+}
+
+// freetunnel://toggle comes from a keyboard shortcut, a script or a Stream Deck,
+// and acts silently, as the in-app hotkeys do. Bringing the window up for it took
+// focus from whatever the user was typing into.
+void TestAppStartup::aForwardedToggleLeavesTheWindowAlone()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("toggle"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    freetunnel::wireInstanceServer(&server, backend, &window, QStringLiteral("tok"));
+    // With no config to connect, the toggle answers with an error: the sign that
+    // the command arrived and was acted on.
+    QSignalSpy handled(&backend, &Backend::errorOccurred);
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"),
+                                                                QStringLiteral("freetunnel://toggle")));
+    QTRY_VERIFY_WITH_TIMEOUT(handled.count() > 0, 10000);
+    QCoreApplication::processEvents();
+    QVERIFY2(window.windowStates() & Qt::WindowMinimized, "a toggle brought the window up");
 }
 
 // A peer whose first bytes are slow to arrive must still be heard. The listener

@@ -25,6 +25,10 @@ void watchPortalSettings(DesktopChrome *desktop, const QDBusConnection &bus);
 
 constexpr int kPortalReadTimeoutMs = 1000;
 
+// Report through DesktopChrome::trayHostAppeared() when a tray host (a
+// StatusNotifierWatcher) registers on the bus after the app has started.
+void watchTrayHost(DesktopChrome *desktop, const QDBusConnection &bus);
+
 // Ask the X11 window manager for its window menu at the pointer. False on native
 // Wayland, with no window, or when the window manager does not advertise support.
 bool showX11WindowMenu(QWindow *window);

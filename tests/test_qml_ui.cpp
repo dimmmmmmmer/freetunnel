@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include <QDirIterator>
+#include <QPointer>
 #include <QScopeGuard>
 #include <QGuiApplication>
 #include <QStandardPaths>
@@ -58,6 +59,11 @@ private slots:
     void aToastWaitsForAWindowThatIsAway();
     void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
     void aMinimisedWindowIsBroughtBack();
+    void minimisingKeepsAWindowMaximised();
+    void hidingAFullScreenWindowLeavesFullScreenFirst();
+    void theWindowsOwnButtonsMinimiseThroughTheDesktop();
+    void theMacKeysForCloseAndMinimise();
+    void aTrayHostThatAppearsLateGetsAnIcon();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -1216,6 +1222,113 @@ void TestQmlUi::aConfirmDialogTakesTheKeyboardFromAHotkeyField()
     QVERIFY2(field->hasActiveFocus(), "and gave it back when it closed");
     delete dialogRoot;
     delete fieldRoot;
+}
+
+// QWindow::showMinimized() replaces every state with Minimized, and on X11 Qt then
+// has the window manager take maximised off first: the window shrank to normal
+// size on its way down, and came back at it.
+void TestQmlUi::minimisingKeepsAWindowMaximised()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMaximized);
+    freetunnel::minimizeWindow(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowMaximized | Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
+}
+
+// Ordered out while in full screen, a macOS window leaves its Space behind: the
+// red button used to drop the user on an empty black one.
+void TestQmlUi::hidingAFullScreenWindowLeavesFullScreenFirst()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.setVisible(true); // not show(), which is showNormal() and would undo the next line
+    window.setWindowStates(Qt::WindowFullScreen);
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QTRY_VERIFY(window.windowStates() & Qt::WindowFullScreen);
+    freetunnel::hideWindowToTray(&window);
+    // Within a second: hidden on leaving full screen, not by the two-second fallback.
+    QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 1000);
+    QVERIFY(!(window.windowStates() & Qt::WindowFullScreen));
+
+    // Not in full screen, it simply goes.
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    freetunnel::hideWindowToTray(&window);
+    QVERIFY(!window.isVisible());
+}
+
+// Every minimise the window starts itself goes through the desktop, which keeps
+// the window maximised: its own button, and a title band whose click the
+// desktop has set to minimise.
+void TestQmlUi::theWindowsOwnButtonsMinimiseThroughTheDesktop()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *minimise = root->findChild<QQuickItem *>(QStringLiteral("windowMinButton"));
+    QVERIFY2(minimise && minimise->isVisible(), "the window's own minimise button");
+    const int before = m_desktop.minimizeRequests;
+    const QPoint at =
+            minimise->mapToScene(QPointF(minimise->width() / 2.0, minimise->height() / 2.0)).toPoint();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+    QCOMPARE(m_desktop.minimizeRequests, before + 1);
+    QMetaObject::invokeMethod(root, "titlebarAction", Q_ARG(QVariant, QStringLiteral("minimize")));
+    QCOMPARE(m_desktop.minimizeRequests, before + 2);
+    delete root;
+#endif
+}
+
+// ⌘W and ⌘M reached nothing on macOS: a QGuiApplication has no Window menu to
+// carry them. Elsewhere Ctrl+W and Ctrl+M are not the window's.
+void TestQmlUi::theMacKeysForCloseAndMinimise()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    const int hides = m_desktop.hideRequests;
+    const int minimises = m_desktop.minimizeRequests;
+    QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier); // ⌘W on macOS
+    QTest::keyClick(window, Qt::Key_M, Qt::ControlModifier); // ⌘M on macOS
+#ifdef Q_OS_MACOS
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+#else
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+#endif
+    delete root;
+}
+
+// Qt makes the tray icon's platform half once, and only if a tray host is on the
+// bus right then. When one turns up later, an icon without a tray is made again.
+void TestQmlUi::aTrayHostThatAppearsLateGetsAnIcon()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QPointer<QObject> first = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(first);
+    QVERIFY2(!first->property("available").toBool(), "offscreen has no tray, which is the case here");
+    emit m_desktop.trayHostAppeared();
+    QTRY_VERIFY2(first.isNull(), "the icon made without a tray was not replaced");
+    QObject *second = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(second);
+    QCOMPARE(root->property("tray").value<QObject *>(), second);
+    delete root;
 }
 
 int main(int argc, char *argv[])

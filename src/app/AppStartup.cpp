@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "app/Backend.h"
+#include "core/ControlCommand.h"
 #include "core/InstanceControl.h"
 
 #ifndef _WIN32
@@ -89,10 +90,23 @@ static void raiseMainWindow(QWindow *win)
 {
     if (!win)
         return;
+    // setVisible, not show(): show() is showNormal(), which took a maximised or
+    // full-screen window out of that state on the way back.
     if (!win->isVisible())
-        win->show();
+        win->setVisible(true);
     win->raise();
     win->requestActivate();
+}
+
+// A second launch ("focus") and a tt:// link, which needs its import confirmed,
+// are the user asking for the window from outside it. freetunnel://toggle,
+// connect and disconnect are not: they come from a keyboard shortcut, a script
+// or a Stream Deck and act silently, as the in-app hotkeys do. Bringing the
+// window up for them took focus from whatever the user was typing into.
+static bool commandWantsWindow(const QString &command)
+{
+    const ControlAction action = parseControlCommand(command).action;
+    return action == ControlAction::None || action == ControlAction::ImportLink;
 }
 
 namespace {
@@ -206,8 +220,8 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
             return;
         be->handleControl(cmd);
-        // A second launch is the user asking for the window, from outside it.
-        freetunnel::bringWindowForward(win);
+        if (commandWantsWindow(cmd))
+            freetunnel::bringWindowForward(win);
     };
 
     QObject::connect(idle, &QTimer::timeout, c, deliver);
@@ -335,7 +349,10 @@ bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
 void UrlOpenFilter::apply(const QString &u)
 {
     backend->handleControl(u);
-    freetunnel::raiseMainWindow(win);
+    // bringWindowForward, not the activation-time raise: a window minimised to
+    // the Dock stayed there, with the import question in it unseen.
+    if (freetunnel::commandWantsWindow(u))
+        freetunnel::bringWindowForward(win);
 }
 
 bool QuitFilter::eventFilter(QObject *o, QEvent *e)

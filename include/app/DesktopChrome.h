@@ -31,6 +31,17 @@ struct ButtonLayout {
 // showNormal() in Qt 6 — would not do.
 void bringWindowForward(QWindow *window);
 
+// Minimise, keeping maximised. QWindow::showMinimized() replaces the window's
+// states with Minimized, and on X11 Qt then asks the window manager to take the
+// maximised state off first: the window visibly shrank to normal size before
+// going, and came back at it.
+void minimizeWindow(QWindow *window);
+
+// Hide the window to the tray (the menu bar on macOS). A full-screen window
+// leaves full screen first: ordered out while in it, AppKit keeps its Space, and
+// the user was left on an empty black one.
+void hideWindowToTray(QWindow *window);
+
 // A GNOME/GTK decoration layout — "appmenu:minimize,close", "close:", ":" — read
 // into the buttons this window draws. Anything else in it (appmenu, icon, menu,
 // spacer) is not a button we have and is dropped, and a name given twice is kept
@@ -96,14 +107,19 @@ public:
     // false everywhere else, so the caller can decide what to do instead.
     Q_INVOKABLE bool showWindowMenu(QObject *window);
 
-    // bringWindowForward(), for the QML.
+    // bringWindowForward(), minimizeWindow() and hideWindowToTray(), for the QML.
     Q_INVOKABLE void bringToFront(QObject *window);
+    Q_INVOKABLE void minimize(QObject *window);
+    Q_INVOKABLE void hideToTray(QObject *window);
 
     // For tests: apply a setting as if the portal had just reported it.
     void applySetting(const QString &ns, const QString &key, const QVariant &value);
 
 signals:
     void changed();
+    // Linux: a tray host registered after start, so a tray icon made before it
+    // should be made again. See watchTrayHost().
+    void trayHostAppeared();
 
 private:
     // The org.gnome.desktop.wm.preferences keys; whether one changed anything.

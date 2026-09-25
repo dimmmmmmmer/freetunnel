@@ -86,6 +86,9 @@ target_link_libraries(ft_desktop PUBLIC Qt6::Core Qt6::Gui)
 if(UNIX AND NOT APPLE)
     target_sources(ft_desktop PRIVATE ../src/app/DesktopChromeLinux.cpp ../src/app/DesktopChromeLinux.h)
     target_link_libraries(ft_desktop PUBLIC Qt6::DBus xcb)
+elseif(APPLE)
+    target_sources(ft_desktop PRIVATE ../src/app/DesktopChromeMac.mm ../src/app/DesktopChromeMac.h)
+    target_link_libraries(ft_desktop PUBLIC "-framework AppKit")
 endif()
 # Test-only. Main.qml uses Qt.labs.platform for the tray icon, which needs either
 # a native implementation or Qt Widgets to fall back to. Under QT_QPA_PLATFORM=

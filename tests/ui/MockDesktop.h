@@ -35,12 +35,17 @@ public:
 
     Q_INVOKABLE bool showWindowMenu(QObject *) { ++menuRequests; return false; }
     Q_INVOKABLE void bringToFront(QObject *) { ++bringRequests; }
+    Q_INVOKABLE void minimize(QObject *) { ++minimizeRequests; }
+    Q_INVOKABLE void hideToTray(QObject *) { ++hideRequests; }
 
     int menuRequests = 0;
     int bringRequests = 0;
+    int minimizeRequests = 0;
+    int hideRequests = 0;
 
 signals:
     void changed();
+    void trayHostAppeared();
 
 private:
     // The defaults the window had before any desktop said otherwise.

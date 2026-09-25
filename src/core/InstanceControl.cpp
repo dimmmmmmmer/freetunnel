@@ -243,6 +243,18 @@ bool pipePeerIsSameUser(HANDLE pipe, bool weAreTheServer)
     return !ours.isEmpty() && ours == theirs;
 }
 
+// This process was started by the user — from Explorer, or by a browser for a
+// tt:// link — and so may set the foreground window. The running instance, about
+// to be asked to bring its window forward, may not: Windows refuses
+// SetForegroundWindow to a process that did not get the last input and only
+// flashes its taskbar button. Pass the right on, to that process alone.
+void letPipeServerTakeForeground(HANDLE pipe)
+{
+    ULONG serverPid = 0;
+    if (::GetNamedPipeServerProcessId(pipe, &serverPid) != 0 && serverPid != 0)
+        ::AllowSetForegroundWindow(static_cast<DWORD>(serverPid));
+}
+
 } // namespace
 #endif
 
@@ -311,6 +323,9 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     if (!localSocketPeerIsSameUser(&probe, SocketEnd::WeConnected))
         return false;
 
+#if defined(Q_OS_WIN)
+    letPipeServerTakeForeground(reinterpret_cast<HANDLE>(probe.socketDescriptor()));
+#endif
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
     const QByteArray msg = formatInstanceMessage(token, payload);
     if (probe.write(msg) != msg.size())
