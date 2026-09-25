@@ -215,10 +215,11 @@ QString githubApiUrl(const QString &path)
 
 // What went wrong with a reply, in words. The transfer timeout aborts a stalled
 // reply, and Qt calls that "Operation canceled", which reads as if the user had
-// cancelled something.
+// cancelled something, or "Operation timed out" (the macOS runners' Qt says so).
 QString replyError(const QNetworkReply *reply)
 {
-    return reply->error() == QNetworkReply::OperationCanceledError
+    const QNetworkReply::NetworkError error = reply->error();
+    return error == QNetworkReply::OperationCanceledError || error == QNetworkReply::TimeoutError
             ? UpdateChecker::tr("the server stopped responding")
             : reply->errorString();
 }
