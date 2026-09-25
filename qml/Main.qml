@@ -159,6 +159,13 @@ Window {
             }
             Platform.MenuSeparator {}
             // Configs listed inline; the active one carries a checkmark.
+            //
+            // Choosing the one already ticked turns it on or off, as the user
+            // expects of it; choosing another switches to that one, reconnecting
+            // if connected. Either way the tick is put back on its binding: the
+            // menu flips a checkable item's tick by itself on a click, which broke
+            // the binding and left the active config unticked while nothing else
+            // changed.
             Instantiator {
                 model: backend.configs
                 delegate: Platform.MenuItem {
@@ -167,7 +174,13 @@ Window {
                     text: modelData
                     checkable: true
                     checked: index === backend.activeIndex
-                    onTriggered: backend.selectConfig(index)
+                    onTriggered: {
+                        if (index === backend.activeIndex)
+                            backend.toggle()
+                        else
+                            backend.selectConfig(index)
+                        checked = Qt.binding(() => index === backend.activeIndex)
+                    }
                 }
                 onObjectAdded: (i, obj) => tray.menu.insertItem(i + 3, obj)
                 onObjectRemoved: (i, obj) => tray.menu.removeItem(obj)

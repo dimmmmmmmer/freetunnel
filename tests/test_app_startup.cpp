@@ -14,6 +14,7 @@
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QSettings>
+#include <QWindow>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTranslator>
@@ -37,6 +38,7 @@ private slots:
     void applyLanguageLoadsRussian();
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
+    void aSecondLaunchBringsTheWindowBack();
     void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
@@ -355,6 +357,28 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, 10000);
     QCOMPARE(imports.count(), 1); // still one — connect is not an import
     QCOMPARE(errors.at(0).at(0).toString(), Backend::tr("Select a config first"));
+}
+
+// A plain second launch sends "focus": the user asking for the window, from
+// another process. A window our close button minimised has to come back — a
+// raise alone left it minimised.
+void TestAppStartup::aSecondLaunchBringsTheWindowBack()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("focus"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    freetunnel::wireInstanceServer(&server, backend, &window, QStringLiteral("tok"));
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), QStringLiteral("focus")));
+    QTRY_VERIFY_WITH_TIMEOUT(!(window.windowStates() & Qt::WindowMinimized), 10000);
+    QVERIFY(window.isVisible());
 }
 
 // A peer whose first bytes are slow to arrive must still be heard. The listener

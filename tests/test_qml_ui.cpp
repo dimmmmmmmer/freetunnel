@@ -7,6 +7,7 @@
 #include <QStyleHints>
 #include <QWindow>
 #include <QtGui/private/qguiapplication_p.h>
+#include <qpa/qplatformsystemtrayicon.h>
 #include <qpa/qplatformtheme.h>
 #include <qpa/qwindowsysteminterface.h>
 #include <QQmlComponent>
@@ -49,6 +50,8 @@ private slots:
     void aTitleBarPressIsNotYetAMove();
     void theDesktopDecidesDarkOnlyWhenQtCannot();
     void showFreeTunnelInTheTrayMenuBringsTheWindowForward();
+    void doubleClickingTheTrayIconBringsTheWindowForward();
+    void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
     void aMinimisedWindowIsBroughtBack();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
@@ -931,6 +934,73 @@ void TestQmlUi::showFreeTunnelInTheTrayMenuBringsTheWindowForward()
     const int before = m_desktop.bringRequests;
     QVERIFY(QMetaObject::invokeMethod(show, "triggered"));
     QCOMPARE(m_desktop.bringRequests, before + 1);
+    delete root;
+}
+
+// The tray icon's own gesture for the same request. Not on macOS, where the icon
+// only opens its menu — see the comment on the tray's onActivated.
+void TestQmlUi::doubleClickingTheTrayIconBringsTheWindowForward()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QObject *tray = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(tray);
+    const int before = m_desktop.bringRequests;
+    QVERIFY(QMetaObject::invokeMethod(tray, "activated",
+                                      Q_ARG(QPlatformSystemTrayIcon::ActivationReason,
+                                            QPlatformSystemTrayIcon::DoubleClick)));
+#ifdef Q_OS_MACOS
+    QCOMPARE(m_desktop.bringRequests, before);
+#else
+    QCOMPARE(m_desktop.bringRequests, before + 1);
+#endif
+    delete root;
+}
+
+// The configs in the tray menu, driven the way the menu drives them: it flips a
+// checkable item's tick itself, then reports the click. Choosing the ticked one
+// used to clear its tick and do nothing else.
+void TestQmlUi::theTickedConfigInTheTrayTurnsTheConnectionOnAndOff()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    const auto item = [root](const QString &text) -> QObject * {
+        const auto all = root->findChildren<QObject *>();
+        for (QObject *o : all) {
+            if (o->property("text").toString() == text && o->property("checkable").toBool())
+                return o;
+        }
+        return nullptr;
+    };
+    const auto click = [](QObject *menuItem) {
+        menuItem->setProperty("checked", !menuItem->property("checked").toBool());
+        return QMetaObject::invokeMethod(menuItem, "triggered");
+    };
+    QObject *active = item(QStringLiteral("Test Config"));
+    QObject *other = item(QStringLiteral("Backup"));
+    QVERIFY(active && other);
+    QCOMPARE(m_backend.property("activeIndex").toInt(), 0);
+    QVERIFY(active->property("checked").toBool());
+
+    m_backend.setConnected(true);
+    const int toggles = m_backend.toggleCount();
+    QVERIFY(click(active));
+    QCOMPARE(m_backend.toggleCount(), toggles + 1); // off
+    QVERIFY(!m_backend.property("connected").toBool());
+    QVERIFY2(active->property("checked").toBool(), "the active config keeps its tick");
+
+    QVERIFY(click(active));
+    QCOMPARE(m_backend.toggleCount(), toggles + 2); // and on again
+
+    // Another config is switched to, not toggled, and the tick follows it.
+    QVERIFY(click(other));
+    QCOMPARE(m_backend.toggleCount(), toggles + 2);
+    QCOMPARE(m_backend.property("activeIndex").toInt(), 1);
+    QVERIFY(other->property("checked").toBool());
+    QVERIFY(!active->property("checked").toBool());
+
+    m_backend.selectConfig(0);
+    m_backend.setConnected(false);
     delete root;
 }
 
