@@ -40,7 +40,10 @@ compare link at the bottom of its release notes.
   resized.** They stayed open, away from what they belong to.
 - **Updates in Settings**
   - The download arrow tipped onto its side under the pointer, and the retry
-    arrow turned against its own direction. They stay upright now.
+    arrow turned against its own direction. Now the download arrow, under the
+    pointer, bends round clockwise into ↻; clicked, that ↻ turns while the update
+    downloads, and if the pointer leaves without a click it straightens back into
+    ↓. The retry arrow leans the way it goes.
   - Once an update was downloaded, the arrow and the line beside it both opened
     the release web page. After the download they offer nothing more: the
     installer, the disk image or the folder with the file has been opened. On
@@ -54,8 +57,8 @@ compare link at the bottom of its release notes.
     or the same percentage for many minutes, and nothing in the row could be
     clicked meanwhile. It now gives up after 30 seconds without progress, and
     says the server stopped responding.
-  - While checking or downloading, the "…" beside the line pulses instead of
-    standing still.
+  - While checking or downloading, the arrow turns. A "…" stood beside the line
+    instead, and it did not move whether the download did or not.
   - On Windows, and when FreeTunnel runs as an AppImage, installing an update
     closes FreeTunnel, and the VPN goes down with it. The line offering the
     update now says so.

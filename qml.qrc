@@ -18,5 +18,6 @@
     <file alias="components/SectionLabel.qml">qml/components/SectionLabel.qml</file>
     <file alias="components/Sep.qml">qml/components/Sep.qml</file>
     <file alias="components/WindowControls.qml">qml/components/WindowControls.qml</file>
+    <file alias="components/UpdateArrow.qml">qml/components/UpdateArrow.qml</file>
   </qresource>
 </RCC>
