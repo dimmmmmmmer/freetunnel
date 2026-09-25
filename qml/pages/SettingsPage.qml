@@ -262,40 +262,47 @@ Item {
                             visible: backend.updateState === "current"
                             text: "✓"; font.pixelSize: 14; color: theme.success
                         }
-                        // Breathes while it works, at the pace of Home's connecting
-                        // pulse: a still "…" beside a percentage that had stopped
-                        // moving looked the same as one that was just slow.
-                        Text {
-                            id: updBusy
-                            objectName: "updateBusy"
-                            visible: backend.updateState === "checking"
-                                   || backend.updateState === "downloading"
-                            text: "…"; font.pixelSize: 14; color: theme.textDim
-                            SequentialAnimation on opacity {
-                                running: updBusy.visible; loops: Animation.Infinite; alwaysRunToEnd: true
-                                NumberAnimation { to: 0.25; duration: 750; easing.type: Easing.InOutSine }
-                                NumberAnimation { to: 1.0; duration: 750; easing.type: Easing.InOutSine }
-                            }
-                        }
-                        Text {
+                        // One arrow for the whole flow. ↓ offers the download: under
+                        // the pointer it bends round into ↻, and straightens again if
+                        // the pointer leaves without a click. Clicked, it stays ↻ and
+                        // turns while the update comes down, as it does during a
+                        // check. After a failure ↻ offers to try again, and ↗ opens
+                        // the page of a release with nothing for this platform.
+                        // The hit area stays where it is: a MouseArea inside a moving
+                        // glyph left and re-entered it under a pointer held still.
+                        Item {
                             id: updIcon
                             objectName: "updateIcon"
-                            visible: backend.updateState === "available"
-                                   || backend.updateState === "error"
-                            // Download vs retry are different offers and must not
-                            // look identical: a failed CHECK used to show the same
-                            // glyph as "a new version is waiting for you", which
-                            // reads as an update that does not exist. ↗ where the
-                            // release has nothing for this platform: its page.
-                            text: backend.updateState !== "error" ? "↓"
-                                  : backend.updateErrorOpensPage ? "↗" : "↻"
-                            font.pixelSize: 17
-                            // Only a colour change on hover, like the line beside it.
-                            // It used to turn -30°, which tipped ↓ onto its side and
-                            // turned ↻ against its own arrow.
-                            color: updIconMa.containsMouse ? theme.text : theme.accent
+                            readonly property bool busy: backend.updateState === "checking"
+                                                         || backend.updateState === "downloading"
+                            // What a click does, which is what the arrow shows.
+                            readonly property string offer: backend.updateState === "available" ? "download"
+                                  : backend.updateState === "error" ? (backend.updateErrorOpensPage ? "page" : "retry")
+                                  : busy ? "busy" : ""
+                            visible: offer !== ""
+                            implicitWidth: 20; implicitHeight: 20
+                            UpdateArrow {
+                                objectName: "updateArrow"
+                                anchors.fill: parent
+                                theme: settingsRoot.theme
+                                visible: updIcon.offer !== "page"
+                                bend: updIcon.offer === "download" && !updIconMa.containsMouse ? 0 : 1
+                                Behavior on bend { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+                                // Retry leans a little the way it goes.
+                                turn: updIcon.offer === "retry" && updIconMa.containsMouse ? 45 : 0
+                                Behavior on turn { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                                spinning: updIcon.busy
+                                color: updIconMa.containsMouse ? theme.text : theme.accent
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                visible: updIcon.offer === "page"
+                                text: "↗"; font.pixelSize: 17
+                                color: updIconMa.containsMouse ? theme.text : theme.accent
+                            }
                             MouseArea { id: updIconMa; anchors.fill: parent; anchors.margins: -6
-                                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        hoverEnabled: true; enabled: !updIcon.busy
+                                        cursorShape: Qt.PointingHandCursor
                                         onClicked: backend.openLatestRelease() }
                         }
                         Text {

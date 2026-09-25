@@ -7,6 +7,10 @@
 
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLineF>
 #include <QRegularExpression>
 #include <QPointer>
 #include <QScopeGuard>
@@ -119,8 +123,9 @@ private slots:
     void aSecondConfirmQueuesInsteadOfReplacingTheLiveOne();
     void aHotkeyNeedsAModifierAndBackspaceUnbinds();
     void aConfirmDialogTakesTheKeyboardFromAHotkeyField();
-    void theUpdateIconStaysUprightAndSaysWhatItDoes();
-    void theUpdateBusyMarkMoves();
+    void theUpdateArrowBendsUnderThePointerAndBack();
+    void theUpdateArrowTurnsWhileItWorks();
+    void theUpdateArrowBendsFromDownIntoAClockwiseCircle();
     void theConnectingLogoPulses();
     void onlyTheLogoConnects();
     void homeLeadsStraightToTheAddMenu();
@@ -2766,10 +2771,12 @@ constexpr int kHoverSettles = 300;
 
 } // namespace
 
-// Hovered, the update icon turned -30°: ↓ lay on its side, and ↻ turned against
-// its own arrow. Its glyph is also its offer: ↓ downloads, ↻ tries again, and ↗
-// opens the release page where the release has nothing for this platform.
-void TestQmlUi::theUpdateIconStaysUprightAndSaysWhatItDoes()
+// The update arrow is the offer. ↓ downloads, and under the pointer it bends round
+// into ↻, the arrow of the work a click starts; with the pointer gone and no click
+// it is ↓ again. ↻ on its own offers to try again, and leans the way it goes; ↗
+// opens the page of a release with nothing for this platform. The arrow used to
+// turn -30° under the pointer, which tipped ↓ onto its side and ↻ against itself.
+void TestQmlUi::theUpdateArrowBendsUnderThePointerAndBack()
 {
     const auto restore = qScopeGuard([this] {
         m_backend.updateErrorOpensPage = false;
@@ -2780,47 +2787,117 @@ void TestQmlUi::theUpdateIconStaysUprightAndSaysWhatItDoes()
     QQuickWindow window;
     QVERIFY(showInWindow(root, window, 400, 1400));
     auto *icon = root->findChild<QQuickItem *>(QStringLiteral("updateIcon"));
-    QVERIFY(icon);
+    auto *arrow = root->findChild<QQuickItem *>(QStringLiteral("updateArrow"));
+    QVERIFY(icon && arrow);
+    const QPoint away(10, 10);
 
     m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
-    QVERIFY(icon->isVisible());
-    QCOMPARE(icon->property("text").toString(), QStringLiteral("↓"));
+    QCOMPARE(icon->property("offer").toString(), QStringLiteral("download"));
+    QTRY_COMPARE(arrow->property("bend").toReal(), 0.0);
     QTest::mouseMove(&window, centreOf(icon));
-    QTest::qWait(kHoverSettles);
-    QCOMPARE(icon->rotation(), 0.0);
+    QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
+    QTest::mouseMove(&window, away);
+    QTRY_COMPARE(arrow->property("bend").toReal(), 0.0);
 
     m_backend.setUpdate(QStringLiteral("error"), QStringLiteral("Download failed: timed out"));
-    QCOMPARE(icon->property("text").toString(), QStringLiteral("↻"));
-    QTest::qWait(kHoverSettles);
-    QCOMPARE(icon->rotation(), 0.0);
+    QCOMPARE(icon->property("offer").toString(), QStringLiteral("retry"));
+    QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
+    QCOMPARE(arrow->property("turn").toReal(), 0.0);
+    QTest::mouseMove(&window, centreOf(icon));
+    QTRY_VERIFY2(arrow->property("turn").toReal() > 10, "retry did not lean clockwise under the pointer");
+    QTest::mouseMove(&window, away);
 
     m_backend.updateErrorOpensPage = true;
     m_backend.setUpdate(QStringLiteral("error"), QStringLiteral("No installer asset found for this platform"));
-    QCOMPARE(icon->property("text").toString(), QStringLiteral("↗"));
+    QCOMPARE(icon->property("offer").toString(), QStringLiteral("page"));
+    QVERIFY(!arrow->isVisible());
+    QVERIFY(textIn(icon, QStringLiteral("↗")));
     delete root;
 }
 
-// While checking or downloading, the row's only sign of work was a still "…"
-// beside the percentage: a stalled download looked the same as a slow one.
-void TestQmlUi::theUpdateBusyMarkMoves()
+// The arrow's shape itself: straight down at rest, and at full bend most of a
+// circle traced clockwise about the point it spins around, its head at the end.
+void TestQmlUi::theUpdateArrowBendsFromDownIntoAClockwiseCircle()
+{
+    QObject *root = loadPage("components/UpdateArrow.qml");
+    QVERIFY(root);
+    struct Shape {
+        QList<QPointF> shaft, head;
+        QPointF pivot;
+    };
+    const auto shapeAt = [root](qreal bend) {
+        root->setProperty("bend", bend);
+        const QString json = evaluateIn(root, QStringLiteral(
+                "JSON.stringify({ strokes: geometry.strokes.map(l => l.map(p => [p.x, p.y])),"
+                "                 pivot: [geometry.pivot.x, geometry.pivot.y] })")).toString();
+        const QJsonObject g = QJsonDocument::fromJson(json.toUtf8()).object();
+        const auto points = [](const QJsonValue &line) {
+            QList<QPointF> out;
+            for (const QJsonValue &p : line.toArray())
+                out << QPointF(p.toArray().at(0).toDouble(), p.toArray().at(1).toDouble());
+            return out;
+        };
+        const QJsonArray strokes = g.value(QStringLiteral("strokes")).toArray();
+        const QJsonArray pivot = g.value(QStringLiteral("pivot")).toArray();
+        return Shape{points(strokes.at(0)), points(strokes.at(1)),
+                     QPointF(pivot.at(0).toDouble(), pivot.at(1).toDouble())};
+    };
+
+    // ↓: one upright line going down, the head at its foot with both barbs above.
+    Shape down = shapeAt(0);
+    QVERIFY(down.shaft.size() > 2 && down.head.size() == 3);
+    for (const QPointF &p : std::as_const(down.shaft))
+        QVERIFY(qAbs(p.x() - down.shaft.first().x()) < 0.01);
+    QVERIFY(down.shaft.last().y() > down.shaft.first().y());
+    QCOMPARE(down.head.at(1), down.shaft.last());
+    QVERIFY(down.head.at(0).y() < down.head.at(1).y() && down.head.at(2).y() < down.head.at(1).y());
+
+    // ↻: the shaft on one circle about the pivot, winding clockwise on screen (y
+    // grows downward, so a clockwise turn is a positive angle) through most of it.
+    Shape round = shapeAt(1);
+    const qreal radius = QLineF(round.pivot, round.shaft.first()).length();
+    QVERIFY(radius > 3);
+    qreal turned = 0;
+    for (qsizetype i = 0; i + 1 < round.shaft.size(); ++i) {
+        const QPointF a = round.shaft.at(i) - round.pivot;
+        const QPointF b = round.shaft.at(i + 1) - round.pivot;
+        QVERIFY(qAbs(QLineF(round.pivot, round.shaft.at(i)).length() - radius) < 0.01);
+        turned += std::atan2(a.x() * b.y() - a.y() * b.x(), a.x() * b.x() + a.y() * b.y());
+    }
+    QVERIFY2(turned > 4.5, qPrintable(QStringLiteral("turned %1 rad").arg(turned)));
+    QCOMPARE(round.head.at(1), round.shaft.last());
+    delete root;
+}
+
+// While the update comes down, or a check runs, the ↻ turns: a still "…" beside a
+// percentage looked the same whether it moved or had stalled. The pointer leaving
+// does not straighten it then, since the work is under way; and when the work
+// ends it comes round to rest rather than stopping at an angle.
+void TestQmlUi::theUpdateArrowTurnsWhileItWorks()
 {
     const auto restore = qScopeGuard([this] { m_backend.setUpdate(QString(), QString()); });
     QObject *root = loadPage("pages/SettingsPage.qml");
     QVERIFY(root);
     QQuickWindow window;
     QVERIFY(showInWindow(root, window, 400, 1400));
-    auto *busy = root->findChild<QQuickItem *>(QStringLiteral("updateBusy"));
-    QVERIFY(busy);
-    QVERIFY(!busy->isVisible());
+    auto *icon = root->findChild<QQuickItem *>(QStringLiteral("updateIcon"));
+    auto *arrow = root->findChild<QQuickItem *>(QStringLiteral("updateArrow"));
+    QVERIFY(icon && arrow);
+    const auto angle = [arrow] { return arrow->property("spinAngle").toReal(); };
 
-    m_backend.setUpdate(QStringLiteral("downloading"), QStringLiteral("Downloading… 42%"));
-    QVERIFY(busy->isVisible());
-    QVERIFY2(strays(sampled([busy] { return busy->opacity(); }, 900), 1.0, 0.2), "the busy mark stood still");
+    for (const QString &state : {QStringLiteral("downloading"), QStringLiteral("checking")}) {
+        m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+        QTest::mouseMove(&window, centreOf(icon));
+        QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
+        m_backend.setUpdate(state, QStringLiteral("Working… 42%"));
+        QCOMPARE(icon->property("offer").toString(), QStringLiteral("busy"));
+        QTest::mouseMove(&window, QPoint(10, 10));
+        QVERIFY2(strays(sampled(angle, 900), 0.0, 30), qPrintable(state + QStringLiteral(": the arrow stood still")));
+        QCOMPARE(arrow->property("bend").toReal(), 1.0);
 
-    // Done, it comes to rest whole, ready for the next time.
-    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
-    QVERIFY(!busy->isVisible());
-    QTRY_COMPARE(busy->opacity(), 1.0);
+        m_backend.setUpdate(QStringLiteral("error"), QStringLiteral("Download failed"));
+        QTRY_COMPARE(angle(), 0.0);
+    }
     delete root;
 }
 
