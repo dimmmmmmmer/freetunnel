@@ -281,7 +281,8 @@ private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reloadConfigs();
     void persistSettings();
-    void applySplitRules(); // push the active CONFIG's profile rules to the core
+    void applySplitRules(bool warnOfLeak = true); // push the active CONFIG's profile rules to the core
+    void applyProfileEdit(); // persist, apply and announce an edit to the Split page's profile
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
     void startConnectAttempt();   // connectVpn() past its "already busy" check
     void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"

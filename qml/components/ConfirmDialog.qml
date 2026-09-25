@@ -122,6 +122,19 @@ Item {
     // actually reads the dialog.
     property bool armed: false
     Timer { id: armTimer; interval: 400; onTriggered: cd.armed = true }
+    // The same when the keys come back to it from a dialog over it that has just
+    // closed: a Return pressed twice, or held, to answer that one reached this one
+    // at once.
+    onEscapeOwnerChanged: {
+        if (visible && escapeOwner) {
+            armed = false
+            armTimer.restart()
+        }
+    }
+    // And Tab stays in it while it is up. The editor's fields under the dimmed
+    // backdrop are in the tab chain, and typing went into the hidden form.
+    Keys.onTabPressed: function(e) { e.accepted = true }
+    Keys.onBacktabPressed: function(e) { e.accepted = true }
     // Only for the two-button form. The three-button one is the deep-link name
     // collision, where the primary action replaces an existing config with one a
     // link chose — there is no answer safe enough to be the default, so that one

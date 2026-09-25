@@ -23,6 +23,8 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
     }
     PreparedImport out;
     out.fileName = sanitizeFileName(name) + QStringLiteral(".toml");
+    if (!name.isEmpty())
+        out.legacyFileName = legacyConfigBaseName(name) + QStringLiteral(".toml");
     out.tomlContent = deepLinkConfigToToml(*cfg);
     out.skipVerification = cfg->skipVerification;
     return out;

@@ -189,18 +189,53 @@ QString friendlyConnectFailure(const QString &reason)
     return QCoreApplication::translate("Backend", "Couldn't connect to the server: %1").arg(reason);
 }
 
-} // namespace
+// Worded by the helper with a value filled in, so matched by what surrounds the
+// value. Marked here as well, so they stay in the catalogue whatever the helper
+// code does.
+struct HelperTemplate {
+    const char *context;
+    const char *text;
+};
+const HelperTemplate kHelperTemplates[] = {
+        {"QObject", QT_TRANSLATE_NOOP("QObject", "wintun.dll is missing next to FreeTunnel.exe (%1). "
+                                                 "Reinstall from the official installer.")},
+        {"QtTrustTunnelClient", QT_TRANSLATE_NOOP("QtTrustTunnelClient", "Failed parsing config: %1")},
+        {"QtTrustTunnelClient",
+         QT_TRANSLATE_NOOP("QtTrustTunnelClient", "%1 (likely needs sudo/admin privileges)")},
+};
 
-QString Backend::friendlyVpnError(const QString &m) const
+// The helper words some messages itself, and it runs elevated without the
+// user's language, so they arrive in English. This catalogue has them. Empty
+// when @p m is not one of them.
+QString translatedHelperWords(const QString &m)
 {
-    // The helper words some messages itself, and it runs elevated, without the
-    // user's language, so they arrive in English. This catalogue has them.
     const QByteArray source = m.toUtf8();
     for (const char *context : {"QObject", "QtTrustTunnelClient"}) {
         const QString local = QCoreApplication::translate(context, source.constData());
         if (local != m)
             return local;
     }
+    for (const HelperTemplate &t : kHelperTemplates) {
+        const QString text = QString::fromUtf8(t.text);
+        const qsizetype at = text.indexOf(QLatin1String("%1"));
+        const QString before = text.left(at);
+        const QString after = text.mid(at + 2);
+        if (m.size() <= before.size() + after.size() || !m.startsWith(before) || !m.endsWith(after))
+            continue;
+        const QString local = QCoreApplication::translate(t.context, t.text);
+        if (local != text)
+            return local.arg(m.mid(before.size(), m.size() - before.size() - after.size()));
+    }
+    return QString();
+}
+
+} // namespace
+
+QString Backend::friendlyVpnError(const QString &m) const
+{
+    const QString helperWords = translatedHelperWords(m);
+    if (!helperWords.isEmpty())
+        return helperWords;
     static const QLatin1String failedPrefix("Connection failed:");
     if (m.startsWith(failedPrefix, Qt::CaseInsensitive))
         return friendlyConnectFailure(m.mid(failedPrefix.size()).trimmed());

@@ -71,8 +71,10 @@ compare link at the bottom of its release notes.
   one that FreeTunnel could not register, because another program or the desktop
   has it, shows in red.
 - **Config names keep their spaces and punctuation.** "Germany · Frankfurt" used
-  to be listed as "Germany___Frankfurt". Only characters a file name cannot hold
-  are replaced. Configs you already have keep their names.
+  to be listed as "Germany___Frankfurt". Only characters that some system does
+  not allow in a file name, such as / \ : * ? " < > |, are replaced, and
+  characters that draw nothing are left out. Configs you already have keep their
+  names.
 
 ### Fixed
 
@@ -102,7 +104,7 @@ compare link at the bottom of its release notes.
   - A connection the VPN core refused at once could stay on "Connecting…" until
     you clicked.
   - Choosing the ticked config in the tray menu only removed its tick. It now
-    turns the connection off, and on again.
+    turns the connection off, or on when it was off.
   - Double-clicking the logo connected and at once cancelled. It now counts as
     one click.
   - After deleting the active config, the next start could make a different
@@ -111,24 +113,24 @@ compare link at the bottom of its release notes.
     and then blamed the administrator prompt. It now says wintun.dll is missing,
     before asking for administrator rights.
 - **Tray and window**
-  - Linux: clicking the tray icon did nothing; only «Show FreeTunnel» in its menu
-    worked. A click on KDE, or a double-click on GNOME, now brings the window
-    back.
+  - Linux: clicking the tray icon did nothing. A click on KDE, or a double-click
+    on GNOME, now brings the window back.
   - Linux: when the tray came up after FreeTunnel, as a panel can at login,
     there was no tray icon for the whole session, and the window's close button
     quit the app. The icon now appears once the tray does.
-  - Config names in the tray menu show as typed. On Linux an underscore went
-    missing, and on every system an "&" could.
+  - Linux: the tray menu dropped an underscore from config names. An underscore
+    there now shows as a space, because desktops read underscores in menus in
+    ways that no spelling of one gets right everywhere.
   - When something started from the tray failed while the window was hidden,
     the error showed only inside the hidden window, and was gone before you saw
     it. It is also sent as a notification now, and waits in the window until
     you open it.
   - Minimising a maximised window made it come back at normal size. It stays
     maximised.
-  - freetunnel://toggle, connect and disconnect brought the window up each time,
-    taking focus from what you were typing in. They now work without it. A
-    second launch and a tt:// link still bring the window forward.
-  - macOS: «Show FreeTunnel» and a second launch did nothing after ⌘H.
+  - macOS: freetunnel://toggle, connect and disconnect no longer bring back a
+    window hidden in the menu bar.
+  - macOS: «Show FreeTunnel» in the menu-bar menu did nothing after ⌘H or Hide
+    Others.
   - macOS: clicking the Dock icon took a zoomed or full-screen window out of zoom
     or full screen. A tt:// link left a window minimised to the Dock where it
     was, with the question about the import inside it.
@@ -178,13 +180,16 @@ compare link at the bottom of its release notes.
   - Dark theme: the editor's Save button and the selected profile had white text
     on light grey, hard to read and looking disabled.
 - **Russian**
-  - Text cut short at the default window size fits, the built-in profile is
-    «По умолчанию», and the discard question reads «Закрыть без сохранения?» with
-    «Не сохранять» instead of «Отмена» beside «Отменить».
-  - Connection errors, update errors, errors in tt:// links and messages from
-    the VPN helper were in English.
-  - Switching the language now changes everything at once. The keyring warning
-    on Linux stayed in English for a whole session started in Russian.
+  - Text that was cut short at the default window size fits, the built-in
+    profile is «По умолчанию», and the discard question reads «Закрыть без
+    сохранения?» with «Не сохранять» instead of «Отмена» beside «Отменить».
+  - Connection errors, update errors, errors in tt:// links and the VPN helper's
+    own messages were in English. A reason that a server or the VPN core gives
+    is still passed on as it comes.
+  - Switching the language now also changes the keyring warning, the update
+    status and ping times, which kept the old language; a reason in an update
+    error keeps the language it came in. The keyring warning on Linux was in
+    English for a whole session started in Russian.
   - Linux: file dialogs have Russian buttons.
 
 ## 1.2.0

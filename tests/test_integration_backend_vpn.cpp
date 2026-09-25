@@ -13,6 +13,8 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QTcpSocket>
+#include <QTcpServer>
 #include <QTranslator>
 #include <QScopeGuard>
 
@@ -44,7 +46,9 @@ private slots:
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms_data();
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms();
     void aBackendDestroyedMidSessionWithoutPrepareQuitIsSafe();
+    void aMessageTheHelperWordsIsShownInTheUsersLanguage_data();
     void aMessageTheHelperWordsIsShownInTheUsersLanguage();
+    void aChangeWhileTheHelperStartsDoesNotStartItAgain();
     void deletingActiveConfigWhileConnectedTearsDownTunnel();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
@@ -353,7 +357,9 @@ void TestIntegrationBackendVpn::configSwitchSuppressesCoreDisconnectToast()
     // The old session reporting its own end while the switch tears it down.
     server.setTeardownError(QStringLiteral("core disconnected"));
     backend.selectConfig(1);
-    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    // Until the old session reports going down, connected() is still A's: wait
+    // for the second connect, or the check below runs before the switch has.
+    QVERIFY(QTest::qWaitFor([&]() { return server.connectCount() == 2 && backend.connected(); }, 10000));
     QCOMPARE(backend.activeIndex(), 1);
 
     // A QSignalSpy row is the argument LIST, not the argument. Binding it to a
@@ -722,35 +728,104 @@ void TestIntegrationBackendVpn::aBackendDestroyedMidSessionWithoutPrepareQuitIsS
     QTest::qWait(50); // anything it posted on the way out is delivered here
 }
 
+void TestIntegrationBackendVpn::aMessageTheHelperWordsIsShownInTheUsersLanguage_data()
+{
+    // What the helper sends, and the catalogue entry it should be shown as.
+    QTest::addColumn<QString>("sent");
+    QTest::addColumn<QString>("context");
+    QTest::addColumn<QString>("source");
+    QTest::addColumn<QString>("value");
+    const QString warning = QStringLiteral(
+            "The connection is using an unusual number of system resources. The tunnel is being "
+            "kept up because the kill switch is on — reconnect manually when convenient.");
+    QTest::newRow("as worded") << warning << QStringLiteral("QObject") << warning << QString();
+    const QString wintun = QStringLiteral("wintun.dll is missing next to FreeTunnel.exe (%1). "
+                                          "Reinstall from the official installer.");
+    const QString dir = QStringLiteral("C:/Program Files/FreeTunnel");
+    QTest::newRow("with a path in it") << wintun.arg(dir) << QStringLiteral("QObject") << wintun << dir;
+    const QString parse = QStringLiteral("Failed parsing config: %1");
+    const QString reason = QStringLiteral("expected '='");
+    QTest::newRow("from the core") << parse.arg(reason) << QStringLiteral("QtTrustTunnelClient") << parse
+                                   << reason;
+}
+
 // The helper runs elevated, without the user's language, so what it words itself
-// (the kill switch's resource warning, a missing wintun.dll) arrived in English
-// in a Russian window. The GUI's catalogue has those texts.
+// (the kill switch's resource warning, a missing wintun.dll, a config the core
+// cannot read) arrived in English in a Russian window. The GUI's catalogue has
+// those texts, the ones with a value filled in included.
 void TestIntegrationBackendVpn::aMessageTheHelperWordsIsShownInTheUsersLanguage()
 {
+    QFETCH(QString, sent);
+    QFETCH(QString, context);
+    QFETCH(QString, source);
+    QFETCH(QString, value);
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     TestConfigs configs;
     QVERIFY(configs.add(QStringLiteral("helperwords.example")));
     configs.install();
 
-    const char *english = "The connection is using an unusual number of system resources. The tunnel "
-                          "is being kept up because the kill switch is on — reconnect manually when "
-                          "convenient.";
     MockHelperEnv env(QStringLiteral("backend-helperwords-token"));
     QVERIFY(env.start());
-    env.server.refuseConnectsWith(QStringLiteral("helperwords.example"), QString::fromUtf8(english));
+    env.server.refuseConnectsWith(QStringLiteral("helperwords.example"), sent);
 
     QTranslator russian;
     QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
     QCoreApplication::installTranslator(&russian);
     const auto remove = qScopeGuard([&russian] { QCoreApplication::removeTranslator(&russian); });
+    QString shown = QCoreApplication::translate(context.toUtf8().constData(), source.toUtf8().constData());
+    if (!value.isEmpty())
+        shown = shown.arg(value);
+    QVERIFY2(shown != sent, "the catalogue has no Russian for it");
 
     Backend backend;
     QSignalSpy errors(&backend, &Backend::errorOccurred);
     backend.connectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
-    const QString local = QCoreApplication::translate("QObject", english);
-    QVERIFY2(local != QString::fromUtf8(english), "the catalogue has no Russian for it");
-    QCOMPARE(errors.constLast().at(0).toString(), local);
+    QCOMPARE(errors.constLast().at(0).toString(), shown);
+    backend.prepareQuit();
+}
+
+// On a real system the helper starts behind a password prompt, and the connect
+// waits in the client until it answers. Saving a changed config, or picking
+// another, tore that start down and began a new one: the prompt closed and a
+// second opened. A port that accepts and never answers stands in for the prompt.
+void TestIntegrationBackendVpn::aChangeWhileTheHelperStartsDoesNotStartItAgain()
+{
+    QTcpServer silent;
+    QVERIFY(silent.listen(QHostAddress::LocalHost));
+    QList<QTcpSocket *> held;
+    QObject::connect(&silent, &QTcpServer::newConnection, &silent, [&]() {
+        while (silent.hasPendingConnections())
+            held << silent.nextPendingConnection();
+    });
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(silent.serverPort()));
+    qputenv("FT_TEST_HELPER_TOKEN", "unused");
+    qputenv("FT_TEST_HANDSHAKE_MS", "60000");
+    const auto unset = qScopeGuard([] {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+        qunsetenv("FT_TEST_HANDSHAKE_MS");
+    });
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("starting-a")));
+    QVERIFY(configs.add(QStringLiteral("starting-b")));
+    configs.install();
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return held.size() == 1; }, 5000));
+    QVERIFY(backend.connecting());
+
+    QVariantMap edit = backend.configFields(0);
+    edit[QStringLiteral("password")] = QStringLiteral("changed");
+    edit[QStringLiteral("editIndex")] = 0;
+    edit[QStringLiteral("editPath")] = configs.paths.first();
+    QVERIFY(backend.createConfig(edit));
+    backend.selectConfig(1);
+    QTest::qWait(500);
+    QCOMPARE(held.size(), 1); // the one start, still waiting
+    QVERIFY(backend.connecting());
     backend.prepareQuit();
 }
 

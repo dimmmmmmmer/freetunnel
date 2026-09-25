@@ -11,6 +11,10 @@ namespace freetunnel {
 
 struct PreparedImport {
     QString fileName;    // safe target file name (ends with .toml)
+    // The name 1.2.0 gave the same link, which turned every space and punctuation
+    // mark into '_'. A config imported then is still under it, and a link sent
+    // again has to find it there to offer to replace it.
+    QString legacyFileName;
     QString tomlContent; // TOML ready to write to disk
     bool skipVerification = false;
 };

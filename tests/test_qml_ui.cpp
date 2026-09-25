@@ -6,6 +6,7 @@
 #include <QDirIterator>
 #include <QPointer>
 #include <QScopeGuard>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
@@ -57,9 +58,11 @@ private slots:
     void showFreeTunnelInTheTrayMenuBringsTheWindowForward();
     void theTrayIconBringsTheWindowForward_data();
     void theTrayIconBringsTheWindowForward();
+    void theTrayMenuShowsConfigNamesAsTyped_data();
     void theTrayMenuShowsConfigNamesAsTyped();
     void doubleClickingTheLogoTogglesOnce();
     void aToastWaitsForAWindowThatIsAway();
+    void onlyATrayActionsFailureIsNotified();
     void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
     void aMinimisedWindowIsBroughtBack();
     void minimisingKeepsAWindowMaximised();
@@ -69,6 +72,7 @@ private slots:
     void aTrayHostThatAppearsLateGetsAnIcon();
     void theEmptyConfigsPageOffersToAdd();
     void configActionsFollowTheConfigNotTheRow();
+    void theExportDialogOffersTheWholeName();
     void aLongHostnameWrapsInsideTheConfirm();
     void aClickInsideTheConfirmCardDoesNotCancelIt();
     void threeButtonsStayInsideTheConfirmCard();
@@ -84,6 +88,8 @@ private slots:
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
+    void russianFitsAtTheDefaultWidth_data();
+    void russianFitsAtTheDefaultWidth();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -1005,30 +1011,106 @@ void TestQmlUi::theTrayIconBringsTheWindowForward()
     delete root;
 }
 
-// Menus take '&' for the mnemonic marker everywhere, and on Linux the dbusmenu
-// protocol takes '_' as one too, which Qt does not escape: the GNOME host dropped
-// the first underscore of every config name.
+namespace {
+
+// What Qt sends over D-Bus for a menu label: the first '&' that is not the last
+// character becomes dbusmenu's '_' (QDBusMenuItem::convertMnemonic).
+QString dbusLabel(const QString &label)
+{
+    const qsizetype at = label.indexOf(QLatin1Char('&'));
+    if (at < 0 || at == label.size() - 1)
+        return label;
+    QString wire = label;
+    wire[at] = QLatin1Char('_');
+    return wire;
+}
+
+// What GNOME Shell's AppIndicator extension shows for it (dbusMenu.js):
+// label.replace(/_([^_])/, '$1'), the first match only.
+QString gnomeShows(const QString &wire)
+{
+    for (qsizetype i = 0; i + 1 < wire.size(); ++i) {
+        if (wire.at(i) == QLatin1Char('_') && wire.at(i + 1) != QLatin1Char('_'))
+            return wire.left(i) + wire.mid(i + 1);
+    }
+    return wire;
+}
+
+// What KDE shows for it: dbusmenu-qt's swapMnemonicChar('_' to '&'), and then a
+// Qt menu, which hides the mnemonic marker and folds '&&'.
+QString kdeShows(const QString &wire)
+{
+    QString menu;
+    bool mnemonic = false;
+    for (qsizetype i = 0; i < wire.size(); ++i) {
+        const QChar c = wire.at(i);
+        if (c == QLatin1Char('_')) {
+            if (i + 1 < wire.size() && wire.at(i + 1) == QLatin1Char('_')) {
+                menu += c;
+                ++i;
+            } else if (i + 1 < wire.size() && !mnemonic) {
+                mnemonic = true;
+                menu += QLatin1Char('&');
+            }
+        } else if (c == QLatin1Char('&')) {
+            menu += QStringLiteral("&&");
+        } else {
+            menu += c;
+        }
+    }
+    QString shown;
+    for (qsizetype i = 0; i < menu.size(); ++i) {
+        if (menu.at(i) == QLatin1Char('&') && i + 1 < menu.size())
+            ++i;
+        shown += menu.at(i);
+    }
+    return shown;
+}
+
+} // namespace
+
+void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped_data()
+{
+    QTest::addColumn<QString>("name");
+    QTest::addColumn<QString>("linuxShows");
+    QTest::newRow("one underscore") << QStringLiteral("my_vpn") << QStringLiteral("my vpn");
+    // What 1.2.0 made of "My Home VPN". GNOME dropped the first underscore, and
+    // doubling them all showed three where there had been two.
+    QTest::newRow("from 1.2.0") << QStringLiteral("My_Home_VPN") << QStringLiteral("My Home VPN");
+    QTest::newRow("an ampersand") << QStringLiteral("Tom & Jerry") << QStringLiteral("Tom & Jerry");
+    QTest::newRow("two of them") << QStringLiteral("R&D & Ops") << QStringLiteral("R&D & Ops");
+    QTest::newRow("punctuation") << QStringLiteral("Germany · Frankfurt") << QStringLiteral("Germany · Frankfurt");
+}
+
+// Menus read '&' as the mnemonic marker, and on Linux dbusmenu reads '_' too,
+// with the hosts disagreeing on how: GNOME's extension dropped the first
+// underscore of a name, and the fix that doubled every underscore showed extra
+// ones there. The labels are checked through what each host actually displays.
 void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped()
 {
+    QFETCH(QString, name);
+    QFETCH(QString, linuxShows);
     const QStringList saved = m_backend.configs();
     const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
-    m_backend.setConfigs({QStringLiteral("my_vpn"), QStringLiteral("Tom & Jerry")});
+    m_backend.setConfigs({name});
     QObject *root = createMainWindow(m_engine);
     QVERIFY(root);
-    QStringList labels;
+    QString label;
     const auto all = root->findChildren<QObject *>();
     for (QObject *o : all) {
         if (o->property("checkable").toBool() && o->metaObject()->indexOfSignal("triggered()") >= 0)
-            labels << o->property("text").toString();
+            label = o->property("text").toString();
     }
+    QVERIFY(!label.isEmpty());
 #ifdef Q_OS_LINUX
-    QStringList expected = {QStringLiteral("my__vpn"), QStringLiteral("Tom && Jerry")};
+    const QString wire = dbusLabel(label);
+    QCOMPARE(gnomeShows(wire), linuxShows);
+    QCOMPARE(kdeShows(wire), linuxShows);
 #else
-    QStringList expected = {QStringLiteral("my_vpn"), QStringLiteral("Tom && Jerry")};
+    Q_UNUSED(linuxShows)
+    QString expected = name;
+    QCOMPARE(label, expected.replace(QLatin1Char('&'), QStringLiteral("&&")));
 #endif
-    labels.sort();
-    expected.sort();
-    QCOMPARE(labels, expected);
     delete root;
 }
 
@@ -1259,8 +1341,9 @@ void TestQmlUi::minimisingKeepsAWindowMaximised()
     QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
 }
 
-// Ordered out while in full screen, a macOS window leaves its Space behind: the
-// red button used to drop the user on an empty black one.
+// Hiding to the tray hides, full screen or not. Waiting for macOS to finish
+// leaving full screen first, the reason this is not a plain hide(), is AppKit's
+// part and can only be seen on a Mac; under offscreen this takes the plain path.
 void TestQmlUi::hidingAFullScreenWindowLeavesFullScreenFirst()
 {
     QWindow window;
@@ -1268,14 +1351,11 @@ void TestQmlUi::hidingAFullScreenWindowLeavesFullScreenFirst()
     window.setVisible(true); // not show(), which is showNormal() and would undo the next line
     window.setWindowStates(Qt::WindowFullScreen);
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    QTRY_VERIFY(window.windowStates() & Qt::WindowFullScreen);
     freetunnel::hideWindowToTray(&window);
-    // Within a second: hidden on leaving full screen, not by the two-second fallback.
-    QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 1000);
-    QVERIFY(!(window.windowStates() & Qt::WindowFullScreen));
+    QTRY_VERIFY(!window.isVisible());
 
-    // Not in full screen, it simply goes.
-    window.show();
+    window.setWindowStates(Qt::WindowNoState);
+    window.setVisible(true);
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     freetunnel::hideWindowToTray(&window);
     QVERIFY(!window.isVisible());
@@ -1331,6 +1411,37 @@ void TestQmlUi::theMacKeysForCloseAndMinimise()
     QCOMPARE(m_desktop.hideRequests, hides);
     QCOMPARE(m_desktop.minimizeRequests, minimises);
 #endif
+    delete root;
+}
+
+// A connection retrying in the background reports every failed try. Sent as
+// notifications, that was one about every half minute through an outage; only
+// the failure of something started from the tray, with the window away, is.
+void TestQmlUi::onlyATrayActionsFailureIsNotified()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->hide();
+    const auto restore = qScopeGuard([this] { m_backend.setConnecting(false); });
+
+    QVERIFY(!root->property("errorsGoToTray").toBool());
+    emit m_backend.errorOccurred(QStringLiteral("a background retry failed"));
+    QVERIFY(!root->property("errorsGoToTray").toBool());
+
+    QObject *connect = nullptr;
+    for (QObject *o : root->findChildren<QObject *>()) {
+        if (o->property("text").toString() == QStringLiteral("Connect")
+            && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            connect = o;
+    }
+    QVERIFY2(connect, "the tray's «Connect»");
+    QVERIFY(QMetaObject::invokeMethod(connect, "triggered"));
+    QVERIFY2(root->property("errorsGoToTray").toBool(), "its failure is worth saying while away");
+    emit m_backend.errorOccurred(QStringLiteral("the server did not answer"));
+    QVERIFY2(!root->property("errorsGoToTray").toBool(), "and said once");
     delete root;
 }
 
@@ -1421,6 +1532,19 @@ void TestQmlUi::configActionsFollowTheConfigNotTheRow()
     QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
     QCOMPARE(m_backend.lastDeepLinkRow, -1);
     QCOMPARE(m_shell.lastToast(), QStringLiteral("That configuration is no longer there."));
+    delete root;
+}
+
+// A name may hold '#' and '%' now. Glued into a URL, '#' began the fragment and
+// '%' an escape, so "Work #2" was offered as "Work .toml".
+void TestQmlUi::theExportDialogOffersTheWholeName()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("configExportDialog"));
+    QVERIFY(dialog);
+    root->setProperty("exportName", QStringLiteral("Work #2 at 100%fast"));
+    QCOMPARE(dialog->property("selectedFile").toUrl().fileName(), QStringLiteral("Work #2 at 100%fast.toml"));
     delete root;
 }
 
@@ -1528,6 +1652,18 @@ void TestQmlUi::theWindowConfirmOwnsTheKeysOverTheEditorsPrompt()
     QTest::keyClick(window, Qt::Key_Return);
     QVERIFY(!prompt->property("visible").toBool());
     QCOMPARE(discarded.count(), 0); // the edits are still there to decide on
+    // A second Return right after, as from a double press or a held key, does not
+    // answer the question that is underneath: it has only just got the keys back.
+    QTest::keyClick(window, Qt::Key_Return);
+    QCOMPARE(discarded.count(), 0);
+    QTRY_VERIFY(discard->property("armed").toBool());
+
+    // Nor does Tab leave it for the form behind.
+    auto *name = root->findChild<QObject *>(QStringLiteral("nameField"))->property("input").value<QQuickItem *>();
+    QVERIFY(name);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(!name->hasActiveFocus(), "Tab went into the form behind the question");
+    QVERIFY(qobject_cast<QQuickItem *>(discard)->hasActiveFocus());
     delete root;
 }
 
@@ -1586,6 +1722,19 @@ void TestQmlUi::tabMovesThroughTheEditorsFields()
     QTest::keyClick(window, Qt::Key_Tab);
     QVERIFY2(!cert->hasActiveFocus(), "Tab leaves the certificate field too");
     QVERIFY(!cert->property("text").toString().contains(QLatin1Char('\t')));
+
+    // And the field Tab reaches is brought into view: at the default size the
+    // certificate sits below the fold, and typing went in unseen.
+    auto *form = root->findChild<QQuickItem *>(QStringLiteral("editorForm"));
+    QVERIFY(form);
+    nameInput->forceActiveFocus();
+    QCOMPARE(form->property("contentY").toReal(), 0.0);
+    for (int i = 0; i < 20 && !cert->hasActiveFocus(); ++i)
+        QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY(cert->hasActiveFocus());
+    const qreal top = cert->mapToItem(form, QPointF(0, 0)).y();
+    QVERIFY2(top >= 0 && top < form->height(),
+             qPrintable(QStringLiteral("the certificate field is at %1 in a %2 px view").arg(top).arg(form->height())));
     delete root;
 }
 
@@ -1766,6 +1915,13 @@ void TestQmlUi::theThroughVpnNoticeNamesTheConfigAndItsProfile()
     QVERIFY(notice);
     QVERIFY2(shown(notice).contains(QStringLiteral("Test Config")), qPrintable(shown(notice)));
     QVERIFY2(shown(notice).contains(QStringLiteral("Default")), qPrintable(shown(notice)));
+
+    // With no config at all there is none to name. The backend then calls the
+    // active one "No config", which the notice used to name as a config.
+    const QStringList saved = m_backend.configs();
+    m_backend.setConfigs({});
+    QVERIFY2(shown(notice).startsWith(QStringLiteral("Add a rule")), qPrintable(shown(notice)));
+    m_backend.setConfigs(saved);
     delete root;
 }
 
@@ -1801,6 +1957,56 @@ void TestQmlUi::textOnTheAccentIsReadableInTheDarkTheme()
     const QColor fill = m_theme.property("accent").value<QColor>();
     QVERIFY2(contrast(label, fill) >= 4.5,
              qPrintable(QStringLiteral("contrast %1:1").arg(contrast(label, fill), 0, 'f', 1)));
+    delete root;
+}
+
+void TestQmlUi::russianFitsAtTheDefaultWidth_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::newRow("Settings") << QStringLiteral("pages/SettingsPage.qml");
+    QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
+    QTest::newRow("Logs") << QStringLiteral("pages/LogsPage.qml");
+    QTest::newRow("Configs") << QStringLiteral("pages/ConfigsPage.qml");
+    QTest::newRow("config editor") << QStringLiteral("CreateConfigOverlay.qml");
+}
+
+// Russian runs longer than English, and at the default 400 px window labels,
+// links and input hints were cut, among them the "then Enter" that is the only
+// hint that Enter adds a rule. Measured with DejaVu Sans, the widest of the
+// usual Linux fonts and the one this was found with.
+void TestQmlUi::russianFitsAtTheDefaultWidth()
+{
+    QFETCH(QString, page);
+    if (!QFontDatabase::families().contains(QStringLiteral("DejaVu Sans")))
+        QSKIP("DejaVu Sans is not installed");
+    const QFont savedFont = QGuiApplication::font();
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    QGuiApplication::setFont(QFont(QStringLiteral("DejaVu Sans")));
+    m_engine.retranslate();
+    const auto restore = qScopeGuard([this, &russian, savedFont] {
+        QCoreApplication::removeTranslator(&russian);
+        QGuiApplication::setFont(savedFont);
+        m_engine.retranslate();
+    });
+
+    QObject *root = loadPage(page.toUtf8().constData());
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    QStringList cut;
+    const auto texts = root->findChildren<QQuickItem *>();
+    for (QQuickItem *item : texts) {
+        if (!item->inherits("QQuickText") || !item->isVisible())
+            continue;
+        // A path elided in the middle is shortened on purpose, whatever the language.
+        if (item->property("elide").toInt() == Qt::ElideMiddle)
+            continue;
+        if (item->property("truncated").toBool())
+            cut << item->property("text").toString();
+    }
+    QVERIFY2(cut.isEmpty(), qPrintable(QStringLiteral("cut: ") + cut.join(QStringLiteral(" | "))));
     delete root;
 }
 

@@ -120,12 +120,20 @@ Window {
     Shortcut { enabled: win.isMac; sequence: "Ctrl+M"; onActivated: desktop.minimize(win) }
 
     // ---------- system tray ----------
-    // A config name as a menu shows it: as typed. Every platform's menus read '&'
-    // as the mnemonic marker, and on Linux the dbusmenu protocol reads '_' as one
-    // too — Qt passes it through unescaped — so "my_vpn" was listed as "myvpn".
+    // A config name as the tray menu shows it. On Windows and macOS '&' is the
+    // menus' mnemonic marker, so it is doubled. Linux is harder. Qt turns the
+    // first '&' into dbusmenu's '_', and the hosts read '_' differently: KDE drops
+    // every single '_' after the first and wants '__', GNOME's AppIndicator
+    // extension removes only the first '_' before a letter and shows the rest as
+    // they are. No spelling of '_' comes out right on both, so there it is shown
+    // as a space, which is what 1.2.0 had turned into '_' in every name anyway. A
+    // '&' is kept by giving Qt a first '&' of its own to make the mnemonic, which
+    // every host then hides.
     function menuLabel(name) {
-        const escaped = name.replace(/&/g, "&&")
-        return Qt.platform.os === "linux" ? escaped.replace(/_/g, "__") : escaped
+        if (Qt.platform.os !== "linux")
+            return name.replace(/&/g, "&&")
+        const spaced = name.replace(/_/g, " ")
+        return spaced.indexOf("&") >= 0 ? "&" + spaced : spaced
     }
     // The tray icon, made again when a tray host appears after start. Qt decides
     // once, when the icon is made, whether there is a tray on the session bus
@@ -182,7 +190,10 @@ Window {
                           : backend.connecting ? qsTr("Connecting…")
                           : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
                     enabled: backend.configs.length > 0
-                    onTriggered: backend.toggle()
+                    onTriggered: {
+                        win.trayActionWaiting = true
+                        backend.toggle()
+                    }
                 }
                 // Active config + session time on one line (only while connected).
                 Platform.MenuItem {
@@ -207,6 +218,7 @@ Window {
                         checkable: true
                         checked: index === backend.activeIndex
                         onTriggered: {
+                            win.trayActionWaiting = true
                             if (index === backend.activeIndex)
                                 backend.toggle()
                             else
@@ -633,9 +645,21 @@ Window {
         function onErrorOccurred(msg) {
             toast.show(msg)
             // An action started from the tray fails where nobody is looking. The
-            // toast waits for the window (below); the tray says it now.
-            if (!win.onScreen && win.tray && win.tray.available && win.tray.supportsMessages)
+            // toast waits for the window (below); the tray says it now. Only for
+            // that action: a connection retrying in the background reports each
+            // failed try, and a notification for every one of them is noise.
+            if (win.errorsGoToTray && win.tray && win.tray.available && win.tray.supportsMessages)
                 win.tray.showMessage("FreeTunnel", msg)
+            win.trayActionWaiting = false
+        }
+        // The action has come to rest: connected (again, for a switch, which
+        // starts out still connected to the old server) or off.
+        function onStateChanged() {
+            const nowConnected = backend.connected
+            if ((nowConnected && !win.wasConnected)
+                    || (!nowConnected && !backend.connecting && !backend.disconnecting))
+                win.trayActionWaiting = false
+            win.wasConnected = nowConnected
         }
         function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
         function onUpdateChanged() {
@@ -646,6 +670,10 @@ Window {
     // Hidden to the tray or the menu bar, or minimised: a toast drawn now would
     // time out before anyone could read it.
     readonly property bool onScreen: visible && visibility !== Window.Minimized
+    // Something the user started from the tray has yet to succeed or fail.
+    property bool trayActionWaiting: false
+    property bool wasConnected: backend.connected
+    readonly property bool errorsGoToTray: !onScreen && trayActionWaiting
     onOnScreenChanged: {
         if (onScreen && toast.waiting) {
             toast.waiting = false

@@ -33,10 +33,15 @@ QString configEntryMatching(const QStringList &entries, const QString &fileName)
 bool nameMixesScripts(const QString &name);
 
 /// A display name / hostname as a config filename stem: the name as typed, with
-/// only what some file system refuses replaced by '_' (separators, the characters
-/// Windows reserves, control and formatting characters, a leading dot) and a
-/// Windows device name such as "CON" kept from being one.
+/// what some file system refuses replaced by '_' (separators, the characters
+/// Windows reserves, control characters, a leading dot), invisible and
+/// formatting characters dropped, any space written as ' ', and on Windows a
+/// device name such as "CON" kept from being one.
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix = QStringLiteral("imported"));
+
+/// The stem 1.2.0 made of a name: letters, digits, '.', '-' and '_' kept, every
+/// other character '_'. For finding a config it named, never for a new one.
+QString legacyConfigBaseName(const QString &name);
 
 /// Whether two paths name one file: the same path, or two that differ only in
 /// letter case on a file system that folds it (APFS, NTFS).

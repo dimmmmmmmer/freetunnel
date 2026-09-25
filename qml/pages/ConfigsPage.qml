@@ -291,7 +291,9 @@ Item {
         id: tomlSaveDlg; objectName: "configExportDialog"; title: qsTr("Export config")
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
-        selectedFile: "file:" + cfgRoot.exportFileName(cfgRoot.exportName) + ".toml"
+        // Encoded: a name may hold '#' or '%' now, and in a URL '#' starts the
+        // fragment, so "Work #2" was offered as "Work .toml".
+        selectedFile: "file:" + encodeURIComponent(cfgRoot.exportFileName(cfgRoot.exportName) + ".toml")
         onAccepted: cfgRoot.exportToml(tomlSaveDlg.selectedFile.toString())
     }
 }

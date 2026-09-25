@@ -37,9 +37,10 @@ void bringWindowForward(QWindow *window);
 // going, and came back at it.
 void minimizeWindow(QWindow *window);
 
-// Hide the window to the tray (the menu bar on macOS). A full-screen window
-// leaves full screen first: ordered out while in it, AppKit keeps its Space, and
-// the user was left on an empty black one.
+// Hide the window to the tray (the menu bar on macOS). On macOS a full-screen
+// window leaves full screen first, and is hidden once AppKit says it has:
+// ordered out while in it, AppKit keeps its Space, and the user was left on an
+// empty black one.
 void hideWindowToTray(QWindow *window);
 
 // A GNOME/GTK decoration layout — "appmenu:minimize,close", "close:", ":" — read

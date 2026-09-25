@@ -127,13 +127,27 @@ void TestConfigPaths::aNameIsKeptAsTypedUnlessAFileCannotHoldIt_data()
     QTest::newRow("what Windows reserves")
             << QStringLiteral("a/b\\c:d*e?f\"g<h>i|j") << QStringLiteral("a_b_c_d_e_f_g_h_i_j");
     QTest::newRow("control characters") << QStringLiteral("tab\there\nnext") << QStringLiteral("tab_here_next");
-    QTest::newRow("text turned around") << QStringLiteral("abc\u202Etxt.exe") << QStringLiteral("abc_txt.exe");
+    QTest::newRow("text turned around") << QStringLiteral("abc\u202Etxt.exe") << QStringLiteral("abctxt.exe");
+    // Nothing on screen, so nothing in the name: "Work" and an invisible
+    // character would otherwise pass for the user's own "Work".
+    QTest::newRow("a blank") << QStringLiteral("Work\u2800") << QStringLiteral("Work");
+    QTest::newRow("a joiner") << QStringLiteral("Wo\u034Frk") << QStringLiteral("Work");
+    QTest::newRow("beyond the first plane") << QStringLiteral("Work\U000E0020") << QStringLiteral("Work");
+    QTest::newRow("a format character there") << QStringLiteral("Work\U0001D173") << QStringLiteral("Work");
+    QTest::newRow("an emoji's own selector") << QStringLiteral("Love \u2764\uFE0F") << QStringLiteral("Love \u2764");
+    QTest::newRow("another space") << QStringLiteral("My\u00A0Server") << QStringLiteral("My Server");
     QTest::newRow("outer spaces") << QStringLiteral("  padded  ") << QStringLiteral("padded");
     QTest::newRow("hidden file") << QStringLiteral(".hidden") << QStringLiteral("_hidden");
     QTest::newRow("a swept leftover") << QStringLiteral(".connect-x") << QStringLiteral("_connect-x");
+#if defined(Q_OS_WIN)
     QTest::newRow("a device name") << QStringLiteral("CON") << QStringLiteral("CON_");
     QTest::newRow("one with a suffix") << QStringLiteral("con.backup") << QStringLiteral("con_.backup");
     QTest::newRow("a numbered port") << QStringLiteral("COM1") << QStringLiteral("COM1_");
+    QTest::newRow("a superscript port") << QStringLiteral("LPT\u00B3") << QStringLiteral("LPT\u00B3_");
+#else
+    // Windows' device names are ordinary names elsewhere, kept as they are.
+    QTest::newRow("a device name") << QStringLiteral("aux") << QStringLiteral("aux");
+#endif
     QTest::newRow("only looks like one") << QStringLiteral("Company") << QStringLiteral("Company");
 }
 

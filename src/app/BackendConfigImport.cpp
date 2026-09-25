@@ -101,10 +101,18 @@ void Backend::restoreReplacedConfig(const QString &target, const QByteArray &pre
 // name the user's config actually has. Deriving them from the link's casing
 // instead let a link replace a config while its real password survived under the
 // other key, ready to be sent to the link author's server.
+//
+// And under the name 1.2.0 would have given it: it turned spaces into '_', so a
+// config imported then from "My Server" is My_Server.toml, and the same link sent
+// again found nothing to replace and added a second copy.
 QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    return freetunnel::existingConfigPath(base, prepared.fileName);
+    const QString current = freetunnel::existingConfigPath(base, prepared.fileName);
+    if (!current.isEmpty() || prepared.legacyFileName.isEmpty()
+        || prepared.legacyFileName == prepared.fileName)
+        return current;
+    return freetunnel::existingConfigPath(base, prepared.legacyFileName);
 }
 
 bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,

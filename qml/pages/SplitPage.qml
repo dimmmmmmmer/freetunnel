@@ -62,7 +62,7 @@ Item {
                     // what the tunnel follows, and it need not be the one on screen:
                     // "add a rule" under a profile that already had rules left the
                     // user adding rules that could not change anything.
-                    text: backend.activeConfig === ""
+                    text: backend.configs.length === 0
                           ? qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
                           : qsTr("“%1” uses the profile “%2”, which has no rules, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule.")
                                 .arg(backend.activeConfig).arg(splitRoot.profileLabel(backend.activeConfigProfile))

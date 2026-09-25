@@ -199,8 +199,10 @@ void Backend::ensureHotkeysRegistered()
 {
     if (!m_settings.hotkeys_enabled || m_hotkeySuspensions > 0)
         return;
+    // A combo refused as unsafe will be refused again: not worth re-registering
+    // every hotkey, and logging it, each time the window is activated.
     const auto ok = [](QHotkey *hk, const QString &seq) {
-        return seq.trimmed().isEmpty() || (hk && hk->isRegistered());
+        return seq.trimmed().isEmpty() || !isSafeGlobalHotkey(seq) || (hk && hk->isRegistered());
     };
     if (ok(m_hkToggle, m_settings.hotkey_toggle) && ok(m_hkConnect, m_settings.hotkey_connect)
         && ok(m_hkDisconnect, m_settings.hotkey_disconnect))

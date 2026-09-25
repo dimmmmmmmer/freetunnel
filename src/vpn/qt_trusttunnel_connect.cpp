@@ -89,9 +89,9 @@ void QtTrustTunnelClient::connectVpn()
         return;
     if (!privilegeCheckPasses()) {
 #ifndef _WIN32
-        emit vpnError(QStringLiteral("Root permissions are required to initialize VPN (run app with sudo)."));
+        emit vpnError(tr("Root permissions are required to initialize VPN (run app with sudo)."));
 #else
-        emit vpnError(QStringLiteral(
+        emit vpnError(tr(
                 "Administrator privileges are required to initialize VPN. Restart the app as Administrator."));
 #endif
         return;
@@ -120,7 +120,7 @@ void QtTrustTunnelClient::beginConnect(const QString &configToml)
     const bool needsTeardown = st != State::Disconnected && st != State::Error;
     auto startConnect = [this, configToml]() {
         if (!loadConfigFromToml(configToml)) {
-            emit vpnError(QStringLiteral("Failed to load config"));
+            emit vpnError(tr("Failed to load config"));
             return;
         }
         connectVpn();
@@ -258,7 +258,7 @@ bool QtTrustTunnelClient::reloadStoredConfigIfNeeded()
     if (!stored.isEmpty())
         return loadConfigFromToml(stored);
     setState(State::Error);
-    emit vpnError(QStringLiteral("TrustTunnel config is not set"));
+    emit vpnError(tr("TrustTunnel config is not set"));
     return false;
 }
 
@@ -285,7 +285,7 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
         std::lock_guard<std::mutex> lk(m_configMutex);
         if (!m_config.has_value()) {
             setState(State::Error);
-            emit vpnError(QStringLiteral("TrustTunnel config is not set"));
+            emit vpnError(tr("TrustTunnel config is not set"));
             return nullptr;
         }
         applyCoreLogPathToConfigLocked();
@@ -368,7 +368,7 @@ void QtTrustTunnelClient::runAttempt(const AttemptPtr &ctx)
         ctx->monitor = std::make_unique<ag::AutoNetworkMonitor>(ctx->client.get(), ctx->boundIf);
         if (!ctx->monitor->start()) {
             ctx->outcome = ConnectAttempt::Outcome::FatalKeepGoing;
-            ctx->error = QStringLiteral("Failed to start network monitor");
+            ctx->error = tr("Failed to start network monitor");
             retireCore(ctx->client, ctx->monitor);
             return;
         }
@@ -431,7 +431,7 @@ void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHi
 {
     QString msg = qErr;
     if (privilegeHint)
-        msg += QStringLiteral(" (likely needs sudo/admin privileges)");
+        msg = tr("%1 (likely needs sudo/admin privileges)").arg(qErr);
     teardownClient();
     m_stopRequested = true;
     setState(State::Error);

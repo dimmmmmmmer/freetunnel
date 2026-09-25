@@ -667,6 +667,42 @@
         <source>Establishing tunnel...</source>
         <translation>Установка туннеля…</translation>
     </message>
+    <message>
+        <source>Failed parsing config: %1</source>
+        <translation>Не удалось разобрать конфиг: %1</translation>
+    </message>
+    <message>
+        <source>%1 (likely needs sudo/admin privileges)</source>
+        <translation>%1 (вероятно, нужны права администратора)</translation>
+    </message>
+    <message>
+        <source>Empty config</source>
+        <translation>Пустой конфиг</translation>
+    </message>
+    <message>
+        <source>Invalid TrustTunnel config structure</source>
+        <translation>Неверная структура конфига TrustTunnel</translation>
+    </message>
+    <message>
+        <source>Root permissions are required to initialize VPN (run app with sudo).</source>
+        <translation>Для запуска VPN нужны права root (запустите приложение через sudo).</translation>
+    </message>
+    <message>
+        <source>Administrator privileges are required to initialize VPN. Restart the app as Administrator.</source>
+        <translation>Для запуска VPN нужны права администратора. Перезапустите приложение от имени администратора.</translation>
+    </message>
+    <message>
+        <source>Failed to load config</source>
+        <translation>Не удалось загрузить конфиг</translation>
+    </message>
+    <message>
+        <source>TrustTunnel config is not set</source>
+        <translation>Конфиг TrustTunnel не задан</translation>
+    </message>
+    <message>
+        <source>Failed to start network monitor</source>
+        <translation>Не удалось запустить отслеживание сети</translation>
+    </message>
 </context>
 <context>
     <name>SettingsPage</name>
@@ -732,7 +768,7 @@
     </message>
     <message>
         <source>IP or subnet (e.g. 10.0.0.0/8), then Enter</source>
-        <translation>IP или подсеть (например 10.0.0.0/8), затем Enter</translation>
+        <translation>IP или подсеть (10.0.0.0/8), затем Enter</translation>
     </message>
     <message>
         <source>Hotkeys</source>
@@ -847,7 +883,7 @@
     </message>
     <message>
         <source>Recommended for Russia</source>
-        <translation>Для России</translation>
+        <translation>Сайты РФ</translation>
     </message>
     <message>
         <source>Clear all</source>

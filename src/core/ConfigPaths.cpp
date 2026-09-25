@@ -48,27 +48,47 @@ bool nameMixesScripts(const QString &name)
 
 namespace {
 
+// Characters that draw nothing and are not format characters either: the
+// default-ignorable code points, and the braille blank.
+bool drawsNothing(char32_t c)
+{
+    return c == 0x034F || c == 0x115F || c == 0x1160 || c == 0x17B4 || c == 0x17B5
+            || (c >= 0x180B && c <= 0x180F) || c == 0x2800 || c == 0x3164
+            || (c >= 0xFE00 && c <= 0xFE0F) || c == 0xFFA0 || (c >= 0xE0000 && c <= 0xE0FFF);
+}
+
 // What no file name may hold on at least one of the three systems: separators,
-// the characters Windows reserves, and control and formatting characters. The
-// last have no place in a name anyway, and some make one display as something
-// else: U+202E turns the text after it around.
-bool unusableInFileName(QChar c)
+// the characters Windows reserves, control characters and line breaks.
+bool unusableInFileName(char32_t c)
 {
     static const QString reserved = QStringLiteral("/\\:*?\"<>|");
-    if (reserved.contains(c))
+    if (c < 0x80 && reserved.contains(QChar(c)))
         return true;
-    switch (c.category()) {
+    switch (QChar::category(c)) {
     case QChar::Other_Control:
-    case QChar::Other_Format:
     case QChar::Separator_Line:
     case QChar::Separator_Paragraph:
+    case QChar::Other_Surrogate:
         return true;
     default:
         return false;
     }
 }
 
+// What a name is better without: formatting characters, some of which make it
+// display as something else (U+202E turns the text after it around), and
+// characters that draw nothing. Kept, they let a link's "Work" plus an
+// invisible one pass for the user's own "Work", with no question about the name
+// being taken; dropped, it is the same name, and asked about.
+bool invisibleInName(char32_t c)
+{
+    return QChar::category(c) == QChar::Other_Format || drawsNothing(c);
+}
+
+#if defined(Q_OS_WIN)
 // Device names Windows reserves with any extension: "con.toml" cannot be made.
+// Its port numbers include the superscript ones, ¹ ² ³. Only there: on macOS and
+// Linux these are ordinary names, and a config called "aux" is left alone.
 bool reservedOnWindows(const QString &head)
 {
     static const QStringList devices{QStringLiteral("CON"), QStringLiteral("PRN"),
@@ -76,9 +96,13 @@ bool reservedOnWindows(const QString &head)
     const QString upper = head.trimmed().toUpper();
     if (devices.contains(upper))
         return true;
-    return upper.size() == 4 && (upper.startsWith(QLatin1String("COM")) || upper.startsWith(QLatin1String("LPT")))
-            && upper.at(3) >= QLatin1Char('1') && upper.at(3) <= QLatin1Char('9');
+    if (upper.size() != 4 || !(upper.startsWith(QLatin1String("COM")) || upper.startsWith(QLatin1String("LPT"))))
+        return false;
+    const QChar port = upper.at(3);
+    return (port >= QLatin1Char('1') && port <= QLatin1Char('9')) || port == QChar(0x00B9)
+            || port == QChar(0x00B2) || port == QChar(0x00B3);
 }
+#endif
 
 } // namespace
 
@@ -88,17 +112,32 @@ QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefi
     // it keeps the name as typed, spaces and punctuation included. Replacing
     // everything but letters, digits and ".-_" listed the editor's own example,
     // "Germany · Frankfurt", as "Germany___Frankfurt".
+    //
+    // Code point by code point, not UTF-16 unit by unit: half of a character
+    // beyond the first plane is only a surrogate, and slipped through.
     QString safe;
-    for (const QChar &c : name)
-        safe += unusableInFileName(c) ? QChar('_') : c;
+    const QList<uint> points = name.toUcs4();
+    for (const uint point : points) {
+        const auto c = static_cast<char32_t>(point);
+        if (invisibleInName(c))
+            continue;
+        if (unusableInFileName(c))
+            safe += QLatin1Char('_');
+        else if (QChar::category(c) == QChar::Separator_Space)
+            safe += QLatin1Char(' '); // one space, however it was spelled
+        else
+            safe += QString::fromUcs4(&c, 1);
+    }
     safe = safe.trimmed();
     // A leading dot hides the file on macOS and Linux, and ".connect-*" is swept
     // at startup as a leftover.
     for (int i = 0; i < safe.size() && safe.at(i) == QLatin1Char('.'); ++i)
         safe[i] = QLatin1Char('_');
-    const int firstDot = safe.indexOf(QLatin1Char('.'));
+#if defined(Q_OS_WIN)
+    const qsizetype firstDot = safe.indexOf(QLatin1Char('.'));
     if (reservedOnWindows(firstDot < 0 ? safe : safe.left(firstDot)))
         safe.insert(firstDot < 0 ? safe.size() : firstDot, QLatin1Char('_'));
+#endif
     if (safe.isEmpty())
         safe = QStringLiteral("%1-%2").arg(fallbackPrefix).arg(QDateTime::currentSecsSinceEpoch());
     return safe;
@@ -158,6 +197,14 @@ QString existingConfigPath(const QString &dir, const QString &fileName)
     // confirmed means something changed underneath us; fall back to the literal
     // path rather than reporting no collision, which would overwrite blind.
     return QDir(dir).filePath(actual.isEmpty() ? fileName : actual);
+}
+
+QString legacyConfigBaseName(const QString &name)
+{
+    QString stem;
+    for (const QChar &c : name)
+        stem += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
+    return stem;
 }
 
 bool namesTheSameFile(const QString &a, const QString &b)

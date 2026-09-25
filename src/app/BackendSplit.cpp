@@ -44,20 +44,20 @@ bool Backend::addDomain(const QString &domain) {
         return false;
     m_settings.domain_bypass_rules << added;
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
     return true;
 }
 void Backend::removeDomain(int index) {
     if (index < 0 || index >= m_settings.domain_bypass_rules.size()) return;
     m_settings.domain_bypass_rules.removeAt(index);
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
 }
 void Backend::clearDomains() {
     if (m_settings.domain_bypass_rules.isEmpty()) return;
     m_settings.domain_bypass_rules.clear();
     m_settings.profiles[m_settings.active_profile] = m_settings.domain_bypass_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
 }
 
 // ---------- excluded routes (subnets that bypass the tunnel) ----------
@@ -128,7 +128,7 @@ bool Backend::addAppRule(const QString &rule) {
     }
     m_settings.app_rules << norm;
     m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
     return true;
 }
 
@@ -272,14 +272,14 @@ void Backend::removeAppRule(int index) {
     if (index < 0 || index >= m_settings.app_rules.size()) return;
     m_settings.app_rules.removeAt(index);
     m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
 }
 
 void Backend::clearAppRules() {
     if (m_settings.app_rules.isEmpty()) return;
     m_settings.app_rules.clear();
     m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
 }
 
 void Backend::restoreDefaultExcludedRoutes() {
@@ -300,7 +300,7 @@ void Backend::addRecommendedRussia() {
         return;
     m_settings.domain_bypass_rules = rules;
     m_settings.profiles[m_settings.active_profile] = rules;
-    persistSettings(); applySplitRules(); reapplyIfEditingActiveProfile(); emit splitChanged();
+    applyProfileEdit();
 }
 
 // Live-apply a profile edit only when the edited profile is the one the active
@@ -308,6 +308,17 @@ void Backend::addRecommendedRussia() {
 void Backend::reapplyIfEditingActiveProfile() {
     if (m_settings.active_profile == activeConfigProfile())
         reapplyIfConnected();
+}
+
+// A rule added to or taken from the profile on the Split page. What leaks is the
+// active config's profile, and a warning after each rule added to another one
+// read as though the rule just added did not count; the page's standing notice
+// names both whichever profile is shown.
+void Backend::applyProfileEdit() {
+    persistSettings();
+    applySplitRules(/*warnOfLeak=*/m_settings.active_profile == activeConfigProfile());
+    reapplyIfEditingActiveProfile();
+    emit splitChanged();
 }
 
 // ---------- split-tunnel profiles ----------
@@ -406,7 +417,7 @@ bool Backend::selectiveModeWouldLeak() const {
             && !selectiveModeActive();
 }
 
-void Backend::applySplitRules() {
+void Backend::applySplitRules(bool warnOfLeak) {
     const bool on = m_settings.domain_bypass_enabled;
     const QStringList profileDomains = m_settings.profiles.value(activeConfigProfile());
     const QStringList coreDomains = coreBypassRules(profileDomains);
@@ -452,16 +463,13 @@ void Backend::applySplitRules() {
     }
     m_client.setAppRules(appRules);
 
-    // Warned from here rather than from each of the six callers, so no future entry
+    // Warned from here rather than from each of the callers, so no future entry
     // point can forget it. It only fires in the misconfigured state, and every
     // caller is a moment the user just acted (toggled split, edited rules, changed
-    // mode, switched profile, connected), which is exactly when it is useful.
-    //
-    // Only while the Split page is on the profile concerned. What leaks is the
-    // active config's profile, not the one on screen, and a toast after each rule
-    // added to another profile read as though the rule just added did not count.
-    // The page's standing notice names both, whichever profile is shown.
-    if (selectiveModeWouldLeak() && m_settings.active_profile == activeConfigProfile()) {
+    // mode, switched config, connected), which is exactly when it is useful. An
+    // edit to a profile the active config does not use passes warnOfLeak = false
+    // (see applyProfileEdit()).
+    if (warnOfLeak && selectiveModeWouldLeak()) {
         emit errorOccurred(tr("\"Through VPN\" has no rules, so nothing would be routed through "
                               "the tunnel. Keeping the full tunnel until you add a rule."));
     }
@@ -475,10 +483,13 @@ void Backend::reconnectActiveConfig() {
     // when it lands.
     if (m_activePath.isEmpty() || m_pendingReconnect)
         return;
-    if (m_awaitingToml) {
-        // Nothing has reached the helper yet, so read again for the config that
-        // is active now. A second pick made here used to be dropped: the tunnel
-        // came up on the first while every label named the second.
+    // Nothing has reached a running session yet: the password is still being
+    // read, or the connect waits for the helper to start (and for its password
+    // prompt). Read again for the config that is active now; the waiting connect
+    // goes out with it. A second pick made here used to be dropped, the tunnel
+    // coming up on the first while every label named the second, and tearing the
+    // attempt down instead closed the password prompt and opened another.
+    if (m_awaitingToml || (m_connecting && !m_connected && !m_client.helperReady())) {
         logConnectAttempt();
         buildConnectTomlAsync();
         return;

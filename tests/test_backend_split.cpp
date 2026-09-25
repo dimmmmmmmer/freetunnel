@@ -450,16 +450,22 @@ void TestBackendSplit::theLeakWarningPopsUpOnlyOverTheProfileItConcerns()
     backend.addProfile(QStringLiteral("Work"));
     backend.selectProfile(QStringLiteral("Work"));
     QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    // Anything that is not an edit of another profile says it, whichever profile
+    // the page shows: here a change of mode. A connect takes the same path.
     backend.setVpnMode(QStringLiteral("selective"));
     QVERIFY(backend.selectiveModeWouldLeak()); // the config still uses Default, which is empty
-    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
-    QCOMPARE(errors.count(), 0);
-
-    // Over the profile concerned, it is said.
-    backend.selectProfile(QStringLiteral("Default"));
-    backend.setVpnMode(QStringLiteral("general"));
-    backend.setVpnMode(QStringLiteral("selective"));
     QCOMPARE(errors.count(), 1);
+
+    // A rule added to Work, which the config does not use, does not.
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QCOMPARE(errors.count(), 1);
+
+    // Over the profile concerned, an edit says it too.
+    backend.selectProfile(QStringLiteral("Default"));
+    backend.addRecommendedRussia();
+    backend.clearDomains();
+    QCOMPARE(errors.count(), 2);
     backend.setVpnMode(QStringLiteral("general"));
 }
 

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Effects
 // See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
@@ -98,8 +99,32 @@ Item {
                    text: cform.editing ? qsTr("Edit config") : qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
         }
         Flickable {
+            id: formFlick
+            objectName: "editorForm"
             anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
             anchors.leftMargin: 18; anchors.rightMargin: 18; contentWidth: width; contentHeight: fcol.height; clip: true
+            // Keep the field that has the keyboard in view. Tab reaches fields below
+            // the fold, and typing went into one nobody could see.
+            // Room is left above it for the field's label.
+            function reveal(item) {
+                const top = item.mapToItem(fcol, 0, 0).y
+                if (top - 28 < contentY)
+                    contentY = Math.max(0, top - 28)
+                else if (top + item.height > contentY + height)
+                    contentY = Math.max(0, Math.min(contentHeight - height, top + item.height - height + 8))
+            }
+            Connections {
+                target: createRoot.Window.window
+                function onActiveFocusItemChanged() {
+                    let item = createRoot.Window.activeFocusItem
+                    for (let up = item; up; up = up.parent) {
+                        if (up === fcol) {
+                            formFlick.reveal(item)
+                            return
+                        }
+                    }
+                }
+            }
             Column {
                 id: fcol; width: parent.width; spacing: 10
                 Field { id: fName; objectName: "nameField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
