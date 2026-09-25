@@ -193,6 +193,14 @@ QString friendlyConnectFailure(const QString &reason)
 
 QString Backend::friendlyVpnError(const QString &m) const
 {
+    // The helper words some messages itself, and it runs elevated, without the
+    // user's language, so they arrive in English. This catalogue has them.
+    const QByteArray source = m.toUtf8();
+    for (const char *context : {"QObject", "QtTrustTunnelClient"}) {
+        const QString local = QCoreApplication::translate(context, source.constData());
+        if (local != m)
+            return local;
+    }
     static const QLatin1String failedPrefix("Connection failed:");
     if (m.startsWith(failedPrefix, Qt::CaseInsensitive))
         return friendlyConnectFailure(m.mid(failedPrefix.size()).trimmed());

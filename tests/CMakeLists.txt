@@ -567,6 +567,7 @@ set(BACKEND_TEST_SOURCES
     test_integration_backend_vpn.cpp
     helper_ipc_mock_server.cpp
     helper_ipc_mock_server.h
+    ../i18n/i18n.qrc
     ../src/app/Backend.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp

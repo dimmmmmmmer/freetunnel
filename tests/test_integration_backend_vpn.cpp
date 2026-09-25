@@ -13,6 +13,8 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QTranslator>
+#include <QScopeGuard>
 
 #include "app/Backend.h"
 #include "app/LogModel.h"
@@ -42,6 +44,7 @@ private slots:
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms_data();
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms();
     void aBackendDestroyedMidSessionWithoutPrepareQuitIsSafe();
+    void aMessageTheHelperWordsIsShownInTheUsersLanguage();
     void deletingActiveConfigWhileConnectedTearsDownTunnel();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
@@ -717,6 +720,38 @@ void TestIntegrationBackendVpn::aBackendDestroyedMidSessionWithoutPrepareQuitIsS
         QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
     }
     QTest::qWait(50); // anything it posted on the way out is delivered here
+}
+
+// The helper runs elevated, without the user's language, so what it words itself
+// (the kill switch's resource warning, a missing wintun.dll) arrived in English
+// in a Russian window. The GUI's catalogue has those texts.
+void TestIntegrationBackendVpn::aMessageTheHelperWordsIsShownInTheUsersLanguage()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("helperwords.example")));
+    configs.install();
+
+    const char *english = "The connection is using an unusual number of system resources. The tunnel "
+                          "is being kept up because the kill switch is on — reconnect manually when "
+                          "convenient.";
+    MockHelperEnv env(QStringLiteral("backend-helperwords-token"));
+    QVERIFY(env.start());
+    env.server.refuseConnectsWith(QStringLiteral("helperwords.example"), QString::fromUtf8(english));
+
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    const auto remove = qScopeGuard([&russian] { QCoreApplication::removeTranslator(&russian); });
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    const QString local = QCoreApplication::translate("QObject", english);
+    QVERIFY2(local != QString::fromUtf8(english), "the catalogue has no Russian for it");
+    QCOMPARE(errors.constLast().at(0).toString(), local);
+    backend.prepareQuit();
 }
 
 void TestIntegrationBackendVpn::deletingActiveConfigWhileConnectedTearsDownTunnel()
