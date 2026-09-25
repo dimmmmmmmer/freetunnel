@@ -1011,6 +1011,7 @@ void TestQmlUi::theTrayIconBringsTheWindowForward()
     delete root;
 }
 
+#ifdef Q_OS_LINUX
 namespace {
 
 // What Qt sends over D-Bus for a menu label: the first '&' that is not the last
@@ -1068,6 +1069,7 @@ QString kdeShows(const QString &wire)
 }
 
 } // namespace
+#endif
 
 void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped_data()
 {
