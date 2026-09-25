@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include <QDirIterator>
+#include <QScopeGuard>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
@@ -50,7 +51,11 @@ private slots:
     void aTitleBarPressIsNotYetAMove();
     void theDesktopDecidesDarkOnlyWhenQtCannot();
     void showFreeTunnelInTheTrayMenuBringsTheWindowForward();
-    void doubleClickingTheTrayIconBringsTheWindowForward();
+    void theTrayIconBringsTheWindowForward_data();
+    void theTrayIconBringsTheWindowForward();
+    void theTrayMenuShowsConfigNamesAsTyped();
+    void doubleClickingTheLogoTogglesOnce();
+    void aToastWaitsForAWindowThatIsAway();
     void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
     void aMinimisedWindowIsBroughtBack();
     void everyComponentLoadsOnItsOwn();
@@ -937,23 +942,114 @@ void TestQmlUi::showFreeTunnelInTheTrayMenuBringsTheWindowForward()
     delete root;
 }
 
-// The tray icon's own gesture for the same request. Not on macOS, where the icon
-// only opens its menu — see the comment on the tray's onActivated.
-void TestQmlUi::doubleClickingTheTrayIconBringsTheWindowForward()
+void TestQmlUi::theTrayIconBringsTheWindowForward_data()
 {
+    QTest::addColumn<int>("reason");
+    QTest::addColumn<bool>("brings");
+    // Trigger is what every Linux host sends — a left click on KDE, a
+    // double-click on GNOME — and a left click on Windows.
+    QTest::newRow("click") << int(QPlatformSystemTrayIcon::Trigger) << true;
+    QTest::newRow("double-click") << int(QPlatformSystemTrayIcon::DoubleClick) << true;
+    QTest::newRow("menu") << int(QPlatformSystemTrayIcon::Context) << false;
+    QTest::newRow("middle click") << int(QPlatformSystemTrayIcon::MiddleClick) << false;
+}
+
+// The tray icon's own gesture for the same request. Not on macOS, where the icon
+// only opens its menu — see the comment on the tray's onActivated. On Linux the
+// handler used to wait for a DoubleClick that no StatusNotifierItem host sends.
+void TestQmlUi::theTrayIconBringsTheWindowForward()
+{
+    QFETCH(int, reason);
+    QFETCH(bool, brings);
     QObject *root = createMainWindow(m_engine);
     QVERIFY(root);
     QObject *tray = root->findChild<QObject *>(QStringLiteral("systemTray"));
     QVERIFY(tray);
     const int before = m_desktop.bringRequests;
-    QVERIFY(QMetaObject::invokeMethod(tray, "activated",
-                                      Q_ARG(QPlatformSystemTrayIcon::ActivationReason,
-                                            QPlatformSystemTrayIcon::DoubleClick)));
+    QVERIFY(QMetaObject::invokeMethod(
+            tray, "activated",
+            Q_ARG(QPlatformSystemTrayIcon::ActivationReason,
+                  static_cast<QPlatformSystemTrayIcon::ActivationReason>(reason))));
 #ifdef Q_OS_MACOS
-    QCOMPARE(m_desktop.bringRequests, before);
-#else
-    QCOMPARE(m_desktop.bringRequests, before + 1);
+    brings = false;
 #endif
+    QCOMPARE(m_desktop.bringRequests, before + (brings ? 1 : 0));
+    delete root;
+}
+
+// Menus take '&' for the mnemonic marker everywhere, and on Linux the dbusmenu
+// protocol takes '_' as one too, which Qt does not escape: the GNOME host dropped
+// the first underscore of every config name.
+void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({QStringLiteral("my_vpn"), QStringLiteral("Tom & Jerry")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QStringList labels;
+    const auto all = root->findChildren<QObject *>();
+    for (QObject *o : all) {
+        if (o->property("checkable").toBool() && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            labels << o->property("text").toString();
+    }
+#ifdef Q_OS_LINUX
+    QStringList expected = {QStringLiteral("my__vpn"), QStringLiteral("Tom && Jerry")};
+#else
+    QStringList expected = {QStringLiteral("my_vpn"), QStringLiteral("Tom && Jerry")};
+#endif
+    labels.sort();
+    expected.sort();
+    QCOMPARE(labels, expected);
+    delete root;
+}
+
+// People double-click whatever looks like an icon. Each click of the pair was a
+// toggle, so a double-click from Off connected and at once cancelled.
+void TestQmlUi::doubleClickingTheLogoTogglesOnce()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *logo = root->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QVERIFY2(logo && logo->isVisible(), "the logo on the Connection page");
+    const QPoint at = logo->mapToScene(QPointF(logo->width() / 2.0, logo->height() / 2.0)).toPoint();
+
+    const int before = m_backend.toggleCount();
+    QTest::mouseDClick(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_backend.toggleCount(), before + 1);
+    QVERIFY(m_backend.connecting());
+
+    m_backend.setConnecting(false);
+    delete root;
+}
+
+// An action started from the tray while the window is hidden or minimised
+// reports its failure in a toast nobody can see, and the toast used to be gone
+// three seconds later. It now waits for the window to be back.
+void TestQmlUi::aToastWaitsForAWindowThatIsAway()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *toast = root->findChild<QObject *>(QStringLiteral("toast"));
+    QObject *timer = root->findChild<QObject *>(QStringLiteral("toastTimer"));
+    QVERIFY(toast && timer);
+
+    window->hide();
+    emit m_backend.errorOccurred(QStringLiteral("The server did not answer"));
+    QCOMPARE(toast->property("message").toString(), QStringLiteral("The server did not answer"));
+    QVERIFY2(!timer->property("running").toBool(), "nobody can read it yet");
+
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QVERIFY2(timer->property("running").toBool(), "its time starts when the window is back");
     delete root;
 }
 

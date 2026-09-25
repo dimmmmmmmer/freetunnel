@@ -116,6 +116,13 @@ Window {
     Shortcut { sequences: [StandardKey.Quit]; onActivated: backend.quitApplication() }
 
     // ---------- system tray ----------
+    // A config name as a menu shows it: as typed. Every platform's menus read '&'
+    // as the mnemonic marker, and on Linux the dbusmenu protocol reads '_' as one
+    // too — Qt passes it through unescaped — so "my_vpn" was listed as "myvpn".
+    function menuLabel(name) {
+        const escaped = name.replace(/&/g, "&&")
+        return Qt.platform.os === "linux" ? escaped.replace(/_/g, "__") : escaped
+    }
     Platform.SystemTrayIcon {
         id: tray
         objectName: "systemTray"
@@ -127,8 +134,13 @@ Window {
         icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
         tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
                                     : "FreeTunnel"
-        // Right-click opens the menu (below). Double-click — or a single left-click
-        // on Windows, the expected tray gesture there — brings the window forward.
+        // Right-click opens the menu (below). The icon's own gesture brings the
+        // window forward: a left click on Windows, a double-click too. On Linux
+        // every host reports it as Trigger, never DoubleClick — Qt's
+        // StatusNotifierItem turns the host's Activate call into Trigger — and
+        // hosts send Activate for a left click (KDE) or a double-click (GNOME's
+        // AppIndicator extension, where one click opens the menu).
+        //
         // macOS is excluded outright: there the status item owns an NSMenu, so Qt
         // emits activated() from NSMenuDidBeginTracking and derives the reason from
         // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
@@ -138,8 +150,8 @@ Window {
         onActivated: function(reason) {
             if (win.isMac)
                 return
-            if (reason === Platform.SystemTrayIcon.DoubleClick
-                    || (reason === Platform.SystemTrayIcon.Trigger && Qt.platform.os === "windows")) {
+            if (reason === Platform.SystemTrayIcon.Trigger
+                    || reason === Platform.SystemTrayIcon.DoubleClick) {
                 desktop.bringToFront(win)
             }
         }
@@ -155,7 +167,7 @@ Window {
             // Active config + session time on one line (only while connected).
             Platform.MenuItem {
                 enabled: false; visible: backend.connected
-                text: backend.activeConfig + "  ·  " + backend.sessionTime
+                text: win.menuLabel(backend.activeConfig) + "  ·  " + backend.sessionTime
             }
             Platform.MenuSeparator {}
             // Configs listed inline; the active one carries a checkmark.
@@ -171,7 +183,7 @@ Window {
                 delegate: Platform.MenuItem {
                     required property int index
                     required property string modelData
-                    text: modelData
+                    text: win.menuLabel(modelData)
                     checkable: true
                     checked: index === backend.activeIndex
                     onTriggered: {
@@ -594,23 +606,45 @@ Window {
     // ---------- toast (errors/notices) ----------
     Connections {
         target: backend
-        function onErrorOccurred(msg) { toast.show(msg) }
+        function onErrorOccurred(msg) {
+            toast.show(msg)
+            // An action started from the tray fails where nobody is looking. The
+            // toast waits for the window (below); the tray says it now.
+            if (!win.onScreen && tray.available && tray.supportsMessages)
+                tray.showMessage("FreeTunnel", msg)
+        }
         function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
         function onUpdateChanged() {
             if (backend.updateState === "available")
                 toast.show(qsTr("Update available: %1").arg(backend.latestVersion))
         }
     }
+    // Hidden to the tray or the menu bar, or minimised: a toast drawn now would
+    // time out before anyone could read it.
+    readonly property bool onScreen: visible && visibility !== Window.Minimized
+    onOnScreenChanged: {
+        if (onScreen && toast.waiting) {
+            toast.waiting = false
+            toastTimer.restart()
+        }
+    }
     Rectangle {
         id: toast
+        objectName: "toast"
         z: 1000
         property string message: ""
+        // Shown while the window was away; its three seconds start when it is back.
+        property bool waiting: false
         TextMetrics { id: toastMetrics; font.pixelSize: 13 }
         function show(m) {
             toastMetrics.text = m
             message = m
             opacity = 0.97
-            toastTimer.restart()
+            waiting = !win.onScreen
+            if (waiting)
+                toastTimer.stop()
+            else
+                toastTimer.restart()
         }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom; anchors.bottomMargin: 26
@@ -627,8 +661,14 @@ Window {
             maximumLineCount: 3; elide: Text.ElideRight
         }
         Behavior on opacity { NumberAnimation { duration: 180 } }
-        Timer { id: toastTimer; interval: 3200; onTriggered: toast.opacity = 0 }
-        MouseArea { anchors.fill: parent; onClicked: toast.opacity = 0 }
+        Timer { id: toastTimer; objectName: "toastTimer"; interval: 3200; onTriggered: toast.opacity = 0 }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                toast.waiting = false
+                toast.opacity = 0
+            }
+        }
     }
 
     // ---------- window-level select popup (used by Dropdown) ----------

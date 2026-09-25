@@ -81,6 +81,7 @@ public:
     QString upSpeed() const { return m_upSpeed; }
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
+    void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
     int activeIndex() const { return m_activeIndex; }
 
     QString language() const { return m_language; }
