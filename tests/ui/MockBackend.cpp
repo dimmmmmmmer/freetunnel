@@ -133,6 +133,8 @@ void MockBackend::setHotkeyDisconnect(const QString &v)
 
 QString MockBackend::logPath() const
 {
+    if (!logPathOverride.isEmpty())
+        return logPathOverride;
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
             + QStringLiteral("/freetunnel-mock.log");
 }

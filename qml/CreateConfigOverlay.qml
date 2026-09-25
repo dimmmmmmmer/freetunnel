@@ -218,10 +218,12 @@ Item {
                 }
                 Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8
                         topPadding: 6; bottomPadding: 12
-                    Rectangle { width: 88; height: 32; radius: 8
+                    // At least 88 px, and wider for a longer label: «Сохранить» nearly
+                    // touched the edges of a fixed 88 px button.
+                    Rectangle { objectName: "saveButton"; width: Math.max(88, saveText.implicitWidth + 26); height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.onAccent; font.pixelSize: 14 }
+                        Text { id: saveText; objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.onAccent; font.pixelSize: 14 }
                         MouseArea { id: saveMa; anchors.fill: parent; hoverEnabled: true; onClicked: {
                             var ok = backend.createConfig({
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
@@ -233,10 +235,10 @@ Item {
                                 editPath: cform.editPath });
                             if (ok) cform.close()
                         } } }
-                    Rectangle { width: 88; height: 32; radius: 8
+                    Rectangle { width: Math.max(88, cancelText.implicitWidth + 26); height: 32; radius: 8
                         color: cancelMa.containsMouse ? theme.surface : theme.bg; border.color: theme.border; border.width: 1
                         Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
+                        Text { id: cancelText; anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14 }
                         MouseArea { id: cancelMa; anchors.fill: parent; hoverEnabled: true; onClicked: cform.tryClose() } }
                 }
             }

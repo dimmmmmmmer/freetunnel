@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QScopeGuard>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
@@ -76,6 +77,21 @@ private slots:
     void aLongHostnameWrapsInsideTheConfirm();
     void aClickInsideTheConfirmCardDoesNotCancelIt();
     void threeButtonsStayInsideTheConfirmCard();
+    void aShortQuestionGetsANarrowCard();
+    void aTwoLineToastIsAsWideAsItsLongestLine();
+    void aWrappedQuestionHasNoEmptySides();
+    void aWrappedToastHasNoEmptySides();
+    void aLongToastIsShownWholeAndForLonger();
+    void aToastOnHomeKeepsOffTheSelectorAndTheTiles();
+    void theConfigPickerIsAsWideAsItsNames();
+    void theActiveConfigNameUsesTheRoomItHas();
+    void theConnectedConfigKeepsRoomForItsName();
+    void theImportMenuIsAsWideAsItsItems();
+    void theSelectPopupElidesWhatTheWindowCannotHold();
+    void popupsCloseWhenTheWindowIsResized();
+    void theEditorsButtonsFitTheirLabels();
+    void linksActOnlyOverTheirWords();
+    void chipsAreCutOnlyWhereTheRowEnds();
     void theWindowConfirmOwnsTheKeysOverTheEditorsPrompt();
     void escapeStandsDownForTheEditorsFileDialog();
     void tabMovesThroughTheEditorsFields();
@@ -1631,6 +1647,596 @@ void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
     delete root;
 }
 
+namespace {
+
+// The widest line of a message, as a QML Text of that pixel size lays it out.
+qreal widestLine(const QString &text, int pixelSize, QFont::Weight weight = QFont::Normal)
+{
+    QFont font = QGuiApplication::font();
+    font.setPixelSize(pixelSize);
+    font.setWeight(weight);
+    const QFontMetricsF metrics(font);
+    qreal widest = 0;
+    for (const QString &line : text.split(QLatin1Char('\n')))
+        widest = std::max(widest, metrics.horizontalAdvance(line));
+    return widest;
+}
+
+// Text that grows a letter at a time from `start` until it is at least `width`
+// wide in that font, whatever the font: the tests that use it need a name of a
+// given width more than a given name.
+QString textOfWidth(QString start, qreal width, int pixelSize, QFont::Weight weight = QFont::Normal)
+{
+    static const QString letters = QStringLiteral("abcdefghijklmnopqrstuvwxyz");
+    for (int i = 0; widestLine(start, pixelSize, weight) < width; ++i)
+        start += letters.at(i % letters.size());
+    return start;
+}
+
+// Every item under `item`, drawn ones included: a ListView's rows and a
+// Repeater's chips are children of their view as items, and findChildren(),
+// which follows QObject parents, does not reach them.
+QList<QQuickItem *> itemsIn(QQuickItem *item)
+{
+    QList<QQuickItem *> out;
+    const QList<QQuickItem *> children = item->childItems();
+    for (QQuickItem *child : children)
+        out << child << itemsIn(child);
+    return out;
+}
+
+// The visible Text under `item` that says `text`, or null.
+QQuickItem *textIn(QQuickItem *item, const QString &text)
+{
+    const QList<QQuickItem *> all = itemsIn(item);
+    for (QQuickItem *candidate : all) {
+        if (candidate->inherits("QQuickText") && candidate->isVisible()
+            && candidate->property("text").toString() == text)
+            return candidate;
+    }
+    return nullptr;
+}
+
+QQuickItem *namedIn(QQuickItem *item, const QString &objectName)
+{
+    const QList<QQuickItem *> all = itemsIn(item);
+    for (QQuickItem *candidate : all) {
+        if (candidate->objectName() == objectName)
+            return candidate;
+    }
+    return nullptr;
+}
+
+QRectF sceneRect(QQuickItem *item)
+{
+    return item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+}
+
+QVariant evaluateIn(QObject *root, const QString &expression)
+{
+    QQmlExpression e(qmlContext(root), root, expression);
+    const QVariant value = e.evaluate();
+    if (e.hasError())
+        qWarning("%s", qPrintable(e.error().toString()));
+    return value;
+}
+
+// A language whose words for `sources` are much longer than English's, which is
+// what a wider font does to them as well.
+class LongerWords : public QTranslator {
+public:
+    LongerWords(QByteArrayList sources, QString suffix)
+        : m_sources(std::move(sources)), m_suffix(std::move(suffix)) {}
+    bool isEmpty() const override { return false; }
+    QString translate(const char *, const char *source, const char *, int) const override
+    {
+        if (m_sources.contains(QByteArray(source)))
+            return QString::fromUtf8(source) + m_suffix;
+        return QString();
+    }
+
+private:
+    QByteArrayList m_sources;
+    QString m_suffix;
+};
+
+} // namespace
+
+// The card was sized from TextMetrics, which takes a message as one line,
+// newlines and all: the two-line import question was sized as both lines end to
+// end, and the card spread across the window around a short text.
+void TestQmlUi::aShortQuestionGetsANarrowCard()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    const QString message = QStringLiteral("Import it?\nServer: a.example");
+    root->setProperty("text", message);
+    root->setProperty("confirmText", QStringLiteral("Import"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    auto *cancel = root->findChild<QQuickItem *>(QStringLiteral("cancelButton"));
+    auto *confirm = root->findChild<QQuickItem *>(QStringLiteral("confirmButton"));
+    QVERIFY(card && cancel && confirm);
+    const qreal buttons = cancel->width() + 8 + confirm->width();
+    const qreal fits = std::max(buttons, widestLine(message, 14)) + 28;
+    QTRY_VERIFY2(card->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px card for %2 px of content").arg(card->width()).arg(fits)));
+    delete root;
+}
+
+// The toast was sized the same way.
+void TestQmlUi::aTwoLineToastIsAsWideAsItsLongestLine()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    const QString message = QStringLiteral("Could not import.\nTry again.");
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, message));
+    const qreal fits = std::max<qreal>(80, widestLine(message, 13) + 24);
+    QTRY_VERIFY2(toast->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px toast for %2 px of text").arg(toast->width()).arg(fits)));
+    delete root;
+}
+
+// A question that wraps was sized from its one-line width, so a card held to
+// the window had broad empty sides around text that wrapped well short of them.
+void TestQmlUi::aWrappedQuestionHasNoEmptySides()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    // Two words, each a little over half as wide as the card's text may be, so
+    // the question wraps between them and each line leaves room beside it.
+    const QString word = textOfWidth(QStringLiteral("Question"), 180, 14);
+    const QString message = word + QLatin1Char(' ') + word;
+    QVERIFY(widestLine(message, 14) > 400 - 84);
+    root->setProperty("text", message);
+    root->setProperty("confirmText", QStringLiteral("OK"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    auto *cancel = root->findChild<QQuickItem *>(QStringLiteral("cancelButton"));
+    auto *confirm = root->findChild<QQuickItem *>(QStringLiteral("confirmButton"));
+    QVERIFY(card && cancel && confirm);
+    const qreal buttons = cancel->width() + 8 + confirm->width();
+    const qreal fits = std::max(buttons, widestLine(word, 14)) + 28;
+    QTRY_VERIFY2(card->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px card for %2 px of content").arg(card->width()).arg(fits)));
+    delete root;
+}
+
+// The toast was sized the same way.
+void TestQmlUi::aWrappedToastHasNoEmptySides()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    const QString word = textOfWidth(QStringLiteral("Message"), 200, 13);
+    const QString message = word + QLatin1Char(' ') + word;
+    QVERIFY(widestLine(message, 13) > window->width() - 60);
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, message));
+    const qreal fits = widestLine(word, 13) + 24;
+    QTRY_VERIFY2(toast->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px toast for %2 px of text").arg(toast->width()).arg(fits)));
+    delete root;
+}
+
+// A name with no spaces in it ran past both edges of the toast; a fourth line
+// was cut, and it was usually the one saying what to do; and a long message was
+// gone in the same three seconds as "Copied".
+void TestQmlUi::aLongToastIsShownWholeAndForLonger()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *text = root->findChild<QQuickItem *>(QStringLiteral("toastText"));
+    QObject *timer = root->findChild<QObject *>(QStringLiteral("toastTimer"));
+    QVERIFY(text && timer);
+    const auto show = [root](const QString &message) {
+        QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, message));
+    };
+
+    const QString unbroken = textOfWidth(QStringLiteral("frankfurt"), 2.5 * window->width(), 13);
+    show(unbroken);
+    QVERIFY2(text->property("contentWidth").toReal() <= text->width() + 0.5,
+             qPrintable(QStringLiteral("%1 px of text in a %2 px toast")
+                                .arg(text->property("contentWidth").toReal()).arg(text->width())));
+    QVERIFY(!text->property("truncated").toBool());
+
+    const QString fiveLines = QStringLiteral("Could not connect.\nNo answer.\nIt may be down.\n"
+                                             "Check the address.\nThen try again.");
+    show(fiveLines);
+    QCOMPARE(text->property("lineCount").toInt(), 5);
+    QVERIFY(!text->property("truncated").toBool());
+
+    show(QStringLiteral("Copied."));
+    const int brief = timer->property("interval").toInt();
+    show(fiveLines);
+    QVERIFY2(timer->property("interval").toInt() > brief,
+             qPrintable(QStringLiteral("%1 ms for five lines, as for one word").arg(brief)));
+    delete root;
+}
+
+// On Home the toast sat across the middle of the speed tiles and cut their
+// labels in half. A short one keeps to the gap between the config selector and
+// the tiles; a longer one covers the tiles, whole, rather than the selector.
+void TestQmlUi::aToastOnHomeKeepsOffTheSelectorAndTheTiles()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *page = root->findChild<QObject *>(QStringLiteral("pageLoader"))->property("item").value<QQuickItem *>();
+    QVERIFY(page);
+    auto *label = namedIn(page, QStringLiteral("activeConfigLabel"));
+    auto *tiles = namedIn(page, QStringLiteral("speedTiles"));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(label && tiles && toast);
+    const QRectF selector = sceneRect(label);
+    const QRectF tileRow = sceneRect(tiles);
+    const auto describe = [&] {
+        const QRectF t = sceneRect(toast);
+        return QStringLiteral("toast %1..%2, selector %3..%4, tiles %5..%6")
+                .arg(t.top()).arg(t.bottom()).arg(selector.top()).arg(selector.bottom())
+                .arg(tileRow.top()).arg(tileRow.bottom());
+    };
+
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, QStringLiteral("Config imported.")));
+    QVERIFY2(!sceneRect(toast).intersects(selector) && !sceneRect(toast).intersects(tileRow),
+             qPrintable(describe()));
+
+    QMetaObject::invokeMethod(root, "showToast",
+                              Q_ARG(QVariant, QStringLiteral("Could not connect.\nNo answer.\nTry again.")));
+    QVERIFY2(!sceneRect(toast).intersects(selector), qPrintable(describe()));
+    QVERIFY2(sceneRect(toast).top() <= tileRow.top() && sceneRect(toast).bottom() >= tileRow.bottom(),
+             qPrintable(describe()));
+    // And opaque, or the tiles show through it.
+    QTRY_COMPARE(toast->opacity(), 1.0);
+    delete root;
+}
+
+// The picker was a fixed 250 px: a broad empty band around short names, and a
+// long one cut all the same.
+void TestQmlUi::theConfigPickerIsAsWideAsItsNames()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({QStringLiteral("Home"), QStringLiteral("Work")});
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+    auto *picker = root->findChild<QQuickItem *>(QStringLiteral("configPicker"));
+    QVERIFY(label && picker);
+    const auto open = [&] {
+        picker->setProperty("open", false);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        return picker->property("open").toBool();
+    };
+    QVERIFY(open());
+    QVERIFY2(picker->width() <= 140.5, qPrintable(QStringLiteral("%1 px for two short names").arg(picker->width())));
+
+    const QString longName = textOfWidth(QStringLiteral("Frankfurt premium"), 260, 14);
+    QVERIFY(widestLine(longName, 14) + 30 < 400 - 16);
+    m_backend.setConfigs({QStringLiteral("Home"), longName});
+    QVERIFY(open());
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY((row = textIn(picker, longName)) != nullptr);
+    QVERIFY2(!row->property("truncated").toBool(),
+             qPrintable(QStringLiteral("a %1 px name in a %2 px picker").arg(row->implicitWidth()).arg(picker->width())));
+    QVERIFY(sceneRect(picker).left() >= 7.5 && sceneRect(picker).right() <= 400 - 7.5);
+    delete root;
+}
+
+// The name above the logo was held to 260 px, which cut names the window had
+// room for. Cut where it has to be, the ▾ keeps to the text.
+void TestQmlUi::theActiveConfigNameUsesTheRoomItHas()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] {
+        m_backend.setConfigs(saved);
+        m_backend.selectConfig(0);
+    });
+    const QString name = textOfWidth(QStringLiteral("Frankfurt premium"), 275, 15, QFont::Medium);
+    m_backend.setConfigs({name});
+    m_backend.selectConfig(0);
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 460);
+    QVERIFY(page);
+    auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+    auto *arrow = textIn(page, QStringLiteral("▾"));
+    QVERIFY(label && arrow);
+    QVERIFY2(!label->property("truncated").toBool(),
+             qPrintable(QStringLiteral("a %1 px name given %2 px").arg(label->implicitWidth()).arg(label->width())));
+
+    m_backend.setConfigs({textOfWidth(name, 500, 15, QFont::Medium)});
+    m_backend.selectConfig(0);
+    QVERIFY(label->property("truncated").toBool());
+    const qreal textRight = sceneRect(label).left() + label->property("contentWidth").toReal();
+    QVERIFY2(sceneRect(arrow).left() - textRight <= 7,
+             qPrintable(QStringLiteral("the ▾ %1 px after the text").arg(sceneRect(arrow).left() - textRight)));
+    // Room is left for the + beside it, and the page's margin. Once laid out: the
+    // column centres the selector in its next polish.
+    QTRY_VERIFY2(sceneRect(arrow).right() <= 400 - 18 - 6 - 22 + 0.5,
+             qPrintable(QStringLiteral("the ▾ ends at %1").arg(sceneRect(arrow).right())));
+    delete root;
+}
+
+// Connected, the row also holds the ping, the badge and three icons, and with a
+// 30 px cell and the row's gap for each icon the name was left about 60 px at
+// the default width: "Home server" was cut.
+void TestQmlUi::theConnectedConfigKeepsRoomForItsName()
+{
+    const QString name = QStringLiteral("Home server");
+    if (widestLine(name, 14, QFont::Medium) > 95)
+        QSKIP("this font draws the name wider than the proportional fonts the row is laid out for");
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] {
+        m_backend.setConnected(false);
+        m_backend.setConfigs(saved);
+        m_backend.selectConfig(0);
+    });
+    m_backend.setConfigs({name, QStringLiteral("Backup")});
+    m_backend.selectConfig(0);
+    m_backend.setConnected(true);
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 460);
+    QVERIFY(page);
+    QQuickItem *text = nullptr;
+    QTRY_VERIFY((text = textIn(page, name)) != nullptr);
+    QVERIFY(textIn(page, QStringLiteral("connected")));
+    QVERIFY2(!text->property("truncated").toBool(),
+             qPrintable(QStringLiteral("%1 px for a %2 px name").arg(text->width()).arg(text->implicitWidth())));
+    delete root;
+}
+
+// The add menu was a fixed 240 px around three short labels.
+void TestQmlUi::theImportMenuIsAsWideAsItsItems()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 460);
+    QVERIFY(page);
+    auto *menu = root->findChild<QQuickItem *>(QStringLiteral("importMenu"));
+    QVERIFY(menu);
+    menu->setProperty("open", true);
+    QTRY_VERIFY(menu->isVisible());
+    qreal widest = 0;
+    for (const QString &label : {QStringLiteral("Paste from clipboard"), QStringLiteral("From file…"),
+                                 QStringLiteral("Create new…")}) {
+        QQuickItem *text = textIn(menu, label);
+        QVERIFY2(text, qPrintable(label));
+        widest = std::max(widest, text->implicitWidth());
+        QVERIFY2(!text->property("truncated").toBool() && sceneRect(text).right() <= sceneRect(menu).right(),
+                 qPrintable(label));
+    }
+    QVERIFY2(menu->width() <= std::max<qreal>(140, std::ceil(widest) + 40) + 0.5,
+             qPrintable(QStringLiteral("a %1 px menu for %2 px labels").arg(menu->width()).arg(widest)));
+
+    // Longer than the page can hold: cut, and inside the menu.
+    const QString suffix = QStringLiteral(" in a much longer language, too long for any window to hold");
+    LongerWords longer({"Paste from clipboard"}, suffix);
+    QCoreApplication::installTranslator(&longer);
+    m_engine.retranslate();
+    const auto untranslate = qScopeGuard([this, &longer] {
+        QCoreApplication::removeTranslator(&longer);
+        m_engine.retranslate();
+    });
+    QQuickItem *paste = textIn(menu, QStringLiteral("Paste from clipboard") + suffix);
+    QVERIFY(paste);
+    QVERIFY(paste->property("truncated").toBool());
+    QVERIFY(sceneRect(paste).right() <= sceneRect(menu).right() + 0.5);
+    QVERIFY(sceneRect(menu).left() >= -0.5 && sceneRect(menu).right() <= 400.5);
+    delete root;
+}
+
+// The window's select popup is held to the window, and an option longer than
+// that ran off its edge, under the check mark, with nothing to say it went on.
+void TestQmlUi::theSelectPopupElidesWhatTheWindowCannotHold()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *popup = qobject_cast<QQuickItem *>(evaluateIn(root, QStringLiteral("selectPopup")).value<QObject *>());
+    QVERIFY(popup);
+
+    const QString longOption = textOfWidth(QStringLiteral("Profile"), 600, 14);
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: '%1'}, {v: 'b', t: 'Short'}], 'a', null)")
+                             .arg(longOption));
+    QTRY_VERIFY(popup->isVisible());
+    QQuickItem *option = nullptr;
+    QTRY_VERIFY((option = textIn(popup, longOption)) != nullptr);
+    QQuickItem *check = textIn(popup, QStringLiteral("✓"));
+    QVERIFY(check);
+    QVERIFY(option->property("truncated").toBool());
+    QVERIFY2(option->mapToScene(QPointF(option->property("contentWidth").toReal(), 0)).x()
+                     <= sceneRect(check).left() + 0.5,
+             "the option runs under the check mark");
+
+    // What the window can hold is not cut.
+    const QString option2 = QStringLiteral("Everything else");
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'Selective'}, {v: 'b', t: '%1'}], 'a', null)")
+                             .arg(option2));
+    QTRY_VERIFY((option = textIn(popup, option2)) != nullptr);
+    QVERIFY(!option->property("truncated").toBool());
+    delete root;
+}
+
+// Both are placed and sized when they open, and after a resize they hung away
+// from the control they drop from.
+void TestQmlUi::popupsCloseWhenTheWindowIsResized()
+{
+    {
+        QObject *root = loadPage("pages/HomePage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        auto *page = showInWindow(root, window, 400, 460);
+        QVERIFY(page);
+        auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        auto *picker = root->findChild<QQuickItem *>(QStringLiteral("configPicker"));
+        QVERIFY(label && picker);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QVERIFY(picker->property("open").toBool());
+        page->setWidth(520);
+        QVERIFY2(!picker->property("open").toBool(), "the config picker stayed open");
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QVERIFY(picker->property("open").toBool());
+        page->setHeight(600);
+        QVERIFY2(!picker->property("open").toBool(), "the config picker stayed open");
+        delete root;
+    }
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'A'}], 'a', null)"));
+    QVERIFY(evaluateIn(root, QStringLiteral("selectPopup.open")).toBool());
+    window->resize(520, 600);
+    QTRY_VERIFY2(!evaluateIn(root, QStringLiteral("selectPopup.open")).toBool(), "the select popup stayed open");
+    delete root;
+}
+
+// Save and Cancel were a fixed 88 px, and «Сохранить» all but touched the edges.
+void TestQmlUi::theEditorsButtonsFitTheirLabels()
+{
+    LongerWords longer({"Save", "Cancel"}, QStringLiteral(" and close"));
+    QCoreApplication::installTranslator(&longer);
+    m_engine.retranslate();
+    const auto untranslate = qScopeGuard([this, &longer] {
+        QCoreApplication::removeTranslator(&longer);
+        m_engine.retranslate();
+    });
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 700);
+    QVERIFY(page);
+    for (const QString &label : {QStringLiteral("Save and close"), QStringLiteral("Cancel and close")}) {
+        QQuickItem *text = textIn(page, label);
+        QVERIFY2(text, qPrintable(label));
+        QVERIFY2(text->parentItem()->width() >= text->implicitWidth() + 24,
+                 qPrintable(QStringLiteral("«%1», %2 px, on a %3 px button")
+                                    .arg(label).arg(text->implicitWidth()).arg(text->parentItem()->width())));
+    }
+    delete root;
+}
+
+// A link as wide as its row took a click anywhere along the row, far from its
+// words.
+void TestQmlUi::linksActOnlyOverTheirWords()
+{
+    {
+        m_backend.logPathOverride = QStringLiteral("/tmp/freetunnel.log");
+        const auto restore = qScopeGuard([this] { m_backend.logPathOverride.clear(); });
+        QObject *root = loadPage("pages/LogsPage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        auto *page = showInWindow(root, window, 400, 460);
+        QVERIFY(page);
+        auto *link = root->findChild<QQuickItem *>(QStringLiteral("logPathLink"));
+        QVERIFY(link);
+        QVERIFY2(link->width() <= std::ceil(link->parentItem()->implicitWidth()) + 0.5,
+                 qPrintable(QStringLiteral("a %1 px link for a %2 px path")
+                                    .arg(link->width()).arg(link->parentItem()->implicitWidth())));
+        // Auto-scroll keeps to the right, where it was.
+        QQuickItem *autoScroll = textIn(page, QStringLiteral("Auto-scroll"));
+        QVERIFY(autoScroll);
+        QVERIFY(sceneRect(autoScroll).left() > 200);
+        delete root;
+    }
+    QObject *root = loadPage("AppPickerOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 700));
+    auto *link = root->findChild<QQuickItem *>(QStringLiteral("chooseFileLink"));
+    QVERIFY(link);
+    QVERIFY2(link->width() <= std::ceil(link->implicitWidth()) + 0.5,
+             qPrintable(QStringLiteral("a %1 px link for %2 px of words").arg(link->width()).arg(link->implicitWidth())));
+    delete root;
+}
+
+// Chips cut their names at a fixed 190 px, 130 for a profile, with the row to
+// spare; they are the only place the name is shown.
+void TestQmlUi::chipsAreCutOnlyWhereTheRowEnds()
+{
+    const QStringList routes = m_backend.excludedRoutes();
+    const QStringList profiles = m_backend.profiles();
+    const QStringList rules = m_backend.appRules();
+    const QStringList labels = m_backend.appRuleLabels();
+    const auto restore = qScopeGuard([&] {
+        m_backend.setDomains({});
+        m_backend.setExcludedRoutes(routes);
+        m_backend.setProfiles(profiles);
+        m_backend.setAppRules(rules, labels);
+    });
+    const QString domain = textOfWidth(QStringLiteral("downloads.example."), 230, 13);
+    const QString profile = textOfWidth(QStringLiteral("Streaming "), 170, 13);
+    const QString app = textOfWidth(QStringLiteral("Firefox "), 230, 13);
+    const QString route = textOfWidth(QStringLiteral("2001:db8:"), 230, 13);
+    m_backend.setDomains({domain});
+    m_backend.setProfiles({QStringLiteral("Default"), profile});
+    m_backend.setAppRules({QStringLiteral("/usr/bin/app")}, {app});
+    m_backend.setExcludedRoutes({route});
+
+    const auto check = [](QQuickItem *page, const QString &name) {
+        QQuickItem *text = textIn(page, name);
+        if (!text)
+            return QStringLiteral("«%1» is not on the page").arg(name);
+        if (text->property("truncated").toBool())
+            return QStringLiteral("«%1», %2 px, cut to %3 px").arg(name).arg(text->implicitWidth()).arg(text->width());
+        return QString();
+    };
+    {
+        QObject *root = loadPage("pages/SplitPage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        auto *page = showInWindow(root, window, 400, 1400);
+        QVERIFY(page);
+        for (const QString &name : {domain, profile, app}) {
+            const QString problem = check(page, name);
+            QVERIFY2(problem.isEmpty(), qPrintable(problem));
+        }
+        // Longer than the row: cut, and the chip inside the page.
+        const QString longer = textOfWidth(domain, 600, 13);
+        m_backend.setDomains({longer});
+        QQuickItem *text = textIn(page, longer);
+        QVERIFY(text);
+        QVERIFY(text->property("truncated").toBool());
+        QVERIFY(sceneRect(text->parentItem()).right() <= 400.5);
+        delete root;
+    }
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 1400);
+    QVERIFY(page);
+    const QString problem = check(page, route);
+    QVERIFY2(problem.isEmpty(), qPrintable(problem));
+    delete root;
+}
+
 // A link arriving while "Discard unsaved changes?" is up puts the import prompt
 // on top of it. The hidden prompt kept Return and Escape, so Return meant for the
 // import threw the edits away.
@@ -1865,7 +2471,19 @@ void TestQmlUi::theUpdateLineDoesWhatItOffers()
     QVERIFY(showInWindow(root, window, 400, 1400));
     auto *line = root->findChild<QQuickItem *>(QStringLiteral("updateStatus"));
     QVERIFY(line);
-    const auto click = [&] { QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(line)); };
+    // On the words: the line spans the row so that it can wrap, and only the
+    // words act.
+    const auto click = [&] {
+        const QPointF words(line->property("contentWidth").toReal() / 2, line->height() / 2);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, line->mapToScene(words).toPoint());
+    };
+
+    // Beside the words, nothing: the line spans the row, and a click far to the
+    // right of a short "Check for updates" acted on it.
+    QVERIFY(line->property("contentWidth").toReal() < line->width() - 8);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
+                      line->mapToScene(QPointF(line->width() - 4, line->height() / 2)).toPoint());
+    QCOMPARE(m_backend.updateChecks, 0);
 
     click();
     QCOMPARE(m_backend.updateChecks, 1);
@@ -1976,33 +2594,14 @@ void TestQmlUi::headingLinksStayOnANarrowPage_data()
     QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
 }
 
-namespace {
-
-// A language whose words for the heading links are much longer than English's,
-// which is what a wider font does to them as well.
-class LongLinks : public QTranslator {
-public:
-    bool isEmpty() const override { return false; }
-    QString translate(const char *, const char *source, const char *, int) const override
-    {
-        static const QByteArrayList links{"Restore defaults", "Clear all", "Recommended for Russia",
-                                          "Choose…"};
-        if (links.contains(QByteArray(source)))
-            return QString::fromUtf8(source)
-                    + QStringLiteral(" in a much longer language, too long for any window to hold");
-        return QString();
-    }
-};
-
-} // namespace
-
 // A link beside a section heading that did not fill kept its full width however
 // little room there was, and ran off the page: with the fonts the Windows tests
 // get, «Restore defaults» sat past the right edge of a 400 px window.
 void TestQmlUi::headingLinksStayOnANarrowPage()
 {
     QFETCH(QString, page);
-    LongLinks longLinks;
+    LongerWords longLinks({"Restore defaults", "Clear all", "Recommended for Russia", "Choose…"},
+                          QStringLiteral(" in a much longer language, too long for any window to hold"));
     QCoreApplication::installTranslator(&longLinks);
     m_engine.retranslate();
     const auto restore = qScopeGuard([this, &longLinks] {

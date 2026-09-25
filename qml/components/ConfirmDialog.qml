@@ -39,7 +39,13 @@ Item {
             back.forceActiveFocus()
     }
 
-    TextMetrics { id: cdMetrics; font.pixelSize: 14; text: cd.text }
+    // The width the message takes when laid out as wide as the card may be: its
+    // widest line after wrapping. Not TextMetrics, which takes text as one line,
+    // newlines and all, so a two-line question was sized as both lines end to end,
+    // and not the one-line width either, which left wide empty sides once a long
+    // question wrapped. A Text of its own, not cdText, whose width is the card's.
+    Text { id: cdWrapped; visible: false; text: cd.text; font.pixelSize: 14
+           wrapMode: Text.Wrap; width: cd.width - 56 - 28 }
 
     // Buttons cannot wrap the way text does. When the row is wider than the card
     // can be, the buttons give up their padding and minimum width, and a label
@@ -68,9 +74,7 @@ Item {
         // may take some of it — three Russian ones ran into the card's border at
         // the default width.
         width: Math.min(parent.width - 24,
-                        Math.max(btnRow.implicitWidth + 28,
-                                 Math.min(parent.width - 56,
-                                          Math.ceil(cdMetrics.boundingRect.width) + 28)))
+                        Math.max(btnRow.implicitWidth + 28, Math.ceil(cdWrapped.contentWidth) + 28))
         height: cdCol.implicitHeight + 24
         radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
         // A click on the card is not a click on the backdrop behind it: it used

@@ -134,12 +134,20 @@ public:
     QStringList domains() const { return m_domains; }
     void setDomains(const QStringList &d) { m_domains = d; emit splitChanged(); }
     QStringList excludedRoutes() const { return m_excludedRoutes; }
+    void setExcludedRoutes(const QStringList &r) { m_excludedRoutes = r; emit splitChanged(); }
     QStringList appRules() const { return m_appRules; }
+    void setAppRules(const QStringList &rules, const QStringList &labels)
+    {
+        m_appRules = rules;
+        m_appRuleLabels = labels;
+        emit splitChanged();
+    }
     // Deliberately NOT the file names of the rules: the page is supposed to show
     // what the picker called the program, and a mock that echoed the path would
     // let a page that ignores these labels render identically.
     QStringList appRuleLabels() const { return m_appRuleLabels; }
     QStringList profiles() const { return m_profiles; }
+    void setProfiles(const QStringList &p) { m_profiles = p; emit splitChanged(); }
     QString activeProfile() const { return m_activeProfile; }
 
     bool hotkeysSupported() const { return m_hotkeysSupported; }
@@ -209,6 +217,8 @@ public:
     Q_INVOKABLE void clearLogs() { m_logModel.clear(); }
     void appendLog(const QString &msg) { m_logModel.append(QStringLiteral("12:00:01"), QStringLiteral("INFO"), msg); }
     Q_INVOKABLE void openLogFolder() {}
+    // Read once, when a page loads: a test that needs a path of its own sets it first.
+    QString logPathOverride;
     Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
     Q_INVOKABLE void copyToClipboard(const QString &) const {}
     Q_INVOKABLE QString readTextFile(const QString &) const { return QString(); }

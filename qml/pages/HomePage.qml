@@ -9,9 +9,28 @@ Item {
     required property var backend
     required property var theme
 
+    // How far above the bottom the window's toast sits here. In the middle of the
+    // gap between the config selector and the speed tiles when it fits there; a
+    // longer one covers the tiles, whole, and not the selector, the one thing here
+    // people click. Across the middle of the tiles, where it used to sit, it cut
+    // their labels in half.
+    function toastMargin(toastHeight) {
+        var gapBottom = speedRow.anchors.bottomMargin + speedRow.height
+        var gapTop = height - (homeCol.parent.y + homeCol.y + homeCol.height)
+        var room = gapTop - gapBottom
+        return toastHeight + 8 <= room ? gapBottom + (room - toastHeight) / 2
+                                       : speedRow.anchors.bottomMargin
+    }
+
+    // The picker is placed and sized when it opens; a resize would leave it
+    // hanging away from the selector it belongs to.
+    onWidthChanged: cfgPopup.open = false
+    onHeightChanged: cfgPopup.open = false
+
     // Speed badges pinned to the bottom — independent of the logo/config block.
     RowLayout {
         id: speedRow
+        objectName: "speedTiles"
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 44
@@ -44,6 +63,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: speedRow.top; anchors.bottomMargin: 22
         ColumnLayout {
+            id: homeCol
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: 6
@@ -115,20 +135,31 @@ Item {
                         id: cfgLabelBlock
                         implicitHeight: 24
                         implicitWidth: cfgLabelRow.implicitWidth
-                        Row {
-                            id: cfgLabelRow; spacing: 6
+                        // The ▾ follows the text as painted, so an elided name keeps it
+                        // as close as a whole one does.
+                        Item {
+                            id: cfgLabelRow
                             anchors.verticalCenter: parent.verticalCenter
+                            implicitWidth: Math.ceil(cfgLabel.contentWidth)
+                                           + (cfgArrow.visible ? 6 + cfgArrow.implicitWidth : 0)
+                            implicitHeight: cfgLabel.implicitHeight
                             Text {
                                 id: cfgLabel
+                                objectName: "activeConfigLabel"
                                 property color labelColor: cfgSelMa.containsMouse ? theme.accent : theme.text
                                 text: backend.configs.length > 0 ? backend.activeConfig : qsTr("Add a config")
-                                width: backend.configs.length > 0 ? Math.min(implicitWidth, 260) : implicitWidth
+                                // As much of the page as the selector's other parts leave,
+                                // not a fixed 260 px that cut names the window had room for.
+                                width: Math.min(implicitWidth,
+                                                homeRoot.width - 36 - 6 - cfgArrow.implicitWidth - 6 - 22)
                                 elide: Text.ElideRight
                                 color: labelColor
                                 font.underline: cfgSelMa.containsMouse
                                 font.pixelSize: 15; font.weight: Font.Medium
                             }
                             Text { id: cfgArrow
+                                   x: Math.ceil(cfgLabel.contentWidth) + 6
+                                   anchors.verticalCenter: cfgLabel.verticalCenter
                                    visible: backend.configs.length > 0; text: "▾"
                                    color: cfgLabel.labelColor; font.pixelSize: 15 }
                         }
@@ -137,8 +168,19 @@ Item {
                                     onClicked: {
                                         if (backend.configs.length === 0) { shell.currentPage = 1; return }
                                         if (!cfgPopup.open) {
+                                            // As wide as the longest name needs, within the
+                                            // page: a fixed 250 px left a broad empty band
+                                            // around short names and still cut long ones.
+                                            var widest = 0
+                                            for (var i = 0; i < backend.configs.length; ++i) {
+                                                pickerMetrics.text = backend.configs[i]
+                                                widest = Math.max(widest, pickerMetrics.advanceWidth)
+                                            }
+                                            cfgPopup.width = Math.min(homeRoot.width - 16,
+                                                                      Math.max(140, Math.ceil(widest) + 30))
                                             var p = cfgSel.mapToItem(homeRoot, 0, 0)
-                                            cfgPopup.x = p.x + cfgSel.width / 2 - cfgPopup.width / 2
+                                            cfgPopup.x = Math.max(8, Math.min(homeRoot.width - cfgPopup.width - 8,
+                                                                              p.x + cfgSel.width / 2 - cfgPopup.width / 2))
                                             cfgPopup.y = p.y + cfgSel.height + 6
                                         }
                                         cfgPopup.open = !cfgPopup.open
@@ -173,16 +215,19 @@ Item {
     // dialog the user is actually looking at.
     Shortcut { sequence: "Escape"; enabled: cfgPopup.open && !shell.windowPopupOpen
                onActivated: cfgPopup.open = false }
+    // Config names are single lines, so TextMetrics measures them right.
+    TextMetrics { id: pickerMetrics; font.pixelSize: 14 }
     // Config picker dropdown, anchored under the selector.
     Rectangle {
         id: cfgPopup
+        objectName: "configPicker"
         property bool open: false
         visible: opacity > 0; z: 100
         opacity: open ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 130 } }
         transform: Translate { y: cfgPopup.open ? 0 : -8
                                Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
-        width: 250
+        width: 140
         height: picker.height + 12
         radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
         layer.enabled: true

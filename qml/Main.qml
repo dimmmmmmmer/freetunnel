@@ -687,11 +687,17 @@ Window {
         property string message: ""
         // Shown while the window was away; its three seconds start when it is back.
         property bool waiting: false
-        TextMetrics { id: toastMetrics; font.pixelSize: 13 }
+        // The width the message takes when laid out as wide as the toast may be:
+        // its widest line after wrapping. TextMetrics takes text as one line,
+        // newlines and all, and a message's one-line width left wide empty sides
+        // once it wrapped. A Text of its own, as tmsg's width is bound to the toast's.
+        Text { id: toastWrapped; visible: false; text: toast.message; font.pixelSize: 13
+               wrapMode: Text.Wrap; width: toast.parent.width - 36 - 24 }
         function show(m) {
-            toastMetrics.text = m
             message = m
-            opacity = 0.97
+            // Opaque: on Home a long one covers the speed tiles, which showed
+            // through a toast that was not quite.
+            opacity = 1
             waiting = !win.onScreen
             if (waiting)
                 toastTimer.stop()
@@ -702,21 +708,27 @@ Window {
         // Over an open editor or picker it goes to the top: at the bottom it sat on
         // the card's Save and Cancel, and took the click meant for them just when
         // an error had asked the user to fix a field and save again.
-        y: win.overlay !== "" ? win.titlebarSafeTop + 8 : parent.height - height - 26
-        // Size to the message text (TextMetrics), not tmsg.implicitWidth — binding
-        // tmsg.width to toast.width made implicitWidth inflate and left empty margins.
-        width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastMetrics.boundingRect.width) + 24))
+        // A page can place it itself: Home keeps it off its selector and tiles.
+        y: win.overlay !== "" ? win.titlebarSafeTop + 8
+                              : parent.height - height - (pageLoader.item && pageLoader.item.toastMargin
+                                                          ? pageLoader.item.toastMargin(height) : 26)
+        width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastWrapped.contentWidth) + 24))
         height: Math.max(40, tmsg.contentHeight + 18)
         radius: 9; color: theme.surface; border.color: theme.border; border.width: 1
         opacity: 0; visible: opacity > 0
         Text {
-            id: tmsg; anchors.centerIn: parent; width: toast.width - 24
+            id: tmsg; objectName: "toastText"; anchors.centerIn: parent; width: toast.width - 24
             text: toast.message; color: theme.text; font.pixelSize: 13
-            horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
-            maximumLineCount: 3; elide: Text.ElideRight
+            // Wrap, not WordWrap: a long name without spaces ran past both edges.
+            // And up to six lines, with the time to read them: at three, the part
+            // cut off was usually the one saying what to do.
+            horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+            maximumLineCount: 6; elide: Text.ElideRight
         }
         Behavior on opacity { NumberAnimation { duration: 180 } }
-        Timer { id: toastTimer; objectName: "toastTimer"; interval: 3200; onTriggered: toast.opacity = 0 }
+        Timer { id: toastTimer; objectName: "toastTimer"
+                interval: Math.min(10000, Math.max(3200, toast.message.length * 55))
+                onTriggered: toast.opacity = 0 }
         MouseArea {
             anchors.fill: parent
             onClicked: {
@@ -738,7 +750,7 @@ Window {
         var w = 140
         for (var i = 0; i < model.length; i++) {
             spMetrics.text = model[i].t
-            w = Math.max(w, spMetrics.advanceWidth + 56)
+            w = Math.max(w, Math.ceil(spMetrics.advanceWidth) + 56)
         }
         selectPopup.width = Math.min(w, overlayLayer.width - 16)
 
@@ -772,6 +784,10 @@ Window {
     Item {
         id: overlayLayer; anchors.fill: parent; z: 1500
         visible: selectPopup.open
+        // The popup is placed and sized when it opens; after a resize it would
+        // hang away from the control it drops from.
+        onWidthChanged: selectPopup.open = false
+        onHeightChanged: selectPopup.open = false
         MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
         // Stand down while a confirm dialog is up: it owns Escape then, and two
         // enabled shortcuts on the same key make Qt report the press as
@@ -811,7 +827,10 @@ Window {
                     required property var modelData
                     width: spList.width; height: win.spRowH; radius: 6
                     color: spMa.containsMouse ? theme.surface : theme.bg
+                    // Up to the check mark's room, then an ellipsis: a popup held to a
+                    // narrow window cut a long name off at its edge, under the ✓.
                     Text { anchors.verticalCenter: parent.verticalCenter; x: 12
+                           width: parent.width - 44; elide: Text.ElideRight
                            text: modelData.t
                            color: modelData.v === selectPopup.value ? theme.accent : theme.text
                            font.pixelSize: 14 }

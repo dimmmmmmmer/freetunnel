@@ -5,6 +5,40 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
+## 1.2.2
+
+### Fixed
+
+- **Boxes fit what they hold.**
+  - A question such as "Add a VPN server from this link?" came in a card spread
+    across the window around two short lines. Questions, and the messages that
+    appear at the bottom of the window, are now as wide as their longest line.
+  - The list of configs under the name on Home, and the menu for adding a config,
+    had a fixed width: wide around short names, while a long one was cut all the
+    same. They are now as wide as the longest name, within the window.
+  - Names were cut where the window had room for them: the active config on Home,
+    the connected config in the list, where its ping and "connected" left it
+    little, and addresses, domains, profiles and applications on the Split and
+    Settings pages. They are cut only where the window ends now, and the config
+    list leaves the connected config's name more room.
+  - Save and Cancel in the config editor grow to fit longer words, as in Russian.
+  - A choice or a menu item longer than the window can show ends in "…". It used
+    to stop at the edge, part of it hidden under the tick.
+- **Links respond over their words.** "Check for updates", the log file's path
+  and "Choose a file instead…" took a click anywhere on their row, far to the
+  right of the words.
+- **Messages at the bottom of the window**
+  - A name with no spaces in it, such as a long file name, ran past both edges.
+    It wraps now.
+  - A message longer than three lines was cut, and the part left out was often
+    the one saying what to do. Up to six lines show now, and a long message stays
+    up longer.
+  - On Home a message sat across the speed tiles and cut them in half. A short
+    one now shows between the config name and the tiles, and a longer one covers
+    the tiles rather than the config name.
+- **The config list on Home and the drop-down lists close when the window is
+  resized.** They stayed open, away from what they belong to.
+
 ## 1.2.1
 
 ### Security

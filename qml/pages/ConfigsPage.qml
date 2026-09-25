@@ -184,11 +184,15 @@ Item {
                     cfgDelegate.dragY = 0; moved = false
                 }
             }
+            // The name takes what is left, so the rest keeps to what it needs: the
+            // three icons share one group of 26 px cells, not 30 px cells with the
+            // row's gap between each. At the default width the connected config,
+            // with its ping and badge, was left about 60 px for its name.
             RowLayout {
-                anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 6; spacing: 10
+                anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 6; spacing: 8
                 Image { source: "qrc:/assets/logo.svg"; Layout.preferredWidth: 22; Layout.preferredHeight: 22
                         sourceSize: Qt.size(44,44); opacity: index === backend.activeIndex ? 1 : 0.4 }
-                Text { text: modelData; color: theme.text; font.pixelSize: 14
+                Text { objectName: "configName"; text: modelData; color: theme.text; font.pixelSize: 14
                        Layout.fillWidth: true; elide: Text.ElideRight
                        font.weight: index === backend.activeIndex ? Font.Medium : Font.Normal }
                 Text { visible: index < backend.pings.length && backend.pings[index] !== ""
@@ -201,30 +205,32 @@ Item {
                 Rectangle { visible: index === backend.activeIndex && backend.connected && !backend.disconnecting
                     radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
                     Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
-                Item { Layout.preferredWidth: 30; Layout.fillHeight: true
-                    Icon { anchors.centerIn: parent; width: 17; height: 17; svg: "qrc:/icons/export.svg"
-                           color: expMa.containsMouse ? cfgRoot.theme.text : cfgRoot.theme.textDim; theme: cfgRoot.theme }
-                    MouseArea { id: expMa; anchors.fill: parent; hoverEnabled: true
-                        onClicked: {
-                            cfgRoot.exportPath = backend.configPath(index); cfgRoot.exportName = modelData
-                            shell.showSelect(parent,
-                                [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
-                                cfgRoot.exportPicked)
-                        } } }
-                Item { Layout.preferredWidth: 30; Layout.fillHeight: true
-                    Icon { anchors.centerIn: parent; width: 18; height: 18; svg: "qrc:/icons/more.svg"
-                           color: dotsMa.containsMouse ? theme.text : theme.textDim; theme: cfgRoot.theme }
-                    MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
-                                onClicked: { shell.editIndex = index; shell.overlay = "create" } } }
-                Item { Layout.preferredWidth: 30; Layout.fillHeight: true
-                    Icon { anchors.centerIn: parent; width: 16; height: 16; svg: "qrc:/icons/close.svg"
-                           color: delMa.containsMouse ? theme.danger : theme.textDim; theme: cfgRoot.theme }
-                    MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
-                                onClicked: {
-                                    cfgRoot.deletePath = backend.configPath(index)
-                                    shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
-                                                      qsTr("Delete"), cfgRoot.deleteConfirmed)
-                                } } }
+                Row { Layout.fillHeight: true
+                    Item { width: 26; height: parent.height
+                        Icon { anchors.centerIn: parent; width: 17; height: 17; svg: "qrc:/icons/export.svg"
+                               color: expMa.containsMouse ? cfgRoot.theme.text : cfgRoot.theme.textDim; theme: cfgRoot.theme }
+                        MouseArea { id: expMa; anchors.fill: parent; hoverEnabled: true
+                            onClicked: {
+                                cfgRoot.exportPath = backend.configPath(index); cfgRoot.exportName = modelData
+                                shell.showSelect(parent,
+                                    [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
+                                    cfgRoot.exportPicked)
+                            } } }
+                    Item { width: 26; height: parent.height
+                        Icon { anchors.centerIn: parent; width: 18; height: 18; svg: "qrc:/icons/more.svg"
+                               color: dotsMa.containsMouse ? theme.text : theme.textDim; theme: cfgRoot.theme }
+                        MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { shell.editIndex = index; shell.overlay = "create" } } }
+                    Item { width: 26; height: parent.height
+                        Icon { anchors.centerIn: parent; width: 16; height: 16; svg: "qrc:/icons/close.svg"
+                               color: delMa.containsMouse ? theme.danger : theme.textDim; theme: cfgRoot.theme }
+                        MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: {
+                                        cfgRoot.deletePath = backend.configPath(index)
+                                        shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
+                                                          qsTr("Delete"), cfgRoot.deleteConfirmed)
+                                    } } }
+                }
             }
         }
     }
@@ -253,7 +259,13 @@ Item {
         transform: Translate { y: importMenu.open ? 0 : -8
                                Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
         anchors.top: parent.top; anchors.topMargin: 44; anchors.horizontalCenter: parent.horizontalCenter
-        width: 240; height: menuCol.height + 12; radius: 10; color: theme.bg
+        // As wide as its widest item needs, not a fixed 240 px that left a broad
+        // empty band beside three short labels. The window's own select popup
+        // sizes itself the same way.
+        width: Math.min(cfgRoot.width - 16,
+                        Math.max(140, Math.ceil(Math.max(mrPaste.labelWidth, mrFile.labelWidth,
+                                                         mrCreate.labelWidth)) + 40))
+        height: menuCol.height + 12; radius: 10; color: theme.bg
         border.color: theme.border; border.width: 1
         layer.enabled: true
         layer.effect: MultiEffect {
@@ -263,22 +275,24 @@ Item {
         Column { id: menuCol; width: parent.width - 10; x: 5; y: 6; spacing: 1
             component MenuRow: Rectangle {
                 property alias text: mrLbl.text
+                readonly property real labelWidth: mrLbl.implicitWidth
                 property alias hovered: mrMa.containsMouse
                 signal triggered()
                 width: parent.width; height: 40; radius: 6
                 color: mrMa.containsMouse ? theme.surface : theme.bg
                 Behavior on color { ColorAnimation { duration: 120 } }
                 Text { id: mrLbl; anchors.verticalCenter: parent.verticalCenter; x: 9
+                       width: parent.width - 18; elide: Text.ElideRight
                        color: theme.text; font.pixelSize: 14 }
                 MouseArea { id: mrMa; anchors.fill: parent; hoverEnabled: true; onClicked: parent.triggered() }
             }
-            MenuRow { text: qsTr("Paste from clipboard")
+            MenuRow { id: mrPaste; text: qsTr("Paste from clipboard")
                 onTriggered: { importMenu.open = false; backend.importFromClipboard() } }
-            MenuRow { text: qsTr("From file…")
+            MenuRow { id: mrFile; text: qsTr("From file…")
                 onTriggered: { importMenu.open = false; fileDlg.open() } }
             Item { width: parent.width; height: 11
                 Rectangle { anchors.centerIn: parent; width: parent.width - 16; height: 1; color: theme.border } }
-            MenuRow { text: qsTr("Create new…")
+            MenuRow { id: mrCreate; text: qsTr("Create new…")
                 onTriggered: { importMenu.open = false; shell.editIndex = -1; shell.overlay = "create" } }
         }
     }
