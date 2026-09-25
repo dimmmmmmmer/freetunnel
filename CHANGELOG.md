@@ -59,6 +59,20 @@ compare link at the bottom of its release notes.
   version fields there were empty.
 - **FreeTunnel now needs macOS 12 or later.** 1.2.0 said it needed macOS 11, but
   it could not start there either: the Qt libraries it is built on need 12.
+- **Global hotkeys are off until you turn them on.** The keys they came with,
+  Ctrl+Shift+T, E and D (⌘⇧T, E and D on macOS), are what browsers and terminals
+  use to reopen a closed tab and more, and a global hotkey takes its keys away
+  from every other program. If you used them as they came, turn them back on in
+  Settings → Hotkeys. If you had changed any of the keys, your hotkeys stay as
+  they were.
+- **A hotkey needs Ctrl, Alt or Meta** (⌘, ⌥ or ⌃ on macOS), unless it is one of
+  F1–F12. Enter, Tab or a letter pressed in the field used to become a hotkey for
+  the whole system. Backspace or Delete in the field now removes a hotkey, and
+  one that FreeTunnel could not register, because another program or the desktop
+  has it, shows in red.
+- **Config names keep their spaces and punctuation.** "Germany · Frankfurt" used
+  to be listed as "Germany___Frankfurt". Only characters a file name cannot hold
+  are replaced. Configs you already have keep their names.
 
 ### Fixed
 
@@ -75,6 +89,103 @@ compare link at the bottom of its release notes.
 - **macOS 27: clicking the menu-bar icon could make the app quit.** This is a
   fault in the Qt version FreeTunnel is built on, and the app now works around
   it.
+- **Connecting**
+  - Switching to a config whose server was down showed no error. The app said
+    "Connecting…" for as long as it kept retrying, and ignored the next config
+    you picked. The error now shows, and the next pick switches.
+  - Picking another config while a switch was still connecting could leave the
+    tunnel on the first one while the app showed the second. The last pick wins.
+  - Saving the config you are connecting with, say with its password corrected,
+    starts the attempt again with what you saved. So does changing a rule or the
+    kill switch while connecting. The attempt used to go on with the old
+    settings until you reconnected.
+  - A connection the VPN core refused at once could stay on "Connecting…" until
+    you clicked.
+  - Choosing the ticked config in the tray menu only removed its tick. It now
+    turns the connection off, and on again.
+  - Double-clicking the logo connected and at once cancelled. It now counts as
+    one click.
+  - After deleting the active config, the next start could make a different
+    config active, and with "Connect on startup" connect to it.
+  - Windows: without wintun.dll next to FreeTunnel.exe, Connect waited a minute
+    and then blamed the administrator prompt. It now says wintun.dll is missing,
+    before asking for administrator rights.
+- **Tray and window**
+  - Linux: clicking the tray icon did nothing; only «Show FreeTunnel» in its menu
+    worked. A click on KDE, or a double-click on GNOME, now brings the window
+    back.
+  - Linux: when the tray came up after FreeTunnel, as a panel can at login,
+    there was no tray icon for the whole session, and the window's close button
+    quit the app. The icon now appears once the tray does.
+  - Config names in the tray menu show as typed. On Linux an underscore went
+    missing, and on every system an "&" could.
+  - When something started from the tray failed while the window was hidden,
+    the error showed only inside the hidden window, and was gone before you saw
+    it. It is also sent as a notification now, and waits in the window until
+    you open it.
+  - Minimising a maximised window made it come back at normal size. It stays
+    maximised.
+  - freetunnel://toggle, connect and disconnect brought the window up each time,
+    taking focus from what you were typing in. They now work without it. A
+    second launch and a tt:// link still bring the window forward.
+  - macOS: «Show FreeTunnel» and a second launch did nothing after ⌘H.
+  - macOS: clicking the Dock icon took a zoomed or full-screen window out of zoom
+    or full screen. A tt:// link left a window minimised to the Dock where it
+    was, with the question about the import inside it.
+  - macOS: the red button in full screen left an empty black screen. The window
+    now leaves full screen first.
+  - macOS: ⌘W hides the window like the red button, and ⌘M minimises it. Neither
+    did anything.
+  - Windows: a second launch or a tt:// link could leave the running window
+    behind others.
+- **Configs and questions**
+  - Renaming a config only by letter case, "work" to "Work", gave "Work-2" on
+    Windows and macOS.
+  - When a config was added while the export menu or the delete question was
+    open (from a link, a file or the clipboard), exporting or deleting could act
+    on the config next to the one you chose. A copied deep link then carried
+    that config's password.
+  - Escape in the file dialog for a certificate or an application closed the
+    editor or the application picker behind it, and on Linux could crash the
+    app.
+  - In the question about importing a link, a long server name was cut off at
+    both ends, and clicking inside the question cancelled it. In Russian, three
+    buttons ran into its edges.
+  - An import question that appeared over the editor's "Discard unsaved
+    changes?" did not get Return and Escape: Return discarded the edits behind
+    it.
+  - A hotkey field still recording under a question took the Return meant for
+    the question as its hotkey. Questions now take the keyboard while they are
+    open.
+  - Tab moves between the fields of the config editor.
+  - After a failed Save, the error covered the editor's Save button and took the
+    next click. Over the editor, messages now show at the top.
+  - On an empty Configs page, «Add a config» could not be clicked.
+- **Settings, Split and Logs**
+  - Logs: Clear left the old log on screen if some of it was selected, and a
+    selection stopped the view from updating at all. With logging off, the page
+    now says so instead of waiting for lines that will not come.
+  - Settings: the update status is no longer cut short, and clicking it does
+    what it offers: check, download or try again. During a check or a download it
+    does nothing; it used to start a check in the middle of a download, which
+    could then offer the same download a second time.
+  - Settings: «Restore defaults» for excluded routes asks first, like «Clear all»
+    next to it.
+  - Split: the notice about "Through VPN" with no rules names the connected
+    config and the profile it uses, which need not be the profile on screen. The
+    message about it no longer pops up after each rule you add to a different
+    profile.
+  - Dark theme: the editor's Save button and the selected profile had white text
+    on light grey, hard to read and looking disabled.
+- **Russian**
+  - Text cut short at the default window size fits, the built-in profile is
+    «По умолчанию», and the discard question reads «Закрыть без сохранения?» with
+    «Не сохранять» instead of «Отмена» beside «Отменить».
+  - Connection errors, update errors, errors in tt:// links and messages from
+    the VPN helper were in English.
+  - Switching the language now changes everything at once. The keyring warning
+    on Linux stayed in English for a whole session started in Russian.
+  - Linux: file dialogs have Russian buttons.
 
 ## 1.2.0
 
