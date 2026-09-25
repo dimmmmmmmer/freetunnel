@@ -208,17 +208,19 @@ Item {
                          onToggled: function(v){ backend.verboseLogs = v } } }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
-            Item { Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, updRow.implicitHeight + 12)
-                RowLayout {
-                    id: updRow
-                    anchors.left: parent.left; anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
+            // Anchored, not in a RowLayout: layouts do not size a wrapping text's
+            // height from its width, and gave it the height of fewer lines than it
+            // had, eliding the rest.
+            Item { Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, updTxt.implicitHeight + 12)
+                Item {
+                    anchors.fill: parent
                     Text { id: updTxt; objectName: "updateStatus"
-                           Layout.fillWidth: true; Layout.minimumWidth: 0
+                           anchors.left: parent.left; anchors.right: updIcons.left; anchors.rightMargin: 6
+                           anchors.verticalCenter: parent.verticalCenter
                            // Wrapped: the status is often a whole instruction ("finish
                            // installing it from the file manager…") or a reason, and
                            // on one line it was the part cut off.
-                           wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
+                           wrapMode: Text.WordWrap; maximumLineCount: 6; elide: Text.ElideRight
                            // Surface the backend's status line (download %, error
                            // text, "Version X is available") while an update flow
                            // is active — the icons alone don't say what happened.
@@ -242,8 +244,9 @@ Item {
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: updTxt.idle ? backend.checkForUpdates() : backend.openLatestRelease() } }
                     Row {
+                        id: updIcons
                         spacing: 5
-                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                         Text {
                             visible: backend.updateState === "current"
                             text: "✓"; font.pixelSize: 14; color: theme.success
@@ -280,8 +283,13 @@ Item {
                 }
             }
             Item { Layout.preferredHeight: 14 }
-            // Footer: project names link to their repos.
+            // Footer: project names link to their repos. Allowed to be narrower than
+            // it would like: an item that does not fill has its full width as its
+            // minimum, and in a column that minimum became every row's, so a wide
+            // font here pushed each row on the page past its right edge.
             Row { Layout.alignment: Qt.AlignHCenter; spacing: 0
+                  Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth
+                  clip: true
                 Text { text: "FreeTunnel " + backend.appVersion; font.pixelSize: 12
                        color: ftMa.containsMouse ? theme.accent : theme.textFaint
                        MouseArea { id: ftMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor

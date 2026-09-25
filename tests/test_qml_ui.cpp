@@ -1880,8 +1880,7 @@ void TestQmlUi::theUpdateLineDoesWhatItOffers()
 
     // Long reasons wrap rather than lose their end.
     m_backend.setUpdate(QStringLiteral("error"),
-                        QStringLiteral("Update downloaded. Finish installing it from the file manager — "
-                                       "packages are installed by your package manager."));
+                        QStringLiteral("Update downloaded. Finish installing it from the file manager."));
     QTRY_VERIFY(line->property("lineCount").toInt() > 1);
     QVERIFY(!line->property("truncated").toBool());
     delete root;
