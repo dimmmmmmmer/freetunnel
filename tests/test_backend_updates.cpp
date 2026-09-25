@@ -19,6 +19,8 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QDesktopServices>
+#include <QUrl>
 
 #include "app/Backend.h"
 #include "core/UpdateChecker.h"
@@ -38,6 +40,10 @@ private slots:
     void asecondCheckWhileOneIsRunningIsIgnored();
     void aCheckWaitsForARunningDownload();
     void theUpdateLineFollowsALanguageChange();
+    void aReleaseWithNothingForThisPlatformOffersItsPage();
+    void aRefusedDownloadIsCheckedAgainNotRetried();
+    void aFailedDownloadIsRetried();
+    void aStalledCheckGivesUp();
 
 private:
     // Serve one release payload and wait for the check to settle.
@@ -116,6 +122,13 @@ void TestBackendUpdates::checkFindsNewerVersion()
     QCOMPARE(backend.latestVersion(), QStringLiteral("99.0.0"));
     QVERIFY2(backend.updateMessage().contains(QStringLiteral("99.0.0")),
              qPrintable(backend.updateMessage()));
+    // Installing it closes FreeTunnel on Windows, and the tunnel with it: said
+    // before the click. Not here, where this test is not an AppImage.
+#if defined(Q_OS_WIN)
+    QVERIFY2(backend.updateMessage().contains(QStringLiteral("closes FreeTunnel")), qPrintable(backend.updateMessage()));
+#else
+    QVERIFY2(!backend.updateMessage().contains(QStringLiteral("closes FreeTunnel")), qPrintable(backend.updateMessage()));
+#endif
     qunsetenv("FT_GITHUB_API_BASE");
 }
 
@@ -307,6 +320,127 @@ void TestBackendUpdates::backgroundCheckDoesNotPaintCheckingState()
     QVERIFY2(backend.updateState().isEmpty() || backend.updateState() == QLatin1String("available"),
              qPrintable(backend.updateState()));
     qunsetenv("FT_GITHUB_API_BASE");
+}
+
+namespace {
+
+// Records what would have been handed to the desktop to open.
+class UrlCatcher : public QObject {
+    Q_OBJECT
+public:
+    QList<QUrl> urls;
+public slots:
+    void open(const QUrl &url) { urls << url; }
+};
+
+} // namespace
+
+// A release with nothing to install on this platform failed the same way on every
+// retry, and ↻ was all the row offered; the first click visibly did nothing. The
+// release page is where the user can see what there is.
+void TestBackendUpdates::aReleaseWithNothingForThisPlatformOffersItsPage()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveRelease(http, QStringLiteral("v99.0.0")); // no installer
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    QCOMPARE(backend.updateState(), QStringLiteral("available"));
+    backend.downloadUpdate();
+    QCOMPARE(backend.updateState(), QStringLiteral("error"));
+    QVERIFY(backend.updateErrorOpensPage());
+
+    UrlCatcher catcher;
+    QDesktopServices::setUrlHandler(QStringLiteral("http"), &catcher, "open");
+    const auto unhandle = qScopeGuard([] { QDesktopServices::unsetUrlHandler(QStringLiteral("http")); });
+    backend.openLatestRelease();
+    QCOMPARE(backend.updateState(), QStringLiteral("error"));
+    QCOMPARE(catcher.urls, QList<QUrl>{QUrl(http.baseUrl() + QStringLiteral("/release"))});
+
+    // A check starts over: whatever the next release has, it is offered afresh.
+    backend.checkForUpdates(true);
+    QVERIFY(!backend.updateErrorOpensPage());
+}
+
+// An unsigned release, or one whose signature does not hold, is refused. Retrying
+// the download fetched the same refused release; checking again may find it fixed.
+void TestBackendUpdates::aRefusedDownloadIsCheckedAgainNotRetried()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveRelease(http, QStringLiteral("v99.0.0"), /*withInstaller=*/true);
+    MockHttpServer::Route sums;
+    sums.body = QByteArrayLiteral("0000  freetunnel-test\n");
+    sums.contentType = QByteArrayLiteral("text/plain");
+    http.setRoute(QStringLiteral("/checksums"), sums); // and no signature: refused
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    backend.downloadUpdate();
+    QTRY_VERIFY_WITH_TIMEOUT(backend.updateState() == QLatin1String("error"), 10000);
+    QVERIFY2(backend.updateMessage().contains(QStringLiteral("not signed")), qPrintable(backend.updateMessage()));
+    QVERIFY(!backend.updateErrorOpensPage());
+
+    const int fetched = http.requestCount(QStringLiteral("/checksums"));
+    backend.openLatestRelease();
+    QCOMPARE(backend.updateState(), QStringLiteral("checking"));
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    QCOMPARE(http.requestCount(QStringLiteral("/checksums")), fetched);
+}
+
+// A download that failed on the way, a network error say, is retried: the same
+// release may well come down the next time.
+void TestBackendUpdates::aFailedDownloadIsRetried()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveRelease(http, QStringLiteral("v99.0.0"), /*withInstaller=*/true);
+    MockHttpServer::Route broken;
+    broken.status = 503;
+    http.setRoute(QStringLiteral("/checksums"), broken);
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    backend.downloadUpdate();
+    QTRY_VERIFY_WITH_TIMEOUT(backend.updateState() == QLatin1String("error"), 10000);
+    QVERIFY(!backend.updateErrorOpensPage());
+    backend.openLatestRelease();
+    QCOMPARE(backend.updateState(), QStringLiteral("downloading"));
+}
+
+// With no timeout, a connection that stopped answering held "Checking…" until the
+// system gave up on it, many minutes on, with every way out of the row blocked.
+void TestBackendUpdates::aStalledCheckGivesUp()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    qputenv("FT_UPDATE_TRANSFER_TIMEOUT_MS", "300");
+    const auto unset = qScopeGuard([] {
+        qunsetenv("FT_GITHUB_API_BASE");
+        qunsetenv("FT_UPDATE_TRANSFER_TIMEOUT_MS");
+    });
+    MockHttpServer::Route silent;
+    silent.silent = true;
+    http.setRoute(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest"), silent);
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QCOMPARE(backend.updateState(), QStringLiteral("checking"));
+    QTRY_VERIFY_WITH_TIMEOUT(backend.updateState() == QLatin1String("error"), 10000);
+    // In words that do not say the user cancelled something.
+    QVERIFY2(backend.updateMessage().contains(QStringLiteral("stopped responding")),
+             qPrintable(backend.updateMessage()));
 }
 
 QTEST_MAIN(TestBackendUpdates)

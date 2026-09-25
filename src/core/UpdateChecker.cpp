@@ -212,6 +212,16 @@ QString githubApiUrl(const QString &path)
 #endif
     return QStringLiteral("https://api.github.com") + path;
 }
+
+// What went wrong with a reply, in words. The transfer timeout aborts a stalled
+// reply, and Qt calls that "Operation canceled", which reads as if the user had
+// cancelled something.
+QString replyError(const QNetworkReply *reply)
+{
+    return reply->error() == QNetworkReply::OperationCanceledError
+            ? UpdateChecker::tr("the server stopped responding")
+            : reply->errorString();
+}
 } // namespace
 
 UpdateChecker::UpdateChecker(const QString &githubRepo,
@@ -222,6 +232,20 @@ UpdateChecker::UpdateChecker(const QString &githubRepo,
     , m_currentVersion(currentVersion)
     , m_nam(new QNetworkAccessManager(this))
 {
+    // Qt leaves the transfer timeout off, so a connection that stops delivering
+    // (routing changed under the VPN, Wi-Fi switched) held "Checking…" or
+    // "Downloading… N%" until the system gave up on it, with every way out of the
+    // row blocked meanwhile. The timer restarts on progress: a slow download that
+    // is still moving is not cut off.
+    std::chrono::milliseconds timeout = QNetworkRequest::DefaultTransferTimeout;
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Test-only, like FT_GITHUB_API_BASE: a stall waited out in milliseconds.
+    bool ok = false;
+    const int ms = qEnvironmentVariableIntValue("FT_UPDATE_TRANSFER_TIMEOUT_MS", &ok);
+    if (ok && ms > 0)
+        timeout = std::chrono::milliseconds(ms);
+#endif
+    m_nam->setTransferTimeout(timeout);
 }
 
 void UpdateChecker::checkNow()
@@ -330,7 +354,7 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
-        emit noUpdateAvailable(tr("Network error: %1").arg(reply->errorString()));
+        emit noUpdateAvailable(tr("Network error: %1").arg(replyError(reply)));
         return;
     }
 
@@ -378,7 +402,7 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 void UpdateChecker::downloadLatest()
 {
     if (m_latest.installerUrl.isEmpty()) {
-        emit downloadFailed(tr("No installer asset found for this platform"));
+        emit downloadFailed(tr("No installer asset found for this platform"), DownloadFailure::NoInstaller);
         return;
     }
 
@@ -396,7 +420,8 @@ void UpdateChecker::downloadLatest()
     // SHA256SUMS.txt manifest is treated as untrusted.
     if (m_latest.checksumsUrl.isEmpty()) {
         emit downloadFailed(tr("This release has no SHA256SUMS.txt — refusing to "
-                               "download an unverifiable update."));
+                               "download an unverifiable update."),
+                            DownloadFailure::Refused);
         return;
     }
     m_checksumsData.clear();
@@ -424,14 +449,15 @@ void UpdateChecker::onChecksumsFetched(QNetworkReply *reply)
 {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-        emit downloadFailed(tr("Could not download SHA256SUMS.txt: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Could not download SHA256SUMS.txt: %1").arg(replyError(reply)));
         return;
     }
     m_checksumsData = reply->readAll();
 
     if (signatureVerificationActive()) {
         if (m_latest.signatureUrl.isEmpty()) {
-            emit downloadFailed(tr("This release is not signed — refusing to update."));
+            emit downloadFailed(tr("This release is not signed — refusing to update."),
+                                DownloadFailure::Refused);
             return;
         }
         fetchSignature();
@@ -460,14 +486,14 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
 {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-        emit downloadFailed(tr("Could not download the signature: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Could not download the signature: %1").arg(replyError(reply)));
         return;
     }
     m_signatureData = reply->readAll();
 
     const QByteArray pub(freetunnel::kReleaseSigningPublicKeyPem);
     if (!verifyEd25519Signature(m_checksumsData, m_signatureData, pub)) {
-        emit downloadFailed(tr("Update signature is invalid — aborting."));
+        emit downloadFailed(tr("Update signature is invalid — aborting."), DownloadFailure::Refused);
         return;
     }
 
@@ -483,7 +509,8 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
         emit downloadFailed(
                 tr("This update is signed for version %1, but %2 was offered — "
                    "aborting.")
-                        .arg(manifestVersion, m_latest.version));
+                        .arg(manifestVersion, m_latest.version),
+                DownloadFailure::Refused);
         return;
     }
     fetchInstaller();
@@ -552,7 +579,7 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
     }
     if (reply->error() != QNetworkReply::NoError) {
         QFile::remove(m_downloadPath);
-        emit downloadFailed(tr("Download failed: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Download failed: %1").arg(replyError(reply)));
         return;
     }
 

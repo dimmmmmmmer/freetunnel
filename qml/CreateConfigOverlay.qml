@@ -22,9 +22,10 @@ Item {
     readonly property int cardWidth: Math.min(width - 28, 372)
 
     anchors.fill: parent
-    // Dimmed backdrop — the main UI shows through; click to close.
+    // Dimmed backdrop — the main UI shows through; click to close. It takes hover
+    // too: the page under the dim is out of reach, and lit up as if it were not.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
-        MouseArea { anchors.fill: parent; onClicked: cform.tryClose() } }
+        MouseArea { anchors.fill: parent; hoverEnabled: true; onClicked: cform.tryClose() } }
     // Escape closes the innermost thing first: stand down while the discard
     // dialog or a window-level popup (protocol / split-profile dropdown, confirm
     // dialog) already handles it — two enabled shortcuts on one key are
@@ -94,7 +95,10 @@ Item {
             height: 48
             Text { id: cBack; anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter
                    text: "←"; color: cBackMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 20
-                   MouseArea { id: cBackMa; anchors.fill: parent; hoverEnabled: true; onClicked: cform.tryClose() } }
+                   // As far around the arrow as the app picker's: 3 px to its left
+                   // it no longer responded.
+                   MouseArea { id: cBackMa; objectName: "editorBack"; anchors.fill: parent; anchors.margins: -6
+                               hoverEnabled: true; onClicked: cform.tryClose() } }
             Text { anchors.left: cBack.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                    text: cform.editing ? qsTr("Edit config") : qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
         }
@@ -223,7 +227,7 @@ Item {
                     Rectangle { objectName: "saveButton"; width: Math.max(88, saveText.implicitWidth + 26); height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { id: saveText; objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.onAccent; font.pixelSize: 14 }
+                        Text { id: saveText; objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.accentText; font.pixelSize: 14 }
                         MouseArea { id: saveMa; anchors.fill: parent; hoverEnabled: true; onClicked: {
                             var ok = backend.createConfig({
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,

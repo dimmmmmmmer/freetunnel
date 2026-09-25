@@ -38,6 +38,69 @@ compare link at the bottom of its release notes.
     the tiles rather than the config name.
 - **The config list on Home and the drop-down lists close when the window is
   resized.** They stayed open, away from what they belong to.
+- **Updates in Settings**
+  - The download arrow tipped onto its side under the pointer, and the retry
+    arrow turned against its own direction. They stay upright now.
+  - Once an update was downloaded, the arrow and the line beside it both opened
+    the release web page. They no longer offer anything after the download: the
+    installer, the disk image or the folder has already been opened.
+  - After a failed download the row offers what can help. A release with nothing
+    for your system offers its page (↗). One that is unsigned, or whose
+    signature does not match, is checked for again rather than downloaded again.
+    Other failures are retried as before.
+  - A check or a download whose connection stopped answering showed "Checking…"
+    or the same percentage for many minutes, and nothing in the row could be
+    clicked meanwhile. It now gives up after 30 seconds without progress, and
+    says the server stopped responding.
+  - While checking or downloading, the "…" beside the line pulses instead of
+    standing still.
+  - On Windows, and when FreeTunnel runs as an AppImage, installing an update
+    closes FreeTunnel, and the VPN goes down with it. The line offering the
+    update now says so.
+  - Windows: if the downloaded installer could not be started, FreeTunnel quit
+    all the same. It now stays open and says so.
+  - Changing the language announced an available update again.
+- **Home**
+  - The logo's pulse while connecting or disconnecting never moved. It pulses now.
+  - Clicking the session time under the logo, or the space beside the logo,
+    disconnected. Only the logo does now.
+  - When a connection started or ended, the config name under the logo jumped
+    while the logo glided. Both glide now.
+  - With no configs, clicking the logo said "Select a config first", with none to
+    select. The logo, "Add a config" and the + beside the config name now open
+    the menu for adding one, where they only switched to the Configs page.
+- **Configs**
+  - While a config was connecting, or FreeTunnel was switching to another one,
+    the list showed nothing. The active config now says "connecting…" until it
+    says "connected".
+  - The button that opens a config for editing showed ⋯, which suggests a menu.
+    It shows a pencil now.
+  - With no configs, "Add a config" looked like faint placeholder text and did
+    not respond to the pointer, though it could be clicked. It is a link now, like
+    the same words on Home.
+- **Light theme: text on dark buttons is white again.** Since 1.2.1 the Save
+  label in the config editor and the name on the chosen profile were black on
+  dark grey. Hovering chips, hotkey fields and the Cancel buttons also showed
+  almost no change; it does now.
+- **Tray menu:** while connecting, the first item read "Connecting…" like a
+  status, and choosing it cancelled the connection. It reads "Cancel connecting"
+  now. While disconnecting it cannot be chosen, since it did nothing then.
+- **Hover and pointer**
+  - With a question, a drop-down list or a menu open, what lay behind it still lit
+    up under the pointer, though a click there only closed it. It no longer
+    reacts.
+  - A few buttons showed the hand pointer, where the others and the window's own
+    buttons show the arrow. They show the arrow now; links keep the hand.
+  - The back arrow in the config editor responds a little around it, as the one in
+    "Add an application" does.
+  - A hotkey field flickered as it started or stopped listening for keys.
+  - The links at the bottom of Settings underline under the pointer, like the
+    others.
+  - The drop-down lists fade out as they fade in, and list rows fade their
+    highlight everywhere.
+- **Adding an application no longer freezes the window the first time.** On
+  Windows, reading every Start Menu shortcut could stall the window for a while.
+  The list is now read in the background, and the picker says it is looking.
 
 ## 1.2.1
 

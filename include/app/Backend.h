@@ -71,6 +71,8 @@ class Backend : public QObject {
     // when the rules change, and once more when the scan of installed
     // applications finishes, which emits splitChanged for exactly that reason.
     Q_PROPERTY(QStringList appRuleLabels READ appRuleLabels NOTIFY splitChanged)
+    // Whether the scan of installed applications has finished; the picker waits on it.
+    Q_PROPERTY(bool installedAppsReady READ installedAppsReady NOTIFY splitChanged)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     // Global hotkeys (portable key sequences, e.g. "Ctrl+Alt+T"; empty = unbound)
@@ -90,6 +92,9 @@ class Backend : public QObject {
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged) // ""|checking|current|available|downloading|ready|error
     Q_PROPERTY(QString updateMessage READ updateMessage NOTIFY updateChanged)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY updateChanged)
+    // In "error": the row's action opens the release page, not a retry. The
+    // release has no installer for this platform, so retrying cannot help.
+    Q_PROPERTY(bool updateErrorOpensPage READ updateErrorOpensPage NOTIFY updateChanged)
     // Misc
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
     Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
@@ -190,10 +195,12 @@ public:
     // it stands for, because that is the only name a rule can match.
     Q_INVOKABLE bool addApplicationFromPath(const QString &pathOrUrl);
     // Everything the system lists as installed, as {name, path} rows for the
-    // picker. Scanned on first use and kept for the session: the answer only
-    // changes when something is installed or removed, and on Windows the scan
-    // has to resolve every Start Menu shortcut through the shell.
+    // picker. Scanned on a worker on first use and kept for the session: the
+    // answer only changes when something is installed or removed, and on Windows
+    // the scan has to resolve every Start Menu shortcut through the shell. Empty
+    // until the scan finishes, which installedAppsReady tells.
     Q_INVOKABLE QVariantList installedApplications();
+    bool installedAppsReady() const { return m_installedAppsScanned; }
     QStringList appRuleLabels();
     // Installed applications whose name or path contains `query`, at most
     // `limit` of them, for completing what someone is typing. Empty while the
@@ -238,6 +245,7 @@ public:
     const QString &updateState() const { return m_updateState; }
     const QString &updateMessage() const { return m_updateMessage; }
     const QString &latestVersion() const { return m_latestVersion; }
+    bool updateErrorOpensPage() const { return m_updateErrorOpensPage; }
     Q_INVOKABLE void checkForUpdates(bool userInitiated = true);
     Q_INVOKABLE void downloadUpdate();
     Q_INVOKABLE void openLatestRelease();
@@ -370,7 +378,7 @@ private:
 
     VpnHelperClient m_client;
     AppSettings m_settings;
-    // Scanned once per Backend when the picker first opens; see
+    // Scanned once per Backend when first asked for; see
     // installedApplications() for why this is not a function-local static.
     QVariantList m_installedApps;
     bool m_installedAppsScanned = false;
@@ -400,6 +408,7 @@ private:
     // Which side failed: m_latestVersion cannot answer that — it only says "this
     // process has ever seen a release" and is never cleared.
     bool m_updateErrorFromDownload = false;
+    bool m_updateErrorOpensPage = false;
     QVariantList m_pings;
     int m_pingGeneration = 0;  // bumped on every ping run / config reload so
                                // in-flight probe callbacks from a previous run

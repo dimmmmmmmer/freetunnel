@@ -63,8 +63,10 @@ Item {
         return Math.min(label.implicitWidth + 16, (buttonRoom - 8 * (buttonCount - 1)) / buttonCount)
     }
 
+    // Takes hover as well as clicks: the page under the dim is out of reach, and
+    // its rows and tiles lit up under the pointer as if they were not.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
-        MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
+        MouseArea { anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
     Rectangle {
         objectName: "confirmCard"
         anchors.centerIn: parent
@@ -107,14 +109,16 @@ Item {
             Row { id: btnRow; anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
                 Rectangle { objectName: "cancelButton"
                     width: cd.buttonWidth(c1t); height: 32; radius: 8
-                    color: c1.containsMouse ? theme.border : theme.surface
+                    color: c1.containsMouse ? theme.surfaceHover : theme.surface
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Text { id: c1t; anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
                     MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
                 Rectangle { objectName: "alternateButton"
                     visible: cd.altText !== ""
                     width: visible ? cd.buttonWidth(c3t) : 0; height: 32; radius: 8
-                    color: c3.containsMouse ? theme.border : theme.surface
+                    color: c3.containsMouse ? theme.surfaceHover : theme.surface
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Text { id: c3t; anchors.centerIn: parent; text: cd.altText; color: theme.text; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
                     MouseArea { id: c3; anchors.fill: parent; hoverEnabled: true
@@ -122,6 +126,7 @@ Item {
                 Rectangle { objectName: "confirmButton"
                     width: cd.buttonWidth(c2t); height: 32; radius: 8
                     color: c2.containsMouse ? Qt.darker(theme.danger, 1.15) : theme.danger
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Text { id: c2t; anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
                     MouseArea { id: c2; anchors.fill: parent; hoverEnabled: true

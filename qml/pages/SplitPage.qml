@@ -81,7 +81,7 @@ Item {
                         property bool isDefault: modelData === "Default"
                         radius: 13; height: 28
                         implicitWidth: plabel.width + (chip.isDefault ? 22 : 39)
-                        color: isActive ? theme.accent : (chipMa.containsMouse ? theme.border : theme.surface)
+                        color: isActive ? theme.accent : (chipMa.containsMouse ? theme.surfaceHover : theme.surface)
                         Behavior on color { ColorAnimation { duration: 120 } }
                         MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
                                     onClicked: backend.selectProfile(chip.modelData) }
@@ -91,8 +91,8 @@ Item {
                                // width with room to spare.
                                width: Math.min(implicitWidth, chip.parent ? chip.parent.width - 39 : 130)
                                elide: Text.ElideRight
-                               color: chip.isActive ? theme.onAccent : theme.text; font.pixelSize: 13 }
-                        ChipX { visible: !chip.isDefault; onAccent: chip.isActive; theme: splitRoot.theme
+                               color: chip.isActive ? theme.accentText : theme.text; font.pixelSize: 13 }
+                        ChipX { visible: !chip.isDefault; overAccent: chip.isActive; theme: splitRoot.theme
                                 anchors.left: plabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
                                 onClicked: shell.showConfirm(qsTr("Delete profile “%1”?").arg(shell.elideMiddle(chip.modelData, 36)),
@@ -101,7 +101,7 @@ Item {
                 }
                 Rectangle {
                     radius: 13; height: 28; implicitWidth: 34
-                    color: addChipMa.containsMouse ? theme.border : theme.surface
+                    color: addChipMa.containsMouse ? theme.surfaceHover : theme.surface
                     Behavior on color { ColorAnimation { duration: 120 } }
                     border.color: theme.border; border.width: 1
                     Text { anchors.centerIn: parent; text: "+"; color: theme.accent; font.pixelSize: 17 }
@@ -308,7 +308,6 @@ Item {
                             }
                             MouseArea {
                                 anchors.fill: parent; hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
                                 onEntered: apSuggest.highlighted = index
                                 onClicked: apSuggest.take(index)
                             }

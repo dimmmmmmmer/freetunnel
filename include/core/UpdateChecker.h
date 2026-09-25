@@ -33,6 +33,14 @@ public:
         QString signatureUrl; ///< SHA256SUMS.txt.sig (Ed25519) URL (when published)
     };
 
+    /// Why a download failed, which decides what the Settings row offers next.
+    enum class DownloadFailure {
+        Transient,   ///< network or disk: the same download may work next time
+        NoInstaller, ///< the release has nothing for this platform
+        Refused,     ///< unverifiable, or verified wrong: this download must never be installed
+    };
+    Q_ENUM(DownloadFailure)
+
     /**
      * @param githubRepo  "owner/repo" string, e.g. "dimmmmmmmer/freetunnel"
      * @param currentVersion  current app version string, e.g. "0.6b"
@@ -61,7 +69,8 @@ signals:
 
     void downloadProgress(qint64 received, qint64 total);
     void downloadReady(const QString &localPath);
-    void downloadFailed(const QString &message);
+    void downloadFailed(const QString &message,
+                        UpdateChecker::DownloadFailure kind = UpdateChecker::DownloadFailure::Transient);
 
 private slots:
     void selectReleaseAssets(const QJsonObject &release, const QString &tagName);

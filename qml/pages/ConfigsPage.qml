@@ -61,6 +61,10 @@ Item {
         return s.length > 0 ? s : "config"
     }
 
+    // Home's + and "Add a config" come here for the add menu. The flag is cleared
+    // on every load, so it can never open the menu on a later visit.
+    Component.onCompleted: if (shell.openAddMenu) { shell.openAddMenu = false; importMenu.open = true }
+
     // Cmd/Ctrl+V tries to import a config from the clipboard.
     Shortcut { sequences: [StandardKey.Paste]; onActivated: backend.importFromClipboard() }
     // Header: Add (+) opens the import/create menu, Ping (speedometer).
@@ -87,18 +91,23 @@ Item {
             color: pingMa.containsMouse ? theme.surface : theme.bg
             Behavior on color { ColorAnimation { duration: 120 } }
             Icon { anchors.centerIn: parent; width: 22; height: 22; svg: "qrc:/icons/speedometer.svg"; color: cfgRoot.theme.accent; theme: cfgRoot.theme }
-            MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: backend.pingConfigs() }
+            MouseArea { id: pingMa; objectName: "pingButton"; anchors.fill: parent; hoverEnabled: true; onClicked: backend.pingConfigs() }
         }
     }
     Text {
         objectName: "addConfigHint"
-        visible: backend.configs.length === 0
+        // Hidden under its own menu, which at the default height cut it in half.
+        visible: backend.configs.length === 0 && !importMenu.open
         // Above the (empty) list, which fills the same area and, being a
         // Flickable, took the click itself.
         z: 1
         anchors.centerIn: parent
-        text: qsTr("Add a config"); color: theme.textFaint; font.pixelSize: 15
-        MouseArea { anchors.fill: parent; onClicked: importMenu.open = true }
+        // A link, like the same words on Home: in placeholder grey, with nothing
+        // on hover, it read as a hint and not as something to click.
+        text: qsTr("Add a config"); font.pixelSize: 15; font.weight: Font.Medium
+        color: hintMa.containsMouse ? theme.accent : theme.text; font.underline: hintMa.containsMouse
+        MouseArea { id: hintMa; anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor; onClicked: importMenu.open = true }
     }
     ListView {
         id: cfgList
@@ -198,13 +207,19 @@ Item {
                 Text { visible: index < backend.pings.length && backend.pings[index] !== ""
                        text: index < backend.pings.length ? backend.pings[index] : ""
                        color: theme.textDim; font.pixelSize: 12 }
-                // Hide the badge the moment teardown starts (disconnecting) so it
-                // never lingers on a config whose tunnel is going down. A seamless
-                // config switch keeps disconnecting=false (m_reapplying), so the
-                // badge stays put there as intended.
-                Rectangle { visible: index === backend.activeIndex && backend.connected && !backend.disconnecting
+                // On the active config while it is up or on its way up; gone the
+                // moment teardown starts (disconnecting), so it never lingers on a
+                // config whose tunnel is going down. A connect, a switch to another
+                // config (m_reapplying keeps disconnecting false and reports
+                // connecting) and a reconnect say "connecting…" here, as Home and
+                // the tray do: the badge used to just vanish until the tunnel was up.
+                // Worded by connected, so if both flags are ever true it says up.
+                Rectangle { objectName: "connectionBadge"
+                    visible: index === backend.activeIndex && (backend.connected || backend.connecting) && !backend.disconnecting
                     radius: 10; color: theme.infoBg; implicitWidth: ab.width+16; implicitHeight: 20
-                    Text { id: ab; anchors.centerIn: parent; text: qsTr("connected"); color: theme.success; font.pixelSize: 11; font.weight: Font.Medium } }
+                    Text { id: ab; anchors.centerIn: parent
+                           text: backend.connected ? qsTr("connected") : qsTr("connecting…")
+                           color: backend.connected ? theme.success : theme.textDim; font.pixelSize: 11; font.weight: Font.Medium } }
                 Row { Layout.fillHeight: true
                     Item { width: 26; height: parent.height
                         Icon { anchors.centerIn: parent; width: 17; height: 17; svg: "qrc:/icons/export.svg"
@@ -216,8 +231,10 @@ Item {
                                     [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
                                     cfgRoot.exportPicked)
                             } } }
+                    // A pencil: it opens the editor. It was ⋯, which promises a menu,
+                    // while the menu was the export icon's beside it.
                     Item { width: 26; height: parent.height
-                        Icon { anchors.centerIn: parent; width: 18; height: 18; svg: "qrc:/icons/more.svg"
+                        Icon { objectName: "editConfigIcon"; anchors.centerIn: parent; width: 16; height: 16; svg: "qrc:/icons/edit.svg"
                                color: dotsMa.containsMouse ? theme.text : theme.textDim; theme: cfgRoot.theme }
                         MouseArea { id: dotsMa; anchors.fill: parent; hoverEnabled: true
                                     onClicked: { shell.editIndex = index; shell.overlay = "create" } } }
@@ -243,8 +260,9 @@ Item {
         target: backend
         function onConfigsChanged() { cfgList.endDrag() }
     }
-    // Click-away backdrop + Esc to dismiss the import menu.
-    MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open
+    // Click-away backdrop + Esc to dismiss the import menu. It takes hover too, so
+    // what it covers does not light up for a click that only closes the menu.
+    MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open; hoverEnabled: true
                 onClicked: importMenu.open = false }
     // Same standing-down rule as everywhere else: a confirm dialog opened over
     // this menu (a deep link can do that unprompted) owns Escape, and leaving both

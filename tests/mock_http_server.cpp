@@ -50,6 +50,8 @@ void MockHttpServer::onNewConnection()
 
             ++m_hits[path];
             const Route route = m_routes.value(path);
+            if (route.silent)
+                return;
             const QByteArray body = route.body;
             QByteArray response = QByteArrayLiteral("HTTP/1.1 ");
             response += QByteArray::number(route.status);

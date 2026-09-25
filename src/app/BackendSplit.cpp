@@ -133,20 +133,16 @@ bool Backend::addAppRule(const QString &rule) {
 }
 
 QVariantList Backend::installedApplications() {
+    // What the scan has found, which is nothing until it finishes; see
+    // installedAppsReady. Scanned here, on the picker's first open, it froze the
+    // window while Windows resolved every Start Menu shortcut, and a scan the
+    // Split page had already started on a worker was done twice.
+    //
     // Per-instance, not a function-local static: a static would be shared by
     // every Backend in the process — including two in one test run — and could
     // never be cleared, so installing a program would need a restart before the
     // picker could see it.
-    if (!m_installedAppsScanned) {
-        m_installedAppsScanned = true;
-        for (const freetunnel::InstalledApp &app : freetunnel::installedApplications()) {
-            QVariantMap row;
-            row[QStringLiteral("name")] = app.name;
-            row[QStringLiteral("path")] = app.executablePath;
-            m_installedApps.append(row);
-        }
-        indexInstalledApps();
-    }
+    startInstalledAppsScan();
     return m_installedApps;
 }
 
@@ -202,14 +198,12 @@ void Backend::indexInstalledApps() {
 
 void Backend::adoptInstalledApps(const QVariantList &apps) {
     m_installedAppsScanning = false;
-    // Discarded if the picker has already scanned synchronously in the
-    // meantime: that answer is no older than this one and is already in use.
-    if (m_installedAppsScanned) return;
     m_installedApps = apps;
     m_installedAppsScanned = true;
     indexInstalledApps();
     // The labels on the Split page are derived from this list, and until it
-    // arrived they were showing the file name instead.
+    // arrived they were showing the file name instead. It is also what tells the
+    // picker, through installedAppsReady, that its list is in.
     emit splitChanged();
 }
 
