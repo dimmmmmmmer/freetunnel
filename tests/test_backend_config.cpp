@@ -46,6 +46,7 @@ private slots:
     void moveConfigReordersTheList();
     void removeConfigForgetsThePassword();
     void deletingTheActiveConfigRemembersTheOneThatTookOver();
+    void renamingOnlyTheLetterCaseRenames();
     void readAccessorsRejectOutOfRangeIndexes();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
@@ -355,6 +356,27 @@ void TestBackendConfig::deletingTheActiveConfigRemembersTheOneThatTookOver()
     }
     Backend relaunched;
     QCOMPARE(pathFor(relaunched, relaunched.activeIndex()), takeover);
+}
+
+// "work" to "Work": on APFS and NTFS the new name is the same file, which the save
+// took for another config and answered with "Work-2". Removing the old spelling
+// afterwards would remove the file itself there, and deleting the old password
+// would take the new one from the Windows credential store, which folds case too.
+void TestBackendConfig::renamingOnlyTheLetterCaseRenames()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("work"), QStringLiteral("hunter2"))));
+    QVariantMap edit = form(QStringLiteral("Work"), QStringLiteral("hunter2"));
+    edit[QStringLiteral("editIndex")] = 0;
+    edit[QStringLiteral("editPath")] = backend.configFields(0).value(QStringLiteral("path"));
+    QVERIFY(backend.createConfig(edit));
+
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("Work")});
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QCOMPARE(QDir(dir).entryList({QStringLiteral("*.toml")}, QDir::Files),
+             QStringList{QStringLiteral("Work.toml")});
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("password")).toString(),
+             QStringLiteral("hunter2"));
 }
 
 // QML asks for fields by row index, and rows disappear (removal, reload) between

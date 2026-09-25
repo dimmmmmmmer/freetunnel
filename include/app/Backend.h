@@ -141,6 +141,14 @@ public:
     // Export: a shareable tt:// deep link, or a full .toml written to disk
     // (both carry the password — pulled from the OS keychain).
     Q_INVOKABLE QString configDeepLink(int index) const;
+    // A row's config file, and back. An action that outlives its row — a menu, a
+    // save dialog, a confirmation — remembers the file: an import prepends to the
+    // list and every row below moves.
+    Q_INVOKABLE QString configPath(int index) const { return m_paths.value(index); }
+    Q_INVOKABLE int configIndex(const QString &path) const
+    {
+        return path.isEmpty() ? -1 : static_cast<int>(m_paths.indexOf(path));
+    }
     Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
 
     QObject *logModel() { return &m_logModel; }

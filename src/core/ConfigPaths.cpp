@@ -46,12 +46,59 @@ bool nameMixesScripts(const QString &name)
     return false;
 }
 
+namespace {
+
+// What no file name may hold on at least one of the three systems: separators,
+// the characters Windows reserves, and control and formatting characters. The
+// last have no place in a name anyway, and some make one display as something
+// else: U+202E turns the text after it around.
+bool unusableInFileName(QChar c)
+{
+    static const QString reserved = QStringLiteral("/\\:*?\"<>|");
+    if (reserved.contains(c))
+        return true;
+    switch (c.category()) {
+    case QChar::Other_Control:
+    case QChar::Other_Format:
+    case QChar::Separator_Line:
+    case QChar::Separator_Paragraph:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Device names Windows reserves with any extension: "con.toml" cannot be made.
+bool reservedOnWindows(const QString &head)
+{
+    static const QStringList devices{QStringLiteral("CON"), QStringLiteral("PRN"),
+                                     QStringLiteral("AUX"), QStringLiteral("NUL")};
+    const QString upper = head.trimmed().toUpper();
+    if (devices.contains(upper))
+        return true;
+    return upper.size() == 4 && (upper.startsWith(QLatin1String("COM")) || upper.startsWith(QLatin1String("LPT")))
+            && upper.at(3) >= QLatin1Char('1') && upper.at(3) <= QLatin1Char('9');
+}
+
+} // namespace
+
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix)
 {
+    // The file name is what the list, the Connection page and the tray show, so
+    // it keeps the name as typed, spaces and punctuation included. Replacing
+    // everything but letters, digits and ".-_" listed the editor's own example,
+    // "Germany · Frankfurt", as "Germany___Frankfurt".
     QString safe;
-    for (const QChar &c : name) {
-        safe += (c.isLetterOrNumber() || c == '.' || c == '-' || c == '_') ? c : QChar('_');
-    }
+    for (const QChar &c : name)
+        safe += unusableInFileName(c) ? QChar('_') : c;
+    safe = safe.trimmed();
+    // A leading dot hides the file on macOS and Linux, and ".connect-*" is swept
+    // at startup as a leftover.
+    for (int i = 0; i < safe.size() && safe.at(i) == QLatin1Char('.'); ++i)
+        safe[i] = QLatin1Char('_');
+    const int firstDot = safe.indexOf(QLatin1Char('.'));
+    if (reservedOnWindows(firstDot < 0 ? safe : safe.left(firstDot)))
+        safe.insert(firstDot < 0 ? safe.size() : firstDot, QLatin1Char('_'));
     if (safe.isEmpty())
         safe = QStringLiteral("%1-%2").arg(fallbackPrefix).arg(QDateTime::currentSecsSinceEpoch());
     return safe;
@@ -113,12 +160,46 @@ QString existingConfigPath(const QString &dir, const QString &fileName)
     return QDir(dir).filePath(actual.isEmpty() ? fileName : actual);
 }
 
+bool namesTheSameFile(const QString &a, const QString &b)
+{
+    if (a == b)
+        return true;
+    if (a.compare(b, Qt::CaseInsensitive) != 0)
+        return false;
+    const QFileInfo fa(a);
+    const QFileInfo fb(b);
+    if (!fa.exists() || !fb.exists())
+        return false;
+    // Both answer to exists(). Two files, or one that folds case? The listing
+    // says: a case-sensitive file system lists both names.
+    const QStringList entries = QDir(fa.absolutePath()).entryList(QDir::Files | QDir::Hidden);
+    return !(entries.contains(fa.fileName()) && entries.contains(fb.fileName()));
+}
+
 QString ownerConfigPathForSave(const QString &stem, const QString &existingPath)
 {
     if (!existingPath.isEmpty()) {
         const QFileInfo existing(existingPath);
         if (existing.completeBaseName() == stem)
             return existingPath;
+        // Only the letter case changed ("work" to "Work"). Where the file system
+        // folds case the new name is this very file, which the unique path below
+        // took for another config and answered with "Work-2". Rename it in place,
+        // through a temporary name because a case-only rename is a no-op on some
+        // systems, and save over it.
+        const QString wanted = existing.dir().filePath(stem + QStringLiteral(".toml"));
+        if (existing.completeBaseName().compare(stem, Qt::CaseInsensitive) == 0
+            && namesTheSameFile(existingPath, wanted)) {
+            const QString step = existing.dir().filePath(
+                    QStringLiteral(".rename-%1.toml")
+                            .arg(QRandomGenerator::system()->generate(), 8, 16, QLatin1Char('0')));
+            if (QFile::rename(existingPath, step)) {
+                if (QFile::rename(step, wanted))
+                    return wanted;
+                QFile::rename(step, existingPath); // put it back rather than lose it
+            }
+            return existingPath;
+        }
     }
     return uniqueOwnerConfigPath(stem);
 }

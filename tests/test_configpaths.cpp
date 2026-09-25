@@ -18,12 +18,16 @@ private slots:
     void existingConfigPathFindsAnExactCollision();
     void existingConfigPathReportsNoCollisionForAFreeName();
     void mixedScriptNamesAreFlaggedAndSingleScriptOnesAreNot();
+    void aNameIsKeptAsTypedUnlessAFileCannotHoldIt_data();
+    void aNameIsKeptAsTypedUnlessAFileCannotHoldIt();
+    void aNameWithNothingLeftFallsBack();
+    void twoSpellingsAreOneFileOnlyWhereTheFileSystemSaysSo();
 };
 
 void TestConfigPaths::sanitizeAndUniquePath()
 {
     const QString stem = freetunnel::sanitizeConfigBaseName(QStringLiteral("My Server"));
-    QCOMPARE(stem, QStringLiteral("My_Server"));
+    QCOMPARE(stem, QStringLiteral("My Server"));
     const QString path = freetunnel::uniqueOwnerConfigPath(stem);
     QVERIFY(path.endsWith(QStringLiteral(".toml")));
 }
@@ -108,6 +112,69 @@ void TestConfigPaths::mixedScriptNamesAreFlaggedAndSingleScriptOnesAreNot()
     QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("Работа-2")));
     QVERIFY(!freetunnel::nameMixesScripts(QStringLiteral("12.34")));
     QVERIFY(!freetunnel::nameMixesScripts(QString()));
+}
+
+void TestConfigPaths::aNameIsKeptAsTypedUnlessAFileCannotHoldIt_data()
+{
+    QTest::addColumn<QString>("typed");
+    QTest::addColumn<QString>("stem");
+    // The editor's own example used to come out as "Germany___Frankfurt".
+    QTest::newRow("spaces and a dot") << QStringLiteral("Germany · Frankfurt")
+                                      << QStringLiteral("Germany · Frankfurt");
+    QTest::newRow("Cyrillic") << QStringLiteral("Москва — центр") << QStringLiteral("Москва — центр");
+    QTest::newRow("brackets and commas") << QStringLiteral("Work (fast), #2") << QStringLiteral("Work (fast), #2");
+    QTest::newRow("an emoji") << QStringLiteral("Home \U0001F3E0") << QStringLiteral("Home \U0001F3E0");
+    QTest::newRow("what Windows reserves")
+            << QStringLiteral("a/b\\c:d*e?f\"g<h>i|j") << QStringLiteral("a_b_c_d_e_f_g_h_i_j");
+    QTest::newRow("control characters") << QStringLiteral("tab\there\nnext") << QStringLiteral("tab_here_next");
+    QTest::newRow("text turned around") << QStringLiteral("abc\u202Etxt.exe") << QStringLiteral("abc_txt.exe");
+    QTest::newRow("outer spaces") << QStringLiteral("  padded  ") << QStringLiteral("padded");
+    QTest::newRow("hidden file") << QStringLiteral(".hidden") << QStringLiteral("_hidden");
+    QTest::newRow("a swept leftover") << QStringLiteral(".connect-x") << QStringLiteral("_connect-x");
+    QTest::newRow("a device name") << QStringLiteral("CON") << QStringLiteral("CON_");
+    QTest::newRow("one with a suffix") << QStringLiteral("con.backup") << QStringLiteral("con_.backup");
+    QTest::newRow("a numbered port") << QStringLiteral("COM1") << QStringLiteral("COM1_");
+    QTest::newRow("only looks like one") << QStringLiteral("Company") << QStringLiteral("Company");
+}
+
+// The file name is the name the list, the Connection page and the tray show.
+void TestConfigPaths::aNameIsKeptAsTypedUnlessAFileCannotHoldIt()
+{
+    QFETCH(QString, typed);
+    QFETCH(QString, stem);
+    QCOMPARE(freetunnel::sanitizeConfigBaseName(typed), stem);
+}
+
+void TestConfigPaths::aNameWithNothingLeftFallsBack()
+{
+    QVERIFY(freetunnel::sanitizeConfigBaseName(QStringLiteral("   ")).startsWith(QLatin1String("imported-")));
+    QVERIFY(freetunnel::sanitizeConfigBaseName(QString(), QStringLiteral("config"))
+                    .startsWith(QLatin1String("config-")));
+}
+
+// On APFS and NTFS "work.toml" and "Work.toml" are one file; on ext4 they are
+// two, and each exists only if it was made. Which one this host has is found out
+// here the same way the code does, and the answer checked against it.
+void TestConfigPaths::twoSpellingsAreOneFileOnlyWhereTheFileSystemSaysSo()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString upper = dir.filePath(QStringLiteral("Work.toml"));
+    const QString lower = dir.filePath(QStringLiteral("work.toml"));
+    QFile f(upper);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.close();
+    const bool foldsCase = QFileInfo::exists(lower);
+    QCOMPARE(freetunnel::namesTheSameFile(upper, lower), foldsCase);
+    QVERIFY(freetunnel::namesTheSameFile(upper, upper));
+    QVERIFY(!freetunnel::namesTheSameFile(upper, dir.filePath(QStringLiteral("Home.toml"))));
+    if (!foldsCase) {
+        // Two real files that differ only in case are two configs.
+        QFile g(lower);
+        QVERIFY(g.open(QIODevice::WriteOnly));
+        g.close();
+        QVERIFY(!freetunnel::namesTheSameFile(upper, lower));
+    }
 }
 
 QTEST_MAIN(TestConfigPaths)

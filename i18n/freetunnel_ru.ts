@@ -360,6 +360,10 @@
         <source>Config exported — the file contains the password</source>
         <translation>Конфиг экспортирован — файл содержит пароль</translation>
     </message>
+    <message>
+        <source>That configuration is no longer there.</source>
+        <translation>Этой конфигурации больше нет.</translation>
+    </message>
 </context>
 <context>
     <name>ConfirmDialog</name>
@@ -444,11 +448,11 @@
     </message>
     <message>
         <source>Discard unsaved changes?</source>
-        <translation>Отменить несохранённые изменения?</translation>
+        <translation>Закрыть без сохранения?</translation>
     </message>
     <message>
         <source>Discard</source>
-        <translation>Отменить</translation>
+        <translation>Не сохранять</translation>
     </message>
     <message>
         <source>Split profile</source>

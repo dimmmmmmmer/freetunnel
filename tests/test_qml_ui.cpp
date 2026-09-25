@@ -64,6 +64,15 @@ private slots:
     void theWindowsOwnButtonsMinimiseThroughTheDesktop();
     void theMacKeysForCloseAndMinimise();
     void aTrayHostThatAppearsLateGetsAnIcon();
+    void theEmptyConfigsPageOffersToAdd();
+    void configActionsFollowTheConfigNotTheRow();
+    void aLongHostnameWrapsInsideTheConfirm();
+    void aClickInsideTheConfirmCardDoesNotCancelIt();
+    void threeButtonsStayInsideTheConfirmCard();
+    void theWindowConfirmOwnsTheKeysOverTheEditorsPrompt();
+    void escapeStandsDownForTheEditorsFileDialog();
+    void tabMovesThroughTheEditorsFields();
+    void aToastStaysOffTheEditorsButtons();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -1328,6 +1337,263 @@ void TestQmlUi::aTrayHostThatAppearsLateGetsAnIcon()
     QObject *second = root->findChild<QObject *>(QStringLiteral("systemTray"));
     QVERIFY(second);
     QCOMPARE(root->property("tray").value<QObject *>(), second);
+    delete root;
+}
+
+namespace {
+
+// A component on its own, sized and on screen, for a test that clicks it.
+QQuickItem *showInWindow(QObject *root, QQuickWindow &window, int width, int height)
+{
+    auto *item = qobject_cast<QQuickItem *>(root);
+    if (!item)
+        return nullptr;
+    window.resize(width, height);
+    item->setParentItem(window.contentItem());
+    item->setWidth(width);
+    item->setHeight(height);
+    window.show();
+    return QTest::qWaitForWindowExposed(&window) ? item : nullptr;
+}
+
+QPoint centreOf(QQuickItem *item)
+{
+    return item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
+}
+
+} // namespace
+
+// The empty list filled the same area as the "Add a config" hint and, being a
+// Flickable, took its click; only the small + in the header worked.
+void TestQmlUi::theEmptyConfigsPageOffersToAdd()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    auto *hint = root->findChild<QQuickItem *>(QStringLiteral("addConfigHint"));
+    QObject *menu = root->findChild<QObject *>(QStringLiteral("importMenu"));
+    QVERIFY(hint && hint->isVisible() && menu);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(hint));
+    QVERIFY2(menu->property("open").toBool(), "clicking «Add a config» opens the add menu");
+    delete root;
+}
+
+// The export menu and the delete confirmation outlive the row they came from,
+// and an import prepends to the list. A remembered row number then exported the
+// neighbouring config, password included, or deleted it.
+void TestQmlUi::configActionsFollowTheConfigNotTheRow()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({QStringLiteral("Alpha"), QStringLiteral("Beta")});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+
+    root->setProperty("exportPath", m_backend.configPath(1)); // Beta's menu opened
+    root->setProperty("deletePath", m_backend.configPath(1)); // and Beta's delete asked
+    m_backend.setConfigs({QStringLiteral("Imported"), QStringLiteral("Alpha"), QStringLiteral("Beta")});
+
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_backend.lastDeepLinkRow, 2);
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QCOMPARE(m_backend.lastExportRow, 2);
+    QMetaObject::invokeMethod(root, "deleteConfirmed");
+    QCOMPARE(m_backend.configs(),
+             (QStringList{QStringLiteral("Imported"), QStringLiteral("Alpha")}));
+
+    // Gone by the time the action runs: nothing happens to anything else.
+    m_backend.lastDeepLinkRow = -1;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_backend.lastDeepLinkRow, -1);
+    QCOMPARE(m_shell.lastToast(), QStringLiteral("That configuration is no longer there."));
+    delete root;
+}
+
+// The import prompt names the server, the one line the user can trust, and a
+// hostname has no space to break at: WordWrap let it run past both edges.
+void TestQmlUi::aLongHostnameWrapsInsideTheConfirm()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    root->setProperty("text", QStringLiteral("Import this config?\nServer: "
+                                             "fra1.de.nodes.premiumvpnprovider.example.net"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *text = root->findChild<QQuickItem *>(QStringLiteral("confirmText"));
+    QVERIFY(text);
+    QTRY_VERIFY(text->property("contentWidth").toReal() <= text->width() + 0.5);
+    delete root;
+}
+
+// Only the backdrop and Cancel dismiss. A click on the message, the card's
+// padding or the gap between two buttons fell through to the backdrop.
+void TestQmlUi::aClickInsideTheConfirmCardDoesNotCancelIt()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    root->setProperty("text", QStringLiteral("Delete config “Work”?"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    QVERIFY(card);
+    const QPoint onTheCard = card->mapToScene(QPointF(card->width() / 2.0, 8)).toPoint();
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, onTheCard);
+    QVERIFY2(root->property("visible").toBool(), "a click on the card cancelled the dialog");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, QPoint(4, 4)); // the backdrop
+    QVERIFY(!root->property("visible").toBool());
+    delete root;
+}
+
+// Buttons cannot wrap the way text does. At a width where the old cap left the
+// row wider than the card's content, the three touched or crossed its border.
+void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    root->setProperty("text", QStringLiteral("«Работа» уже есть."));
+    root->setProperty("confirmText", QStringLiteral("Заменить"));
+    root->setProperty("altText", QStringLiteral("Добавить копию"));
+    QMetaObject::invokeMethod(root, "open");
+    const QStringList names{QStringLiteral("cancelButton"), QStringLiteral("alternateButton"),
+                            QStringLiteral("confirmButton")};
+    QList<QQuickItem *> buttons;
+    qreal row = 16; // the two gaps between three buttons
+    for (const QString &name : names) {
+        auto *b = root->findChild<QQuickItem *>(name);
+        QVERIFY(b);
+        buttons << b;
+        row += b->width();
+    }
+    // Wide enough for the row and the card's own padding, not for the old margin.
+    auto *item = qobject_cast<QQuickItem *>(root);
+    item->setWidth(row + 28 + 40);
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    QVERIFY(card);
+    QTRY_VERIFY(card->width() >= row + 28 - 0.5);
+    for (QQuickItem *b : std::as_const(buttons)) {
+        const QPointF at = b->mapToItem(card, QPointF(0, 0));
+        QVERIFY2(at.x() >= 13 && at.x() + b->width() <= card->width() - 13,
+                 qPrintable(b->objectName() + QStringLiteral(" runs into the card's edge")));
+    }
+    delete root;
+}
+
+// A link arriving while "Discard unsaved changes?" is up puts the import prompt
+// on top of it. The hidden prompt kept Return and Escape, so Return meant for the
+// import threw the edits away.
+void TestQmlUi::theWindowConfirmOwnsTheKeysOverTheEditorsPrompt()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *discard = nullptr;
+    QTRY_VERIFY((discard = root->findChild<QObject *>(QStringLiteral("discardConfirm"))) != nullptr);
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    QMetaObject::invokeMethod(discard, "open");
+    QMetaObject::invokeMethod(root, "showConfirm", Q_ARG(QVariant, QStringLiteral("Import it?")),
+                              Q_ARG(QVariant, QStringLiteral("Import")), Q_ARG(QVariant, QVariant()));
+    QVERIFY(prompt->property("visible").toBool());
+    QTRY_VERIFY(prompt->property("armed").toBool() && discard->property("armed").toBool());
+    QSignalSpy discarded(discard, SIGNAL(confirmed()));
+
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY2(!prompt->property("visible").toBool(), "Escape answers the prompt on top");
+    QVERIFY(discard->property("visible").toBool());
+    QMetaObject::invokeMethod(root, "showConfirm", Q_ARG(QVariant, QStringLiteral("Import it?")),
+                              Q_ARG(QVariant, QStringLiteral("Import")), Q_ARG(QVariant, QVariant()));
+    QTRY_VERIFY(prompt->property("armed").toBool());
+    QTest::keyClick(window, Qt::Key_Return);
+    QVERIFY(!prompt->property("visible").toBool());
+    QCOMPARE(discarded.count(), 0); // the edits are still there to decide on
+    delete root;
+}
+
+// Where Qt draws the file dialog itself, the editor's window-wide Escape saw the
+// dialog's Escape too, closed the editor and destroyed the dialog mid-key.
+void TestQmlUi::escapeStandsDownForTheEditorsFileDialog()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *dialog = nullptr;
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("certificateDialog"))) != nullptr);
+    QObject *overlay = root->findChild<QObject *>(QStringLiteral("createOverlay"));
+    QVERIFY(overlay);
+    QObject *escape = nullptr;
+    const auto children = overlay->children();
+    for (QObject *o : children) {
+        if (o->inherits("QQuickShortcut")
+            && o->property("sequences").toList().contains(QStringLiteral("Escape")))
+            escape = o;
+    }
+    QVERIFY2(escape, "the editor's Escape shortcut");
+    QVERIFY(escape->property("enabled").toBool());
+    QMetaObject::invokeMethod(dialog, "open");
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY2(!escape->property("enabled").toBool(), "the file dialog's Escape is its own");
+    QMetaObject::invokeMethod(dialog, "close");
+    delete root;
+}
+
+// Tab did nothing in the editor: plain text inputs are not in the tab chain.
+void TestQmlUi::tabMovesThroughTheEditorsFields()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *name = nullptr;
+    QTRY_VERIFY((name = root->findChild<QObject *>(QStringLiteral("nameField"))) != nullptr);
+    auto *nameInput = name->property("input").value<QQuickItem *>();
+    auto *hostInput = root->findChild<QObject *>(QStringLiteral("hostField"))->property("input").value<QQuickItem *>();
+    auto *cert = root->findChild<QQuickItem *>(QStringLiteral("certificateField"));
+    QVERIFY(nameInput && hostInput && cert);
+
+    nameInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(hostInput->hasActiveFocus(), "Tab moves from Name to Server host");
+    QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+    QVERIFY(nameInput->hasActiveFocus());
+
+    cert->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(!cert->hasActiveFocus(), "Tab leaves the certificate field too");
+    QVERIFY(!cert->property("text").toString().contains(QLatin1Char('\t')));
+    delete root;
+}
+
+// An error from Save showed at the bottom, on the editor's own Save and Cancel,
+// and took the click meant for them.
+void TestQmlUi::aToastStaysOffTheEditorsButtons()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, QStringLiteral("Fill in host")));
+    QVERIFY2(toast->y() + toast->height() < window->height() / 2.0, "over the editor, the toast is at the top");
+    root->setProperty("overlay", QString());
+    QVERIFY(toast->y() > window->height() / 2.0);
     delete root;
 }
 

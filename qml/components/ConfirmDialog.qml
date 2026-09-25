@@ -44,14 +44,23 @@ Item {
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
         MouseArea { anchors.fill: parent; onClicked: cd.visible = false } }
     Rectangle {
+        objectName: "confirmCard"
         anchors.centerIn: parent
         // Fit to message + buttons; cdText.width = parent.width made implicitWidth
-        // stretch to the old fixed 252 px cap and left empty side margins.
-        width: Math.min(parent.width - 56,
+        // stretch to the old fixed 252 px cap and left empty side margins. The text
+        // wraps, so it stays within the usual margin; the buttons cannot, so they
+        // may take some of it — three Russian ones ran into the card's border at
+        // the default width.
+        width: Math.min(parent.width - 24,
                         Math.max(btnRow.implicitWidth + 28,
-                                 Math.ceil(cdMetrics.boundingRect.width) + 28))
+                                 Math.min(parent.width - 56,
+                                          Math.ceil(cdMetrics.boundingRect.width) + 28)))
         height: cdCol.implicitHeight + 24
         radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
+        // A click on the card is not a click on the backdrop behind it: it used
+        // to fall through and cancel, as the message or the gap between two
+        // buttons were clicked. The editor and the app picker do the same.
+        TapHandler {}
         Column {
             id: cdCol; width: parent.width - 28; anchors.centerIn: parent; spacing: 14
             // The message must never be cut off. A deep-link confirmation carries
@@ -67,8 +76,11 @@ Item {
                 clip: true
                 interactive: contentHeight > height
                 boundsBehavior: Flickable.StopAtBounds
-                Text { id: cdText; width: cdFlick.width
-                       wrapMode: Text.WordWrap
+                // Wrap, not WordWrap: a long hostname has no space to break at, and
+                // WordWrap let it run past both edges of the card, cut off at each
+                // end — on the one line of an import prompt the user can trust.
+                Text { id: cdText; objectName: "confirmText"; width: cdFlick.width
+                       wrapMode: Text.Wrap
                        text: cd.text
                        color: theme.text; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter }
             }

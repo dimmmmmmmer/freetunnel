@@ -668,7 +668,10 @@ Window {
                 toastTimer.restart()
         }
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 26
+        // Over an open editor or picker it goes to the top: at the bottom it sat on
+        // the card's Save and Cancel, and took the click meant for them just when
+        // an error had asked the user to fix a field and save again.
+        y: win.overlay !== "" ? win.titlebarSafeTop + 8 : parent.height - height - 26
         // Size to the message text (TextMetrics), not tmsg.implicitWidth — binding
         // tmsg.width to toast.width made implicitWidth inflate and left empty margins.
         width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastMetrics.boundingRect.width) + 24))
@@ -826,8 +829,11 @@ Window {
         var next = confirmQueue.shift()
         applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb)
     }
-    ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
-                    escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
+    // Drawn above everything, the editor's own "Discard unsaved changes?" included,
+    // so it owns Return and Escape while it is up and that one stands down (see
+    // CreateConfigOverlay). The other way round, Return meant for an import
+    // prompt that had just covered the editor's discarded the edits underneath.
+    ConfirmDialog { id: winConfirm; objectName: "windowConfirm"; z: 2500; theme: win.theme
         onConfirmed: if (win.confirmCb) win.confirmCb()
         onAlternate: if (win.confirmAltCb) win.confirmAltCb()
         // Deferred: the dialog clears `visible` before it emits confirmed()/

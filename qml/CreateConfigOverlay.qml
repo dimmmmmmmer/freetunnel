@@ -8,6 +8,7 @@ import "components"
 
 Item {
     id: createRoot
+    objectName: "createOverlay"
     required property var shell
     required property var backend
     required property var theme
@@ -25,8 +26,11 @@ Item {
     // dialog or a window-level popup (protocol / split-profile dropdown, confirm
     // dialog) already handles it — two enabled shortcuts on one key are
     // ambiguous to Qt and then *neither* fires.
+    // Nor while the certificate file dialog is up. Where Qt draws that dialog
+    // itself, this window shortcut also sees its Escape, and closing the editor
+    // then destroyed the dialog in the middle of handling the key: a crash.
     Shortcut { sequences: ["Escape"]
-               enabled: !discardConfirm.visible && !shell.windowPopupOpen
+               enabled: !discardConfirm.visible && !shell.windowPopupOpen && !certFileDlg.visible
                onActivated: cform.tryClose() }
 
     Rectangle {
@@ -96,8 +100,8 @@ Item {
             anchors.leftMargin: 18; anchors.rightMargin: 18; contentWidth: width; contentHeight: fcol.height; clip: true
             Column {
                 id: fcol; width: parent.width; spacing: 10
-                Field { id: fName; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
-                Field { id: fHost; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
+                Field { id: fName; objectName: "nameField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
+                Field { id: fHost; objectName: "hostField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
                 Field { id: fAddr; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Address(es) · host:port (comma-separated)"); placeholder: "1.2.3.4:443" }
                 Row { width: parent.width; spacing: 10
                     Field { id: fUser; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Username"); width: (parent.width - 10) / 2 }
@@ -171,7 +175,13 @@ Item {
                     }
                     Rectangle { width: parent.width; height: 70; radius: 8; color: theme.inputBg; border.color: fCert.activeFocus ? theme.accent : theme.inputBorder; border.width: 1
                         Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
-                            TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere } }
+                            TextEdit { id: fCert; objectName: "certificateField"
+                                width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere
+                                // In the tab chain like the other fields; a certificate
+                                // has no use for a typed tab, so Tab leaves the field.
+                                activeFocusOnTab: true
+                                Keys.onTabPressed: function(e) { nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason); e.accepted = true }
+                                Keys.onBacktabPressed: function(e) { nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason); e.accepted = true } } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
                 }
                 Dialogs.FileDialog {
@@ -205,12 +215,13 @@ Item {
             }
         }
     }
-    // Read by the window so its own confirm dialog can stand down while this
-    // inner one owns Escape.
-    readonly property bool confirmVisible: discardConfirm.visible
     ConfirmDialog {
         id: discardConfirm
+        objectName: "discardConfirm"
         theme: createRoot.theme
+        // The window's own confirm dialog is drawn above this one; while it is up,
+        // Return and Escape are its.
+        escapeOwner: !shell.windowPopupOpen
         text: qsTr("Discard unsaved changes?")
         confirmText: qsTr("Discard")
         onConfirmed: cform.close()

@@ -32,13 +32,22 @@ QString configEntryMatching(const QStringList &entries, const QString &fileName)
 /// Digits, punctuation and spaces belong to no script and are ignored.
 bool nameMixesScripts(const QString &name);
 
-/// Sanitize a display name / hostname into a safe config filename stem.
+/// A display name / hostname as a config filename stem: the name as typed, with
+/// only what some file system refuses replaced by '_' (separators, the characters
+/// Windows reserves, control and formatting characters, a leading dot) and a
+/// Windows device name such as "CON" kept from being one.
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix = QStringLiteral("imported"));
+
+/// Whether two paths name one file: the same path, or two that differ only in
+/// letter case on a file system that folds it (APFS, NTFS).
+bool namesTheSameFile(const QString &a, const QString &b);
 
 /// Resolve a unique owner-only config path under AppConfigLocation.
 QString uniqueOwnerConfigPath(const QString &stem);
 
 /// Pick a save path for create/edit: reuse @p existingPath when the stem is unchanged.
+/// When only its letter case changed on a file system that folds case, the file
+/// is renamed to the new spelling first and that path returned.
 QString ownerConfigPathForSave(const QString &stem, const QString &existingPath = {});
 
 } // namespace freetunnel

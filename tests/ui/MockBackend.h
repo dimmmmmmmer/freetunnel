@@ -83,6 +83,19 @@ public:
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
     void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
+    Q_INVOKABLE QString configPath(int index) const
+    {
+        return index >= 0 && index < m_configs.size()
+                ? QStringLiteral("/mock/%1.toml").arg(m_configs.at(index)) : QString();
+    }
+    Q_INVOKABLE int configIndex(const QString &path) const
+    {
+        for (int i = 0; i < m_configs.size(); ++i) {
+            if (configPath(i) == path)
+                return i;
+        }
+        return -1;
+    }
     int activeIndex() const { return m_activeIndex; }
 
     QString language() const { return m_language; }
@@ -170,8 +183,18 @@ public:
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
-    Q_INVOKABLE QString configDeepLink(int) const { return QStringLiteral("tt://?mock"); }
-    Q_INVOKABLE bool exportConfigToml(int, const QString &) const { return true; }
+    Q_INVOKABLE QString configDeepLink(int index) const
+    {
+        lastDeepLinkRow = index;
+        return QStringLiteral("tt://?mock");
+    }
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &) const
+    {
+        lastExportRow = index;
+        return true;
+    }
+    mutable int lastDeepLinkRow = -1;
+    mutable int lastExportRow = -1;
     Q_INVOKABLE void clearLogs() {}
     Q_INVOKABLE void openLogFolder() {}
     Q_INVOKABLE QString logText() const { return QString(); }
