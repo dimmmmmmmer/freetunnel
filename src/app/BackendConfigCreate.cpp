@@ -116,6 +116,20 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
 }
 
+// A renamed config's password moves with it: stored under the new path by the
+// save, and dropped from the old one here. A rename that only changed the letter
+// case gives two keys the Windows credential store takes for one, so deleting the
+// old took the new with it; it is put back.
+void forgetOldPassword(const QString &oldPath, const QString &target, const QString &password)
+{
+    using freetunnel::CredentialStore;
+    const QString oldKey = CredentialStore::keyForConfigPath(oldPath);
+    const QString newKey = CredentialStore::keyForConfigPath(target);
+    CredentialStore::deletePassword(oldKey);
+    if (oldKey.compare(newKey, Qt::CaseInsensitive) == 0 && !password.isEmpty())
+        CredentialStore::storePassword(newKey, password);
+}
+
 // Cannot fail: naming is the last step and sanitizeConfigBaseName() always
 // produces something, falling back to the hostname and then to a generated stem.
 // Returns bool only so parseCreateConfigFields() reads as one chain of steps.
@@ -203,7 +217,7 @@ bool Backend::createConfig(const QVariantMap &f)
         return false;
     }
     if (!oldPath.isEmpty() && oldPath != target)
-        freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(oldPath));
+        forgetOldPassword(oldPath, target, parsed.password);
 
     CreatedConfigFinalize ctx;
     ctx.form = f;
@@ -223,7 +237,10 @@ void Backend::persistCreatedConfigPaths(const QString &oldPath, const QString &t
                                         bool editing, bool wasActive)
 {
     if (!oldPath.isEmpty() && oldPath != target) {
-        QFile::remove(oldPath);
+        // A rename that only changed the letter case is one file where the file
+        // system folds case, and removing the old spelling removed the new one.
+        if (!freetunnel::namesTheSameFile(oldPath, target))
+            QFile::remove(oldPath);
         if (wasActive)
             m_activePath = target;
     }
@@ -262,7 +279,11 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
         if (noChange)
             return;
         applySplitRules();
-        reapplyIfConnected();
+        // Connecting counts too. A connect that is failing on a wrong password
+        // retries with the config it was given, so saving the fixed one only
+        // helps if the attempt starts again from it.
+        if (m_connected || m_connecting)
+            reconnectActiveConfig();
         return;
     }
     // Creating a config makes it the active one (persistCreatedConfigPaths). If a

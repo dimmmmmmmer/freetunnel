@@ -40,7 +40,11 @@ public:
     QString lastToast() const { return m_lastToast; }
 
     Q_INVOKABLE void showToast(const QString &msg);
-    Q_INVOKABLE void showConfirm(const QString &, const QString &, const QVariant &) {}
+    Q_INVOKABLE void showConfirm(const QString &message, const QString &, const QVariant &)
+    {
+        lastConfirm = message;
+    }
+    QString lastConfirm;
     Q_INVOKABLE void showSelect(QObject *, const QVariant &, const QString &, const QVariant &) {}
     Q_INVOKABLE QString elide(const QString &s, int n) const;
     Q_INVOKABLE QString elideMiddle(const QString &s, int n) const;

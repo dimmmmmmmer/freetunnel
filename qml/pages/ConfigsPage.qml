@@ -16,16 +16,26 @@ Item {
     // Which config the export menu / "Save .toml" dialog is acting on, and which
     // one the delete confirmation is about. Both dialogs live at window level and
     // outlive the row they were opened from — a background import (deep link from
-    // a second instance) resets the model and destroys that delegate — so the
-    // action has to resolve against the page, never against the delegate's index.
-    property int exportIndex: -1
+    // a second instance, a paste) prepends to the list — so the action remembers
+    // the config's file and finds its row when it runs. A remembered row number
+    // exported the neighbouring config, password and all, or deleted it.
+    property string exportPath: ""
     property string exportName: ""
-    property int deleteIndex: -1
+    property string deletePath: ""
 
+    // The row the remembered config is on now, or -1 with the user told why.
+    function rowOf(path) {
+        const i = backend.configIndex(path)
+        if (i < 0)
+            shell.showToast(qsTr("That configuration is no longer there."))
+        return i
+    }
     function exportPicked(v) {
         if (v === "toml") { tomlSaveDlg.open(); return }
         if (v !== "link") return
-        var lnk = backend.configDeepLink(cfgRoot.exportIndex)
+        const row = rowOf(cfgRoot.exportPath)
+        if (row < 0) return
+        var lnk = backend.configDeepLink(row)
         if (lnk && lnk.length > 0) {
             backend.copyToClipboard(lnk)
             shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully"))
@@ -33,9 +43,16 @@ Item {
             shell.showToast(qsTr("Couldn’t build deep-link"))
         }
     }
+    function exportToml(fileUrl) {
+        const row = rowOf(cfgRoot.exportPath)
+        if (row < 0) return
+        shell.showToast(backend.exportConfigToml(row, fileUrl)
+                        ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
+    }
     function deleteConfirmed() {
-        if (cfgRoot.deleteIndex >= 0)
-            backend.removeConfig(cfgRoot.deleteIndex)
+        const row = rowOf(cfgRoot.deletePath)
+        if (row >= 0)
+            backend.removeConfig(row)
     }
     // A config name is user- or import-controlled: a "/" (or "\" on Windows)
     // would be read as a path separator by the save dialog, so flatten it.
@@ -74,7 +91,11 @@ Item {
         }
     }
     Text {
+        objectName: "addConfigHint"
         visible: backend.configs.length === 0
+        // Above the (empty) list, which fills the same area and, being a
+        // Flickable, took the click itself.
+        z: 1
         anchors.centerIn: parent
         text: qsTr("Add a config"); color: theme.textFaint; font.pixelSize: 15
         MouseArea { anchors.fill: parent; onClicked: importMenu.open = true }
@@ -185,7 +206,7 @@ Item {
                            color: expMa.containsMouse ? cfgRoot.theme.text : cfgRoot.theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: expMa; anchors.fill: parent; hoverEnabled: true
                         onClicked: {
-                            cfgRoot.exportIndex = index; cfgRoot.exportName = modelData
+                            cfgRoot.exportPath = backend.configPath(index); cfgRoot.exportName = modelData
                             shell.showSelect(parent,
                                 [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
                                 cfgRoot.exportPicked)
@@ -200,7 +221,7 @@ Item {
                            color: delMa.containsMouse ? theme.danger : theme.textDim; theme: cfgRoot.theme }
                     MouseArea { id: delMa; anchors.fill: parent; hoverEnabled: true
                                 onClicked: {
-                                    cfgRoot.deleteIndex = index
+                                    cfgRoot.deletePath = backend.configPath(index)
                                     shell.showConfirm(qsTr("Delete config “%1”?").arg(shell.elideMiddle(modelData, 36)),
                                                       qsTr("Delete"), cfgRoot.deleteConfirmed)
                                 } } }
@@ -226,7 +247,7 @@ Item {
                onActivated: importMenu.open = false }
     // Import / create dropdown (collapsed by default).
     Rectangle {
-        id: importMenu; property bool open: false
+        id: importMenu; objectName: "importMenu"; property bool open: false
         visible: opacity > 0; opacity: open ? 1 : 0; z: 10
         Behavior on opacity { NumberAnimation { duration: 130 } }
         transform: Translate { y: importMenu.open ? 0 : -8
@@ -270,8 +291,9 @@ Item {
         id: tomlSaveDlg; objectName: "configExportDialog"; title: qsTr("Export config")
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["TOML (*.toml)"]; defaultSuffix: "toml"
-        selectedFile: "file:" + cfgRoot.exportFileName(cfgRoot.exportName) + ".toml"
-        onAccepted: shell.showToast(backend.exportConfigToml(cfgRoot.exportIndex, tomlSaveDlg.selectedFile.toString())
-                                    ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
+        // Encoded: a name may hold '#' or '%' now, and in a URL '#' starts the
+        // fragment, so "Work #2" was offered as "Work .toml".
+        selectedFile: "file:" + encodeURIComponent(cfgRoot.exportFileName(cfgRoot.exportName) + ".toml")
+        onAccepted: cfgRoot.exportToml(tomlSaveDlg.selectedFile.toString())
     }
 }

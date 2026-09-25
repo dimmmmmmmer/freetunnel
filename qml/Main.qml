@@ -90,7 +90,7 @@ Window {
         function onAboutToShutdown() {
             shuttingDown = true
             // Defer so tray/dock menu items can finish closing before we tear down.
-            Qt.callLater(function() { tray.visible = false })
+            Qt.callLater(function() { if (win.tray) win.tray.visible = false })
         }
         // Every deep-link import is confirmed, not just the ones that disable
         // certificate verification — so the button is a plain «Import»; the
@@ -114,80 +114,130 @@ Window {
     }
 
     Shortcut { sequences: [StandardKey.Quit]; onActivated: backend.quitApplication() }
+    // macOS: ⌘W does what the red button does, and ⌘M minimises. Neither reached
+    // anything before: this application has no Window menu to carry them.
+    Shortcut { enabled: win.isMac; sequences: [StandardKey.Close]; onActivated: desktop.hideToTray(win) }
+    Shortcut { enabled: win.isMac; sequence: "Ctrl+M"; onActivated: desktop.minimize(win) }
 
     // ---------- system tray ----------
-    Platform.SystemTrayIcon {
-        id: tray
-        objectName: "systemTray"
-        visible: true
-        // Green mark when connected — the configs-page "connected" badge
-        // color — dimmed when off.
-        //
-        // Except on macOS, where a menu-bar item is a template image: black on
-        // clear, recoloured by the system for a light or dark bar and inverted
-        // while its menu is open. A coloured bitmap there is the one icon on the
-        // bar that does none of that, and on macOS 26's transparent bar the dark
-        // inner arches of the green mark all but vanish. With no colour to carry
-        // the state, the shape carries it: filled when connected, outlined when not.
-        icon.source: win.isMac
-                     ? (backend.connected ? "qrc:/assets/tray-mac-on.svg" : "qrc:/assets/tray-mac-off.svg")
-                     : (backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg")
-        icon.mask: win.isMac
-        tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
-                                    : "FreeTunnel"
-        // Right-click opens the menu (below). Double-click — or a single left-click
-        // on Windows, the expected tray gesture there — brings the window forward.
-        // macOS is excluded outright: there the status item owns an NSMenu, so Qt
-        // emits activated() from NSMenuDidBeginTracking and derives the reason from
-        // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
-        // as DoubleClick even though the user only opened the menu, which popped the
-        // hidden window back open. The menu's «Show FreeTunnel» item and the Dock
-        // icon are the macOS ways back.
-        onActivated: function(reason) {
-            if (win.isMac)
+    // A config name as the tray menu shows it. On Windows and macOS '&' is the
+    // menus' mnemonic marker, so it is doubled. Linux is harder. Qt turns the
+    // first '&' into dbusmenu's '_', and the hosts read '_' differently: KDE drops
+    // every single '_' after the first and wants '__', GNOME's AppIndicator
+    // extension removes only the first '_' before a letter and shows the rest as
+    // they are. No spelling of '_' comes out right on both, so there it is shown
+    // as a space, which is what 1.2.0 had turned into '_' in every name anyway. A
+    // '&' is kept by giving Qt a first '&' of its own to make the mnemonic, which
+    // every host then hides.
+    function menuLabel(name) {
+        if (Qt.platform.os !== "linux")
+            return name.replace(/&/g, "&&")
+        const spaced = name.replace(/_/g, " ")
+        return spaced.indexOf("&") >= 0 ? "&" + spaced : spaced
+    }
+    // The tray icon, made again when a tray host appears after start. Qt decides
+    // once, when the icon is made, whether there is a tray on the session bus
+    // (see DesktopChrome::trayHostAppeared); an icon made before the panel was up
+    // stayed without one for good, and ✕ quit instead of going to the tray.
+    readonly property var tray: trayMaker.object
+    Connections {
+        target: desktop
+        function onTrayHostAppeared() {
+            if (win.tray && win.tray.available)
                 return
-            if (reason === Platform.SystemTrayIcon.DoubleClick
-                    || (reason === Platform.SystemTrayIcon.Trigger && Qt.platform.os === "windows")) {
-                win.show(); win.raise(); win.requestActivate()
-            }
+            trayMaker.active = false
+            trayMaker.active = true
         }
-        menu: Platform.Menu {
-            // Plain connect/disconnect action button.
-            Platform.MenuItem {
-                text: backend.disconnecting ? qsTr("Disconnecting…")
-                      : backend.connecting ? qsTr("Connecting…")
-                      : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
-                enabled: backend.configs.length > 0
-                onTriggered: backend.toggle()
-            }
-            // Active config + session time on one line (only while connected).
-            Platform.MenuItem {
-                enabled: false; visible: backend.connected
-                text: backend.activeConfig + "  ·  " + backend.sessionTime
-            }
-            Platform.MenuSeparator {}
-            // Configs listed inline; the active one carries a checkmark.
-            Instantiator {
-                model: backend.configs
-                delegate: Platform.MenuItem {
-                    required property int index
-                    required property string modelData
-                    text: modelData
-                    checkable: true
-                    checked: index === backend.activeIndex
-                    onTriggered: backend.selectConfig(index)
+    }
+    Instantiator {
+        id: trayMaker
+        delegate: Platform.SystemTrayIcon {
+            id: tray
+            objectName: "systemTray"
+            visible: true
+            // Green mark when connected — the configs-page "connected" badge
+            // color — dimmed when off. On macOS too: a monochrome template image was
+            // tried there, and it drew a plain white mark that said nothing about the
+            // state at a glance, which is what this icon is for.
+            icon.source: backend.connected ? "qrc:/assets/logo-green.svg" : "qrc:/assets/logo-dim.svg"
+            tooltip: backend.connected ? qsTr("FreeTunnel — %1").arg(backend.activeConfig)
+                                        : "FreeTunnel"
+            // Right-click opens the menu (below). The icon's own gesture brings the
+            // window forward: a left click on Windows, a double-click too. On Linux
+            // every host reports it as Trigger, never DoubleClick — Qt's
+            // StatusNotifierItem turns the host's Activate call into Trigger — and
+            // hosts send Activate for a left click (KDE) or a double-click (GNOME's
+            // AppIndicator extension, where one click opens the menu).
+            //
+            // macOS is excluded outright: there the status item owns an NSMenu, so Qt
+            // emits activated() from NSMenuDidBeginTracking and derives the reason from
+            // NSApp.currentEvent.clickCount — a second quick click on the icon arrives
+            // as DoubleClick even though the user only opened the menu, which popped the
+            // hidden window back open. The menu's «Show FreeTunnel» item and the Dock
+            // icon are the macOS ways back.
+            onActivated: function(reason) {
+                if (win.isMac)
+                    return
+                if (reason === Platform.SystemTrayIcon.Trigger
+                        || reason === Platform.SystemTrayIcon.DoubleClick) {
+                    desktop.bringToFront(win)
                 }
-                onObjectAdded: (i, obj) => tray.menu.insertItem(i + 3, obj)
-                onObjectRemoved: (i, obj) => tray.menu.removeItem(obj)
             }
-            Platform.MenuSeparator { visible: backend.configs.length > 0 }
-            Platform.MenuItem {
-                text: qsTr("Show FreeTunnel")
-                onTriggered: { win.show(); win.raise(); win.requestActivate() }
-            }
-            Platform.MenuItem {
-                text: qsTr("Quit")
-                onTriggered: backend.quitApplication()
+            menu: Platform.Menu {
+                // Plain connect/disconnect action button.
+                Platform.MenuItem {
+                    text: backend.disconnecting ? qsTr("Disconnecting…")
+                          : backend.connecting ? qsTr("Connecting…")
+                          : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
+                    enabled: backend.configs.length > 0
+                    onTriggered: {
+                        win.trayActionWaiting = true
+                        backend.toggle()
+                    }
+                }
+                // Active config + session time on one line (only while connected).
+                Platform.MenuItem {
+                    enabled: false; visible: backend.connected
+                    text: win.menuLabel(backend.activeConfig) + "  ·  " + backend.sessionTime
+                }
+                Platform.MenuSeparator {}
+                // Configs listed inline; the active one carries a checkmark.
+                //
+                // Choosing the one already ticked turns it on or off, as the user
+                // expects of it; choosing another switches to that one, reconnecting
+                // if connected. Either way the tick is put back on its binding: the
+                // menu flips a checkable item's tick by itself on a click, which broke
+                // the binding and left the active config unticked while nothing else
+                // changed.
+                Instantiator {
+                    model: backend.configs
+                    delegate: Platform.MenuItem {
+                        required property int index
+                        required property string modelData
+                        text: win.menuLabel(modelData)
+                        checkable: true
+                        checked: index === backend.activeIndex
+                        onTriggered: {
+                            win.trayActionWaiting = true
+                            if (index === backend.activeIndex)
+                                backend.toggle()
+                            else
+                                backend.selectConfig(index)
+                            checked = Qt.binding(() => index === backend.activeIndex)
+                        }
+                    }
+                    onObjectAdded: (i, obj) => tray.menu.insertItem(i + 3, obj)
+                    onObjectRemoved: (i, obj) => tray.menu.removeItem(obj)
+                }
+                Platform.MenuSeparator { visible: backend.configs.length > 0 }
+                Platform.MenuItem {
+                    text: qsTr("Show FreeTunnel")
+                    onTriggered: desktop.bringToFront(win)
+                }
+                Platform.MenuItem {
+                    text: qsTr("Quit")
+                    onTriggered: backend.quitApplication()
+                }
             }
         }
     }
@@ -221,6 +271,9 @@ Window {
         readonly property color textDim: dark ? "#9a9a9a" : "#6b6b6b"
         readonly property color textFaint: dark ? "#6a6a6a" : "#9a9a9a"
         readonly property color accent: dark ? "#b0b0b0" : "#4f4f4f"
+        // Text on an accent fill. White on the light dark-theme accent read at about
+        // 2:1, so the editor's Save looked disabled next to Cancel.
+        readonly property color onAccent: dark ? "#181818" : "#ffffff"
         readonly property color border: dark ? "#2e2e2e" : "#e5e5e5"
         // Off-state track for switches: clearly darker than the (light) accent
         // in dark mode so on/off don't blur together.
@@ -381,7 +434,7 @@ Window {
         if (action === "toggle-maximize")
             win.toggleMaximized()
         else if (action === "minimize")
-            win.showMinimized()
+            desktop.minimize(win)
         else if (action === "lower")
             win.lower()
         else if (action === "menu")
@@ -410,8 +463,8 @@ Window {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
     function closeFromTitleBar() {
-        if (tray.available)
-            win.showMinimized()
+        if (win.tray && win.tray.available)
+            desktop.minimize(win)
         else
             backend.quitApplication()
     }
@@ -427,7 +480,7 @@ Window {
         controlStyle: desktop.controlStyle
         window: win
         theme: win.theme
-        onMinimizeRequested: win.showMinimized()
+        onMinimizeRequested: desktop.minimize(win)
         onMaximizeToggleRequested: win.toggleMaximized()
         onCloseRequested: win.closeFromTitleBar()
     }
@@ -441,7 +494,7 @@ Window {
         controlStyle: desktop.controlStyle
         window: win
         theme: win.theme
-        onMinimizeRequested: win.showMinimized()
+        onMinimizeRequested: desktop.minimize(win)
         onMaximizeToggleRequested: win.toggleMaximized()
         onCloseRequested: win.closeFromTitleBar()
     }
@@ -589,26 +642,67 @@ Window {
     // ---------- toast (errors/notices) ----------
     Connections {
         target: backend
-        function onErrorOccurred(msg) { toast.show(msg) }
+        function onErrorOccurred(msg) {
+            toast.show(msg)
+            // An action started from the tray fails where nobody is looking. The
+            // toast waits for the window (below); the tray says it now. Only for
+            // that action: a connection retrying in the background reports each
+            // failed try, and a notification for every one of them is noise.
+            if (win.errorsGoToTray && win.tray && win.tray.available && win.tray.supportsMessages)
+                win.tray.showMessage("FreeTunnel", msg)
+            win.trayActionWaiting = false
+        }
+        // The action has come to rest: connected (again, for a switch, which
+        // starts out still connected to the old server) or off.
+        function onStateChanged() {
+            const nowConnected = backend.connected
+            if ((nowConnected && !win.wasConnected)
+                    || (!nowConnected && !backend.connecting && !backend.disconnecting))
+                win.trayActionWaiting = false
+            win.wasConnected = nowConnected
+        }
         function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
         function onUpdateChanged() {
             if (backend.updateState === "available")
                 toast.show(qsTr("Update available: %1").arg(backend.latestVersion))
         }
     }
+    // Hidden to the tray or the menu bar, or minimised: a toast drawn now would
+    // time out before anyone could read it.
+    readonly property bool onScreen: visible && visibility !== Window.Minimized
+    // Something the user started from the tray has yet to succeed or fail.
+    property bool trayActionWaiting: false
+    property bool wasConnected: backend.connected
+    readonly property bool errorsGoToTray: !onScreen && trayActionWaiting
+    onOnScreenChanged: {
+        if (onScreen && toast.waiting) {
+            toast.waiting = false
+            toastTimer.restart()
+        }
+    }
     Rectangle {
         id: toast
+        objectName: "toast"
         z: 1000
         property string message: ""
+        // Shown while the window was away; its three seconds start when it is back.
+        property bool waiting: false
         TextMetrics { id: toastMetrics; font.pixelSize: 13 }
         function show(m) {
             toastMetrics.text = m
             message = m
             opacity = 0.97
-            toastTimer.restart()
+            waiting = !win.onScreen
+            if (waiting)
+                toastTimer.stop()
+            else
+                toastTimer.restart()
         }
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 26
+        // Over an open editor or picker it goes to the top: at the bottom it sat on
+        // the card's Save and Cancel, and took the click meant for them just when
+        // an error had asked the user to fix a field and save again.
+        y: win.overlay !== "" ? win.titlebarSafeTop + 8 : parent.height - height - 26
         // Size to the message text (TextMetrics), not tmsg.implicitWidth — binding
         // tmsg.width to toast.width made implicitWidth inflate and left empty margins.
         width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastMetrics.boundingRect.width) + 24))
@@ -622,8 +716,14 @@ Window {
             maximumLineCount: 3; elide: Text.ElideRight
         }
         Behavior on opacity { NumberAnimation { duration: 180 } }
-        Timer { id: toastTimer; interval: 3200; onTriggered: toast.opacity = 0 }
-        MouseArea { anchors.fill: parent; onClicked: toast.opacity = 0 }
+        Timer { id: toastTimer; objectName: "toastTimer"; interval: 3200; onTriggered: toast.opacity = 0 }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                toast.waiting = false
+                toast.opacity = 0
+            }
+        }
     }
 
     // ---------- window-level select popup (used by Dropdown) ----------
@@ -760,8 +860,11 @@ Window {
         var next = confirmQueue.shift()
         applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb)
     }
-    ConfirmDialog { id: winConfirm; z: 2500; theme: win.theme
-                    escapeOwner: !(overlayLoader.item && overlayLoader.item.confirmVisible)
+    // Drawn above everything, the editor's own "Discard unsaved changes?" included,
+    // so it owns Return and Escape while it is up and that one stands down (see
+    // CreateConfigOverlay). The other way round, Return meant for an import
+    // prompt that had just covered the editor's discarded the edits underneath.
+    ConfirmDialog { id: winConfirm; objectName: "windowConfirm"; z: 2500; theme: win.theme
         onConfirmed: if (win.confirmCb) win.confirmCb()
         onAlternate: if (win.confirmAltCb) win.confirmAltCb()
         // Deferred: the dialog clears `visible` before it emits confirmed()/

@@ -5,6 +5,7 @@ import QtQuick
 Column {
     property alias label: lbl.text
     property alias text: input.text
+    property alias input: input
     property string placeholder: ""
     property bool password: false
     property color labelColor: "#6b7280"
@@ -26,6 +27,8 @@ Column {
             verticalAlignment: TextInput.AlignVCenter; clip: true
             font.pixelSize: 14; color: textColor
             echoMode: password ? TextInput.Password : TextInput.Normal
+            // Tab and Shift+Tab move between the fields of a form, as in any.
+            activeFocusOnTab: true
         }
         Text {
             text: placeholder; color: placeholderColor; font.pixelSize: 14

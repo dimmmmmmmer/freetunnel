@@ -43,6 +43,7 @@ class MockBackend : public QObject {
     // Derived here the same way, so the page under test sees the real relationship
     // rather than a constant.
     Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
+    Q_PROPERTY(QString activeConfigProfile MEMBER m_activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -54,6 +55,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
+    Q_PROPERTY(QStringList unavailableHotkeys MEMBER unavailableHotkeys NOTIFY hotkeyAvailabilityChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged)
@@ -81,6 +83,20 @@ public:
     QString upSpeed() const { return m_upSpeed; }
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
+    void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
+    Q_INVOKABLE QString configPath(int index) const
+    {
+        return index >= 0 && index < m_configs.size()
+                ? QStringLiteral("/mock/%1.toml").arg(m_configs.at(index)) : QString();
+    }
+    Q_INVOKABLE int configIndex(const QString &path) const
+    {
+        for (int i = 0; i < m_configs.size(); ++i) {
+            if (configPath(i) == path)
+                return i;
+        }
+        return -1;
+    }
     int activeIndex() const { return m_activeIndex; }
 
     QString language() const { return m_language; }
@@ -116,6 +132,7 @@ public:
     }
     void setVpnMode(const QString &v);
     QStringList domains() const { return m_domains; }
+    void setDomains(const QStringList &d) { m_domains = d; emit splitChanged(); }
     QStringList excludedRoutes() const { return m_excludedRoutes; }
     QStringList appRules() const { return m_appRules; }
     // Deliberately NOT the file names of the rules: the page is supposed to show
@@ -137,14 +154,26 @@ public:
     // Backend maps a key's physical position to its Latin letter; nothing to map
     // headlessly, so report "not a letter key" like the real one does.
     Q_INVOKABLE QString physicalLetterForKey(quint32, quint32) const { return QString(); }
+    Q_INVOKABLE void suspendHotkeys(bool suspend) { hotkeySuspensions += suspend ? 1 : -1; }
+    int hotkeySuspensions = 0;
+    QStringList unavailableHotkeys;
 
     // Empty = the OS keychain works, which is the normal desktop case.
     QString credentialStorageWarning() const { return m_credentialStorageWarning; }
 
     QString appVersion() const { return QStringLiteral("1.0.0-test"); }
     QString coreVersion() const { return QStringLiteral("test-core"); }
-    QString updateState() const { return QString(); }
-    QString updateMessage() const { return QString(); }
+    QString updateState() const { return m_updateState; }
+    QString updateMessage() const { return m_updateMessage; }
+    void setUpdate(const QString &state, const QString &message)
+    {
+        m_updateState = state;
+        m_updateMessage = message;
+        emit updateChanged();
+    }
+    int updateChecks = 0;
+    int updateOffersTaken = 0;
+    int routeRestores = 0;
     QString latestVersion() const { return QString(); }
     QString logPath() const;
     bool autoStart() const { return m_autoStart; }
@@ -165,11 +194,22 @@ public:
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const;
-    Q_INVOKABLE QString configDeepLink(int) const { return QStringLiteral("tt://?mock"); }
-    Q_INVOKABLE bool exportConfigToml(int, const QString &) const { return true; }
-    Q_INVOKABLE void clearLogs() {}
+    Q_INVOKABLE QString configDeepLink(int index) const
+    {
+        lastDeepLinkRow = index;
+        return QStringLiteral("tt://?mock");
+    }
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &) const
+    {
+        lastExportRow = index;
+        return true;
+    }
+    mutable int lastDeepLinkRow = -1;
+    mutable int lastExportRow = -1;
+    Q_INVOKABLE void clearLogs() { m_logModel.clear(); }
+    void appendLog(const QString &msg) { m_logModel.append(QStringLiteral("12:00:01"), QStringLiteral("INFO"), msg); }
     Q_INVOKABLE void openLogFolder() {}
-    Q_INVOKABLE QString logText() const { return QString(); }
+    Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
     Q_INVOKABLE void copyToClipboard(const QString &) const {}
     Q_INVOKABLE QString readTextFile(const QString &) const { return QString(); }
     Q_INVOKABLE bool addDomain(const QString &) { return false; }
@@ -203,7 +243,7 @@ public:
     }
     Q_INVOKABLE void removeAppRule(int) {}
     Q_INVOKABLE void clearAppRules() {}
-    Q_INVOKABLE void restoreDefaultExcludedRoutes() {}
+    Q_INVOKABLE void restoreDefaultExcludedRoutes() { ++routeRestores; }
     Q_INVOKABLE void addRecommendedRussia() {}
     // These two are real, unlike their neighbours: the page has to show that
     // applications belong to the profile, and a stub that stores nothing can
@@ -227,9 +267,9 @@ public:
         emit splitChanged();
     }
     Q_INVOKABLE void removeProfile(const QString &) {}
-    Q_INVOKABLE void checkForUpdates() {}
+    Q_INVOKABLE void checkForUpdates() { ++updateChecks; }
     Q_INVOKABLE void downloadUpdate() {}
-    Q_INVOKABLE void openLatestRelease() {}
+    Q_INVOKABLE void openLatestRelease() { ++updateOffersTaken; }
     Q_INVOKABLE void openUrl(const QString &) {}
     Q_INVOKABLE void startWindowDrag(QObject *) { ++windowDrags; }
     int windowDrags = 0;
@@ -253,6 +293,7 @@ signals:
     void logChanged();
     void splitChanged();
     void hotkeysChanged();
+    void hotkeyAvailabilityChanged();
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
@@ -279,6 +320,9 @@ private:
     bool m_autoConnect = false;
     bool m_killSwitch = false;
     bool m_loggingEnabled = true;
+    QString m_activeConfigProfile = QStringLiteral("Default");
+    QString m_updateState;
+    QString m_updateMessage;
     bool m_verboseLogs = false;
     LogModel m_logModel;
     bool m_splitEnabled = false;

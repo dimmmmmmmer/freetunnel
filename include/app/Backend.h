@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QObject>
 
+#include <functional>
 #include <optional>
 #include <atomic>
 #include <QString>
@@ -54,6 +55,9 @@ class Backend : public QObject {
     // tunnel is kept full in that state (see selectiveModeActive), so this is what
     // the UI needs in order to explain why the chosen mode is not in effect.
     Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
+    // The split profile the active CONFIG uses. It decides what the tunnel does,
+    // and it need not be the one the Split page is showing.
+    Q_PROPERTY(QString activeConfigProfile READ activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -77,6 +81,9 @@ class Backend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
+    // "toggle", "connect", "disconnect": set, switched on, and not in effect —
+    // refused as unsafe, or held by another application or the desktop.
+    Q_PROPERTY(QStringList unavailableHotkeys READ unavailableHotkeys NOTIFY hotkeyAvailabilityChanged)
     // Updater (GitHub Releases)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
@@ -93,6 +100,10 @@ class Backend : public QObject {
 
 public:
     explicit Backend(QObject *parent = nullptr);
+    ~Backend() override;
+    // Say again, in the language just put in place, what Backend worded earlier
+    // and kept: the credential-storage warning, the update line, ping times.
+    void retranslate();
 
     bool connected() const { return m_connected; }
     bool connecting() const { return m_connecting; }
@@ -137,6 +148,14 @@ public:
     // Export: a shareable tt:// deep link, or a full .toml written to disk
     // (both carry the password — pulled from the OS keychain).
     Q_INVOKABLE QString configDeepLink(int index) const;
+    // A row's config file, and back. An action that outlives its row — a menu, a
+    // save dialog, a confirmation — remembers the file: an import prepends to the
+    // list and every row below moves.
+    Q_INVOKABLE QString configPath(int index) const { return m_paths.value(index); }
+    Q_INVOKABLE int configIndex(const QString &path) const
+    {
+        return path.isEmpty() ? -1 : static_cast<int>(m_paths.indexOf(path));
+    }
     Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
 
     QObject *logModel() { return &m_logModel; }
@@ -154,6 +173,7 @@ public:
     void setVpnMode(const QString &mode);
     bool selectiveModeActive() const;    // what the core is actually told
     bool selectiveModeWouldLeak() const; // selected, but with no rules to route
+    QString activeConfigProfile() const; // split profile assigned to the active config
     Q_INVOKABLE bool addDomain(const QString &domain); // accepts a list; true if any added
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
@@ -201,6 +221,13 @@ public:
     void setHotkeyToggle(const QString &v);
     void setHotkeyConnect(const QString &v);
     void setHotkeyDisconnect(const QString &v);
+    const QStringList &unavailableHotkeys() const { return m_unavailableHotkeys; }
+    // Held while a hotkey field records a combo; counted, see the definition.
+    Q_INVOKABLE void suspendHotkeys(bool suspend);
+    bool hotkeysSuspended() const { return m_hotkeySuspensions > 0; }
+    // Whether a combo may be taken system-wide: it needs Ctrl, Alt or Meta, or is
+    // one of F1–F12. Anything else is a key people type.
+    static bool isSafeGlobalHotkey(const QString &sequence);
     // Maps a key's physical position (QKeyEvent::nativeScanCode) to its Latin
     // letter "A".."Z", or "" if it isn't a letter key. Lets hotkey capture work
     // under a non-Latin layout (e.g. Russian), where key()/text() are Cyrillic.
@@ -237,6 +264,7 @@ signals:
     void settingsChanged();
     void splitChanged();
     void hotkeysChanged();
+    void hotkeyAvailabilityChanged();
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
@@ -253,9 +281,11 @@ private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reloadConfigs();
     void persistSettings();
-    void applySplitRules(); // push the active CONFIG's profile rules to the core
-    QString activeConfigProfile() const; // split profile assigned to the active config
+    void applySplitRules(bool warnOfLeak = true); // push the active CONFIG's profile rules to the core
+    void applyProfileEdit(); // persist, apply and announce an edit to the Split page's profile
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
+    void startConnectAttempt();   // connectVpn() past its "already busy" check
+    void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
     void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
@@ -358,10 +388,15 @@ private:
     QHotkey *m_hkConnect = nullptr;
     QHotkey *m_hkDisconnect = nullptr;
     bool m_waylandHotkeyWarned = false; // log the Wayland limitation only once
+    int m_hotkeySuspensions = 0;
+    QStringList m_unavailableHotkeys;
+    void noteUnavailableHotkeys();
 
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    std::function<QString()> m_updateWords; // says m_updateMessage; see setUpdateMessage()
+    void setUpdateMessage(std::function<QString()> words);
     // Which side failed: m_latestVersion cannot answer that — it only says "this
     // process has ever seen a release" and is never cleared.
     bool m_updateErrorFromDownload = false;
@@ -377,7 +412,7 @@ private:
     // Answered once and kept: the probe behind it spawns a subprocess and runs a
     // nested event loop on this thread. mutable because the property reader is
     // const, as a property reader has to be.
-    mutable std::optional<QString> m_credentialWarning;
+    mutable std::optional<bool> m_credentialStoreMissing;
     bool m_disconnecting = false; // Disconnecting (tearing down / cancelling)
     LogModel m_logModel;
 
@@ -390,12 +425,18 @@ private:
 
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
-    bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
+    // A config switch or live re-apply is a teardown followed by a fresh connect.
+    // m_reapplying covers only the part before that connect reaches the helper:
+    // the old tunnel going down, then the credential read. States and errors
+    // there belong to the old session. Once the connect is issued it is an
+    // ordinary attempt, and its failures are the user's to see.
+    bool m_reapplying = false;
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
-    bool m_inConnect = false;
+    bool m_awaitingToml = false;  // credential read in flight; nothing sent to the helper yet
+    bool m_inConnect = false;     // inside onConnectTomlReady(): suppress live-reapply
     // Bumped by anything that supersedes an in-flight connect, so a credential
     // read that finishes late cannot start a session nobody asked for any more.
-    quint64 m_connectGen = 0;     // inside connectVpn(): suppress live-reapply
+    quint64 m_connectGen = 0;
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran
 };

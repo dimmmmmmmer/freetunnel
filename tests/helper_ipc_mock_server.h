@@ -45,6 +45,17 @@ public:
     // so the double has to keep the values, not just the verbs.
     QJsonObject lastMessageFor(const QString &cmd) const { return m_lastByCmd.value(cmd); }
     int connectionCount() const { return m_connectionCount; }
+    int connectCount() const { return m_connectCount; }
+
+    // Scripted outcomes for the Backend tests, keyed on a value quoted in the
+    // connect's config: its hostname, or its password. A failing connect gets
+    // Connecting, then Reconnecting with `error`, which is how the core reports
+    // an attempt it will keep retrying. A refused one gets `error` and no state
+    // at all, as when the core is already in Error and cannot load the config.
+    void failConnectsWith(const QString &value, const QString &error) { m_failing.insert(value, error); }
+    void refuseConnectsWith(const QString &value, const QString &error) { m_refusing.insert(value, error); }
+    // The old session reports `error` while a disconnect is tearing it down.
+    void setTeardownError(const QString &error) { m_teardownError = error; }
 
 private:
     void adoptSocket(QTcpSocket *s);
@@ -63,6 +74,9 @@ private:
     int m_connectionCount = 0;
     int m_connectCount = 0;
     bool m_tunnelUp = false;
+    QHash<QString, QString> m_failing;
+    QHash<QString, QString> m_refusing;
+    QString m_teardownError;
 
 signals:
     void quitRequested();

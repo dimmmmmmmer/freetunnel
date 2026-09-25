@@ -42,6 +42,7 @@ private slots:
     void turningSplitTunnellingOffDoesNotInvertTheAppRules();
     void appRulesBelongToTheProfile();
     void theOneOldApplicationListSeedsEveryProfileOnce();
+    void theLeakWarningPopsUpOnlyOverTheProfileItConcerns();
 
 private:
     QTemporaryDir m_home;
@@ -433,6 +434,39 @@ void TestBackendSplit::turningSplitTunnellingOffDoesNotInvertTheAppRules()
 
     backend.setSplitEnabled(true);
     QVERIFY(backend.selectiveModeActive());
+}
+
+// What leaks is the active config's profile. With the Split page on another one,
+// every rule added there was answered by "Through VPN has no rules… until you
+// add a rule", as though the rule just added did not count. The page's standing
+// notice names the config and its profile instead.
+void TestBackendSplit::theLeakWarningPopsUpOnlyOverTheProfileItConcerns()
+{
+    Backend backend;
+    backend.setSplitEnabled(true);
+    backend.selectProfile(QStringLiteral("Default"));
+    backend.clearDomains();
+    backend.clearAppRules();
+    backend.addProfile(QStringLiteral("Work"));
+    backend.selectProfile(QStringLiteral("Work"));
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    // Anything that is not an edit of another profile says it, whichever profile
+    // the page shows: here a change of mode. A connect takes the same path.
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(backend.selectiveModeWouldLeak()); // the config still uses Default, which is empty
+    QCOMPARE(errors.count(), 1);
+
+    // A rule added to Work, which the config does not use, does not.
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QCOMPARE(errors.count(), 1);
+
+    // Over the profile concerned, an edit says it too.
+    backend.selectProfile(QStringLiteral("Default"));
+    backend.addRecommendedRussia();
+    backend.clearDomains();
+    QCOMPARE(errors.count(), 2);
+    backend.setVpnMode(QStringLiteral("general"));
 }
 
 QTEST_MAIN(TestBackendSplit)

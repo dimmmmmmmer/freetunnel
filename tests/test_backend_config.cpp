@@ -45,6 +45,8 @@ private slots:
     void deepLinkRoundTripsBackIntoTheSameConfig();
     void moveConfigReordersTheList();
     void removeConfigForgetsThePassword();
+    void deletingTheActiveConfigRemembersTheOneThatTookOver();
+    void renamingOnlyTheLetterCaseRenames();
     void readAccessorsRejectOutOfRangeIndexes();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
@@ -326,6 +328,55 @@ void TestBackendConfig::removeConfigForgetsThePassword()
     QVERIFY2(!QFileInfo::exists(path), "the config file survived removal");
     QVERIFY2(freetunnel::CredentialStore::loadPassword(key).isEmpty(),
              "the password outlived the config it belonged to");
+}
+
+// Deleting the active config hands the slot to the first one left, and that is
+// the config the window shows as active. It was never saved as such: the setting
+// kept naming the deleted file, so the next launch fell back to whatever row was
+// first by then — after an import or a drag, a config nobody had picked, and
+// "Connect on startup" connected to it.
+void TestBackendConfig::deletingTheActiveConfigRemembersTheOneThatTookOver()
+{
+    QString takeover;
+    {
+        Backend backend;
+        QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("a"))));
+        QVERIFY(backend.createConfig(form(QStringLiteral("Beta"), QStringLiteral("b"))));
+        QVERIFY(backend.createConfig(form(QStringLiteral("Gamma"), QStringLiteral("c"))));
+        backend.selectConfig(1);
+        const QString deleted = pathFor(backend, 1);
+        backend.removeConfig(1);
+        QVERIFY(backend.activeIndex() >= 0);
+        takeover = pathFor(backend, backend.activeIndex());
+        QVERIFY(takeover != deleted);
+
+        // Another config to the top of the list, where an import or a drag puts it.
+        backend.moveConfig(1, 0);
+        QVERIFY(pathFor(backend, 0) != takeover);
+    }
+    Backend relaunched;
+    QCOMPARE(pathFor(relaunched, relaunched.activeIndex()), takeover);
+}
+
+// "work" to "Work": on APFS and NTFS the new name is the same file, which the save
+// took for another config and answered with "Work-2". Removing the old spelling
+// afterwards would remove the file itself there, and deleting the old password
+// would take the new one from the Windows credential store, which folds case too.
+void TestBackendConfig::renamingOnlyTheLetterCaseRenames()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("work"), QStringLiteral("hunter2"))));
+    QVariantMap edit = form(QStringLiteral("Work"), QStringLiteral("hunter2"));
+    edit[QStringLiteral("editIndex")] = 0;
+    edit[QStringLiteral("editPath")] = backend.configFields(0).value(QStringLiteral("path"));
+    QVERIFY(backend.createConfig(edit));
+
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("Work")});
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QCOMPARE(QDir(dir).entryList({QStringLiteral("*.toml")}, QDir::Files),
+             QStringList{QStringLiteral("Work.toml")});
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("password")).toString(),
+             QStringLiteral("hunter2"));
 }
 
 // QML asks for fields by row index, and rows disappear (removal, reload) between

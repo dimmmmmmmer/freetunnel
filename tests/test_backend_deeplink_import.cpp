@@ -10,6 +10,7 @@
 #include <QSignalSpy>
 
 #include "app/Backend.h"
+#include "core/ConfigStore.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 
@@ -22,6 +23,7 @@ private slots:
     void confirmImportsUnsafeLink();
     void secondLinkWithTheSameNameOffersReplace();
     void replaceOverwritesInsteadOfAddingACopy();
+    void aLinkSentAgainFindsTheConfig120Named();
     void addingACopyKeepsBothConfigs();
     void replaceDoesNotInheritTheOldStoredPassword();
 
@@ -274,6 +276,40 @@ void TestBackendDeepLinkImport::secondLinkWithTheSameNameOffersReplace()
     // Third argument is the colliding config's name — empty means "no collision".
     QVERIFY(!confirmSpy.first().at(2).toString().isEmpty());
     QCOMPARE(backend.configs().size(), afterFirst); // nothing imported yet
+}
+
+// 1.2.0 turned every space in a name into '_', so a config imported then from a
+// link named "My Server" is My_Server.toml. Names now keep their spaces, and the
+// same link sent again looked for "My Server.toml", found nothing, and offered to
+// add a second copy instead of replacing the first.
+void TestBackendDeepLinkImport::aLinkSentAgainFindsTheConfig120Named()
+{
+    freetunnel::DeepLinkConfig c;
+    c.name = QStringLiteral("My Server");
+    c.hostname = QStringLiteral("legacy-name.example.com");
+    c.addresses = {QStringLiteral("203.0.113.8:443")};
+    c.username = QStringLiteral("user");
+    c.password = QStringLiteral("pass");
+    const QString link = freetunnel::encodeDeepLink(c);
+    {
+        Backend first;
+        QVERIFY(first.confirmDeepLinkImport(link));
+    }
+    // Put it where 1.2.0 would have.
+    const QString made = importedConfigPath(QStringLiteral("legacy-name.example.com"));
+    QVERIFY(!made.isEmpty());
+    const QString legacy = QFileInfo(made).dir().filePath(QStringLiteral("My_Server.toml"));
+    QVERIFY(QFile::rename(made, legacy));
+    QStringList stored = loadStoredConfigs();
+    stored.replace(stored.indexOf(made), legacy);
+    saveStoredConfigs(stored);
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importDeepLink(link));
+    QCOMPARE(confirmSpy.count(), 1);
+    QCOMPARE(confirmSpy.first().at(2).toString(), QStringLiteral("My_Server"));
+    QFile::remove(legacy);
 }
 
 void TestBackendDeepLinkImport::replaceOverwritesInsteadOfAddingACopy()

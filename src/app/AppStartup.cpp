@@ -4,6 +4,7 @@
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QGuiApplication>
+#include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
@@ -14,6 +15,7 @@
 #include <memory>
 
 #include "app/Backend.h"
+#include "core/ControlCommand.h"
 #include "core/InstanceControl.h"
 
 #ifndef _WIN32
@@ -25,16 +27,54 @@
 
 namespace freetunnel {
 
+namespace {
+
+// Qt's own words — Open, Save and Cancel in the file dialog Qt draws where the
+// desktop offers none, the macOS application menu — come from Qt's catalogues.
+// They ship beside the app and were never loaded, so those dialogs said "Open"
+// and "Cancel" under a Russian title. Where they are depends on how the app was
+// deployed; the first place that has them wins. Parented to @p owner, so they go
+// when it does.
+void installQtCatalogues(QGuiApplication &app, QTranslator *owner, const QString &lang)
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList dirs{QLibraryInfo::path(QLibraryInfo::TranslationsPath),
+                           appDir + QStringLiteral("/translations"),
+                           appDir + QStringLiteral("/../translations"),
+                           appDir + QStringLiteral("/../Resources/translations")};
+    for (const QString &dir : dirs) {
+        auto *qtbase = new QTranslator(owner);
+        // qt_<lang> is the umbrella windeployqt ships; it pulls in qtbase itself.
+        if (!qtbase->load(QStringLiteral("qtbase_") + lang, dir)
+            && !qtbase->load(QStringLiteral("qt_") + lang, dir)) {
+            delete qtbase;
+            continue;
+        }
+        app.installTranslator(qtbase);
+        auto *declarative = new QTranslator(owner);
+        if (declarative->load(QStringLiteral("qtdeclarative_") + lang, dir))
+            app.installTranslator(declarative);
+        else
+            delete declarative;
+        return;
+    }
+}
+
+} // namespace
+
 void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
                    QTranslator *&tr, const QString &lang)
 {
     if (tr) {
         app.removeTranslator(tr);
-        delete tr;
+        delete tr; // and Qt's catalogues with it, its children
         tr = nullptr;
     }
     if (lang == QLatin1String("ru")) {
         tr = new QTranslator(&app);
+        installQtCatalogues(app, tr, lang);
+        // Installed last so it is asked first: the most recently installed
+        // translator is the one Qt tries before the others.
         if (tr->load(QStringLiteral(":/i18n/freetunnel_ru.qm")))
             app.installTranslator(tr);
     }
@@ -89,10 +129,23 @@ static void raiseMainWindow(QWindow *win)
 {
     if (!win)
         return;
+    // setVisible, not show(): show() is showNormal(), which took a maximised or
+    // full-screen window out of that state on the way back.
     if (!win->isVisible())
-        win->show();
+        win->setVisible(true);
     win->raise();
     win->requestActivate();
+}
+
+// A second launch ("focus") and a tt:// link, which needs its import confirmed,
+// are the user asking for the window from outside it. freetunnel://toggle,
+// connect and disconnect are not: they come from a keyboard shortcut, a script
+// or a Stream Deck and act silently, as the in-app hotkeys do. Bringing the
+// window up for them took focus from whatever the user was typing into.
+static bool commandWantsWindow(const QString &command)
+{
+    const ControlAction action = parseControlCommand(command).action;
+    return action == ControlAction::None || action == ControlAction::ImportLink;
 }
 
 namespace {
@@ -206,7 +259,8 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
             return;
         be->handleControl(cmd);
-        raiseMainWindow(win);
+        if (commandWantsWindow(cmd))
+            freetunnel::bringWindowForward(win);
     };
 
     QObject::connect(idle, &QTimer::timeout, c, deliver);
@@ -334,7 +388,10 @@ bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
 void UrlOpenFilter::apply(const QString &u)
 {
     backend->handleControl(u);
-    freetunnel::raiseMainWindow(win);
+    // bringWindowForward, not the activation-time raise: a window minimised to
+    // the Dock stayed there, with the import question in it unseen.
+    if (freetunnel::commandWantsWindow(u))
+        freetunnel::bringWindowForward(win);
 }
 
 bool QuitFilter::eventFilter(QObject *o, QEvent *e)

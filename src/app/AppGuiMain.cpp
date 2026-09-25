@@ -69,12 +69,17 @@ static QWindow *loadMainWindow(QQmlApplicationEngine &engine, Backend &backend)
 }
 
 static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &engine,
-                                const Backend &backend, QTranslator *&translator)
+                                Backend &backend, QTranslator *&translator)
 {
+    // Backend is told after each change too: it words some things in C++ and
+    // keeps them, and the first of those are worded while the window loads,
+    // before this installs any translator at all.
     applyLanguage(app, engine, translator, backend.language());
+    backend.retranslate();
     QObject::connect(&backend, &Backend::languageChanged, &app,
-                     [&app, &engine, &translator](const QString &lang) {
+                     [&app, &engine, &translator, &backend](const QString &lang) {
                          applyLanguage(app, engine, translator, lang);
+                         backend.retranslate();
                      });
 }
 
@@ -136,15 +141,15 @@ static void setupMacWindow(QWindow *win, bool *appQuitting)
     QObject::connect(win, &QWindow::widthChanged, win, publishControls);
     QObject::connect(win, &QWindow::windowStateChanged, win, publishControls);
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
-    installMacWindowCloseToTray(win->winId(), [win]() { win->hide(); });
+    installMacWindowCloseToTray(win->winId(), [win]() { freetunnel::hideWindowToTray(win); });
     // Bring the hidden window back only on a real Dock-icon click — not on every
-    // app activation (status-bar clicks, Cmd-Tab), which used to re-open it.
+    // app activation (status-bar clicks, Cmd-Tab), which used to re-open it. And in
+    // whatever state it was in: show() is showNormal(), and every Dock click took
+    // a zoomed window out of zoom and a full-screen one out of full screen.
     installMacDockReopenHandler([win, appQuitting]() {
         if (*appQuitting)
             return;
-        win->show();
-        win->raise();
-        win->requestActivate();
+        freetunnel::bringWindowForward(win);
     });
 #else
     Q_UNUSED(win);

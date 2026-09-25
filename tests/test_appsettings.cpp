@@ -22,6 +22,8 @@ private slots:
     void profilesPreserveOrder();
     void theInsecureTmpLogPathIsMigratedOnLoad();
     void theDefaultExcludedRoutesCoverThePrivateRanges();
+    void hotkeysNobodyChoseAreTurnedOffOnce_data();
+    void hotkeysNobodyChoseAreTurnedOffOnce();
 };
 
 void TestAppSettings::initTestCase() {
@@ -47,7 +49,7 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral("*.ru")));
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral(".ru")));
-    QCOMPARE(s.hotkeys_enabled, true);
+    QCOMPARE(s.hotkeys_enabled, false);
     QCOMPARE(s.hotkey_toggle, QStringLiteral("Ctrl+Shift+T"));
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
     QCOMPARE(s.hotkey_disconnect, QStringLiteral("Ctrl+Shift+D"));
@@ -152,6 +154,49 @@ void TestAppSettings::theDefaultExcludedRoutesCoverThePrivateRanges() {
         QVERIFY2(routes.contains(range),
                  qPrintable(QStringLiteral("%1 must stay out of the tunnel").arg(range)));
     }
+}
+
+void TestAppSettings::hotkeysNobodyChoseAreTurnedOffOnce_data()
+{
+    QTest::addColumn<bool>("savedUnderOptIn");
+    QTest::addColumn<QString>("toggle");
+    QTest::addColumn<bool>("stillOn");
+    // Before 1.2.1: on, as shipped, with the shipped combos. Nobody chose that.
+    QTest::newRow("old store, shipped combos") << false << QStringLiteral("Ctrl+Shift+T") << false;
+    // Before 1.2.1, with a combo someone set: they use them.
+    QTest::newRow("old store, own combo") << false << QStringLiteral("Ctrl+Alt+1") << true;
+    // Turned on since, even with the shipped combos: that is a choice.
+    QTest::newRow("turned on since") << true << QStringLiteral("Ctrl+Shift+T") << true;
+}
+
+// Global hotkeys used to be on out of the box and took Ctrl+Shift+T, E and D
+// from every browser and terminal. They are opt-in now, and an install that
+// never touched them has to end up where a fresh one starts: off.
+void TestAppSettings::hotkeysNobodyChoseAreTurnedOffOnce()
+{
+    QFETCH(bool, savedUnderOptIn);
+    QFETCH(QString, toggle);
+    QFETCH(bool, stillOn);
+    {
+        QSettings s;
+        s.clear();
+        s.setValue("hotkeys/enabled", true);
+        s.setValue("hotkeys/toggle", toggle);
+        s.setValue("hotkeys/connect", QStringLiteral("Ctrl+Shift+E"));
+        s.setValue("hotkeys/disconnect", QStringLiteral("Ctrl+Shift+D"));
+        if (savedUnderOptIn)
+            s.setValue("hotkeys/opt_in", true);
+    }
+    const AppSettings loaded = loadAppSettings();
+    QCOMPARE(loaded.hotkeys_enabled, stillOn);
+    QCOMPARE(loaded.hotkey_toggle, toggle); // the combos themselves are kept
+
+    // And once saved, an "on" the user sets afterwards stays on.
+    AppSettings turnedOn = loaded;
+    turnedOn.hotkeys_enabled = true;
+    saveAppSettings(turnedOn);
+    QCOMPARE(loadAppSettings().hotkeys_enabled, true);
+    QSettings().clear();
 }
 
 QTEST_MAIN(TestAppSettings)

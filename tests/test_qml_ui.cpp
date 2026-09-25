@@ -1,11 +1,19 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <cmath>
+
 #include <QDirIterator>
+#include <QPointer>
+#include <QScopeGuard>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
+#include <QTranslator>
+#include <QWindow>
 #include <QtGui/private/qguiapplication_p.h>
+#include <qpa/qplatformsystemtrayicon.h>
 #include <qpa/qplatformtheme.h>
 #include <qpa/qwindowsysteminterface.h>
 #include <QQmlComponent>
@@ -17,6 +25,7 @@
 
 #include "ui/MockBackend.h"
 #include "ui/MockDesktop.h"
+#include "app/DesktopChrome.h"
 #include "ui/MockShell.h"
 #include "ui/UiTheme.h"
 
@@ -46,11 +55,50 @@ private slots:
     void titleBarClicksDoWhatTheDesktopSays();
     void aTitleBarPressIsNotYetAMove();
     void theDesktopDecidesDarkOnlyWhenQtCannot();
+    void showFreeTunnelInTheTrayMenuBringsTheWindowForward();
+    void theTrayIconBringsTheWindowForward_data();
+    void theTrayIconBringsTheWindowForward();
+    void theTrayMenuShowsConfigNamesAsTyped_data();
+    void theTrayMenuShowsConfigNamesAsTyped();
+    void doubleClickingTheLogoTogglesOnce();
+    void aToastWaitsForAWindowThatIsAway();
+    void onlyATrayActionsFailureIsNotified();
+    void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
+    void aMinimisedWindowIsBroughtBack();
+    void minimisingKeepsAWindowMaximised();
+    void hidingAFullScreenWindowLeavesFullScreenFirst();
+    void theWindowsOwnButtonsMinimiseThroughTheDesktop();
+    void theMacKeysForCloseAndMinimise();
+    void aTrayHostThatAppearsLateGetsAnIcon();
+    void theEmptyConfigsPageOffersToAdd();
+    void configActionsFollowTheConfigNotTheRow();
+    void theExportDialogOffersTheWholeName();
+    void aLongHostnameWrapsInsideTheConfirm();
+    void aClickInsideTheConfirmCardDoesNotCancelIt();
+    void threeButtonsStayInsideTheConfirmCard();
+    void theWindowConfirmOwnsTheKeysOverTheEditorsPrompt();
+    void escapeStandsDownForTheEditorsFileDialog();
+    void tabMovesThroughTheEditorsFields();
+    void aToastStaysOffTheEditorsButtons();
+    void clearEmptiesTheLogEvenWithASelection();
+    void aHeldLogCatchesUpWhenTheSelectionGoes();
+    void theLogsPageSaysWhenLoggingIsOff();
+    void theUpdateLineDoesWhatItOffers();
+    void restoringDefaultRoutesAsksFirst();
+    void theThroughVpnNoticeNamesTheConfigAndItsProfile();
+    void theBuiltInProfileIsShownInTheUsersLanguage();
+    void textOnTheAccentIsReadableInTheDarkTheme();
+    void headingLinksStayOnANarrowPage_data();
+    void headingLinksStayOnANarrowPage();
+    void russianFitsAtTheDefaultWidth_data();
+    void russianFitsAtTheDefaultWidth();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
     void confirmDialogAnswersReturnAndEscape();
     void aSecondConfirmQueuesInsteadOfReplacingTheLiveOne();
+    void aHotkeyNeedsAModifierAndBackspaceUnbinds();
+    void aConfirmDialogTakesTheKeyboardFromAHotkeyField();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -907,6 +955,1132 @@ void TestQmlUi::theDesktopDecidesDarkOnlyWhenQtCannot()
 
     m_backend.setThemeMode(QStringLiteral("dark"));
     m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Unknown));
+    delete root;
+}
+
+// The tray menu's «Show FreeTunnel» is the user asking for the window from outside
+// it, and goes through the path that handles that — see bringWindowForward().
+void TestQmlUi::showFreeTunnelInTheTrayMenuBringsTheWindowForward()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QObject *show = nullptr;
+    const auto candidates = root->findChildren<QObject *>();
+    for (QObject *o : candidates) {
+        if (o->property("text").toString() == QStringLiteral("Show FreeTunnel")
+            && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            show = o;
+    }
+    QVERIFY2(show, "the tray menu has a «Show FreeTunnel» item");
+    const int before = m_desktop.bringRequests;
+    QVERIFY(QMetaObject::invokeMethod(show, "triggered"));
+    QCOMPARE(m_desktop.bringRequests, before + 1);
+    delete root;
+}
+
+void TestQmlUi::theTrayIconBringsTheWindowForward_data()
+{
+    QTest::addColumn<int>("reason");
+    QTest::addColumn<bool>("brings");
+    // Trigger is what every Linux host sends — a left click on KDE, a
+    // double-click on GNOME — and a left click on Windows.
+    QTest::newRow("click") << int(QPlatformSystemTrayIcon::Trigger) << true;
+    QTest::newRow("double-click") << int(QPlatformSystemTrayIcon::DoubleClick) << true;
+    QTest::newRow("menu") << int(QPlatformSystemTrayIcon::Context) << false;
+    QTest::newRow("middle click") << int(QPlatformSystemTrayIcon::MiddleClick) << false;
+}
+
+// The tray icon's own gesture for the same request. Not on macOS, where the icon
+// only opens its menu — see the comment on the tray's onActivated. On Linux the
+// handler used to wait for a DoubleClick that no StatusNotifierItem host sends.
+void TestQmlUi::theTrayIconBringsTheWindowForward()
+{
+    QFETCH(int, reason);
+    QFETCH(bool, brings);
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QObject *tray = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(tray);
+    const int before = m_desktop.bringRequests;
+    QVERIFY(QMetaObject::invokeMethod(
+            tray, "activated",
+            Q_ARG(QPlatformSystemTrayIcon::ActivationReason,
+                  static_cast<QPlatformSystemTrayIcon::ActivationReason>(reason))));
+#ifdef Q_OS_MACOS
+    brings = false;
+#endif
+    QCOMPARE(m_desktop.bringRequests, before + (brings ? 1 : 0));
+    delete root;
+}
+
+#ifdef Q_OS_LINUX
+namespace {
+
+// What Qt sends over D-Bus for a menu label: the first '&' that is not the last
+// character becomes dbusmenu's '_' (QDBusMenuItem::convertMnemonic).
+QString dbusLabel(const QString &label)
+{
+    const qsizetype at = label.indexOf(QLatin1Char('&'));
+    if (at < 0 || at == label.size() - 1)
+        return label;
+    QString wire = label;
+    wire[at] = QLatin1Char('_');
+    return wire;
+}
+
+// What GNOME Shell's AppIndicator extension shows for it (dbusMenu.js):
+// label.replace(/_([^_])/, '$1'), the first match only.
+QString gnomeShows(const QString &wire)
+{
+    for (qsizetype i = 0; i + 1 < wire.size(); ++i) {
+        if (wire.at(i) == QLatin1Char('_') && wire.at(i + 1) != QLatin1Char('_'))
+            return wire.left(i) + wire.mid(i + 1);
+    }
+    return wire;
+}
+
+// What KDE shows for it: dbusmenu-qt's swapMnemonicChar('_' to '&'), and then a
+// Qt menu, which hides the mnemonic marker and folds '&&'.
+QString kdeShows(const QString &wire)
+{
+    QString menu;
+    bool mnemonic = false;
+    for (qsizetype i = 0; i < wire.size(); ++i) {
+        const QChar c = wire.at(i);
+        if (c == QLatin1Char('_')) {
+            if (i + 1 < wire.size() && wire.at(i + 1) == QLatin1Char('_')) {
+                menu += c;
+                ++i;
+            } else if (i + 1 < wire.size() && !mnemonic) {
+                mnemonic = true;
+                menu += QLatin1Char('&');
+            }
+        } else if (c == QLatin1Char('&')) {
+            menu += QStringLiteral("&&");
+        } else {
+            menu += c;
+        }
+    }
+    QString shown;
+    for (qsizetype i = 0; i < menu.size(); ++i) {
+        if (menu.at(i) == QLatin1Char('&') && i + 1 < menu.size())
+            ++i;
+        shown += menu.at(i);
+    }
+    return shown;
+}
+
+} // namespace
+#endif
+
+void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped_data()
+{
+    QTest::addColumn<QString>("name");
+    QTest::addColumn<QString>("linuxShows");
+    QTest::newRow("one underscore") << QStringLiteral("my_vpn") << QStringLiteral("my vpn");
+    // What 1.2.0 made of "My Home VPN". GNOME dropped the first underscore, and
+    // doubling them all showed three where there had been two.
+    QTest::newRow("from 1.2.0") << QStringLiteral("My_Home_VPN") << QStringLiteral("My Home VPN");
+    QTest::newRow("an ampersand") << QStringLiteral("Tom & Jerry") << QStringLiteral("Tom & Jerry");
+    QTest::newRow("two of them") << QStringLiteral("R&D & Ops") << QStringLiteral("R&D & Ops");
+    QTest::newRow("punctuation") << QStringLiteral("Germany · Frankfurt") << QStringLiteral("Germany · Frankfurt");
+}
+
+// Menus read '&' as the mnemonic marker, and on Linux dbusmenu reads '_' too,
+// with the hosts disagreeing on how: GNOME's extension dropped the first
+// underscore of a name, and the fix that doubled every underscore showed extra
+// ones there. The labels are checked through what each host actually displays.
+void TestQmlUi::theTrayMenuShowsConfigNamesAsTyped()
+{
+    QFETCH(QString, name);
+    QFETCH(QString, linuxShows);
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({name});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QString label;
+    const auto all = root->findChildren<QObject *>();
+    for (QObject *o : all) {
+        if (o->property("checkable").toBool() && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            label = o->property("text").toString();
+    }
+    QVERIFY(!label.isEmpty());
+#ifdef Q_OS_LINUX
+    const QString wire = dbusLabel(label);
+    QCOMPARE(gnomeShows(wire), linuxShows);
+    QCOMPARE(kdeShows(wire), linuxShows);
+#else
+    Q_UNUSED(linuxShows)
+    QString expected = name;
+    QCOMPARE(label, expected.replace(QLatin1Char('&'), QStringLiteral("&&")));
+#endif
+    delete root;
+}
+
+// People double-click whatever looks like an icon. Each click of the pair was a
+// toggle, so a double-click from Off connected and at once cancelled.
+void TestQmlUi::doubleClickingTheLogoTogglesOnce()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *logo = root->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QVERIFY2(logo && logo->isVisible(), "the logo on the Connection page");
+    const QPoint at = logo->mapToScene(QPointF(logo->width() / 2.0, logo->height() / 2.0)).toPoint();
+
+    const int before = m_backend.toggleCount();
+    QTest::mouseDClick(window, Qt::LeftButton, {}, at);
+    QCOMPARE(m_backend.toggleCount(), before + 1);
+    QVERIFY(m_backend.connecting());
+
+    m_backend.setConnecting(false);
+    delete root;
+}
+
+// An action started from the tray while the window is hidden or minimised
+// reports its failure in a toast nobody can see, and the toast used to be gone
+// three seconds later. It now waits for the window to be back.
+void TestQmlUi::aToastWaitsForAWindowThatIsAway()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *toast = root->findChild<QObject *>(QStringLiteral("toast"));
+    QObject *timer = root->findChild<QObject *>(QStringLiteral("toastTimer"));
+    QVERIFY(toast && timer);
+
+    window->hide();
+    emit m_backend.errorOccurred(QStringLiteral("The server did not answer"));
+    QCOMPARE(toast->property("message").toString(), QStringLiteral("The server did not answer"));
+    QVERIFY2(!timer->property("running").toBool(), "nobody can read it yet");
+
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QVERIFY2(timer->property("running").toBool(), "its time starts when the window is back");
+    delete root;
+}
+
+// The configs in the tray menu, driven the way the menu drives them: it flips a
+// checkable item's tick itself, then reports the click. Choosing the ticked one
+// used to clear its tick and do nothing else.
+void TestQmlUi::theTickedConfigInTheTrayTurnsTheConnectionOnAndOff()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    const auto item = [root](const QString &text) -> QObject * {
+        const auto all = root->findChildren<QObject *>();
+        for (QObject *o : all) {
+            if (o->property("text").toString() == text && o->property("checkable").toBool())
+                return o;
+        }
+        return nullptr;
+    };
+    const auto click = [](QObject *menuItem) {
+        menuItem->setProperty("checked", !menuItem->property("checked").toBool());
+        return QMetaObject::invokeMethod(menuItem, "triggered");
+    };
+    QObject *active = item(QStringLiteral("Test Config"));
+    QObject *other = item(QStringLiteral("Backup"));
+    QVERIFY(active && other);
+    QCOMPARE(m_backend.property("activeIndex").toInt(), 0);
+    QVERIFY(active->property("checked").toBool());
+
+    m_backend.setConnected(true);
+    const int toggles = m_backend.toggleCount();
+    QVERIFY(click(active));
+    QCOMPARE(m_backend.toggleCount(), toggles + 1); // off
+    QVERIFY(!m_backend.property("connected").toBool());
+    QVERIFY2(active->property("checked").toBool(), "the active config keeps its tick");
+
+    QVERIFY(click(active));
+    QCOMPARE(m_backend.toggleCount(), toggles + 2); // and on again
+
+    // Another config is switched to, not toggled, and the tick follows it.
+    QVERIFY(click(other));
+    QCOMPARE(m_backend.toggleCount(), toggles + 2);
+    QCOMPARE(m_backend.property("activeIndex").toInt(), 1);
+    QVERIFY(other->property("checked").toBool());
+    QVERIFY(!active->property("checked").toBool());
+
+    m_backend.selectConfig(0);
+    m_backend.setConnected(false);
+    delete root;
+}
+
+// Our own close button minimises. Brought back, the window has to be neither
+// minimised nor robbed of being maximised, which show() — showNormal() in Qt 6.8 —
+// would do. (Whether the window manager then lets it come forward is X11's part,
+// and needs a real desktop to see.)
+void TestQmlUi::aMinimisedWindowIsBroughtBack()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    QVERIFY(window.windowStates() & Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QVERIFY(!(window.windowStates() & Qt::WindowMinimized));
+    QVERIFY(window.isVisible());
+
+    // And a window minimised from maximised comes back maximised.
+    window.setWindowStates(Qt::WindowMaximized | Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
+}
+
+namespace {
+
+// Starts recording the way a click on the field does.
+void startCapture(QObject *field)
+{
+    field->setProperty("capturing", true);
+    QMetaObject::invokeMethod(field, "forceActiveFocus");
+}
+
+} // namespace
+
+// A global hotkey takes its combo from every other application. The field used
+// to take any key: Enter pressed to confirm, Tab to move on or a plain letter
+// was saved as a system-wide grab, and there was no way to unbind one.
+void TestQmlUi::aHotkeyNeedsAModifierAndBackspaceUnbinds()
+{
+    QObject *root = loadPage("components/HotkeyField.qml");
+    QVERIFY(root);
+    auto *field = qobject_cast<QQuickItem *>(root);
+    QVERIFY(field);
+    QQuickWindow window;
+    field->setParentItem(window.contentItem());
+    field->setWidth(400);
+    field->setHeight(42);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QSignalSpy captured(root, SIGNAL(captured(QString)));
+    QVERIFY(captured.isValid());
+
+    startCapture(field);
+    QCOMPARE(m_backend.hotkeySuspensions, 1); // its own combos cannot fire meanwhile
+    QTest::keyClick(&window, Qt::Key_Return);
+    QTest::keyClick(&window, Qt::Key_Tab);
+    QTest::keyClick(&window, Qt::Key_A);
+    QTest::keyClick(&window, Qt::Key_A, Qt::ShiftModifier);
+    QCOMPARE(captured.count(), 0);
+    QVERIFY2(root->property("capturing").toBool(), "a refused key keeps the field recording");
+    QVERIFY2(root->property("needsModifier").toBool(), "and says what it is waiting for");
+
+    QTest::keyClick(&window, Qt::Key_F5);
+    QCOMPARE(captured.count(), 1);
+    QCOMPARE(captured.constLast().at(0).toString(), QStringLiteral("F5"));
+    QVERIFY(!root->property("capturing").toBool());
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+
+    startCapture(field);
+    QTest::keyClick(&window, Qt::Key_T, Qt::ControlModifier | Qt::AltModifier);
+    QCOMPARE(captured.constLast().at(0).toString(), QStringLiteral("Ctrl+Alt+T"));
+
+    startCapture(field);
+    QTest::keyClick(&window, Qt::Key_Backspace);
+    QCOMPARE(captured.count(), 3);
+    QVERIFY2(captured.constLast().at(0).toString().isEmpty(), "Backspace unbinds");
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+    delete root;
+}
+
+// A dialog opened over a field still recording a combo, by a click elsewhere or
+// a link arriving, left the keyboard with the field: Return meant for the dialog
+// was recorded as the hotkey, and the dialog stayed open.
+void TestQmlUi::aConfirmDialogTakesTheKeyboardFromAHotkeyField()
+{
+    QObject *fieldRoot = loadPage("components/HotkeyField.qml");
+    QObject *dialogRoot = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(fieldRoot && dialogRoot);
+    auto *field = qobject_cast<QQuickItem *>(fieldRoot);
+    auto *dialog = qobject_cast<QQuickItem *>(dialogRoot);
+    QQuickWindow window;
+    window.resize(400, 400);
+    field->setParentItem(window.contentItem());
+    field->setWidth(400);
+    field->setHeight(42);
+    dialog->setParentItem(window.contentItem());
+    dialog->setWidth(400);
+    dialog->setHeight(400);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QSignalSpy captured(fieldRoot, SIGNAL(captured(QString)));
+    QSignalSpy confirmed(dialogRoot, SIGNAL(confirmed()));
+
+    startCapture(field);
+    QVERIFY(field->hasActiveFocus());
+    QMetaObject::invokeMethod(dialogRoot, "open");
+    QVERIFY2(!fieldRoot->property("capturing").toBool(), "the dialog took the keyboard");
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+
+    QTRY_VERIFY(dialogRoot->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QCOMPARE(confirmed.count(), 1);
+    QCOMPARE(captured.count(), 0);
+    QVERIFY2(field->hasActiveFocus(), "and gave it back when it closed");
+    delete dialogRoot;
+    delete fieldRoot;
+}
+
+// QWindow::showMinimized() replaces every state with Minimized, and on X11 Qt then
+// has the window manager take maximised off first: the window shrank to normal
+// size on its way down, and came back at it.
+void TestQmlUi::minimisingKeepsAWindowMaximised()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMaximized);
+    freetunnel::minimizeWindow(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowMaximized | Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
+}
+
+// Hiding to the tray hides, full screen or not. Waiting for macOS to finish
+// leaving full screen first, the reason this is not a plain hide(), is AppKit's
+// part and can only be seen on a Mac; under offscreen this takes the plain path.
+void TestQmlUi::hidingAFullScreenWindowLeavesFullScreenFirst()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.setVisible(true); // not show(), which is showNormal() and would undo the next line
+    window.setWindowStates(Qt::WindowFullScreen);
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    freetunnel::hideWindowToTray(&window);
+    QTRY_VERIFY(!window.isVisible());
+
+    window.setWindowStates(Qt::WindowNoState);
+    window.setVisible(true);
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    freetunnel::hideWindowToTray(&window);
+    QVERIFY(!window.isVisible());
+}
+
+// Every minimise the window starts itself goes through the desktop, which keeps
+// the window maximised: its own button, and a title band whose click the
+// desktop has set to minimise.
+void TestQmlUi::theWindowsOwnButtonsMinimiseThroughTheDesktop()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *minimise = root->findChild<QQuickItem *>(QStringLiteral("windowMinButton"));
+    QVERIFY2(minimise && minimise->isVisible(), "the window's own minimise button");
+    const int before = m_desktop.minimizeRequests;
+    const QPoint at =
+            minimise->mapToScene(QPointF(minimise->width() / 2.0, minimise->height() / 2.0)).toPoint();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+    QCOMPARE(m_desktop.minimizeRequests, before + 1);
+    QMetaObject::invokeMethod(root, "titlebarAction", Q_ARG(QVariant, QStringLiteral("minimize")));
+    QCOMPARE(m_desktop.minimizeRequests, before + 2);
+    delete root;
+#endif
+}
+
+// ⌘W and ⌘M reached nothing on macOS: a QGuiApplication has no Window menu to
+// carry them. Elsewhere Ctrl+W and Ctrl+M are not the window's.
+void TestQmlUi::theMacKeysForCloseAndMinimise()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    const int hides = m_desktop.hideRequests;
+    const int minimises = m_desktop.minimizeRequests;
+    QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier); // ⌘W on macOS
+    QTest::keyClick(window, Qt::Key_M, Qt::ControlModifier); // ⌘M on macOS
+#ifdef Q_OS_MACOS
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+#else
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+#endif
+    delete root;
+}
+
+// A connection retrying in the background reports every failed try. Sent as
+// notifications, that was one about every half minute through an outage; only
+// the failure of something started from the tray, with the window away, is.
+void TestQmlUi::onlyATrayActionsFailureIsNotified()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->hide();
+    const auto restore = qScopeGuard([this] { m_backend.setConnecting(false); });
+
+    QVERIFY(!root->property("errorsGoToTray").toBool());
+    emit m_backend.errorOccurred(QStringLiteral("a background retry failed"));
+    QVERIFY(!root->property("errorsGoToTray").toBool());
+
+    QObject *connect = nullptr;
+    for (QObject *o : root->findChildren<QObject *>()) {
+        if (o->property("text").toString() == QStringLiteral("Connect")
+            && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            connect = o;
+    }
+    QVERIFY2(connect, "the tray's «Connect»");
+    QVERIFY(QMetaObject::invokeMethod(connect, "triggered"));
+    QVERIFY2(root->property("errorsGoToTray").toBool(), "its failure is worth saying while away");
+    emit m_backend.errorOccurred(QStringLiteral("the server did not answer"));
+    QVERIFY2(!root->property("errorsGoToTray").toBool(), "and said once");
+    delete root;
+}
+
+// Qt makes the tray icon's platform half once, and only if a tray host is on the
+// bus right then. When one turns up later, an icon without a tray is made again.
+void TestQmlUi::aTrayHostThatAppearsLateGetsAnIcon()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QPointer<QObject> first = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(first);
+    QVERIFY2(!first->property("available").toBool(), "offscreen has no tray, which is the case here");
+    emit m_desktop.trayHostAppeared();
+    QTRY_VERIFY2(first.isNull(), "the icon made without a tray was not replaced");
+    QObject *second = root->findChild<QObject *>(QStringLiteral("systemTray"));
+    QVERIFY(second);
+    QCOMPARE(root->property("tray").value<QObject *>(), second);
+    delete root;
+}
+
+namespace {
+
+// A component on its own, sized and on screen, for a test that clicks it.
+QQuickItem *showInWindow(QObject *root, QQuickWindow &window, int width, int height)
+{
+    auto *item = qobject_cast<QQuickItem *>(root);
+    if (!item)
+        return nullptr;
+    window.resize(width, height);
+    item->setParentItem(window.contentItem());
+    item->setWidth(width);
+    item->setHeight(height);
+    window.show();
+    return QTest::qWaitForWindowExposed(&window) ? item : nullptr;
+}
+
+QPoint centreOf(QQuickItem *item)
+{
+    return item->mapToScene(QPointF(item->width() / 2.0, item->height() / 2.0)).toPoint();
+}
+
+} // namespace
+
+// The empty list filled the same area as the "Add a config" hint and, being a
+// Flickable, took its click; only the small + in the header worked.
+void TestQmlUi::theEmptyConfigsPageOffersToAdd()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    auto *hint = root->findChild<QQuickItem *>(QStringLiteral("addConfigHint"));
+    QObject *menu = root->findChild<QObject *>(QStringLiteral("importMenu"));
+    QVERIFY(hint && hint->isVisible() && menu);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(hint));
+    QVERIFY2(menu->property("open").toBool(), "clicking «Add a config» opens the add menu");
+    delete root;
+}
+
+// The export menu and the delete confirmation outlive the row they came from,
+// and an import prepends to the list. A remembered row number then exported the
+// neighbouring config, password included, or deleted it.
+void TestQmlUi::configActionsFollowTheConfigNotTheRow()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({QStringLiteral("Alpha"), QStringLiteral("Beta")});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+
+    root->setProperty("exportPath", m_backend.configPath(1)); // Beta's menu opened
+    root->setProperty("deletePath", m_backend.configPath(1)); // and Beta's delete asked
+    m_backend.setConfigs({QStringLiteral("Imported"), QStringLiteral("Alpha"), QStringLiteral("Beta")});
+
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_backend.lastDeepLinkRow, 2);
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QCOMPARE(m_backend.lastExportRow, 2);
+    QMetaObject::invokeMethod(root, "deleteConfirmed");
+    QCOMPARE(m_backend.configs(),
+             (QStringList{QStringLiteral("Imported"), QStringLiteral("Alpha")}));
+
+    // Gone by the time the action runs: nothing happens to anything else.
+    m_backend.lastDeepLinkRow = -1;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_backend.lastDeepLinkRow, -1);
+    QCOMPARE(m_shell.lastToast(), QStringLiteral("That configuration is no longer there."));
+    delete root;
+}
+
+// A name may hold '#' and '%' now. Glued into a URL, '#' began the fragment and
+// '%' an escape, so "Work #2" was offered as "Work .toml".
+void TestQmlUi::theExportDialogOffersTheWholeName()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("configExportDialog"));
+    QVERIFY(dialog);
+    root->setProperty("exportName", QStringLiteral("Work #2 at 100%fast"));
+    QCOMPARE(dialog->property("selectedFile").toUrl().fileName(), QStringLiteral("Work #2 at 100%fast.toml"));
+    delete root;
+}
+
+// The import prompt names the server, the one line the user can trust, and a
+// hostname has no space to break at: WordWrap let it run past both edges.
+void TestQmlUi::aLongHostnameWrapsInsideTheConfirm()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    root->setProperty("text", QStringLiteral("Import this config?\nServer: "
+                                             "fra1.de.nodes.premiumvpnprovider.example.net"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *text = root->findChild<QQuickItem *>(QStringLiteral("confirmText"));
+    QVERIFY(text);
+    QTRY_VERIFY(text->property("contentWidth").toReal() <= text->width() + 0.5);
+    delete root;
+}
+
+// Only the backdrop and Cancel dismiss. A click on the message, the card's
+// padding or the gap between two buttons fell through to the backdrop.
+void TestQmlUi::aClickInsideTheConfirmCardDoesNotCancelIt()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    root->setProperty("text", QStringLiteral("Delete config “Work”?"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    QVERIFY(card);
+    const QPoint onTheCard = card->mapToScene(QPointF(card->width() / 2.0, 8)).toPoint();
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, onTheCard);
+    QVERIFY2(root->property("visible").toBool(), "a click on the card cancelled the dialog");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, QPoint(4, 4)); // the backdrop
+    QVERIFY(!root->property("visible").toBool());
+    delete root;
+}
+
+// Buttons cannot wrap the way text does, and three of them ran into the card's
+// edges, or past them, when the window was narrow for the language and font:
+// Russian at the default width on Linux, and wider fonts elsewhere. Checked at
+// the widths where each way of fitting them has to work.
+void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 600, 400));
+    root->setProperty("text", QStringLiteral("«Работа» уже есть."));
+    root->setProperty("confirmText", QStringLiteral("Заменить"));
+    root->setProperty("altText", QStringLiteral("Добавить копию"));
+    QMetaObject::invokeMethod(root, "open");
+    const QStringList names{QStringLiteral("cancelButton"), QStringLiteral("alternateButton"),
+                            QStringLiteral("confirmButton")};
+    QList<QQuickItem *> buttons;
+    qreal row = 16; // the two gaps between three buttons
+    for (const QString &name : names) {
+        auto *b = root->findChild<QQuickItem *>(name);
+        QVERIFY(b);
+        buttons << b;
+        row += b->width();
+    }
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    QVERIFY(card);
+    const auto inside = [&]() {
+        for (QQuickItem *b : std::as_const(buttons)) {
+            const QPointF at = b->mapToItem(card, QPointF(0, 0));
+            if (at.x() < 13 || at.x() + b->width() > card->width() - 13)
+                return false;
+        }
+        return true;
+    };
+    // The dialog fills its window, so the window is what is narrowed.
+    window.resize(int(row + 28 + 40), 400); // room for the row, not for the usual margin
+    QTRY_VERIFY2(inside(), "full-size buttons run into the card's edges");
+    window.resize(int(row * 0.8), 400); // not enough for them at all
+    QTRY_VERIFY2(inside(), "compact buttons run into the card's edges");
+    delete root;
+}
+
+// A link arriving while "Discard unsaved changes?" is up puts the import prompt
+// on top of it. The hidden prompt kept Return and Escape, so Return meant for the
+// import threw the edits away.
+void TestQmlUi::theWindowConfirmOwnsTheKeysOverTheEditorsPrompt()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *discard = nullptr;
+    QTRY_VERIFY((discard = root->findChild<QObject *>(QStringLiteral("discardConfirm"))) != nullptr);
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    QMetaObject::invokeMethod(discard, "open");
+    QMetaObject::invokeMethod(root, "showConfirm", Q_ARG(QVariant, QStringLiteral("Import it?")),
+                              Q_ARG(QVariant, QStringLiteral("Import")), Q_ARG(QVariant, QVariant()));
+    QVERIFY(prompt->property("visible").toBool());
+    QTRY_VERIFY(prompt->property("armed").toBool() && discard->property("armed").toBool());
+    QSignalSpy discarded(discard, SIGNAL(confirmed()));
+
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY2(!prompt->property("visible").toBool(), "Escape answers the prompt on top");
+    QVERIFY(discard->property("visible").toBool());
+    QMetaObject::invokeMethod(root, "showConfirm", Q_ARG(QVariant, QStringLiteral("Import it?")),
+                              Q_ARG(QVariant, QStringLiteral("Import")), Q_ARG(QVariant, QVariant()));
+    QTRY_VERIFY(prompt->property("armed").toBool());
+    QTest::keyClick(window, Qt::Key_Return);
+    QVERIFY(!prompt->property("visible").toBool());
+    QCOMPARE(discarded.count(), 0); // the edits are still there to decide on
+    // A second Return right after, as from a double press or a held key, does not
+    // answer the question that is underneath: it has only just got the keys back.
+    QTest::keyClick(window, Qt::Key_Return);
+    QCOMPARE(discarded.count(), 0);
+    QTRY_VERIFY(discard->property("armed").toBool());
+
+    // Nor does Tab leave it for the form behind.
+    auto *name = root->findChild<QObject *>(QStringLiteral("nameField"))->property("input").value<QQuickItem *>();
+    QVERIFY(name);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(!name->hasActiveFocus(), "Tab went into the form behind the question");
+    QVERIFY(qobject_cast<QQuickItem *>(discard)->hasActiveFocus());
+    delete root;
+}
+
+// Where Qt draws the file dialog itself, the editor's window-wide Escape saw the
+// dialog's Escape too, closed the editor and destroyed the dialog mid-key.
+void TestQmlUi::escapeStandsDownForTheEditorsFileDialog()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *dialog = nullptr;
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("certificateDialog"))) != nullptr);
+    QObject *overlay = root->findChild<QObject *>(QStringLiteral("createOverlay"));
+    QVERIFY(overlay);
+    QObject *escape = nullptr;
+    const auto children = overlay->children();
+    for (QObject *o : children) {
+        if (o->inherits("QQuickShortcut")
+            && o->property("sequences").toList().contains(QStringLiteral("Escape")))
+            escape = o;
+    }
+    QVERIFY2(escape, "the editor's Escape shortcut");
+    QVERIFY(escape->property("enabled").toBool());
+    QMetaObject::invokeMethod(dialog, "open");
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY2(!escape->property("enabled").toBool(), "the file dialog's Escape is its own");
+    QMetaObject::invokeMethod(dialog, "close");
+    delete root;
+}
+
+// Tab did nothing in the editor: plain text inputs are not in the tab chain.
+void TestQmlUi::tabMovesThroughTheEditorsFields()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *name = nullptr;
+    QTRY_VERIFY((name = root->findChild<QObject *>(QStringLiteral("nameField"))) != nullptr);
+    auto *nameInput = name->property("input").value<QQuickItem *>();
+    auto *hostInput = root->findChild<QObject *>(QStringLiteral("hostField"))->property("input").value<QQuickItem *>();
+    auto *cert = root->findChild<QQuickItem *>(QStringLiteral("certificateField"));
+    QVERIFY(nameInput && hostInput && cert);
+
+    nameInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(hostInput->hasActiveFocus(), "Tab moves from Name to Server host");
+    QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+    QVERIFY(nameInput->hasActiveFocus());
+
+    cert->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY2(!cert->hasActiveFocus(), "Tab leaves the certificate field too");
+    QVERIFY(!cert->property("text").toString().contains(QLatin1Char('\t')));
+
+    // And the field Tab reaches is brought into view: at the default size the
+    // certificate sits below the fold, and typing went in unseen.
+    auto *form = root->findChild<QQuickItem *>(QStringLiteral("editorForm"));
+    QVERIFY(form);
+    nameInput->forceActiveFocus();
+    QCOMPARE(form->property("contentY").toReal(), 0.0);
+    for (int i = 0; i < 20 && !cert->hasActiveFocus(); ++i)
+        QTest::keyClick(window, Qt::Key_Tab);
+    QVERIFY(cert->hasActiveFocus());
+    const qreal top = cert->mapToItem(form, QPointF(0, 0)).y();
+    QVERIFY2(top >= 0 && top < form->height(),
+             qPrintable(QStringLiteral("the certificate field is at %1 in a %2 px view").arg(top).arg(form->height())));
+    delete root;
+}
+
+// An error from Save showed at the bottom, on the editor's own Save and Cancel,
+// and took the click meant for them.
+void TestQmlUi::aToastStaysOffTheEditorsButtons()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, QStringLiteral("Fill in host")));
+    QVERIFY2(toast->y() + toast->height() < window->height() / 2.0, "over the editor, the toast is at the top");
+    root->setProperty("overlay", QString());
+    QVERIFY(toast->y() > window->height() / 2.0);
+    delete root;
+}
+
+namespace {
+
+// A text's line count and what it shows, as far as a test can see it.
+QString shown(QObject *text) { return text ? text->property("text").toString() : QString(); }
+
+// WCAG relative luminance, for a contrast check that means what it says.
+double luminance(const QColor &c)
+{
+    const auto channel = [](double v) {
+        return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF());
+}
+
+double contrast(const QColor &a, const QColor &b)
+{
+    const double la = luminance(a);
+    const double lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+} // namespace
+
+// The view keeps its text while a selection is held, so a live update cannot
+// wipe what the user is copying. Clear honoured that too, and left the whole old
+// log on screen with "Logs will appear after connecting" drawn over it.
+void TestQmlUi::clearEmptiesTheLogEvenWithASelection()
+{
+    m_backend.appendLog(QStringLiteral("a line to select"));
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *view = root->findChild<QQuickItem *>(QStringLiteral("logView"));
+    auto *clear = root->findChild<QQuickItem *>(QStringLiteral("clearLogs"));
+    QVERIFY(view && clear);
+    QVERIFY(!shown(view).isEmpty());
+    QMetaObject::invokeMethod(view, "selectAll");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(clear));
+    QVERIFY2(shown(view).isEmpty(), "Clear left the old log on screen");
+    delete root;
+}
+
+// And nothing retried once the selection went, so the view stayed stale for good.
+void TestQmlUi::aHeldLogCatchesUpWhenTheSelectionGoes()
+{
+    m_backend.appendLog(QStringLiteral("before"));
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *view = root->findChild<QQuickItem *>(QStringLiteral("logView"));
+    QVERIFY(view);
+    QMetaObject::invokeMethod(view, "selectAll");
+    m_backend.appendLog(QStringLiteral("arrived while selected"));
+    QTest::qWait(400); // past the refresh interval
+    QVERIFY2(!shown(view).contains(QStringLiteral("arrived while selected")),
+             "the selection holds the view");
+    QMetaObject::invokeMethod(view, "deselect");
+    QTRY_VERIFY(shown(view).contains(QStringLiteral("arrived while selected")));
+    m_backend.clearLogs();
+    delete root;
+}
+
+// Logging off writes nothing new, and the page promised lines that never came.
+void TestQmlUi::theLogsPageSaysWhenLoggingIsOff()
+{
+    m_backend.clearLogs();
+    m_backend.setLoggingEnabled(false);
+    const auto restore = qScopeGuard([this] { m_backend.setLoggingEnabled(true); });
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *notice = root->findChild<QQuickItem *>(QStringLiteral("loggingOffNotice"));
+    auto *placeholder = root->findChild<QQuickItem *>(QStringLiteral("logsPlaceholder"));
+    auto *turnOn = root->findChild<QQuickItem *>(QStringLiteral("turnLoggingOn"));
+    QVERIFY(notice && placeholder && turnOn);
+    QVERIFY(notice->isVisible());
+    QVERIFY2(!placeholder->isVisible(), "no promise of logs that will not come");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(turnOn));
+    QVERIFY(m_backend.loggingEnabled());
+    QVERIFY(!notice->isVisible());
+    delete root;
+}
+
+// Clicking the status line always started a new check: over "Version X is
+// available" it downloaded nothing, and mid-download it started a check that
+// then offered the same download again.
+void TestQmlUi::theUpdateLineDoesWhatItOffers()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setUpdate(QString(), QString()); });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *line = root->findChild<QQuickItem *>(QStringLiteral("updateStatus"));
+    QVERIFY(line);
+    const auto click = [&] { QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(line)); };
+
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    QCOMPARE(m_backend.updateOffersTaken, 1);
+    m_backend.setUpdate(QStringLiteral("downloading"), QStringLiteral("Downloading… 45%"));
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    QCOMPARE(m_backend.updateOffersTaken, 1);
+
+    // Long reasons wrap rather than lose their end.
+    m_backend.setUpdate(QStringLiteral("error"),
+                        QStringLiteral("Update downloaded. Finish installing it from the file manager."));
+    QTRY_VERIFY(line->property("lineCount").toInt() > 1);
+    QVERIFY(!line->property("truncated").toBool());
+    delete root;
+}
+
+// Restore defaults replaces the whole list with no undo, a few pixels from a
+// Clear all that asks first. It asks too now.
+void TestQmlUi::restoringDefaultRoutesAsksFirst()
+{
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *restore = root->findChild<QQuickItem *>(QStringLiteral("restoreRoutes"));
+    QVERIFY(restore);
+    m_shell.lastConfirm.clear();
+    const int before = m_backend.routeRestores;
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(restore));
+    QCOMPARE(m_backend.routeRestores, before);
+    QVERIFY2(!m_shell.lastConfirm.isEmpty(), "Restore defaults asks before replacing the list");
+    delete root;
+}
+
+// What leaks is the active config's profile, which need not be the one on the
+// page: "add a rule" under a profile that already had rules sent the user adding
+// rules that could not change anything.
+void TestQmlUi::theThroughVpnNoticeNamesTheConfigAndItsProfile()
+{
+    m_backend.setSplitEnabled(true);
+    m_backend.setVpnMode(QStringLiteral("selective"));
+    const QStringList domains = m_backend.domains();
+    m_backend.setDomains({});
+    const auto restore = qScopeGuard([this, domains] {
+        m_backend.setVpnMode(QStringLiteral("general"));
+        m_backend.setDomains(domains);
+    });
+    QVERIFY(m_backend.selectiveModeWouldLeak());
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    QObject *notice = root->findChild<QObject *>(QStringLiteral("throughVpnNotice"));
+    QVERIFY(notice);
+    QVERIFY2(shown(notice).contains(QStringLiteral("Test Config")), qPrintable(shown(notice)));
+    QVERIFY2(shown(notice).contains(QStringLiteral("Default")), qPrintable(shown(notice)));
+
+    // With no config at all there is none to name. The backend then calls the
+    // active one "No config", which the notice used to name as a config.
+    const QStringList saved = m_backend.configs();
+    m_backend.setConfigs({});
+    QVERIFY2(shown(notice).startsWith(QStringLiteral("Add a rule")), qPrintable(shown(notice)));
+    m_backend.setConfigs(saved);
+    delete root;
+}
+
+// The built-in profile is stored under the key "Default", and was shown as that
+// key in the Russian UI.
+void TestQmlUi::theBuiltInProfileIsShownInTheUsersLanguage()
+{
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    const auto restore = qScopeGuard([this, &russian] {
+        QCoreApplication::removeTranslator(&russian);
+        m_engine.retranslate();
+    });
+    m_engine.retranslate();
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    const QStringList texts = everyText(root);
+    QVERIFY2(texts.contains(QStringLiteral("По умолчанию")), qPrintable(texts.join(QLatin1String(" | "))));
+    QVERIFY(!texts.contains(QStringLiteral("Default")));
+    delete root;
+}
+
+// White on the dark theme's light-grey accent read at about 2:1, and the
+// editor's Save looked disabled next to Cancel.
+void TestQmlUi::textOnTheAccentIsReadableInTheDarkTheme()
+{
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QObject *save = root->findChild<QObject *>(QStringLiteral("saveLabel"));
+    QVERIFY(save);
+    const QColor label = save->property("color").value<QColor>();
+    const QColor fill = m_theme.property("accent").value<QColor>();
+    QVERIFY2(contrast(label, fill) >= 4.5,
+             qPrintable(QStringLiteral("contrast %1:1").arg(contrast(label, fill), 0, 'f', 1)));
+    delete root;
+}
+
+void TestQmlUi::headingLinksStayOnANarrowPage_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::newRow("Settings") << QStringLiteral("pages/SettingsPage.qml");
+    QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
+}
+
+namespace {
+
+// A language whose words for the heading links are much longer than English's,
+// which is what a wider font does to them as well.
+class LongLinks : public QTranslator {
+public:
+    bool isEmpty() const override { return false; }
+    QString translate(const char *, const char *source, const char *, int) const override
+    {
+        static const QByteArrayList links{"Restore defaults", "Clear all", "Recommended for Russia",
+                                          "Choose…"};
+        if (links.contains(QByteArray(source)))
+            return QString::fromUtf8(source)
+                    + QStringLiteral(" in a much longer language, too long for any window to hold");
+        return QString();
+    }
+};
+
+} // namespace
+
+// A link beside a section heading that did not fill kept its full width however
+// little room there was, and ran off the page: with the fonts the Windows tests
+// get, «Restore defaults» sat past the right edge of a 400 px window.
+void TestQmlUi::headingLinksStayOnANarrowPage()
+{
+    QFETCH(QString, page);
+    LongLinks longLinks;
+    QCoreApplication::installTranslator(&longLinks);
+    m_engine.retranslate();
+    const auto restore = qScopeGuard([this, &longLinks] {
+        QCoreApplication::removeTranslator(&longLinks);
+        m_engine.retranslate();
+    });
+    m_backend.setDomains({QStringLiteral("example.com")}); // so both rules links show
+    const auto domains = qScopeGuard([this] { m_backend.setDomains({}); });
+
+    QObject *root = loadPage(page.toUtf8().constData());
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *item = showInWindow(root, window, 400, 1400);
+    QVERIFY(item);
+    QStringList out;
+    int links = 0;
+    const auto texts = root->findChildren<QQuickItem *>();
+    for (QQuickItem *text : texts) {
+        if (!text->inherits("QQuickText") || !text->isVisible()
+            || !text->property("text").toString().endsWith(QLatin1String("any window to hold")))
+            continue;
+        ++links;
+        const qreal right = text->mapToItem(item, QPointF(text->width(), 0)).x();
+        if (right > item->width() + 0.5)
+            out << QStringLiteral("%1 (to %2)").arg(text->property("text").toString()).arg(right);
+    }
+    QVERIFY2(links >= 2, "the links were not found");
+    QVERIFY2(out.isEmpty(), qPrintable(QStringLiteral("past the edge: ") + out.join(QStringLiteral(" | "))));
+    delete root;
+}
+
+void TestQmlUi::russianFitsAtTheDefaultWidth_data()
+{
+    QTest::addColumn<QString>("page");
+    QTest::newRow("Settings") << QStringLiteral("pages/SettingsPage.qml");
+    QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
+    QTest::newRow("Logs") << QStringLiteral("pages/LogsPage.qml");
+    QTest::newRow("Configs") << QStringLiteral("pages/ConfigsPage.qml");
+    QTest::newRow("config editor") << QStringLiteral("CreateConfigOverlay.qml");
+}
+
+// Russian runs longer than English, and at the default 400 px window labels,
+// links and input hints were cut, among them the "then Enter" that is the only
+// hint that Enter adds a rule. Measured with DejaVu Sans, the widest of the
+// usual Linux fonts and the one this was found with.
+void TestQmlUi::russianFitsAtTheDefaultWidth()
+{
+    QFETCH(QString, page);
+    if (!QFontDatabase::families().contains(QStringLiteral("DejaVu Sans")))
+        QSKIP("DejaVu Sans is not installed");
+    const QFont savedFont = QGuiApplication::font();
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    QGuiApplication::setFont(QFont(QStringLiteral("DejaVu Sans")));
+    m_engine.retranslate();
+    const auto restore = qScopeGuard([this, &russian, savedFont] {
+        QCoreApplication::removeTranslator(&russian);
+        QGuiApplication::setFont(savedFont);
+        m_engine.retranslate();
+    });
+
+    QObject *root = loadPage(page.toUtf8().constData());
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    QStringList cut;
+    const auto texts = root->findChildren<QQuickItem *>();
+    for (QQuickItem *item : texts) {
+        if (!item->inherits("QQuickText") || !item->isVisible())
+            continue;
+        // A path elided in the middle is shortened on purpose, whatever the language.
+        if (item->property("elide").toInt() == Qt::ElideMiddle)
+            continue;
+        if (item->property("truncated").toBool())
+            cut << item->property("text").toString();
+    }
+    QVERIFY2(cut.isEmpty(), qPrintable(QStringLiteral("cut: ") + cut.join(QStringLiteral(" | "))));
     delete root;
 }
 

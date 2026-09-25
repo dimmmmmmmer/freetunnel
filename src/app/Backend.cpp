@@ -63,6 +63,17 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         QTimer::singleShot(600, this, [this] { connectVpn(); });
 }
 
+Backend::~Backend()
+{
+    // The client is a member, and the ones declared after it (the log among them)
+    // are gone by the time it is destroyed. Its destructor aborts a live helper
+    // socket, which reports Disconnected synchronously, and that used to land in
+    // this half-destroyed object and crash. prepareQuit() shuts the client down
+    // while everything is alive; a Backend destroyed without it, as a test that
+    // stops early does, must not be called back at all.
+    m_client.disconnect(this);
+}
+
 void Backend::wireVpnClientSignals()
 {
     connect(&m_client, &VpnHelperClient::stateChanged, this, &Backend::onVpnClientStateChanged);
@@ -162,12 +173,72 @@ QString classifyVpnErrorMessage(const QString &lower)
     return QString();
 }
 
+// "Connection failed: X" is the core saying the session never came up; X is its
+// own wording plus the error code. The two reasons a user can act on are said in
+// their language; anything else keeps X, code and all, because that is what
+// tells a support thread what went wrong, under a translated lead-in.
+QString friendlyConnectFailure(const QString &reason)
+{
+    const QString lower = reason.toLower();
+    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"))) {
+        return QCoreApplication::translate("Backend",
+                                           "Authentication failed — check the username and password.");
+    }
+    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+        return QCoreApplication::translate("Backend", "Server isn't responding (timed out).");
+    return QCoreApplication::translate("Backend", "Couldn't connect to the server: %1").arg(reason);
+}
+
+// Worded by the helper with a value filled in, so matched by what surrounds the
+// value. Marked here as well, so they stay in the catalogue whatever the helper
+// code does.
+struct HelperTemplate {
+    const char *context;
+    const char *text;
+};
+const HelperTemplate kHelperTemplates[] = {
+        {"QObject", QT_TRANSLATE_NOOP("QObject", "wintun.dll is missing next to FreeTunnel.exe (%1). "
+                                                 "Reinstall from the official installer.")},
+        {"QtTrustTunnelClient", QT_TRANSLATE_NOOP("QtTrustTunnelClient", "Failed parsing config: %1")},
+        {"QtTrustTunnelClient",
+         QT_TRANSLATE_NOOP("QtTrustTunnelClient", "%1 (likely needs sudo/admin privileges)")},
+};
+
+// The helper words some messages itself, and it runs elevated without the
+// user's language, so they arrive in English. This catalogue has them. Empty
+// when @p m is not one of them.
+QString translatedHelperWords(const QString &m)
+{
+    const QByteArray source = m.toUtf8();
+    for (const char *context : {"QObject", "QtTrustTunnelClient"}) {
+        const QString local = QCoreApplication::translate(context, source.constData());
+        if (local != m)
+            return local;
+    }
+    for (const HelperTemplate &t : kHelperTemplates) {
+        const QString text = QString::fromUtf8(t.text);
+        const qsizetype at = text.indexOf(QLatin1String("%1"));
+        const QString before = text.left(at);
+        const QString after = text.mid(at + 2);
+        if (m.size() <= before.size() + after.size() || !m.startsWith(before) || !m.endsWith(after))
+            continue;
+        const QString local = QCoreApplication::translate(t.context, t.text);
+        if (local != text)
+            return local.arg(m.mid(before.size(), m.size() - before.size() - after.size()));
+    }
+    return QString();
+}
+
 } // namespace
 
 QString Backend::friendlyVpnError(const QString &m) const
 {
-    if (m.startsWith(QStringLiteral("Connection failed:"), Qt::CaseInsensitive))
-        return m;
+    const QString helperWords = translatedHelperWords(m);
+    if (!helperWords.isEmpty())
+        return helperWords;
+    static const QLatin1String failedPrefix("Connection failed:");
+    if (m.startsWith(failedPrefix, Qt::CaseInsensitive))
+        return friendlyConnectFailure(m.mid(failedPrefix.size()).trimmed());
     const QString classified = classifyVpnErrorMessage(m.toLower());
     return classified.isEmpty() ? m : classified;
 }
@@ -187,11 +258,29 @@ void Backend::onVpnErrorReceived(const QString &m)
     appendLog(QStringLiteral("ERROR"), m);
     // NOT gated on m_inConnect: a synchronous helper-spawn failure (no
     // pkexec/sudo, token file not writable) emits from inside connectVpn(),
-    // and swallowing it left Connect looking like a silent no-op. Duplicate
-    // chatter is already handled by m_reapplying + the 30 s dedupe below.
+    // and swallowing it left Connect looking like a silent no-op. The old
+    // session's chatter during a switch is dropped by m_reapplying, repeats by
+    // the 30 s dedupe below.
     if (m_reapplying || isInternalVpnError(m))
         return;
+    settleRefusedConnect();
     emitDedupedVpnError(friendlyVpnError(m));
+}
+
+// A connect refused outright reports an error and no state: the core already in
+// Error and handed a config it cannot load, a missing wintun.dll, a helper
+// without privileges. Nothing else would take the UI off the optimistic
+// "Connecting…" connectVpn() set, so it pulsed until the user clicked to cancel,
+// and the Connect hotkey and links were ignored meanwhile.
+void Backend::settleRefusedConnect()
+{
+    if (!m_connecting || m_awaitingToml)
+        return;
+    const VpnHelperClient::State st = m_client.state();
+    if (st != VpnHelperClient::State::Disconnected && st != VpnHelperClient::State::Error)
+        return;
+    m_connecting = false;
+    emit stateChanged();
 }
 
 void Backend::onStatsTick()
@@ -260,7 +349,7 @@ void Backend::toggle() {
 
 bool Backend::shouldSkipConnectAttempt() const
 {
-    return !m_reapplying && (m_connected || m_connecting || m_disconnecting);
+    return m_connected || m_connecting || m_disconnecting;
 }
 
 void Backend::logConnectAttempt()
@@ -296,10 +385,17 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Select a config first"));
         return;
     }
-    // Connect hotkey / deep link: no-op when already up or a session is in flight.
-    // reconnectActiveConfig() sets m_reapplying so live rule edits can still rebuild.
+    // Connect hotkey / deep link: no-op when already up, while an attempt or a
+    // config switch is in flight (a switch reads as connecting throughout), or
+    // while disconnecting. The switch's own reconnect goes straight to
+    // startConnectAttempt().
     if (shouldSkipConnectAttempt())
         return;
+    startConnectAttempt();
+}
+
+void Backend::startConnectAttempt()
+{
     // Show "Connecting…" immediately — the helper handshake (and any elevation
     // prompt) can take a few seconds before the core reports a real state.
     // A subsequent state change (Connected / Error / Disconnected) overrides it.
@@ -319,6 +415,7 @@ void Backend::connectVpn() {
 void Backend::buildConnectTomlAsync()
 {
     const quint64 generation = ++m_connectGen;
+    m_awaitingToml = true;
     const QString path = m_activePath;
     const QString level =
             m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");
@@ -377,10 +474,17 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
     // credential store had us waiting.
     if (generation != m_connectGen)
         return;
+    m_awaitingToml = false;
     if (toml.isEmpty()) {
         failConnectNoPassword();
         return;
     }
+    // From here a switch is an ordinary connect attempt: what the helper reports
+    // is the new session, not the old one going down. Holding the guard until
+    // Connected swallowed every error of a switch to a server that fails, left
+    // "Connecting…" up for as long as the core kept retrying, and made the next
+    // config pick a silent no-op.
+    m_reapplying = false;
     m_inConnect = true;
     m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
@@ -395,6 +499,7 @@ void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
     ++m_connectGen; // a credential read still in flight must not start a session
+    m_awaitingToml = false;
     m_reapplying = false;
     m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
@@ -439,17 +544,22 @@ QString Backend::credentialStorageWarning() const
     // thread, and the Settings page reads this property from three separate
     // bindings — so every visit to that page stalled the interface three times
     // over for an answer that had not changed.
-    if (m_credentialWarning.has_value())
-        return *m_credentialWarning;
+    //
+    // The answer is kept, not the sentence, which is put into words on each read
+    // in the language then in force. It is first read while the window loads,
+    // before any translator is in, so a kept sentence was English in a Russian
+    // window for the whole session.
+    if (!m_credentialStoreMissing.has_value()) {
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
-    if (!freetunnel::CredentialStore::secureStorageAvailable()) {
-        m_credentialWarning = tr("Secure credential storage is unavailable. Install gnome-keyring or "
-                                 "KWallet (with secret-tool) before saving VPN passwords.");
-        return *m_credentialWarning;
-    }
+        m_credentialStoreMissing = !freetunnel::CredentialStore::secureStorageAvailable();
+#else
+        m_credentialStoreMissing = false;
 #endif
-    m_credentialWarning = QString();
-    return *m_credentialWarning;
+    }
+    if (!*m_credentialStoreMissing)
+        return QString();
+    return tr("Secure credential storage is unavailable. Install gnome-keyring or "
+              "KWallet (with secret-tool) before saving VPN passwords.");
 }
 
 void Backend::recheckCredentialStorage()
@@ -459,10 +569,38 @@ void Backend::recheckCredentialStorage()
     // installed or unlocked a keyring — and, with the cache above, would now stay
     // shown for a second reason. Called from the one place that learns the
     // storage is not working: a save that failed on the password.
-    const QString before = m_credentialWarning.value_or(QString());
-    m_credentialWarning.reset();
-    if (credentialStorageWarning() != before)
+    const bool before = m_credentialStoreMissing.value_or(false);
+    m_credentialStoreMissing.reset();
+    credentialStorageWarning(); // asks again
+    if (m_credentialStoreMissing.value_or(false) != before)
         emit credentialStorageChanged();
+}
+
+void Backend::retranslate()
+{
+    // Called once a new translator is in (AppGuiMain). QML's qsTr bindings follow
+    // by themselves; these are words Backend put together earlier and kept, which
+    // stayed in the language they were made in.
+    if (m_credentialStoreMissing.value_or(false))
+        emit credentialStorageChanged();
+    if (m_updateWords) {
+        m_updateMessage = m_updateWords();
+        emit updateChanged();
+    }
+    // Ping times are "<n> ms" with a translated unit; the number stays.
+    bool pingsMoved = false;
+    for (QVariant &ping : m_pings) {
+        const QString text = ping.toString();
+        qsizetype digits = 0;
+        while (digits < text.size() && text.at(digits).isDigit())
+            ++digits;
+        if (digits == 0)
+            continue;
+        ping = text.left(digits) + tr(" ms");
+        pingsMoved = true;
+    }
+    if (pingsMoved)
+        emit pingsChanged();
 }
 
 void Backend::handleControl(const QString &command) {
@@ -525,5 +663,13 @@ void Backend::removeConfig(int index) {
     reloadConfigs();
     if (m_activePath.isEmpty() && !m_paths.isEmpty())
         m_activePath = m_paths.first();
+    // Save the fallback as the one to start with. Left pointing at the deleted
+    // file, the next launch fell back to whatever row was first by then, which
+    // after an import or a reorder is a config nobody picked, and "Connect on
+    // startup" connected to it.
+    if (m_settings.last_config_path != m_activePath) {
+        m_settings.last_config_path = m_activePath;
+        persistSettings();
+    }
     emit configChanged();
 }

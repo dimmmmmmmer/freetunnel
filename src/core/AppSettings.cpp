@@ -171,6 +171,25 @@ static void loadBypassProfiles(const QSettings &s, AppSettings &out)
     loadProfileOrderAndAssignments(s, out);
 }
 
+static void loadHotkeys(const QSettings &s, AppSettings &out)
+{
+    const AppSettings shipped;
+    out.hotkey_toggle = s.value("hotkeys/toggle", shipped.hotkey_toggle).toString();
+    out.hotkey_connect = s.value("hotkeys/connect", shipped.hotkey_connect).toString();
+    out.hotkey_disconnect = s.value("hotkeys/disconnect", shipped.hotkey_disconnect).toString();
+    // Until 1.2.1 global hotkeys were on out of the box, and Ctrl+Shift+T, E and
+    // D stopped reaching every browser and terminal. They are opt-in now. A store
+    // saved before that keeps its "on" only where someone chose it, which shows
+    // as a combo changed from the shipped ones; all three untouched means nobody
+    // did. The marker makes this one-time: an "on" saved since is a choice.
+    const bool chosenUnderOptIn = s.value("hotkeys/opt_in", false).toBool();
+    const bool untouched = out.hotkey_toggle == shipped.hotkey_toggle
+            && out.hotkey_connect == shipped.hotkey_connect
+            && out.hotkey_disconnect == shipped.hotkey_disconnect;
+    out.hotkeys_enabled = s.value("hotkeys/enabled", shipped.hotkeys_enabled).toBool()
+            && (chosenUnderOptIn || !untouched);
+}
+
 AppSettings loadAppSettings() {
     // Uses QCoreApplication's organization/application name (set to "FreeTunnel"
     // in main()), so tests can redirect the store to an isolated domain.
@@ -190,10 +209,7 @@ AppSettings loadAppSettings() {
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
     loadBypassProfiles(s, out); // and, inside it, the per-profile application lists
-    out.hotkeys_enabled = s.value("hotkeys/enabled", true).toBool();
-    out.hotkey_toggle = s.value("hotkeys/toggle", "Ctrl+Shift+T").toString();
-    out.hotkey_connect = s.value("hotkeys/connect", "Ctrl+Shift+E").toString();
-    out.hotkey_disconnect = s.value("hotkeys/disconnect", "Ctrl+Shift+D").toString();
+    loadHotkeys(s, out);
     out.last_config_path = s.value("vpn/last_config_path", "").toString();
     if (out.log_path.isEmpty()) {
         out.log_path = defaultLogPath();
@@ -232,6 +248,7 @@ void saveAppSettings(const AppSettings &cfg) {
         cp.insert(it.key(), it.value());
     s.setValue("bypass/config_profiles", cp);
     s.setValue("hotkeys/enabled", cfg.hotkeys_enabled);
+    s.setValue("hotkeys/opt_in", true); // see loadHotkeys()
     s.setValue("hotkeys/toggle", cfg.hotkey_toggle);
     s.setValue("hotkeys/connect", cfg.hotkey_connect);
     s.setValue("hotkeys/disconnect", cfg.hotkey_disconnect);

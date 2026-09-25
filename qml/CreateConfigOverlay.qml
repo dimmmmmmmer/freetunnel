@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Effects
 // See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
@@ -8,6 +9,9 @@ import "components"
 
 Item {
     id: createRoot
+    objectName: "createOverlay"
+    // The built-in profile is stored as "Default" and shown in the UI's language.
+    function profileLabel(name) { return name === "Default" ? qsTr("Default") : name }
     required property var shell
     required property var backend
     required property var theme
@@ -25,8 +29,11 @@ Item {
     // dialog or a window-level popup (protocol / split-profile dropdown, confirm
     // dialog) already handles it — two enabled shortcuts on one key are
     // ambiguous to Qt and then *neither* fires.
+    // Nor while the certificate file dialog is up. Where Qt draws that dialog
+    // itself, this window shortcut also sees its Escape, and closing the editor
+    // then destroyed the dialog in the middle of handling the key: a crash.
     Shortcut { sequences: ["Escape"]
-               enabled: !discardConfirm.visible && !shell.windowPopupOpen
+               enabled: !discardConfirm.visible && !shell.windowPopupOpen && !certFileDlg.visible
                onActivated: cform.tryClose() }
 
     Rectangle {
@@ -92,12 +99,36 @@ Item {
                    text: cform.editing ? qsTr("Edit config") : qsTr("New config"); color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
         }
         Flickable {
+            id: formFlick
+            objectName: "editorForm"
             anchors.top: chdr.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
             anchors.leftMargin: 18; anchors.rightMargin: 18; contentWidth: width; contentHeight: fcol.height; clip: true
+            // Keep the field that has the keyboard in view. Tab reaches fields below
+            // the fold, and typing went into one nobody could see.
+            // Room is left above it for the field's label.
+            function reveal(item) {
+                const top = item.mapToItem(fcol, 0, 0).y
+                if (top - 28 < contentY)
+                    contentY = Math.max(0, top - 28)
+                else if (top + item.height > contentY + height)
+                    contentY = Math.max(0, Math.min(contentHeight - height, top + item.height - height + 8))
+            }
+            Connections {
+                target: createRoot.Window.window
+                function onActiveFocusItemChanged() {
+                    let item = createRoot.Window.activeFocusItem
+                    for (let up = item; up; up = up.parent) {
+                        if (up === fcol) {
+                            formFlick.reveal(item)
+                            return
+                        }
+                    }
+                }
+            }
             Column {
                 id: fcol; width: parent.width; spacing: 10
-                Field { id: fName; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
-                Field { id: fHost; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
+                Field { id: fName; objectName: "nameField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Name"); placeholder: qsTr("Germany · Frankfurt") }
+                Field { id: fHost; objectName: "hostField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Server host"); placeholder: "frankfurt.example.com" }
                 Field { id: fAddr; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Address(es) · host:port (comma-separated)"); placeholder: "1.2.3.4:443" }
                 Row { width: parent.width; spacing: 10
                     Field { id: fUser; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Username"); width: (parent.width - 10) / 2 }
@@ -131,12 +162,12 @@ Item {
                         Behavior on border.color { ColorAnimation { duration: 120 } }
                         Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: profArrow.left; anchors.rightMargin: 6
                                anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-                               text: cform.splitProfile; color: theme.text; font.pixelSize: 14 }
+                               text: createRoot.profileLabel(cform.splitProfile); color: theme.text; font.pixelSize: 14 }
                         Text { id: profArrow; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
                                text: "▾"; color: theme.textDim; font.pixelSize: 16 }
                         MouseArea { id: profMa; anchors.fill: parent; hoverEnabled: true
                             onClicked: shell.showSelect(profBox,
-                                backend.profiles.map(function(p){ return {v:p, t:p} }),
+                                backend.profiles.map(function(p){ return {v:p, t:createRoot.profileLabel(p)} }),
                                 cform.splitProfile, function(v){ cform.splitProfile = v }) } }
                 }
                 Item { width: parent.width; height: 32
@@ -171,7 +202,13 @@ Item {
                     }
                     Rectangle { width: parent.width; height: 70; radius: 8; color: theme.inputBg; border.color: fCert.activeFocus ? theme.accent : theme.inputBorder; border.width: 1
                         Flickable { anchors.fill: parent; anchors.margins: 8; contentHeight: fCert.height; clip: true
-                            TextEdit { id: fCert; width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere } }
+                            TextEdit { id: fCert; objectName: "certificateField"
+                                width: parent.width; font.pixelSize: 12; font.family: shell.monoFont; color: theme.text; wrapMode: TextEdit.WrapAnywhere
+                                // In the tab chain like the other fields; a certificate
+                                // has no use for a typed tab, so Tab leaves the field.
+                                activeFocusOnTab: true
+                                Keys.onTabPressed: function(e) { nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason); e.accepted = true }
+                                Keys.onBacktabPressed: function(e) { nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason); e.accepted = true } } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
                 }
                 Dialogs.FileDialog {
@@ -184,7 +221,7 @@ Item {
                     Rectangle { width: 88; height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { anchors.centerIn: parent; text: qsTr("Save"); color: "white"; font.pixelSize: 14 }
+                        Text { objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.onAccent; font.pixelSize: 14 }
                         MouseArea { id: saveMa; anchors.fill: parent; hoverEnabled: true; onClicked: {
                             var ok = backend.createConfig({
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
@@ -205,12 +242,13 @@ Item {
             }
         }
     }
-    // Read by the window so its own confirm dialog can stand down while this
-    // inner one owns Escape.
-    readonly property bool confirmVisible: discardConfirm.visible
     ConfirmDialog {
         id: discardConfirm
+        objectName: "discardConfirm"
         theme: createRoot.theme
+        // The window's own confirm dialog is drawn above this one; while it is up,
+        // Return and Escape are its.
+        escapeOwner: !shell.windowPopupOpen
         text: qsTr("Discard unsaved changes?")
         confirmText: qsTr("Discard")
         onConfirmed: cform.close()

@@ -249,7 +249,7 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
 bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     if (tomlContent.isEmpty()) {
         setState(State::Error);
-        emit vpnError(QStringLiteral("Empty config"));
+        emit vpnError(tr("Empty config"));
         return false;
     }
     toml::parse_result parsed = toml::parse(tomlContent.toStdString());
@@ -258,14 +258,14 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
         // result, and keeping a view alive across statements is a lifetime trap.
         const std::string descr{parsed.error().description()};
         setState(State::Error);
-        emit vpnError(QString("Failed parsing config: %1").arg(QString::fromStdString(descr)));
+        emit vpnError(tr("Failed parsing config: %1").arg(QString::fromStdString(descr)));
         return false;
     }
 
     auto config = ag::TrustTunnelConfig::build_config(parsed.table());
     if (!config.has_value()) {
         setState(State::Error);
-        emit vpnError(QStringLiteral("Invalid TrustTunnel config structure"));
+        emit vpnError(tr("Invalid TrustTunnel config structure"));
         return false;
     }
 

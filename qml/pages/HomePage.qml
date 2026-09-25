@@ -94,7 +94,16 @@ Item {
                         font.pixelSize: 15; font.weight: Font.Medium
                     }
                 }
-                MouseArea { id: heroMa; anchors.fill: parent; onClicked: backend.toggle() }
+                MouseArea {
+                    id: heroMa
+                    objectName: "connectionLogo"
+                    anchors.fill: parent
+                    onClicked: backend.toggle()
+                    // Handled, so the second click of a double-click is not a second
+                    // toggle. People double-click anything that looks like an icon,
+                    // and it connected and at once cancelled.
+                    onDoubleClicked: {}
+                }
             }
             Item { Layout.preferredHeight: 22 }
             Item {

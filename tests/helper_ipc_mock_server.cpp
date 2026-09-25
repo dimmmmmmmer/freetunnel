@@ -187,15 +187,35 @@ void MockHelperServer::handle(const QJsonObject &c)
         return;
     }
     if (cmd == QLatin1String("connect")) {
-        if (m_connectCount++ > 0) {
-            send(QJsonObject{{"ev", "error"}, {"msg", QStringLiteral("core disconnected")}});
+        ++m_connectCount;
+        const QString toml = c.value("configToml").toString();
+        auto scripted = [&toml](const QHash<QString, QString> &byValue) {
+            for (auto it = byValue.cbegin(); it != byValue.cend(); ++it) {
+                if (toml.contains(QStringLiteral("\"%1\"").arg(it.key())))
+                    return it.value();
+            }
+            return QString();
+        };
+        const QString refusal = scripted(m_refusing);
+        if (!refusal.isEmpty()) {
+            send(QJsonObject{{"ev", "error"}, {"msg", refusal}});
+            return;
         }
         send(QJsonObject{{"ev", "state"}, {"state", "Connecting"}});
+        const QString failure = scripted(m_failing);
+        if (!failure.isEmpty()) {
+            send(QJsonObject{{"ev", "state"}, {"state", "Reconnecting"}});
+            send(QJsonObject{{"ev", "error"}, {"msg", failure}});
+            m_tunnelUp = true; // a session exists, retrying, until disconnected
+            return;
+        }
         send(QJsonObject{{"ev", "state"}, {"state", "Connected"}});
         send(QJsonObject{{"ev", "stats"}, {"up", 1024.0}, {"down", 2048.0}});
         m_tunnelUp = true;
     } else if (cmd == QLatin1String("disconnect")) {
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnecting"}});
+        if (m_tunnelUp && !m_teardownError.isEmpty())
+            send(QJsonObject{{"ev", "error"}, {"msg", m_teardownError}});
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnected"}});
         m_tunnelUp = false;
     } else if (cmd == QLatin1String("quit")) {

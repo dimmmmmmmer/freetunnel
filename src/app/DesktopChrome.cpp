@@ -1,10 +1,18 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/DesktopChrome.h"
 
+#include <QGuiApplication>
+#include <QPointer>
+#include <QTimer>
 #include <QWindow>
+
+#include <memory>
 
 #ifdef Q_OS_LINUX
 #include "DesktopChromeLinux.h"
+#endif
+#ifdef Q_OS_MACOS
+#include "DesktopChromeMac.h"
 #endif
 
 namespace freetunnel {
@@ -135,6 +143,74 @@ void DesktopChrome::applySetting(const QString &ns, const QString &key, const QV
     }
     if (moved)
         emit changed();
+}
+
+void bringWindowForward(QWindow *window)
+{
+    if (!window)
+        return;
+#ifdef Q_OS_MACOS
+    unhideMacApplication();
+#endif
+    if (window->windowStates() & Qt::WindowMinimized)
+        window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
+    // setVisible, not show(): show() is showNormal() here, and a window minimised
+    // from maximised would come back no longer maximised.
+    window->setVisible(true);
+    window->raise();
+#ifdef Q_OS_LINUX
+    if (activateX11Window(window))
+        return;
+#endif
+    window->requestActivate();
+}
+
+void minimizeWindow(QWindow *window)
+{
+    if (window)
+        window->setWindowStates(window->windowStates() | Qt::WindowMinimized);
+}
+
+void hideWindowToTray(QWindow *window)
+{
+    if (!window)
+        return;
+#ifdef Q_OS_MACOS
+    // The Space is AppKit's, so the end of leaving it is asked of AppKit: Qt says
+    // the state changed as soon as it has asked for the change. Only on the real
+    // platform — elsewhere, as under offscreen, a window id is not an NSView.
+    if ((window->windowStates() & Qt::WindowFullScreen)
+        && QGuiApplication::platformName() == QLatin1String("cocoa")) {
+        QPointer<QWindow> guard(window);
+        auto hidden = std::make_shared<bool>(false);
+        const auto hideOnce = [guard, hidden]() {
+            if (*hidden || !guard)
+                return;
+            *hidden = true;
+            guard->hide();
+        };
+        whenMacFullScreenEnds(window, hideOnce);
+        QTimer::singleShot(2000, window, hideOnce); // for an exit that never reports
+        window->setWindowStates(window->windowStates() & ~Qt::WindowFullScreen);
+        return;
+    }
+#endif
+    window->hide();
+}
+
+void DesktopChrome::bringToFront(QObject *window)
+{
+    bringWindowForward(qobject_cast<QWindow *>(window));
+}
+
+void DesktopChrome::minimize(QObject *window)
+{
+    minimizeWindow(qobject_cast<QWindow *>(window));
+}
+
+void DesktopChrome::hideToTray(QObject *window)
+{
+    hideWindowToTray(qobject_cast<QWindow *>(window));
 }
 
 bool DesktopChrome::showWindowMenu(QObject *window)

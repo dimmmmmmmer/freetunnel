@@ -7,10 +7,21 @@ Item {
     required property var theme
     property string label: ""
     property string value: ""
+    // Set, switched on, and not in effect: refused, or held by another app.
+    property bool unavailable: false
     signal captured(string seq)
     Layout.fillWidth: true
     Layout.preferredHeight: 42
     property bool capturing: false
+    // A key was pressed with nothing that makes it safe to take system-wide.
+    property bool needsModifier: false
+    onCapturingChanged: {
+        needsModifier = false
+        // A combo FreeTunnel has registered is handed to that registration and
+        // never reaches the field, so pressing it ran its action instead.
+        backend.suspendHotkeys(capturing)
+    }
+    Component.onDestruction: if (capturing) backend.suspendHotkeys(false)
 
     // Capturing relies on this Item holding active focus (Keys.onPressed below).
     // Active focus is unique per window, so starting capture on another field —
@@ -31,8 +42,13 @@ Item {
             border.width: hk.capturing ? 1 : 0; border.color: theme.accent
             Text {
                 id: lbl; anchors.centerIn: parent
-                text: hk.capturing ? qsTr("Press…") : (hk.value ? shell.keyGlyphs(hk.value) : "—")
-                color: (hk.value || hk.capturing) ? theme.text : theme.textFaint
+                text: !hk.capturing ? (hk.value ? shell.keyGlyphs(hk.value) : "—")
+                      : !hk.needsModifier ? qsTr("Press…")
+                      : Qt.platform.os === "osx" ? qsTr("Add ⌘, ⌥ or ⌃…")
+                      : qsTr("Add Ctrl or Alt…")
+                color: hk.capturing ? theme.text
+                       : !hk.value ? theme.textFaint
+                       : hk.unavailable ? theme.danger : theme.text
                 font.pixelSize: 13
             }
             MouseArea { id: hkMa; anchors.fill: parent; hoverEnabled: true
@@ -50,6 +66,21 @@ Item {
         if (e.key === Qt.Key_Escape) { hk.capturing = false; return }
         if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift
                 || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return
+        const held = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+        // Backspace or Delete on its own unbinds this action.
+        if (!held && (e.key === Qt.Key_Backspace || e.key === Qt.Key_Delete)) {
+            hk.capturing = false
+            hk.captured("")
+            return
+        }
+        // A global hotkey takes its combo from every other application, so a key
+        // on its own — Enter to confirm, Tab to move on, a letter — would stop
+        // working everywhere else. F1–F12 are the only keys safe without Ctrl,
+        // Alt or Meta (⌘, ⌥ or ⌃ on macOS); anything else waits for one.
+        if (!held && !(e.key >= Qt.Key_F1 && e.key <= Qt.Key_F12)) {
+            hk.needsModifier = true
+            return
+        }
         var parts = []
         if (e.modifiers & Qt.ControlModifier) parts.push("Ctrl")
         if (e.modifiers & Qt.AltModifier) parts.push("Alt")

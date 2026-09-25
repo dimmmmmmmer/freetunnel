@@ -52,8 +52,11 @@ struct AppSettings {
     QMap<QString, QString> config_profiles;
 
     // Global system hotkeys (portable key sequences, e.g. "Ctrl+Alt+T").
-    // Empty string = unbound. hotkeys_enabled is the master switch.
-    bool hotkeys_enabled = true;
+    // Empty string = unbound. hotkeys_enabled is the master switch, and it is
+    // off until the user turns it on: a global hotkey takes its combo away from
+    // every other application, and these ones are reopen-closed-tab and friends
+    // in every browser and terminal.
+    bool hotkeys_enabled = false;
     QString hotkey_toggle = "Ctrl+Shift+T";
     QString hotkey_connect = "Ctrl+Shift+E";
     QString hotkey_disconnect = "Ctrl+Shift+D";

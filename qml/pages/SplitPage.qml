@@ -10,6 +10,9 @@ Item {
     required property var backend
     required property var theme
 
+    // The built-in profile is stored as "Default" and shown in the UI's language.
+    function profileLabel(name) { return name === "Default" ? qsTr("Default") : name }
+
     // Clicking empty page area clears focus from a text field.
     TapHandler { onTapped: splitRoot.forceActiveFocus() }
     Flickable {
@@ -48,12 +51,21 @@ Item {
                 radius: 8; color: theme.infoBg
                 Text {
                     id: warnText
+                    objectName: "throughVpnNotice"
                     anchors.centerIn: parent; width: parent.width - 20
                     wrapMode: Text.WordWrap; font.pixelSize: 12; color: theme.warn
                     // One literal, not a concatenation: lupdate can only extract a
                     // literal argument, and a split string silently drops out of the
                     // catalogue.
-                    text: qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
+                    //
+                    // It names the config and the profile it uses. That profile is
+                    // what the tunnel follows, and it need not be the one on screen:
+                    // "add a rule" under a profile that already had rules left the
+                    // user adding rules that could not change anything.
+                    text: backend.configs.length === 0
+                          ? qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
+                          : qsTr("“%1” uses the profile “%2”, which has no rules, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule.")
+                                .arg(backend.activeConfig).arg(splitRoot.profileLabel(backend.activeConfigProfile))
                 }
             }
             Item { Layout.preferredHeight: 6 }
@@ -74,9 +86,9 @@ Item {
                         MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true
                                     onClicked: backend.selectProfile(chip.modelData) }
                         Text { id: plabel; anchors.left: parent.left; anchors.leftMargin: 11
-                               anchors.verticalCenter: parent.verticalCenter; text: chip.modelData
+                               anchors.verticalCenter: parent.verticalCenter; text: splitRoot.profileLabel(chip.modelData)
                                width: Math.min(implicitWidth, 130); elide: Text.ElideRight
-                               color: chip.isActive ? "white" : theme.text; font.pixelSize: 13 }
+                               color: chip.isActive ? theme.onAccent : theme.text; font.pixelSize: 13 }
                         ChipX { visible: !chip.isDefault; onAccent: chip.isActive; theme: splitRoot.theme
                                 anchors.left: plabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
@@ -114,13 +126,18 @@ Item {
             }
             Item { Layout.preferredHeight: 14 }
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: splitRoot.theme
+                // Every item fills, the links up to their own width: a link that does
+                // not fill keeps its full width however little room is left, and ran
+                // off the edge. Short of room, they all narrow and elide instead.
+                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
-                Text { text: qsTr("Recommended for Russia"); font.pixelSize: 12
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Recommended for Russia"); font.pixelSize: 12
                        color: recMa.containsMouse ? theme.text : theme.accent; font.underline: recMa.containsMouse
                     MouseArea { id: recMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor; onClicked: backend.addRecommendedRussia() } }
-                Text { text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
                        color: clrDomMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                        font.underline: clrDomMa.containsMouse
                     MouseArea { id: clrDomMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
@@ -164,7 +181,7 @@ Item {
                 }
                 Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                        anchors.right: parent.right; anchors.rightMargin: 12; elide: Text.ElideRight
-                       text: qsTr("domain or domains (comma/space separated), then Enter"); color: theme.textFaint; font.pixelSize: 13
+                       text: qsTr("domains, comma-separated, then Enter"); color: theme.textFaint; font.pixelSize: 13
                        visible: domInput.text.length === 0 && !domInput.activeFocus }
                 MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor }
             }
@@ -178,14 +195,16 @@ Item {
             // it". A list whose meaning is flipped from another screen is a list
             // nobody can read with confidence.
             RowLayout { Layout.fillWidth: true; spacing: 10
-                SectionLabel { Layout.fillWidth: true; elide: Text.ElideRight; theme: splitRoot.theme
+                SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Applications — via VPN")
                                                           : qsTr("Applications — bypass VPN") }
-                Text { text: qsTr("Choose…"); font.pixelSize: 12
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Choose…"); font.pixelSize: 12
                        color: pickMa.containsMouse ? theme.text : theme.accent; font.underline: pickMa.containsMouse
                     MouseArea { id: pickMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor; onClicked: shell.overlay = "apps" } }
-                Text { text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.appRules.length > 0
+                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
+                       text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.appRules.length > 0
                        color: clrApMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                        font.underline: clrApMa.containsMouse
                     MouseArea { id: clrApMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true

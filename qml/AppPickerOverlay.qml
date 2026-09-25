@@ -26,8 +26,10 @@ Item {
 
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
         MouseArea { anchors.fill: parent; onClicked: pickerRoot.shell.overlay = "" } }
+    // Not while the file dialog is up: where Qt draws it, this shortcut saw its
+    // Escape too, and closing the picker destroyed the dialog mid-key — a crash.
     Shortcut { sequences: ["Escape"]
-               enabled: !pickerRoot.shell.windowPopupOpen
+               enabled: !pickerRoot.shell.windowPopupOpen && !fileDlg.visible
                onActivated: pickerRoot.shell.overlay = "" }
 
     // The scan touches the filesystem, so it happens once when the card opens

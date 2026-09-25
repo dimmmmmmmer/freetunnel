@@ -53,8 +53,8 @@ void TestConfigImport::skipVerificationFlagPropagates() {
 void TestConfigImport::fileNameFromServerName() {
     auto out = prepareDeepLinkImport(makeLink("My Server"));
     QVERIFY(out.has_value());
-    // spaces sanitized to underscores, .toml appended
-    QCOMPARE(out->fileName, QStringLiteral("My_Server.toml"));
+    // the name as typed, .toml appended
+    QCOMPARE(out->fileName, QStringLiteral("My Server.toml"));
 }
 
 void TestConfigImport::fileNameSanitized() {

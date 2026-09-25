@@ -6,6 +6,8 @@
 #include <QStringList>
 #include <QVariant>
 
+class QWindow;
+
 namespace freetunnel {
 
 // Which of the three window buttons go on which side of the title bar.
@@ -13,6 +15,33 @@ struct ButtonLayout {
     QStringList left;
     QStringList right;
 };
+
+// Bring the window in front of the user: restored if minimised, shown, raised and
+// given focus. For when the user has asked to see it — the tray menu, a second
+// launch — which reaches the app as a D-Bus call or a socket message rather than
+// as input to the window itself.
+//
+// On X11 that difference decides it. Qt asks the window manager to activate the
+// window with the time of the last X event the app received, which is older than
+// the click on the panel that led here; Mutter reads such a request as focus
+// stealing, refuses it and only flags the window for attention — it stays
+// minimised, which is where our own close button leaves it. So there it is asked
+// with the current server time instead, as a request made on the user's behalf.
+// A window minimised from maximised also comes back maximised, which show() —
+// showNormal() in Qt 6 — would not do.
+void bringWindowForward(QWindow *window);
+
+// Minimise, keeping maximised. QWindow::showMinimized() replaces the window's
+// states with Minimized, and on X11 Qt then asks the window manager to take the
+// maximised state off first: the window visibly shrank to normal size before
+// going, and came back at it.
+void minimizeWindow(QWindow *window);
+
+// Hide the window to the tray (the menu bar on macOS). On macOS a full-screen
+// window leaves full screen first, and is hidden once AppKit says it has:
+// ordered out while in it, AppKit keeps its Space, and the user was left on an
+// empty black one.
+void hideWindowToTray(QWindow *window);
 
 // A GNOME/GTK decoration layout — "appmenu:minimize,close", "close:", ":" — read
 // into the buttons this window draws. Anything else in it (appmenu, icon, menu,
@@ -79,11 +108,19 @@ public:
     // false everywhere else, so the caller can decide what to do instead.
     Q_INVOKABLE bool showWindowMenu(QObject *window);
 
+    // bringWindowForward(), minimizeWindow() and hideWindowToTray(), for the QML.
+    Q_INVOKABLE void bringToFront(QObject *window);
+    Q_INVOKABLE void minimize(QObject *window);
+    Q_INVOKABLE void hideToTray(QObject *window);
+
     // For tests: apply a setting as if the portal had just reported it.
     void applySetting(const QString &ns, const QString &key, const QVariant &value);
 
 signals:
     void changed();
+    // Linux: a tray host registered after start, so a tray icon made before it
+    // should be made again. See watchTrayHost().
+    void trayHostAppeared();
 
 private:
     // The org.gnome.desktop.wm.preferences keys; whether one changed anything.

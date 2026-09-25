@@ -259,6 +259,20 @@ void VpnHelperClient::resetHelperTransport()
 
 bool VpnHelperClient::configureProductionHelper()
 {
+#if defined(Q_OS_WIN)
+    // The helper is this same executable and refuses to start without wintun.dll
+    // beside it. It says so only inside its own hidden, elevated process, whose
+    // exit nothing here can see, so the GUI used to poll for a minute and then
+    // blame the elevation. Same folder, same file: look before asking for it.
+    // QObject::tr and the helper's wording, so the one translation serves both.
+    const QString appDir = QCoreApplication::applicationDirPath();
+    if (!QFile::exists(appDir + QStringLiteral("/wintun.dll"))) {
+        fail(QObject::tr("wintun.dll is missing next to FreeTunnel.exe (%1). "
+                         "Reinstall from the official installer.")
+                     .arg(appDir));
+        return false;
+    }
+#endif
     // Full dynamic/ephemeral port range 49152–65535 (16384 ports).
     m_tcpPort = static_cast<quint16>(49152 + QRandomGenerator::system()->bounded(16384));
     // Two 64-bit CSPRNG values, zero-padded to a fixed 32-hex (128-bit) string —

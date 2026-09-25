@@ -86,6 +86,9 @@ target_link_libraries(ft_desktop PUBLIC Qt6::Core Qt6::Gui)
 if(UNIX AND NOT APPLE)
     target_sources(ft_desktop PRIVATE ../src/app/DesktopChromeLinux.cpp ../src/app/DesktopChromeLinux.h)
     target_link_libraries(ft_desktop PUBLIC Qt6::DBus xcb)
+elseif(APPLE)
+    target_sources(ft_desktop PRIVATE ../src/app/DesktopChromeMac.mm ../src/app/DesktopChromeMac.h)
+    target_link_libraries(ft_desktop PUBLIC "-framework AppKit")
 endif()
 # Test-only. Main.qml uses Qt.labs.platform for the tray icon, which needs either
 # a native implementation or Qt Widgets to fall back to. Under QT_QPA_PLATFORM=
@@ -491,6 +494,9 @@ target_include_directories(test_qml_ui PRIVATE . ui ../include)
 # GuiPrivate for one thing only: standing in for the platform theme, so a test can
 # say what Qt reports about light and dark (see QtSays in test_qml_ui.cpp).
 target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
+# And the real DesktopChrome, for bringWindowForward(), which needs a window to act
+# on; the QML itself is given MockDesktop.
+target_link_libraries(test_qml_ui PRIVATE ft_desktop)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
@@ -561,6 +567,7 @@ set(BACKEND_TEST_SOURCES
     test_integration_backend_vpn.cpp
     helper_ipc_mock_server.cpp
     helper_ipc_mock_server.h
+    ../i18n/i18n.qrc
     ../src/app/Backend.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp

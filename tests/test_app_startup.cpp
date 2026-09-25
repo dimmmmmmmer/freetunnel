@@ -10,10 +10,12 @@
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QGuiApplication>
+#include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QSettings>
+#include <QWindow>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTranslator>
@@ -35,8 +37,11 @@ private slots:
     void quitFilterEmitsShutdown();
     void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
+    void applyLanguageLoadsQtsOwnRussianToo();
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
+    void aSecondLaunchBringsTheWindowBack();
+    void aForwardedToggleLeavesTheWindowAlone();
     void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
@@ -141,6 +146,24 @@ void TestAppStartup::applyLanguageLoadsRussian()
     freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("en"));
     QVERIFY2(translator == nullptr, "the Russian translator outlived the switch back to English");
     QCOMPARE(QCoreApplication::translate("Backend", "Connected"), sourceText);
+}
+
+// Qt's own words — the drawn file dialog's Open, Save and Cancel, the macOS
+// application menu — come from Qt's catalogues, which were never loaded: the
+// dialog had a Russian title over English buttons.
+void TestAppStartup::applyLanguageLoadsQtsOwnRussianToo()
+{
+    const QString dir = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+    if (!QFile::exists(dir + QStringLiteral("/qtbase_ru.qm")))
+        QSKIP("this Qt was installed without its translations");
+    QQmlApplicationEngine engine;
+    QTranslator *translator = nullptr;
+    QCOMPARE(QCoreApplication::translate("QPlatformTheme", "Cancel"), QStringLiteral("Cancel"));
+    freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("ru"));
+    const QString russian = QCoreApplication::translate("QPlatformTheme", "Cancel");
+    QVERIFY2(!russian.isEmpty() && russian.at(0).script() == QChar::Script_Cyrillic, qPrintable(russian));
+    freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("en"));
+    QCOMPARE(QCoreApplication::translate("QPlatformTheme", "Cancel"), QStringLiteral("Cancel"));
 }
 
 QString TestAppStartup::instanceSocketName(const QString &suffix)
@@ -355,6 +378,55 @@ void TestAppStartup::wireInstanceServerForwardsCommand()
     QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, 10000);
     QCOMPARE(imports.count(), 1); // still one — connect is not an import
     QCOMPARE(errors.at(0).at(0).toString(), Backend::tr("Select a config first"));
+}
+
+// A plain second launch sends "focus": the user asking for the window, from
+// another process. A window our close button minimised has to come back — a
+// raise alone left it minimised.
+void TestAppStartup::aSecondLaunchBringsTheWindowBack()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("focus"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    freetunnel::wireInstanceServer(&server, backend, &window, QStringLiteral("tok"));
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"), QStringLiteral("focus")));
+    QTRY_VERIFY_WITH_TIMEOUT(!(window.windowStates() & Qt::WindowMinimized), 10000);
+    QVERIFY(window.isVisible());
+}
+
+// freetunnel://toggle comes from a keyboard shortcut, a script or a Stream Deck,
+// and acts silently, as the in-app hotkeys do. Bringing the window up for it took
+// focus from whatever the user was typing into.
+void TestAppStartup::aForwardedToggleLeavesTheWindowAlone()
+{
+    Backend backend;
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("toggle"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    freetunnel::wireInstanceServer(&server, backend, &window, QStringLiteral("tok"));
+    // With no config to connect, the toggle answers with an error: the sign that
+    // the command arrived and was acted on.
+    QSignalSpy handled(&backend, &Backend::errorOccurred);
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(QStringLiteral("tok"),
+                                                                QStringLiteral("freetunnel://toggle")));
+    QTRY_VERIFY_WITH_TIMEOUT(handled.count() > 0, 10000);
+    QCoreApplication::processEvents();
+    QVERIFY2(window.windowStates() & Qt::WindowMinimized, "a toggle brought the window up");
 }
 
 // A peer whose first bytes are slow to arrive must still be heard. The listener
