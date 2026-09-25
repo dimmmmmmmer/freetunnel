@@ -1903,6 +1903,8 @@ void TestQmlUi::aToastOnHomeKeepsOffTheSelectorAndTheTiles()
     QVERIFY2(!sceneRect(toast).intersects(selector), qPrintable(describe()));
     QVERIFY2(sceneRect(toast).top() <= tileRow.top() && sceneRect(toast).bottom() >= tileRow.bottom(),
              qPrintable(describe()));
+    // And opaque, or the tiles show through it.
+    QTRY_COMPARE(toast->opacity(), 1.0);
     delete root;
 }
 
@@ -2097,6 +2099,10 @@ void TestQmlUi::popupsCloseWhenTheWindowIsResized()
         QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
         QVERIFY(picker->property("open").toBool());
         page->setWidth(520);
+        QVERIFY2(!picker->property("open").toBool(), "the config picker stayed open");
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QVERIFY(picker->property("open").toBool());
+        page->setHeight(600);
         QVERIFY2(!picker->property("open").toBool(), "the config picker stayed open");
         delete root;
     }
