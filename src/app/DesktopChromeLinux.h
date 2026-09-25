@@ -29,4 +29,10 @@ constexpr int kPortalReadTimeoutMs = 1000;
 // Wayland, with no window, or when the window manager does not advertise support.
 bool showX11WindowMenu(QWindow *window);
 
+// Ask the X11 window manager to activate the window — restore, raise, focus — as
+// a request made on the user's behalf, with the current server time. False on
+// native Wayland, with no window, or when the window manager does not support
+// _NET_ACTIVE_WINDOW.
+bool activateX11Window(QWindow *window);
+
 } // namespace freetunnel

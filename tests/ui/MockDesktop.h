@@ -34,8 +34,10 @@ public:
     }
 
     Q_INVOKABLE bool showWindowMenu(QObject *) { ++menuRequests; return false; }
+    Q_INVOKABLE void bringToFront(QObject *) { ++bringRequests; }
 
     int menuRequests = 0;
+    int bringRequests = 0;
 
 signals:
     void changed();

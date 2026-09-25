@@ -33,9 +33,7 @@ compare link at the bottom of its release notes.
   - **macOS 26 and 27:** the window buttons and corners now match other current
     apps, where they looked like an older macOS. The app icon has a dark
     rounded-square background of its own, so macOS no longer puts it inside a
-    grey one. The menu-bar icon is drawn the way the system's own are: it follows
-    a light or dark menu bar, and it is filled while connected and outlined while
-    not. Dragging the window by its top edge works on a trackpad, and
+    grey one. Dragging the window by its top edge works on a trackpad, and
     double-clicking there zooms or minimises it as set in System Settings.
   - **Windows:** the window no longer gives up what Windows gives an ordinary
     window. It has a shadow, and on Windows 11 rounded corners. It snaps when you
@@ -64,6 +62,12 @@ compare link at the bottom of its release notes.
 
 ### Fixed
 
+- **Linux: «Show FreeTunnel» in the tray menu did not bring the window back** on
+  GNOME and Pop!_OS, and neither did starting FreeTunnel again while it was
+  running. The window stayed minimised and only asked for attention: the request
+  reached the app from the panel rather than as a click on the window, and the
+  window manager took it for another program trying to steal focus. It now comes
+  forward, and a window closed while maximised comes back maximised.
 - **Linux: the "System" theme showed a light window on a dark desktop** on GNOME
   and Pop!_OS. It follows the desktop's light or dark setting now, including when
   you switch it while the app is open. Other desktops are followed the same way

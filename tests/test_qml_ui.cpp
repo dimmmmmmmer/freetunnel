@@ -5,6 +5,7 @@
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
+#include <QWindow>
 #include <QtGui/private/qguiapplication_p.h>
 #include <qpa/qplatformtheme.h>
 #include <qpa/qwindowsysteminterface.h>
@@ -17,6 +18,7 @@
 
 #include "ui/MockBackend.h"
 #include "ui/MockDesktop.h"
+#include "app/DesktopChrome.h"
 #include "ui/MockShell.h"
 #include "ui/UiTheme.h"
 
@@ -46,6 +48,8 @@ private slots:
     void titleBarClicksDoWhatTheDesktopSays();
     void aTitleBarPressIsNotYetAMove();
     void theDesktopDecidesDarkOnlyWhenQtCannot();
+    void showFreeTunnelInTheTrayMenuBringsTheWindowForward();
+    void aMinimisedWindowIsBroughtBack();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -908,6 +912,47 @@ void TestQmlUi::theDesktopDecidesDarkOnlyWhenQtCannot()
     m_backend.setThemeMode(QStringLiteral("dark"));
     m_desktop.setProperty("colorScheme", QVariant::fromValue(Qt::ColorScheme::Unknown));
     delete root;
+}
+
+// The tray menu's «Show FreeTunnel» is the user asking for the window from outside
+// it, and goes through the path that handles that — see bringWindowForward().
+void TestQmlUi::showFreeTunnelInTheTrayMenuBringsTheWindowForward()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QObject *show = nullptr;
+    const auto candidates = root->findChildren<QObject *>();
+    for (QObject *o : candidates) {
+        if (o->property("text").toString() == QStringLiteral("Show FreeTunnel")
+            && o->metaObject()->indexOfSignal("triggered()") >= 0)
+            show = o;
+    }
+    QVERIFY2(show, "the tray menu has a «Show FreeTunnel» item");
+    const int before = m_desktop.bringRequests;
+    QVERIFY(QMetaObject::invokeMethod(show, "triggered"));
+    QCOMPARE(m_desktop.bringRequests, before + 1);
+    delete root;
+}
+
+// Our own close button minimises. Brought back, the window has to be neither
+// minimised nor robbed of being maximised, which show() — showNormal() in Qt 6.8 —
+// would do. (Whether the window manager then lets it come forward is X11's part,
+// and needs a real desktop to see.)
+void TestQmlUi::aMinimisedWindowIsBroughtBack()
+{
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    QVERIFY(window.windowStates() & Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QVERIFY(!(window.windowStates() & Qt::WindowMinimized));
+    QVERIFY(window.isVisible());
+
+    // And a window minimised from maximised comes back maximised.
+    window.setWindowStates(Qt::WindowMaximized | Qt::WindowMinimized);
+    freetunnel::bringWindowForward(&window);
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
 }
 
 int main(int argc, char *argv[])

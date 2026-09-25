@@ -491,6 +491,9 @@ target_include_directories(test_qml_ui PRIVATE . ui ../include)
 # GuiPrivate for one thing only: standing in for the platform theme, so a test can
 # say what Qt reports about light and dark (see QtSays in test_qml_ui.cpp).
 target_link_libraries(test_qml_ui PRIVATE Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
+# And the real DesktopChrome, for bringWindowForward(), which needs a window to act
+# on; the QML itself is given MockDesktop.
+target_link_libraries(test_qml_ui PRIVATE ft_desktop)
 if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()

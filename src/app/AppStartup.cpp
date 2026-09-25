@@ -206,7 +206,8 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
             return;
         be->handleControl(cmd);
-        raiseMainWindow(win);
+        // A second launch is the user asking for the window, from outside it.
+        freetunnel::bringWindowForward(win);
     };
 
     QObject::connect(idle, &QTimer::timeout, c, deliver);

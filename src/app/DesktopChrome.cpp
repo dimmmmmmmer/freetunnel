@@ -137,6 +137,28 @@ void DesktopChrome::applySetting(const QString &ns, const QString &key, const QV
         emit changed();
 }
 
+void bringWindowForward(QWindow *window)
+{
+    if (!window)
+        return;
+    if (window->windowStates() & Qt::WindowMinimized)
+        window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
+    // setVisible, not show(): show() is showNormal() here, and a window minimised
+    // from maximised would come back no longer maximised.
+    window->setVisible(true);
+    window->raise();
+#ifdef Q_OS_LINUX
+    if (activateX11Window(window))
+        return;
+#endif
+    window->requestActivate();
+}
+
+void DesktopChrome::bringToFront(QObject *window)
+{
+    bringWindowForward(qobject_cast<QWindow *>(window));
+}
+
 bool DesktopChrome::showWindowMenu(QObject *window)
 {
 #ifdef Q_OS_LINUX

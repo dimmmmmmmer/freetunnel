@@ -237,6 +237,77 @@ bool showX11WindowMenu(QWindow *window)
     return true;
 }
 
+namespace {
+
+// Now, in X server time. The way ICCCM gives for getting one: change a property
+// on a window of your own and read the time off the PropertyNotify that follows.
+// Done on a connection of its own, so the event never passes through Qt's queue.
+// CurrentTime (0) if that connection cannot be made.
+xcb_timestamp_t currentServerTime()
+{
+    xcb_connection_t *c = xcb_connect(nullptr, nullptr);
+    xcb_timestamp_t now = XCB_CURRENT_TIME;
+    if (xcb_connection_has_error(c) == 0) {
+        const xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+        const xcb_window_t probe = xcb_generate_id(c);
+        const uint32_t events = XCB_EVENT_MASK_PROPERTY_CHANGE;
+        xcb_create_window(c, XCB_COPY_FROM_PARENT, probe, screen->root, 0, 0, 1, 1, 0,
+                          XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK,
+                          &events);
+        xcb_change_property(c, XCB_PROP_MODE_APPEND, probe, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, 0,
+                            nullptr);
+        xcb_flush(c);
+        while (xcb_generic_event_t *event = xcb_wait_for_event(c)) {
+            const bool notify = (event->response_type & 0x7f) == XCB_PROPERTY_NOTIFY;
+            if (notify)
+                now = reinterpret_cast<const xcb_property_notify_event_t *>(event)->time;
+            std::free(event);
+            if (notify)
+                break;
+        }
+        xcb_destroy_window(c, probe);
+    }
+    xcb_disconnect(c);
+    return now;
+}
+
+} // namespace
+
+bool activateX11Window(QWindow *window)
+{
+    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+    if (!x11 || !window)
+        return false; // native Wayland, or not a GUI application
+    xcb_connection_t *c = x11->connection();
+    if (!c)
+        return false;
+    const auto win = static_cast<xcb_window_t>(window->winId());
+    xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(c, xcb_get_geometry(c, win), nullptr);
+    if (!geometry)
+        return false;
+    const xcb_window_t root = geometry->root;
+    std::free(geometry);
+    const xcb_atom_t active = internAtom(c, "_NET_ACTIVE_WINDOW");
+    if (active == XCB_ATOM_NONE || !windowManagerSupports(c, root, active))
+        return false;
+
+    xcb_client_message_event_t event{};
+    event.response_type = XCB_CLIENT_MESSAGE;
+    event.format = 32;
+    event.window = win;
+    event.type = active;
+    // Source indication 2: "a pager or other client that represents direct user
+    // actions" (EWMH), which a menu item the user just chose is. Mutter also always
+    // raises for these, rather than only when raise-on-click is on.
+    event.data.data32[0] = 2;
+    event.data.data32[1] = currentServerTime();
+    event.data.data32[2] = XCB_NONE;
+    xcb_send_event(c, 0, root, XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
+                   reinterpret_cast<const char *>(&event));
+    xcb_flush(c);
+    return true;
+}
+
 } // namespace freetunnel
 
 #include "DesktopChromeLinux.moc"
