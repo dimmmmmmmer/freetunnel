@@ -309,6 +309,10 @@
         <source>Update downloaded — install it from the disk image that opened</source>
         <translation>Обновление загружено — установите его из открывшегося образа диска</translation>
     </message>
+    <message>
+        <source>Update downloaded to %1 — install it with your package manager.</source>
+        <translation>Обновление загружено в %1 — установите его через менеджер пакетов.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>

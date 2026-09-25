@@ -18,12 +18,31 @@
 
 // ---------- updater ----------
 
+// Whether installing this release closes FreeTunnel, taking the tunnel down with
+// it: on Windows the installer replaces it, and an AppImage is replaced and then
+// restarted (applyLinuxUpdate). A function rather than a constant per platform:
+// a lambda that captures a constant is a warning to clang, an error under -Werror.
+static bool installingClosesTheApp(const UpdateChecker::ReleaseInfo &info)
+{
+#if defined(Q_OS_WIN)
+    Q_UNUSED(info)
+    return true;
+#elif defined(Q_OS_MACOS)
+    Q_UNUSED(info)
+    return false;
+#else
+    return info.assetName.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)
+            && !freetunnel::runningAppImagePath().isEmpty();
+#endif
+}
+
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 // Open the folder holding the verified download, so "we could not install this
-// for you" comes with the file rather than just a path in a label.
-static void revealDownload(const QString &path)
+// for you" comes with the file rather than just a path in a label. False when
+// there was nothing to open it with.
+static bool revealDownload(const QString &path)
 {
-    QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
+    return QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
 }
 
 // Install a verified Linux download, or say honestly that we cannot.
@@ -41,12 +60,24 @@ void Backend::applyLinuxUpdate(const QString &path)
         // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
         // that is the package manager's job, and doing it silently would need root.
         // Show the file and say so, instead of claiming success.
+        if (!revealDownload(path)) {
+            // Nothing to show it with: say where it is, and offer the release
+            // page, as the row does for a release it cannot install. The row
+            // is otherwise inert once an update is downloaded.
+            m_updateState = QStringLiteral("error");
+            m_updateErrorFromDownload = false;
+            m_updateErrorOpensPage = true;
+            setUpdateMessage([path] {
+                return tr("Update downloaded to %1 — install it with your package manager.").arg(path);
+            });
+            emit updateChanged();
+            return;
+        }
         setUpdateMessage([] {
             return tr("Update downloaded. Finish installing it from the file manager — "
                       "packages are installed by your package manager.");
         });
         emit updateChanged();
-        revealDownload(path);
         return;
     }
 
@@ -130,17 +161,8 @@ void Backend::wireUpdaterSignals()
                 m_latestVersion = info.version;
                 m_latestUrl = info.htmlUrl;
                 const QString version = info.version;
-                // Installing closes FreeTunnel on Windows (the installer replaces
-                // it) and for an AppImage (replaced, then restarted), and the
-                // tunnel goes down with it. Said before the click, not after.
-#if defined(Q_OS_WIN)
-                const bool closesApp = true;
-#elif defined(Q_OS_MACOS)
-                const bool closesApp = false;
-#else
-                const bool closesApp = info.assetName.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)
-                        && !freetunnel::runningAppImagePath().isEmpty();
-#endif
+                // Said before the click, not after.
+                const bool closesApp = installingClosesTheApp(info);
                 setUpdateMessage([version, closesApp] {
                     return closesApp ? tr("Version %1 is available — installing it closes FreeTunnel").arg(version)
                                      : tr("Version %1 is available").arg(version);

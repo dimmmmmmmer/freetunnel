@@ -135,6 +135,7 @@ private slots:
     void theEditorsBackArrowTakesANearMiss();
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
+    void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -3241,6 +3242,56 @@ void TestQmlUi::thePickerWaitsForTheScanWithoutFreezing()
     // What was typed while it waited is applied to the list that arrived.
     QVERIFY(!textIn(page, QStringLiteral("Some App")));
     QVERIFY(!textIn(page, QStringLiteral("Looking for installed applications…")));
+    delete root;
+}
+
+namespace {
+
+// A click at a moment of the test's choosing. QTest spaces its clicks so that two
+// never make a double-click; a person's second click comes a moment after the
+// first, and that is the case to test. On QTest's own clock, moved on past it.
+void clickAt(QWindow *window, QPoint at, int timestamp)
+{
+    const QPointF global = window->mapToGlobal(QPointF(at));
+    QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
+            window, ulong(timestamp), QPointF(at), global, Qt::LeftButton, Qt::LeftButton,
+            QEvent::MouseButtonPress);
+    QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
+            window, ulong(timestamp + 20), QPointF(at), global, Qt::NoButton, Qt::LeftButton,
+            QEvent::MouseButtonRelease);
+    QTest::lastMouseTimestamp = timestamp + 20 + QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+}
+
+} // namespace
+
+// With no configs, the logo's first click opens the add menu, and the second of a
+// double-click landed on it: it closed the menu at once, or ran the row under the
+// pointer, which opened a file dialog or the editor, or imported the clipboard.
+void TestQmlUi::aDoubleClickThatOpensTheAddMenuLeavesItOpen()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    auto *loader = root->findChild<QObject *>(QStringLiteral("pageLoader"));
+    auto *logo = loader->property("item").value<QQuickItem *>()->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QVERIFY(logo);
+    const QPoint at = centreOf(logo);
+    const int start = QTest::lastMouseTimestamp + QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+
+    clickAt(window, at, start);
+    QTest::qWait(150); // the menu fades in under the pointer
+    clickAt(window, at, start + 150);
+    QTest::qWait(kHoverSettles);
+
+    QCOMPARE(root->property("currentPage").toInt(), 1);
+    auto *page = loader->property("item").value<QQuickItem *>();
+    QVERIFY(page->findChild<QObject *>(QStringLiteral("importMenu"))->property("open").toBool());
+    QCOMPARE(root->property("overlay").toString(), QString());
+    QVERIFY(!page->findChild<QObject *>(QStringLiteral("configImportDialog"))->property("visible").toBool());
     delete root;
 }
 

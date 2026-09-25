@@ -295,7 +295,11 @@ Item {
                             required property var modelData
                             required property int index
                             width: apSuggestList.width; height: 42; radius: 6
-                            color: index === apSuggest.highlighted ? theme.surface : "transparent"
+                            // Faded like the rows of the other lists, from the box's own
+                            // colour: from "transparent", black with no alpha, it would
+                            // pass through grey.
+                            color: index === apSuggest.highlighted ? theme.surface : theme.bg
+                            Behavior on color { ColorAnimation { duration: 120 } }
                             Column {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left; anchors.leftMargin: 8

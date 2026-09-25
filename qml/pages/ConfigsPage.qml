@@ -261,9 +261,12 @@ Item {
         function onConfigsChanged() { cfgList.endDrag() }
     }
     // Click-away backdrop + Esc to dismiss the import menu. It takes hover too, so
-    // what it covers does not light up for a click that only closes the menu.
+    // what it covers does not light up for a click that only closes the menu. A
+    // double-click is taken whole (here and by the rows): Home's logo, + and "Add a
+    // config" open this menu on their first click, and the second landed on it,
+    // closing it at once or running whichever row was under the pointer.
     MouseArea { anchors.fill: parent; z: 9; visible: importMenu.open; hoverEnabled: true
-                onClicked: importMenu.open = false }
+                onClicked: importMenu.open = false; onDoubleClicked: {} }
     // Same standing-down rule as everywhere else: a confirm dialog opened over
     // this menu (a deep link can do that unprompted) owns Escape, and leaving both
     // enabled makes Qt call the press ambiguous and run neither.
@@ -302,7 +305,8 @@ Item {
                 Text { id: mrLbl; anchors.verticalCenter: parent.verticalCenter; x: 9
                        width: parent.width - 18; elide: Text.ElideRight
                        color: theme.text; font.pixelSize: 14 }
-                MouseArea { id: mrMa; anchors.fill: parent; hoverEnabled: true; onClicked: parent.triggered() }
+                MouseArea { id: mrMa; anchors.fill: parent; hoverEnabled: true; onClicked: parent.triggered()
+                            onDoubleClicked: {} }
             }
             MenuRow { id: mrPaste; text: qsTr("Paste from clipboard")
                 onTriggered: { importMenu.open = false; backend.importFromClipboard() } }

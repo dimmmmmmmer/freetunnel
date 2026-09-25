@@ -181,8 +181,14 @@ void TestBackendUpdates::theUpdateLineFollowsALanguageChange()
     QCoreApplication::installTranslator(&russian);
     const auto remove = qScopeGuard([&russian] { QCoreApplication::removeTranslator(&russian); });
     backend.retranslate();
+    // On Windows the line also says that installing closes FreeTunnel.
+#if defined(Q_OS_WIN)
+    const char *source = "Version %1 is available — installing it closes FreeTunnel";
+#else
+    const char *source = "Version %1 is available";
+#endif
     QCOMPARE(backend.updateMessage(),
-             QCoreApplication::translate("Backend", "Version %1 is available").arg(QStringLiteral("99.0.0")));
+             QCoreApplication::translate("Backend", source).arg(QStringLiteral("99.0.0")));
     QVERIFY2(backend.updateMessage() != english, "the catalogue has no Russian for it");
 }
 

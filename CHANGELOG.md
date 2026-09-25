@@ -42,8 +42,10 @@ compare link at the bottom of its release notes.
   - The download arrow tipped onto its side under the pointer, and the retry
     arrow turned against its own direction. They stay upright now.
   - Once an update was downloaded, the arrow and the line beside it both opened
-    the release web page. They no longer offer anything after the download: the
-    installer, the disk image or the folder has already been opened.
+    the release web page. After the download they offer nothing more: the
+    installer, the disk image or the folder with the file has been opened. On
+    Linux, where there is no file manager to show the folder, the line says where
+    the file is and offers the release page.
   - After a failed download the row offers what can help. A release with nothing
     for your system offers its page (↗). One that is unsigned, or whose
     signature does not match, is checked for again rather than downloaded again.
