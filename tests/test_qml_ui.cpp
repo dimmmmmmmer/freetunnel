@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QScopeGuard>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
@@ -76,6 +77,8 @@ private slots:
     void aLongHostnameWrapsInsideTheConfirm();
     void aClickInsideTheConfirmCardDoesNotCancelIt();
     void threeButtonsStayInsideTheConfirmCard();
+    void aShortQuestionGetsANarrowCard();
+    void aTwoLineToastIsAsWideAsItsLongestLine();
     void theWindowConfirmOwnsTheKeysOverTheEditorsPrompt();
     void escapeStandsDownForTheEditorsFileDialog();
     void tabMovesThroughTheEditorsFields();
@@ -1628,6 +1631,64 @@ void TestQmlUi::threeButtonsStayInsideTheConfirmCard()
     QTRY_VERIFY2(inside(), "full-size buttons run into the card's edges");
     window.resize(int(row * 0.8), 400); // not enough for them at all
     QTRY_VERIFY2(inside(), "compact buttons run into the card's edges");
+    delete root;
+}
+
+namespace {
+
+// The widest line of a message, as a QML Text of that pixel size lays it out.
+qreal widestLine(const QString &text, int pixelSize)
+{
+    QFont font = QGuiApplication::font();
+    font.setPixelSize(pixelSize);
+    const QFontMetricsF metrics(font);
+    qreal widest = 0;
+    for (const QString &line : text.split(QLatin1Char('\n')))
+        widest = std::max(widest, metrics.horizontalAdvance(line));
+    return widest;
+}
+
+} // namespace
+
+// The card was sized from TextMetrics, which takes a message as one line,
+// newlines and all: the two-line import question was sized as both lines end to
+// end, and the card spread across the window around a short text.
+void TestQmlUi::aShortQuestionGetsANarrowCard()
+{
+    QObject *root = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 400));
+    const QString message = QStringLiteral("Import it?\nServer: a.example");
+    root->setProperty("text", message);
+    root->setProperty("confirmText", QStringLiteral("Import"));
+    QMetaObject::invokeMethod(root, "open");
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("confirmCard"));
+    auto *cancel = root->findChild<QQuickItem *>(QStringLiteral("cancelButton"));
+    auto *confirm = root->findChild<QQuickItem *>(QStringLiteral("confirmButton"));
+    QVERIFY(card && cancel && confirm);
+    const qreal buttons = cancel->width() + 8 + confirm->width();
+    const qreal fits = std::max(buttons, widestLine(message, 14)) + 28;
+    QTRY_VERIFY2(card->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px card for %2 px of content").arg(card->width()).arg(fits)));
+    delete root;
+}
+
+// The toast was sized the same way.
+void TestQmlUi::aTwoLineToastIsAsWideAsItsLongestLine()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    const QString message = QStringLiteral("Could not import.\nTry again.");
+    QMetaObject::invokeMethod(root, "showToast", Q_ARG(QVariant, message));
+    const qreal fits = std::max<qreal>(80, widestLine(message, 13) + 24);
+    QTRY_VERIFY2(toast->width() <= fits + 2,
+                 qPrintable(QStringLiteral("a %1 px toast for %2 px of text").arg(toast->width()).arg(fits)));
     delete root;
 }
 

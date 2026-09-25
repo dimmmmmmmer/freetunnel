@@ -687,9 +687,11 @@ Window {
         property string message: ""
         // Shown while the window was away; its three seconds start when it is back.
         property bool waiting: false
-        TextMetrics { id: toastMetrics; font.pixelSize: 13 }
+        // The message's natural width, its widest line, from a Text of its own:
+        // TextMetrics takes text as one line, newlines and all, and tmsg's width is
+        // bound to the toast's.
+        Text { id: toastNatural; visible: false; text: toast.message; font.pixelSize: 13 }
         function show(m) {
-            toastMetrics.text = m
             message = m
             opacity = 0.97
             waiting = !win.onScreen
@@ -703,9 +705,7 @@ Window {
         // the card's Save and Cancel, and took the click meant for them just when
         // an error had asked the user to fix a field and save again.
         y: win.overlay !== "" ? win.titlebarSafeTop + 8 : parent.height - height - 26
-        // Size to the message text (TextMetrics), not tmsg.implicitWidth — binding
-        // tmsg.width to toast.width made implicitWidth inflate and left empty margins.
-        width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastMetrics.boundingRect.width) + 24))
+        width: Math.min(parent.width - 36, Math.max(80, Math.ceil(toastNatural.implicitWidth) + 24))
         height: Math.max(40, tmsg.contentHeight + 18)
         radius: 9; color: theme.surface; border.color: theme.border; border.width: 1
         opacity: 0; visible: opacity > 0

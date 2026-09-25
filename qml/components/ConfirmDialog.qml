@@ -39,7 +39,11 @@ Item {
             back.forceActiveFocus()
     }
 
-    TextMetrics { id: cdMetrics; font.pixelSize: 14; text: cd.text }
+    // The message's natural width: its widest line. Not TextMetrics, which takes
+    // text as one line, newlines and all, so a two-line question was sized as both
+    // lines end to end and the card spread across the window around a short text.
+    // A Text of its own, not cdText, whose width is bound to the card's.
+    Text { id: cdNatural; visible: false; text: cd.text; font.pixelSize: 14 }
 
     // Buttons cannot wrap the way text does. When the row is wider than the card
     // can be, the buttons give up their padding and minimum width, and a label
@@ -70,7 +74,7 @@ Item {
         width: Math.min(parent.width - 24,
                         Math.max(btnRow.implicitWidth + 28,
                                  Math.min(parent.width - 56,
-                                          Math.ceil(cdMetrics.boundingRect.width) + 28)))
+                                          Math.ceil(cdNatural.implicitWidth) + 28)))
         height: cdCol.implicitHeight + 24
         radius: 12; color: theme.bg; border.color: theme.border; border.width: 1
         // A click on the card is not a click on the backdrop behind it: it used
