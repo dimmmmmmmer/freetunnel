@@ -456,7 +456,12 @@ void Backend::applySplitRules() {
     // point can forget it. It only fires in the misconfigured state, and every
     // caller is a moment the user just acted (toggled split, edited rules, changed
     // mode, switched profile, connected), which is exactly when it is useful.
-    if (selectiveModeWouldLeak()) {
+    //
+    // Only while the Split page is on the profile concerned. What leaks is the
+    // active config's profile, not the one on screen, and a toast after each rule
+    // added to another profile read as though the rule just added did not count.
+    // The page's standing notice names both, whichever profile is shown.
+    if (selectiveModeWouldLeak() && m_settings.active_profile == activeConfigProfile()) {
         emit errorOccurred(tr("\"Through VPN\" has no rules, so nothing would be routed through "
                               "the tunnel. Keeping the full tunnel until you add a rule."));
     }

@@ -16,9 +16,15 @@ Item {
                    text: qsTr("Clear"); font.pixelSize: 13
                    color: clrMa.containsMouse ? theme.text : theme.accent
                    font.underline: clrMa.containsMouse }
-            MouseArea { id: clrMa; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+            MouseArea { id: clrMa; objectName: "clearLogs"; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         width: clrTxt.implicitWidth + 8; height: 22; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: backend.clearLogs() }
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            backend.clearLogs()
+                            // Now, not through the refresh, which holds off while text
+                            // is selected: Clear left the old log on screen.
+                            logView.text = backend.logText()
+                        } }
             Text { id: cpyTxt; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                    text: qsTr("Copy"); font.pixelSize: 13
                    color: cpyMa.containsMouse ? theme.text : theme.accent
@@ -28,11 +34,25 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: { backend.copyToClipboard(backend.logText()); shell.showToast(qsTr("Log copied")) } }
         }
+        // Logging off: nothing new will be written, so the page says so instead of
+        // showing old lines as if they were current, or promising new ones.
+        RowLayout {
+            objectName: "loggingOffNotice"
+            visible: !backend.loggingEnabled
+            Layout.fillWidth: true; spacing: 8
+            Text { Layout.fillWidth: true; text: qsTr("Logging is off."); color: theme.warn
+                   font.pixelSize: 12; wrapMode: Text.WordWrap }
+            Text { text: qsTr("Turn on"); font.pixelSize: 12
+                   color: onMa.containsMouse ? theme.text : theme.accent; font.underline: onMa.containsMouse
+                   MouseArea { id: onMa; objectName: "turnLoggingOn"; anchors.fill: parent; hoverEnabled: true
+                               cursorShape: Qt.PointingHandCursor; onClicked: backend.loggingEnabled = true } }
+        }
         Rectangle {
             Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: theme.surface
             clip: true
             Text {
-                anchors.centerIn: parent; visible: backend.logModel.count === 0
+                objectName: "logsPlaceholder"
+                anchors.centerIn: parent; visible: backend.logModel.count === 0 && backend.loggingEnabled
                 text: qsTr("Logs will appear after connecting"); color: theme.textFaint; font.pixelSize: 13
             }
             // One plain-text editor for the whole log (not a virtualized list) so
@@ -48,6 +68,7 @@ Item {
                 function toBottom() { if (autoScroll) contentY = Math.max(0, contentHeight - height) }
                 TextEdit {
                     id: logView
+                    objectName: "logView"
                     width: logFlick.width
                     readOnly: true; selectByMouse: true; persistentSelection: true
                     wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
@@ -55,14 +76,23 @@ Item {
                     color: theme.text; selectionColor: theme.accent
                     Component.onCompleted: text = backend.logText()
                     onTextChanged: Qt.callLater(logFlick.toBottom)
+                    // Catch up once the selection that held the view is dropped.
+                    // Nothing retried before, so the view stayed stale for good.
+                    onSelectedTextChanged: if (selectedText === "" && logRefresh.behind) logRefresh.start()
                 }
             }
-            // Coalesce model growth into at most one text rebuild per interval; skip
-            // while the user holds a selection so a live update can't wipe it.
+            // Coalesce model growth into at most one text rebuild per interval; hold
+            // off while the user holds a selection so a live update can't wipe it.
+            // An emptied log is shown at once, selection or not.
             Timer {
                 id: logRefresh; interval: 180
-                onTriggered: if (logView.selectionStart === logView.selectionEnd)
-                                 logView.text = backend.logText()
+                property bool behind: false
+                onTriggered: {
+                    behind = logView.selectionStart !== logView.selectionEnd
+                            && backend.logModel.count > 0
+                    if (!behind)
+                        logView.text = backend.logText()
+                }
             }
             Connections {
                 target: backend.logModel

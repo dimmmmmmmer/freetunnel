@@ -1,12 +1,15 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <cmath>
+
 #include <QDirIterator>
 #include <QPointer>
 #include <QScopeGuard>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QStyleHints>
+#include <QTranslator>
 #include <QWindow>
 #include <QtGui/private/qguiapplication_p.h>
 #include <qpa/qplatformsystemtrayicon.h>
@@ -73,6 +76,14 @@ private slots:
     void escapeStandsDownForTheEditorsFileDialog();
     void tabMovesThroughTheEditorsFields();
     void aToastStaysOffTheEditorsButtons();
+    void clearEmptiesTheLogEvenWithASelection();
+    void aHeldLogCatchesUpWhenTheSelectionGoes();
+    void theLogsPageSaysWhenLoggingIsOff();
+    void theUpdateLineDoesWhatItOffers();
+    void restoringDefaultRoutesAsksFirst();
+    void theThroughVpnNoticeNamesTheConfigAndItsProfile();
+    void theBuiltInProfileIsShownInTheUsersLanguage();
+    void textOnTheAccentIsReadableInTheDarkTheme();
     void everyComponentLoadsOnItsOwn();
     void everyComponentLoadsOnItsOwn_data();
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
@@ -1594,6 +1605,202 @@ void TestQmlUi::aToastStaysOffTheEditorsButtons()
     QVERIFY2(toast->y() + toast->height() < window->height() / 2.0, "over the editor, the toast is at the top");
     root->setProperty("overlay", QString());
     QVERIFY(toast->y() > window->height() / 2.0);
+    delete root;
+}
+
+namespace {
+
+// A text's line count and what it shows, as far as a test can see it.
+QString shown(QObject *text) { return text ? text->property("text").toString() : QString(); }
+
+// WCAG relative luminance, for a contrast check that means what it says.
+double luminance(const QColor &c)
+{
+    const auto channel = [](double v) {
+        return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF());
+}
+
+double contrast(const QColor &a, const QColor &b)
+{
+    const double la = luminance(a);
+    const double lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+} // namespace
+
+// The view keeps its text while a selection is held, so a live update cannot
+// wipe what the user is copying. Clear honoured that too, and left the whole old
+// log on screen with "Logs will appear after connecting" drawn over it.
+void TestQmlUi::clearEmptiesTheLogEvenWithASelection()
+{
+    m_backend.appendLog(QStringLiteral("a line to select"));
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *view = root->findChild<QQuickItem *>(QStringLiteral("logView"));
+    auto *clear = root->findChild<QQuickItem *>(QStringLiteral("clearLogs"));
+    QVERIFY(view && clear);
+    QVERIFY(!shown(view).isEmpty());
+    QMetaObject::invokeMethod(view, "selectAll");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(clear));
+    QVERIFY2(shown(view).isEmpty(), "Clear left the old log on screen");
+    delete root;
+}
+
+// And nothing retried once the selection went, so the view stayed stale for good.
+void TestQmlUi::aHeldLogCatchesUpWhenTheSelectionGoes()
+{
+    m_backend.appendLog(QStringLiteral("before"));
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *view = root->findChild<QQuickItem *>(QStringLiteral("logView"));
+    QVERIFY(view);
+    QMetaObject::invokeMethod(view, "selectAll");
+    m_backend.appendLog(QStringLiteral("arrived while selected"));
+    QTest::qWait(400); // past the refresh interval
+    QVERIFY2(!shown(view).contains(QStringLiteral("arrived while selected")),
+             "the selection holds the view");
+    QMetaObject::invokeMethod(view, "deselect");
+    QTRY_VERIFY(shown(view).contains(QStringLiteral("arrived while selected")));
+    m_backend.clearLogs();
+    delete root;
+}
+
+// Logging off writes nothing new, and the page promised lines that never came.
+void TestQmlUi::theLogsPageSaysWhenLoggingIsOff()
+{
+    m_backend.clearLogs();
+    m_backend.setLoggingEnabled(false);
+    const auto restore = qScopeGuard([this] { m_backend.setLoggingEnabled(true); });
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *notice = root->findChild<QQuickItem *>(QStringLiteral("loggingOffNotice"));
+    auto *placeholder = root->findChild<QQuickItem *>(QStringLiteral("logsPlaceholder"));
+    auto *turnOn = root->findChild<QQuickItem *>(QStringLiteral("turnLoggingOn"));
+    QVERIFY(notice && placeholder && turnOn);
+    QVERIFY(notice->isVisible());
+    QVERIFY2(!placeholder->isVisible(), "no promise of logs that will not come");
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(turnOn));
+    QVERIFY(m_backend.loggingEnabled());
+    QVERIFY(!notice->isVisible());
+    delete root;
+}
+
+// Clicking the status line always started a new check: over "Version X is
+// available" it downloaded nothing, and mid-download it started a check that
+// then offered the same download again.
+void TestQmlUi::theUpdateLineDoesWhatItOffers()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setUpdate(QString(), QString()); });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *line = root->findChild<QQuickItem *>(QStringLiteral("updateStatus"));
+    QVERIFY(line);
+    const auto click = [&] { QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(line)); };
+
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    QCOMPARE(m_backend.updateOffersTaken, 1);
+    m_backend.setUpdate(QStringLiteral("downloading"), QStringLiteral("Downloading… 45%"));
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    QCOMPARE(m_backend.updateOffersTaken, 1);
+
+    // Long reasons wrap rather than lose their end.
+    m_backend.setUpdate(QStringLiteral("error"),
+                        QStringLiteral("Update downloaded. Finish installing it from the file manager — "
+                                       "packages are installed by your package manager."));
+    QTRY_VERIFY(line->property("lineCount").toInt() > 1);
+    QVERIFY(!line->property("truncated").toBool());
+    delete root;
+}
+
+// Restore defaults replaces the whole list with no undo, a few pixels from a
+// Clear all that asks first. It asks too now.
+void TestQmlUi::restoringDefaultRoutesAsksFirst()
+{
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *restore = root->findChild<QQuickItem *>(QStringLiteral("restoreRoutes"));
+    QVERIFY(restore);
+    m_shell.lastConfirm.clear();
+    const int before = m_backend.routeRestores;
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(restore));
+    QCOMPARE(m_backend.routeRestores, before);
+    QVERIFY2(!m_shell.lastConfirm.isEmpty(), "Restore defaults asks before replacing the list");
+    delete root;
+}
+
+// What leaks is the active config's profile, which need not be the one on the
+// page: "add a rule" under a profile that already had rules sent the user adding
+// rules that could not change anything.
+void TestQmlUi::theThroughVpnNoticeNamesTheConfigAndItsProfile()
+{
+    m_backend.setSplitEnabled(true);
+    m_backend.setVpnMode(QStringLiteral("selective"));
+    const QStringList domains = m_backend.domains();
+    m_backend.setDomains({});
+    const auto restore = qScopeGuard([this, domains] {
+        m_backend.setVpnMode(QStringLiteral("general"));
+        m_backend.setDomains(domains);
+    });
+    QVERIFY(m_backend.selectiveModeWouldLeak());
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    QObject *notice = root->findChild<QObject *>(QStringLiteral("throughVpnNotice"));
+    QVERIFY(notice);
+    QVERIFY2(shown(notice).contains(QStringLiteral("Test Config")), qPrintable(shown(notice)));
+    QVERIFY2(shown(notice).contains(QStringLiteral("Default")), qPrintable(shown(notice)));
+    delete root;
+}
+
+// The built-in profile is stored under the key "Default", and was shown as that
+// key in the Russian UI.
+void TestQmlUi::theBuiltInProfileIsShownInTheUsersLanguage()
+{
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    const auto restore = qScopeGuard([this, &russian] {
+        QCoreApplication::removeTranslator(&russian);
+        m_engine.retranslate();
+    });
+    m_engine.retranslate();
+    QObject *root = loadPage("pages/SplitPage.qml");
+    QVERIFY(root);
+    const QStringList texts = everyText(root);
+    QVERIFY2(texts.contains(QStringLiteral("По умолчанию")), qPrintable(texts.join(QLatin1String(" | "))));
+    QVERIFY(!texts.contains(QStringLiteral("Default")));
+    delete root;
+}
+
+// White on the dark theme's light-grey accent read at about 2:1, and the
+// editor's Save looked disabled next to Cancel.
+void TestQmlUi::textOnTheAccentIsReadableInTheDarkTheme()
+{
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QObject *save = root->findChild<QObject *>(QStringLiteral("saveLabel"));
+    QVERIFY(save);
+    const QColor label = save->property("color").value<QColor>();
+    const QColor fill = m_theme.property("accent").value<QColor>();
+    QVERIFY2(contrast(label, fill) >= 4.5,
+             qPrintable(QStringLiteral("contrast %1:1").arg(contrast(label, fill), 0, 'f', 1)));
     delete root;
 }
 

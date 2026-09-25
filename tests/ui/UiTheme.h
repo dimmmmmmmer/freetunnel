@@ -17,6 +17,7 @@ class UiTheme : public QObject {
     Q_PROPERTY(QColor textDim MEMBER m_textDim CONSTANT)
     Q_PROPERTY(QColor textFaint MEMBER m_textFaint CONSTANT)
     Q_PROPERTY(QColor accent MEMBER m_accent CONSTANT)
+    Q_PROPERTY(QColor onAccent MEMBER m_onAccent CONSTANT)
     Q_PROPERTY(QColor border MEMBER m_border CONSTANT)
     Q_PROPERTY(QColor toggleOff MEMBER m_toggleOff CONSTANT)
     Q_PROPERTY(QColor success MEMBER m_success CONSTANT)
@@ -39,6 +40,7 @@ private:
     QColor m_textDim = QColor(QStringLiteral("#9a9a9a"));
     QColor m_textFaint = QColor(QStringLiteral("#6a6a6a"));
     QColor m_accent = QColor(QStringLiteral("#b0b0b0"));
+    QColor m_onAccent = QColor(QStringLiteral("#181818"));
     QColor m_border = QColor(QStringLiteral("#2e2e2e"));
     QColor m_toggleOff = QColor(QStringLiteral("#3a3a3a"));
     QColor m_success = QColor(QStringLiteral("#3fbf93"));

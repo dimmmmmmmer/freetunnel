@@ -10,6 +10,8 @@
 // m_latestVersion — which is set by the first successful check and never
 // cleared.
 #include <QtTest>
+#include <QTranslator>
+#include <QScopeGuard>
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -34,10 +36,12 @@ private slots:
     void retryAfterFailedCheckChecksAgainInsteadOfDownloading();
     void backgroundCheckDoesNotPaintCheckingState();
     void asecondCheckWhileOneIsRunningIsIgnored();
+    void aCheckWaitsForARunningDownload();
+    void theUpdateLineFollowsALanguageChange();
 
 private:
     // Serve one release payload and wait for the check to settle.
-    static void serveRelease(MockHttpServer &http, const QString &tag);
+    static void serveRelease(MockHttpServer &http, const QString &tag, bool withInstaller = false);
     static bool settled(const Backend &backend);
 
     QTemporaryDir m_home;
@@ -53,7 +57,7 @@ void TestBackendUpdates::initTestCase()
     QCoreApplication::setApplicationName(QStringLiteral("BackendUpdatesTest"));
 }
 
-void TestBackendUpdates::serveRelease(MockHttpServer &http, const QString &tag)
+void TestBackendUpdates::serveRelease(MockHttpServer &http, const QString &tag, bool withInstaller)
 {
     const QString base = http.baseUrl();
     QJsonObject release;
@@ -68,6 +72,21 @@ void TestBackendUpdates::serveRelease(MockHttpServer &http, const QString &tag)
     sums[QStringLiteral("name")] = QStringLiteral("SHA256SUMS.txt");
     sums[QStringLiteral("browser_download_url")] = base + QStringLiteral("/checksums");
     assets.append(sums);
+    if (withInstaller) {
+        // Named the way this platform's installer is, so the download has something
+        // to fetch; the fetch itself is left to fail on the mock.
+#if defined(Q_OS_WIN)
+        const QString installer = QStringLiteral("freetunnel-test.exe");
+#elif defined(Q_OS_MACOS)
+        const QString installer = QStringLiteral("freetunnel-test.dmg");
+#else
+        const QString installer = QStringLiteral("freetunnel-test.AppImage");
+#endif
+        QJsonObject asset;
+        asset[QStringLiteral("name")] = installer;
+        asset[QStringLiteral("browser_download_url")] = base + QStringLiteral("/installer");
+        assets.append(asset);
+    }
     release[QStringLiteral("assets")] = assets;
 
     MockHttpServer::Route route;
@@ -108,6 +127,52 @@ void TestBackendUpdates::checkFindsNewerVersion()
 // The observation has to be the request count. Once both checks settle, the
 // state, the version and the message all read exactly the same whether one check
 // ran or two, so nothing the Backend exposes can tell them apart.
+// A check started mid-download answered "available" again and offered the same
+// download a second time, into the staging file the first one was still using.
+void TestBackendUpdates::aCheckWaitsForARunningDownload()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveRelease(http, QStringLiteral("v99.0.0"), /*withInstaller=*/true);
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    QCOMPARE(backend.updateState(), QStringLiteral("available"));
+
+    backend.downloadUpdate();
+    QCOMPARE(backend.updateState(), QStringLiteral("downloading"));
+    backend.checkForUpdates(true);
+    QCOMPARE(backend.updateState(), QStringLiteral("downloading"));
+}
+
+// The update line is worded in C++ and kept. A language switch re-rendered every
+// string in the QML and left this one in the language it was made in.
+void TestBackendUpdates::theUpdateLineFollowsALanguageChange()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveRelease(http, QStringLiteral("v99.0.0"));
+
+    Backend backend;
+    backend.checkForUpdates(true);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(backend), 10000);
+    const QString english = backend.updateMessage();
+
+    QTranslator russian;
+    QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+    QCoreApplication::installTranslator(&russian);
+    const auto remove = qScopeGuard([&russian] { QCoreApplication::removeTranslator(&russian); });
+    backend.retranslate();
+    QCOMPARE(backend.updateMessage(),
+             QCoreApplication::translate("Backend", "Version %1 is available").arg(QStringLiteral("99.0.0")));
+    QVERIFY2(backend.updateMessage() != english, "the catalogue has no Russian for it");
+}
+
 void TestBackendUpdates::asecondCheckWhileOneIsRunningIsIgnored()
 {
     MockHttpServer http;

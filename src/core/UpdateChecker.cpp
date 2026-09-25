@@ -3,6 +3,7 @@
 
 #include "core/AppImagePath.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -155,19 +156,19 @@ QString updateStagingDir()
 bool prepareStagingDir(const QString &dir, QString *error)
 {
     if (!QDir().mkpath(dir)) {
-        *error = QStringLiteral("Could not create the update download directory");
+        *error = QCoreApplication::translate("UpdateChecker", "Could not create the update download directory");
         return false;
     }
     if (!QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
                                             | QFileDevice::ExeOwner)) {
-        *error = QStringLiteral("Could not make the update download directory owner-only");
+        *error = QCoreApplication::translate("UpdateChecker", "Could not make the update download directory owner-only");
         return false;
     }
 #if defined(Q_OS_UNIX)
     struct stat st = {};
     if (::lstat(QFile::encodeName(dir).constData(), &st) != 0 || !S_ISDIR(st.st_mode)
         || st.st_uid != ::geteuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
-        *error = QStringLiteral("The update download directory is not private to this user");
+        *error = QCoreApplication::translate("UpdateChecker", "The update download directory is not private to this user");
         return false;
     }
 #endif
@@ -329,25 +330,25 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
-        emit noUpdateAvailable(QStringLiteral("Network error: %1").arg(reply->errorString()));
+        emit noUpdateAvailable(tr("Network error: %1").arg(reply->errorString()));
         return;
     }
 
     const QByteArray data = reply->readAll();
     const QJsonDocument doc = QJsonDocument::fromJson(data);
     if (!doc.isObject()) {
-        emit noUpdateAvailable(QStringLiteral("Invalid response from GitHub API"));
+        emit noUpdateAvailable(tr("Invalid response from GitHub API"));
         return;
     }
 
     const QJsonObject obj = doc.object();
     const QString tagName = obj.value("tag_name").toString();
     if (tagName.isEmpty()) {
-        emit noUpdateAvailable(QStringLiteral("No releases found"));
+        emit noUpdateAvailable(tr("No releases found"));
         return;
     }
     if (!isPlausibleTag(tagName)) {
-        emit noUpdateAvailable(QStringLiteral("Invalid response from GitHub API"));
+        emit noUpdateAvailable(tr("Invalid response from GitHub API"));
         return;
     }
 
@@ -368,6 +369,8 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     if (isVersionNewer(m_currentVersion, remoteVersion)) {
         emit updateAvailable(m_latest);
     } else {
+        // Not translated, unlike the failures: Backend tells this one from them by
+        // its text, and shows a line of its own instead.
         emit noUpdateAvailable(QStringLiteral("You are running the latest version (%1)").arg(m_currentVersion));
     }
 }
@@ -375,7 +378,7 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 void UpdateChecker::downloadLatest()
 {
     if (m_latest.installerUrl.isEmpty()) {
-        emit downloadFailed(QStringLiteral("No installer asset found for this platform"));
+        emit downloadFailed(tr("No installer asset found for this platform"));
         return;
     }
 
@@ -392,8 +395,8 @@ void UpdateChecker::downloadLatest()
     // Never install an asset we can't integrity-check. A release without a
     // SHA256SUMS.txt manifest is treated as untrusted.
     if (m_latest.checksumsUrl.isEmpty()) {
-        emit downloadFailed(QStringLiteral("This release has no SHA256SUMS.txt — refusing to "
-                                           "download an unverifiable update."));
+        emit downloadFailed(tr("This release has no SHA256SUMS.txt — refusing to "
+                               "download an unverifiable update."));
         return;
     }
     m_checksumsData.clear();
@@ -421,14 +424,14 @@ void UpdateChecker::onChecksumsFetched(QNetworkReply *reply)
 {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-        emit downloadFailed(QStringLiteral("Could not download SHA256SUMS.txt: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Could not download SHA256SUMS.txt: %1").arg(reply->errorString()));
         return;
     }
     m_checksumsData = reply->readAll();
 
     if (signatureVerificationActive()) {
         if (m_latest.signatureUrl.isEmpty()) {
-            emit downloadFailed(QStringLiteral("This release is not signed — refusing to update."));
+            emit downloadFailed(tr("This release is not signed — refusing to update."));
             return;
         }
         fetchSignature();
@@ -457,14 +460,14 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
 {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-        emit downloadFailed(QStringLiteral("Could not download the signature: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Could not download the signature: %1").arg(reply->errorString()));
         return;
     }
     m_signatureData = reply->readAll();
 
     const QByteArray pub(freetunnel::kReleaseSigningPublicKeyPem);
     if (!verifyEd25519Signature(m_checksumsData, m_signatureData, pub)) {
-        emit downloadFailed(QStringLiteral("Update signature is invalid — aborting."));
+        emit downloadFailed(tr("Update signature is invalid — aborting."));
         return;
     }
 
@@ -478,8 +481,8 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
     const QString manifestVersion = versionFromSums(m_checksumsData);
     if (!manifestVersion.isEmpty() && manifestVersion != m_latest.version) {
         emit downloadFailed(
-                QStringLiteral("This update is signed for version %1, but %2 was offered — "
-                               "aborting.")
+                tr("This update is signed for version %1, but %2 was offered — "
+                   "aborting.")
                         .arg(manifestVersion, m_latest.version));
         return;
     }
@@ -492,7 +495,7 @@ void UpdateChecker::fetchInstaller()
     m_installerOut = std::make_unique<QFile>(m_downloadPath);
     if (!createInstallerFile(*m_installerOut, m_downloadPath)) {
         m_installerOut.reset();
-        emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
+        emit downloadFailed(tr("Could not write the downloaded file"));
         return;
     }
 
@@ -543,13 +546,13 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
         // Write error mid-stream (or open failure surfaced earlier).
         QFile::remove(m_downloadPath);
         if (reply->error() == QNetworkReply::NoError) {
-            emit downloadFailed(QStringLiteral("Could not write the downloaded file"));
+            emit downloadFailed(tr("Could not write the downloaded file"));
             return;
         }
     }
     if (reply->error() != QNetworkReply::NoError) {
         QFile::remove(m_downloadPath);
-        emit downloadFailed(QStringLiteral("Download failed: %1").arg(reply->errorString()));
+        emit downloadFailed(tr("Download failed: %1").arg(reply->errorString()));
         return;
     }
 
@@ -561,7 +564,7 @@ void UpdateChecker::onInstallerFetched(QNetworkReply *reply)
     if (m_checksumsData.isEmpty()
         || !verifyFileAgainstSums(m_downloadPath, m_checksumsData, m_latest.assetName)) {
         QFile::remove(m_downloadPath);
-        emit downloadFailed(QStringLiteral("Download failed integrity check (SHA-256 mismatch)"));
+        emit downloadFailed(tr("Download failed integrity check (SHA-256 mismatch)"));
         return;
     }
 

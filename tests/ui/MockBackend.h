@@ -43,6 +43,7 @@ class MockBackend : public QObject {
     // Derived here the same way, so the page under test sees the real relationship
     // rather than a constant.
     Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
+    Q_PROPERTY(QString activeConfigProfile MEMBER m_activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -131,6 +132,7 @@ public:
     }
     void setVpnMode(const QString &v);
     QStringList domains() const { return m_domains; }
+    void setDomains(const QStringList &d) { m_domains = d; emit splitChanged(); }
     QStringList excludedRoutes() const { return m_excludedRoutes; }
     QStringList appRules() const { return m_appRules; }
     // Deliberately NOT the file names of the rules: the page is supposed to show
@@ -161,8 +163,17 @@ public:
 
     QString appVersion() const { return QStringLiteral("1.0.0-test"); }
     QString coreVersion() const { return QStringLiteral("test-core"); }
-    QString updateState() const { return QString(); }
-    QString updateMessage() const { return QString(); }
+    QString updateState() const { return m_updateState; }
+    QString updateMessage() const { return m_updateMessage; }
+    void setUpdate(const QString &state, const QString &message)
+    {
+        m_updateState = state;
+        m_updateMessage = message;
+        emit updateChanged();
+    }
+    int updateChecks = 0;
+    int updateOffersTaken = 0;
+    int routeRestores = 0;
     QString latestVersion() const { return QString(); }
     QString logPath() const;
     bool autoStart() const { return m_autoStart; }
@@ -195,9 +206,10 @@ public:
     }
     mutable int lastDeepLinkRow = -1;
     mutable int lastExportRow = -1;
-    Q_INVOKABLE void clearLogs() {}
+    Q_INVOKABLE void clearLogs() { m_logModel.clear(); }
+    void appendLog(const QString &msg) { m_logModel.append(QStringLiteral("12:00:01"), QStringLiteral("INFO"), msg); }
     Q_INVOKABLE void openLogFolder() {}
-    Q_INVOKABLE QString logText() const { return QString(); }
+    Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
     Q_INVOKABLE void copyToClipboard(const QString &) const {}
     Q_INVOKABLE QString readTextFile(const QString &) const { return QString(); }
     Q_INVOKABLE bool addDomain(const QString &) { return false; }
@@ -231,7 +243,7 @@ public:
     }
     Q_INVOKABLE void removeAppRule(int) {}
     Q_INVOKABLE void clearAppRules() {}
-    Q_INVOKABLE void restoreDefaultExcludedRoutes() {}
+    Q_INVOKABLE void restoreDefaultExcludedRoutes() { ++routeRestores; }
     Q_INVOKABLE void addRecommendedRussia() {}
     // These two are real, unlike their neighbours: the page has to show that
     // applications belong to the profile, and a stub that stores nothing can
@@ -255,9 +267,9 @@ public:
         emit splitChanged();
     }
     Q_INVOKABLE void removeProfile(const QString &) {}
-    Q_INVOKABLE void checkForUpdates() {}
+    Q_INVOKABLE void checkForUpdates() { ++updateChecks; }
     Q_INVOKABLE void downloadUpdate() {}
-    Q_INVOKABLE void openLatestRelease() {}
+    Q_INVOKABLE void openLatestRelease() { ++updateOffersTaken; }
     Q_INVOKABLE void openUrl(const QString &) {}
     Q_INVOKABLE void startWindowDrag(QObject *) { ++windowDrags; }
     int windowDrags = 0;
@@ -308,6 +320,9 @@ private:
     bool m_autoConnect = false;
     bool m_killSwitch = false;
     bool m_loggingEnabled = true;
+    QString m_activeConfigProfile = QStringLiteral("Default");
+    QString m_updateState;
+    QString m_updateMessage;
     bool m_verboseLogs = false;
     LogModel m_logModel;
     bool m_splitEnabled = false;

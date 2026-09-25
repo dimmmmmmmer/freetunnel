@@ -9,6 +9,8 @@ import "components"
 Item {
     id: createRoot
     objectName: "createOverlay"
+    // The built-in profile is stored as "Default" and shown in the UI's language.
+    function profileLabel(name) { return name === "Default" ? qsTr("Default") : name }
     required property var shell
     required property var backend
     required property var theme
@@ -135,12 +137,12 @@ Item {
                         Behavior on border.color { ColorAnimation { duration: 120 } }
                         Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: profArrow.left; anchors.rightMargin: 6
                                anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-                               text: cform.splitProfile; color: theme.text; font.pixelSize: 14 }
+                               text: createRoot.profileLabel(cform.splitProfile); color: theme.text; font.pixelSize: 14 }
                         Text { id: profArrow; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
                                text: "▾"; color: theme.textDim; font.pixelSize: 16 }
                         MouseArea { id: profMa; anchors.fill: parent; hoverEnabled: true
                             onClicked: shell.showSelect(profBox,
-                                backend.profiles.map(function(p){ return {v:p, t:p} }),
+                                backend.profiles.map(function(p){ return {v:p, t:createRoot.profileLabel(p)} }),
                                 cform.splitProfile, function(v){ cform.splitProfile = v }) } }
                 }
                 Item { width: parent.width; height: 32
@@ -194,7 +196,7 @@ Item {
                     Rectangle { width: 88; height: 32; radius: 8
                         color: saveMa.containsMouse ? Qt.darker(theme.accent, 1.12) : theme.accent
                         Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { anchors.centerIn: parent; text: qsTr("Save"); color: "white"; font.pixelSize: 14 }
+                        Text { objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.onAccent; font.pixelSize: 14 }
                         MouseArea { id: saveMa; anchors.fill: parent; hoverEnabled: true; onClicked: {
                             var ok = backend.createConfig({
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,

@@ -80,12 +80,18 @@ Item {
             // ----- Excluded routes (subnets that bypass the tunnel) -----
             RowLayout { Layout.fillWidth: true; spacing: 10
                 SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: settingsRoot.theme; text: qsTr("Excluded routes") }
-                Text { Layout.maximumWidth: 120; elide: Text.ElideRight
+                // The links keep their full width and the heading gives way: capped,
+                // the Russian ones were cut to «Вернуть по умолча…» and «Очистить …».
+                Text { elide: Text.ElideRight
                        text: qsTr("Restore defaults"); font.pixelSize: 12
                        color: rdMa.containsMouse ? theme.text : theme.accent; font.underline: rdMa.containsMouse
-                    MouseArea { id: rdMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: backend.restoreDefaultExcludedRoutes() } }
-                Text { Layout.maximumWidth: 80; elide: Text.ElideRight
+                    // Asked first, like Clear all beside it: it replaces the whole
+                    // list, and there is no undo.
+                    MouseArea { id: rdMa; objectName: "restoreRoutes"; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: shell.showConfirm(qsTr("Replace the excluded routes with the defaults?"),
+                                                     qsTr("Replace"), function() { backend.restoreDefaultExcludedRoutes() }) } }
+                Text { elide: Text.ElideRight
                     visible: backend.excludedRoutes.length > 0
                     text: qsTr("Clear all"); font.pixelSize: 12
                     color: clrRtMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
@@ -135,13 +141,14 @@ Item {
             Item { Layout.preferredHeight: 16 }
 
             SectionLabel { text: qsTr("Hotkeys"); theme: settingsRoot.theme }
-            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42
+            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, implicitHeight + 8)
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("Enable"); color: theme.text; font.pixelSize: 14 }
                     // Wayland can't deliver global hotkeys — say so where it's off.
-                    Text { Layout.fillWidth: true; elide: Text.ElideRight; visible: !backend.hotkeysSupported
+                    // Wrapped: cut short, it lost the part saying what to do.
+                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: !backend.hotkeysSupported
                            text: qsTr("Not available under Wayland — use an X11/Xorg session")
                            color: theme.textFaint; font.pixelSize: 12 }
                 }
@@ -181,36 +188,53 @@ Item {
                 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.loggingEnabled
                          onToggled: function(v){ backend.loggingEnabled = v } } }
-            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 42; enabled: backend.loggingEnabled
+            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, implicitHeight + 8)
+                enabled: backend.loggingEnabled
                 opacity: backend.loggingEnabled ? 1 : 0.45
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("Verbose logs"); color: theme.text; font.pixelSize: 14 }
-                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap
                            text: qsTr("full VPN core detail for debugging (noisy)"); color: theme.textFaint; font.pixelSize: 12 }
                 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.verboseLogs
                          onToggled: function(v){ backend.verboseLogs = v } } }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Maintenance"); theme: settingsRoot.theme }
-            Item { Layout.fillWidth: true; Layout.preferredHeight: 42
+            Item { Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, updRow.implicitHeight + 12)
                 RowLayout {
-                    anchors.fill: parent
-                    Text { id: updTxt; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                    id: updRow
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text { id: updTxt; objectName: "updateStatus"
+                           Layout.fillWidth: true; Layout.minimumWidth: 0
+                           // Wrapped: the status is often a whole instruction ("finish
+                           // installing it from the file manager…") or a reason, and
+                           // on one line it was the part cut off.
+                           wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
                            // Surface the backend's status line (download %, error
                            // text, "Version X is available") while an update flow
                            // is active — the icons alone don't say what happened.
                            readonly property bool updActive: backend.updateState !== ""
                                                              && backend.updateState !== "current"
+                           // A click does what the line offers, as the icon beside it
+                           // does: check, download, retry. Nothing while a check or a
+                           // download runs — it used to start a check mid-download,
+                           // which then offered the same download a second time.
+                           readonly property bool idle: backend.updateState === ""
+                                                        || backend.updateState === "current"
+                           readonly property bool actionable: backend.updateState !== "checking"
+                                                              && backend.updateState !== "downloading"
                            text: (updActive && backend.updateMessage.length > 0)
                                  ? backend.updateMessage : qsTr("Check for updates")
                            font.pixelSize: 14
                            color: updTxtMa.containsMouse ? theme.accent : theme.text
                            font.underline: updTxtMa.containsMouse
                         MouseArea { id: updTxtMa; anchors.fill: parent; hoverEnabled: true
+                                    enabled: updTxt.actionable
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: backend.checkForUpdates() } }
+                                    onClicked: updTxt.idle ? backend.checkForUpdates() : backend.openLatestRelease() } }
                     Row {
                         spacing: 5
                         Layout.alignment: Qt.AlignRight | Qt.AlignVCenter

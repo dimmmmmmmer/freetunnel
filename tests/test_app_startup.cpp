@@ -10,6 +10,7 @@
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QGuiApplication>
+#include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
@@ -36,6 +37,7 @@ private slots:
     void quitFilterEmitsShutdown();
     void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
+    void applyLanguageLoadsQtsOwnRussianToo();
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
     void aSecondLaunchBringsTheWindowBack();
@@ -144,6 +146,24 @@ void TestAppStartup::applyLanguageLoadsRussian()
     freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("en"));
     QVERIFY2(translator == nullptr, "the Russian translator outlived the switch back to English");
     QCOMPARE(QCoreApplication::translate("Backend", "Connected"), sourceText);
+}
+
+// Qt's own words — the drawn file dialog's Open, Save and Cancel, the macOS
+// application menu — come from Qt's catalogues, which were never loaded: the
+// dialog had a Russian title over English buttons.
+void TestAppStartup::applyLanguageLoadsQtsOwnRussianToo()
+{
+    const QString dir = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+    if (!QFile::exists(dir + QStringLiteral("/qtbase_ru.qm")))
+        QSKIP("this Qt was installed without its translations");
+    QQmlApplicationEngine engine;
+    QTranslator *translator = nullptr;
+    QCOMPARE(QCoreApplication::translate("QPlatformTheme", "Cancel"), QStringLiteral("Cancel"));
+    freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("ru"));
+    const QString russian = QCoreApplication::translate("QPlatformTheme", "Cancel");
+    QVERIFY2(!russian.isEmpty() && russian.at(0).script() == QChar::Script_Cyrillic, qPrintable(russian));
+    freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("en"));
+    QCOMPARE(QCoreApplication::translate("QPlatformTheme", "Cancel"), QStringLiteral("Cancel"));
 }
 
 QString TestAppStartup::instanceSocketName(const QString &suffix)

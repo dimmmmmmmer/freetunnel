@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/DeepLink.h"
 
+#include <QCoreApplication>
+
 #include <limits>
 
 namespace freetunnel {
@@ -246,7 +248,7 @@ bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
         bool ok = false;
         cfg.dnsUpstreams = decodeStringList(value, &ok);
         if (!ok && error)
-            *error = QStringLiteral("malformed dns_upstreams list");
+            *error = QCoreApplication::translate("DeepLink", "malformed dns_upstreams list");
         return ok;
     }
     return true;
@@ -271,12 +273,12 @@ bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &c
     quint64 len = 0;
     if (!readVarint(payload, *pos, tag) || !readVarint(payload, *pos, len)) {
         if (error)
-            *error = QStringLiteral("truncated TLV header");
+            *error = QCoreApplication::translate("DeepLink", "truncated TLV header");
         return false;
     }
     if (!tlvLengthFits(payload, *pos, len)) {
         if (error)
-            *error = QStringLiteral("TLV length exceeds payload");
+            *error = QCoreApplication::translate("DeepLink", "TLV length exceeds payload");
         return false;
     }
     const QByteArray value = payload.mid(*pos, static_cast<int>(len));
@@ -300,13 +302,13 @@ std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, Q
     }
     if (cfg.version > kDeepLinkMaxVersion) {
         if (error)
-            *error = QStringLiteral("unsupported deep link version %1").arg(cfg.version);
+            *error = QCoreApplication::translate("DeepLink", "unsupported deep link version %1").arg(cfg.version);
         return std::nullopt;
     }
     if (!deepLinkHasRequiredFields(cfg, flags)) {
         if (error)
-            *error = QStringLiteral("deep link missing required fields "
-                                     "(hostname, address, username, password)");
+            *error = QCoreApplication::translate("DeepLink", "deep link missing required fields "
+                                                             "(hostname, address, username, password)");
         return std::nullopt;
     }
     return cfg;
@@ -351,7 +353,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     s = normalizeDeepLinkBody(s);
     if (s.isEmpty()) {
         if (error)
-            *error = QStringLiteral("not a tt:// deep link");
+            *error = QCoreApplication::translate("DeepLink", "not a tt:// deep link");
         return std::nullopt;
     }
 
@@ -359,7 +361,7 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
             QByteArray::fromBase64(s.toLatin1(), QByteArray::Base64UrlEncoding);
     if (payload.isEmpty()) {
         if (error)
-            *error = QStringLiteral("invalid base64url payload");
+            *error = QCoreApplication::translate("DeepLink", "invalid base64url payload");
         return std::nullopt;
     }
     return decodeDeepLinkPayload(payload, error);

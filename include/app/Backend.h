@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QObject>
 
+#include <functional>
 #include <optional>
 #include <atomic>
 #include <QString>
@@ -54,6 +55,9 @@ class Backend : public QObject {
     // tunnel is kept full in that state (see selectiveModeActive), so this is what
     // the UI needs in order to explain why the chosen mode is not in effect.
     Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
+    // The split profile the active CONFIG uses. It decides what the tunnel does,
+    // and it need not be the one the Split page is showing.
+    Q_PROPERTY(QString activeConfigProfile READ activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -97,6 +101,9 @@ class Backend : public QObject {
 public:
     explicit Backend(QObject *parent = nullptr);
     ~Backend() override;
+    // Say again, in the language just put in place, what Backend worded earlier
+    // and kept: the credential-storage warning, the update line, ping times.
+    void retranslate();
 
     bool connected() const { return m_connected; }
     bool connecting() const { return m_connecting; }
@@ -166,6 +173,7 @@ public:
     void setVpnMode(const QString &mode);
     bool selectiveModeActive() const;    // what the core is actually told
     bool selectiveModeWouldLeak() const; // selected, but with no rules to route
+    QString activeConfigProfile() const; // split profile assigned to the active config
     Q_INVOKABLE bool addDomain(const QString &domain); // accepts a list; true if any added
     Q_INVOKABLE void removeDomain(int index);
     Q_INVOKABLE void clearDomains();
@@ -274,7 +282,6 @@ private:
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(); // push the active CONFIG's profile rules to the core
-    QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
     void startConnectAttempt();   // connectVpn() past its "already busy" check
     void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
@@ -387,6 +394,8 @@ private:
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
+    std::function<QString()> m_updateWords; // says m_updateMessage; see setUpdateMessage()
+    void setUpdateMessage(std::function<QString()> words);
     // Which side failed: m_latestVersion cannot answer that — it only says "this
     // process has ever seen a release" and is never cleared.
     bool m_updateErrorFromDownload = false;
@@ -402,7 +411,7 @@ private:
     // Answered once and kept: the probe behind it spawns a subprocess and runs a
     // nested event loop on this thread. mutable because the property reader is
     // const, as a property reader has to be.
-    mutable std::optional<QString> m_credentialWarning;
+    mutable std::optional<bool> m_credentialStoreMissing;
     bool m_disconnecting = false; // Disconnecting (tearing down / cancelling)
     LogModel m_logModel;
 

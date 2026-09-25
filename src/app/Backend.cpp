@@ -501,17 +501,22 @@ QString Backend::credentialStorageWarning() const
     // thread, and the Settings page reads this property from three separate
     // bindings — so every visit to that page stalled the interface three times
     // over for an answer that had not changed.
-    if (m_credentialWarning.has_value())
-        return *m_credentialWarning;
+    //
+    // The answer is kept, not the sentence, which is put into words on each read
+    // in the language then in force. It is first read while the window loads,
+    // before any translator is in, so a kept sentence was English in a Russian
+    // window for the whole session.
+    if (!m_credentialStoreMissing.has_value()) {
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
-    if (!freetunnel::CredentialStore::secureStorageAvailable()) {
-        m_credentialWarning = tr("Secure credential storage is unavailable. Install gnome-keyring or "
-                                 "KWallet (with secret-tool) before saving VPN passwords.");
-        return *m_credentialWarning;
-    }
+        m_credentialStoreMissing = !freetunnel::CredentialStore::secureStorageAvailable();
+#else
+        m_credentialStoreMissing = false;
 #endif
-    m_credentialWarning = QString();
-    return *m_credentialWarning;
+    }
+    if (!*m_credentialStoreMissing)
+        return QString();
+    return tr("Secure credential storage is unavailable. Install gnome-keyring or "
+              "KWallet (with secret-tool) before saving VPN passwords.");
 }
 
 void Backend::recheckCredentialStorage()
@@ -521,10 +526,38 @@ void Backend::recheckCredentialStorage()
     // installed or unlocked a keyring — and, with the cache above, would now stay
     // shown for a second reason. Called from the one place that learns the
     // storage is not working: a save that failed on the password.
-    const QString before = m_credentialWarning.value_or(QString());
-    m_credentialWarning.reset();
-    if (credentialStorageWarning() != before)
+    const bool before = m_credentialStoreMissing.value_or(false);
+    m_credentialStoreMissing.reset();
+    credentialStorageWarning(); // asks again
+    if (m_credentialStoreMissing.value_or(false) != before)
         emit credentialStorageChanged();
+}
+
+void Backend::retranslate()
+{
+    // Called once a new translator is in (AppGuiMain). QML's qsTr bindings follow
+    // by themselves; these are words Backend put together earlier and kept, which
+    // stayed in the language they were made in.
+    if (m_credentialStoreMissing.value_or(false))
+        emit credentialStorageChanged();
+    if (m_updateWords) {
+        m_updateMessage = m_updateWords();
+        emit updateChanged();
+    }
+    // Ping times are "<n> ms" with a translated unit; the number stays.
+    bool pingsMoved = false;
+    for (QVariant &ping : m_pings) {
+        const QString text = ping.toString();
+        qsizetype digits = 0;
+        while (digits < text.size() && text.at(digits).isDigit())
+            ++digits;
+        if (digits == 0)
+            continue;
+        ping = text.left(digits) + tr(" ms");
+        pingsMoved = true;
+    }
+    if (pingsMoved)
+        emit pingsChanged();
 }
 
 void Backend::handleControl(const QString &command) {

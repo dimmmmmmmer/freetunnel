@@ -41,8 +41,10 @@ void Backend::applyLinuxUpdate(const QString &path)
         // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
         // that is the package manager's job, and doing it silently would need root.
         // Show the file and say so, instead of claiming success.
-        m_updateMessage = tr("Update downloaded. Finish installing it from the file manager — "
-                             "packages are installed by your package manager.");
+        setUpdateMessage([] {
+            return tr("Update downloaded. Finish installing it from the file manager — "
+                      "packages are installed by your package manager.");
+        });
         emit updateChanged();
         revealDownload(path);
         return;
@@ -54,14 +56,18 @@ void Backend::applyLinuxUpdate(const QString &path)
     const QString backup = current + QStringLiteral(".old");
     QFile::remove(backup);
     if (!QFile::rename(current, backup)) {
-        m_updateMessage = tr("Could not replace %1 — check that you can write to it.").arg(current);
+        setUpdateMessage([current] {
+            return tr("Could not replace %1 — check that you can write to it.").arg(current);
+        });
         emit updateChanged();
         revealDownload(path);
         return;
     }
     if (!QFile::copy(path, current)) {
         QFile::rename(backup, current); // put the working build back
-        m_updateMessage = tr("Could not replace %1 — check that you can write to it.").arg(current);
+        setUpdateMessage([current] {
+            return tr("Could not replace %1 — check that you can write to it.").arg(current);
+        });
         emit updateChanged();
         revealDownload(path);
         return;
@@ -87,7 +93,7 @@ void Backend::applyLinuxUpdate(const QString &path)
     // the quit handler now removes only a token that is still ours.
     QLocalServer::removeServer(freetunnel::instanceServerName());
 
-    m_updateMessage = tr("Update installed — restarting");
+    setUpdateMessage([] { return tr("Update installed — restarting"); });
     emit updateChanged();
     QProcess::startDetached(current, {});
     quitApplication();
@@ -117,20 +123,23 @@ void Backend::wireUpdaterSignals()
                 m_updateState = QStringLiteral("available");
                 m_latestVersion = info.version;
                 m_latestUrl = info.htmlUrl;
-                m_updateMessage = tr("Version %1 is available").arg(info.version);
+                const QString version = info.version;
+                setUpdateMessage([version] { return tr("Version %1 is available").arg(version); });
                 emit updateChanged();
             });
     connect(m_updater, &UpdateChecker::downloadProgress, this,
             [this](qint64 received, qint64 total) {
                 m_updateState = QStringLiteral("downloading");
-                m_updateMessage = total > 0 ? tr("Downloading… %1%").arg(received * 100 / total)
-                                            : tr("Downloading…");
+                setUpdateMessage([received, total] {
+                    return total > 0 ? tr("Downloading… %1%").arg(received * 100 / total)
+                                     : tr("Downloading…");
+                });
                 emit updateChanged();
             });
     connect(m_updater, &UpdateChecker::downloadReady, this,
             [this](const QString &path) {
                 m_updateState = QStringLiteral("ready");
-                m_updateMessage = tr("Update downloaded — opening installer");
+                setUpdateMessage([] { return tr("Update downloaded — opening installer"); });
                 emit updateChanged();
 #if defined(Q_OS_WIN)
                 QProcess::startDetached(path, {});
@@ -140,7 +149,7 @@ void Backend::wireUpdaterSignals()
                 // running with nothing left to stop them. Quitting here runs the
                 // ordinary shutdown — tunnel down, helper stopped — while the
                 // installer waits for us (see win/installer.nsi).
-                m_updateMessage = tr("Update downloaded — closing FreeTunnel to install it");
+                setUpdateMessage([] { return tr("Update downloaded — closing FreeTunnel to install it"); });
                 emit updateChanged();
                 quitApplication();
 #elif defined(Q_OS_MACOS)
@@ -152,7 +161,7 @@ void Backend::wireUpdaterSignals()
     connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {
         m_updateState = QStringLiteral("error");
         m_updateErrorFromDownload = true;
-        m_updateMessage = msg;
+        setUpdateMessage([msg] { return msg; });
         emit updateChanged();
     });
     connect(m_updater, &UpdateChecker::noUpdateAvailable, this, [this](const QString &message) {
@@ -166,8 +175,10 @@ void Backend::wireUpdaterSignals()
         const bool upToDate = message.contains(QLatin1String("latest version"),
                                                Qt::CaseInsensitive);
         m_updateState = upToDate ? QStringLiteral("current") : QStringLiteral("error");
-        m_updateMessage = upToDate ? tr("You have the latest version")
-                                   : tr("Update check failed: %1").arg(message);
+        setUpdateMessage([upToDate, message] {
+            return upToDate ? tr("You have the latest version")
+                            : tr("Update check failed: %1").arg(message);
+        });
         emit updateChanged();
     });
 }
@@ -180,16 +191,27 @@ void Backend::ensureUpdater()
     wireUpdaterSignals();
 }
 
+// The update line is kept as a way to say it rather than as a sentence, so a
+// change of language says it again in the new one. See retranslate().
+void Backend::setUpdateMessage(std::function<QString()> words)
+{
+    m_updateWords = std::move(words);
+    m_updateMessage = m_updateWords ? m_updateWords() : QString();
+}
+
 void Backend::checkForUpdates(bool userInitiated)
 {
-    if (m_updateState == QLatin1String("checking"))
+    // Not while a download runs either: the check's answer turned the state back
+    // to "available" and offered the same download a second time, into the same
+    // staging file as the first.
+    if (m_updateState == QLatin1String("checking") || m_updateState == QLatin1String("downloading"))
         return;
     ensureUpdater();
     m_updateCheckUserInitiated = userInitiated;
     m_updateErrorFromDownload = false;
     if (userInitiated) {
         m_updateState = QStringLiteral("checking");
-        m_updateMessage = tr("Checking…");
+        setUpdateMessage([] { return tr("Checking…"); });
         emit updateChanged();
     }
     m_updater->checkNow();
@@ -219,7 +241,7 @@ void Backend::downloadUpdate() {
     if (!m_updater || m_updateState == QLatin1String("downloading"))
         return;
     m_updateState = QStringLiteral("downloading");
-    m_updateMessage = tr("Downloading…");
+    setUpdateMessage([] { return tr("Downloading…"); });
     emit updateChanged();
     m_updater->downloadLatest();
 }

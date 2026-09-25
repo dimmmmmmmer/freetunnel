@@ -259,6 +259,9 @@ Window {
         readonly property color textDim: dark ? "#9a9a9a" : "#6b6b6b"
         readonly property color textFaint: dark ? "#6a6a6a" : "#9a9a9a"
         readonly property color accent: dark ? "#b0b0b0" : "#4f4f4f"
+        // Text on an accent fill. White on the light dark-theme accent read at about
+        // 2:1, so the editor's Save looked disabled next to Cancel.
+        readonly property color onAccent: dark ? "#181818" : "#ffffff"
         readonly property color border: dark ? "#2e2e2e" : "#e5e5e5"
         // Off-state track for switches: clearly darker than the (light) accent
         // in dark mode so on/off don't blur together.

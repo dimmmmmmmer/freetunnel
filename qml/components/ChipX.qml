@@ -12,7 +12,7 @@ Item {
         svg: "qrc:/icons/close.svg"
         theme: cx.theme
         color: cxMa.containsMouse ? theme.danger
-              : (cx.onAccent ? "white" : theme.textDim)
+              : (cx.onAccent ? theme.onAccent : theme.textDim)
     }
     MouseArea { id: cxMa; anchors.fill: parent; anchors.margins: -6
                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cx.clicked() }

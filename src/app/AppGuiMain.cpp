@@ -69,12 +69,17 @@ static QWindow *loadMainWindow(QQmlApplicationEngine &engine, Backend &backend)
 }
 
 static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &engine,
-                                const Backend &backend, QTranslator *&translator)
+                                Backend &backend, QTranslator *&translator)
 {
+    // Backend is told after each change too: it words some things in C++ and
+    // keeps them, and the first of those are worded while the window loads,
+    // before this installs any translator at all.
     applyLanguage(app, engine, translator, backend.language());
+    backend.retranslate();
     QObject::connect(&backend, &Backend::languageChanged, &app,
-                     [&app, &engine, &translator](const QString &lang) {
+                     [&app, &engine, &translator, &backend](const QString &lang) {
                          applyLanguage(app, engine, translator, lang);
+                         backend.retranslate();
                      });
 }
 

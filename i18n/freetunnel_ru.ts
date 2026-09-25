@@ -424,7 +424,7 @@
     </message>
     <message>
         <source>Load from file…</source>
-        <translation>Загрузить из файла…</translation>
+        <translation>Из файла…</translation>
     </message>
     <message>
         <source>Certificate (PEM) · optional</source>
@@ -473,6 +473,41 @@
     <message>
         <source>Client random (hex)</source>
         <translation>Client random (hex)</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>По умолчанию</translation>
+    </message>
+</context>
+<context>
+    <name>DeepLink</name>
+    <message>
+        <source>malformed dns_upstreams list</source>
+        <translation>повреждён список dns_upstreams</translation>
+    </message>
+    <message>
+        <source>truncated TLV header</source>
+        <translation>обрезанный заголовок TLV</translation>
+    </message>
+    <message>
+        <source>TLV length exceeds payload</source>
+        <translation>длина TLV больше самих данных</translation>
+    </message>
+    <message>
+        <source>unsupported deep link version %1</source>
+        <translation>неподдерживаемая версия ссылки %1</translation>
+    </message>
+    <message>
+        <source>deep link missing required fields (hostname, address, username, password)</source>
+        <translation>в ссылке нет обязательных полей (хост, адрес, имя пользователя, пароль)</translation>
+    </message>
+    <message>
+        <source>not a tt:// deep link</source>
+        <translation>это не ссылка tt://</translation>
+    </message>
+    <message>
+        <source>invalid base64url payload</source>
+        <translation>данные ссылки не в формате base64url</translation>
     </message>
 </context>
 <context>
@@ -530,6 +565,14 @@
     <message>
         <source>Auto-scroll</source>
         <translation>Авто-прокрутка</translation>
+    </message>
+    <message>
+        <source>Logging is off.</source>
+        <translation>Логирование выключено.</translation>
+    </message>
+    <message>
+        <source>Turn on</source>
+        <translation>Включить</translation>
     </message>
 </context>
 <context>
@@ -673,11 +716,11 @@
     </message>
     <message>
         <source>Restore defaults</source>
-        <translation>Вернуть по умолчанию</translation>
+        <translation>По умолчанию</translation>
     </message>
     <message>
         <source>Clear all</source>
-        <translation>Очистить все</translation>
+        <translation>Очистить</translation>
     </message>
     <message>
         <source>Clear all excluded routes?</source>
@@ -751,6 +794,14 @@
         <source>Kill switch</source>
         <translation>Аварийное отключение</translation>
     </message>
+    <message>
+        <source>Replace the excluded routes with the defaults?</source>
+        <translation>Заменить исключённые маршруты стандартными?</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Заменить</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>
@@ -796,11 +847,11 @@
     </message>
     <message>
         <source>Recommended for Russia</source>
-        <translation>Рекомендованные для России</translation>
+        <translation>Для России</translation>
     </message>
     <message>
         <source>Clear all</source>
-        <translation>Очистить все</translation>
+        <translation>Очистить</translation>
     </message>
     <message>
         <source>Clear all domains?</source>
@@ -809,10 +860,6 @@
     <message>
         <source>Clear</source>
         <translation>Очистить</translation>
-    </message>
-    <message>
-        <source>domain or domains (comma/space separated), then Enter</source>
-        <translation>домен или домены (через запятую/пробел), затем Enter</translation>
     </message>
     <message>
         <source>Add a rule to use &quot;Through VPN&quot; — with an empty list nothing would go through the tunnel, so the full tunnel stays on.</source>
@@ -840,7 +887,86 @@
     </message>
     <message>
         <source>Drop an application here, or paste its full path</source>
-        <translation>Перетащите приложение сюда или вставьте полный путь</translation>
+        <translation>Перетащите приложение или вставьте путь</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>По умолчанию</translation>
+    </message>
+    <message>
+        <source>“%1” uses the profile “%2”, which has no rules, so &quot;Through VPN&quot; would send nothing through the tunnel. The full tunnel stays on until that profile has a rule.</source>
+        <translation>«%1» использует профиль «%2», в котором нет правил, так что в режиме «Через VPN» через туннель не пошло бы ничего. Полный туннель остаётся, пока в этом профиле нет правила.</translation>
+    </message>
+    <message>
+        <source>domains, comma-separated, then Enter</source>
+        <translation>домены через запятую, затем Enter</translation>
+    </message>
+</context>
+<context>
+    <name>UpdateChecker</name>
+    <message>
+        <source>Could not create the update download directory</source>
+        <translation>Не удалось создать папку для загрузки обновления</translation>
+    </message>
+    <message>
+        <source>Could not make the update download directory owner-only</source>
+        <translation>Не удалось закрыть папку загрузки обновления от других пользователей</translation>
+    </message>
+    <message>
+        <source>The update download directory is not private to this user</source>
+        <translation>Папка загрузки обновления доступна не только этому пользователю</translation>
+    </message>
+    <message>
+        <source>Network error: %1</source>
+        <translation>Ошибка сети: %1</translation>
+    </message>
+    <message>
+        <source>Invalid response from GitHub API</source>
+        <translation>Некорректный ответ GitHub API</translation>
+    </message>
+    <message>
+        <source>No releases found</source>
+        <translation>Релизы не найдены</translation>
+    </message>
+    <message>
+        <source>No installer asset found for this platform</source>
+        <translation>Для этой платформы нет установщика</translation>
+    </message>
+    <message>
+        <source>This release is not signed — refusing to update.</source>
+        <translation>Этот релиз не подписан — обновление отменено.</translation>
+    </message>
+    <message>
+        <source>Could not download the signature: %1</source>
+        <translation>Не удалось скачать подпись: %1</translation>
+    </message>
+    <message>
+        <source>Update signature is invalid — aborting.</source>
+        <translation>Подпись обновления недействительна — обновление отменено.</translation>
+    </message>
+    <message>
+        <source>This update is signed for version %1, but %2 was offered — aborting.</source>
+        <translation>Обновление подписано для версии %1, а предложена %2 — обновление отменено.</translation>
+    </message>
+    <message>
+        <source>Could not write the downloaded file</source>
+        <translation>Не удалось записать скачанный файл</translation>
+    </message>
+    <message>
+        <source>Download failed: %1</source>
+        <translation>Не удалось скачать: %1</translation>
+    </message>
+    <message>
+        <source>Download failed integrity check (SHA-256 mismatch)</source>
+        <translation>Скачанный файл не прошёл проверку целостности (SHA-256 не совпадает)</translation>
+    </message>
+    <message>
+        <source>This release has no SHA256SUMS.txt — refusing to download an unverifiable update.</source>
+        <translation>В этом релизе нет SHA256SUMS.txt — непроверяемое обновление не скачивается.</translation>
+    </message>
+    <message>
+        <source>Could not download SHA256SUMS.txt: %1</source>
+        <translation>Не удалось скачать SHA256SUMS.txt: %1</translation>
     </message>
 </context>
 <context>
