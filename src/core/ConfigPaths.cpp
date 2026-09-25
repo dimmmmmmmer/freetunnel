@@ -192,7 +192,7 @@ QString ownerConfigPathForSave(const QString &stem, const QString &existingPath)
             && namesTheSameFile(existingPath, wanted)) {
             const QString step = existing.dir().filePath(
                     QStringLiteral(".rename-%1.toml")
-                            .arg(QRandomGenerator::system()->generate(), 8, 16, QLatin1Char('0')));
+                            .arg(QRandomGenerator::global()->generate(), 8, 16, QLatin1Char('0')));
             if (QFile::rename(existingPath, step)) {
                 if (QFile::rename(step, wanted))
                     return wanted;
