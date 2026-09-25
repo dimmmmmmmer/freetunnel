@@ -87,7 +87,10 @@ Item {
                                     onClicked: backend.selectProfile(chip.modelData) }
                         Text { id: plabel; anchors.left: parent.left; anchors.leftMargin: 11
                                anchors.verticalCenter: parent.verticalCenter; text: splitRoot.profileLabel(chip.modelData)
-                               width: Math.min(implicitWidth, 130); elide: Text.ElideRight
+                               // Cut only where the row cannot hold it, not at a fixed
+                               // width with room to spare.
+                               width: Math.min(implicitWidth, chip.parent ? chip.parent.width - 39 : 130)
+                               elide: Text.ElideRight
                                color: chip.isActive ? theme.onAccent : theme.text; font.pixelSize: 13 }
                         ChipX { visible: !chip.isDefault; onAccent: chip.isActive; theme: splitRoot.theme
                                 anchors.left: plabel.right; anchors.leftMargin: 5
@@ -159,7 +162,8 @@ Item {
                         implicitWidth: dlabel.width + 39; implicitHeight: 28
                         Text { id: dlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                anchors.verticalCenter: parent.verticalCenter; text: domChip.modelData
-                               width: Math.min(implicitWidth, 190); elide: Text.ElideRight
+                               width: Math.min(implicitWidth, domChip.parent ? domChip.parent.width - 39 : 190)
+                               elide: Text.ElideRight
                                color: theme.text; font.pixelSize: 13 }
                         ChipX { theme: splitRoot.theme; anchors.left: dlabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
@@ -233,7 +237,8 @@ Item {
                                text: apChip.index < backend.appRuleLabels.length
                                      ? backend.appRuleLabels[apChip.index]
                                      : apChip.modelData.split(/[\\/]/).pop()
-                               width: Math.min(implicitWidth, 190); elide: Text.ElideRight
+                               width: Math.min(implicitWidth, apChip.parent ? apChip.parent.width - 39 : 190)
+                               elide: Text.ElideRight
                                color: theme.text; font.pixelSize: 13 }
                         ChipX { theme: splitRoot.theme; anchors.left: alabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter

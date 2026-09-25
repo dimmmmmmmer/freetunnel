@@ -120,7 +120,10 @@ Item {
                         implicitWidth: rlabel.width + 39; implicitHeight: 28
                         Text { id: rlabel; anchors.left: parent.left; anchors.leftMargin: 11
                                anchors.verticalCenter: parent.verticalCenter; text: rtChip.modelData
-                               width: Math.min(implicitWidth, 190); elide: Text.ElideRight
+                               // Cut only where the row cannot hold it, not at a fixed 190 px
+                               // with room to spare; the chip shows the name nowhere else.
+                               width: Math.min(implicitWidth, rtChip.parent ? rtChip.parent.width - 39 : 190)
+                               elide: Text.ElideRight
                                color: theme.text; font.pixelSize: 13 }
                         ChipX { theme: settingsRoot.theme; anchors.left: rlabel.right; anchors.leftMargin: 5
                                 anchors.verticalCenter: parent.verticalCenter
@@ -239,7 +242,11 @@ Item {
                            font.pixelSize: 14
                            color: updTxtMa.containsMouse ? theme.accent : theme.text
                            font.underline: updTxtMa.containsMouse
-                        MouseArea { id: updTxtMa; anchors.fill: parent; hoverEnabled: true
+                        // Over the words only: the text spans the row so that it can
+                        // wrap, and a hover or click far to the right of a short
+                        // "Check for updates" acted on it.
+                        MouseArea { id: updTxtMa; hoverEnabled: true
+                                    width: Math.ceil(updTxt.contentWidth); height: updTxt.height
                                     enabled: updTxt.actionable
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: updTxt.idle ? backend.checkForUpdates() : backend.openLatestRelease() } }

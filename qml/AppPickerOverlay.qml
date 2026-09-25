@@ -156,8 +156,11 @@ Item {
 
             Sep { Layout.fillWidth: true; theme: pickerRoot.theme }
 
+            // No wider than its words, so it acts over them and not across the card.
             Text {
-                Layout.fillWidth: true
+                objectName: "chooseFileLink"
+                Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
+                elide: Text.ElideRight
                 text: qsTr("Choose a file instead…"); font.pixelSize: 12
                 color: browseMa.containsMouse ? theme.text : theme.accent
                 font.underline: browseMa.containsMouse
