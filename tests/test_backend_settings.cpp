@@ -39,6 +39,9 @@ private slots:
     void physicalKeyPositionsMapToLetters();
     void unknownScanCodesMapToNothing();
     void hotkeysAreUnsupportedOnAWaylandSessionEvenUnderXWayland();
+    void onlyCombosWithAModifierCanBeGlobal_data();
+    void onlyCombosWithAModifierCanBeGlobal();
+    void hotkeySuspensionIsCounted();
 
     void autoStartWritesAnAutostartEntry();
     void autoStartRemovalTakesTheEntryAway();
@@ -206,7 +209,7 @@ void TestBackendSettings::hotkeyFieldsPersistAndAnnounce()
         else if (field == QLatin1String("disconnect"))
             backend.setHotkeyDisconnect(seq);
         else
-            backend.setHotkeysEnabled(false);
+            backend.setHotkeysEnabled(true); // off until turned on
         QCOMPARE(hotkeys.count(), 1);
 
         // Re-assigning the same value must not re-register the grabs.
@@ -217,7 +220,7 @@ void TestBackendSettings::hotkeyFieldsPersistAndAnnounce()
         else if (field == QLatin1String("disconnect"))
             backend.setHotkeyDisconnect(seq);
         else
-            backend.setHotkeysEnabled(false);
+            backend.setHotkeysEnabled(true);
         QCOMPARE(hotkeys.count(), 1);
     }
 
@@ -229,7 +232,54 @@ void TestBackendSettings::hotkeyFieldsPersistAndAnnounce()
     else if (field == QLatin1String("disconnect"))
         QCOMPARE(restarted.hotkeyDisconnect(), seq);
     else
-        QCOMPARE(restarted.hotkeysEnabled(), false);
+        QCOMPARE(restarted.hotkeysEnabled(), true);
+}
+
+void TestBackendSettings::onlyCombosWithAModifierCanBeGlobal_data()
+{
+    QTest::addColumn<QString>("sequence");
+    QTest::addColumn<bool>("safe");
+    QTest::newRow("Ctrl+Shift") << QStringLiteral("Ctrl+Shift+T") << true;
+    QTest::newRow("Alt") << QStringLiteral("Alt+1") << true;
+    QTest::newRow("Meta") << QStringLiteral("Meta+K") << true;
+    QTest::newRow("F5 alone") << QStringLiteral("F5") << true;
+    QTest::newRow("F12 alone") << QStringLiteral("F12") << true;
+    QTest::newRow("F13 alone") << QStringLiteral("F13") << false;
+    QTest::newRow("Enter") << QStringLiteral("Return") << false;
+    QTest::newRow("a letter") << QStringLiteral("A") << false;
+    QTest::newRow("Shift is typing") << QStringLiteral("Shift+A") << false;
+    QTest::newRow("Space") << QStringLiteral("Space") << false;
+    QTest::newRow("nothing") << QString() << false;
+}
+
+// A global hotkey takes its combo away from every other application. The field
+// used to record any key at all, so Enter pressed to confirm it — or a letter —
+// became a system-wide grab, saved and re-registered on every launch.
+void TestBackendSettings::onlyCombosWithAModifierCanBeGlobal()
+{
+    QFETCH(QString, sequence);
+    QFETCH(bool, safe);
+    QCOMPARE(Backend::isSafeGlobalHotkey(sequence), safe);
+}
+
+// Capture passes from one field to the next with the new one starting before
+// the old one ends, so a plain flag would switch the hotkeys back on under the
+// field now recording. And an extra "resume" must not leave a debt behind.
+void TestBackendSettings::hotkeySuspensionIsCounted()
+{
+    Backend backend;
+    QVERIFY(!backend.hotkeysSuspended());
+    backend.suspendHotkeys(true);  // field B starts recording
+    backend.suspendHotkeys(true);
+    backend.suspendHotkeys(false); // field A stops
+    QVERIFY(backend.hotkeysSuspended());
+    backend.suspendHotkeys(false);
+    QVERIFY(!backend.hotkeysSuspended());
+    backend.suspendHotkeys(false);
+    backend.suspendHotkeys(true);
+    QVERIFY(backend.hotkeysSuspended());
+    backend.suspendHotkeys(false);
+    QVERIFY(!backend.hotkeysSuspended());
 }
 
 // The hotkey field records the physical key position, not the character the

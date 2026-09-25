@@ -77,6 +77,9 @@ class Backend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
+    // "toggle", "connect", "disconnect": set, switched on, and not in effect —
+    // refused as unsafe, or held by another application or the desktop.
+    Q_PROPERTY(QStringList unavailableHotkeys READ unavailableHotkeys NOTIFY hotkeyAvailabilityChanged)
     // Updater (GitHub Releases)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
@@ -202,6 +205,13 @@ public:
     void setHotkeyToggle(const QString &v);
     void setHotkeyConnect(const QString &v);
     void setHotkeyDisconnect(const QString &v);
+    const QStringList &unavailableHotkeys() const { return m_unavailableHotkeys; }
+    // Held while a hotkey field records a combo; counted, see the definition.
+    Q_INVOKABLE void suspendHotkeys(bool suspend);
+    bool hotkeysSuspended() const { return m_hotkeySuspensions > 0; }
+    // Whether a combo may be taken system-wide: it needs Ctrl, Alt or Meta, or is
+    // one of F1–F12. Anything else is a key people type.
+    static bool isSafeGlobalHotkey(const QString &sequence);
     // Maps a key's physical position (QKeyEvent::nativeScanCode) to its Latin
     // letter "A".."Z", or "" if it isn't a letter key. Lets hotkey capture work
     // under a non-Latin layout (e.g. Russian), where key()/text() are Cyrillic.
@@ -238,6 +248,7 @@ signals:
     void settingsChanged();
     void splitChanged();
     void hotkeysChanged();
+    void hotkeyAvailabilityChanged();
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);
@@ -361,6 +372,9 @@ private:
     QHotkey *m_hkConnect = nullptr;
     QHotkey *m_hkDisconnect = nullptr;
     bool m_waylandHotkeyWarned = false; // log the Wayland limitation only once
+    int m_hotkeySuspensions = 0;
+    QStringList m_unavailableHotkeys;
+    void noteUnavailableHotkeys();
 
     UpdateChecker *m_updater = nullptr;
     bool m_updateCheckUserInitiated = false;

@@ -54,6 +54,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString hotkeyToggle READ hotkeyToggle WRITE setHotkeyToggle NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyConnect READ hotkeyConnect WRITE setHotkeyConnect NOTIFY hotkeysChanged)
     Q_PROPERTY(QString hotkeyDisconnect READ hotkeyDisconnect WRITE setHotkeyDisconnect NOTIFY hotkeysChanged)
+    Q_PROPERTY(QStringList unavailableHotkeys MEMBER unavailableHotkeys NOTIFY hotkeyAvailabilityChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged)
@@ -138,6 +139,9 @@ public:
     // Backend maps a key's physical position to its Latin letter; nothing to map
     // headlessly, so report "not a letter key" like the real one does.
     Q_INVOKABLE QString physicalLetterForKey(quint32, quint32) const { return QString(); }
+    Q_INVOKABLE void suspendHotkeys(bool suspend) { hotkeySuspensions += suspend ? 1 : -1; }
+    int hotkeySuspensions = 0;
+    QStringList unavailableHotkeys;
 
     // Empty = the OS keychain works, which is the normal desktop case.
     QString credentialStorageWarning() const { return m_credentialStorageWarning; }
@@ -254,6 +258,7 @@ signals:
     void logChanged();
     void splitChanged();
     void hotkeysChanged();
+    void hotkeyAvailabilityChanged();
     void updateChanged();
     void pingsChanged();
     void languageChanged(const QString &lang);

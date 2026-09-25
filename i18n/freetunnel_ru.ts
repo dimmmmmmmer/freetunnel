@@ -289,6 +289,10 @@
         <source>Couldn&apos;t connect to the server: %1</source>
         <translation>Не удалось подключиться к серверу: %1</translation>
     </message>
+    <message>
+        <source>Hotkey “%1” (%2) has no Ctrl, Alt or Meta, so it would take that key from every other application — ignored.</source>
+        <translation>У горячей клавиши «%1» (%2) нет Ctrl, Alt или Meta, и она отняла бы эту клавишу у всех остальных приложений — пропущена.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -491,6 +495,14 @@
     <message>
         <source>Press…</source>
         <translation>Нажмите…</translation>
+    </message>
+    <message>
+        <source>Add ⌘, ⌥ or ⌃…</source>
+        <translation>Добавьте ⌘, ⌥ или ⌃…</translation>
+    </message>
+    <message>
+        <source>Add Ctrl or Alt…</source>
+        <translation>Добавьте Ctrl или Alt…</translation>
     </message>
 </context>
 <context>

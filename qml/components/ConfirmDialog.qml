@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 
 Item {
     id: cd
@@ -13,8 +14,30 @@ Item {
     anchors.fill: parent
     visible: false
     z: 2000
-    function open() { visible = true }
+    // It takes the keyboard while it is up, so Return and Escape answer it. A
+    // hotkey field left recording underneath claimed every key first, and Return
+    // meant for this dialog was saved as a system-wide hotkey instead. Focus goes
+    // back where it was when the dialog closes.
+    property Item focusBefore: null
+    function open() {
+        if (!visible)
+            focusBefore = Window.activeFocusItem
+        visible = true
+        forceActiveFocus()
+    }
     function close() { visible = false }
+    onVisibleChanged: {
+        armed = false
+        if (visible) {
+            armTimer.restart()
+            return
+        }
+        armTimer.stop()
+        const back = focusBefore
+        focusBefore = null
+        if (back && back.visible && back.enabled)
+            back.forceActiveFocus()
+    }
 
     TextMetrics { id: cdMetrics; font.pixelSize: 14; text: cd.text }
 
@@ -87,13 +110,6 @@ Item {
     // actually reads the dialog.
     property bool armed: false
     Timer { id: armTimer; interval: 400; onTriggered: cd.armed = true }
-    onVisibleChanged: {
-        armed = false
-        if (visible)
-            armTimer.restart()
-        else
-            armTimer.stop()
-    }
     // Only for the two-button form. The three-button one is the deep-link name
     // collision, where the primary action replaces an existing config with one a
     // link chose — there is no answer safe enough to be the default, so that one

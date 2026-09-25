@@ -157,12 +157,15 @@ Item {
                 enabled: hkActive
                 ColumnLayout { id: hkCol; anchors.left: parent.left; anchors.right: parent.right; spacing: 0
                     HotkeyField { label: qsTr("Toggle VPN"); value: backend.hotkeyToggle; shell: settingsRoot.shell; theme: settingsRoot.theme
+                        unavailable: backend.unavailableHotkeys.indexOf("toggle") >= 0
                         onCaptured: function(s){ backend.hotkeyToggle = s } }
                     Sep { theme: settingsRoot.theme }
                     HotkeyField { label: qsTr("Connect"); value: backend.hotkeyConnect; shell: settingsRoot.shell; theme: settingsRoot.theme
+                        unavailable: backend.unavailableHotkeys.indexOf("connect") >= 0
                         onCaptured: function(s){ backend.hotkeyConnect = s } }
                     Sep { theme: settingsRoot.theme }
                     HotkeyField { label: qsTr("Disconnect"); value: backend.hotkeyDisconnect; shell: settingsRoot.shell; theme: settingsRoot.theme
+                        unavailable: backend.unavailableHotkeys.indexOf("disconnect") >= 0
                         onCaptured: function(s){ backend.hotkeyDisconnect = s } }
                 }
             }

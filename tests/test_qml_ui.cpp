@@ -63,6 +63,8 @@ private slots:
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
     void confirmDialogAnswersReturnAndEscape();
     void aSecondConfirmQueuesInsteadOfReplacingTheLiveOne();
+    void aHotkeyNeedsAModifierAndBackspaceUnbinds();
+    void aConfirmDialogTakesTheKeyboardFromAHotkeyField();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -1119,6 +1121,101 @@ void TestQmlUi::aMinimisedWindowIsBroughtBack()
     window.setWindowStates(Qt::WindowMaximized | Qt::WindowMinimized);
     freetunnel::bringWindowForward(&window);
     QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
+}
+
+namespace {
+
+// Starts recording the way a click on the field does.
+void startCapture(QObject *field)
+{
+    field->setProperty("capturing", true);
+    QMetaObject::invokeMethod(field, "forceActiveFocus");
+}
+
+} // namespace
+
+// A global hotkey takes its combo from every other application. The field used
+// to take any key: Enter pressed to confirm, Tab to move on or a plain letter
+// was saved as a system-wide grab, and there was no way to unbind one.
+void TestQmlUi::aHotkeyNeedsAModifierAndBackspaceUnbinds()
+{
+    QObject *root = loadPage("components/HotkeyField.qml");
+    QVERIFY(root);
+    auto *field = qobject_cast<QQuickItem *>(root);
+    QVERIFY(field);
+    QQuickWindow window;
+    field->setParentItem(window.contentItem());
+    field->setWidth(400);
+    field->setHeight(42);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QSignalSpy captured(root, SIGNAL(captured(QString)));
+    QVERIFY(captured.isValid());
+
+    startCapture(field);
+    QCOMPARE(m_backend.hotkeySuspensions, 1); // its own combos cannot fire meanwhile
+    QTest::keyClick(&window, Qt::Key_Return);
+    QTest::keyClick(&window, Qt::Key_Tab);
+    QTest::keyClick(&window, Qt::Key_A);
+    QTest::keyClick(&window, Qt::Key_A, Qt::ShiftModifier);
+    QCOMPARE(captured.count(), 0);
+    QVERIFY2(root->property("capturing").toBool(), "a refused key keeps the field recording");
+    QVERIFY2(root->property("needsModifier").toBool(), "and says what it is waiting for");
+
+    QTest::keyClick(&window, Qt::Key_F5);
+    QCOMPARE(captured.count(), 1);
+    QCOMPARE(captured.constLast().at(0).toString(), QStringLiteral("F5"));
+    QVERIFY(!root->property("capturing").toBool());
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+
+    startCapture(field);
+    QTest::keyClick(&window, Qt::Key_T, Qt::ControlModifier | Qt::AltModifier);
+    QCOMPARE(captured.constLast().at(0).toString(), QStringLiteral("Ctrl+Alt+T"));
+
+    startCapture(field);
+    QTest::keyClick(&window, Qt::Key_Backspace);
+    QCOMPARE(captured.count(), 3);
+    QVERIFY2(captured.constLast().at(0).toString().isEmpty(), "Backspace unbinds");
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+    delete root;
+}
+
+// A dialog opened over a field still recording a combo, by a click elsewhere or
+// a link arriving, left the keyboard with the field: Return meant for the dialog
+// was recorded as the hotkey, and the dialog stayed open.
+void TestQmlUi::aConfirmDialogTakesTheKeyboardFromAHotkeyField()
+{
+    QObject *fieldRoot = loadPage("components/HotkeyField.qml");
+    QObject *dialogRoot = loadPage("components/ConfirmDialog.qml");
+    QVERIFY(fieldRoot && dialogRoot);
+    auto *field = qobject_cast<QQuickItem *>(fieldRoot);
+    auto *dialog = qobject_cast<QQuickItem *>(dialogRoot);
+    QQuickWindow window;
+    window.resize(400, 400);
+    field->setParentItem(window.contentItem());
+    field->setWidth(400);
+    field->setHeight(42);
+    dialog->setParentItem(window.contentItem());
+    dialog->setWidth(400);
+    dialog->setHeight(400);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QSignalSpy captured(fieldRoot, SIGNAL(captured(QString)));
+    QSignalSpy confirmed(dialogRoot, SIGNAL(confirmed()));
+
+    startCapture(field);
+    QVERIFY(field->hasActiveFocus());
+    QMetaObject::invokeMethod(dialogRoot, "open");
+    QVERIFY2(!fieldRoot->property("capturing").toBool(), "the dialog took the keyboard");
+    QCOMPARE(m_backend.hotkeySuspensions, 0);
+
+    QTRY_VERIFY(dialogRoot->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QCOMPARE(confirmed.count(), 1);
+    QCOMPARE(captured.count(), 0);
+    QVERIFY2(field->hasActiveFocus(), "and gave it back when it closed");
+    delete dialogRoot;
+    delete fieldRoot;
 }
 
 int main(int argc, char *argv[])

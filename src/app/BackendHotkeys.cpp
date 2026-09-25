@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
+#include <algorithm>
+
 #include <QGuiApplication>
 #include <QHash>
 #include <QKeySequence>
@@ -75,13 +77,17 @@ void Backend::unregisterHotkeys() {
 
 void Backend::registerHotkeys() {
     unregisterHotkeys();
+    if (m_hotkeySuspensions > 0)
+        return; // a field is recording a combo; suspendHotkeys() re-registers after
 #ifdef FT_ENABLE_TEST_HOOKS
     // QHotkey needs a real windowing session; offscreen CI (QT_QPA_PLATFORM=offscreen) segfaults.
     if (qEnvironmentVariable("QT_QPA_PLATFORM") == QLatin1String("offscreen"))
         return;
 #endif
-    if (!m_settings.hotkeys_enabled) // master switch off — leave everything unbound
+    if (!m_settings.hotkeys_enabled) { // master switch off — leave everything unbound
+        noteUnavailableHotkeys();
         return;
+    }
     // Under Wayland the compositor owns global shortcuts and never forwards them
     // to an X11 grab (even via XWayland), so registration would silently "succeed"
     // yet nothing fires. Don't bind anything; the UI also disables the feature.
@@ -104,6 +110,56 @@ void Backend::registerHotkeys() {
     m_hkConnect = makeHotkey(m_settings.hotkey_connect, tr("Connect"), &Backend::connectVpn, platform);
     m_hkDisconnect =
             makeHotkey(m_settings.hotkey_disconnect, tr("Disconnect"), &Backend::disconnectVpn, platform);
+    noteUnavailableHotkeys();
+}
+
+// A combo that failed to register used to look exactly like one that works: the
+// only word of it was a WARN line in the log.
+void Backend::noteUnavailableHotkeys()
+{
+    QStringList unavailable;
+    if (m_settings.hotkeys_enabled) {
+        const auto missing = [](const QString &seq, const QHotkey *hk) {
+            return !seq.trimmed().isEmpty() && !(hk && hk->isRegistered());
+        };
+        if (missing(m_settings.hotkey_toggle, m_hkToggle))
+            unavailable << QStringLiteral("toggle");
+        if (missing(m_settings.hotkey_connect, m_hkConnect))
+            unavailable << QStringLiteral("connect");
+        if (missing(m_settings.hotkey_disconnect, m_hkDisconnect))
+            unavailable << QStringLiteral("disconnect");
+    }
+    if (unavailable == m_unavailableHotkeys)
+        return;
+    m_unavailableHotkeys = unavailable;
+    emit hotkeyAvailabilityChanged();
+}
+
+// A field recording a new combo has to receive it as a key press, and a combo
+// that is registered never arrives as one: the system hands it to the grab. So
+// pressing the current combo to keep it, or another action's combo to move it,
+// ran that action while the field went on waiting. Counted rather than a flag,
+// because capture moves between fields by the new one starting before the old
+// one stops.
+void Backend::suspendHotkeys(bool suspend)
+{
+    const int before = m_hotkeySuspensions;
+    m_hotkeySuspensions = suspend ? before + 1 : std::max(0, before - 1);
+    if (before == 0 && m_hotkeySuspensions > 0)
+        unregisterHotkeys();
+    else if (before > 0 && m_hotkeySuspensions == 0)
+        registerHotkeys();
+}
+
+bool Backend::isSafeGlobalHotkey(const QString &sequence)
+{
+    const QKeySequence ks(sequence.trimmed());
+    if (ks.isEmpty())
+        return false;
+    const QKeyCombination first = ks[0];
+    if (first.keyboardModifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+        return true;
+    return first.key() >= Qt::Key_F1 && first.key() <= Qt::Key_F12;
 }
 
 QHotkey *Backend::makeHotkey(const QString &seq, const QString &label,
@@ -115,6 +171,15 @@ QHotkey *Backend::makeHotkey(const QString &seq, const QString &label,
     if (ks.isEmpty()) {
         appendLog(QStringLiteral("WARN"),
                   tr("Hotkey “%1” (%2) is not a valid key sequence — ignored.").arg(s, label));
+        return nullptr;
+    }
+    // The field refuses these too; this is for a combo saved before it did, or
+    // written into the settings by hand. Registered, a bare Enter or letter stops
+    // reaching every other application for as long as FreeTunnel runs.
+    if (!isSafeGlobalHotkey(s)) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("Hotkey “%1” (%2) has no Ctrl, Alt or Meta, so it would take that key "
+                     "from every other application — ignored.").arg(s, label));
         return nullptr;
     }
     auto *hk = new QHotkey(ks, true /*autoRegister*/, this);
@@ -132,7 +197,7 @@ QHotkey *Backend::makeHotkey(const QString &seq, const QString &label,
 
 void Backend::ensureHotkeysRegistered()
 {
-    if (!m_settings.hotkeys_enabled)
+    if (!m_settings.hotkeys_enabled || m_hotkeySuspensions > 0)
         return;
     const auto ok = [](QHotkey *hk, const QString &seq) {
         return seq.trimmed().isEmpty() || (hk && hk->isRegistered());
