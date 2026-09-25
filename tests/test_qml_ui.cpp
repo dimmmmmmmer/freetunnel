@@ -2723,14 +2723,14 @@ namespace {
 
 // A property's values over a stretch of time, for telling a moving thing from a
 // still one.
-QList<qreal> sampled(const std::function<qreal()> &read, int forMs, int everyMs = 40)
+QList<qreal> sampled(const std::function<qreal()> &valueNow, int forMs, int everyMs = 40)
 {
     QList<qreal> out;
     QElapsedTimer clock;
     clock.start();
     while (clock.elapsed() < forMs) {
         QTest::qWait(everyMs);
-        out << read();
+        out << valueNow();
     }
     return out;
 }

@@ -336,7 +336,7 @@ class UrlCatcher : public QObject {
 public:
     QList<QUrl> urls;
 public slots:
-    void open(const QUrl &url) { urls << url; }
+    void handle(const QUrl &url) { urls << url; }
 };
 
 } // namespace
@@ -361,7 +361,7 @@ void TestBackendUpdates::aReleaseWithNothingForThisPlatformOffersItsPage()
     QVERIFY(backend.updateErrorOpensPage());
 
     UrlCatcher catcher;
-    QDesktopServices::setUrlHandler(QStringLiteral("http"), &catcher, "open");
+    QDesktopServices::setUrlHandler(QStringLiteral("http"), &catcher, "handle");
     const auto unhandle = qScopeGuard([] { QDesktopServices::unsetUrlHandler(QStringLiteral("http")); });
     backend.openLatestRelease();
     QCOMPARE(backend.updateState(), QStringLiteral("error"));
