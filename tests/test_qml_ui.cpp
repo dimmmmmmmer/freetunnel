@@ -134,6 +134,7 @@ private slots:
     void footerLinksUnderlineLikeTheOthers();
     void theEditorsBackArrowTakesANearMiss();
     void thePickerWaitsForTheScanWithoutFreezing();
+    void theSelectPopupFadesOutAndLetsGo();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -2904,6 +2905,15 @@ void TestQmlUi::homeLeadsStraightToTheAddMenu()
         QCOMPARE(m_backend.toggleCount(), toggles);
         QCOMPARE(m_shell.currentPage(), 1);
         QVERIFY(m_shell.openAddMenu);
+        // And the "Add a config" under it.
+        m_shell.setCurrentPage(0);
+        m_shell.openAddMenu = false;
+        auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), QStringLiteral("Add a config"));
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QCOMPARE(m_shell.currentPage(), 1);
+        QVERIFY(m_shell.openAddMenu);
         delete root;
     }
     m_shell.setCurrentPage(0);
@@ -2990,6 +3000,42 @@ void TestQmlUi::whatAPopupCoversDoesNotLightUp()
     evaluateIn(root, QStringLiteral("winConfirm.visible = false"));
     evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'A'}], 'a', null)"));
     QCOMPARE(hoverTile(), 1.0);
+    evaluateIn(root, QStringLiteral("selectPopup.open = false"));
+    // The config editor's dim, and the app picker's.
+    for (const QString &overlay : {QStringLiteral("create"), QStringLiteral("apps")}) {
+        root->setProperty("overlay", overlay);
+        QCOMPARE(hoverTile(), 1.0);
+        root->setProperty("overlay", QString());
+    }
+    delete root;
+}
+
+// The window's select popup vanished the moment it closed, while it fades in and
+// the other popups fade out. While it fades, what is under it takes clicks again.
+void TestQmlUi::theSelectPopupFadesOutAndLetsGo()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    auto *layer = root->findChild<QQuickItem *>(QStringLiteral("overlayLayer"));
+    auto *nav = root->findChild<QQuickItem *>(QStringLiteral("navRow"));
+    QVERIFY(layer && nav);
+    QQuickItem *split = nullptr;
+    const QList<QQuickItem *> tiles = nav->childItems();
+    for (QQuickItem *child : tiles) {
+        if (child->property("index").toInt() == 2)
+            split = child;
+    }
+    QVERIFY(split);
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'A'}], 'a', null)"));
+    QTRY_VERIFY(evaluateIn(root, QStringLiteral("selectPopup.opacity")).toReal() > 0.99);
+
+    evaluateIn(root, QStringLiteral("selectPopup.open = false"));
+    QVERIFY2(layer->isVisible(), "the popup vanished instead of fading");
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(split));
+    QCOMPARE(root->property("currentPage").toInt(), 2);
+    QTRY_VERIFY(!layer->isVisible());
     delete root;
 }
 
@@ -3012,6 +3058,17 @@ void TestQmlUi::theTrayConnectItemSaysWhatItDoes()
     m_backend.setDisconnecting(true);
     QCOMPARE(item->property("text").toString(), QStringLiteral("Disconnecting…"));
     QVERIFY(!item->property("enabled").toBool());
+    // The ticked config toggles too, and did nothing then but flick its tick.
+    QObject *ticked = nullptr;
+    const auto all = root->findChildren<QObject *>();
+    for (QObject *o : all) {
+        if (o->property("checkable").toBool() && o->property("checked").toBool())
+            ticked = o;
+    }
+    QVERIFY(ticked);
+    QVERIFY(!ticked->property("enabled").toBool());
+    m_backend.setDisconnecting(false);
+    QVERIFY(ticked->property("enabled").toBool());
     delete root;
 }
 

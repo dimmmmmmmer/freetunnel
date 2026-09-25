@@ -17,6 +17,7 @@
 
 #include "app/Backend.h"
 #include "core/AppSettings.h"
+#include "core/InstalledApps.h"
 
 class TestBackendSplit : public QObject {
     Q_OBJECT
@@ -43,6 +44,7 @@ private slots:
     void appRulesBelongToTheProfile();
     void theOneOldApplicationListSeedsEveryProfileOnce();
     void theLeakWarningPopsUpOnlyOverTheProfileItConcerns();
+    void thePickersListComesFromABackgroundScan();
 
 private:
     QTemporaryDir m_home;
@@ -467,6 +469,20 @@ void TestBackendSplit::theLeakWarningPopsUpOnlyOverTheProfileItConcerns()
     backend.clearDomains();
     QCOMPARE(errors.count(), 2);
     backend.setVpnMode(QStringLiteral("general"));
+}
+
+// The picker's first open scanned on the UI thread, and on Windows froze the
+// window while every Start Menu shortcut was resolved. It gets what the scan on a
+// worker has so far, and hears through splitChanged when the rest is in.
+void TestBackendSplit::thePickersListComesFromABackgroundScan()
+{
+    Backend backend;
+    QSignalSpy changed(&backend, &Backend::splitChanged);
+    QVERIFY(backend.installedApplications().isEmpty());
+    QVERIFY2(!backend.installedAppsReady(), "the list was read on this thread");
+    QTRY_VERIFY_WITH_TIMEOUT(backend.installedAppsReady(), 30000);
+    QVERIFY(changed.count() >= 1);
+    QCOMPARE(backend.installedApplications().size(), freetunnel::installedApplications().size());
 }
 
 QTEST_MAIN(TestBackendSplit)
