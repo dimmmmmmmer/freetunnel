@@ -1,9 +1,13 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 
 #include <QDirIterator>
+#include <QElapsedTimer>
+#include <QRegularExpression>
 #include <QPointer>
 #include <QScopeGuard>
 #include <QFontDatabase>
@@ -115,6 +119,23 @@ private slots:
     void aSecondConfirmQueuesInsteadOfReplacingTheLiveOne();
     void aHotkeyNeedsAModifierAndBackspaceUnbinds();
     void aConfirmDialogTakesTheKeyboardFromAHotkeyField();
+    void theUpdateIconStaysUprightAndSaysWhatItDoes();
+    void theUpdateBusyMarkMoves();
+    void theConnectingLogoPulses();
+    void onlyTheLogoConnects();
+    void homeLeadsStraightToTheAddMenu();
+    void whatAPopupCoversDoesNotLightUp();
+    void theTrayConnectItemSaysWhatItDoes();
+    void anUpdateIsAnnouncedOnce();
+    void theConfigListSaysWhenItIsConnecting();
+    void theWindowThemeWorksInBothModes();
+    void noPropertyIsNamedLikeASignalHandler();
+    void theHotkeyFieldFillStaysOpaque();
+    void footerLinksUnderlineLikeTheOthers();
+    void theEditorsBackArrowTakesANearMiss();
+    void thePickerWaitsForTheScanWithoutFreezing();
+    void theSelectPopupFadesOutAndLetsGo();
+    void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -1519,8 +1540,14 @@ void TestQmlUi::theEmptyConfigsPageOffersToAdd()
     auto *hint = root->findChild<QQuickItem *>(QStringLiteral("addConfigHint"));
     QObject *menu = root->findChild<QObject *>(QStringLiteral("importMenu"));
     QVERIFY(hint && hint->isVisible() && menu);
+    // A link, as the same words on Home are, not placeholder grey that ignores the
+    // pointer.
+    QTest::mouseMove(&window, centreOf(hint));
+    QTRY_VERIFY(hint->property("font").value<QFont>().underline());
     QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(hint));
     QVERIFY2(menu->property("open").toBool(), "clicking «Add a config» opens the add menu");
+    // And out of the way of its menu, which at the default height cut it in half.
+    QVERIFY(!hint->isVisible());
     delete root;
 }
 
@@ -2495,6 +2522,15 @@ void TestQmlUi::theUpdateLineDoesWhatItOffers()
     click();
     QCOMPARE(m_backend.updateChecks, 1);
     QCOMPARE(m_backend.updateOffersTaken, 1);
+    // Downloaded: the installer or its folder has been opened, and neither the
+    // line nor an arrow beside it has anything left to offer. The arrow was there,
+    // and both opened the release web page.
+    m_backend.setUpdate(QStringLiteral("ready"),
+                        QStringLiteral("Update downloaded — install it from the disk image that opened"));
+    click();
+    QCOMPARE(m_backend.updateChecks, 1);
+    QCOMPARE(m_backend.updateOffersTaken, 1);
+    QVERIFY(!root->findChild<QQuickItem *>(QStringLiteral("updateIcon"))->isVisible());
 
     // Long reasons wrap rather than lose their end.
     m_backend.setUpdate(QStringLiteral("error"),
@@ -2680,6 +2716,582 @@ void TestQmlUi::russianFitsAtTheDefaultWidth()
             cut << item->property("text").toString();
     }
     QVERIFY2(cut.isEmpty(), qPrintable(QStringLiteral("cut: ") + cut.join(QStringLiteral(" | "))));
+    delete root;
+}
+
+namespace {
+
+// A property's values over a stretch of time, for telling a moving thing from a
+// still one.
+QList<qreal> sampled(const std::function<qreal()> &valueNow, int forMs, int everyMs = 40)
+{
+    QList<qreal> out;
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < forMs) {
+        QTest::qWait(everyMs);
+        out << valueNow();
+    }
+    return out;
+}
+
+bool strays(const QList<qreal> &values, qreal from, qreal by)
+{
+    return std::any_of(values.cbegin(), values.cend(), [from, by](qreal v) { return std::abs(v - from) >= by; });
+}
+
+// The visible item under `item` with this objectName: rows of a list each have
+// one, and only the one on screen is the one that counts.
+QQuickItem *visibleNamedIn(QQuickItem *item, const QString &objectName)
+{
+    const QList<QQuickItem *> all = itemsIn(item);
+    for (QQuickItem *candidate : all) {
+        if (candidate->objectName() == objectName && candidate->isVisible())
+            return candidate;
+    }
+    return nullptr;
+}
+
+QQuickWindow *exposed(QObject *root)
+{
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    if (!window)
+        return nullptr;
+    window->show();
+    return QTest::qWaitForWindowExposed(window) ? window : nullptr;
+}
+
+// Long enough for any hover animation in the app (120–140 ms) to have finished.
+constexpr int kHoverSettles = 300;
+
+} // namespace
+
+// Hovered, the update icon turned -30°: ↓ lay on its side, and ↻ turned against
+// its own arrow. Its glyph is also its offer: ↓ downloads, ↻ tries again, and ↗
+// opens the release page where the release has nothing for this platform.
+void TestQmlUi::theUpdateIconStaysUprightAndSaysWhatItDoes()
+{
+    const auto restore = qScopeGuard([this] {
+        m_backend.updateErrorOpensPage = false;
+        m_backend.setUpdate(QString(), QString());
+    });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *icon = root->findChild<QQuickItem *>(QStringLiteral("updateIcon"));
+    QVERIFY(icon);
+
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+    QVERIFY(icon->isVisible());
+    QCOMPARE(icon->property("text").toString(), QStringLiteral("↓"));
+    QTest::mouseMove(&window, centreOf(icon));
+    QTest::qWait(kHoverSettles);
+    QCOMPARE(icon->rotation(), 0.0);
+
+    m_backend.setUpdate(QStringLiteral("error"), QStringLiteral("Download failed: timed out"));
+    QCOMPARE(icon->property("text").toString(), QStringLiteral("↻"));
+    QTest::qWait(kHoverSettles);
+    QCOMPARE(icon->rotation(), 0.0);
+
+    m_backend.updateErrorOpensPage = true;
+    m_backend.setUpdate(QStringLiteral("error"), QStringLiteral("No installer asset found for this platform"));
+    QCOMPARE(icon->property("text").toString(), QStringLiteral("↗"));
+    delete root;
+}
+
+// While checking or downloading, the row's only sign of work was a still "…"
+// beside the percentage: a stalled download looked the same as a slow one.
+void TestQmlUi::theUpdateBusyMarkMoves()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setUpdate(QString(), QString()); });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *busy = root->findChild<QQuickItem *>(QStringLiteral("updateBusy"));
+    QVERIFY(busy);
+    QVERIFY(!busy->isVisible());
+
+    m_backend.setUpdate(QStringLiteral("downloading"), QStringLiteral("Downloading… 42%"));
+    QVERIFY(busy->isVisible());
+    QVERIFY2(strays(sampled([busy] { return busy->opacity(); }, 900), 1.0, 0.2), "the busy mark stood still");
+
+    // Done, it comes to rest whole, ready for the next time.
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+    QVERIFY(!busy->isVisible());
+    QTRY_COMPARE(busy->opacity(), 1.0);
+    delete root;
+}
+
+// The connecting pulse on the logo never moved: a Behavior on the property it
+// shared with the press restarted on every frame of it and held the logo at size.
+void TestQmlUi::theConnectingLogoPulses()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setConnecting(false); });
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *area = root->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QVERIFY(area);
+    // The logo as drawn: whatever scales it, its box or the image itself.
+    QQuickItem *box = area->parentItem();
+    QQuickItem *image = nullptr;
+    const QList<QQuickItem *> inBox = box->childItems();
+    for (QQuickItem *child : inBox) {
+        if (child->inherits("QQuickImage"))
+            image = child;
+    }
+    QVERIFY(image);
+    const auto drawn = [box, image] { return box->scale() * image->scale(); };
+
+    m_backend.setConnecting(true);
+    QVERIFY2(strays(sampled(drawn, 1000), 1.0, 0.01), "the logo held still while connecting");
+    m_backend.setConnecting(false);
+    QTRY_COMPARE(drawn(), 1.0);
+    delete root;
+}
+
+// The logo's click area was the whole hero, wider than the logo and down over the
+// session line: a click on the timer, or beside the logo, disconnected.
+void TestQmlUi::onlyTheLogoConnects()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setConnected(false); });
+    m_backend.setConnected(true);
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 460);
+    QVERIFY(page);
+    auto *logo = root->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QQuickItem *timer = nullptr;
+    QTRY_VERIFY((timer = textIn(page, m_backend.sessionTime())) != nullptr);
+    QVERIFY(logo);
+    const int toggles = m_backend.toggleCount();
+    const int doubleClick = QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50;
+
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(timer));
+    QCOMPARE(m_backend.toggleCount(), toggles);
+    QTest::qWait(doubleClick);
+    const QRectF drawn = sceneRect(logo);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
+                      QPointF(drawn.left() - 20, drawn.center().y()).toPoint());
+    QCOMPARE(m_backend.toggleCount(), toggles);
+    QTest::qWait(doubleClick);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(logo));
+    QCOMPARE(m_backend.toggleCount(), toggles + 1);
+    delete root;
+}
+
+// With no configs the logo said "Select a config first", with none to select, and
+// Home's + only switched pages: the add menu was a second click away on Configs.
+void TestQmlUi::homeLeadsStraightToTheAddMenu()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] {
+        m_backend.setConfigs(saved);
+        m_shell.setCurrentPage(0);
+        m_shell.openAddMenu = false;
+    });
+    {
+        m_backend.setConfigs({});
+        QObject *root = loadPage("pages/HomePage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        QVERIFY(showInWindow(root, window, 400, 460));
+        const int toggles = m_backend.toggleCount();
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
+                          centreOf(root->findChild<QQuickItem *>(QStringLiteral("connectionLogo"))));
+        QCOMPARE(m_backend.toggleCount(), toggles);
+        QCOMPARE(m_shell.currentPage(), 1);
+        QVERIFY(m_shell.openAddMenu);
+        // And the "Add a config" under it.
+        m_shell.setCurrentPage(0);
+        m_shell.openAddMenu = false;
+        auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), QStringLiteral("Add a config"));
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QCOMPARE(m_shell.currentPage(), 1);
+        QVERIFY(m_shell.openAddMenu);
+        delete root;
+    }
+    m_shell.setCurrentPage(0);
+    m_shell.openAddMenu = false;
+    m_backend.setConfigs(saved);
+    {
+        QObject *root = loadPage("pages/HomePage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        QVERIFY(showInWindow(root, window, 400, 460));
+        auto *plus = root->findChild<QQuickItem *>(QStringLiteral("addConfigButton"));
+        QVERIFY(plus);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(plus));
+        QCOMPARE(m_shell.currentPage(), 1);
+        QVERIFY(m_shell.openAddMenu);
+        delete root;
+    }
+    // Configs opens with the menu once, and clears the request.
+    QObject *first = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(first);
+    QVERIFY(first->findChild<QObject *>(QStringLiteral("importMenu"))->property("open").toBool());
+    QVERIFY(!m_shell.openAddMenu);
+    delete first;
+    QObject *again = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(again);
+    QVERIFY(!again->findChild<QObject *>(QStringLiteral("importMenu"))->property("open").toBool());
+    delete again;
+}
+
+// A popup's click-away area and a dialog's dim let hover through: what they
+// covered lit up under the pointer, though a click there only closed them.
+void TestQmlUi::whatAPopupCoversDoesNotLightUp()
+{
+    {
+        QObject *root = loadPage("pages/HomePage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        QVERIFY(showInWindow(root, window, 400, 460));
+        auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        auto *plus = root->findChild<QQuickItem *>(QStringLiteral("addConfigButton"));
+        QVERIFY(label && plus);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        QVERIFY(root->findChild<QObject *>(QStringLiteral("configPicker"))->property("open").toBool());
+        QTest::mouseMove(&window, centreOf(plus));
+        QTest::qWait(50);
+        QVERIFY2(!plus->property("containsMouse").toBool(), "Home's + lit up under the picker's backdrop");
+        delete root;
+    }
+    {
+        QObject *root = loadPage("pages/ConfigsPage.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        QVERIFY(showInWindow(root, window, 400, 460));
+        root->findChild<QObject *>(QStringLiteral("importMenu"))->setProperty("open", true);
+        auto *ping = root->findChild<QQuickItem *>(QStringLiteral("pingButton"));
+        QVERIFY(ping);
+        QTest::mouseMove(&window, centreOf(ping));
+        QTest::qWait(50);
+        QVERIFY2(!ping->property("containsMouse").toBool(), "the ping button lit up under the add menu's backdrop");
+        delete root;
+    }
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    auto *nav = root->findChild<QQuickItem *>(QStringLiteral("navRow"));
+    QVERIFY(nav);
+    QQuickItem *tile = nullptr;
+    const QList<QQuickItem *> tiles = nav->childItems();
+    for (QQuickItem *child : tiles) {
+        if (child->property("index").toInt() == 2)
+            tile = child;
+    }
+    QVERIFY(tile);
+    const auto hoverTile = [&] {
+        QTest::mouseMove(window, QPoint(window->width() / 2, window->height() - 10));
+        QTest::qWait(kHoverSettles);
+        QTest::mouseMove(window, centreOf(tile));
+        QTest::qWait(kHoverSettles);
+        return tile->scale();
+    };
+    evaluateIn(root, QStringLiteral("showConfirm('Delete this?', 'Delete', null)"));
+    QCOMPARE(hoverTile(), 1.0);
+    evaluateIn(root, QStringLiteral("winConfirm.visible = false"));
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'A'}], 'a', null)"));
+    QCOMPARE(hoverTile(), 1.0);
+    evaluateIn(root, QStringLiteral("selectPopup.open = false"));
+    // The config editor's dim, and the app picker's.
+    for (const QString &overlay : {QStringLiteral("create"), QStringLiteral("apps")}) {
+        root->setProperty("overlay", overlay);
+        QCOMPARE(hoverTile(), 1.0);
+        root->setProperty("overlay", QString());
+    }
+    delete root;
+}
+
+// The window's select popup vanished the moment it closed, while it fades in and
+// the other popups fade out. While it fades, what is under it takes clicks again.
+void TestQmlUi::theSelectPopupFadesOutAndLetsGo()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    auto *layer = root->findChild<QQuickItem *>(QStringLiteral("overlayLayer"));
+    auto *nav = root->findChild<QQuickItem *>(QStringLiteral("navRow"));
+    QVERIFY(layer && nav);
+    QQuickItem *split = nullptr;
+    const QList<QQuickItem *> tiles = nav->childItems();
+    for (QQuickItem *child : tiles) {
+        if (child->property("index").toInt() == 2)
+            split = child;
+    }
+    QVERIFY(split);
+    evaluateIn(root, QStringLiteral("showSelect(pageLoader, [{v: 'a', t: 'A'}], 'a', null)"));
+    QTRY_VERIFY(evaluateIn(root, QStringLiteral("selectPopup.opacity")).toReal() > 0.99);
+
+    evaluateIn(root, QStringLiteral("selectPopup.open = false"));
+    QVERIFY2(layer->isVisible(), "the popup vanished instead of fading");
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(split));
+    QCOMPARE(root->property("currentPage").toInt(), 2);
+    QTRY_VERIFY(!layer->isVisible());
+    delete root;
+}
+
+// While connecting, the first tray item read "Connecting…" like a status line,
+// and choosing it cancelled the connection; while disconnecting it did nothing.
+void TestQmlUi::theTrayConnectItemSaysWhatItDoes()
+{
+    const auto restore = qScopeGuard([this] {
+        m_backend.setConnecting(false);
+        m_backend.setDisconnecting(false);
+    });
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QObject *item = root->findChild<QObject *>(QStringLiteral("trayToggle"));
+    QVERIFY(item);
+    m_backend.setConnecting(true);
+    QCOMPARE(item->property("text").toString(), QStringLiteral("Cancel connecting"));
+    QVERIFY(item->property("enabled").toBool());
+    m_backend.setConnecting(false);
+    m_backend.setDisconnecting(true);
+    QCOMPARE(item->property("text").toString(), QStringLiteral("Disconnecting…"));
+    QVERIFY(!item->property("enabled").toBool());
+    // The ticked config toggles too, and did nothing then but flick its tick.
+    QObject *ticked = nullptr;
+    const auto all = root->findChildren<QObject *>();
+    for (QObject *o : all) {
+        if (o->property("checkable").toBool() && o->property("checked").toBool())
+            ticked = o;
+    }
+    QVERIFY(ticked);
+    QVERIFY(!ticked->property("enabled").toBool());
+    m_backend.setDisconnecting(false);
+    QVERIFY(ticked->property("enabled").toBool());
+    delete root;
+}
+
+// A change of language says the update line again, and each time it did, the
+// window announced the update again.
+void TestQmlUi::anUpdateIsAnnouncedOnce()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setUpdate(QString(), QString()); });
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    QVERIFY(exposed(root));
+    auto *toast = root->findChild<QQuickItem *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
+    QTRY_VERIFY(toast->opacity() > 0.5);
+    toast->setProperty("opacity", 0.0); // read, and gone
+    QTest::qWait(kHoverSettles);
+    m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Доступна версия 9.9.9"));
+    QTest::qWait(kHoverSettles);
+    QCOMPARE(toast->opacity(), 0.0);
+    delete root;
+}
+
+// Connecting, or switching to another config, the list showed nothing about it:
+// the "connected" badge went away until the tunnel was up.
+void TestQmlUi::theConfigListSaysWhenItIsConnecting()
+{
+    const auto restore = qScopeGuard([this] {
+        m_backend.setConnecting(false);
+        m_backend.setConnected(false);
+    });
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 460);
+    QVERIFY(page);
+    m_backend.setConnecting(true);
+    QQuickItem *badge = nullptr;
+    QTRY_VERIFY((badge = visibleNamedIn(page, QStringLiteral("connectionBadge"))) != nullptr);
+    QVERIFY(textIn(badge, QStringLiteral("connecting…")));
+    m_backend.setConnecting(false);
+    m_backend.setConnected(true);
+    QVERIFY(badge->isVisible());
+    QVERIFY(textIn(badge, QStringLiteral("connected")));
+    delete root;
+}
+
+// The theme's colour for text on the accent was called onAccent, which beside a
+// property called accent QML takes for the handler of accent's change signal: it
+// stayed black, and in the light theme the Save label and the chosen profile were
+// black on dark grey. In the light theme, too, hover went from surface to border,
+// three levels apart, and chips, hotkey fields and Cancel showed nothing.
+void TestQmlUi::theWindowThemeWorksInBothModes()
+{
+    const QString saved = m_backend.themeMode();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setThemeMode(saved); });
+    for (const QString &mode : {QStringLiteral("light"), QStringLiteral("dark")}) {
+        m_backend.setThemeMode(mode);
+        QObject *root = createMainWindow(m_engine);
+        QVERIFY(root);
+        const auto colour = [root](const char *name) {
+            return evaluateIn(root, QStringLiteral("theme.") + QLatin1String(name)).value<QColor>();
+        };
+        const double onAccent = contrast(colour("accentText"), colour("accent"));
+        QVERIFY2(onAccent >= 4.5, qPrintable(QStringLiteral("%1: text on the accent at %2:1").arg(mode).arg(onAccent, 0, 'f', 1)));
+        const int hover = std::abs(qGray(colour("surfaceHover").rgb()) - qGray(colour("surface").rgb()));
+        QVERIFY2(hover >= 8, qPrintable(QStringLiteral("%1: hover %2 levels from rest").arg(mode).arg(hover)));
+        delete root;
+    }
+}
+
+// The same trap anywhere else: no property may be named like a signal handler.
+void TestQmlUi::noPropertyIsNamedLikeASignalHandler()
+{
+    static const QRegularExpression handlerLike(QStringLiteral("\\bproperty\\s+\\w+\\s+(on[A-Z]\\w*)"));
+    QStringList found;
+    QDirIterator it(QStringLiteral(":/"), {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString source = QString::fromUtf8(file.readAll());
+        auto matches = handlerLike.globalMatch(source);
+        while (matches.hasNext())
+            found << path + QLatin1Char(' ') + matches.next().captured(1);
+    }
+    QVERIFY2(found.isEmpty(), qPrintable(found.join(QStringLiteral(", "))));
+}
+
+// Capturing, the field's fill eased into a translucent colour, and a colour
+// animation eases RGB and alpha apart: it blinked instead of fading.
+void TestQmlUi::theHotkeyFieldFillStaysOpaque()
+{
+    QObject *root = loadPage("components/HotkeyField.qml");
+    QVERIFY(root);
+    auto *fill = root->findChild<QQuickItem *>(QStringLiteral("hotkeyFill"));
+    QVERIFY(fill);
+    root->setProperty("capturing", true);
+    QTest::qWait(kHoverSettles);
+    QCOMPARE(fill->property("color").value<QColor>().alpha(), 255);
+    root->setProperty("capturing", false);
+    delete root;
+}
+
+// Every text link underlines under the pointer; the two in the footer only
+// changed colour.
+void TestQmlUi::footerLinksUnderlineLikeTheOthers()
+{
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 1400);
+    QVERIFY(page);
+    int checked = 0;
+    for (const QString &label : {QStringLiteral("FreeTunnel ") + m_backend.appVersion(),
+                                 QStringLiteral("TrustTunnel core ") + m_backend.coreVersion()}) {
+        QQuickItem *link = textIn(page, label);
+        QVERIFY2(link, qPrintable(label));
+        // The footer is clipped where the page is too narrow for it, as with the
+        // fonts the Windows tests get, and a link past the edge cannot be pointed at.
+        if (sceneRect(link).right() > page->width())
+            continue;
+        QTest::mouseMove(&window, centreOf(link));
+        QTRY_VERIFY2(link->property("font").value<QFont>().underline(), qPrintable(label));
+        ++checked;
+    }
+    QVERIFY(checked > 0);
+    delete root;
+}
+
+// The editor's ← answered only over the glyph itself: 3 px to its left it did
+// nothing, where the app picker's identical arrow takes 6 px around.
+void TestQmlUi::theEditorsBackArrowTakesANearMiss()
+{
+    m_shell.setOverlay(QStringLiteral("create"));
+    const auto restore = qScopeGuard([this] { m_shell.setOverlay(QString()); });
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 700));
+    auto *back = root->findChild<QQuickItem *>(QStringLiteral("editorBack"));
+    QVERIFY(back);
+    QQuickItem *glyph = back->parentItem();
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
+                      glyph->mapToScene(QPointF(-4, glyph->height() / 2)).toPoint());
+    QCOMPARE(m_shell.overlay(), QString());
+    delete root;
+}
+
+// The first open of the picker scanned on the UI thread, and on Windows the
+// window froze while every Start Menu shortcut was resolved.
+void TestQmlUi::thePickerWaitsForTheScanWithoutFreezing()
+{
+    m_backend.installedAppsReady = false;
+    const auto restore = qScopeGuard([this] {
+        m_backend.installedAppsReady = true;
+        emit m_backend.splitChanged();
+    });
+    QObject *root = loadPage("AppPickerOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 700);
+    QVERIFY(page);
+    QVERIFY(textIn(page, QStringLiteral("Looking for installed applications…")));
+    evaluateIn(root, QStringLiteral("searchField.text = 'fire'"));
+
+    m_backend.installedAppsReady = true;
+    emit m_backend.splitChanged();
+    QTRY_VERIFY(textIn(page, QStringLiteral("Firefox")));
+    // What was typed while it waited is applied to the list that arrived.
+    QVERIFY(!textIn(page, QStringLiteral("Some App")));
+    QVERIFY(!textIn(page, QStringLiteral("Looking for installed applications…")));
+    delete root;
+}
+
+namespace {
+
+// A click at a moment of the test's choosing. QTest spaces its clicks so that two
+// never make a double-click; a person's second click comes a moment after the
+// first, and that is the case to test. On QTest's own clock, moved on past it.
+void clickAt(QWindow *window, QPoint at, int timestamp)
+{
+    const QPointF global = window->mapToGlobal(QPointF(at));
+    QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
+            window, ulong(timestamp), QPointF(at), global, Qt::LeftButton, Qt::LeftButton,
+            QEvent::MouseButtonPress);
+    QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
+            window, ulong(timestamp + 20), QPointF(at), global, Qt::NoButton, Qt::LeftButton,
+            QEvent::MouseButtonRelease);
+    QTest::lastMouseTimestamp = timestamp + 20 + QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+}
+
+} // namespace
+
+// With no configs, the logo's first click opens the add menu, and the second of a
+// double-click landed on it: it closed the menu at once, or ran the row under the
+// pointer, which opened a file dialog or the editor, or imported the clipboard.
+void TestQmlUi::aDoubleClickThatOpensTheAddMenuLeavesItOpen()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setConfigs(saved); });
+    m_backend.setConfigs({});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    auto *loader = root->findChild<QObject *>(QStringLiteral("pageLoader"));
+    auto *logo = loader->property("item").value<QQuickItem *>()->findChild<QQuickItem *>(QStringLiteral("connectionLogo"));
+    QVERIFY(logo);
+    const QPoint at = centreOf(logo);
+    const int start = QTest::lastMouseTimestamp + QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+
+    clickAt(window, at, start);
+    QTest::qWait(150); // the menu fades in under the pointer
+    clickAt(window, at, start + 150);
+    QTest::qWait(kHoverSettles);
+
+    QCOMPARE(root->property("currentPage").toInt(), 1);
+    auto *page = loader->property("item").value<QQuickItem *>();
+    QVERIFY(page->findChild<QObject *>(QStringLiteral("importMenu"))->property("open").toBool());
+    QCOMPARE(root->property("overlay").toString(), QString());
+    QVERIFY(!page->findChild<QObject *>(QStringLiteral("configImportDialog"))->property("visible").toBool());
     delete root;
 }
 

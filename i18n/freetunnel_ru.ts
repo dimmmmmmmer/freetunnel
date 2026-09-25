@@ -46,6 +46,10 @@
         <source>Applications (*.desktop *.app)</source>
         <translation>Приложения (*.desktop *.app)</translation>
     </message>
+    <message>
+        <source>Looking for installed applications…</source>
+        <translation>Ищем установленные приложения…</translation>
+    </message>
 </context>
 <context>
     <name>Backend</name>
@@ -293,6 +297,22 @@
         <source>Hotkey “%1” (%2) has no Ctrl, Alt or Meta, so it would take that key from every other application — ignored.</source>
         <translation>У горячей клавиши «%1» (%2) нет Ctrl, Alt или Meta, и она отняла бы эту клавишу у всех остальных приложений — пропущена.</translation>
     </message>
+    <message>
+        <source>Version %1 is available — installing it closes FreeTunnel</source>
+        <translation>Доступна версия %1 — при установке FreeTunnel закроется</translation>
+    </message>
+    <message>
+        <source>The downloaded installer could not be started</source>
+        <translation>Не удалось запустить загруженный установщик</translation>
+    </message>
+    <message>
+        <source>Update downloaded — install it from the disk image that opened</source>
+        <translation>Обновление загружено — установите его из открывшегося образа диска</translation>
+    </message>
+    <message>
+        <source>Update downloaded to %1 — install it with your package manager.</source>
+        <translation>Обновление загружено в %1 — установите его через менеджер пакетов.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -363,6 +383,10 @@
     <message>
         <source>That configuration is no longer there.</source>
         <translation>Этой конфигурации больше нет.</translation>
+    </message>
+    <message>
+        <source>connecting…</source>
+        <translation>подключение…</translation>
     </message>
 </context>
 <context>
@@ -598,10 +622,6 @@
         <translation>FreeTunnel — %1</translation>
     </message>
     <message>
-        <source>Connecting…</source>
-        <translation>Подключение…</translation>
-    </message>
-    <message>
         <source>Disconnecting…</source>
         <translation>Отключение…</translation>
     </message>
@@ -624,6 +644,10 @@
     <message>
         <source>Replace</source>
         <translation>Заменить</translation>
+    </message>
+    <message>
+        <source>Cancel connecting</source>
+        <translation>Отменить подключение</translation>
     </message>
 </context>
 <context>
@@ -1003,6 +1027,10 @@
     <message>
         <source>Could not download SHA256SUMS.txt: %1</source>
         <translation>Не удалось скачать SHA256SUMS.txt: %1</translation>
+    </message>
+    <message>
+        <source>the server stopped responding</source>
+        <translation>сервер перестал отвечать</translation>
     </message>
 </context>
 <context>

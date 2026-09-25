@@ -18,12 +18,31 @@
 
 // ---------- updater ----------
 
+// Whether installing this release closes FreeTunnel, taking the tunnel down with
+// it: on Windows the installer replaces it, and an AppImage is replaced and then
+// restarted (applyLinuxUpdate). A function rather than a constant per platform:
+// a lambda that captures a constant is a warning to clang, an error under -Werror.
+static bool installingClosesTheApp(const UpdateChecker::ReleaseInfo &info)
+{
+#if defined(Q_OS_WIN)
+    Q_UNUSED(info)
+    return true;
+#elif defined(Q_OS_MACOS)
+    Q_UNUSED(info)
+    return false;
+#else
+    return info.assetName.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)
+            && !freetunnel::runningAppImagePath().isEmpty();
+#endif
+}
+
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 // Open the folder holding the verified download, so "we could not install this
-// for you" comes with the file rather than just a path in a label.
-static void revealDownload(const QString &path)
+// for you" comes with the file rather than just a path in a label. False when
+// there was nothing to open it with.
+static bool revealDownload(const QString &path)
 {
-    QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
+    return QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
 }
 
 // Install a verified Linux download, or say honestly that we cannot.
@@ -41,12 +60,24 @@ void Backend::applyLinuxUpdate(const QString &path)
         // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
         // that is the package manager's job, and doing it silently would need root.
         // Show the file and say so, instead of claiming success.
+        if (!revealDownload(path)) {
+            // Nothing to show it with: say where it is, and offer the release
+            // page, as the row does for a release it cannot install. The row
+            // is otherwise inert once an update is downloaded.
+            m_updateState = QStringLiteral("error");
+            m_updateErrorFromDownload = false;
+            m_updateErrorOpensPage = true;
+            setUpdateMessage([path] {
+                return tr("Update downloaded to %1 — install it with your package manager.").arg(path);
+            });
+            emit updateChanged();
+            return;
+        }
         setUpdateMessage([] {
             return tr("Update downloaded. Finish installing it from the file manager — "
                       "packages are installed by your package manager.");
         });
         emit updateChanged();
-        revealDownload(path);
         return;
     }
 
@@ -55,7 +86,11 @@ void Backend::applyLinuxUpdate(const QString &path)
     // so a hostile environment cannot redirect this write.
     const QString backup = current + QStringLiteral(".old");
     QFile::remove(backup);
+    // A failure here is an error the row can retry, not "ready": left there, it
+    // showed the download arrow, and the arrow opened the release page instead.
     if (!QFile::rename(current, backup)) {
+        m_updateState = QStringLiteral("error");
+        m_updateErrorFromDownload = true;
         setUpdateMessage([current] {
             return tr("Could not replace %1 — check that you can write to it.").arg(current);
         });
@@ -65,6 +100,8 @@ void Backend::applyLinuxUpdate(const QString &path)
     }
     if (!QFile::copy(path, current)) {
         QFile::rename(backup, current); // put the working build back
+        m_updateState = QStringLiteral("error");
+        m_updateErrorFromDownload = true;
         setUpdateMessage([current] {
             return tr("Could not replace %1 — check that you can write to it.").arg(current);
         });
@@ -124,7 +161,12 @@ void Backend::wireUpdaterSignals()
                 m_latestVersion = info.version;
                 m_latestUrl = info.htmlUrl;
                 const QString version = info.version;
-                setUpdateMessage([version] { return tr("Version %1 is available").arg(version); });
+                // Said before the click, not after.
+                const bool closesApp = installingClosesTheApp(info);
+                setUpdateMessage([version, closesApp] {
+                    return closesApp ? tr("Version %1 is available — installing it closes FreeTunnel").arg(version)
+                                     : tr("Version %1 is available").arg(version);
+                });
                 emit updateChanged();
             });
     connect(m_updater, &UpdateChecker::downloadProgress, this,
@@ -138,11 +180,24 @@ void Backend::wireUpdaterSignals()
             });
     connect(m_updater, &UpdateChecker::downloadReady, this,
             [this](const QString &path) {
-                m_updateState = QStringLiteral("ready");
-                setUpdateMessage([] { return tr("Update downloaded — opening installer"); });
-                emit updateChanged();
+                // Quitting, or saying the installer opened, when it never started
+                // left the user with no FreeTunnel, or a line waiting on nothing.
 #if defined(Q_OS_WIN)
-                QProcess::startDetached(path, {});
+                const bool started = QProcess::startDetached(path, {});
+#elif defined(Q_OS_MACOS)
+                const bool started = QProcess::startDetached(QStringLiteral("open"), {path});
+#endif
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+                if (!started) {
+                    m_updateState = QStringLiteral("error");
+                    m_updateErrorFromDownload = true;
+                    setUpdateMessage([] { return tr("The downloaded installer could not be started"); });
+                    emit updateChanged();
+                    return;
+                }
+#endif
+                m_updateState = QStringLiteral("ready");
+#if defined(Q_OS_WIN)
                 // Then get out of its way. The installer cannot replace files this
                 // process has open, and it should not have to force us out either:
                 // a forced kill would leave the tunnel up and the privileged helper
@@ -153,14 +208,23 @@ void Backend::wireUpdaterSignals()
                 emit updateChanged();
                 quitApplication();
 #elif defined(Q_OS_MACOS)
-                QProcess::startDetached(QStringLiteral("open"), {path});
+                // What happens next is the user's: the line stays up all session.
+                setUpdateMessage([] { return tr("Update downloaded — install it from the disk image that opened"); });
+                emit updateChanged();
 #else
+                setUpdateMessage([] { return tr("Update downloaded — opening installer"); });
+                emit updateChanged();
                 applyLinuxUpdate(path);
 #endif
             });
-    connect(m_updater, &UpdateChecker::downloadFailed, this, [this](const QString &msg) {
+    connect(m_updater, &UpdateChecker::downloadFailed, this,
+            [this](const QString &msg, UpdateChecker::DownloadFailure kind) {
         m_updateState = QStringLiteral("error");
-        m_updateErrorFromDownload = true;
+        // What the row offers next. A refused download is never retried with the
+        // release this check found: only a new check, which may find it fixed.
+        // Nothing for this platform: the release page, where the user can see why.
+        m_updateErrorFromDownload = kind == UpdateChecker::DownloadFailure::Transient;
+        m_updateErrorOpensPage = kind == UpdateChecker::DownloadFailure::NoInstaller;
         setUpdateMessage([msg] { return msg; });
         emit updateChanged();
     });
@@ -209,6 +273,7 @@ void Backend::checkForUpdates(bool userInitiated)
     ensureUpdater();
     m_updateCheckUserInitiated = userInitiated;
     m_updateErrorFromDownload = false;
+    m_updateErrorOpensPage = false;
     if (userInitiated) {
         m_updateState = QStringLiteral("checking");
         setUpdateMessage([] { return tr("Checking…"); });
@@ -224,7 +289,11 @@ void Backend::openLatestRelease() {
     // it is set on the first successful check and never cleared, so once ANY
     // check had found a release every later CHECK failure was treated as a
     // download failure and silently started downloading instead of retrying.
-    if (m_updateState == QLatin1String("error") && !m_updateErrorFromDownload) {
+    if (m_updateState == QLatin1String("error") && m_updateErrorOpensPage) {
+        openHttpUrl(m_latestUrl.isEmpty()
+                            ? QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/latest")
+                            : m_latestUrl);
+    } else if (m_updateState == QLatin1String("error") && !m_updateErrorFromDownload) {
         checkForUpdates(true);
     } else if (m_updateState == QLatin1String("available")
                || m_updateState == QLatin1String("error")) {
@@ -241,6 +310,7 @@ void Backend::downloadUpdate() {
     if (!m_updater || m_updateState == QLatin1String("downloading"))
         return;
     m_updateState = QStringLiteral("downloading");
+    m_updateErrorOpensPage = false;
     setUpdateMessage([] { return tr("Downloading…"); });
     emit updateChanged();
     m_updater->downloadLatest();

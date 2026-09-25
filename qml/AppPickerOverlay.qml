@@ -24,20 +24,30 @@ Item {
 
     anchors.fill: parent
 
+    // Takes hover as well as clicks: the page under the dim is out of reach, and
+    // its tiles lit up under the pointer as if they were not.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
-        MouseArea { anchors.fill: parent; onClicked: pickerRoot.shell.overlay = "" } }
+        MouseArea { anchors.fill: parent; hoverEnabled: true; onClicked: pickerRoot.shell.overlay = "" } }
     // Not while the file dialog is up: where Qt draws it, this shortcut saw its
     // Escape too, and closing the picker destroyed the dialog mid-key — a crash.
     Shortcut { sequences: ["Escape"]
                enabled: !pickerRoot.shell.windowPopupOpen && !fileDlg.visible
                onActivated: pickerRoot.shell.overlay = "" }
 
-    // The scan touches the filesystem, so it happens once when the card opens
-    // rather than on every keystroke in the search field.
+    // The scan touches the filesystem, so it happens once rather than on every
+    // keystroke in the search field, and on a worker: done here, the first open
+    // froze the window, on Windows for as long as every Start Menu shortcut took
+    // to resolve. Until it is in the card says so, and whatever was typed
+    // meanwhile is applied to the list when it arrives.
     property var allApps: []
-    Component.onCompleted: {
+    readonly property bool scanning: !backend.installedAppsReady
+    function reload() {
         allApps = backend.installedApplications()
-        appList.model = allApps
+        applyFilter(searchField.text)
+    }
+    onScanningChanged: if (!scanning) reload()
+    Component.onCompleted: {
+        reload()
         searchField.forceActiveFocus()
     }
 
@@ -78,8 +88,9 @@ Item {
                 Layout.fillWidth: true; spacing: 12
                 Text { text: "←"; color: backMa.containsMouse ? theme.text : theme.textDim
                        font.pixelSize: 20
+                    // An arrow cursor, as on every button; the hand is for links.
                     MouseArea { id: backMa; anchors.fill: parent; anchors.margins: -6
-                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
                         onClicked: pickerRoot.shell.overlay = "" } }
                 Text { Layout.fillWidth: true; text: qsTr("Add an application")
                        color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
@@ -120,7 +131,11 @@ Item {
                 delegate: Rectangle {
                     required property var modelData
                     width: appList.width; height: 42; radius: 8
-                    color: rowMa.containsMouse ? theme.surface : "transparent"
+                    // Faded, like the rows of every other list, and from the card's
+                    // own colour: from "transparent", which is black with no alpha,
+                    // a fade would pass through grey.
+                    color: rowMa.containsMouse ? theme.surface : theme.bg
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left; anchors.leftMargin: 10
@@ -136,7 +151,6 @@ Item {
                     }
                     MouseArea {
                         id: rowMa; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             backend.addAppRule(modelData.path)
                             pickerRoot.shell.overlay = ""
@@ -148,7 +162,8 @@ Item {
             Text {
                 Layout.fillWidth: true
                 visible: appList.model.length === 0
-                text: pickerRoot.allApps.length === 0
+                text: pickerRoot.scanning ? qsTr("Looking for installed applications…")
+                      : pickerRoot.allApps.length === 0
                       ? qsTr("No installed applications were found. Choose a file instead.")
                       : qsTr("Nothing matches that.")
                 color: theme.textFaint; font.pixelSize: 12; wrapMode: Text.WordWrap

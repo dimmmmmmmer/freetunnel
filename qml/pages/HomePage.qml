@@ -74,6 +74,10 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: 200
                 Layout.preferredHeight: heroCol.height
+                // Glides with the logo: the status line under it comes and goes at
+                // the start and end of a session, and without this the selector
+                // below jumped 12 px in one frame while the logo slid.
+                Behavior on Layout.preferredHeight { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
                 readonly property bool sessionActive: backend.connected || backend.connecting || backend.disconnecting
                 Column {
                     id: heroCol
@@ -81,6 +85,11 @@ Item {
                     spacing: 6
                     Item {
                         width: 132; height: 132
+                        // The connecting pulse is this box's, and the press is the
+                        // logo's own. On one property, the press's Behavior restarted
+                        // on every frame of the pulse and held the logo still: it
+                        // never pulsed at all.
+                        scale: pulse.value
                         Image {
                             id: heroLogo
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -90,16 +99,43 @@ Item {
                             sourceSize: Qt.size(264, 264)
                             opacity: backend.connected ? 1.0 : ((backend.connecting || backend.disconnecting) ? 0.7 : 0.5)
                             Behavior on opacity { NumberAnimation { duration: 220 } }
-                            scale: (heroMa.pressed ? 0.96 : 1.0) * ((backend.connecting || backend.disconnecting) ? pulse.value : 1.0)
+                            scale: heroMa.pressed ? 0.96 : 1.0
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                             QtObject {
-                                id: pulse; property real value: 1.0
+                                id: pulse; objectName: "connectPulse"; property real value: 1.0
                             }
                             SequentialAnimation {
                                 running: backend.connecting || backend.disconnecting; loops: Animation.Infinite
+                                // Stopped anywhere in its swing, it eases back to size.
+                                onRunningChanged: running ? pulseSettle.stop() : pulseSettle.start()
                                 NumberAnimation { target: pulse; property: "value"; to: 1.05; duration: 750; easing.type: Easing.InOutSine }
                                 NumberAnimation { target: pulse; property: "value"; to: 0.97; duration: 750; easing.type: Easing.InOutSine }
                             }
+                            NumberAnimation { id: pulseSettle; target: pulse; property: "value"; to: 1.0
+                                              duration: 120; easing.type: Easing.OutCubic }
+                        }
+                        // The logo, not the whole hero: the hero is wider than the
+                        // logo and holds the session line under it, and a click on
+                        // the timer, or beside the logo, disconnected.
+                        MouseArea {
+                            id: heroMa
+                            objectName: "connectionLogo"
+                            anchors.fill: parent
+                            onClicked: {
+                                // With nothing to connect, the way to something: the
+                                // add menu, as the line under the logo offers. It
+                                // said "Select a config first", with none to select.
+                                if (backend.configs.length === 0 && !hero.sessionActive) {
+                                    shell.openAddMenu = true
+                                    shell.currentPage = 1
+                                    return
+                                }
+                                backend.toggle()
+                            }
+                            // Handled, so the second click of a double-click is not a second
+                            // toggle. People double-click anything that looks like an icon,
+                            // and it connected and at once cancelled.
+                            onDoubleClicked: {}
                         }
                     }
                     Text {
@@ -113,16 +149,6 @@ Item {
                         color: theme.textDim
                         font.pixelSize: 15; font.weight: Font.Medium
                     }
-                }
-                MouseArea {
-                    id: heroMa
-                    objectName: "connectionLogo"
-                    anchors.fill: parent
-                    onClicked: backend.toggle()
-                    // Handled, so the second click of a double-click is not a second
-                    // toggle. People double-click anything that looks like an icon,
-                    // and it connected and at once cancelled.
-                    onDoubleClicked: {}
                 }
             }
             Item { Layout.preferredHeight: 22 }
@@ -166,7 +192,14 @@ Item {
                         MouseArea { id: cfgSelMa; anchors.fill: parent; hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        if (backend.configs.length === 0) { shell.currentPage = 1; return }
+                                        // Straight to the add menu: the Configs page alone
+                                        // needed a second click on its own "Add a config".
+                                        // The flag first: setting the page loads it at once.
+                                        if (backend.configs.length === 0) {
+                                            shell.openAddMenu = true
+                                            shell.currentPage = 1
+                                            return
+                                        }
                                         if (!cfgPopup.open) {
                                             // As wide as the longest name needs, within the
                                             // page: a fixed 250 px left a broad empty band
@@ -198,16 +231,18 @@ Item {
                             Rectangle { anchors.centerIn: parent; width: 10; height: 1.6; radius: 1; color: theme.accent }
                             Rectangle { anchors.centerIn: parent; width: 1.6; height: 10; radius: 1; color: theme.accent }
                         }
-                        MouseArea { id: addCfgMa; anchors.fill: parent; hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: shell.currentPage = 1 }
+                        // An arrow, not a hand, as on every other button: the hand
+                        // is for links (see WindowControls).
+                        MouseArea { id: addCfgMa; objectName: "addConfigButton"; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { shell.openAddMenu = true; shell.currentPage = 1 } }
                     }
                 }
             }
         }
     }
-    // Click-away backdrop + Esc to dismiss the config picker.
-    MouseArea { anchors.fill: parent; z: 90; visible: cfgPopup.open
+    // Click-away backdrop + Esc to dismiss the config picker. It takes hover too,
+    // so what it covers does not light up for a click that only closes the picker.
+    MouseArea { anchors.fill: parent; z: 90; visible: cfgPopup.open; hoverEnabled: true
                 onClicked: cfgPopup.open = false }
     // Stand down while a window-level popup or confirm dialog is up: it owns
     // Escape then, and two enabled shortcuts on one key make Qt report the press
@@ -246,6 +281,7 @@ Item {
                     required property string modelData
                     width: picker.width; height: 40; radius: 6
                     color: pma.containsMouse ? theme.surface : theme.bg
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Text { anchors.verticalCenter: parent.verticalCenter; x: 10
                            width: parent.width - 20; elide: Text.ElideRight
                            text: parent.modelData

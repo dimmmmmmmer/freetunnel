@@ -34,10 +34,15 @@ Item {
         Text { text: hk.label; color: theme.text; font.pixelSize: 14 }
         Item { Layout.fillWidth: true }
         Rectangle {
+            objectName: "hotkeyFill"
             Layout.preferredHeight: 28
             Layout.preferredWidth: Math.max(96, lbl.implicitWidth + 24)
             radius: 6
-            color: hk.capturing ? theme.infoBg : (hkMa.containsMouse ? theme.border : theme.surface)
+            // Opaque while capturing: infoBg is translucent, and a colour animation
+            // into it eases RGB and alpha apart, so the fill blinked instead of
+            // fading. Tinted over the page, it is the colour that was on screen.
+            color: hk.capturing ? Qt.tint(theme.bg, theme.infoBg)
+                                : (hkMa.containsMouse ? theme.surfaceHover : theme.surface)
             Behavior on color { ColorAnimation { duration: 120 } }
             border.width: hk.capturing ? 1 : 0; border.color: theme.accent
             Text {

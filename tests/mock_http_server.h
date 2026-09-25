@@ -15,6 +15,8 @@ public:
         QByteArray body;
         int status = 200;
         QByteArray contentType = QByteArrayLiteral("application/json");
+        // Take the request and never answer: a connection that has stalled.
+        bool silent = false;
     };
 
     explicit MockHttpServer(QObject *parent = nullptr);

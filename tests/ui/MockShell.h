@@ -11,6 +11,8 @@ class MockShell : public QObject {
     Q_PROPERTY(int currentPage READ currentPage WRITE setCurrentPage NOTIFY currentPageChanged)
     Q_PROPERTY(QString overlay READ overlay WRITE setOverlay NOTIFY overlayChanged)
     Q_PROPERTY(int editIndex READ editIndex WRITE setEditIndex NOTIFY editIndexChanged)
+    // Main.qml's: Home's + asks the Configs page to open with its add menu.
+    Q_PROPERTY(bool openAddMenu MEMBER openAddMenu NOTIFY openAddMenuChanged)
     // Main.qml exposes this read-only (select popup / confirm dialog open); it is
     // writable here so a test can put a sub-screen in that state.
     Q_PROPERTY(bool windowPopupOpen READ windowPopupOpen WRITE setWindowPopupOpen NOTIFY
@@ -38,6 +40,7 @@ public:
     int titlebarSafeTop() const { return 40; }
 
     QString lastToast() const { return m_lastToast; }
+    bool openAddMenu = false;
 
     Q_INVOKABLE void showToast(const QString &msg);
     Q_INVOKABLE void showConfirm(const QString &message, const QString &, const QVariant &)
@@ -60,6 +63,7 @@ signals:
     void overlayChanged();
     void editIndexChanged();
     void windowPopupOpenChanged();
+    void openAddMenuChanged();
 
 private:
     int m_currentPage = 0;

@@ -232,11 +232,15 @@ Item {
                            // A click does what the line offers, as the icon beside it
                            // does: check, download, retry. Nothing while a check or a
                            // download runs — it used to start a check mid-download,
-                           // which then offered the same download a second time.
+                           // which then offered the same download a second time. And
+                           // nothing once the update is downloaded: the installer or
+                           // the folder has been opened, and a click only opened the
+                           // release web page, which is not what the line says.
                            readonly property bool idle: backend.updateState === ""
                                                         || backend.updateState === "current"
                            readonly property bool actionable: backend.updateState !== "checking"
                                                               && backend.updateState !== "downloading"
+                                                              && backend.updateState !== "ready"
                            text: (updActive && backend.updateMessage.length > 0)
                                  ? backend.updateMessage : qsTr("Check for updates")
                            font.pixelSize: 14
@@ -258,25 +262,38 @@ Item {
                             visible: backend.updateState === "current"
                             text: "✓"; font.pixelSize: 14; color: theme.success
                         }
+                        // Breathes while it works, at the pace of Home's connecting
+                        // pulse: a still "…" beside a percentage that had stopped
+                        // moving looked the same as one that was just slow.
                         Text {
+                            id: updBusy
+                            objectName: "updateBusy"
                             visible: backend.updateState === "checking"
                                    || backend.updateState === "downloading"
                             text: "…"; font.pixelSize: 14; color: theme.textDim
+                            SequentialAnimation on opacity {
+                                running: updBusy.visible; loops: Animation.Infinite; alwaysRunToEnd: true
+                                NumberAnimation { to: 0.25; duration: 750; easing.type: Easing.InOutSine }
+                                NumberAnimation { to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                            }
                         }
                         Text {
                             id: updIcon
+                            objectName: "updateIcon"
                             visible: backend.updateState === "available"
                                    || backend.updateState === "error"
-                                   || backend.updateState === "ready"
                             // Download vs retry are different offers and must not
                             // look identical: a failed CHECK used to show the same
                             // glyph as "a new version is waiting for you", which
-                            // reads as an update that does not exist.
-                            text: backend.updateState === "error" ? "↻" : "↓"
+                            // reads as an update that does not exist. ↗ where the
+                            // release has nothing for this platform: its page.
+                            text: backend.updateState !== "error" ? "↓"
+                                  : backend.updateErrorOpensPage ? "↗" : "↻"
                             font.pixelSize: 17
+                            // Only a colour change on hover, like the line beside it.
+                            // It used to turn -30°, which tipped ↓ onto its side and
+                            // turned ↻ against its own arrow.
                             color: updIconMa.containsMouse ? theme.text : theme.accent
-                            rotation: updIconMa.containsMouse ? -30 : 0
-                            Behavior on rotation { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                             MouseArea { id: updIconMa; anchors.fill: parent; anchors.margins: -6
                                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                         onClicked: backend.openLatestRelease() }
@@ -298,12 +315,12 @@ Item {
                   Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth
                   clip: true
                 Text { text: "FreeTunnel " + backend.appVersion; font.pixelSize: 12
-                       color: ftMa.containsMouse ? theme.accent : theme.textFaint
+                       color: ftMa.containsMouse ? theme.accent : theme.textFaint; font.underline: ftMa.containsMouse
                        MouseArea { id: ftMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                            onClicked: backend.openUrl("https://github.com/dimmmmmmmer/freetunnel") } }
                 Text { text: "  ·  "; color: theme.textFaint; font.pixelSize: 12 }
                 Text { text: qsTr("TrustTunnel core ") + backend.coreVersion; font.pixelSize: 12
-                       color: ttMa.containsMouse ? theme.accent : theme.textFaint
+                       color: ttMa.containsMouse ? theme.accent : theme.textFaint; font.underline: ttMa.containsMouse
                        MouseArea { id: ttMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                            onClicked: backend.openUrl("https://github.com/TrustTunnel/TrustTunnelClient") } }
             }

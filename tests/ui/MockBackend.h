@@ -48,6 +48,9 @@ class MockBackend : public QObject {
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRuleLabels READ appRuleLabels NOTIFY splitChanged)
+    // Main's scan runs on a worker; true here unless a test is waiting on it.
+    Q_PROPERTY(bool installedAppsReady MEMBER installedAppsReady NOTIFY splitChanged)
+    Q_PROPERTY(bool updateErrorOpensPage MEMBER updateErrorOpensPage NOTIFY updateChanged)
     Q_PROPERTY(QStringList profiles READ profiles NOTIFY splitChanged)
     Q_PROPERTY(QString activeProfile READ activeProfile NOTIFY splitChanged)
     Q_PROPERTY(bool hotkeysSupported READ hotkeysSupported CONSTANT)
@@ -217,6 +220,8 @@ public:
     Q_INVOKABLE void clearLogs() { m_logModel.clear(); }
     void appendLog(const QString &msg) { m_logModel.append(QStringLiteral("12:00:01"), QStringLiteral("INFO"), msg); }
     Q_INVOKABLE void openLogFolder() {}
+    bool installedAppsReady = true;
+    bool updateErrorOpensPage = false;
     // Read once, when a page loads: a test that needs a path of its own sets it first.
     QString logPathOverride;
     Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
@@ -234,6 +239,8 @@ public:
     // which is what the left elide in the delegate is for.
     Q_INVOKABLE QVariantList installedApplications() {
         QVariantList out;
+        if (!installedAppsReady)
+            return out; // as Backend's, until its scan is in
         QVariantMap a; a["name"] = QStringLiteral("Firefox"); a["path"] = QStringLiteral("/usr/bin/firefox");
         QVariantMap b; b["name"] = QStringLiteral("Some App");
         b["path"] = QStringLiteral("/usr/lib/some/very/long/path/to/a/program");

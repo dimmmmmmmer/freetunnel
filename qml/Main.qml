@@ -184,12 +184,16 @@ Window {
                 }
             }
             menu: Platform.Menu {
-                // Plain connect/disconnect action button.
+                // Plain connect/disconnect action button. It says what choosing it
+                // does: while connecting that is cancelling, which a "Connecting…"
+                // that looked like a status line did without warning. While
+                // disconnecting there is nothing to do, so it is only a status.
                 Platform.MenuItem {
+                    objectName: "trayToggle"
                     text: backend.disconnecting ? qsTr("Disconnecting…")
-                          : backend.connecting ? qsTr("Connecting…")
+                          : backend.connecting ? qsTr("Cancel connecting")
                           : backend.connected ? qsTr("Disconnect") : qsTr("Connect")
-                    enabled: backend.configs.length > 0
+                    enabled: backend.configs.length > 0 && !backend.disconnecting
                     onTriggered: {
                         win.trayActionWaiting = true
                         backend.toggle()
@@ -217,6 +221,9 @@ Window {
                         text: win.menuLabel(modelData)
                         checkable: true
                         checked: index === backend.activeIndex
+                        // The ticked one toggles, and while disconnecting that
+                        // did nothing but flick its tick off and on.
+                        enabled: !(backend.disconnecting && index === backend.activeIndex)
                         onTriggered: {
                             win.trayActionWaiting = true
                             if (index === backend.activeIndex)
@@ -272,9 +279,15 @@ Window {
         readonly property color textFaint: dark ? "#6a6a6a" : "#9a9a9a"
         readonly property color accent: dark ? "#b0b0b0" : "#4f4f4f"
         // Text on an accent fill. White on the light dark-theme accent read at about
-        // 2:1, so the editor's Save looked disabled next to Cancel.
-        readonly property color onAccent: dark ? "#181818" : "#ffffff"
+        // 2:1, so the editor's Save looked disabled next to Cancel. Not "onAccent":
+        // beside a property called accent, QML takes that name for the handler of
+        // accent's change signal, and the colour was left black in both themes.
+        readonly property color accentText: dark ? "#181818" : "#ffffff"
         readonly property color border: dark ? "#2e2e2e" : "#e5e5e5"
+        // Hover fill for controls that rest on surface: a step further from the
+        // page, as rows take from bg to surface. Hovering to border was 3 levels
+        // in the light theme, which nobody can see.
+        readonly property color surfaceHover: dark ? "#2e2e2e" : "#d8d8d8"
         // Off-state track for switches: clearly darker than the (light) accent
         // in dark mode so on/off don't blur together.
         readonly property color toggleOff: dark ? "#3a3a3a" : "#c4c4c4"
@@ -288,6 +301,9 @@ Window {
     property int currentPage: 0
     property string overlay: "" // "", "create", "apps"
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
+    // Home's + and "Add a config": the Configs page opens with its add menu. Set
+    // before currentPage, which loads the page at once; the page clears it.
+    property bool openAddMenu: false
     // True while a window-level popup already owns Escape (the select dropdown or
     // the confirm dialog). Sub-screens must disable their own Escape shortcut
     // then: two *enabled* shortcuts on the same key make Qt report the press as
@@ -662,20 +678,26 @@ Window {
             win.wasConnected = nowConnected
         }
         function onConfigImported(name) { toast.show(qsTr("Config added: %1").arg(name)) }
+        // Once per arrival: a change of language says the update line again in
+        // the new one, which is another updateChanged with nothing new in it.
         function onUpdateChanged() {
-            if (backend.updateState === "available")
+            if (backend.updateState === "available" && win.lastUpdateState !== "available")
                 toast.show(qsTr("Update available: %1").arg(backend.latestVersion))
+            win.lastUpdateState = backend.updateState
         }
     }
     // Hidden to the tray or the menu bar, or minimised: a toast drawn now would
-    // time out before anyone could read it.
-    readonly property bool onScreen: visible && visibility !== Window.Minimized
+    // time out before anyone could read it. Not "onScreen": a property named like
+    // a handler is read as one when its signal is declared in QML, as onAccent was.
+    readonly property bool inView: visible && visibility !== Window.Minimized
     // Something the user started from the tray has yet to succeed or fail.
     property bool trayActionWaiting: false
     property bool wasConnected: backend.connected
-    readonly property bool errorsGoToTray: !onScreen && trayActionWaiting
-    onOnScreenChanged: {
-        if (onScreen && toast.waiting) {
+    // Not a binding: it has to still hold the old state when updateChanged runs.
+    property string lastUpdateState: ""
+    readonly property bool errorsGoToTray: !inView && trayActionWaiting
+    onInViewChanged: {
+        if (inView && toast.waiting) {
             toast.waiting = false
             toastTimer.restart()
         }
@@ -698,7 +720,7 @@ Window {
             // Opaque: on Home a long one covers the speed tiles, which showed
             // through a toast that was not quite.
             opacity = 1
-            waiting = !win.onScreen
+            waiting = !win.inView
             if (waiting)
                 toastTimer.stop()
             else
@@ -782,13 +804,19 @@ Window {
         selectPopup.open = true
     }
     Item {
-        id: overlayLayer; anchors.fill: parent; z: 1500
-        visible: selectPopup.open
+        id: overlayLayer; objectName: "overlayLayer"; anchors.fill: parent; z: 1500
+        // Up until the popup has faded out, not just while it is open: hidden with
+        // it, the popup vanished at once, though it fades in and its siblings fade
+        // out. What it holds takes input only while it is open.
+        visible: selectPopup.open || selectPopup.opacity > 0
         // The popup is placed and sized when it opens; after a resize it would
         // hang away from the control it drops from.
         onWidthChanged: selectPopup.open = false
         onHeightChanged: selectPopup.open = false
-        MouseArea { anchors.fill: parent; onClicked: selectPopup.open = false }
+        // Takes hover too, so what it covers does not light up for a click that
+        // would only close the popup.
+        MouseArea { anchors.fill: parent; enabled: selectPopup.open; hoverEnabled: true
+                    onClicked: selectPopup.open = false }
         // Stand down while a confirm dialog is up: it owns Escape then, and two
         // enabled shortcuts on the same key make Qt report the press as
         // ambiguous — Escape would do nothing at all.
@@ -827,6 +855,7 @@ Window {
                     required property var modelData
                     width: spList.width; height: win.spRowH; radius: 6
                     color: spMa.containsMouse ? theme.surface : theme.bg
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     // Up to the check mark's room, then an ellipsis: a popup held to a
                     // narrow window cut a long name off at its edge, under the ✓.
                     Text { anchors.verticalCenter: parent.verticalCenter; x: 12
@@ -836,7 +865,7 @@ Window {
                            font.pixelSize: 14 }
                     Text { visible: modelData.v === selectPopup.value; text: "✓"; color: theme.accent
                            anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
-                    MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true
+                    MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true; enabled: selectPopup.open
                                 onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(modelData.v) } }
                 }
             }

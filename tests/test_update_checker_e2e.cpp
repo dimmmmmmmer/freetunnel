@@ -148,6 +148,14 @@ static QString sha256HexOfBytes(const QByteArray &body)
 }
 
 
+// What the Settings row offers after a failure follows from its kind: a refused
+// download is never retried with the same release, a missing installer sends the
+// user to the release page, and anything else is retried.
+static UpdateChecker::DownloadFailure failureKind(const QSignalSpy &failed)
+{
+    return failed.at(0).at(1).value<UpdateChecker::DownloadFailure>();
+}
+
 static QString testInstallerAssetName()
 {
 #if defined(_WIN32)
@@ -374,6 +382,7 @@ void TestUpdateCheckerE2e::downloadRejectsMissingChecksums()
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
     QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("SHA256SUMS.txt")));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
 
     qunsetenv("FT_GITHUB_API_BASE");
 }
@@ -406,6 +415,7 @@ void TestUpdateCheckerE2e::downloadRejectsMissingSignature()
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
     QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("not signed")));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
 
     qunsetenv("FT_GITHUB_API_BASE");
 }
@@ -450,6 +460,7 @@ void TestUpdateCheckerE2e::downloadRejectsInvalidSignature()
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 10000));
     QVERIFY(failed.at(0).at(0).toString().contains(QStringLiteral("signature")));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
 
     qunsetenv("FT_GITHUB_API_BASE");
 }
@@ -614,6 +625,7 @@ void TestUpdateCheckerE2e::downloadRejectsSignatureOverOtherContent()
     QCOMPARE(failed.count(), 1);
     QVERIFY2(failed.at(0).at(0).toString().contains(QStringLiteral("signature is invalid")),
              qPrintable(failed.at(0).at(0).toString()));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
 
     qunsetenv("FT_GITHUB_API_BASE");
 #endif
@@ -655,6 +667,8 @@ void TestUpdateCheckerE2e::downloadRejectsBadChecksum()
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 10000));
     QCOMPARE(failed.count(), 1);
+    // A download that came down wrong may come down right: retried, not refused.
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Transient);
 
     // Reporting the mismatch is only half the job: the file that failed the check
     // is an executable installer sitting in a directory the user can open. Leaving
@@ -699,6 +713,9 @@ void TestUpdateCheckerE2e::rejectsAssetsFromAnotherRepo()
     QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return failed.count() > 0; }, 5000));
+    // Nothing for this platform, as far as the row can tell: it offers the release
+    // page, which is the canonical one of this repo whatever the response said.
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::NoInstaller);
     qunsetenv("FT_GITHUB_API_BASE");
 }
 
@@ -842,6 +859,7 @@ void TestUpdateCheckerE2e::downloadRejectsAManifestSignedForAnotherVersion()
     const QString msg = failed.at(0).at(0).toString();
     QVERIFY2(msg.contains(QStringLiteral("1.9.0")) && msg.contains(QStringLiteral("2.0.0")),
              qPrintable(msg));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
 #endif
 }
 
