@@ -93,6 +93,7 @@ class Backend : public QObject {
 
 public:
     explicit Backend(QObject *parent = nullptr);
+    ~Backend() override;
 
     bool connected() const { return m_connected; }
     bool connecting() const { return m_connecting; }
@@ -256,6 +257,8 @@ private:
     void applySplitRules(); // push the active CONFIG's profile rules to the core
     QString activeConfigProfile() const; // split profile assigned to the active config
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
+    void startConnectAttempt();   // connectVpn() past its "already busy" check
+    void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
     void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
     void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
     void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
@@ -390,12 +393,18 @@ private:
 
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
-    bool m_reapplying = false;    // guard against re-entrant reconnect (see reapplyIfConnected)
+    // A config switch or live re-apply is a teardown followed by a fresh connect.
+    // m_reapplying covers only the part before that connect reaches the helper:
+    // the old tunnel going down, then the credential read. States and errors
+    // there belong to the old session. Once the connect is issued it is an
+    // ordinary attempt, and its failures are the user's to see.
+    bool m_reapplying = false;
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
-    bool m_inConnect = false;
+    bool m_awaitingToml = false;  // credential read in flight; nothing sent to the helper yet
+    bool m_inConnect = false;     // inside onConnectTomlReady(): suppress live-reapply
     // Bumped by anything that supersedes an in-flight connect, so a credential
     // read that finishes late cannot start a session nobody asked for any more.
-    quint64 m_connectGen = 0;     // inside connectVpn(): suppress live-reapply
+    quint64 m_connectGen = 0;
     bool m_quitting = false;      // user requested quit — allow window close on macOS
     bool m_shutdownPrepared = false; // prepareQuit() already ran
 };

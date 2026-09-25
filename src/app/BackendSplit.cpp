@@ -466,8 +466,18 @@ void Backend::applySplitRules() {
 // connected, seamlessly rebuild it so edits apply immediately rather than only
 // after a manual reconnect. No-op (and no re-elevation) when disconnected.
 void Backend::reconnectActiveConfig() {
-    if (m_reapplying || m_activePath.isEmpty())
+    // A teardown already under way reconnects with whatever config is active
+    // when it lands.
+    if (m_activePath.isEmpty() || m_pendingReconnect)
         return;
+    if (m_awaitingToml) {
+        // Nothing has reached the helper yet, so read again for the config that
+        // is active now. A second pick made here used to be dropped: the tunnel
+        // came up on the first while every label named the second.
+        logConnectAttempt();
+        buildConnectTomlAsync();
+        return;
+    }
     if (!m_connected && !m_connecting)
         return;
     m_reapplying = true;
@@ -494,11 +504,19 @@ void Backend::firePendingReconnect() {
         emit stateChanged();
         return;
     }
-    connectVpn();
+    startConnectAttempt();
 }
 
 void Backend::reapplyIfConnected() {
-    if (!m_connected || m_reapplying || m_inConnect)
+    // Rules, mode and the kill switch are sent with a connect. Before one reaches
+    // a running helper (the credential read, the teardown of a switch, a helper
+    // still starting) the edit goes out with it. After that the session holds its
+    // own copy and only a rebuild applies the edit — connected or still
+    // connecting. Waiting for Connected used to leave an edit made while
+    // connecting on screen and out of the tunnel until a manual reconnect.
+    if (m_inConnect || m_awaitingToml || m_pendingReconnect)
+        return;
+    if (!m_connected && !m_client.helperReady())
         return;
     reconnectActiveConfig();
 }

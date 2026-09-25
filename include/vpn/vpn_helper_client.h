@@ -49,6 +49,9 @@ public:
     void disconnectVpn();
     void shutdown();
     State state() const { return m_state; }
+    // The helper is up and has authenticated. Until then a connect is queued, and
+    // it goes out with every current setting (handleReadyEvent) once it is.
+    bool helperReady() const { return m_helloAcked; }
 
 signals:
     void stateChanged(VpnHelperClient::State state);

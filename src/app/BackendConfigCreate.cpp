@@ -262,7 +262,11 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
         if (noChange)
             return;
         applySplitRules();
-        reapplyIfConnected();
+        // Connecting counts too. A connect that is failing on a wrong password
+        // retries with the config it was given, so saving the fixed one only
+        // helps if the attempt starts again from it.
+        if (m_connected || m_connecting)
+            reconnectActiveConfig();
         return;
     }
     // Creating a config makes it the active one (persistCreatedConfigPaths). If a

@@ -63,6 +63,17 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         QTimer::singleShot(600, this, [this] { connectVpn(); });
 }
 
+Backend::~Backend()
+{
+    // The client is a member, and the ones declared after it (the log among them)
+    // are gone by the time it is destroyed. Its destructor aborts a live helper
+    // socket, which reports Disconnected synchronously, and that used to land in
+    // this half-destroyed object and crash. prepareQuit() shuts the client down
+    // while everything is alive; a Backend destroyed without it, as a test that
+    // stops early does, must not be called back at all.
+    m_client.disconnect(this);
+}
+
 void Backend::wireVpnClientSignals()
 {
     connect(&m_client, &VpnHelperClient::stateChanged, this, &Backend::onVpnClientStateChanged);
@@ -162,12 +173,29 @@ QString classifyVpnErrorMessage(const QString &lower)
     return QString();
 }
 
+// "Connection failed: X" is the core saying the session never came up; X is its
+// own wording plus the error code. The two reasons a user can act on are said in
+// their language; anything else keeps X, code and all, because that is what
+// tells a support thread what went wrong, under a translated lead-in.
+QString friendlyConnectFailure(const QString &reason)
+{
+    const QString lower = reason.toLower();
+    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"))) {
+        return QCoreApplication::translate("Backend",
+                                           "Authentication failed — check the username and password.");
+    }
+    if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out")))
+        return QCoreApplication::translate("Backend", "Server isn't responding (timed out).");
+    return QCoreApplication::translate("Backend", "Couldn't connect to the server: %1").arg(reason);
+}
+
 } // namespace
 
 QString Backend::friendlyVpnError(const QString &m) const
 {
-    if (m.startsWith(QStringLiteral("Connection failed:"), Qt::CaseInsensitive))
-        return m;
+    static const QLatin1String failedPrefix("Connection failed:");
+    if (m.startsWith(failedPrefix, Qt::CaseInsensitive))
+        return friendlyConnectFailure(m.mid(failedPrefix.size()).trimmed());
     const QString classified = classifyVpnErrorMessage(m.toLower());
     return classified.isEmpty() ? m : classified;
 }
@@ -187,11 +215,29 @@ void Backend::onVpnErrorReceived(const QString &m)
     appendLog(QStringLiteral("ERROR"), m);
     // NOT gated on m_inConnect: a synchronous helper-spawn failure (no
     // pkexec/sudo, token file not writable) emits from inside connectVpn(),
-    // and swallowing it left Connect looking like a silent no-op. Duplicate
-    // chatter is already handled by m_reapplying + the 30 s dedupe below.
+    // and swallowing it left Connect looking like a silent no-op. The old
+    // session's chatter during a switch is dropped by m_reapplying, repeats by
+    // the 30 s dedupe below.
     if (m_reapplying || isInternalVpnError(m))
         return;
+    settleRefusedConnect();
     emitDedupedVpnError(friendlyVpnError(m));
+}
+
+// A connect refused outright reports an error and no state: the core already in
+// Error and handed a config it cannot load, a missing wintun.dll, a helper
+// without privileges. Nothing else would take the UI off the optimistic
+// "Connecting…" connectVpn() set, so it pulsed until the user clicked to cancel,
+// and the Connect hotkey and links were ignored meanwhile.
+void Backend::settleRefusedConnect()
+{
+    if (!m_connecting || m_awaitingToml)
+        return;
+    const VpnHelperClient::State st = m_client.state();
+    if (st != VpnHelperClient::State::Disconnected && st != VpnHelperClient::State::Error)
+        return;
+    m_connecting = false;
+    emit stateChanged();
 }
 
 void Backend::onStatsTick()
@@ -260,7 +306,7 @@ void Backend::toggle() {
 
 bool Backend::shouldSkipConnectAttempt() const
 {
-    return !m_reapplying && (m_connected || m_connecting || m_disconnecting);
+    return m_connected || m_connecting || m_disconnecting;
 }
 
 void Backend::logConnectAttempt()
@@ -296,10 +342,17 @@ void Backend::connectVpn() {
         emit errorOccurred(tr("Select a config first"));
         return;
     }
-    // Connect hotkey / deep link: no-op when already up or a session is in flight.
-    // reconnectActiveConfig() sets m_reapplying so live rule edits can still rebuild.
+    // Connect hotkey / deep link: no-op when already up, while an attempt or a
+    // config switch is in flight (a switch reads as connecting throughout), or
+    // while disconnecting. The switch's own reconnect goes straight to
+    // startConnectAttempt().
     if (shouldSkipConnectAttempt())
         return;
+    startConnectAttempt();
+}
+
+void Backend::startConnectAttempt()
+{
     // Show "Connecting…" immediately — the helper handshake (and any elevation
     // prompt) can take a few seconds before the core reports a real state.
     // A subsequent state change (Connected / Error / Disconnected) overrides it.
@@ -319,6 +372,7 @@ void Backend::connectVpn() {
 void Backend::buildConnectTomlAsync()
 {
     const quint64 generation = ++m_connectGen;
+    m_awaitingToml = true;
     const QString path = m_activePath;
     const QString level =
             m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");
@@ -377,10 +431,17 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
     // credential store had us waiting.
     if (generation != m_connectGen)
         return;
+    m_awaitingToml = false;
     if (toml.isEmpty()) {
         failConnectNoPassword();
         return;
     }
+    // From here a switch is an ordinary connect attempt: what the helper reports
+    // is the new session, not the old one going down. Holding the guard until
+    // Connected swallowed every error of a switch to a server that fails, left
+    // "Connecting…" up for as long as the core kept retrying, and made the next
+    // config pick a silent no-op.
+    m_reapplying = false;
     m_inConnect = true;
     m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
@@ -395,6 +456,7 @@ void Backend::disconnectVpn() {
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
     ++m_connectGen; // a credential read still in flight must not start a session
+    m_awaitingToml = false;
     m_reapplying = false;
     m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
@@ -525,5 +587,13 @@ void Backend::removeConfig(int index) {
     reloadConfigs();
     if (m_activePath.isEmpty() && !m_paths.isEmpty())
         m_activePath = m_paths.first();
+    // Save the fallback as the one to start with. Left pointing at the deleted
+    // file, the next launch fell back to whatever row was first by then, which
+    // after an import or a reorder is a config nobody picked, and "Connect on
+    // startup" connected to it.
+    if (m_settings.last_config_path != m_activePath) {
+        m_settings.last_config_path = m_activePath;
+        persistSettings();
+    }
     emit configChanged();
 }

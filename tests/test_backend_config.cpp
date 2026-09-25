@@ -45,6 +45,7 @@ private slots:
     void deepLinkRoundTripsBackIntoTheSameConfig();
     void moveConfigReordersTheList();
     void removeConfigForgetsThePassword();
+    void deletingTheActiveConfigRemembersTheOneThatTookOver();
     void readAccessorsRejectOutOfRangeIndexes();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
@@ -326,6 +327,34 @@ void TestBackendConfig::removeConfigForgetsThePassword()
     QVERIFY2(!QFileInfo::exists(path), "the config file survived removal");
     QVERIFY2(freetunnel::CredentialStore::loadPassword(key).isEmpty(),
              "the password outlived the config it belonged to");
+}
+
+// Deleting the active config hands the slot to the first one left, and that is
+// the config the window shows as active. It was never saved as such: the setting
+// kept naming the deleted file, so the next launch fell back to whatever row was
+// first by then — after an import or a drag, a config nobody had picked, and
+// "Connect on startup" connected to it.
+void TestBackendConfig::deletingTheActiveConfigRemembersTheOneThatTookOver()
+{
+    QString takeover;
+    {
+        Backend backend;
+        QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("a"))));
+        QVERIFY(backend.createConfig(form(QStringLiteral("Beta"), QStringLiteral("b"))));
+        QVERIFY(backend.createConfig(form(QStringLiteral("Gamma"), QStringLiteral("c"))));
+        backend.selectConfig(1);
+        const QString deleted = pathFor(backend, 1);
+        backend.removeConfig(1);
+        QVERIFY(backend.activeIndex() >= 0);
+        takeover = pathFor(backend, backend.activeIndex());
+        QVERIFY(takeover != deleted);
+
+        // Another config to the top of the list, where an import or a drag puts it.
+        backend.moveConfig(1, 0);
+        QVERIFY(pathFor(backend, 0) != takeover);
+    }
+    Backend relaunched;
+    QCOMPARE(pathFor(relaunched, relaunched.activeIndex()), takeover);
 }
 
 // QML asks for fields by row index, and rows disappear (removal, reload) between

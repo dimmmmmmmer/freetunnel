@@ -285,6 +285,10 @@
         <source>That configuration is no longer there — it may have been deleted while you were editing it.</source>
         <translation>Этой конфигурации больше нет — возможно, её удалили, пока вы её редактировали.</translation>
     </message>
+    <message>
+        <source>Couldn&apos;t connect to the server: %1</source>
+        <translation>Не удалось подключиться к серверу: %1</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
