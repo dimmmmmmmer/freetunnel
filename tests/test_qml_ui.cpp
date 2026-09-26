@@ -2740,6 +2740,17 @@ QList<qreal> sampled(const std::function<qreal()> &valueNow, int forMs, int ever
     return out;
 }
 
+// Points at `item` until `done` holds. An item that has just appeared may not be
+// laid out where it will be yet, and one move to its centre then points at where
+// it is not: re-aimed on each try, the pointer ends up over it.
+bool pointAtUntil(QQuickWindow &window, QQuickItem *item, const std::function<bool()> &done)
+{
+    return QTest::qWaitFor([&] {
+        QTest::mouseMove(&window, centreOf(item));
+        return done();
+    }, 5000);
+}
+
 bool strays(const QList<qreal> &values, qreal from, qreal by)
 {
     return std::any_of(values.cbegin(), values.cend(), [from, by](qreal v) { return std::abs(v - from) >= by; });
@@ -2801,8 +2812,7 @@ void TestQmlUi::theUpdateArrowBendsUnderThePointerAndBack()
     QTest::qWait(50);
     m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
     QCOMPARE(arrow->property("bend").toReal(), 0.0);
-    QTest::mouseMove(&window, centreOf(icon));
-    QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
+    QVERIFY2(pointAtUntil(window, icon, [arrow] { return arrow->property("bend").toReal() == 1.0; }), "the arrow did not bend under the pointer");
     QTest::mouseMove(&window, away);
     QTRY_COMPARE(arrow->property("bend").toReal(), 0.0);
 
@@ -2810,8 +2820,8 @@ void TestQmlUi::theUpdateArrowBendsUnderThePointerAndBack()
     QCOMPARE(icon->property("offer").toString(), QStringLiteral("retry"));
     QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
     QCOMPARE(arrow->property("turn").toReal(), 0.0);
-    QTest::mouseMove(&window, centreOf(icon));
-    QTRY_VERIFY2(arrow->property("turn").toReal() > 10, "retry did not lean clockwise under the pointer");
+    QVERIFY2(pointAtUntil(window, icon, [arrow] { return arrow->property("turn").toReal() > 10; }),
+             "retry did not lean clockwise under the pointer");
     QTest::mouseMove(&window, away);
 
     m_backend.updateErrorOpensPage = true;
@@ -2900,8 +2910,7 @@ void TestQmlUi::theUpdateArrowTurnsWhileItWorks()
     const auto angle = [arrow] { return arrow->property("spinAngle").toReal(); };
 
     m_backend.setUpdate(QStringLiteral("available"), QStringLiteral("Version 9.9.9 is available"));
-    QTest::mouseMove(&window, centreOf(icon));
-    QTRY_COMPARE(arrow->property("bend").toReal(), 1.0);
+    QVERIFY2(pointAtUntil(window, icon, [arrow] { return arrow->property("bend").toReal() == 1.0; }), "the arrow did not bend under the pointer");
     m_backend.setUpdate(QStringLiteral("downloading"), QStringLiteral("Downloading… 42%"));
     QCOMPARE(icon->property("offer").toString(), QStringLiteral("downloading"));
     QTest::mouseMove(&window, QPoint(10, 10));
