@@ -7,6 +7,12 @@ compare link at the bottom of its release notes.
 
 ## 1.2.2
 
+### Changed
+
+- **The VPN core is TrustTunnel 1.1.7**, up from 1.1.5. The core 1.1.5 was
+  reported to crash a few moments after starting on networks without IPv6;
+  1.1.7 fixes that, and brings newer DNS and TLS libraries.
+
 ### Fixed
 
 - **Boxes fit what they hold.**

@@ -2,14 +2,15 @@
 # Re-export the boringssl conan recipe from a newer NativeLibsCommon on top of
 # the one the upstream bootstrap exported from the pinned NLC.
 #
-# Upstream (v1.1.5) pins native_libs_common/8.1.49, whose make_ssl.cpp calls
-# SSL_set_server_padding_request, SSL_set_grease_sigalgs_enabled and
-# SSL_set_extension_order. Those are declared only by NLC's 21_extension_order
-# and 22_chrome_canary_extensions patches, first shipped in v8.1.47. AdGuard's
-# own CI resolves a fresher recipe REVISION of openssl/boring-2024-09-13 from
-# their internal conan remote; building from plain git we must re-export that
-# recipe ourselves. Same package name/version, later export timestamp — conan
-# picks this revision over the bootstrap's one.
+# Upstream (v1.1.7) pins native_libs_common/8.1.52 and with it
+# openssl/boring-2026-05-08, and so does dns-libs 2.10.2. NLC's make_ssl.cpp
+# calls SSL_set_server_padding_request, SSL_set_grease_sigalgs_enabled and
+# SSL_set_extension_order, which only NLC's own boringssl patches declare.
+# AdGuard's own CI resolves the recipe revision from their internal conan
+# remote; building from plain git the bootstrap exports it from each NLC version
+# the dependencies ask for, and when those differ an older NLC's recipe could be
+# the one left in the cache. Exporting the pinned NLC's recipe last makes it the
+# one conan picks: same package name/version, later export timestamp.
 #
 # This pin must therefore track upstream's, not lead it: an older re-export
 # wins on timestamp and silently downgrades the recipe out from under the NLC
@@ -17,7 +18,7 @@
 #
 # Supply chain: this recipe is Python that runs at export/build time and it
 # picks the boringssl source that every shipped VPN binary links statically, so
-# it is pinned twice — to the immutable commit behind the v8.1.45 tag (tags can
+# it is pinned twice — to the immutable commit behind the NLC tag (tags can
 # be moved), and to a SHA-256 over the exported recipe tree (a rewritten commit
 # or a tampered mirror then fails the build instead of quietly swapping our TLS
 # stack). Bumping NLC means updating BOTH constants below; re-run with
@@ -25,11 +26,11 @@
 # keeps them from degrading back into a movable ref.
 set -euo pipefail
 
-# NativeLibsCommon v8.1.49 — annotated tag v8.1.49 peeled to its commit
-# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.1.49^{}').
-NLC_COMMIT="fd7405ee27fe040fffa094782fd4e9c5ea35fa34"
+# NativeLibsCommon v8.1.52 — annotated tag v8.1.52 peeled to its commit
+# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.1.52^{}').
+NLC_COMMIT="58cef252031e2cc1f540ecaec2952f5f32afa3a1"
 # Digest of conan/recipes/boringssl at that commit (see recipe_digest below).
-NLC_RECIPE_SHA256="1908518580b6c925b0afb1cb7bfbdb194255b1841afd74844a83e1fe4a7a1dc6"
+NLC_RECIPE_SHA256="985e54fe4cc407953fbd4840cc108ee84606bd7fe6fe0e88a1b0fc1b8d11bbe5"
 NLC_URL="https://github.com/AdguardTeam/NativeLibsCommon.git"
 
 # macOS runners have shasum, Linux/git-bash have sha256sum.
