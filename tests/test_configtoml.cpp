@@ -11,6 +11,7 @@ class TestConfigToml : public QObject {
     Q_OBJECT
 
 private slots:
+    void dnsServersAreOneEntryEachHoweverSeparated();
     void roundTripKeepsWhatTheEditorDoesNotUnderstand();
     void aCertificateCannotForgeSections();
     void roundTripOfOurOwnOutputIsStable();
@@ -329,6 +330,24 @@ void TestConfigToml::aCertificateIsReadInEverySpelling() {
     // And it comes back out, rather than being written over with an empty value.
     QVERIFY(buildConfigToml(parseConfigToml(singleLine)).contains(QStringLiteral("MIIB")));
     QVERIFY(buildConfigToml(parseConfigToml(literalBlock)).contains(QStringLiteral("MIIB")));
+}
+
+// The editor takes DNS servers separated by spaces or semicolons as well as by
+// commas, and its check let them through, but the config was written split on
+// commas alone: "1.1.1.1 8.8.8.8" went to the core as one server. Core 1.1.5
+// refused to connect with it; 1.1.7 takes it, and the tunnel came up with no DNS.
+void TestConfigToml::dnsServersAreOneEntryEachHoweverSeparated()
+{
+    ConfigToml in;
+    in.hostname = "vpn.example.com";
+    in.addresses = "1.2.3.4:443";
+    in.dns = "1.1.1.1 8.8.8.8; tls://9.9.9.9,\tquic://dns.example.com";
+    const QString toml = buildConfigToml(in);
+    QVERIFY2(toml.contains(QStringLiteral(
+                     "dns_upstreams = [\"1.1.1.1\", \"8.8.8.8\", \"tls://9.9.9.9\", \"quic://dns.example.com\"]")),
+             qPrintable(toml));
+    QCOMPARE(parseConfigToml(toml).dns, QStringLiteral("1.1.1.1, 8.8.8.8, tls://9.9.9.9, quic://dns.example.com"));
+    QCOMPARE(splitDnsList(QStringLiteral(" , ; ")), QStringList());
 }
 
 QTEST_MAIN(TestConfigToml)

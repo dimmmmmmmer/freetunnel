@@ -6,6 +6,7 @@
 // dns are comma-separated strings (as entered in the form).
 
 #include <QString>
+#include <QStringList>
 
 namespace freetunnel {
 
@@ -43,5 +44,12 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel = QStringLi
 
 // Parse a client TOML back into a ConfigToml (endpoint fields only).
 ConfigToml parseConfigToml(const QString &toml);
+
+// The DNS servers in a list as the editor takes it, one per entry, separated by
+// commas, semicolons or spaces. Validation and everything written from the list
+// have to agree on this: split on commas alone, "1.1.1.1 8.8.8.8" passed the
+// check and went to the core as one server, which core 1.1.5 refused to connect
+// with and 1.1.7 takes, leaving the tunnel up with no DNS.
+QStringList splitDnsList(const QString &dns);
 
 } // namespace freetunnel

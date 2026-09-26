@@ -35,8 +35,9 @@ bool validateDnsList(const QString &dns)
 {
     static const QRegularExpression dnsScheme(
         QStringLiteral("^(tls|https|quic|h3|sdns|udp|tcp)://"), QRegularExpression::CaseInsensitiveOption);
-    const QStringList dnsList = dns.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
-                                         Qt::SkipEmptyParts);
+    // Split as the config is written (see splitDnsList), so what passes here is
+    // what the core gets.
+    const QStringList dnsList = freetunnel::splitDnsList(dns);
     return std::all_of(dnsList.cbegin(), dnsList.cend(), [&](const QString &raw) {
         const QString d = raw.trimmed();
         if (dnsScheme.match(d).hasMatch())

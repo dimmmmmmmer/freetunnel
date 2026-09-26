@@ -243,7 +243,7 @@ QString Backend::configDeepLink(int index) const
             ? freetunnel::UpstreamProtocol::Http3 : freetunnel::UpstreamProtocol::Http2;
     dl.clientRandomPrefix = c.clientRandom;
     dl.name = nameForPath(path);
-    for (const QString &d : c.dns.split(QLatin1Char(','), Qt::SkipEmptyParts))
+    for (const QString &d : freetunnel::splitDnsList(c.dns))
         dl.dnsUpstreams << d.trimmed();
     return freetunnel::encodeDeepLink(dl);
 }

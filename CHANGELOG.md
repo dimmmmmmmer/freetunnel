@@ -9,12 +9,24 @@ compare link at the bottom of its release notes.
 
 ### Changed
 
-- **The VPN core is TrustTunnel 1.1.7**, up from 1.1.5. The core 1.1.5 was
-  reported to crash a few moments after starting on networks without IPv6;
-  1.1.7 fixes that, and brings newer DNS and TLS libraries.
+- **The VPN core is TrustTunnel 1.1.7**, up from 1.1.5, with newer DNS and TLS
+  libraries.
+  - It fixes a crash that could happen when an HTTP/3 connection attempt was
+    cut short by the network going away, as on waking from sleep or switching
+    Wi-Fi.
+  - Linux: when NetworkManager briefly swapped default routes, as it does when
+    Wi-Fi reconnects or its connectivity check changes its mind, the core could
+    decide there was no network at all. With the kill switch on, FreeTunnel then
+    waited for a network that was already there. It follows the real default
+    route now.
 
 ### Fixed
 
+- **DNS servers separated by spaces or semicolons work.** The config editor
+  accepts "1.1.1.1 8.8.8.8" as well as "1.1.1.1, 8.8.8.8", but the list was
+  handed to the VPN core split on commas only, as one server. Such a config
+  failed to connect; with the new core it would have connected with no working
+  DNS. Each server is its own entry now.
 - **Boxes fit what they hold.**
   - A question such as "Add a VPN server from this link?" came in a card spread
     across the window around two short lines. Questions, and the messages that

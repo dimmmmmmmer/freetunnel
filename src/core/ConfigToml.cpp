@@ -45,14 +45,23 @@ static QString tomlEscMultiline(const QString &s) {
     return o;
 }
 
-static QString csvToTomlArray(const QString &csv) {
+static QString listToTomlArray(const QStringList &values) {
     QStringList items;
-    for (const QString &raw : csv.split(',', Qt::SkipEmptyParts)) {
+    for (const QString &raw : values) {
         const QString v = raw.trimmed();
         if (!v.isEmpty())
             items << QStringLiteral("\"%1\"").arg(tomlEsc(v));
     }
     return items.join(QStringLiteral(", "));
+}
+
+static QString csvToTomlArray(const QString &csv) {
+    return listToTomlArray(csv.split(',', Qt::SkipEmptyParts));
+}
+
+QStringList splitDnsList(const QString &dns) {
+    static const QRegularExpression separators(QStringLiteral("[\\s,;]+"));
+    return dns.split(separators, Qt::SkipEmptyParts);
 }
 
 namespace {
@@ -260,7 +269,7 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     t += QStringLiteral("vpn_mode = \"general\"\n");
     t += QStringLiteral("killswitch_enabled = false\n");
     t += QStringLiteral("post_quantum_group_enabled = true\n");
-    t += QStringLiteral("dns_upstreams = [%1]\n").arg(csvToTomlArray(c.dns));
+    t += QStringLiteral("dns_upstreams = [%1]\n").arg(listToTomlArray(splitDnsList(c.dns)));
     t += c.extraRootKeys;
     t += QStringLiteral("\n[endpoint]\n");
     t += QStringLiteral("hostname = \"%1\"\n").arg(tomlEsc(c.hostname));
