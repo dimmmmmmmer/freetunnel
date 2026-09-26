@@ -57,8 +57,9 @@ compare link at the bottom of its release notes.
     or the same percentage for many minutes, and nothing in the row could be
     clicked meanwhile. It now gives up after 30 seconds without progress, and
     says the server stopped responding.
-  - While checking or downloading, the arrow turns. A "…" stood beside the line
-    instead, and it did not move whether the download did or not.
+  - While an update downloads, the arrow turns, and while FreeTunnel checks for
+    one, three dots hop in turn. A "…" stood beside the line instead, and it did
+    not move whether the download did or not.
   - On Windows, and when FreeTunnel runs as an AppImage, installing an update
     closes FreeTunnel, and the VPN goes down with it. The line offering the
     update now says so.

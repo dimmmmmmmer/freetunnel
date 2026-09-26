@@ -14,7 +14,7 @@ Item {
     // Turned clockwise by this much on top of any spin, in degrees.
     property real turn: 0
     property bool spinning: false
-    property color color: theme.accent
+    property color color: theme.text
     implicitWidth: 20; implicitHeight: 20
 
     // Clockwise, continuously, while it spins; when it stops, it comes round to
@@ -63,8 +63,12 @@ Item {
                                            -(Math.cos(heading0 + k * s) - Math.cos(heading0)) / k))
         }
         const tip = shaft[steps]
-        const back = heading0 + sweep + Math.PI
+        // The head lies along the chord of the last stretch of shaft, not the
+        // tangent at the tip: on a curve the tangent tips the inner barb onto
+        // the shaft, and on the full ↻ it lay along the circle. Straight, the
+        // two are the same.
         const barb = 4.5, spread = 0.7
+        const back = heading0 + sweep - k * barb / 2 + Math.PI
         const head = [Qt.point(tip.x + barb * Math.cos(back - spread), tip.y + barb * Math.sin(back - spread)),
                       tip,
                       Qt.point(tip.x + barb * Math.cos(back + spread), tip.y + barb * Math.sin(back + spread))]
@@ -90,7 +94,7 @@ Item {
             angle: arrow.spinAngle + arrow.turn
         }
         ShapePath {
-            strokeColor: arrow.color; strokeWidth: 1.7; fillColor: "transparent"
+            strokeColor: arrow.color; strokeWidth: 1.4; fillColor: "transparent"
             capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
             PathMultiline { paths: arrow.geometry.strokes }
         }

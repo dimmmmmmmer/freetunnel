@@ -262,43 +262,70 @@ Item {
                             visible: backend.updateState === "current"
                             text: "✓"; font.pixelSize: 14; color: theme.success
                         }
-                        // One arrow for the whole flow. ↓ offers the download: under
-                        // the pointer it bends round into ↻, and straightens again if
-                        // the pointer leaves without a click. Clicked, it stays ↻ and
-                        // turns while the update comes down, as it does during a
-                        // check. After a failure ↻ offers to try again, and ↗ opens
-                        // the page of a release with nothing for this platform.
+                        // One arrow for the update. ↓ offers the download: under the
+                        // pointer it bends round into ↻, and straightens again if the
+                        // pointer leaves without a click. Clicked, it stays ↻ and turns
+                        // while the update comes down. After a failure ↻ offers to try
+                        // again, and ↗ opens the page of a release with nothing for
+                        // this platform. A check shows hopping dots instead: it is
+                        // waiting on an answer, with nothing yet to download.
                         // The hit area stays where it is: a MouseArea inside a moving
                         // glyph left and re-entered it under a pointer held still.
                         Item {
                             id: updIcon
                             objectName: "updateIcon"
-                            readonly property bool busy: backend.updateState === "checking"
-                                                         || backend.updateState === "downloading"
-                            // What a click does, which is what the arrow shows.
+                            readonly property bool busy: offer === "checking" || offer === "downloading"
+                            // What a click does, which is what the slot shows.
                             readonly property string offer: backend.updateState === "available" ? "download"
                                   : backend.updateState === "error" ? (backend.updateErrorOpensPage ? "page" : "retry")
-                                  : busy ? "busy" : ""
+                                  : backend.updateState === "checking" ? "checking"
+                                  : backend.updateState === "downloading" ? "downloading" : ""
                             visible: offer !== ""
                             implicitWidth: 20; implicitHeight: 20
                             UpdateArrow {
+                                id: updArrow
                                 objectName: "updateArrow"
                                 anchors.fill: parent
                                 theme: settingsRoot.theme
-                                visible: updIcon.offer !== "page"
+                                visible: updIcon.offer === "download" || updIcon.offer === "retry"
+                                         || updIcon.offer === "downloading"
                                 bend: updIcon.offer === "download" && !updIconMa.containsMouse ? 0 : 1
-                                Behavior on bend { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+                                // Shown as it is when it appears, and animated only once it
+                                // is on screen: from the shape a hidden arrow was left in,
+                                // it came in as a straight arrow swinging round into place.
+                                // A Timer of its own rather than Qt.callLater: it goes with
+                                // the arrow, and a call left queued when the page was closed
+                                // ran against nothing.
+                                property bool settled: false
+                                Timer { id: settleTimer; interval: 0; onTriggered: updArrow.settled = updArrow.visible }
+                                onVisibleChanged: {
+                                    settled = false
+                                    if (visible)
+                                        settleTimer.restart()
+                                }
+                                Component.onCompleted: settleTimer.restart()
+                                Behavior on bend {
+                                    enabled: updArrow.settled
+                                    NumberAnimation { duration: 320; easing.type: Easing.OutCubic }
+                                }
                                 // Retry leans a little the way it goes.
                                 turn: updIcon.offer === "retry" && updIconMa.containsMouse ? 45 : 0
                                 Behavior on turn { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                                spinning: updIcon.busy
-                                color: updIconMa.containsMouse ? theme.text : theme.accent
+                                spinning: updIcon.offer === "downloading"
+                                // The colour of the line beside it; the bend is its hover.
+                                color: theme.text
+                            }
+                            BusyDots {
+                                objectName: "updateChecking"
+                                anchors.centerIn: parent; anchors.verticalCenterOffset: 2
+                                theme: settingsRoot.theme
+                                visible: updIcon.offer === "checking"
                             }
                             Text {
                                 anchors.centerIn: parent
                                 visible: updIcon.offer === "page"
                                 text: "↗"; font.pixelSize: 17
-                                color: updIconMa.containsMouse ? theme.text : theme.accent
+                                color: updIconMa.containsMouse ? theme.accent : theme.text
                             }
                             MouseArea { id: updIconMa; anchors.fill: parent; anchors.margins: -6
                                         hoverEnabled: true; enabled: !updIcon.busy
