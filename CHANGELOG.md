@@ -17,8 +17,17 @@ compare link at the bottom of its release notes.
   - Linux: when NetworkManager briefly swapped default routes, as it does when
     Wi-Fi reconnects or its connectivity check changes its mind, the core could
     decide there was no network at all. With the kill switch on, FreeTunnel then
-    waited for a network that was already there. It follows the real default
-    route now.
+    waited for a network that was already there. The core keeps the real default
+    route through such swaps now.
+  - A DNS server given by name rather than address, such as
+    udp://dns.example.com, was skipped, and a config with no other DNS server
+    failed to connect. The name is now looked up through public DNS and the
+    server is used. A name only your own network knows, such as router.lan, is
+    not found this way: give the server's address instead.
+  - A server whose certificate has an empty part in its name, as only unusual
+    hand-made certificates do, used to connect. It is now refused during the
+    handshake, even with "Skip certificate check" on, and the log speaks of a
+    decode error (DECODE_ERROR).
 
 ### Fixed
 
@@ -31,14 +40,15 @@ compare link at the bottom of its release notes.
   - A question such as "Add a VPN server from this link?" came in a card spread
     across the window around two short lines. Questions, and the messages that
     appear at the bottom of the window, are now as wide as their longest line.
-  - The list of configs under the name on Home, and the menu for adding a config,
-    had a fixed width: wide around short names, while a long one was cut all the
-    same. They are now as wide as the longest name, within the window.
+  - The list of configs under the name on Home had a fixed width: wide around
+    short names, while a long one was cut all the same. It is now as wide as the
+    longest name, within the window. The menu for adding a config was as wide
+    around its three short items; it now fits them.
   - Names were cut where the window had room for them: the active config on Home,
-    the connected config in the list, where its ping and "connected" left it
-    little, and addresses, domains, profiles and applications on the Split and
-    Settings pages. They are cut only where the window ends now, and the config
-    list leaves the connected config's name more room.
+    and addresses, domains, profiles and applications on the Split and Settings
+    pages. They are cut only where the window ends now. In the config list, the
+    connected config's name was left little room by its ping, "connected" and the
+    three buttons; the buttons take less of the row now, so the name has more.
   - Save and Cancel in the config editor grow to fit longer words, as in Russian.
   - A choice or a menu item longer than the window can show ends in "…". It used
     to stop at the edge, part of it hidden under the tick.
@@ -53,7 +63,8 @@ compare link at the bottom of its release notes.
     up longer.
   - On Home a message sat across the speed tiles and cut them in half. A short
     one now shows between the config name and the tiles, and a longer one covers
-    the tiles rather than the config name.
+    the tiles instead. In a window of the default size, the longest messages, of
+    five or six lines, can still reach up over the config name.
 - **The config list on Home and the drop-down lists close when the window is
   resized.** They stayed open, away from what they belong to.
 - **Updates in Settings**
@@ -65,8 +76,12 @@ compare link at the bottom of its release notes.
   - Once an update was downloaded, the arrow and the line beside it both opened
     the release web page. After the download they offer nothing more: the
     installer, the disk image or the folder with the file has been opened. On
-    Linux, where there is no file manager to show the folder, the line says where
-    the file is and offers the release page.
+    Linux, if FreeTunnel could not open that folder, the line says where the file
+    is and offers the release page.
+  - When FreeTunnel runs as an AppImage and could not replace its own file, the
+    row said so, but the arrow and the line still opened the release page. They
+    now offer ↻, which downloads the update again and tries once more, for when
+    the file can be written to.
   - After a failed download the row offers what can help. A release with nothing
     for your system offers its page (↗). One that is unsigned, or whose
     signature does not match, is checked for again rather than downloaded again.
@@ -81,8 +96,9 @@ compare link at the bottom of its release notes.
   - On Windows, and when FreeTunnel runs as an AppImage, installing an update
     closes FreeTunnel, and the VPN goes down with it. The line offering the
     update now says so.
-  - Windows: if the downloaded installer could not be started, FreeTunnel quit
-    all the same. It now stays open and says so.
+  - Windows: if the downloaded installer could not be started, as when the
+    administrator prompt was answered No, FreeTunnel quit all the same, and the
+    VPN went down with it. It now stays open and says so, and ↻ tries again.
   - Changing the language announced an available update again.
 - **Home**
   - The logo's pulse while connecting or disconnecting never moved. It pulses now.
@@ -91,12 +107,13 @@ compare link at the bottom of its release notes.
   - When a connection started or ended, the config name under the logo jumped
     while the logo glided. Both glide now.
   - With no configs, clicking the logo said "Select a config first", with none to
-    select. The logo, "Add a config" and the + beside the config name now open
-    the menu for adding one, where they only switched to the Configs page.
+    select, and "Add a config" under it only switched to the Configs page. Both
+    now open the menu for adding one. So does the + beside the config name, which
+    also only switched to the Configs page.
 - **Configs**
   - While a config was connecting, or FreeTunnel was switching to another one,
-    the list showed nothing. The active config now says "connecting…" until it
-    says "connected".
+    nothing in the list said so. The active config now says "connecting…" until
+    it says "connected".
   - The button that opens a config for editing showed ⋯, which suggests a menu.
     It shows a pencil now.
   - With no configs, "Add a config" looked like faint placeholder text and did
@@ -110,9 +127,9 @@ compare link at the bottom of its release notes.
   status, and choosing it cancelled the connection. It reads "Cancel connecting"
   now. While disconnecting it cannot be chosen, since it did nothing then.
 - **Hover and pointer**
-  - With a question, a drop-down list or a menu open, what lay behind it still lit
-    up under the pointer, though a click there only closed it. It no longer
-    reacts.
+  - With a question, the config editor, "Add an application", the config list
+    on Home, a drop-down list or a menu open, what lay behind still lit up under
+    the pointer, though a click there never reached it. It no longer reacts.
   - A few buttons showed the hand pointer, where the others and the window's own
     buttons show the arrow. They show the arrow now; links keep the hand.
   - The back arrow in the config editor responds a little around it, as the one in
