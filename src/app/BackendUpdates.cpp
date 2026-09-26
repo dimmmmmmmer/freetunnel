@@ -10,6 +10,10 @@
 #include <QWindow>
 
 #include <QLocalServer>
+#ifdef FT_FAKE_UPDATE
+#include <QTimer>
+#include <memory>
+#endif
 
 #include "core/AppImagePath.h"
 #include "core/InstanceControl.h"
@@ -270,6 +274,28 @@ void Backend::checkForUpdates(bool userInitiated)
     // staging file as the first.
     if (m_updateState == QLatin1String("checking") || m_updateState == QLatin1String("downloading"))
         return;
+#ifdef FT_FAKE_UPDATE
+    // TEST BUILD ONLY (branch test-build/fake-update-arrow, never merged): the
+    // update flow played here with no network, so the arrow can be watched. The
+    // check at startup offers 9.9.9 at once; "Check for updates" spins for a
+    // moment and offers it again.
+    m_updateErrorFromDownload = false;
+    m_updateErrorOpensPage = false;
+    const auto offer = [this] {
+        m_updateState = QStringLiteral("available");
+        m_latestVersion = QStringLiteral("9.9.9");
+        setUpdateMessage([] { return QStringLiteral("Version 9.9.9 is available (test build)"); });
+        emit updateChanged();
+    };
+    if (!userInitiated) {
+        offer();
+        return;
+    }
+    m_updateState = QStringLiteral("checking");
+    setUpdateMessage([] { return tr("Checking…"); });
+    emit updateChanged();
+    QTimer::singleShot(2500, this, offer);
+#else
     ensureUpdater();
     m_updateCheckUserInitiated = userInitiated;
     m_updateErrorFromDownload = false;
@@ -280,6 +306,7 @@ void Backend::checkForUpdates(bool userInitiated)
         emit updateChanged();
     }
     m_updater->checkNow();
+#endif
 }
 
 void Backend::openLatestRelease() {
@@ -307,6 +334,42 @@ void Backend::openLatestRelease() {
 }
 
 void Backend::downloadUpdate() {
+#ifdef FT_FAKE_UPDATE
+    // TEST BUILD ONLY: a pretend download of about six seconds. Every second one
+    // fails, so the retry arrow shows too; the others end back at "Check for
+    // updates", so the whole round can be played again. Nothing is fetched.
+    if (m_updateState == QLatin1String("downloading"))
+        return;
+    m_updateState = QStringLiteral("downloading");
+    m_updateErrorOpensPage = false;
+    setUpdateMessage([] { return tr("Downloading… %1%").arg(0); });
+    emit updateChanged();
+    static int runs = 0;
+    const bool fails = ++runs % 2 == 0;
+    auto percent = std::make_shared<int>(0);
+    auto *tick = new QTimer(this);
+    tick->setInterval(120);
+    connect(tick, &QTimer::timeout, this, [this, tick, percent, fails] {
+        *percent += 2;
+        if (*percent < 100) {
+            const int now = *percent;
+            setUpdateMessage([now] { return tr("Downloading… %1%").arg(now); });
+            emit updateChanged();
+            return;
+        }
+        tick->deleteLater();
+        if (fails) {
+            m_updateState = QStringLiteral("error");
+            m_updateErrorFromDownload = true;
+            setUpdateMessage([] { return QStringLiteral("Download failed (test build) — try again"); });
+        } else {
+            m_updateState.clear();
+            setUpdateMessage({});
+        }
+        emit updateChanged();
+    });
+    tick->start();
+#else
     if (!m_updater || m_updateState == QLatin1String("downloading"))
         return;
     m_updateState = QStringLiteral("downloading");
@@ -314,6 +377,7 @@ void Backend::downloadUpdate() {
     setUpdateMessage([] { return tr("Downloading…"); });
     emit updateChanged();
     m_updater->downloadLatest();
+#endif
 }
 
 void Backend::openUrl(const QString &url) {

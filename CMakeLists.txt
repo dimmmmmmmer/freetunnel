@@ -191,6 +191,10 @@ target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_VERSION="${PROJECT_VERSION}"
     FREETUNNEL_GIT_VERSION="${FREETUNNEL_GIT_VERSION}"
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
+    # TEST BUILD ONLY — branch test-build/fake-update-arrow, never merged. Plays
+    # the update flow with no network so the update arrow can be looked at; see
+    # BackendUpdates.cpp. Only the app: the unit tests build the real flow.
+    FT_FAKE_UPDATE
 )
 
 # --- Build hardening -------------------------------------------------------
