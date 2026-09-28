@@ -1,5 +1,6 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/DeepLink.h"
+#include "core/ConfigToml.h"
 
 #include <QCoreApplication>
 
@@ -389,19 +390,7 @@ static QString quotedTomlList(const QStringList &items)
     return out.join(QStringLiteral(", "));
 }
 
-static void splitClientRandom(const DeepLinkConfig &cfg, QString *random, QString *mask)
-{
-    *random = cfg.clientRandomPrefix;
-    mask->clear();
-    const int slash = random->indexOf('/');
-    if (slash >= 0) {
-        *mask = random->mid(slash + 1);
-        *random = random->left(slash);
-    }
-}
-
-static QString endpointTomlSection(const DeepLinkConfig &cfg, const QString &clientRandom,
-                                    const QString &clientRandomMask)
+static QString endpointTomlSection(const DeepLinkConfig &cfg)
 {
     QString t;
     t += QStringLiteral("\n[endpoint]\n");
@@ -409,9 +398,10 @@ static QString endpointTomlSection(const DeepLinkConfig &cfg, const QString &cli
     t += QStringLiteral("addresses = [%1]\n").arg(quotedTomlList(cfg.addresses));
     t += QStringLiteral("username = \"%1\"\n").arg(tomlEscape(cfg.username));
     t += QStringLiteral("password = \"%1\"\n").arg(tomlEscape(cfg.password));
-    t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEscape(clientRandom));
-    if (!clientRandomMask.isEmpty())
-        t += QStringLiteral("client_random_mask = \"%1\"\n").arg(tomlEscape(clientRandomMask));
+    // Whole, as the link gives it ("prefix[/mask]"): the core splits it itself. It
+    // used to be split here into client_random and a client_random_mask key the
+    // core has no such key for, and the mask was lost.
+    t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEscape(clientRandomForCore(cfg.clientRandomPrefix)));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEscape(cfg.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(cfg.hasIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(cfg.skipVerification ? "true" : "false");
@@ -437,17 +427,13 @@ static QString listenerTomlSection()
 }
 
 QString deepLinkConfigToToml(const DeepLinkConfig &cfg) {
-    QString clientRandom;
-    QString clientRandomMask;
-    splitClientRandom(cfg, &clientRandom, &clientRandomMask);
-
     QString t;
     t += QStringLiteral("loglevel = \"info\"\n");
     t += QStringLiteral("vpn_mode = \"general\"\n");
     t += QStringLiteral("killswitch_enabled = false\n");
     t += QStringLiteral("post_quantum_group_enabled = true\n");
     t += QStringLiteral("dns_upstreams = [%1]\n").arg(quotedTomlList(cfg.dnsUpstreams));
-    t += endpointTomlSection(cfg, clientRandom, clientRandomMask);
+    t += endpointTomlSection(cfg);
     t += listenerTomlSection();
     return t;
 }

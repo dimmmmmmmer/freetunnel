@@ -162,10 +162,6 @@
         <translation>DNS — это IP или DoT/DoH-адрес (например 1.1.1.1, tls://8.8.8.8)</translation>
     </message>
     <message>
-        <source>Client random must be hexadecimal</source>
-        <translation>Client random должен быть в hex-формате</translation>
-    </message>
-    <message>
         <source>Could not write config</source>
         <translation>Не удалось записать конфиг</translation>
     </message>
@@ -312,6 +308,10 @@
     <message>
         <source>Update downloaded to %1 — install it with your package manager.</source>
         <translation>Обновление загружено в %1 — установите его через менеджер пакетов.</translation>
+    </message>
+    <message>
+        <source>Client random must be hexadecimal, optionally followed by /mask</source>
+        <translation>Client random должен быть в hex-формате, можно с /маской</translation>
     </message>
 </context>
 <context>

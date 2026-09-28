@@ -67,6 +67,9 @@ Value is a concatenation of entries: each entry is `varint length` + UTF-8 bytes
 ### Tag `0x0B` — client random
 
 UTF-8 string `prefix` or `prefix/mask` (hex). Slash separates prefix and mask.
+FreeTunnel writes it to the config's `client_random` unchanged, which is how the
+TrustTunnel core reads it (it splits at the slash itself and has no separate mask
+key). An empty mask after the slash is dropped, since the core rejects it.
 
 ## Validation rules
 

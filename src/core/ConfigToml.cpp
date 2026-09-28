@@ -59,6 +59,13 @@ static QString csvToTomlArray(const QString &csv) {
     return listToTomlArray(csv.split(',', Qt::SkipEmptyParts));
 }
 
+QString clientRandomForCore(const QString &value) {
+    QString v = value.trimmed();
+    if (v.endsWith(QLatin1Char('/')))
+        v.chop(1);
+    return v;
+}
+
 QStringList splitDnsList(const QString &dns) {
     static const QRegularExpression separators(QStringLiteral("[\\s,;]+"));
     return dns.split(separators, Qt::SkipEmptyParts);
@@ -255,6 +262,9 @@ const QStringList &knownEndpointKeys()
             QStringLiteral("hostname"),     QStringLiteral("addresses"),
             QStringLiteral("username"),     QStringLiteral("password"),
             QStringLiteral("client_random"), QStringLiteral("custom_sni"),
+            // Written by 1.2.2 and earlier, never read by the core: merged into
+            // client_random on load (see parseConfigToml), and not carried over.
+            QStringLiteral("client_random_mask"),
             QStringLiteral("has_ipv6"),     QStringLiteral("skip_verification"),
             QStringLiteral("upstream_protocol"), QStringLiteral("anti_dpi"),
             QStringLiteral("certificate")};
@@ -277,7 +287,7 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     t += QStringLiteral("username = \"%1\"\n").arg(tomlEsc(c.username));
     if (!c.password.isEmpty())
         t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(c.password));
-    t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEsc(c.clientRandom));
+    t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEsc(clientRandomForCore(c.clientRandom)));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEsc(c.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(c.allowIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(c.skipVerification ? "true" : "false");
@@ -481,6 +491,15 @@ ConfigToml parseConfigToml(const QString &toml) {
     c.dns = readArray(toml, "dns_upstreams");
     c.customSni = readString(toml, "custom_sni");
     c.clientRandom = readString(toml, "client_random");
+    // A config imported from a link by 1.2.2 or earlier has the mask under a key
+    // of its own, which the core never read: the connection went out without it.
+    // Joined back on here, which is also the path to the core, so such a config
+    // works again without being opened. A mask with no prefix had nothing to
+    // mask and is dropped, as the core effectively did.
+    const QString mask = readString(toml, "client_random_mask").trimmed();
+    if (!mask.isEmpty() && !c.clientRandom.trimmed().isEmpty() && !c.clientRandom.contains(QLatin1Char('/')))
+        c.clientRandom = c.clientRandom.trimmed() + QLatin1Char('/') + mask;
+    c.clientRandom = clientRandomForCore(c.clientRandom);
     c.allowIpv6 = readBool(toml, "has_ipv6", true);
     c.skipVerification = readBool(toml, "skip_verification", false);
     c.antiDpi = readBool(toml, "anti_dpi", false);

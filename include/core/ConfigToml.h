@@ -45,6 +45,12 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel = QStringLi
 // Parse a client TOML back into a ConfigToml (endpoint fields only).
 ConfigToml parseConfigToml(const QString &toml);
 
+// A client random as the core reads it, from the one `client_random` key:
+// "prefix" or "prefix/mask", in hex. The core splits at the slash itself and has
+// no key for the mask alone, and it refuses the whole config when the slash is
+// followed by nothing, so an empty mask is dropped here.
+QString clientRandomForCore(const QString &value);
+
 // The DNS servers in a list as the editor takes it, one per entry, separated by
 // commas, semicolons or spaces. Validation and everything written from the list
 // have to agree on this: split on commas alone, "1.1.1.1 8.8.8.8" passed the

@@ -5,6 +5,17 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
+## Unreleased
+
+### Fixed
+
+- **A config imported from a link keeps its whole client random.** A link can
+  give the client random with a mask, as prefix/mask. FreeTunnel wrote the mask
+  under a key of its own that the VPN core never reads, so the connection went
+  out without it. It now goes to the core whole. Configs imported that way before
+  are read back whole, without needing to be opened, and the config editor accepts
+  a mask after a slash.
+
 ## 1.2.2
 
 ### Changed
