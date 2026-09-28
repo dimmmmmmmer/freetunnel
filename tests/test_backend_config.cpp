@@ -48,6 +48,7 @@ private slots:
     void deletingTheActiveConfigRemembersTheOneThatTookOver();
     void renamingOnlyTheLetterCaseRenames();
     void readAccessorsRejectOutOfRangeIndexes();
+    void theEditorTakesAClientRandomWithAMask();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
     void anEditSavesTheConfigItOpenedEvenIfTheListMoved();
@@ -474,6 +475,37 @@ void TestBackendConfig::theConnectConfigIsBuiltOffTheGuiThread()
              "the connect config was built on the GUI thread — the keychain read blocks it");
 
     backend.disconnectVpn();
+}
+
+// The editor took only plain hex, so a client random with a mask ("prefix/mask",
+// as links carry it) could not be entered, nor a config holding one saved again.
+void TestBackendConfig::theEditorTakesAClientRandomWithAMask()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVariantMap f = form(QStringLiteral("Masked"), QStringLiteral("pw"));
+    f[QStringLiteral("clientRandom")] = QStringLiteral("deadbeef/ffff0000");
+    QVERIFY(backend.createConfig(f));
+    QFile saved(pathFor(backend, 0));
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QString toml = QString::fromUtf8(saved.readAll());
+    QVERIFY2(toml.contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")), qPrintable(toml));
+
+    // And a link made from it carries the mask on.
+    QString err;
+    const auto link = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(link.has_value(), qPrintable(err));
+    QCOMPARE(link->clientRandomPrefix, QStringLiteral("deadbeef/ffff0000"));
+
+    // Still hex only, and a slash needs a mask after it.
+    for (const QString &bad : {QStringLiteral("deadbeef/"), QStringLiteral("xyz"), QStringLiteral("dead/beef/00")}) {
+        f[QStringLiteral("name")] = QStringLiteral("Bad");
+        f[QStringLiteral("clientRandom")] = bad;
+        QVERIFY2(!backend.createConfig(f), qPrintable(bad));
+    }
+    QCOMPARE(errors.count(), 3);
+    QCOMPARE(errors.last().at(0).toString(),
+             QStringLiteral("Client random must be hexadecimal, optionally followed by /mask"));
 }
 
 QTEST_MAIN(TestBackendConfig)

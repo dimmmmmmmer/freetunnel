@@ -11,6 +11,7 @@ class TestConfigToml : public QObject {
     Q_OBJECT
 
 private slots:
+    void anOldSplitClientRandomIsJoinedBack();
     void dnsServersAreOneEntryEachHoweverSeparated();
     void roundTripKeepsWhatTheEditorDoesNotUnderstand();
     void aCertificateCannotForgeSections();
@@ -348,6 +349,38 @@ void TestConfigToml::dnsServersAreOneEntryEachHoweverSeparated()
              qPrintable(toml));
     QCOMPARE(parseConfigToml(toml).dns, QStringLiteral("1.1.1.1, 8.8.8.8, tls://9.9.9.9, quic://dns.example.com"));
     QCOMPARE(splitDnsList(QStringLiteral(" , ; ")), QStringList());
+}
+
+// 1.2.2 and earlier wrote a link's mask under client_random_mask, a key the core
+// never read, so such a config connected without it. Loading it joins the mask back
+// on, which is also what the connect path does, and saving drops the key.
+void TestConfigToml::anOldSplitClientRandomIsJoinedBack()
+{
+    const auto config = [](const QString &prefix, const QString &mask) {
+        return QStringLiteral("loglevel = \"info\"\n"
+                              "[endpoint]\n"
+                              "hostname = \"vpn.example.com\"\n"
+                              "addresses = [\"1.2.3.4:443\"]\n"
+                              "username = \"u\"\n"
+                              "client_random = \"%1\"\n"
+                              "client_random_mask = \"%2\"\n"
+                              "custom_sni = \"\"\n"
+                              "\n[listener.tun]\n"
+                              "mtu_size = 1500\n").arg(prefix, mask);
+    };
+    const ConfigToml joined = parseConfigToml(config(QStringLiteral("deadbeef"), QStringLiteral("ffff0000")));
+    QCOMPARE(joined.clientRandom, QStringLiteral("deadbeef/ffff0000"));
+    const QString rebuilt = buildConfigToml(joined);
+    QVERIFY2(rebuilt.contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("client_random_mask")), qPrintable(rebuilt));
+
+    // Already whole: kept as it is, and the stray key still goes.
+    const ConfigToml whole = parseConfigToml(config(QStringLiteral("aa/bb"), QStringLiteral("cc")));
+    QCOMPARE(whole.clientRandom, QStringLiteral("aa/bb"));
+    QVERIFY(!buildConfigToml(whole).contains(QStringLiteral("client_random_mask")));
+
+    // A mask with no prefix masked nothing, then or now.
+    QCOMPARE(parseConfigToml(config(QString(), QStringLiteral("ff"))).clientRandom, QString());
 }
 
 QTEST_MAIN(TestConfigToml)

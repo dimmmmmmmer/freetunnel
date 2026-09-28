@@ -133,6 +133,7 @@ enable_testing()
 add_executable(test_deeplink
     test_deeplink.cpp
     ../src/core/DeepLink.cpp
+    ../src/core/ConfigToml.cpp
 )
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
@@ -355,6 +356,7 @@ add_executable(test_configimport
     ../src/core/ConfigImport.cpp
     ../src/core/ConfigPaths.cpp
     ../src/core/DeepLink.cpp
+    ../src/core/ConfigToml.cpp
 )
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
 target_link_libraries(test_configimport PRIVATE Qt6::Core Qt6::Test)

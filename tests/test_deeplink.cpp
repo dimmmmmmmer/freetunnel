@@ -2,6 +2,7 @@
 #include <QtTest>
 #include <QRandomGenerator>
 
+#include "core/ConfigToml.h"
 #include "core/DeepLink.h"
 
 using namespace freetunnel;
@@ -26,6 +27,7 @@ private slots:
     void rejectsATlvLengthPastTheEndOfThePayload();
     void acceptsTrustTunnelQrFragment();
     void aCertificateChainSurvivesTheLink();
+    void aMaskedClientRandomReachesTheConfigWhole();
 };
 
 void TestDeepLink::roundTrip() {
@@ -319,6 +321,29 @@ void TestDeepLink::acceptsTrustTunnelQrFragment()
     auto out = parseDeepLink(qr, &err);
     QVERIFY2(out.has_value(), qPrintable(err));
     QCOMPARE(out->hostname, in.hostname);
+}
+
+// A link can give the client random with a mask, "prefix/mask", and the core reads
+// it that way from the one client_random key. It was split into client_random and a
+// client_random_mask key the core has no such key for, and the mask was lost.
+void TestDeepLink::aMaskedClientRandomReachesTheConfigWhole() {
+    DeepLinkConfig in;
+    in.hostname = "vpn.example.com";
+    in.addresses = {"1.2.3.4:443"};
+    in.username = "u";
+    in.password = "p";
+    in.clientRandomPrefix = "deadbeef/ffff0000";
+    QString err;
+    const std::optional<DeepLinkConfig> back = parseDeepLink(encodeDeepLink(in), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    const QString toml = deepLinkConfigToToml(*back);
+    QVERIFY2(toml.contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")), qPrintable(toml));
+    QVERIFY2(!toml.contains(QStringLiteral("client_random_mask")), qPrintable(toml));
+    QCOMPARE(parseConfigToml(toml).clientRandom, QStringLiteral("deadbeef/ffff0000"));
+
+    // With nothing after the slash the core refuses the whole config: no mask then.
+    in.clientRandomPrefix = "deadbeef/";
+    QVERIFY(deepLinkConfigToToml(in).contains(QStringLiteral("client_random = \"deadbeef\"\n")));
 }
 
 QTEST_MAIN(TestDeepLink)

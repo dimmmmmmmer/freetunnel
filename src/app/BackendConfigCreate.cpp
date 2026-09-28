@@ -76,7 +76,9 @@ bool validateCreateOptionalFields(const freetunnel::ConfigToml &ct, QString *err
         return false;
     }
     const QString cr = ct.clientRandom.trimmed();
-    if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+$")).match(cr).hasMatch()) {
+    // Hex, optionally with a mask after a slash ("prefix/mask"), as links carry it
+    // and the core reads it.
+    if (!cr.isEmpty() && !QRegularExpression(QStringLiteral("^[0-9a-fA-F]+(/[0-9a-fA-F]+)?$")).match(cr).hasMatch()) {
         if (err)
             *err = QStringLiteral("bad_client_random");
         return false;
@@ -164,7 +166,7 @@ void Backend::emitCreateConfigError(const QString &parseErr)
     else if (parseErr == QLatin1String("bad_dns"))
         emit errorOccurred(tr("DNS must be an IP or DoT/DoH URL (e.g. 1.1.1.1, tls://8.8.8.8)"));
     else if (parseErr == QLatin1String("bad_client_random"))
-        emit errorOccurred(tr("Client random must be hexadecimal"));
+        emit errorOccurred(tr("Client random must be hexadecimal, optionally followed by /mask"));
 }
 
 bool Backend::createConfig(const QVariantMap &f)
