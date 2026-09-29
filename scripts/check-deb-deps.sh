@@ -38,13 +38,25 @@ mapfile -t external < <(
 needed=$(for lib in "${external[@]}"; do readlink -f "$lib"; done | sort -u \
          | { xargs -r dpkg -S 2>/dev/null || true; } | sed 's/:.*//' | sort -u)
 
+# One entry per Depends field, alternatives kept together ("pkexec|policykit-1").
 declared=$(sed -n 's/^Depends: *//p' "$control" | tr ',' '\n' \
-           | sed 's/(.*)//; s/|.*//; s/ //g' | grep -v '^$' | sort -u)
+           | sed 's/([^)]*)//g; s/ //g' | grep -v '^$' | sort -u)
 [ -n "$declared" ] || { echo "control declares no dependencies" >&2; exit 2; }
 
 # A declared package covers everything it pulls in, so compare against the
-# closure rather than the literal list.
-closure=$(for p in $declared; do
+# closure rather than the literal list. Of alternatives, the first one this
+# release has is the one apt installs: Ubuntu 20.04 and Debian 11 have no pkexec
+# package (it was split out of policykit-1 later), and asking apt-cache about it
+# used to end this script with status 1 and no message.
+closure=$(for group in $declared; do
+  p=""
+  for alt in ${group//|/ }; do
+    if apt-cache show "$alt" >/dev/null 2>&1; then p="$alt"; break; fi
+  done
+  if [ -z "$p" ]; then
+    echo "::error::no alternative of '$group' exists in this system's apt cache" >&2
+    exit 1
+  fi
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts \
     --no-breaks --no-replaces --no-enhances "$p" 2>/dev/null \
     | grep -v '^ ' | grep -v '^|' | tr -d ' '

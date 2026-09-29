@@ -235,9 +235,27 @@ else()
     # 2 on toolchains that don't know it (probe compiles with -Werror).
     set(_ft_fortify 2)
     check_cxx_compiler_flag("-Werror -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3" FT_HAS_FORTIFY3)
+    if(FT_HAS_FORTIFY3 AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Any compiler takes =3; it is glibc that decides, and before 2.33 (or with
+        # a compiler it does not trust with it) it quietly makes it 2. The Linux
+        # release is built on glibc 2.31, so ask glibc what it did, and have the log
+        # say the level that is really in the binary.
+        include(CheckCXXSourceCompiles)
+        set(CMAKE_REQUIRED_FLAGS "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3")
+        check_cxx_source_compiles("#include <cstring>
+#if !defined(__USE_FORTIFY_LEVEL) || __USE_FORTIFY_LEVEL < 3
+#error _FORTIFY_SOURCE=3 is not in effect with this C library
+#endif
+int main() { return 0; }" FT_GLIBC_FORTIFY3)
+        unset(CMAKE_REQUIRED_FLAGS)
+        if(NOT FT_GLIBC_FORTIFY3)
+            set(FT_HAS_FORTIFY3 OFF)
+        endif()
+    endif()
     if(FT_HAS_FORTIFY3)
         set(_ft_fortify 3)
     endif()
+    message(STATUS "FreeTunnel: _FORTIFY_SOURCE=${_ft_fortify} in optimized builds")
     target_compile_options(FreeTunnel PRIVATE
         $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
         $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=${_ft_fortify}>)

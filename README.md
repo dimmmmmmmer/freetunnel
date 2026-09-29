@@ -31,7 +31,7 @@ Download a build for your platform from
 | **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
 | **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
-| **Linux** (portable, any distro) | `freetunnel-x86_64.AppImage` |
+| **Linux** (portable, most distros with glibc 2.31 or newer: Ubuntu 20.04+, Debian 11+, RHEL 9, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
 
 Builds are **unsigned** (no code-signing certificates), so the OS may warn on first launch:
 

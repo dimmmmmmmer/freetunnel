@@ -9,6 +9,10 @@ compare link at the bottom of its release notes.
 
 ### Changed
 
+- **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
+  22.04 and needed its C library (glibc 2.35), so neither the .deb nor the
+  AppImage started on Ubuntu 20.04, Debian 11 or RHEL 9 and its rebuilds. It is
+  built on Ubuntu 20.04 now and needs glibc 2.31.
 - **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
   AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
   no longer finds the new version; FreeTunnel's own updater still does.
