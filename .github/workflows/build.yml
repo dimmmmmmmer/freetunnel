@@ -271,8 +271,14 @@ jobs:
           sudo apt-get install -y g++-13
           # focal also has GCC 9 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
-          clang++-18 -v -x c++ -E /dev/null 2>&1 \
-            | grep -F 'Selected GCC installation: /usr/lib/gcc/x86_64-linux-gnu/13'
+          # clang prints the path through its own directory (/usr/bin/../lib/…),
+          # so only the version directory at the end is compared.
+          gcc_line="$(clang++-18 -v -x c++ -E /dev/null 2>&1 | grep 'Selected GCC installation' || true)"
+          echo "$gcc_line"
+          case "$gcc_line" in
+            */gcc/x86_64-linux-gnu/13) ;;
+            *) echo "::error::clang-18 did not pick GCC 13's headers: ${gcc_line:-no GCC installation found}"; exit 1 ;;
+          esac
           # The X/GL libs Qt's platform plugin needs so linuxdeploy
           # can find and bundle them into the .deb. (No libfuse2: there is no
           # FUSE in a container, and both AppImage steps extract-and-run.)
