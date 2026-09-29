@@ -143,9 +143,11 @@ jobs:
           # libssl1.1 and libsqlite3-0: the focal Python that setup-python installs
           # links them (_ssl, _hashlib, _sqlite3); pip and conan need those modules.
           # zstd: actions/cache falls back to gzip without it.
+          # file: appimagetool refuses to start without it (the runner image has
+          # it; this one does not).
           apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
             git ca-certificates curl gnupg lsb-release software-properties-common \
-            sudo tzdata patch xz-utils zstd binutils libssl1.1 libsqlite3-0
+            sudo tzdata patch xz-utils zstd binutils file libssl1.1 libsqlite3-0
           git --version
 
       - name: Checkout client

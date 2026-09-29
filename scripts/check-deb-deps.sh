@@ -13,6 +13,10 @@
 set -euo pipefail
 
 root="${1:?usage: check-deb-deps.sh <unpacked package root>}"
+root="${root%/}"
+# ldd prints a library found through $ORIGIN as an absolute path, so a bundled
+# library is recognised by this prefix, not by the root as it was given.
+case "$root" in /*) here="$root" ;; *) here="$(pwd -P)/$root" ;; esac
 control="$root/DEBIAN/control"
 [ -f "$control" ] || { echo "no control file at $control" >&2; exit 2; }
 
@@ -21,22 +25,36 @@ control="$root/DEBIAN/control"
 # ldd exits non-zero for anything that is not an ELF object — an icon, a
 # .desktop file, a shell script — and the tree is full of those, so each file is
 # asked separately and a refusal is not an error.
-# shellcheck disable=SC2016  # $0 is the inner sh's argument, not ours to expand
-mapfile -t external < <(
+# Kept as "library<TAB>file that resolved it": naming only the package left a
+# failure with no way to tell which of three hundred files was behind it.
+pairs=$(
   find -L "$root" -type f \( -name '*.so' -o -name '*.so.*' -o -perm -u+x \) -print0 \
-    | xargs -0 -r -n1 sh -c 'ldd "$1" 2>/dev/null || true' _ \
-    | awk '/=>/ {print $3}' \
-    | grep -v '^$' \
-    | grep -v "^$root" \
+    | while IFS= read -r -d '' f; do
+        { ldd "$f" 2>/dev/null || true; } | awk -v f="$f" '/=>/ && $3 != "" {print $3 "\t" f}'
+      done \
+    | awk -F'\t' -v a="$here/" -v r="$root/" 'index($1, a) != 1 && index($1, r) != 1' \
     | sort -u
 )
-[ "${#external[@]}" -gt 0 ] || { echo "found no external libraries — is the root right?" >&2; exit 2; }
+mapfile -t external < <(cut -f1 <<< "$pairs" | sort -u)
+[ -n "$pairs" ] || { echo "found no external libraries — is the root right?" >&2; exit 2; }
 
-# Which package provides each, following symlinks: dpkg -S wants the real path.
-# dpkg -S exits non-zero when it does not own a path, and it owns none of the
-# bundled Qt libraries — which is exactly why they are not in the answer.
-needed=$(for lib in "${external[@]}"; do readlink -f "$lib"; done | sort -u \
-         | { xargs -r dpkg -S 2>/dev/null || true; } | sed 's/:.*//' | sort -u)
+# Which package provides each. dpkg is asked by the path ldd printed and by the
+# real path, because on a merged-/usr system each finds only some: ldd prints
+# /lib/x86_64-linux-gnu/..., and dpkg recorded libc6 there but libx11-6 under
+# /usr/lib. Asking by the real path alone lost libc6, zlib1g, libcom-err2 and
+# the rest of /lib without a word, so the check could not fail for them.
+# dpkg -S exits non-zero when it does not own a path.
+# "package<TAB>library<TAB>first file that needs it", one line per library.
+owners=$(for lib in "${external[@]}"; do
+  file=$(awk -F'\t' -v l="$lib" '$1 == l {print $2; exit}' <<< "$pairs")
+  { dpkg -S "$lib" "$(readlink -f "$lib")" 2>/dev/null || true; } | sed 's/:.*//' \
+    | while IFS= read -r pkg; do printf '%s\t%s\t%s\n' "$pkg" "$lib" "${file#"$root"/}"; done
+done | sort -u)
+needed=$(cut -f1 <<< "$owners" | sort -u)
+
+echo "::group::what the system has to provide, and a file that needs each"
+awk -F'\t' '!seen[$1]++ {printf "  %-28s %s  (%s)\n", $1, $3, $2}' <<< "$owners"
+echo "::endgroup::"
 
 # One entry per Depends field, alternatives kept together ("pkexec|policykit-1").
 declared=$(sed -n 's/^Depends: *//p' "$control" | tr ',' '\n' \
@@ -69,6 +87,9 @@ done
 
 if [ -n "$missing" ]; then
   echo "::error::the package needs these but does not depend on them:$missing"
+  for p in $missing; do
+    awk -F'\t' -v p="$p" '$1 == p {printf "  %s: %s needs %s\n", p, $3, $2; exit}' <<< "$owners"
+  done
   echo "declared:"
   while IFS= read -r pkg; do echo "  $pkg"; done <<< "$declared"
   exit 1
