@@ -673,6 +673,10 @@ jobs:
                 done
             exit 1
           fi
+          # libgssapi-krb5-2 is named because libQt6Network links it directly and
+          # nothing else here is sure to bring it: on 22.04 pkexec happened to
+          # pull it in, on 20.04 and Debian 11 policykit-1 does not, and without
+          # it the application does not start.
           cat > "$root/DEBIAN/control" <<EOF
           Package: freetunnel
           Version: ${ver}
@@ -681,7 +685,7 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, pkexec | policykit-1
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgssapi-krb5-2, libgpg-error0, libxkbcommon0, libxcb-cursor0, pkexec | policykit-1
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on
