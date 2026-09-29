@@ -7,6 +7,12 @@ compare link at the bottom of its release notes.
 
 ## Unreleased
 
+### Changed
+
+- **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
+  AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
+  no longer finds the new version; FreeTunnel's own updater still does.
+
 ### Fixed
 
 - **A config imported from a link keeps its whole client random.** A link can

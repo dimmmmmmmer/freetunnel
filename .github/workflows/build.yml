@@ -616,7 +616,10 @@ jobs:
           ld=linuxdeploy-x86_64.AppImage
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage
           appimage=$(ls -1 *.AppImage | head -1)
-          mv "$appimage" "out/${{ matrix.artifact }}.AppImage"
+          # Not "linux" in the name, unlike the other artifacts: every AppImage is
+          # for Linux, and the AppImage catalog flags it. The in-app updater picks
+          # the asset by its .AppImage suffix, so older versions still find it.
+          mv "$appimage" "out/freetunnel-x86_64.AppImage"
           ls -la out
 
       - name: Build & package universal (macOS)
@@ -969,7 +972,7 @@ jobs:
             echo "- **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS"
             echo "  (\`sudo apt install ./freetunnel-linux-x86_64.deb\`) — it bundles its own Qt"
             echo "  and appears in the app menu. Or run the portable **AppImage**"
-            echo "  (\`chmod +x freetunnel-linux-x86_64.AppImage && ./freetunnel-linux-x86_64.AppImage\`)."
+            echo "  (\`chmod +x freetunnel-x86_64.AppImage && ./freetunnel-x86_64.AppImage\`)."
             echo "- **macOS**: open the **.dmg** and drag FreeTunnel to Applications. The app is"
             echo "  ad-hoc signed but not notarized, so on first launch right-click it → Open"
             echo "  (or run \`xattr -dr com.apple.quarantine /Applications/FreeTunnel.app\`)."
