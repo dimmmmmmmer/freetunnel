@@ -704,14 +704,34 @@ jobs:
           codesign --verify --deep --strict "$APP"
           mkdir -p out
           RW=out/rw.dmg
+          # Every disk device out/rw.dmg is attached as: the first whole-disk
+          # node of each of its entries in hdiutil info. There can be more than
+          # one. A create that fails leaves the image it made attached, with no
+          # volume mounted, and the attach below then adds a second entry beside
+          # it; detaching only the device our own attach printed let a build
+          # wait out six attempts on an image that was still attached as the
+          # other one:
+          #
+          #   hdiutil: create failed - Resource busy
+          #   ##[error]out/rw.dmg is still attached (as /dev/disk7) after six detach attempts
+          #   (hdiutil info: out/rw.dmg on /dev/disk5, nothing mounted)
+          rw_devices() {
+            hdiutil info 2>/dev/null | awk -v img="/$RW" '
+              /^image-path/ { cur = index($0, img) > 0; first = 1; next }
+              /^=+$/ { cur = 0; next }
+              cur && first && $1 ~ /^\/dev\/disk[0-9]+$/ { print $1; first = 0 }'
+          }
           # "Resource busy" here is transient and it has failed a build: the .app
           # was written seconds ago and Spotlight/fseventsd can still be walking
-          # it, and a /Volumes/FreeTunnel left attached by an earlier attempt
-          # holds the volume name. Clean up and retry — the detach below already
-          # does the same thing for the same reason, and a release build should
-          # not die on this.
+          # it, and a /Volumes/FreeTunnel or an image left attached by an earlier
+          # attempt holds the volume name. Clean up and retry — the detach below
+          # already does the same thing for the same reason, and a release build
+          # should not die on this.
           for attempt in 1 2 3 4 5; do
             hdiutil detach /Volumes/FreeTunnel -force >/dev/null 2>&1 || true
+            for dev in $(rw_devices); do
+              hdiutil detach "$dev" -force >/dev/null 2>&1 || true
+            done
             if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m \
                  -ov -format UDRW "$RW"; then
               break
@@ -726,9 +746,6 @@ jobs:
           ATTACHED=$(hdiutil attach -readwrite -noverify -noautofsck "$RW")
           echo "$ATTACHED"
           MOUNT=$(echo "$ATTACHED" | awk '/\/Volumes\// {print $NF; exit}')
-          # The whole-disk node, which is what has to be let go of before the image
-          # can be converted: see below.
-          DEV=$(echo "$ATTACHED" | awk '$1 ~ /^\/dev\/disk[0-9]+$/ {print $1; exit}')
           cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
           SetFile -a C "$MOUNT/.VolumeIcon.icns"
           ln -sf /Applications "$MOUNT/Applications"
@@ -765,20 +782,24 @@ jobs:
           #
           #   hdiutil: convert failed - Resource temporarily unavailable
           #
-          # So detach the device itself, forcing it on the last attempt, until the
-          # image is not attached at all, and stop with the device's state if it
-          # never lets go.
+          # So detach the devices themselves, forcing them on the last attempt,
+          # until the image is not attached at all, and stop with their state if
+          # they never let go.
           for i in 1 2 3 4 5 6; do
-            if ! hdiutil info 2>/dev/null | grep -qF "$RW"; then break; fi
-            if [ "$i" = 6 ]; then
-              hdiutil detach "$DEV" -force >/dev/null 2>&1 || true
-            else
-              hdiutil detach "$DEV" >/dev/null 2>&1 || true
-            fi
+            devs=$(rw_devices)
+            [ -n "$devs" ] || break
+            for dev in $devs; do
+              if [ "$i" = 6 ]; then
+                hdiutil detach "$dev" -force >/dev/null 2>&1 || true
+              else
+                hdiutil detach "$dev" >/dev/null 2>&1 || true
+              fi
+            done
             sleep 5
           done
-          if hdiutil info 2>/dev/null | grep -qF "$RW"; then
-            echo "::error::out/rw.dmg is still attached (as ${DEV:-an unknown device}) after six detach attempts"
+          devs=$(rw_devices)
+          if [ -n "$devs" ]; then
+            echo "::error::out/rw.dmg is still attached (as ${devs//$'\n'/ }) after six detach attempts"
             hdiutil info || true
             exit 1
           fi
