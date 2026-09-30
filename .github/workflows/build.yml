@@ -79,10 +79,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Built on ubuntu-22.04 (glibc 2.35) so the .deb runs on most
-          # current distros (Ubuntu 22.04+, Debian 12+, recent Fedora). Qt and a
+          # Built INSIDE ubuntu:20.04 (glibc 2.31) so the .deb and the AppImage
+          # run on Ubuntu 20.04+, Debian 11+ and anything newer. The runner only
+          # hosts the container: the compiler, the headers and every system
+          # library linuxdeploy bundles come from the image, so the image is
+          # what the glibc floor, the cache keys and Python follow. Qt and a
           # modern clang come from aqt/llvm.sh, not the distro's old packages.
           - os: ubuntu-22.04
+            # Pinned by digest; the 20.04 tag is frozen (last pushed 2025-04-09)
+            # and archive.ubuntu.com still serves focal.
+            container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+            # Names the caches instead of the runner label (see the ccache step).
+            cache_os: ubuntu-20.04
+            # The highest glibc the payload may need: the container's own.
+            glibc_max: '2.31'
+            # The newest 3.13 that actions/python-versions builds for 20.04.
+            python: '3.13.3'
             platform: linux
             qt_host: linux
             qt_arch: linux_gcc_64
@@ -109,8 +121,35 @@ jobs:
             qt_arch: win64_msvc2022_64
             artifact: freetunnel-windows-x86_64
     runs-on: ${{ matrix.os }}
+    # Linux only. macOS and Windows have no `container` in the matrix; an empty
+    # value means no container, and their steps run on the runner as before.
+    container: ${{ matrix.container }}
 
     steps:
+      # ubuntu:20.04 is bare. Without git, actions/checkout falls back to a REST
+      # tarball with no .git, and the About footer's `git describe` quietly reads
+      # "unknown". There is no sudo, curl or patch either, and those are used
+      # before "Install dependencies (Linux)" gets to run. Later steps run apt
+      # through sudo, which drops DEBIAN_FRONTEND, so debconf is told here, once,
+      # never to prompt (tzdata would).
+      - name: Prepare build container (Linux)
+        if: matrix.container
+        shell: bash
+        run: |
+          set -eux
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          echo 'DEBIAN_FRONTEND=noninteractive' >> "$GITHUB_ENV"
+          apt-get -o Acquire::Retries=3 update
+          # libssl1.1 and libsqlite3-0: the focal Python that setup-python installs
+          # links them (_ssl, _hashlib, _sqlite3); pip and conan need those modules.
+          # zstd: actions/cache falls back to gzip without it.
+          # file: appimagetool refuses to start without it (the runner image has
+          # it; this one does not).
+          apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+            git ca-certificates curl gnupg lsb-release software-properties-common \
+            sudo tzdata patch xz-utils zstd binutils file libssl1.1 libsqlite3-0
+          git --version
+
       - name: Checkout client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -176,7 +215,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.13'
+          # Linux gets an exact version: a bare '3.13' would first match the
+          # RUNNER's tool cache, which is mounted into the container and whose
+          # 3.13 is built for 22.04 (glibc 2.34, libssl3).
+          python-version: ${{ matrix.python || '3.13' }}
 
       - name: Patch core wrapper (surface tunnel stats)
         shell: bash
@@ -190,12 +232,16 @@ jobs:
             patch -p1 -d upstream < "$p"
           done
 
-      # quiche (HTTP/3) is built from Rust by conan; ensure a toolchain exists on
-      # every runner (macOS/Windows ship one, but install to be safe + on PATH).
-      # Pinned action instead of `curl https://sh.rustup.rs | sh`: this toolchain
-      # compiles quiche into the shipped binary, and a piped installer script is
-      # an unpinnable remote dependency in the job that publishes releases.
+      # macOS and Windows keep the toolchain they have always had (the macOS step
+      # adds the x86_64 target through rustup). Pinned action instead of
+      # `curl https://sh.rustup.rs | sh`: a piped installer script is an
+      # unpinnable remote dependency in the job that publishes releases.
+      # Not on Linux: the FreeTunnel target compiles no Rust there. Upstream
+      # replaced quiche with ngtcp2/nghttp3 in 1.1.5, and its remaining cargo
+      # build (setup_wizard) is a dependency of `tests` only. The container has
+      # no rustup, so the action would fall back to that very piped installer.
       - name: Install Rust
+        if: matrix.platform != 'linux'
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: stable
@@ -203,6 +249,9 @@ jobs:
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
         if: matrix.platform == 'linux'
+        # The runner's own default for a step with no shell. Inside a container
+        # the default is `sh -e {0}` (dash), so the Linux steps name it.
+        shell: bash -e {0}
         run: |
           sudo apt-get update
           # Modern clang (the core is clang-only; 22.04's default clang is too old).
@@ -222,15 +271,41 @@ jobs:
           done
           sudo apt-get update
           sudo apt-get install -y g++-13
-          # ninja and the X/GL libs Qt's platform plugin needs so linuxdeploy
-          # can find and bundle them into the .deb.
-          sudo apt-get install -y ninja-build libfuse2 libbsd-dev \
+          # focal also has GCC 9 (clang's own dependency); make sure the headers
+          # clang-18 picked are 13's rather than trust the comment above.
+          # clang prints the path through its own directory (/usr/bin/../lib/…),
+          # so only the version directory at the end is compared.
+          gcc_line="$(clang++-18 -v -x c++ -E /dev/null 2>&1 | grep 'Selected GCC installation' || true)"
+          echo "$gcc_line"
+          case "$gcc_line" in
+            */gcc/x86_64-linux-gnu/13) ;;
+            *) echo "::error::clang-18 did not pick GCC 13's headers: ${gcc_line:-no GCC installation found}"; exit 1 ;;
+          esac
+          # The X/GL libs Qt's platform plugin needs so linuxdeploy
+          # can find and bundle them into the .deb. (No libfuse2: there is no
+          # FUSE in a container, and both AppImage steps extract-and-run.)
+          sudo apt-get install -y libbsd-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey builds against xcb/X11
+          # What the ubuntu-22.04 image had preinstalled and ubuntu:20.04 lacks.
+          # linuxdeploy stops at the first library it cannot resolve (libQt6Gui
+          # needs fontconfig, glib and dbus). Without libsecret-1-dev and
+          # pkg-config, FreetunnelDeps.cmake compiles the Secret Service store
+          # out without a word. build-essential: conan's profile detection wants
+          # a gcc, and it should not depend on install-qt-action's own apt list.
+          sudo apt-get install -y build-essential pkg-config libsecret-1-dev \
+            libfontconfig1 libfreetype6 libsm6 libxext6 libdbus-1-3 \
+            libegl1 libopengl0 libgssapi-krb5-2
           pip install -r upstream/requirements.txt
           pip install "conan==${CONAN_VER}"
+          # Upstream needs CMake >= 3.24 and focal has 3.16. These are the
+          # versions the ubuntu-22.04 image carried, as manylinux2014 wheels
+          # (glibc 2.17), first on PATH through setup-python's bin.
+          pip install "cmake==3.31.6" "ninja==1.13.2"
+          cmake --version
+          ninja --version
 
       # ---------------------------------------------------------------- macOS
       - name: Install dependencies (macOS)
@@ -281,6 +356,10 @@ jobs:
           target: desktop
           arch: ${{ matrix.qt_arch }}
           cache: true
+          # Not on Linux: the action's own setup-python (>=3.14) would take the
+          # runner's 22.04 build from the shared tool cache, which cannot run in
+          # the container. aqt uses the job's Python instead.
+          setup-python: ${{ matrix.platform != 'linux' }}
 
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -318,21 +397,25 @@ jobs:
         if: matrix.platform != 'windows'
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
-          # Key includes the runner OS so deps/objects built against one glibc
-          # are never reused on another (e.g. ubuntu-24.04 -> ubuntu-22.04).
+          # Key includes the OS the objects are built against, so deps/objects
+          # built against one glibc are never reused on another (e.g.
+          # ubuntu-22.04 -> ubuntu:20.04). For a container job that is the image
+          # (matrix.cache_os), not the runner label, which stays ubuntu-22.04.
           # The Xcode too, on macOS. ccache compiles through the /usr/bin/c++ xcrun
           # shim, whose bytes do not change when DEVELOPER_DIR does, so without it
           # a new compiler's objects would be mixed with the old one's unnoticed.
-          key: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-ccache
+          key: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-ccache
 
       - name: Conan cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.conan2
-          # Keyed on the Xcode as well, for the same reason as ccache: conan
-          # records only the apple-clang major, which is 17 for Xcode 16.4 and 26.3.
-          key: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
-          restore-keys: ${{ matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-
+          # Keyed on the build OS and the Xcode, for the same reasons as ccache.
+          # conan's package_id records neither: not glibc (a 22.04 cache would put
+          # glibc-2.35 static libraries into the focal link), and only the
+          # apple-clang major, which is 17 for Xcode 16.4 and 26.3.
+          key: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
+          restore-keys: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-
 
       - name: Patch bootstrap for Windows (run .sh via sh)
         if: matrix.platform == 'windows'
@@ -393,6 +476,7 @@ jobs:
       # ----------------------------------------------------------- Configure
       - name: Configure (Linux)
         if: matrix.platform == 'linux'
+        shell: bash -e {0}
         run: |
           # clang-18 from llvm.sh (upstream is clang-only; gcc trips -Werror=extra)
           # with libstdc++; Qt comes from aqt ($QT_ROOT_DIR).
@@ -470,6 +554,7 @@ jobs:
       # ------------------------------------------------------------- Package
       - name: Prepare Linux bundle
         if: matrix.platform == 'linux'
+        shell: bash -e {0}
         run: |
           set -eux
           mkdir -p out
@@ -516,6 +601,10 @@ jobs:
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png \
             --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
             --library "$(g++-13 -print-file-name=libgcc_s.so.1)"
+          # libsecret is optional to the build (found QUIETLY), so a machine
+          # without libsecret-1-dev builds a client that keeps secrets in a file.
+          test -e AppDir/usr/lib/libsecret-1.so.0 \
+            || { echo "::error::built without libsecret: install libsecret-1-dev and pkg-config"; exit 1; }
 
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
@@ -523,6 +612,7 @@ jobs:
       # the launcher; the privileged VPN helper runs via pkexec (polkit).
       - name: Package .deb (Linux)
         if: matrix.platform == 'linux'
+        shell: bash -e {0}
         run: |
           set -eux
           if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
@@ -569,6 +659,22 @@ jobs:
             | sort -V | tail -1)"
           : "${glibc_dep:?could not determine the glibc version the payload needs}"
           echo "glibc floor: $glibc_dep"
+          # The ceiling is what the build promises (the container's glibc). A
+          # payload above it means something built elsewhere got in: a restored
+          # cache, a library from another image. The same AppDir becomes the
+          # AppImage, so this guards both.
+          glibc_max='${{ matrix.glibc_max }}'
+          if dpkg --compare-versions "$glibc_dep" gt "$glibc_max"; then
+            echo "::error::the payload needs glibc $glibc_dep, above the $glibc_max this build promises. Offenders:"
+            find "$root/opt/freetunnel" -type f \( -name 'FreeTunnel' -o -name '*.so*' \) -print0 \
+              | while IFS= read -r -d '' f; do
+                  v="$(objdump -T "$f" 2>/dev/null | sed -nE 's/.*GLIBC_([0-9]+\.[0-9]+).*/\1/p' | sort -V | tail -1)"
+                  if [ -n "$v" ] && dpkg --compare-versions "$v" gt "$glibc_max"; then
+                    echo "  GLIBC_$v  ${f#"$root"/}"
+                  fi
+                done
+            exit 1
+          fi
           cat > "$root/DEBIAN/control" <<EOF
           Package: freetunnel
           Version: ${ver}
@@ -600,19 +706,24 @@ jobs:
           # machine without a system Qt. Checked here rather than trusted,
           # because the machines this is developed on all have one.
           bash client/scripts/check-deb-deps.sh "$root"
-          dpkg-deb --build --root-owner-group "$root" \
+          # xz, named: dpkg-deb's default became zstd in newer dpkg, and Debian 11's
+          # dpkg (1.20) cannot unpack a zstd .deb.
+          dpkg-deb -Zxz --build --root-owner-group "$root" \
             "out/${{ matrix.artifact }}.deb"
           ls -la out
 
       # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
       - name: Package AppImage (Linux)
         if: matrix.platform == 'linux'
+        shell: bash -e {0}
         run: |
           set -eux
           if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
             echo "::error::AppDir missing — cannot build AppImage"
             exit 1
           fi
+          # No FUSE in a container: without this linuxdeploy cannot mount itself.
+          export APPIMAGE_EXTRACT_AND_RUN=1
           ld=linuxdeploy-x86_64.AppImage
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage
           appimage=$(ls -1 *.AppImage | head -1)

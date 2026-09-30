@@ -26,6 +26,8 @@ check "QHotkey commit pin in tests" 'GIT_TAG [0-9a-f]{40}' tests/CMakeLists.txt
 check "boringssl NLC commit pin" '^NLC_COMMIT="[0-9a-f]{40}"$' scripts/export-patched-boringssl.sh
 check "boringssl recipe digest" '^NLC_RECIPE_SHA256="[0-9a-f]{64}"$' scripts/export-patched-boringssl.sh
 check "linuxdeploy checksum" 'sha256sum -c -' .github/workflows/build.yml
+# The Linux release is compiled inside this image; a tag can be repointed.
+check "Linux build container digest pin" 'container: ubuntu:[0-9.]+@sha256:[0-9a-f]{64}$' .github/workflows/build.yml
 
 # Third-party GitHub Actions must be pinned to full commit SHAs. Validate every
 # `uses:` reference in the workflows directly (a tag or branch is mutable —
