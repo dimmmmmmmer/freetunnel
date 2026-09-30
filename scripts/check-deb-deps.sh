@@ -12,6 +12,13 @@
 # The root is the directory holding DEBIAN/control and opt/freetunnel.
 set -euo pipefail
 
+# The loader has to search the way it will on a user's machine. CI exports
+# LD_LIBRARY_PATH for the Qt it builds with, and that is searched before the
+# bundle's RUNPATH: ldd then loaded that Qt instead of ours, found none of its
+# libraries next to it, and took glib, dbus, systemd and Kerberos from the
+# system, so the check demanded packages for libraries the bundle ships.
+unset LD_LIBRARY_PATH LD_PRELOAD
+
 root="${1:?usage: check-deb-deps.sh <unpacked package root>}"
 root="${root%/}"
 # ldd prints a library found through $ORIGIN as an absolute path, so a bundled
