@@ -156,6 +156,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/vpn/qt_trusttunnel_platform.h
     include/vpn/qt_trusttunnel_client.h
     src/vpn/vpn_helper_client.cpp
+    src/vpn/vpn_helper_elevation.cpp
     include/vpn/vpn_helper_client.h
     src/vpn/vpn_helper_launch.cpp
     include/vpn/vpn_helper_launch.h
