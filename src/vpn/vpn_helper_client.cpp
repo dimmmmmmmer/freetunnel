@@ -256,6 +256,25 @@ void VpnHelperClient::setAppRules(const std::vector<std::string> &rules) {
     }
 }
 
+void VpnHelperClient::setSplitRouting(const std::vector<std::string> &exclusions, bool selective,
+                                      const std::vector<std::string> &appRules) {
+    m_exclusions = exclusions;
+    m_selective = selective;
+    m_appRules = appRules;
+    if (!m_helloAcked)
+        return; // handleReadyEvent() sends them all
+    QJsonArray domains;
+    for (const auto &d : m_exclusions) domains.append(QString::fromStdString(d));
+    QJsonArray apps;
+    for (const auto &r : m_appRules) apps.append(QString::fromStdString(r));
+    QJsonObject c;
+    c["cmd"] = "setSplitRouting";
+    c["domains"] = domains;
+    c["selective"] = selective;
+    c["rules"] = apps;
+    send(c);
+}
+
 void VpnHelperClient::setVpnMode(bool selective) {
     m_selective = selective;
     if (m_helloAcked) {
@@ -304,7 +323,7 @@ void VpnHelperClient::connectVpn() {
 }
 
 VpnHelperClient::SessionSettings VpnHelperClient::sessionSettings() const {
-    return {m_exclusions, m_excludedRoutes, m_selective, m_killSwitch};
+    return {m_excludedRoutes, m_killSwitch};
 }
 
 bool VpnHelperClient::sessionSettingsChanged() const {

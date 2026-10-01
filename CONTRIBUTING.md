@@ -19,8 +19,8 @@ upstream CMake tree so the `vpnlibs_trusttunnel` target exists.
 
 Steps 1 and 2 are already automated — `scripts/setup-upstream-tree.sh` clones
 upstream at the pinned ref, copies this client in as `FreeTunnel/`, appends the
-`add_subdirectory()` hook and applies the stats patch, which is exactly what CI
-does. Use it to reproduce a CI build. It **copies** the client rather than
+`add_subdirectory()` hook and applies the vendored patches, which is exactly what
+CI does. Use it to reproduce a CI build. It **copies** the client rather than
 linking it, so for day-to-day work on FreeTunnel itself follow the manual steps
 below and keep editing your own checkout.
 
@@ -34,7 +34,7 @@ rm -rf FreeTunnel
 git clone https://github.com/dimmmmmmmer/freetunnel.git FreeTunnel   # or symlink your fork
 
 # The pinned upstream commit lives in exactly one place. Read it, never retype it —
-# CI verifies the stats patch against this same file.
+# CI verifies the vendored patches against this same file.
 git checkout "$(tr -d '[:space:]' < FreeTunnel/scripts/upstream_ref.txt)"
 
 # Ensure upstream CMakeLists.txt adds the subdirectory when BUILD_TRUSTTUNNEL_QT=ON
@@ -48,7 +48,7 @@ if (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMak
 endif ()
 ```
 
-### 2. Patch upstream (tunnel stats)
+### 2. Patch upstream
 
 From the upstream root:
 
@@ -58,8 +58,11 @@ for p in FreeTunnel/vendor/trusttunnel/*.patch; do patch -p1 < "$p"; done
 
 The patches are numbered because they are not independent — each one's context
 lines assume the previous is applied, so apply them in filename order. Today
-there are two: live upload/download stats in the UI, and the per-connection hook
-that per-application split tunnelling decides on. Verified in CI via
+there are three: live upload/download stats in the UI; the per-connection hook
+that per-application split tunnelling decides on; and the kill switch's pair,
+which hands a running session new split-tunnelling rules and mode instead of
+rebuilding it, and with the kill switch on keeps a first connect that fails
+retrying inside its session rather than ending it. Verified in CI via
 `FreeTunnel/scripts/verify_upstream_patch.sh`.
 
 ### 3. Bootstrap Conan deps

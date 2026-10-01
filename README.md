@@ -62,7 +62,10 @@ admin password the first time you connect in a session.
 The **Split tunnelling** tab decides what goes through the tunnel. Rules are
 either addresses — a domain, an IP, a subnet — or programs, and both obey the
 **Mode** switch at the top of the page: under *Bypass VPN* what is listed goes
-around the tunnel, under *Through VPN* it is the only thing inside it.
+around the tunnel, under *Through VPN* it is the only thing inside it. Changes
+here reach a tunnel that is already up without reconnecting it; after a change
+to the addresses or the mode, connections that were open start again under the
+new rules.
 
 Add a program from the list of what is installed, by dragging its icon onto the
 page, or by picking the file yourself. Which program a connection belongs to is
@@ -83,18 +86,23 @@ Settings does not change that.
 
 ## Kill switch
 
-The kill switch in **Settings** is for a connection that drops: while
-FreeTunnel brings it back, connections that would have gone out over the open
-network are refused instead.
+The kill switch in **Settings** is for a connection that is not up: while
+FreeTunnel connects, or brings back a connection that dropped, connections that
+would have gone out over the open network are refused instead. A connect that
+keeps failing keeps trying, blocked, until it gets through or you press
+**Disconnect**, and the window says why it is failing.
 
 The block belongs to the running VPN session, so it is not a firewall of its
-own. Nothing is blocked while the VPN is off or after an error has stopped it,
-and the block lifts for the moment it takes to build a session anew: when you
-switch configs, change split tunnelling or the kill switch while connected, or
-when FreeTunnel starts over after the server stopped answering. A program rule
-is the exception among those changes: it applies without a new session. The
-one time it does not is under *Through VPN* with no addresses listed, where the
-first program added, or the last one removed, changes what the tunnel carries.
+own. Nothing is blocked while the VPN is off or after an error has stopped it.
+The session stays up, and the block with it, through any change on the
+**Split tunnelling** page: a program rule applies from the program's next
+connection, and a domain, address or mode change restarts the connections that
+are open. The block lifts for the moment it takes to build a session anew,
+which happens when you switch configs, change the excluded routes or the kill
+switch itself while connected, and when the server refuses the login or its
+certificate and FreeTunnel starts over. A config that names its server by a
+domain name rather than an IP address gets no session at all, and so no block,
+while that name cannot be looked up.
 
 ## External control
 

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -70,12 +71,29 @@ public:
     std::optional<Error> connect(AutoSetup)
     {
         const std::string err = mockcore::Controller::instance().onConnect(m_id);
-        if (err.empty())
+        if (err.empty()) {
+            m_running = true;
             return std::nullopt;
+        }
         return Error{err};
     }
 
-    void disconnect() { mockcore::Controller::instance().onDisconnect(m_id); }
+    void disconnect()
+    {
+        m_running = false;
+        mockcore::Controller::instance().onDisconnect(m_id);
+    }
+
+    // Mirrors what vendor/trusttunnel/03-*.patch adds to the real wrapper,
+    // including that it does nothing unless a session is running: the real one
+    // asks the core only while it holds a Vpn, from connect() until disconnect().
+    void update_exclusions(VpnMode mode, std::string_view exclusions)
+    {
+        if (!m_running)
+            return;
+        mockcore::Controller::instance().onUpdateExclusions(m_id, static_cast<int>(mode),
+                                                           std::string(exclusions));
+    }
 
     void notify_network_change(VpnNetworkState state)
     {
@@ -135,6 +153,7 @@ private:
 
     TrustTunnelConfig m_config;
     uint64_t m_id = 0;
+    bool m_running = false; // connect() succeeded and disconnect() has not run
     // In the real header's order, so the file is closed at the same point of
     // destruction as there.
     std::optional<FileHandler> m_logfile_handler;

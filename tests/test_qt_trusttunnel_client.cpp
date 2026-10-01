@@ -155,6 +155,15 @@ private slots:
     void aDnsFailureWithANetworkStillStops();
     void uplinkOfflineAsksTheCoreOnlyOnceARouteIsBack();
     void offlineLooksKeepThePace();
+    void aRuleEditReachesTheRunningSessionWithoutANewOne();
+    void anEditThatChangesNothingLeavesTheSessionAlone();
+    void splitRoutingChangesTheSessionInOneStep();
+    void theCoreHasTheNewModeBeforeTheProgramRulesChange();
+    void anEditMadeWhileTheSessionIsBuiltReachesItOnceBuilt();
+    void aBurstOfEditsLeavesTheSessionOnTheLastOne();
+    void aFirstConnectTheCoreKeepsRetryingStaysConnectingAndSaysWhy();
+    void disconnectStopsASessionTheCoreIsStillRetrying();
+    void aNewSessionSaysWhyItIsNotConnectingAgain();
 
 private:
     // A connected session whose core was built while `ifIndex` was the active
@@ -234,6 +243,51 @@ private:
     {
         QFile f(qt_trusttunnel_default_core_log_path());
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    }
+
+    // Connected, and adopted: the first live edit is how a test knows the client
+    // holds the session, since a CONNECTED event can be handled before the
+    // finished attempt is. Returns the session's id.
+    quint64 connectedWithLiveSession()
+    {
+        auto &ctl = mockcore::Controller::instance();
+        beginConnect();
+        if (!QTest::qWaitFor([&ctl]() { return ctl.connectCallCount() >= 1; }, kLongWaitMs))
+            return 0;
+        const quint64 id = ctl.lastClientId();
+        ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED);
+        QMetaObject::invokeMethod(m_client, "setExtraExclusionDomains",
+                                  Qt::BlockingQueuedConnection,
+                                  Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})));
+        const bool live = QTest::qWaitFor(
+                [this, &ctl]() {
+                    return ctl.exclusionUpdates().size() == 1 && m_lastState == State::Connected;
+                },
+                kLongWaitMs);
+        return live ? id : 0;
+    }
+
+    static bool has(const mockcore::ExclusionsUpdate &u, const char *entry)
+    {
+        return u.exclusions.find(entry) != std::string::npos;
+    }
+
+    // A connection from a socket this test holds, so the shipping lookup names
+    // this test binary as its program.
+    static ag::VpnConnectRequestSnapshot ownConnection(const QTcpServer &server, uint64_t id)
+    {
+        ag::VpnConnectRequestSnapshot req;
+        req.id = id;
+        req.proto = IPPROTO_TCP;
+        req.family = AF_INET;
+        req.src_port = server.serverPort();
+        req.src_ip = "127.0.0.1";
+        return req;
+    }
+
+    static QString ownProgram()
+    {
+        return QFileInfo(QCoreApplication::applicationFilePath()).fileName();
     }
 
     QThread *m_thread = nullptr;
@@ -888,6 +942,325 @@ void TestQtTrustTunnelClient::theCoreIsHandedAServerCertificateVerifier()
             QtWarningMsg,
             "TrustTunnel certificate verification failed: certificate chain is not trusted");
     QCOMPARE(ctl.fireVerifyCertificate(id, "impostor-pem", "impostor-chain"), -1);
+}
+
+// The GUI no longer builds a new session for a domain or address rule or for the
+// mode: it counts on this object handing them to the one that is running. Were
+// that ever dropped, an edit would change the window and not the tunnel until the
+// next reconnect, and under "Through VPN" a removed rule would keep its traffic in
+// the tunnel while the page said otherwise.
+void TestQtTrustTunnelClient::aRuleEditReachesTheRunningSessionWithoutANewOne()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    std::vector<mockcore::ExclusionsUpdate> updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.at(0).client, id);
+    QCOMPARE(updates.at(0).mode, int(ag::VPN_MODE_GENERAL));
+    QVERIFY(has(updates.at(0), "seed.example"));
+
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    QMetaObject::invokeMethod(m_client, "setExtraExclusionDomains", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("intranet.example")})));
+
+    updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.size(), size_t(3));
+    QCOMPARE(updates.at(1).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY(has(updates.at(1), "seed.example"));
+    QCOMPARE(updates.at(2).client, id);
+    QCOMPARE(updates.at(2).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY2(has(updates.at(2), "intranet.example"), updates.at(2).exclusions.c_str());
+    QVERIFY2(!has(updates.at(2), "seed.example"), "a rule taken off the list stayed in the session");
+
+    // The same session throughout: nothing built, nothing torn down.
+    QCOMPARE(ctl.connectCallCount(), 1);
+    QCOMPARE(ctl.coreConfigCaptureCount(), 1);
+    QVERIFY(ctl.clientAlive(id));
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+// The core resets every connection it carries when it is handed exclusions, and
+// the GUI sends every list again after any split-tunnelling edit, a program rule
+// included. Passing on an edit that changes nothing the core routes by would cut
+// every open connection for a change that did not concern them.
+void TestQtTrustTunnelClient::anEditThatChangesNothingLeavesTheSessionAlone()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+
+    QMetaObject::invokeMethod(m_client, "setExtraExclusionDomains", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})));
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, false));
+    // Only the program rules differ, and those are read per connection.
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
+                              Q_ARG(bool, false), Q_ARG(QStringList, QStringList({ownProgram()})));
+    QCOMPARE(ctl.exclusionUpdates().size(), size_t(1));
+
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    QCOMPARE(ctl.exclusionUpdates().size(), size_t(2)); // and a real change still goes
+}
+
+// Domains, mode and programs from one edit reach the session together. Taken one
+// at a time the session would, for a moment, route by a mix that is neither the
+// old settings nor the new: the first program added to "Through VPN" with no
+// addresses would have the core selective while no program was listed yet, and
+// every connection would leave the tunnel.
+void TestQtTrustTunnelClient::splitRoutingChangesTheSessionInOneStep()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 10)).action, ag::VPN_CA_DEFAULT);
+
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("x.example")})),
+                              Q_ARG(bool, true), Q_ARG(QStringList, QStringList({ownProgram()})));
+
+    const std::vector<mockcore::ExclusionsUpdate> updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.size(), size_t(2)); // one for the seed, ONE for all of this
+    QCOMPARE(updates.at(1).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY(has(updates.at(1), "x.example"));
+    QVERIFY(!has(updates.at(1), "seed.example"));
+    // And the program rule came with the mode it is read by: listed under
+    // "Through VPN", this program's connection goes into the tunnel.
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 11)).action,
+             ag::VPN_CA_FORCE_REDIRECT);
+    QCOMPARE(ctl.connectCallCount(), 1);
+}
+
+// A connection is routed in two places: the program rules decide it as it
+// arrives, and the core applies the mode when it completes it, in the order its
+// queue was filled. Taking the last program out of "Through VPN" switches the
+// core back to the full tunnel. Were the program rules dropped before the core
+// had the new mode, that program's next connection would carry no rule into a
+// core still selective, and leave the tunnel. So at the instant the core is
+// handed the update, the old program rules must still be the ones deciding.
+void TestQtTrustTunnelClient::theCoreHasTheNewModeBeforeTheProgramRulesChange()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList()), Q_ARG(bool, true),
+                              Q_ARG(QStringList, QStringList({ownProgram()})));
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    QCOMPARE(ctl.exclusionUpdates().at(0).mode, int(ag::VPN_MODE_SELECTIVE));
+
+    ag::VpnConnectAction atUpdate = ag::VPN_CA_REJECT;
+    int hooked = 0;
+    ctl.setUpdateHook([&](uint64_t client) {
+        if (client != id)
+            return;
+        atUpdate = ctl.fireConnectRequest(id, ownConnection(server, 20 + hooked)).action;
+        ++hooked;
+    });
+    const auto clearHook = qScopeGuard([&ctl]() { ctl.setUpdateHook(nullptr); });
+
+    // The last program taken out: the GUI falls back to the full tunnel.
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
+                              Q_ARG(bool, false), Q_ARG(QStringList, QStringList()));
+    QCOMPARE(hooked, 1);
+    QVERIFY2(atUpdate == ag::VPN_CA_FORCE_REDIRECT,
+             "the program rules changed before the core had the new mode, so the program "
+             "just taken out of Through VPN was sent around the still-selective core");
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 30)).action, ag::VPN_CA_DEFAULT);
+
+    // The Mode switch alone keeps the same order: back to "Through VPN" with the
+    // program listed, then to "Bypass VPN", where the listed program leaves.
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
+                              Q_ARG(bool, true), Q_ARG(QStringList, QStringList({ownProgram()})));
+    QCOMPARE(hooked, 2);
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, false));
+    QCOMPARE(hooked, 3);
+    QVERIFY2(atUpdate == ag::VPN_CA_FORCE_REDIRECT,
+             "setVpnMode changed the program rules' mode before the core's");
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 31)).action,
+             ag::VPN_CA_FORCE_BYPASS);
+}
+
+// The GUI no longer rebuilds a session that is still being built when a rule
+// changes, so an edit that lands while the core's connect() runs reaches only the
+// working set. Handing it over when the attempt is adopted is the only way it
+// gets into that session at all.
+void TestQtTrustTunnelClient::anEditMadeWhileTheSessionIsBuiltReachesItOnceBuilt()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setBlockConnect(true);
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1); // the worker is inside connect()
+    const quint64 id = ctl.lastClientId();
+
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("late.example")})),
+                              Q_ARG(bool, true), Q_ARG(QStringList, QStringList()));
+    const QString builtWith = QString::fromStdString(ctl.lastCoreConfig().exclusions);
+    QVERIFY2(!builtWith.contains(QStringLiteral("late.example")), qPrintable(builtWith));
+    QVERIFY(ctl.exclusionUpdates().empty()); // nothing running to hand it to yet
+
+    ctl.releaseConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(!ctl.exclusionUpdates().empty(), kLongWaitMs);
+    const std::vector<mockcore::ExclusionsUpdate> updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.size(), size_t(1));
+    QCOMPARE(updates.at(0).client, id);
+    QCOMPARE(updates.at(0).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY(has(updates.at(0), "late.example"));
+    QCOMPARE(ctl.connectCallCount(), 1);
+}
+
+// The core keeps one pending update, not a queue: one handed to it before its
+// loop has run the previous one cancels that one (vpn_update_exclusions() holds
+// its task in a single slot). Edits that come in a burst, as two commands read
+// from the helper's socket at once do, can therefore reach the session as the
+// last of them alone. That only works if every update carries the whole of what
+// the session routes by, and if "nothing changed" is judged against the last
+// update handed over rather than what the session was built with: a burst that
+// ends where the session started must still be handed over, or the core keeps
+// the edit before it.
+void TestQtTrustTunnelClient::aBurstOfEditsLeavesTheSessionOnTheLastOne()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    const std::string builtWith = ctl.lastCoreConfig().exclusions;
+
+    // Queued back to back, and only the last one waited for.
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::QueuedConnection, Q_ARG(bool, true));
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::QueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("a.example")})),
+                              Q_ARG(bool, true), Q_ARG(QStringList, QStringList({ownProgram()})));
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList()), Q_ARG(bool, false),
+                              Q_ARG(QStringList, QStringList()));
+
+    const std::vector<mockcore::ExclusionsUpdate> updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.size(), size_t(4)); // the seed, then one per edit
+    // Each one whole, since each may be the one the core keeps.
+    QCOMPARE(updates.at(1).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY2(has(updates.at(1), "seed.example"), updates.at(1).exclusions.c_str());
+    QCOMPARE(updates.at(2).mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY2(has(updates.at(2), "a.example"), updates.at(2).exclusions.c_str());
+    QVERIFY2(!has(updates.at(2), "seed.example"), updates.at(2).exclusions.c_str());
+    // And the last is what the window shows: the session as it was built.
+    QCOMPARE(updates.back().client, id);
+    QCOMPARE(updates.back().mode, int(ag::VPN_MODE_GENERAL));
+    QCOMPARE(updates.back().exclusions, builtWith);
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 40)).action, ag::VPN_CA_DEFAULT);
+    QCOMPARE(ctl.connectCallCount(), 1);
+}
+
+// With the kill switch on, the core keeps a first connect that fails inside its
+// session (vendor patch 03) and goes round its recovery loop, and the block holds
+// while it does. Nothing of ours may take that session down: the state stays
+// Connecting, which is true, and the reason it is not connecting yet is said once
+// per reason rather than once per round, where the core giving up used to say it.
+void TestQtTrustTunnelClient::aFirstConnectTheCoreKeepsRetryingStaysConnectingAndSaysWhy()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const quint64 id = ctl.lastClientId();
+    QTRY_COMPARE(m_lastState, State::Connecting);
+
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    QTRY_COMPARE(m_errors.size(), 1);
+    QCOMPARE(m_errors.first(), QStringLiteral("Connection failed: Failed to ping location"));
+    QCOMPARE(m_lastState, State::Connecting);
+
+    ctl.fireStateChanged(id, ag::VPN_SS_RECOVERING);
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    ctl.fireStateChanged(id, ag::VPN_SS_RECOVERING);
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Connection refused");
+    // Two reasons taking turns are still said once each.
+    ctl.fireStateChanged(id, ag::VPN_SS_RECOVERING);
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    QTRY_VERIFY(m_errors.size() >= 2);
+    // Well past the 250 ms reconnect backoff this fixture sets.
+    QTest::qWait(1500);
+    QCOMPARE(m_errors.size(), 2);
+    QCOMPARE(m_errors.last(), QStringLiteral("Connection failed: Connection refused"));
+    QCOMPARE(m_lastState, State::Connecting);
+    QCOMPARE(ctl.connectCallCount(), 1);
+    QVERIFY(ctl.clientAlive(id));
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+
+    ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+    // Once it has connected, a drop is a reconnect, told by the state, as before,
+    // whatever its reason: one not given yet, so only that rule keeps it quiet.
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Endpoint closed the session");
+    QTRY_COMPARE(m_lastState, State::Reconnecting);
+    QTest::qWait(300);
+    QCOMPARE(m_errors.size(), 2);
+}
+
+// The session the core keeps retrying is still the user's to end, at once.
+void TestQtTrustTunnelClient::disconnectStopsASessionTheCoreIsStillRetrying()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const quint64 id = ctl.lastClientId();
+    ctl.fireStateChanged(id, ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    QTRY_COMPARE(m_errors.size(), 1);
+
+    QElapsedTimer clock;
+    clock.start();
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, 5000);
+    QVERIFY2(clock.elapsed() < 5000, "disconnecting waited on the core's retries");
+    QTRY_VERIFY(!ctl.clientAlive(id));
+    QVERIFY(ctl.disconnectCalls(id) >= 1);
+    // And it stays off: a retry round still queued must not bring it back.
+    ctl.fireStateChanged(id, ag::VPN_SS_RECOVERING);
+    QTest::qWait(600);
+    QCOMPARE(m_lastState, State::Disconnected);
+    QCOMPARE(ctl.connectCallCount(), 1);
+}
+
+// "Once per reason" is per session. The next one, after a disconnect or after
+// the core ended the last, starts with nothing said, or a user who reconnects to
+// the same unreachable server would be told nothing the second time.
+void TestQtTrustTunnelClient::aNewSessionSaysWhyItIsNotConnectingAgain()
+{
+    auto &ctl = mockcore::Controller::instance();
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    QTRY_COMPARE(m_errors.size(), 1);
+
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
+                         "Failed to ping location");
+    QTRY_COMPARE(m_errors.size(), 2);
+    QCOMPARE(m_errors.last(), QStringLiteral("Connection failed: Failed to ping location"));
 }
 
 // Windows is where this bites: the core is pinned to the adapter picked before

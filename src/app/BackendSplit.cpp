@@ -490,20 +490,6 @@ void Backend::applySplitRules(bool warnOfLeak) {
         std::transform(coreDomains.cbegin(), coreDomains.cend(), std::back_inserter(ex),
                        [](const QString &d) { return d.toStdString(); });
     }
-    m_client.setExtraExclusions(ex);
-    // "selective" routes ONLY the listed rules through the tunnel, so an empty list
-    // routes nothing — every byte leaves in the clear while the UI still says
-    // Connected. That is a VPN failing open, and it is easy to reach: a fresh
-    // install has an empty Default profile, "Clear all" empties the active one, and
-    // addProfile() creates an empty profile. Fall back to the full tunnel, which is
-    // the safe direction, and let the caller tell the user why.
-    m_client.setVpnMode(selectiveModeActive());
-    std::vector<std::string> routes;
-    routes.reserve(static_cast<size_t>(m_settings.excluded_routes.size()));
-    std::transform(m_settings.excluded_routes.cbegin(), m_settings.excluded_routes.cend(),
-                    std::back_inserter(routes), [](const QString &r) { return r.toStdString(); });
-    m_client.setExcludedRoutes(routes);
-
     // Gated on `on` exactly as the domain list is, and the reason is a leak.
     // Turning split tunnelling off sets the core to general mode, and in general
     // mode this list means "these programs LEAVE the tunnel". Pushing it anyway
@@ -524,7 +510,22 @@ void Backend::applySplitRules(bool warnOfLeak) {
                        std::back_inserter(appRules),
                        [](const QString &r) { return r.toStdString(); });
     }
-    m_client.setAppRules(appRules);
+    // "selective" routes ONLY the listed rules through the tunnel, so an empty list
+    // routes nothing — every byte leaves in the clear while the UI still says
+    // Connected. That is a VPN failing open, and it is easy to reach: a fresh
+    // install has an empty Default profile, "Clear all" empties the active one, and
+    // addProfile() creates an empty profile. Fall back to the full tunnel, which is
+    // the safe direction, and let the caller tell the user why.
+    //
+    // One command for the rules, the mode and the programs. A running session
+    // takes them live, and sent one by one they would route it, for a moment, by
+    // a mix of old and new: the domain list of one with the mode of the other.
+    m_client.setSplitRouting(ex, selectiveModeActive(), appRules);
+    std::vector<std::string> routes;
+    routes.reserve(static_cast<size_t>(m_settings.excluded_routes.size()));
+    std::transform(m_settings.excluded_routes.cbegin(), m_settings.excluded_routes.cend(),
+                    std::back_inserter(routes), [](const QString &r) { return r.toStdString(); });
+    m_client.setExcludedRoutes(routes);
 
     // Warned from here rather than from each of the callers, so no future entry
     // point can forget it. It only fires in the misconfigured state, and every
@@ -539,7 +540,8 @@ void Backend::applySplitRules(bool warnOfLeak) {
     }
 }
 
-// Routing/exclusion changes only bind when the tunnel is (re)built. If we're
+// A config switch, and an edit to what a session is built with (the excluded
+// routes, the kill switch), binds only when the tunnel is (re)built. If we're
 // connected, seamlessly rebuild it so edits apply immediately rather than only
 // after a manual reconnect. No-op (and no re-elevation) when disconnected.
 void Backend::reconnectActiveConfig() {
@@ -596,24 +598,22 @@ void Backend::firePendingReconnect() {
 }
 
 void Backend::reapplyIfConnected() {
-    // Address rules, routes, mode and the kill switch are sent with a connect.
-    // Before one reaches a running helper (the credential read, the teardown of a
-    // switch, a helper still starting) the edit goes out with it. After that the
-    // session holds its own copy and only a rebuild applies the edit — connected
-    // or still connecting. Waiting for Connected used to leave an edit made while
+    // The excluded routes and the kill switch are sent with a connect. Before one
+    // reaches a running helper (the credential read, the teardown of a switch, a
+    // helper still starting) the edit goes out with it. After that the session
+    // holds its own copy and only a rebuild applies the edit — connected or still
+    // connecting. Waiting for Connected used to leave an edit made while
     // connecting on screen and out of the tunnel until a manual reconnect.
     if (m_inConnect || m_awaitingToml || m_pendingReconnect)
         return;
     if (!m_connected && !m_client.helperReady())
         return;
-    // But only an edit to something the session was built with needs a new one.
-    // Program rules have already gone out (applySplitRules) and the helper reads
-    // them on every connection, so a rebuild for one only dropped every open
-    // connection — and, with the kill switch on, the traffic block for as long as
-    // the rebuild took. The same holds for an edit that changes nothing the
-    // session holds, such as a domain added while split tunnelling is off. A
-    // program rule that switches the mode does change it: the first one in
-    // "Through VPN" with no address rules, or the last one taken out of it.
+    // But only an edit to one of those two needs a new session. Everything else
+    // on the Split tunnelling page (address rules, program rules, the mode, the
+    // switch itself) has already gone out in applySplitRules(), and the helper
+    // hands it to the running session, or to one still being built once it is.
+    // A rebuild for one of them only dropped every open connection — and, with
+    // the kill switch on, the traffic block for as long as the rebuild took.
     if (!m_client.sessionSettingsChanged())
         return;
     reconnectActiveConfig();

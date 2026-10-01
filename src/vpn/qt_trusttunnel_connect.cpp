@@ -302,6 +302,7 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
             return nullptr;
         }
         applyCoreLogPathToConfigLocked();
+        ctx->routing = Routing{m_config->mode, m_config->exclusions};
         ctx->config = std::move(*m_config);
         m_config.reset();
     }
@@ -316,6 +317,7 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     // adopting the tail only on success discarded them.
     startCoreLogTail();
     ctx->callbacks = makeCallbacks(m_guard);
+    m_firstConnectFailuresSaid.clear(); // a new session has said nothing yet
     // The previous session goes with the attempt: retiring it blocks, and the
     // worker is where blocking belongs.
     ctx->retiredClient = std::move(m_client);
@@ -426,6 +428,12 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
         m_client = std::move(ctx->client);
         m_networkMonitor = std::move(ctx->monitor);
         resetUplinkTracking();
+        // The session was built from the config as the attempt found it. A rule
+        // or mode edit that arrived while the attempt ran reached only the working
+        // set, and the GUI no longer rebuilds the session for one, so it is handed
+        // over here or not at all.
+        m_sessionRouting = ctx->routing;
+        applyRoutingToSession();
         return;
     case ConnectAttempt::Outcome::Retry:
         scheduleReconnect(ctx->error);

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -55,6 +56,15 @@ struct CoreConfigSnapshot {
     std::optional<std::string> netns;
 };
 
+// One call of TrustTunnelClient::update_exclusions() on a running session: the
+// mode and exclusion list a session was handed live, as the wrapper of the real
+// core (vendor/trusttunnel/03-*.patch) hands them to vpn_update_exclusions().
+struct ExclusionsUpdate {
+    uint64_t client = 0;
+    int mode = -1; // ag::VpnMode
+    std::string exclusions;
+};
+
 class Controller {
 public:
     static Controller &instance()
@@ -84,6 +94,8 @@ public:
         g_tunnelActive.store(false);
         ag::g_mockActiveIf.store(0);
         ag::g_mockActiveIfLooks.store(0);
+        m_updates.clear();
+        m_updateHook = nullptr;
     }
 
     // ---- scripting from the test ----
@@ -228,6 +240,25 @@ public:
     int coreLogWritesThroughClosedFile() { return ag::Logger::writesThroughClosedFile(); }
     int coreLogLinesToStderr() { return ag::Logger::linesToStderr(); }
     int coreLoggerCallbackSets() { return ag::Logger::callbackSets(); }
+
+    // Run inside every update_exclusions(), on the caller's thread, at the moment
+    // the core is handed the update. The real core completes connections in the
+    // order its queue was filled, so what the rest of the client says at that
+    // instant is what a connection completed right after the update is routed by.
+    void setUpdateHook(std::function<void(uint64_t client)> hook)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_updateHook = std::move(hook);
+    }
+
+    // Every live update a running session was handed, oldest first. A session is
+    // built from its config once; after that, this is the only way a new rule
+    // list or mode reaches it without building another.
+    std::vector<ExclusionsUpdate> exclusionUpdates()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_updates;
+    }
 
     // ---- event injection ----
     void fireStateChanged(uint64_t id, ag::VpnSessionState state, int code = ag::VPN_EC_NOERROR,
@@ -375,6 +406,24 @@ public:
                     NetworkChange{state, outbound, it->second.dnsReads.size()});
     }
 
+    void onUpdateExclusions(uint64_t id, int mode, std::string exclusions)
+    {
+        ExclusionsUpdate update{id, mode, std::move(exclusions)};
+        int count = 0;
+        std::function<void(uint64_t)> hook;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_updates.push_back(update);
+            count = static_cast<int>(m_updates.size());
+            hook = m_updateHook;
+        }
+        if (hook)
+            hook(id); // outside the lock: it may well ask the client something
+        // Mirrored to a file for the same reason as the config below: in
+        // test_helper_server the session lives in the helper PROCESS.
+        dumpExclusionsUpdate(update, count);
+    }
+
     // Called by the mock ag::TrustTunnelClient constructor, i.e. at the exact
     // moment the config crosses into the core.
     void recordCoreConfig(CoreConfigSnapshot snap)
@@ -455,6 +504,27 @@ private:
         return value ? oneLine(*value) : std::string("(unset)");
     }
 
+    static void dumpExclusionsUpdate(const ExclusionsUpdate &update, int count)
+    {
+        const char *path = std::getenv("FT_TEST_CORE_UPDATE_DUMP");
+        if (path == nullptr || *path == '\0')
+            return;
+        const std::string target(path);
+        const std::string partial = target + ".partial";
+        {
+            std::ofstream out(partial, std::ios::binary | std::ios::trunc);
+            if (!out)
+                return;
+            out << "updates=" << count << '\n';
+            out << "mode=" << (update.mode == ag::VPN_MODE_SELECTIVE ? "selective" : "general")
+                << '\n';
+            out << "exclusions=" << oneLine(update.exclusions) << '\n';
+        }
+        // Published by rename, as dumpCoreConfig() below explains.
+        std::remove(target.c_str());
+        std::rename(partial.c_str(), target.c_str());
+    }
+
     static void dumpCoreConfig(const CoreConfigSnapshot &snap)
     {
         const char *path = std::getenv("FT_TEST_CORE_CONFIG_DUMP");
@@ -504,6 +574,8 @@ private:
     std::string m_lastVerifiedCert;
     std::string m_lastVerifiedChain;
     int m_verifyCalls = 0;
+    std::vector<ExclusionsUpdate> m_updates;
+    std::function<void(uint64_t)> m_updateHook;
 };
 
 } // namespace mockcore

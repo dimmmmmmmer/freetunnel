@@ -24,6 +24,7 @@
 #include <csignal>
 #include <sys/types.h>
 #endif
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -106,6 +107,7 @@ private slots:
     void connectIgnoresAnyLogPathTheClientSends();
     void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
     void configKeysRootMustNotActOnAreDroppedInsideTheHelper();
+    void aSplitEditReachesTheRunningSessionInsideTheHelper();
     void sigtermStopsTheHelperOnItsOwn();
     void aTokenFileTheGuiDidNotWriteIsLeftAlone();
 
@@ -119,6 +121,9 @@ private:
     // Where the helper's core drops the config it was built with, one file per
     // launch (see readCoreConfigDump above).
     QString m_configDump;
+    // And the last mode and exclusion list its running session was handed live,
+    // in the same format.
+    QString m_updateDump;
 };
 
 void TestHelperServer::initTestCase()
@@ -159,6 +164,7 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
     if (tokenPath.isEmpty())
         return false;
     m_configDump = QDir(m_dir.path()).filePath(QStringLiteral("core-config-%1").arg(seq));
+    m_updateDump = QDir(m_dir.path()).filePath(QStringLiteral("core-update-%1").arg(seq));
 
     m_helper = new QProcess(this);
     m_helper->setProcessChannelMode(QProcess::ForwardedErrorChannel);
@@ -170,6 +176,7 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
     // Same reasoning: the config the helper's core is built with can only be seen
     // from out here if the child is told where to leave it.
     env.insert(QStringLiteral("FT_TEST_CORE_CONFIG_DUMP"), m_configDump);
+    env.insert(QStringLiteral("FT_TEST_CORE_UPDATE_DUMP"), m_updateDump);
     m_helper->setProcessEnvironment(env);
     m_helper->start(QStringLiteral(FT_TEST_HELPER_BINARY),
                     {QStringLiteral("--helper"), QStringLiteral("--port"),
@@ -683,6 +690,49 @@ void TestHelperServer::configKeysRootMustNotActOnAreDroppedInsideTheHelper()
 
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The other half of the chain: an edit made while connected. The GUI no longer
+// builds a new session for a split-tunnelling edit, so the helper has to parse
+// the one command it arrives in and hand the running session its new rules and
+// mode. An unknown or misread command is silent here, as in production: the
+// window shows the edit and the tunnel goes on routing by the old rules.
+void TestHelperServer::aSplitEditReachesTheRunningSessionInsideTheHelper()
+{
+    const QString token = QStringLiteral("token-for-live-split");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    const auto clear = qScopeGuard([]() {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+    });
+
+    VpnHelperClient client;
+    client.setExtraExclusions(std::vector<std::string>{"built.example"});
+    client.loadConfigFromToml(QStringLiteral("loglevel = \"warn\"\n"
+                                             "[endpoint]\n"
+                                             "hostname = \"vpn.example\"\n"));
+    client.connectVpn();
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_configDump), 20000);
+    QVERIFY(readCoreConfigDump(m_configDump)
+                    .value(QStringLiteral("exclusions"))
+                    .contains(QStringLiteral("built.example")));
+    QVERIFY(!QFile::exists(m_updateDump));
+
+    client.setSplitRouting({"live.example"}, true, {"firefox"});
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_updateDump), 20000);
+    const QMap<QString, QString> update = readCoreConfigDump(m_updateDump);
+    QCOMPARE(update.value(QStringLiteral("updates")), QStringLiteral("1"));
+    QCOMPARE(update.value(QStringLiteral("mode")), QStringLiteral("selective"));
+    const QString exclusions = update.value(QStringLiteral("exclusions"));
+    QVERIFY2(exclusions.contains(QStringLiteral("live.example")), qPrintable(exclusions));
+    QVERIFY2(!exclusions.contains(QStringLiteral("built.example")), qPrintable(exclusions));
+    // Handed to the session it was built as, not to a new one.
+    QCOMPARE(readCoreConfigDump(m_configDump).value(QStringLiteral("exclusions")).contains(
+                     QStringLiteral("live.example")),
+             false);
 }
 
 // The helper runs as root and owns the tunnel: routes, DNS and the kill switch

@@ -217,6 +217,50 @@ which carries the VPN password — and cannot report a tunnel that does not exis
 Pre-authentication connections are capped and time-limited so they cannot
 exhaust the root process.
 
+### The kill switch lives in the VPN session
+
+The kill switch is a flag on the VPN core's session, not a firewall of
+FreeTunnel's own. While the session is up and not connected (connecting, or
+recovering a connection that dropped) the core refuses the connections meant
+for the tunnel rather than let them out over the open network; what the
+split-tunnelling rules send around the tunnel still goes. Its tunnel device
+keeps the routes, and on Windows the filters that block untunnelled traffic are
+installed with that device and removed with it. So what the block covers is
+exactly how long one session lasts.
+
+A session therefore must not be rebuilt for something it can take while it
+runs. The address rules and the mode are handed to the running session (the
+core's own `vpn_update_exclusions()`, reached through FreeTunnel's third vendor
+patch) in one update per edit, and before the program rules change, so that no
+connection decided by the new program rules is completed under the old mode.
+With the kill switch on, a first connect that fails stays in the core's
+recovery loop inside its session instead of ending it after a few attempts, so
+it no longer passes through FreeTunnel's own backoff, which took the session
+down and built another every round.
+
+What is left, and is accepted:
+
+- **Building a session anew** lifts the block for the time it takes: switching
+  configs, editing the excluded routes or the kill switch itself while
+  connected (both are read when a session is built), and starting over after
+  an error the core treats as final, such as a refused login or certificate.
+- **No session, no block.** The VPN being off, an error that stops it, and a
+  config whose server is a domain name that cannot be resolved (the core needs
+  its address before a session can start) all leave traffic unblocked.
+- **The helper quits with the GUI**, and the block with the session it holds,
+  so that an elevated process never outlives the app that started it.
+- **An instant per edit.** Program rules are decided as a connection arrives
+  and the mode when the core completes it, and the two cannot change together.
+  An edit that turns "Through VPN" on and lists a program in the same step, as
+  adding the first program with no addresses listed does, can let a connection
+  that program starts in that instant leave the tunnel. So can taking the last
+  program out of "Through VPN" while a session is still being built, in the
+  moment before the new session is handed the change. And so can two edits
+  that land before the core has taken the first: it keeps only the latest
+  update, which carries the whole of the rules and the mode, so the session
+  ends up routed by the second edit, but a connection the first edit's program
+  rules decided in between is completed under the mode from before it.
+
 ### Server probes go around the tunnel where the system lets them
 
 The Configs page shows a latency figure per server. Those probes are meant to
@@ -329,3 +373,4 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | Config keys that point the elevated core at a path, interface or port | Helper clears the five such keys (session-cache folder, kill-switch ports, interface name, attach, namespace); tunnel listener only; an upstream bump whose core reads a new key fails `verify_upstream_patch.sh` |
 | Operator learns which app opened a flow | Program name kept out of the core decision, local log only |
 | Unsigned installer | User warnings; in-app hash verify before install |
+| Traffic leaving outside the tunnel while it is not connected | Kill switch, held by one session through rule edits and failed first connects; remaining gaps listed above |

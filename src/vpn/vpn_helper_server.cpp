@@ -320,9 +320,13 @@ private:
         }
     }
 
-    // Scalar setting commands that just forward one value to the VPN client.
+    // Setting commands that forward their values to the VPN client as they are.
     // Split out of handleAuthed to keep its branch count under the lint limit.
     bool applyClientSetting(const QString &cmd, const QJsonObject &c) {
+        if (cmd == "setSplitRouting") {
+            applySplitRouting(c);
+            return true;
+        }
         if (cmd == "setMode") {
             QMetaObject::invokeMethod(&m_client, "setVpnMode", Qt::QueuedConnection,
                                       Q_ARG(bool, c.value("selective").toBool()));
@@ -379,12 +383,24 @@ private:
                                   Q_ARG(QStringList, routes));
     }
 
+    static QStringList stringList(const QJsonObject &c, const QString &key) {
+        QStringList out;
+        for (const QJsonValue &v : c.value(key).toArray())
+            out.append(v.toString());
+        return out;
+    }
+
     void applyAppRules(const QJsonObject &c) {
-        QStringList rules;
-        for (const QJsonValue &v : c.value(QStringLiteral("rules")).toArray())
-            rules.append(v.toString());
         QMetaObject::invokeMethod(&m_client, "setAppRules", Qt::QueuedConnection,
-                                  Q_ARG(QStringList, rules));
+                                  Q_ARG(QStringList, stringList(c, QStringLiteral("rules"))));
+    }
+
+    // One invocation for all three, so the VPN thread changes them together.
+    void applySplitRouting(const QJsonObject &c) {
+        QMetaObject::invokeMethod(&m_client, "setSplitRouting", Qt::QueuedConnection,
+                                  Q_ARG(QStringList, stringList(c, QStringLiteral("domains"))),
+                                  Q_ARG(bool, c.value(QStringLiteral("selective")).toBool()),
+                                  Q_ARG(QStringList, stringList(c, QStringLiteral("rules"))));
     }
 
     void handleConnect(const QJsonObject &c) {

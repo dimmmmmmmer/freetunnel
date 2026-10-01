@@ -79,6 +79,7 @@ private slots:
     void realClientRefusesAChallengeCarryingNoNonce();
     void securitySettingsAreSentAsValuesNotJustCommandNames();
     void aHelperThatGoesAwayTakesItsSessionWithIt();
+    void splitRoutingTravelsAsOneCommandAndNeedsNoNewSession();
     void theElevatedArgvComesFromItsArgumentsAndNotTheEnvironment();
     void theAppImageIsUnpackedWhereNobodyElseCanWrite();
     void theHelpersOutputIsNotKeptInMemory();
@@ -619,6 +620,53 @@ void TestIntegrationHelperClient::aHelperThatGoesAwayTakesItsSessionWithIt()
     QTRY_VERIFY_WITH_TIMEOUT(!client.helperReady(), 5000);
     QVERIFY2(client.sessionSettingsChanged(),
              "the settings of a session whose helper is gone still read as the running ones");
+}
+
+// A split-tunnelling edit leaves as ONE command carrying the domain list, the
+// mode and the program rules, each as a value: the helper hands them to the
+// running session together, so nothing is routed by half of an edit. None of
+// them is something the session is built with any more, so none of them may make
+// sessionSettingsChanged() ask for a new session; the routes and the kill switch
+// still do.
+void TestIntegrationHelperClient::splitRoutingTravelsAsOneCommandAndNeedsNoNewSession()
+{
+    const QString token = QStringLiteral("split-routing-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    const auto clear = qScopeGuard([]() {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+    });
+
+    VpnHelperClient client;
+    client.loadConfigFromToml(QStringLiteral("[endpoint]\nhostname = \"vpn.example\"\n"));
+    client.connectVpn();
+    QTRY_VERIFY_WITH_TIMEOUT(server.connectCount() == 1, 10000);
+    QVERIFY(!client.sessionSettingsChanged());
+    const int modeCommands = server.countFor(QStringLiteral("setMode"));
+
+    client.setSplitRouting({"intranet.example", "10.1.2.3"}, true, {"firefox"});
+    QTRY_VERIFY_WITH_TIMEOUT(!server.lastMessageFor(QStringLiteral("setSplitRouting")).isEmpty(),
+                             10000);
+    const QJsonObject routing = server.lastMessageFor(QStringLiteral("setSplitRouting"));
+    QVERIFY2(routing.contains(QStringLiteral("selective")),
+             "setSplitRouting carried no \"selective\" key, which the helper reads as false");
+    QCOMPARE(routing.value(QStringLiteral("selective")).toBool(), true);
+    QCOMPARE(jsonStringArray(routing, "domains"),
+             QStringList({QStringLiteral("intranet.example"), QStringLiteral("10.1.2.3")}));
+    QCOMPARE(jsonStringArray(routing, "rules"), QStringList{QStringLiteral("firefox")});
+    QCOMPARE(server.countFor(QStringLiteral("setMode")), modeCommands);
+    QVERIFY2(!client.sessionSettingsChanged(),
+             "a split-tunnelling edit asked for a new session it no longer needs");
+
+    client.setExcludedRoutes(std::vector<std::string>{"198.51.100.0/24"});
+    QVERIFY2(client.sessionSettingsChanged(), "a route edit has to ask for a new session");
+    client.setExcludedRoutes({});
+    QVERIFY(!client.sessionSettingsChanged());
+    client.setKillSwitch(true);
+    QVERIFY2(client.sessionSettingsChanged(), "a kill switch edit has to ask for a new session");
 }
 
 QTEST_MAIN(TestIntegrationHelperClient)

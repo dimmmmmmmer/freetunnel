@@ -188,8 +188,10 @@ void MockHelperServer::handle(const QJsonObject &c)
     // "setKillSwitch" had been sent and learn nothing about whether it carried
     // enabled=true, enabled=false, or no such key at all.
     m_lastByCmd.insert(cmd, c);
+    ++m_countByCmd[cmd];
     if (cmd == QLatin1String("setExclusions") || cmd == QLatin1String("setRoutes")
-        || cmd == QLatin1String("setMode") || cmd == QLatin1String("setKillSwitch")) {
+        || cmd == QLatin1String("setMode") || cmd == QLatin1String("setKillSwitch")
+        || cmd == QLatin1String("setSplitRouting")) {
         return;
     }
     if (cmd == QLatin1String("connect")) {
