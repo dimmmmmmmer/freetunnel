@@ -69,6 +69,9 @@ private slots:
     void aRefusedCertificateFileIsExplained();
     void theEditorRefusesANameTooLongForAFile();
     void aConfigWithALongerNameStillSaves();
+    void aRefusedPasswordIsExplainedForThisPlatform();
+    void aPasswordTheStoreRefusesIsExplainedInItsTerms();
+    void aRefusedPasswordSaysWhatToDoAboutTheKeyring();
 
 private:
     // A complete, valid create form; individual cases override what they exercise.
@@ -1097,6 +1100,104 @@ void TestBackendConfig::aConfigWithALongerNameStillSaves()
     QVERIFY(!backend.createConfig(edit));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(backend.configs(), QStringList{longName});
+}
+
+// A save the credential store refused told the user to install gnome-keyring or
+// KWallet on every platform — Linux advice, shown to the Windows and macOS users
+// who are most of them, and who have neither to install.
+void TestBackendConfig::aRefusedPasswordIsExplainedForThisPlatform()
+{
+    using freetunnel::backend_config::passwordNotStoredMessage;
+    for (const bool storeIsThere : {true, false}) {
+        const QString message = passwordNotStoredMessage(storeIsThere);
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+        // A keyring that is there and refused was locked: installing one is not
+        // the answer, unlocking it is.
+        if (storeIsThere) {
+            QVERIFY2(message.contains(QLatin1String("unlock"))
+                             && !message.contains(QLatin1String("gnome-keyring")),
+                     qPrintable(message));
+        } else {
+            QVERIFY2(message.contains(QLatin1String("gnome-keyring")), qPrintable(message));
+        }
+#else
+        QVERIFY2(!message.contains(QLatin1String("gnome-keyring"))
+                         && !message.contains(QLatin1String("KWallet")),
+                 qPrintable(message));
+#if defined(Q_OS_MACOS)
+        QVERIFY2(message.contains(QLatin1String("Keychain")), qPrintable(message));
+#else
+        // The refusal known to happen is a password too long for it, and another
+        // try changes nothing: the message says what the limit is instead.
+        QVERIFY2(message.contains(QLatin1String("Credential Manager"))
+                         && message.contains(QLatin1String("2560"))
+                         && !message.contains(QLatin1String("Try again")),
+                 qPrintable(message));
+#endif
+#endif
+    }
+}
+
+// And that is what a save says when it happens. Credential Manager is the one
+// store a test can make refuse a password: it holds at most 2560 bytes
+// (CRED_MAX_CREDENTIAL_BLOB_SIZE), and CredWrite turns down anything longer.
+void TestBackendConfig::aPasswordTheStoreRefusesIsExplainedInItsTerms()
+{
+#if !defined(Q_OS_WIN)
+    QSKIP("only Windows Credential Manager can be made to refuse a password here");
+#else
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.createConfig(
+            form(QStringLiteral("Long"), QString(8192, QLatin1Char('x')))));
+    QCOMPARE(errors.count(), 1);
+    const QString message = errors.takeFirst().at(0).toString();
+    QCOMPARE(message, freetunnel::backend_config::passwordNotStoredMessage(true));
+    QVERIFY2(!message.contains(QLatin1String("gnome-keyring")), qPrintable(message));
+    QCOMPARE(backend.configs().size(), 0);
+#endif
+}
+
+// What a refused password is told depends on whether a store is there at all,
+// and is asked anew when it happens, by an import as much as by a save from the
+// editor: the import never asked, so the Settings banner stayed as it was at
+// startup. FT_TEST_KEYRING stands in for the two stores no test can have on
+// demand: one that is not there, and one that is there and refuses, as a locked
+// keyring does once its unlock prompt is dismissed.
+void TestBackendConfig::aRefusedPasswordSaysWhatToDoAboutTheKeyring()
+{
+    const auto unset = qScopeGuard([] { qunsetenv("FT_TEST_KEYRING"); });
+    const QString source = QDir(m_home.path()).filePath(QStringLiteral("refused.toml"));
+    {
+        QFile out(source);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        out.write("[endpoint]\n"
+                  "hostname = \"vpn.example.org\"\n"
+                  "addresses = [\"198.51.100.7:443\"]\n"
+                  "username = \"alice\"\n"
+                  "password = \"hunter2\"\n");
+    }
+    for (const bool storeIsThere : {true, false}) {
+        qputenv("FT_TEST_KEYRING", storeIsThere ? "locked" : "absent");
+        const QString expected = freetunnel::backend_config::passwordNotStoredMessage(storeIsThere);
+        for (const bool imported : {false, true}) {
+            Backend backend;
+            QSignalSpy errors(&backend, &Backend::errorOccurred);
+            QSignalSpy banner(&backend, &Backend::credentialStorageChanged);
+            QVERIFY(imported ? !backend.importFile(source)
+                             : !backend.createConfig(form(QStringLiteral("Refused"), QStringLiteral("pw"))));
+            const QString what = imported ? QStringLiteral("import") : QStringLiteral("save");
+            QCOMPARE(errors.count(), 1);
+            QVERIFY2(errors.at(0).at(0).toString() == expected,
+                     qPrintable(what + QStringLiteral(": ") + errors.at(0).at(0).toString()));
+            QCOMPARE(backend.configs().size(), 0);
+#if defined(Q_OS_LINUX)
+            // Asked again: the banner shows once there is no keyring, and only then.
+            QVERIFY2(banner.count() == (storeIsThere ? 0 : 1), qPrintable(what));
+            QCOMPARE(backend.credentialStorageWarning().isEmpty(), storeIsThere);
+#endif
+        }
+    }
 }
 
 #include "test_backend_config.moc"

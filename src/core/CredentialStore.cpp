@@ -30,6 +30,12 @@
 #include <unistd.h>
 #endif
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <QDBusMessage>
+#endif
+
 namespace freetunnel {
 
 QString credentialServiceName()
@@ -217,9 +223,11 @@ bool deletePasswordFile(const QString &key)
     return QFile::remove(filePathForKey(key));
 }
 
-// Preferred Linux store: the desktop Secret Service (GNOME Keyring, KWallet's
-// Secret Service bridge, …) via secret-tool. Falls back to the 0600 file when
-// secret-tool or a running service isn't available.
+// The Linux store is the desktop Secret Service (GNOME Keyring, KWallet's Secret
+// Service bridge, …), through libsecret when the build has it and secret-tool
+// otherwise. With neither reaching a service, a new password is refused: the
+// 0600 file is only read back (and moved out of) for passwords older builds left
+// there, and only test builds still write it.
 QString secretToolPath()
 {
     return QStandardPaths::findExecutable(QStringLiteral("secret-tool"));
@@ -338,7 +346,8 @@ namespace {
 // Every call below talks to the OS credential store, and every one of them
 // BLOCKS: on macOS the request goes to securityd and does not return while the
 // system is asking the user whether this build may touch the item; on Linux the
-// Secret Service probe shells out to secret-tool and waits up to five seconds.
+// Secret Service probe can wait up to five seconds, for the bus to start a
+// keyring daemon or for secret-tool to answer.
 // Called straight from the GUI thread — which is what opening the edit form,
 // saving a config, copying a config link or exporting one used to do — that
 // freezes the whole window, spinner and all.
@@ -386,16 +395,55 @@ auto withoutFreezingTheUi(Fn &&fn) -> decltype(fn())
 
 } // namespace
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+bool secretServiceOnSessionBus()
+{
+    static const QString name = QStringLiteral("org.freedesktop.secrets");
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected())
+        return false;
+    if (bus.interface()->isServiceRegistered(name))
+        return true;
+    // Not running is not the same as not there: most keyrings are started on
+    // first use, from a D-Bus .service file, which is what libsecret's first call
+    // would do. Ask the bus to start it now. This fails where that call would — no
+    // such service, or one that will not start — and is capped like the
+    // secret-tool probe, so a daemon that hangs on start costs seconds rather
+    // than the bus's own 25.
+    QDBusMessage start = QDBusMessage::createMethodCall(
+            QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+            QStringLiteral("org.freedesktop.DBus"), QStringLiteral("StartServiceByName"));
+    start << name << 0u;
+    return bus.call(start, QDBus::Block, 5000).type() == QDBusMessage::ReplyMessage;
+}
+#endif
+
+#if defined(FT_ENABLE_TEST_HOOKS)
+// Tests only. "absent": no store at all; "locked": a store that is there and
+// refuses, as a keyring does whose unlock prompt was dismissed. Neither can be
+// had from a real store on demand, on any platform.
+static QByteArray testKeyring()
+{
+    return qgetenv("FT_TEST_KEYRING");
+}
+#endif
+
 static bool doSecureStorageAvailable()
 {
+#if defined(FT_ENABLE_TEST_HOOKS)
+    if (const QByteArray keyring = testKeyring(); !keyring.isEmpty())
+        return keyring != "absent";
+#endif
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     return true;
 #else
 #if defined(FT_HAVE_LIBSECRET)
-    if (secretServiceAvailable())
-        return true;
-    // libsecret works when a session D-Bus is present even if secret-tool is absent.
-    return qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS");
+    // libsecret is linked in, so the client is never what is missing; the service
+    // can be. This used to answer from DBUS_SESSION_BUS_ADDRESS alone, but every
+    // desktop session has a bus, keyring or not, so the Settings warning stayed
+    // hidden on exactly the machines it is for and each save failed on its own.
+    // Asked the same two ways doStorePassword() tries, in the same order.
+    return secretServiceOnSessionBus() || secretServiceAvailable();
 #endif
     return secretServiceAvailable();
 #endif
@@ -405,6 +453,10 @@ static bool doStorePassword(const QString &key, const QString &password)
 {
     if (key.isEmpty())
         return false;
+#if defined(FT_ENABLE_TEST_HOOKS)
+    if (!testKeyring().isEmpty())
+        return false;
+#endif
 
 #if defined(Q_OS_MACOS)
     const QByteArray secretBytes = password.toUtf8();

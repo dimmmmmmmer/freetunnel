@@ -191,6 +191,23 @@ compare link at the bottom of its release notes.
   editor says when a name is longer, and a link or file with a longer name is
   imported under its first 50 characters. A config that already has a longer
   name keeps it, and the same link sent again still offers to replace it.
+- **Linux: Settings says so when there is no keyring to keep passwords in.**
+  FreeTunnel keeps VPN passwords in the desktop's keyring, such as GNOME Keyring
+  or KWallet, and nowhere else. On a desktop without one, every save of a config
+  with a password failed, and the warning in Settings that explains why never
+  appeared: any desktop session was taken for one with a keyring. FreeTunnel now
+  asks for the keyring itself, so the warning shows, and asks again when an
+  import fails as well as when a save does. It also no longer tells you to
+  install secret-tool, which FreeTunnel does not need. When a keyring is there
+  and still refused the password, as when its unlock prompt was closed, the
+  message now says to unlock it and try again, rather than to install one.
+- **macOS and Windows: a password that could not be saved is explained in your
+  system's terms.** When the Keychain or Windows Credential Manager refused a VPN
+  password, FreeTunnel told you to install gnome-keyring or KWallet, which are
+  Linux programs. It now names the store that refused. On macOS it says to allow
+  access to the Keychain when macOS asks for it; on Windows it says that
+  Credential Manager holds at most 2560 bytes of a password, as a longer one is
+  what it refuses.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle

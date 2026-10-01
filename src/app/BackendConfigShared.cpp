@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "BackendConfigShared.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -144,6 +145,38 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
         return false;
     }
     return true;
+}
+
+QString passwordNotStoredMessage(bool storeIsThere)
+{
+    // Said in the terms of the store that refused. This used to be the Linux
+    // advice everywhere, so a Windows or macOS user, most of them, was told to
+    // install gnome-keyring. On macOS the cause is usually a Keychain prompt
+    // that was denied or closed, and the next attempt asks again. On Windows the
+    // one refusal known to happen is a password over the 2560 bytes Credential
+    // Manager holds (CRED_MAX_CREDENTIAL_BLOB_SIZE), which another try does not
+    // change. On Linux a keyring that is there and still refused was locked, its
+    // unlock prompt dismissed; telling that user to install one was wrong.
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not store the VPN password in the Keychain. If macOS "
+                                       "asked for access to the Keychain, allow it and try again.");
+#elif defined(Q_OS_WIN)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not store the VPN password in Windows Credential Manager. "
+                                       "It holds at most 2560 bytes, so a longer password cannot be "
+                                       "saved.");
+#else
+    if (storeIsThere) {
+        return QCoreApplication::translate("Backend",
+                                           "Could not store the VPN password in your keyring. If it "
+                                           "asked to be unlocked, unlock it and try again.");
+    }
+    return QCoreApplication::translate("Backend", "Could not store the VPN password securely. Install "
+                                                  "gnome-keyring or KWallet, then try again.");
+#endif
 }
 
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target)

@@ -10,6 +10,7 @@
 
 #include <memory>
 
+#include "BackendConfigShared.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
@@ -548,11 +549,11 @@ void Backend::quitApplication() {
 
 QString Backend::credentialStorageWarning() const
 {
-    // Answered once per process, because answering costs a subprocess. On Linux
-    // the probe runs `secret-tool lookup` behind a nested event loop on the GUI
-    // thread, and the Settings page reads this property from three separate
-    // bindings — so every visit to that page stalled the interface three times
-    // over for an answer that had not changed.
+    // Answered once per process, because answering can take seconds: on Linux
+    // the probe asks the session bus for a keyring, which may start one, behind
+    // a nested event loop on the GUI thread, and the Settings page reads this
+    // property from three separate bindings — so every visit to that page
+    // stalled the interface three times over for an answer that had not changed.
     //
     // The answer is kept, not the sentence, which is put into words on each read
     // in the language then in force. It is first read while the window loads,
@@ -567,8 +568,9 @@ QString Backend::credentialStorageWarning() const
     }
     if (!*m_credentialStoreMissing)
         return QString();
+    // No secret-tool: release builds reach the keyring through libsecret.
     return tr("Secure credential storage is unavailable. Install gnome-keyring or "
-              "KWallet (with secret-tool) before saving VPN passwords.");
+              "KWallet before saving VPN passwords.");
 }
 
 void Backend::recheckCredentialStorage()
@@ -583,6 +585,18 @@ void Backend::recheckCredentialStorage()
     credentialStorageWarning(); // asks again
     if (m_credentialStoreMissing.value_or(false) != before)
         emit credentialStorageChanged();
+}
+
+// The moment the app learns the credential store is not working, from a save or
+// an import alike. Ask again first, so that the Settings banner matches what just
+// happened rather than what was true at startup, and so that the message can use
+// the answer: on Linux it asks the session bus for a Secret Service
+// (secretServiceOnSessionBus), and one that is there and refused was locked.
+void Backend::reportPasswordNotStored()
+{
+    recheckCredentialStorage();
+    emit errorOccurred(freetunnel::backend_config::passwordNotStoredMessage(
+            !m_credentialStoreMissing.value_or(false)));
 }
 
 void Backend::retranslate()

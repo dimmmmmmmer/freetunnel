@@ -174,10 +174,6 @@
         <translation>Ошибка ссылки: %1</translation>
     </message>
     <message>
-        <source>Secure credential storage is unavailable. Install gnome-keyring or KWallet (with secret-tool) before saving VPN passwords.</source>
-        <translation>Безопасное хранилище паролей недоступно. Установите gnome-keyring или KWallet (с secret-tool), прежде чем сохранять пароли VPN.</translation>
-    </message>
-    <message>
         <source>Could not store the VPN password securely. Install gnome-keyring or KWallet, then try again.</source>
         <translation>Не удалось сохранить пароль VPN безопасно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
     </message>
@@ -344,6 +340,22 @@
     <message>
         <source>A certificate can be loaded only from your home, Downloads, Documents, Desktop or temporary files folder. Copy it there, or paste it into the certificate field.</source>
         <translation>Сертификат загружается только из домашней папки, папок «Загрузки», «Документы», «Рабочий стол» или папки временных файлов. Скопируйте файл туда или вставьте сертификат в поле.</translation>
+    </message>
+    <message>
+        <source>Secure credential storage is unavailable. Install gnome-keyring or KWallet before saving VPN passwords.</source>
+        <translation>Безопасное хранилище паролей недоступно. Установите gnome-keyring или KWallet, прежде чем сохранять пароли VPN.</translation>
+    </message>
+    <message>
+        <source>Could not store the VPN password in the Keychain. If macOS asked for access to the Keychain, allow it and try again.</source>
+        <translation>Не удалось сохранить пароль VPN в Связке ключей. Если macOS запрашивала доступ к Связке ключей, разрешите его и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not store the VPN password in Windows Credential Manager. It holds at most 2560 bytes, so a longer password cannot be saved.</source>
+        <translation>Не удалось сохранить пароль VPN в диспетчере учётных данных Windows. Он хранит не больше 2560 байт, поэтому более длинный пароль сохранить нельзя.</translation>
+    </message>
+    <message>
+        <source>Could not store the VPN password in your keyring. If it asked to be unlocked, unlock it and try again.</source>
+        <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
     </message>
 </context>
 <context>

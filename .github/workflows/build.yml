@@ -605,7 +605,8 @@ jobs:
             --library "$(g++-13 -print-file-name=libstdc++.so.6)" \
             --library "$(g++-13 -print-file-name=libgcc_s.so.1)"
           # libsecret is optional to the build (found QUIETLY), so a machine
-          # without libsecret-1-dev builds a client that keeps secrets in a file.
+          # without libsecret-1-dev builds a client that can store passwords only
+          # through the separate secret-tool program, and refuses them without it.
           test -e AppDir/usr/lib/libsecret-1.so.0 \
             || { echo "::error::built without libsecret: install libsecret-1-dev and pkg-config"; exit 1; }
 
