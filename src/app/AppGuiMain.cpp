@@ -200,6 +200,30 @@ static void setupMacWindow(QWindow *win, bool *appQuitting)
 #endif
 }
 
+// The engine the main window will be loaded into, with the desktop it follows
+// already in its context.
+static void createDesktopAndEngine(GuiStartup *out)
+{
+    out->desktop = std::make_unique<freetunnel::DesktopChrome>();
+    // Before the QML is loaded, so the first frame already has the desktop's
+    // buttons and its light or dark. Not under offscreen, which has no desktop to
+    // follow — and is what the tests run on, which must not take on the look of
+    // whatever desktop they happen to run under.
+    if (QGuiApplication::platformName() != QLatin1String("offscreen"))
+        out->desktop->followDesktop();
+    out->engine = std::make_unique<QQmlApplicationEngine>();
+    out->engine->rootContext()->setContextProperty(QStringLiteral("desktop"), out->desktop.get());
+}
+
+// What came in before there was a window to act on it: the links the URL filter
+// held, then the command this launch was started with.
+static void deliverDeferredControl(GuiStartup *out, Backend &backend, const QString &controlArg)
+{
+    out->urlFilter->ready(&backend, out->win);
+    if (!controlArg.isEmpty())
+        backend.handleControl(controlArg);
+}
+
 std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
                                       GuiStartup *out)
 {
@@ -242,15 +266,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 #endif
     step("lifecycle");
 
-    out->desktop = std::make_unique<freetunnel::DesktopChrome>();
-    // Before the QML is loaded, so the first frame already has the desktop's
-    // buttons and its light or dark. Not under offscreen, which has no desktop to
-    // follow — and is what the tests run on, which must not take on the look of
-    // whatever desktop they happen to run under.
-    if (QGuiApplication::platformName() != QLatin1String("offscreen"))
-        out->desktop->followDesktop();
-    out->engine = std::make_unique<QQmlApplicationEngine>();
-    out->engine->rootContext()->setContextProperty(QStringLiteral("desktop"), out->desktop.get());
+    createDesktopAndEngine(out);
 #if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
     // Only on the real Windows platform: under offscreen the window's id is a
     // counter, not an HWND, and the agent would hand it to Win32 as one.
@@ -278,9 +294,7 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     }
 #endif
 
-    out->urlFilter->ready(&backend, out->win);
-    if (!controlArg.isEmpty())
-        backend.handleControl(controlArg);
+    deliverDeferredControl(out, backend, controlArg);
     step("deferred-control");
 
     out->dockReopen.reset(setupDockReopen(app, out->win, out->appQuitting));
