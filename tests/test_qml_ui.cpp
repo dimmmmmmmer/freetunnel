@@ -2786,6 +2786,9 @@ void TestQmlUi::theThroughVpnNoticeNamesTheConfigAndItsProfile()
     QVERIFY(notice);
     QVERIFY2(shown(notice).contains(QStringLiteral("Test Config")), qPrintable(shown(notice)));
     QVERIFY2(shown(notice).contains(QStringLiteral("Default")), qPrintable(shown(notice)));
+    // Not "has no rules": the profile may list program rules that cannot be
+    // used here, and they stay listed right under this notice.
+    QVERIFY2(shown(notice).contains(QStringLiteral("no rules that can be used")), qPrintable(shown(notice)));
 
     // With no config at all there is none to name. The backend then calls the
     // active one "No config", which the notice used to name as a config.

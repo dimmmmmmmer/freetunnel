@@ -230,10 +230,6 @@
         <translation>Эта ссылка отключает проверку сертификата сервера.</translation>
     </message>
     <message>
-        <source>&quot;Through VPN&quot; has no rules, so nothing would be routed through the tunnel. Keeping the full tunnel until you add a rule.</source>
-        <translation>В режиме «Через VPN» нет ни одного правила — через туннель не пошло бы ничего. Оставляем полный туннель, пока вы не добавите правило.</translation>
-    </message>
-    <message>
         <source>Update downloaded. Finish installing it from the file manager — packages are installed by your package manager.</source>
         <translation>Обновление скачано. Завершите установку из файлового менеджера — пакеты устанавливает ваш пакетный менеджер.</translation>
     </message>
@@ -356,6 +352,22 @@
     <message>
         <source>Could not store the VPN password in your keyring. If it asked to be unlocked, unlock it and try again.</source>
         <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Not a valid domain or subnet: %1. “*.” and a leading dot go only before a domain name; enter an address or subnet without them.</source>
+        <translation>Неверный домен или подсеть: %1. «*.» и точка в начале ставятся только перед доменным именем; введите адрес или подсеть без них.</translation>
+    </message>
+    <message>
+        <source>Not a valid IP or subnet: %1. A subnet ending in /0 is every address, so excluding it would take all of its traffic out of the tunnel.</source>
+        <translation>Неверный IP-адрес или подсеть: %1. Подсеть с /0 на конце — это все адреса, и её исключение вывело бы весь их трафик из туннеля.</translation>
+    </message>
+    <message>
+        <source>&quot;Through VPN&quot; has no rules that can be used, so nothing would be routed through the tunnel. Keeping the full tunnel until you add a rule that can be used.</source>
+        <translation>В режиме «Через VPN» нет ни одного правила, которое можно применить, — через туннель не пошло бы ничего. Оставляем полный туннель, пока вы не добавите такое правило.</translation>
+    </message>
+    <message>
+        <source>Not a valid domain or subnet: %1. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel.</source>
+        <translation>Неверный домен или подсеть: %1. Подсеть с /0 на конце — это все адреса: в режиме «Без VPN» она вывела бы весь их трафик из туннеля.</translation>
     </message>
 </context>
 <context>
@@ -1010,12 +1022,12 @@
         <translation>По умолчанию</translation>
     </message>
     <message>
-        <source>“%1” uses the profile “%2”, which has no rules, so &quot;Through VPN&quot; would send nothing through the tunnel. The full tunnel stays on until that profile has a rule.</source>
-        <translation>«%1» использует профиль «%2», в котором нет правил, так что в режиме «Через VPN» через туннель не пошло бы ничего. Полный туннель остаётся, пока в этом профиле нет правила.</translation>
-    </message>
-    <message>
         <source>domains, comma-separated, then Enter</source>
         <translation>домены через запятую, затем Enter</translation>
+    </message>
+    <message>
+        <source>“%1” uses the profile “%2”, which has no rules that can be used, so &quot;Through VPN&quot; would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used.</source>
+        <translation>«%1» использует профиль «%2», в котором нет ни одного правила, которое можно применить, так что в режиме «Через VPN» через туннель не пошло бы ничего. Полный туннель остаётся, пока в этом профиле не появится такое правило.</translation>
     </message>
 </context>
 <context>

@@ -25,6 +25,21 @@ void Backend::setSplitEnabled(bool v) {
     persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
+// What addDomain() says about the rules it refused. A wildcard on an address is
+// worth more than "not valid": the address itself is fine, so without the
+// reason the refusal reads as a mistake of ours.
+static QString refusedRulesMessage(const QStringList &refused) {
+    const QString list = refused.join(QStringLiteral(", "));
+    if (std::any_of(refused.cbegin(), refused.cend(), isWildcardAddressRule))
+        return Backend::tr("Not a valid domain or subnet: %1. “*.” and a leading dot go only before "
+                           "a domain name; enter an address or subnet without them.").arg(list);
+    if (std::any_of(refused.cbegin(), refused.cend(), isEveryAddressRule))
+        return Backend::tr("Not a valid domain or subnet: %1. A subnet ending in /0 is every address: "
+                           "under “Bypass VPN” it would take all of its traffic out of the tunnel.")
+                .arg(list);
+    return Backend::tr("Not a valid domain or subnet: %1").arg(list);
+}
+
 bool Backend::addDomain(const QString &domain) {
     // Accept a whole list pasted at once: split on commas / whitespace / newlines.
     const QStringList tokens = domain.split(QRegularExpression(QStringLiteral("[\\s,;]+")),
@@ -39,7 +54,7 @@ bool Backend::addDomain(const QString &domain) {
         added << d;
     }
     if (!invalid.isEmpty())
-        emit errorOccurred(tr("Not a valid domain or subnet: %1").arg(invalid.join(QStringLiteral(", "))));
+        emit errorOccurred(refusedRulesMessage(invalid));
     if (added.isEmpty())
         return false;
     m_settings.domain_bypass_rules << added;
@@ -62,17 +77,34 @@ void Backend::clearDomains() {
 
 // ---------- excluded routes (subnets that bypass the tunnel) ----------
 
-// Valid if it's an IP or CIDR subnet (IPv4/IPv6); the optional /prefix must be sane.
-static bool isValidSubnet(const QString &r) {
+// The prefix length of an IP or CIDR subnet (IPv4/IPv6), a bare address being a
+// full-length one; negative when it is neither or the /prefix is not sane.
+static int subnetPrefix(const QString &r) {
     const int slash = r.indexOf(QLatin1Char('/'));
     const QString addr = slash >= 0 ? r.left(slash) : r;
     if (QHostAddress(addr).isNull())
-        return false;
-    if (slash < 0)
-        return true;
-    bool ok = false; const int p = r.mid(slash + 1).toInt(&ok);
+        return -1;
     const int max = addr.contains(QLatin1Char(':')) ? 128 : 32;
-    return ok && p >= 0 && p <= max;
+    if (slash < 0)
+        return max;
+    bool ok = false; const int p = r.mid(slash + 1).toInt(&ok);
+    return ok && p <= max ? p : -1;
+}
+
+// A /0 is a subnet, but it is every address of its kind: the core takes all of
+// that traffic out of the tunnel, and the window goes on saying Connected. Nobody
+// means that by an exclusion, so it is refused like a typo would be.
+static bool isValidSubnet(const QString &r) { return subnetPrefix(r) > 0; }
+static bool isEveryAddress(const QString &r) { return subnetPrefix(r) == 0; }
+
+// What addExcludedRoute() says about the routes it refused, with the reason when
+// one of them was a /0: written correctly, it would otherwise read as our mistake.
+static QString refusedRoutesMessage(const QStringList &refused) {
+    const QString list = refused.join(QStringLiteral(", "));
+    if (std::any_of(refused.cbegin(), refused.cend(), isEveryAddress))
+        return Backend::tr("Not a valid IP or subnet: %1. A subnet ending in /0 is every address, "
+                           "so excluding it would take all of its traffic out of the tunnel.").arg(list);
+    return Backend::tr("Not a valid IP or subnet: %1").arg(list);
 }
 
 bool Backend::addExcludedRoute(const QString &route) {
@@ -92,7 +124,7 @@ bool Backend::addExcludedRoute(const QString &route) {
     // so the one thing this message can add is WHICH of a pasted list was wrong —
     // and that is exactly what the domain field next to it has always said.
     if (!invalid.isEmpty())
-        emit errorOccurred(tr("Not a valid IP or subnet: %1").arg(invalid.join(QStringLiteral(", "))));
+        emit errorOccurred(refusedRoutesMessage(invalid));
     if (added.isEmpty())
         return false;
     m_settings.excluded_routes << added;
@@ -400,7 +432,15 @@ bool Backend::selectiveModeActive() const {
     // with applications and no domains would be told their configuration routes
     // nothing and be forced back to the full tunnel — while the app rules alone
     // are a complete and perfectly reasonable setup.
-    if (!m_settings.profile_app_rules.value(activeConfigProfile()).isEmpty())
+    //
+    // Counted as the helper will count them, after sanitizedAppRules(), exactly
+    // as the domains below are counted as the core will. Settings keep the rules
+    // as written, so a list can hold only rules that match nothing — a Windows
+    // path in settings carried to Linux, a hand edit — and the helper drops every
+    // one. Counted raw, they kept the core in selective mode with nothing listed,
+    // and everything left the tunnel without the fallback or its warning.
+    const QStringList apps = m_settings.profile_app_rules.value(activeConfigProfile());
+    if (!freetunnel::sanitizedAppRules(apps).isEmpty())
         return true;
     return !coreBypassRules(m_settings.profiles.value(activeConfigProfile())).isEmpty();
 }
@@ -464,8 +504,9 @@ void Backend::applySplitRules(bool warnOfLeak) {
     // edit to a profile the active config does not use passes warnOfLeak = false
     // (see applyProfileEdit()).
     if (warnOfLeak && selectiveModeWouldLeak()) {
-        emit errorOccurred(tr("\"Through VPN\" has no rules, so nothing would be routed through "
-                              "the tunnel. Keeping the full tunnel until you add a rule."));
+        emit errorOccurred(tr("\"Through VPN\" has no rules that can be used, so nothing would be "
+                              "routed through the tunnel. Keeping the full tunnel until you add a "
+                              "rule that can be used."));
     }
 }
 

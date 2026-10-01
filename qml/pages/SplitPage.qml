@@ -62,9 +62,15 @@ Item {
                     // what the tunnel follows, and it need not be the one on screen:
                     // "add a rule" under a profile that already had rules left the
                     // user adding rules that could not change anything.
+                    //
+                    // "Rules that can be used", not "rules": a profile can list
+                    // program rules that name nothing on this computer, a Windows
+                    // path in settings moved to a Mac, say. They stay listed under
+                    // this notice and do not count, and "has no rules" over a list
+                    // of them read as a mistake.
                     text: backend.configs.length === 0
                           ? qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
-                          : qsTr("“%1” uses the profile “%2”, which has no rules, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule.")
+                          : qsTr("“%1” uses the profile “%2”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used.")
                                 .arg(backend.activeConfig).arg(splitRoot.profileLabel(backend.activeConfigProfile))
                 }
             }

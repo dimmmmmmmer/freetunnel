@@ -102,7 +102,7 @@ SocketAddress v4MappedAddress(quint32 hostOrder)
 }
 
 // How much of this machine walking the process table may have. A quarter of
-// real time, saved up to fifty milliseconds' worth.
+// real time, saved up to a hundred and fifty milliseconds' worth.
 //
 // The obvious rule — "wait four times what the last walk cost before walking
 // again" — is wrong in precisely the case it exists for. Connections arrive in
@@ -118,6 +118,31 @@ constexpr qint64 kLookDutyDivisor = 4;
 // are set up one after another, so the wait a person would notice is the walks
 // themselves, not the permission to make them.
 constexpr qint64 kLookCreditCapUs = 150000;
+
+// Test-only, and false in release builds, where the hook is compiled out. No
+// machine the tests run on has a walk that fails, and refreshIfStale() has to be
+// shown one that fails every time: this ends each walk the way a Windows walk
+// with a table it could not read ends, with what it saw and a failure.
+bool walkFailsForTests()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    return qEnvironmentVariableIsSet("FT_TEST_PROCESS_WALK_FAILS");
+#else
+    return false;
+#endif
+}
+
+// Test-only as well, and 0 in release builds: microseconds added to what a walk
+// cost, so that a test can have one walk spend more than the whole credit, as a
+// walk on a slow machine can, without a slow machine.
+qint64 extraWalkCostForTests()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    return qEnvironmentVariableIntValue("FT_TEST_PROCESS_WALK_COST_US");
+#else
+    return 0;
+#endif
+}
 
 } // namespace
 
@@ -346,9 +371,11 @@ ProcessLookup::ProcessLookup(std::chrono::milliseconds ttl)
 
 void ProcessLookup::setWatchList(const QStringList &rules)
 {
-    // Normalised once here rather than per rule per process per walk, which is
-    // what appMatchesRules() would otherwise do — it takes rules in any
-    // spelling, and the walk asks it about every process on the machine.
+    // Sanitised, so that the comparison below is between two lists in one
+    // spelling, and a list of nothing but rules that cannot match is the empty
+    // list resolve() walks nothing for. It does not spare the walk any work:
+    // appMatchesRules() takes rules in any spelling and normalises each one on
+    // every call, sanitised or not.
     const QStringList wanted = sanitizedAppRules(rules);
     if (m_watch == wanted)
         return;
@@ -368,7 +395,17 @@ void ProcessLookup::setWatchList(const QStringList &rules)
 void ProcessLookup::refreshIfStale()
 {
     const auto now = std::chrono::steady_clock::now();
-    if (m_everBuilt && now - m_builtAt < currentTtl())
+    // A walk that failed is tried again on the next connection, but only out of
+    // the credit that pays for every other look (see shouldLookAgain()). Trying
+    // again is worth it: on Windows one of the four socket tables refusing still
+    // leaves the other three read, so a fresh walk answers every connection
+    // whose socket is in those. Tried on every connection regardless, a walk that
+    // fails every time cost a whole walk each, outside the credit. Once the
+    // credit is spent it is kept like a table until its time is up: it answers
+    // for the sockets it did see, and any other is reported as not looked at.
+    const bool keep = m_everBuilt
+            || (m_walkFailed && m_credit < std::max<qint64>(m_report.elapsedUs, 0));
+    if (keep && now - m_builtAt < currentTtl())
         return;
     m_owners.clear();
     // Counters are per walk. They used to accumulate, which was invisible while
@@ -403,6 +440,7 @@ std::chrono::milliseconds ProcessLookup::currentTtl() const
 
 void ProcessLookup::finishScan(std::chrono::steady_clock::time_point startedAt, bool ok)
 {
+    ok &= !walkFailsForTests();
     const auto done = std::chrono::steady_clock::now();
     m_report.ok = ok;
 #ifdef Q_OS_WIN
@@ -413,17 +451,20 @@ void ProcessLookup::finishScan(std::chrono::steady_clock::time_point startedAt, 
     m_report.entries = m_owners.size();
     m_report.distinctPids = m_owners.distinctPids();
     m_report.elapsedUs =
-            std::chrono::duration_cast<std::chrono::microseconds>(done - startedAt).count();
+            std::chrono::duration_cast<std::chrono::microseconds>(done - startedAt).count()
+            + extraWalkCostForTests();
     // Stamped now rather than with the time taken before the walk: stamping
     // with the earlier value made the table count as one scan-duration old the
     // moment it was published.
     m_builtAt = done;
     m_everBuilt = ok;
+    m_walkFailed = !ok;
 }
 
 void ProcessLookup::invalidate()
 {
     m_everBuilt = false;
+    m_walkFailed = false; // a new list, or a new session, is looked at at once
     m_owners.clear();
     m_report = {};
 }
@@ -680,9 +721,9 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // too old to trust and buy another walk.
     const QList<qint64> pids = listProcessIds();
     if (pids.isEmpty()) {
-        // Not cached: m_everBuilt stays false so the next connection tries
-        // again, instead of every connection for the next TTL inheriting one
-        // failed call's emptiness.
+        // Reported as a failure, not as an empty machine: m_everBuilt stays
+        // false, so until the walk is tried again the connections are answered
+        // as not looked at, instead of inheriting this emptiness as "nobody's".
         m_report.lastErrno = errno;
         finishScan(now, false);
         return;
@@ -885,7 +926,7 @@ void ProcessLookup::accrueLookCredit(std::chrono::steady_clock::time_point now)
 bool ProcessLookup::shouldLookAgain(std::chrono::steady_clock::time_point asked) const
 {
     if (!m_everBuilt)
-        return false; // the walk we just tried did not complete; it will be retried
+        return false; // the last walk did not complete; refreshIfStale() retries it
     if (m_builtAt >= asked)
         return false;
     return m_credit >= std::max<qint64>(m_report.elapsedUs, 0);

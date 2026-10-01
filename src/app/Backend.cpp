@@ -715,4 +715,7 @@ void Backend::removeConfig(int index) {
         persistSettings();
     }
     emit configChanged();
+    // The config that took over may use another split profile, and the Split
+    // page's notice kept describing the deleted one. See selectConfig().
+    emit splitChanged();
 }

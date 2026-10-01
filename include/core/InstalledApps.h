@@ -22,11 +22,12 @@ struct InstalledApp {
 // has several entries — a Flatpak and a distribution package, or a Start Menu
 // shortcut in both the machine-wide and the per-user tree.
 //
-// Called synchronously, from the interface thread, when the picker opens. The
-// cost is measured rather than assumed on Linux — about 8 ms for a hundred
-// applications — but NOT on Windows, where every Start Menu shortcut is
-// resolved through the shell to find out what it points at. If that turns out
-// to stall the picker, this is the call to move to a worker.
+// Called on a worker thread (Backend::startInstalledAppsScan), once, when the
+// Split page or the picker first wants the list, so it must stay safe to call
+// off the interface thread. It used to run there when the picker opened, and on
+// Windows, where every Start Menu shortcut is resolved through the shell to find
+// out what it points at, that froze the window. On Linux it is about 8 ms for a
+// hundred applications.
 QList<InstalledApp> installedApplications();
 
 // Where this system keeps the things a person launches.

@@ -8,9 +8,11 @@
 #include <QtTest>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QUdpSocket>
@@ -20,6 +22,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <thread>
 
 #include "core/ProcessLookup.h"
@@ -172,6 +175,8 @@ private slots:
     void withNoRulesNothingIsWalkedAtAll();
     void connectionsFromUnnamedProgramsDoNotEachBuyAWalk();
     void aBurstFromTheWatchedProgramSharesOneWalk();
+    void aWalkThatKeepsFailingIsRetriedOutOfTheCredit();
+    void newRulesAreLookedAtEvenWithTheCreditOverspent();
     void bothWaysOfReadingTheSocketTablesAgree();
     void anIpv6SocketIsFoundWhicheverFamilyTheFlowClaims();
     void aConnectionFromAnIpv6SocketToAnIpv4AddressIsFound();
@@ -478,6 +483,133 @@ void TestProcessLookup::aBurstFromTheWatchedProgramSharesOneWalk()
 
     QVERIFY2(walks <= 1,
              qPrintable(QStringLiteral("20 connections already open cost %1 walks").arg(walks)));
+}
+
+// A walk that fails every time — on Windows, one of the four socket tables
+// refusing — was tried again for every connection: a whole walk each, outside
+// the credit. Trying again is still worth it, because such a walk reads the
+// other tables, and a fresh one answers every connection whose socket is in
+// them; what has to stop is trying without end. The hook ends every walk the
+// way such a walk ends: with what it saw, and a failure.
+void TestProcessLookup::aWalkThatKeepsFailingIsRetriedOutOfTheCredit()
+{
+    qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
+    auto restore = qScopeGuard([] { qunsetenv("FT_TEST_PROCESS_WALK_FAILS"); });
+    // A short lifetime, so the last part below comes within the test's patience.
+    ProcessLookup lookup(std::chrono::milliseconds(150));
+    lookup.setWatchList(watchSelf());
+    QTcpServer first;
+    QVERIFY(first.listen(QHostAddress::LocalHost, 0));
+    const LocalFlow seen{AF_INET, IPPROTO_TCP, first.serverPort(), QStringLiteral("127.0.0.1")};
+    QVERIFY(!lookup.resolve(seen).executablePath.isEmpty());
+    QVERIFY(!lookup.lastScan().ok);
+
+    // Each connection after it, from a socket the failed walk cannot have seen,
+    // is looked at while there is credit for it, and found.
+    std::vector<std::unique_ptr<QTcpServer>> later;
+    for (int i = 0; i < 5; ++i) {
+        later.push_back(std::make_unique<QTcpServer>());
+        QVERIFY(later.back()->listen(QHostAddress::LocalHost, 0));
+        letItAffordAnotherWalk(lookup);
+        bool skipped = true;
+        QVERIFY2(!lookup.resolve(LocalFlow{AF_INET, IPPROTO_TCP, later.back()->serverPort(),
+                                           QStringLiteral("127.0.0.1")},
+                                 &skipped)
+                          .executablePath.isEmpty(),
+                 "a connection after a failed walk was not looked at, though there was credit for it");
+        QVERIFY(!skipped);
+    }
+
+    // Back to back, the walks stop when the credit runs out, and a socket the
+    // failed walk did see is still answered from it. Every connection costing
+    // a walk, however long it goes on, is what this used to be.
+    QElapsedTimer patience;
+    patience.start();
+    int looks = 0;
+    bool walkedEveryTime = true;
+    while (walkedEveryTime && patience.elapsed() < 2000) {
+        const qint64 walks = lookup.walksTaken();
+        bool skipped = true;
+        QVERIFY(!lookup.resolve(seen, &skipped).executablePath.isEmpty());
+        QVERIFY(!skipped);
+        walkedEveryTime = lookup.walksTaken() > walks;
+        ++looks;
+    }
+    QVERIFY2(!walkedEveryTime,
+             qPrintable(QStringLiteral("%1 connections after a failed walk cost a walk each").arg(looks)));
+
+    // With the credit spent, a socket the failed walk did not see is reported as
+    // not looked at, never as nobody's: that is what keeps it in the tunnel in
+    // "Through VPN". If the credit has come back in the meantime, it is looked
+    // at and found instead.
+    later.push_back(std::make_unique<QTcpServer>());
+    QVERIFY(later.back()->listen(QHostAddress::LocalHost, 0));
+    const qint64 walks = lookup.walksTaken();
+    bool skipped = false;
+    const bool found = !lookup.resolve(LocalFlow{AF_INET, IPPROTO_TCP, later.back()->serverPort(),
+                                                 QStringLiteral("127.0.0.1")},
+                                       &skipped)
+                                .executablePath.isEmpty();
+    if (lookup.walksTaken() > walks)
+        QVERIFY(found && !skipped);
+    else
+        QVERIFY2(!found && skipped, "a connection nobody looked at was answered as though looked at");
+
+    // A change of rules is looked at at once, credit or not: it is a new
+    // question, not the same one failing again.
+    const qint64 beforeNewRules = lookup.walksTaken();
+    lookup.setWatchList(watchSelf() << QStringLiteral("another-program"));
+    lookup.resolve(seen);
+    QCOMPARE(lookup.walksTaken(), beforeNewRules + 1);
+
+    // Tried again once its time is up, credit or not, and a walk that completes
+    // answers as before.
+    restore.dismiss();
+    qunsetenv("FT_TEST_PROCESS_WALK_FAILS");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    skipped = true;
+    QVERIFY(!lookup.resolve(LocalFlow{AF_INET, IPPROTO_TCP, later.back()->serverPort(),
+                                      QStringLiteral("127.0.0.1")},
+                            &skipped)
+                     .executablePath.isEmpty());
+    QVERIFY(!skipped);
+    QVERIFY(lookup.lastScan().ok);
+}
+
+// A change of rules is a new question, and is looked at at once, even when the
+// last walk failed and cost more than the whole credit, as one walk on a slow
+// machine can: kept from walking until the credit came back, a program just
+// added to the rules would have had every connection reported as not looked at.
+// The test above cannot get there, since its walks cost less than the credit.
+void TestProcessLookup::newRulesAreLookedAtEvenWithTheCreditOverspent()
+{
+    qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
+    qputenv("FT_TEST_PROCESS_WALK_COST_US", "400000");
+    const auto restore = qScopeGuard([] {
+        qunsetenv("FT_TEST_PROCESS_WALK_FAILS");
+        qunsetenv("FT_TEST_PROCESS_WALK_COST_US");
+    });
+    ProcessLookup lookup(std::chrono::milliseconds(60000));
+    lookup.setWatchList({QStringLiteral("another-program")});
+    QTcpServer socket;
+    QVERIFY(socket.listen(QHostAddress::LocalHost, 0));
+    const LocalFlow flow{AF_INET, IPPROTO_TCP, socket.serverPort(), QStringLiteral("127.0.0.1")};
+
+    // One walk, failed, and 400 ms against a credit of at most 150.
+    QVERIFY(lookup.resolve(flow).executablePath.isEmpty());
+    QVERIFY(!lookup.lastScan().ok);
+    const qint64 walks = lookup.walksTaken();
+    // The same question again is not worth another: the credit is spent.
+    QVERIFY(lookup.resolve(flow).executablePath.isEmpty());
+    QCOMPARE(lookup.walksTaken(), walks);
+
+    // New rules are.
+    lookup.setWatchList(watchSelf());
+    bool skipped = true;
+    QVERIFY2(!lookup.resolve(flow, &skipped).executablePath.isEmpty(),
+             "a program just added to the rules was not looked for");
+    QVERIFY(!skipped);
+    QCOMPARE(lookup.walksTaken(), walks + 1);
 }
 
 // The reason the rest of this exists. A table is a snapshot, and a connection is
