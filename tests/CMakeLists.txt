@@ -31,6 +31,7 @@ add_library(ft_apps STATIC
     ../src/core/AppShortcut.cpp
     ../src/core/ProcessLookup.cpp
     ../src/core/ProcessLookupSockets.cpp
+    ../src/core/ProcessLookupWalk.cpp
     ../src/core/InstalledApps.cpp
     ../src/core/NetBind.cpp
 )
