@@ -135,18 +135,26 @@ gnome-keyring on Linux CI; locally, either unlock yours or skip that suite with
 `bash ../scripts/run-ctest.sh build-tests -E '^credentialstore$'` — CI still
 covers it.
 
+On macOS and Windows the configure needs OpenSSL, as the app's does: without
+it the update-signature tests would skip the path every release takes. On macOS
+that is `brew install openssl@3` and `-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)`.
+On Windows, install OpenSSL 3 for 64-bit Windows (for example
+`choco install openssl`); CMake looks for it in `C:\Program Files\OpenSSL`, the
+installer's default, and anywhere else needs `-DOPENSSL_ROOT_DIR=` pointing at it.
+
 CI runs this on every push/PR via `.github/workflows/tests.yml` (matrix: Linux,
 macOS, Windows), plus a scheduled run every Monday so a quiet `main` still gets
 sampled. Additional Linux-only jobs: **gcov/lcov coverage**
 (`scripts/coverage-upstream-report.sh`, merges unit tests + upstream instrumented
 build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
-Test suites (`ctest -N` lists them all): deep links (incl. structured
+Test suites — `ctest -N` lists them: deep links (incl. structured
 fuzz) and config import, config store and paths, settings, both TOML writers,
 credentials (Keychain / Credential Manager / libsecret, and whether Linux has a
 Secret Service to keep them in), release verify and version comparison, control
 commands and the single-instance socket, helper IPC from both ends (client,
-server, fuzz) and the elevated argv, split-tunnel bypass
+server, and fuzzing of both the real helper and its test double), the real
+helper's lifecycle and the elevated argv, split-tunnel bypass
 rules and interface binding, the Backend's own units (logs, settings, config,
 split tunnel, updates), QML UI smoke tests, and integration tests (config
 workflow, Backend + mock VPN, single instance, helper client, UpdateChecker

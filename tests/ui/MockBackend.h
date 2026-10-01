@@ -328,7 +328,6 @@ signals:
     void configChanged();
     void configsChanged();
     void settingsChanged();
-    void logChanged();
     void splitChanged();
     void hotkeysChanged();
     void hotkeyAvailabilityChanged();

@@ -23,6 +23,7 @@ private slots:
     void preAuthSquatterDoesNotBlock();
     void oversizedBufferClosesConnection();
     void connectDisconnectFlow();
+    void pathOnlyConnectIsRefusedAsByTheRealHelper();
     void preAuthCommandsRejected();
 };
 
@@ -171,7 +172,9 @@ void TestHelperIpc::connectDisconnectFlow()
 
     QJsonObject connectCmd;
     connectCmd["cmd"] = "connect";
-    connectCmd["configPath"] = "/tmp/test.toml";
+    // Inline, as the GUI sends it: a path is what the real helper refuses (see
+    // pathOnlyConnectIsRefusedAsByTheRealHelper).
+    connectCmd["configToml"] = "[endpoint]\nhostname = \"vpn.example\"\n";
     client.write(QJsonDocument(connectCmd).toJson(QJsonDocument::Compact) + '\n');
     client.flush();
     QVERIFY(server.waitForClientData(3000));
@@ -217,6 +220,49 @@ void TestHelperIpc::connectDisconnectFlow()
             break;
     }
     QCOMPARE(lastState, QStringLiteral("Disconnected"));
+}
+
+// A double is only worth what its contract is worth. The real helper answers a
+// connect that names a file (configPath) with an error and starts nothing, since
+// it would open that file as root (TestHelperServer::serverRefusesPathBasedConnect).
+// This one reported Connected for it, and connectDisconnectFlow above asserted
+// exactly that: a session production never starts.
+void TestHelperIpc::pathOnlyConnectIsRefusedAsByTheRealHelper()
+{
+    const QString token = QStringLiteral("path-only-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), server.port());
+    QVERIFY(client.waitForConnected(3000));
+    server.acceptPending();
+    QVERIFY(mockHelperHandshake(server, client, token));
+
+    QJsonObject connectCmd;
+    connectCmd["cmd"] = "connect";
+    connectCmd["configPath"] = "/tmp/test.toml";
+    client.write(QJsonDocument(connectCmd).toJson(QJsonDocument::Compact) + '\n');
+    client.flush();
+    QVERIFY(server.waitForClientData(3000));
+
+    QString error;
+    QStringList states;
+    for (int attempt = 0; attempt < 10 && error.isEmpty(); ++attempt) {
+        if (client.bytesAvailable() == 0 && !client.waitForReadyRead(3000))
+            break;
+        while (client.canReadLine()) {
+            const QJsonObject ev = QJsonDocument::fromJson(client.readLine()).object();
+            if (ev.value("ev").toString() == QLatin1String("error"))
+                error = ev.value("msg").toString();
+            else if (ev.value("ev").toString() == QLatin1String("state"))
+                states << ev.value("state").toString();
+        }
+    }
+    QVERIFY2(error.contains(QStringLiteral("inline configToml")), qPrintable(error));
+    QVERIFY2(states.isEmpty(), qPrintable(states.join(QLatin1Char(','))));
+    // Refused, not dropped: the session that sent it is still the helper's client.
+    QVERIFY(server.authed());
 }
 
 void TestHelperIpc::preAuthCommandsRejected()

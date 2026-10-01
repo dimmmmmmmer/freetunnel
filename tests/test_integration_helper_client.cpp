@@ -331,7 +331,8 @@ void TestIntegrationHelperClient::clientHandshakeAndConnectFlow()
 
     QJsonObject connectCmd;
     connectCmd[QStringLiteral("cmd")] = QStringLiteral("connect");
-    connectCmd[QStringLiteral("configPath")] = QStringLiteral("/tmp/test.toml");
+    // Inline: the helper refuses a connect that only names a file.
+    connectCmd[QStringLiteral("configToml")] = QStringLiteral("[endpoint]\nhostname = \"vpn.example\"\n");
     sock.write(QJsonDocument(connectCmd).toJson(QJsonDocument::Compact) + '\n');
     sock.flush();
     QVERIFY(server.waitForClientData(3000));

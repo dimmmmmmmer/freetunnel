@@ -22,6 +22,15 @@ check "upstream ref in build workflow" 'UPSTREAM_REF|upstream_ref' .github/workf
 # A tag proves nothing — it can be repointed. Require the full commit SHA.
 check "QHotkey commit pin" 'GIT_TAG [0-9a-f]{40}' CMakeLists.txt
 check "QHotkey commit pin in tests" 'GIT_TAG [0-9a-f]{40}' tests/CMakeLists.txt
+check "QWindowKit commit pin" 'GIT_TAG [0-9a-f]{40}' cmake/QWindowKit.cmake
+# The app and test_windows_chrome both include cmake/QWindowKit.cmake. A second
+# declaration could be bumped on its own, and the test would then check a chrome
+# the app no longer ships.
+while read -r line; do
+  echo "pinned-deps: QWindowKit declared outside cmake/QWindowKit.cmake, include that file instead: $line" >&2
+  fail=1
+done < <(grep -n 'qwindowkit\.git' CMakeLists.txt tests/CMakeLists.txt cmake/*.cmake \
+         | grep -v '^cmake/QWindowKit\.cmake:')
 # The TLS stack's conan recipe: commit pin plus a digest over the exported tree.
 check "boringssl NLC commit pin" '^NLC_COMMIT="[0-9a-f]{40}"$' scripts/export-patched-boringssl.sh
 check "boringssl recipe digest" '^NLC_RECIPE_SHA256="[0-9a-f]{64}"$' scripts/export-patched-boringssl.sh

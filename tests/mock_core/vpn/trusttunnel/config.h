@@ -38,6 +38,12 @@ struct TrustTunnelConfig {
     std::variant<TunListener, SocksListener> listener;
     struct {
         std::vector<std::string> dns_upstreams;
+        // The endpoint's TLS settings. The real core keeps a pinned certificate
+        // as a loaded CA store; this keeps its text, so a test can compare it.
+        bool skip_verification = false;
+        std::string certificate;
+        std::string client_random;
+        std::string client_random_mask;
     } location;
     std::string exclusions;
     VpnMode mode = VPN_MODE_GENERAL;
@@ -45,6 +51,27 @@ struct TrustTunnelConfig {
     std::string killswitch_allow_ports;
     std::string log_file_path;
     std::optional<std::string> ssl_session_storage_path;
+
+    // [endpoint]'s TLS keys, read as the real build_endpoint reads them, since
+    // they decide whom the tunnel trusts and nothing past the constructor shows
+    // them: a certificate is pinned only when verification is not skipped, and
+    // client_random is "prefix" or "prefix/mask", split at the slash, with an
+    // empty mask failing the whole config. They used to be ignored here, so no
+    // test could tell whether a pin or a mask written by the app ever arrived.
+    static bool readEndpointTls(const toml::table &t, TrustTunnelConfig &c)
+    {
+        auto &loc = c.location;
+        loc.skip_verification = t["endpoint.skip_verification"].value<bool>().value_or(false);
+        if (!loc.skip_verification)
+            loc.certificate = t["endpoint.certificate"].value<std::string>().value_or("");
+        const std::string random = t["endpoint.client_random"].value<std::string>().value_or("");
+        const size_t slash = random.find('/');
+        loc.client_random = random.substr(0, slash);
+        if (slash == std::string::npos)
+            return true;
+        loc.client_random_mask = random.substr(slash + 1);
+        return !loc.client_random_mask.empty();
+    }
 
     // The real build_config rejects a table that parses as TOML but isn't a
     // config. Returning a value unconditionally made the wrapper's
@@ -59,6 +86,8 @@ struct TrustTunnelConfig {
         if (!t.contains("hostname") && !t.contains("endpoint.hostname"))
             return std::nullopt;
         TrustTunnelConfig c;
+        if (!readEndpointTls(t, c))
+            return std::nullopt;
         c.ssl_session_storage_path = t["ssl_session_cache_path"].value<std::string>();
         // Kept as the raw array text: the wrapper only has to empty it, or pass it
         // on untouched when the user lets the config decide.

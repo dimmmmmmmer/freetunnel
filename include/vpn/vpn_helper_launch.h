@@ -45,4 +45,16 @@ QStringList linuxHelperCommand(const QString &exe, const QString &appImage, quin
 // and as pipes they piled up in this process's memory for the helper's lifetime.
 bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringList &helperCmd);
 
+// The AppleScript osascript runs to start the helper on macOS:
+// `do shell script "…" with administrator privileges`, the command inside quoted
+// once for /bin/sh and again for the AppleScript string. Both paths are the
+// user's to choose (the app runs from wherever it was put), and this text runs
+// as root.
+QString macHelperElevationScript(const QString &exe, quint16 port, const QString &tokenPath);
+
+// The command line ShellExecuteExW ("runas") hands the elevated helper on
+// Windows, read back by CommandLineToArgvW. The token path lies under the user's
+// profile folder, whose name may hold spaces.
+QString windowsHelperParameters(quint16 port, const QString &tokenPath);
+
 } // namespace freetunnel

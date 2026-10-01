@@ -43,6 +43,11 @@ struct CoreConfigSnapshot {
     bool killswitch_enabled = false;
     int mode = -1;     // ag::VpnMode
     int loglevel = -1; // ag::LogLevel
+    // The endpoint's TLS settings, as ag::TrustTunnelConfig::location has them.
+    bool skip_verification = false;
+    std::string certificate;
+    std::string client_random;
+    std::string client_random_mask;
     std::string exclusions;
     std::vector<std::string> included_routes;
     std::vector<std::string> excluded_routes;
@@ -365,6 +370,7 @@ public:
         const auto it = m_clients.find(id);
         if (it != m_clients.end())
             it->second.alive = false; // keep callbacks: stale events still fire
+        noteLifecycle("destroyed", id);
     }
 
     std::string onSetSystemDns(uint64_t id)
@@ -384,6 +390,7 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
         ++m_connectCalls;
         m_lastClientId = id;
+        noteLifecycle("connect", id);
         m_cv.wait(lock, [this]() { return !m_blockConnect; });
         return m_connectError;
     }
@@ -394,6 +401,38 @@ public:
         const auto it = m_clients.find(id);
         if (it != m_clients.end())
             ++it->second.disconnects;
+        noteLifecycle("disconnect", id);
+    }
+
+    // Called by the mock ag::TrustTunnelClient once its connect() succeeded: what
+    // the real core goes on to do by itself. A helper PROCESS has a core no test
+    // can reach to call fire*() on, so there it is asked for by the environment.
+    //
+    // FT_TEST_CORE_REPORTS_CONNECTED says the session is up, as the real core
+    // does once the tunnel is established. Without it the helper's client waits
+    // in Connecting for good, and nothing that happens to a CONNECTED session on
+    // the far side of the helper can be tested.
+    //
+    // FT_TEST_CORE_PROBE_TCP_PORT is for the per-application rules the helper was
+    // sent, which could otherwise only be seen arriving at the IPC layer, never
+    // deciding anything. It names a loopback TCP port the test itself listens on;
+    // the core then asks about that one connection, the way the real one asks
+    // about every flow, and the decision goes back to the GUI as the line the
+    // wrapper logs for it.
+    void afterConnectFromEnvironment(uint64_t id)
+    {
+        if (std::getenv("FT_TEST_CORE_REPORTS_CONNECTED") != nullptr)
+            fireStateChanged(id, ag::VPN_SS_CONNECTED);
+        const char *port = std::getenv("FT_TEST_CORE_PROBE_TCP_PORT");
+        if (port == nullptr || *port == '\0')
+            return;
+        ag::VpnConnectRequestSnapshot req;
+        req.id = 1;
+        req.proto = IPPROTO_TCP;
+        req.family = AF_INET;
+        req.src_port = static_cast<uint16_t>(std::strtoul(port, nullptr, 10));
+        req.src_ip = "127.0.0.1";
+        fireConnectRequest(id, req);
     }
 
     void onNetworkChange(uint64_t id, ag::VpnNetworkState state)
@@ -466,6 +505,19 @@ private:
         std::vector<NetworkChange> networkChanges;
         std::vector<uint32_t> dnsReads; // outbound interface at each set_system_dns()
     };
+
+    // The core's lifecycle as it happens, one `event id` line per call, appended
+    // to FT_TEST_CORE_EVENT_LOG. For the same reason as dumpCoreConfig: in the
+    // helper the core lives in another process, and whether the tunnel came down
+    // when the helper left is something only the core itself can say.
+    static void noteLifecycle(const char *event, uint64_t id)
+    {
+        const char *path = std::getenv("FT_TEST_CORE_EVENT_LOG");
+        if (path == nullptr || *path == '\0')
+            return;
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        out << event << ' ' << id << '\n';
+    }
 
     ag::VpnCallbacks callbacksFor(uint64_t id)
     {
@@ -543,6 +595,10 @@ private:
             out << "mode=" << (snap.mode == ag::VPN_MODE_SELECTIVE ? "selective" : "general")
                 << '\n';
             out << "loglevel=" << snap.loglevel << '\n';
+            out << "skip_verification=" << (snap.skip_verification ? 1 : 0) << '\n';
+            out << "certificate=" << oneLine(snap.certificate) << '\n';
+            out << "client_random=" << oneLine(snap.client_random) << '\n';
+            out << "client_random_mask=" << oneLine(snap.client_random_mask) << '\n';
             out << "exclusions=" << oneLine(snap.exclusions) << '\n';
             out << "included_routes=" << oneLine(joinList(snap.included_routes)) << '\n';
             out << "excluded_routes=" << oneLine(joinList(snap.excluded_routes)) << '\n';

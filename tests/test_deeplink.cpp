@@ -229,10 +229,25 @@ void TestDeepLink::malformedPayloadsNeverCrash()
     QVERIFY(true);
 }
 
+// The seed of the two random loops below. They used to draw from
+// QRandomGenerator::global(), seeded afresh by every run and never printed, so an
+// input the sanitizer job crashed on could not be fed in again. A fixed seed
+// repeats the same inputs on every run; FT_FUZZ_SEED picks other ones. Either
+// way the seed is printed, and the log of a failed run says how to repeat it.
+static quint32 fuzzSeed(const char *loop, quint32 fixed)
+{
+    bool fromEnv = false;
+    const quint32 env = qEnvironmentVariable("FT_FUZZ_SEED").toUInt(&fromEnv);
+    const quint32 seed = fromEnv ? env : fixed;
+    qInfo("%s: seed %u (FT_FUZZ_SEED=%u repeats it)", loop, seed, seed);
+    return seed;
+}
+
 // Random TLV-shaped byte streams (not necessarily valid base64url payloads).
 void TestDeepLink::structuredTlvFuzzNeverCrash()
 {
-    auto *rng = QRandomGenerator::global();
+    QRandomGenerator seeded(fuzzSeed("structuredTlvFuzzNeverCrash", 20250611u));
+    auto *rng = &seeded;
     for (int i = 0; i < 2000; ++i) {
         QByteArray p;
         p.resize(rng->bounded(1, 384));
@@ -257,7 +272,8 @@ void TestDeepLink::mutatesValidLinksSafely()
     const QString valid = encodeDeepLink(in);
     const QString payload = valid.mid(QStringLiteral("tt://?").size());
 
-    auto *rng = QRandomGenerator::global();
+    QRandomGenerator seeded(fuzzSeed("mutatesValidLinksSafely", 20250612u));
+    auto *rng = &seeded;
     for (int i = 0; i < 500; ++i) {
         QByteArray mutated = payload.toLatin1();
         const int n = rng->bounded(1, 8);

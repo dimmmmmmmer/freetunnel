@@ -523,6 +523,23 @@ void installTerminationHandlers(QCoreApplication *app)
 } // namespace
 #endif
 
+namespace {
+
+// A helper nobody authenticated within a minute leaves on its own: whoever
+// started it is not coming, and a root process holding a port with a token
+// nobody will present is no use to anyone.
+int unauthenticatedExitMs()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    // A test cannot wait a minute to watch it go. Compiled out of release builds.
+    if (qEnvironmentVariableIsSet("FT_TEST_HELPER_AUTH_WINDOW_MS"))
+        return qEnvironmentVariableIntValue("FT_TEST_HELPER_AUTH_WINDOW_MS");
+#endif
+    return 60000;
+}
+
+} // namespace
+
 int runVpnHelper(int argc, char **argv) {
     QCoreApplication app(argc, argv);
 #if defined(Q_OS_UNIX)
@@ -544,7 +561,7 @@ int runVpnHelper(int argc, char **argv) {
     if (!server.listen())
         return 3;
 
-    QTimer::singleShot(60000, &app, [&server]() {
+    QTimer::singleShot(unauthenticatedExitMs(), &app, [&server]() {
         if (!server.authed())
             QCoreApplication::quit();
     });

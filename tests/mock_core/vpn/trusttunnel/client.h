@@ -73,6 +73,8 @@ public:
         const std::string err = mockcore::Controller::instance().onConnect(m_id);
         if (err.empty()) {
             m_running = true;
+            // What a connected core does next; see the controller.
+            mockcore::Controller::instance().afterConnectFromEnvironment(m_id);
             return std::nullopt;
         }
         return Error{err};
@@ -131,6 +133,10 @@ private:
     static mockcore::CoreConfigSnapshot snapshotOf(const TrustTunnelConfig &cfg)
     {
         mockcore::CoreConfigSnapshot snap;
+        snap.skip_verification = cfg.location.skip_verification;
+        snap.certificate = cfg.location.certificate;
+        snap.client_random = cfg.location.client_random;
+        snap.client_random_mask = cfg.location.client_random_mask;
         snap.killswitch_enabled = cfg.killswitch_enabled;
         snap.mode = static_cast<int>(cfg.mode);
         snap.loglevel = static_cast<int>(cfg.loglevel);
