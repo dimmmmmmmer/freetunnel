@@ -143,7 +143,53 @@ QString appBundleOf(const QString &path)
     return QDir::toNativeSeparators(slashed.left(marker + 4)); // keep ".app"
 }
 
+QString unversionedAppPath(const QString &path)
+{
+    // On the string, like appBundleOf: it is asked about every running process
+    // a rule is checked against, and the test has to run where the tests run.
+    const QFileInfo file(QDir::fromNativeSeparators(path));
+    const QFileInfo directory(file.path());
+    // Squirrel names the directory app-<version>, and its versions start with a
+    // digit. Asking for the digit is what keeps a folder someone merely called
+    // app-data from being read as a version of anything.
+    const QString name = directory.fileName();
+    if (name.size() < 5 || !name.startsWith(QLatin1String("app-"), appPathCaseSensitivity())
+        || !name.at(4).isDigit())
+        return {};
+    return QDir::toNativeSeparators(QDir(directory.path()).filePath(file.fileName()));
+}
+
+QString squirrelUnversionedPath(const QString &path)
+{
+    const QString unversioned = unversionedAppPath(path);
+    if (unversioned.isEmpty())
+        return {};
+    // The program named after its installation folder is Squirrel's own layout,
+    // and is told from the string. Any other program in a version directory
+    // needs Update.exe in that folder to say Squirrel put it there.
+    const QFileInfo program(QDir::fromNativeSeparators(unversioned));
+    const QString root = program.path();
+    if (program.completeBaseName().compare(QFileInfo(root).fileName(), Qt::CaseInsensitive) == 0
+        || QFileInfo(QDir(root).filePath(QStringLiteral("Update.exe"))).isFile())
+        return unversioned;
+    return {};
+}
+
 namespace {
+
+// The one form a rule and a process are compared in: on Windows, a program
+// Squirrel installed is the same program in every version directory it has had.
+// Squirrel installs nowhere else, and elsewhere stripping the directory only
+// widened what a rule covers.
+QString acrossVersions(const QString &path)
+{
+#if defined(Q_OS_WIN)
+    const QString unversioned = squirrelUnversionedPath(path);
+    return unversioned.isEmpty() ? path : unversioned;
+#else
+    return path;
+#endif
+}
 
 // One rule against one program. Pulled out of the loop so the loop is a loop:
 // the decision below is three separate questions, and they read as three.
@@ -185,15 +231,18 @@ bool appMatchesRules(const AppIdentity &app, const QStringList &rules)
         return false;
 
     const Qt::CaseSensitivity cs = appPathCaseSensitivity();
+    // Without a Squirrel version directory, on both sides: compared as reported,
+    // a rule for Discord stopped matching at Discord's next update.
     const QString path = app.executablePath.isEmpty()
             ? QString()
-            : QDir::toNativeSeparators(QDir::cleanPath(QDir::fromNativeSeparators(app.executablePath)));
+            : acrossVersions(QDir::toNativeSeparators(
+                      QDir::cleanPath(QDir::fromNativeSeparators(app.executablePath))));
     // Prefer the name the OS gave us, but a lookup that only produced a path
     // still has to match bare-name rules, so derive one when it is missing.
     const QString name = !app.name.isEmpty() ? app.name : QFileInfo(path).fileName();
 
     for (const QString &rule : rules) {
-        if (oneRuleMatches(normalizedAppRule(rule), path, name, cs))
+        if (oneRuleMatches(acrossVersions(normalizedAppRule(rule)), path, name, cs))
             return true;
     }
     return false;

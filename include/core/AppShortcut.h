@@ -15,9 +15,11 @@ namespace freetunnel {
 // — which is the only name a rule can ever match.
 //
 // Returns the name a rule should use: an absolute path to an existing file,
-// or — for a program that runs inside a sandbox — a bare program name. Empty
-// when the argument is not a program and does not lead to one. Accepts a plain
-// path or a file: URL.
+// or — for a program that runs inside a sandbox — a bare program name, or — for
+// one Squirrel installed — its path without the version directory, which is
+// the one name it keeps across updates (see ruleForProgram). Empty when the
+// argument is not a program and does not lead to one. Accepts a plain path or
+// a file: URL.
 //
 // The sandbox case is not a nicety. A Flatpak entry launches
 // "/usr/bin/flatpak run … com.anydesk.Anydesk", so following it naively yields
@@ -26,6 +28,28 @@ namespace freetunnel {
 // system actually reports is /app/extra/anydesk, inside the sandbox, so a bare
 // name is what matches it.
 QString resolveApplicationTarget(const QString &pathOrUrl);
+
+// The rule for a program file that exists, given the arguments it is started
+// with: a Windows shortcut's, or none when the file was picked on its own.
+// Almost always the file itself, spelled the way the system reports a running
+// process. Not for a program Squirrel installed — Discord, Slack, GitHub
+// Desktop and many other Electron applications on Windows. Its shortcut starts
+// Update.exe --processStart Discord.exe, Update.exe starts Discord.exe out of
+// an app-<version> directory, and each update replaces that directory. So the
+// shortcut, Update.exe, and the program picked out of today's directory all
+// answer the program without its version (see unversionedAppPath), which is
+// what the rule matches in every version.
+//
+// Separated from the shell that reads a shortcut, so it is tested where the
+// tests run.
+QString ruleForProgram(const QString &program, const QString &arguments);
+
+// A rule already stored for a Squirrel updater, <root>\Update.exe, as picking
+// Discord from the list or dropping its shortcut stored one before the shortcut's
+// arguments were read: the rule for the program that updater installs, as
+// ruleForProgram gives it for Update.exe picked on its own. Empty when the rule
+// is not one, or that program is not installed there.
+QString squirrelProgramForUpdaterRule(const QString &rule);
 
 // The Exec/TryExec program named by the contents of a .desktop entry, without
 // its arguments or field codes. Separated from the file handling so the parsing

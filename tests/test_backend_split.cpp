@@ -12,12 +12,16 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
+#include <QSettings>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QUrl>
 
 #include "app/Backend.h"
+#include "core/AppRules.h"
 #include "core/AppSettings.h"
+#include "core/AppShortcut.h"
 #include "core/InstalledApps.h"
 
 class TestBackendSplit : public QObject {
@@ -45,6 +49,8 @@ private slots:
     void anAddressRuleOfEveryAddressIsRefused();
     void appRulesThatMatchNothingAreNotRules();
     void appRulesAreValidatedDedupedAndPersisted();
+    void aRuleStoredForASquirrelUpdaterBecomesItsProgram();
+    void aRuleStoredForASquirrelUpdaterMatchesTheProgramOnWindows();
     void aDroppedShortcutBecomesARuleForTheProgramItNames();
     void turningSplitTunnellingOffDoesNotInvertTheAppRules();
     void appRulesBelongToTheProfile();
@@ -460,6 +466,107 @@ void TestBackendSplit::appRulesThatMatchNothingAreNotRules()
     // One that can match is enough, as in appRulesAreRulesToo().
     QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
     QVERIFY(backend.selectiveModeActive());
+}
+
+namespace {
+
+void touchFile(const QString &path)
+{
+    QDir().mkpath(QFileInfo(path).path());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly))
+        f.close();
+}
+
+// Discord as Squirrel installs it, under `parent`: the updater a rule from an
+// earlier version names, and the program that actually runs.
+struct SquirrelDiscord {
+    QString updater;
+    QString running;
+};
+
+SquirrelDiscord installSquirrelDiscord(const QString &parent)
+{
+    SquirrelDiscord d;
+    d.updater = QDir::toNativeSeparators(parent + QStringLiteral("/Discord/Update.exe"));
+    d.running = QDir::toNativeSeparators(parent + QStringLiteral("/Discord/app-1.0.9163/Discord.exe"));
+    touchFile(QDir::fromNativeSeparators(d.updater));
+    touchFile(QDir::fromNativeSeparators(d.running));
+    return d;
+}
+
+void storeAppRules(const QString &profile, const QStringList &rules)
+{
+    QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("FreeTunnelTest"),
+                QStringLiteral("BackendSplitTest"));
+    s.setValue(QStringLiteral("bypass/profile_apps/") + profile, rules);
+    s.setValue(QStringLiteral("bypass/profile_apps_seeded"), true);
+    s.sync();
+}
+
+} // namespace
+
+// Picking Discord from the list, or dropping its shortcut, stored a rule for its
+// updater before shortcuts were followed to their program, and the rule matched
+// none of Discord's connections. Such a rule is read as the program from now on,
+// and saved that way, so nobody has to find it and add Discord again.
+void TestBackendSplit::aRuleStoredForASquirrelUpdaterBecomesItsProgram()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const SquirrelDiscord discord = installSquirrelDiscord(dir.path());
+    const QString program = freetunnel::squirrelProgramForUpdaterRule(discord.updater);
+    QVERIFY(!program.isEmpty());
+    const QString vendorUpdater = QDir::toNativeSeparators(dir.filePath(QStringLiteral("Vendor/Update.exe")));
+    touchFile(QDir::fromNativeSeparators(vendorUpdater));
+    // The program listed already as well, as someone who added it by hand has it.
+    storeAppRules(QStringLiteral("Default"),
+                  {discord.updater, QStringLiteral("firefox"), program, vendorUpdater});
+
+    {
+        Backend backend;
+        QCOMPARE(backend.appRules(), (QStringList{program, QStringLiteral("firefox"), vendorUpdater}));
+    }
+    // Saved so: read back by a Backend that has nothing left to change.
+    QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("FreeTunnelTest"),
+                QStringLiteral("BackendSplitTest"));
+    QCOMPARE(s.value(QStringLiteral("bypass/profile_apps/Default")).toStringList(),
+             (QStringList{program, QStringLiteral("firefox"), vendorUpdater}));
+}
+
+// The same where it matters, through what Windows reports for the running
+// program: the rule an earlier version stored has to match Discord as it runs,
+// in its version directory, from the first start of this version.
+void TestBackendSplit::aRuleStoredForASquirrelUpdaterMatchesTheProgramOnWindows()
+{
+#if !defined(Q_OS_WIN)
+    QSKIP("Squirrel installs programs on Windows only");
+#else
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    // Under the long name Windows reports a running program by: the runner's
+    // temporary folder can be reached through an 8.3 one.
+    const SquirrelDiscord discord = installSquirrelDiscord(QFileInfo(dir.path()).canonicalFilePath());
+    // In capitals, as nothing on Windows stops a path from being spelled.
+    storeAppRules(QStringLiteral("Default"), {discord.updater.toUpper()});
+    QVERIFY(!freetunnel::appMatchesRules({discord.running, QStringLiteral("Discord.exe")},
+                                         {discord.updater.toUpper()}));
+
+    Backend backend;
+    QCOMPARE(backend.appRules().size(), 1);
+    const QString rule = backend.appRules().first();
+    QVERIFY2(!rule.endsWith(QStringLiteral("Update.exe"), Qt::CaseInsensitive), qPrintable(rule));
+    // Discord as it runs, spelled as the rule is: the rule is stored the way
+    // Windows reports a running program, which is what the matcher is given.
+    const QString root = QFileInfo(QDir::fromNativeSeparators(rule)).path();
+    const QString running = QDir::toNativeSeparators(root + QStringLiteral("/app-1.0.9163/Discord.exe"));
+    QVERIFY2(QFileInfo(running).isFile(), qPrintable(running));
+    QVERIFY2(freetunnel::appMatchesRules({running, QStringLiteral("Discord.exe")}, backend.appRules()),
+             qPrintable(rule));
+    const QString nextVersion = QString(running).replace(QStringLiteral("app-1.0.9163"),
+                                                         QStringLiteral("app-1.0.9170"));
+    QVERIFY(freetunnel::appMatchesRules({nextVersion, QStringLiteral("Discord.exe")}, backend.appRules()));
+#endif
 }
 
 void TestBackendSplit::appRulesAreValidatedDedupedAndPersisted()

@@ -55,6 +55,26 @@ QString appBundleOf(const QString &path);
 // /usr/bin": a program would have to be called "bin" to widen that.
 QString appDirectoryOf(const QString &path);
 
+// The name a program installed by Squirrel keeps across its updates, or empty
+// when the path is not in a version directory.
+// "C:\Users\me\AppData\Local\Discord\app-1.0.9163\Discord.exe"
+//     -> "C:\Users\me\AppData\Local\Discord\Discord.exe"
+//
+// Squirrel is the installer behind Discord, Slack, GitHub Desktop and a good
+// many other Electron applications on Windows. It puts every version of the
+// program in an app-<version> directory of its own and deletes the old one, so
+// the path a running Discord reports today is a path that is gone after its
+// next update. On the string alone: whether the layout is Squirrel's is
+// squirrelUnversionedPath's question.
+QString unversionedAppPath(const QString &path);
+
+// unversionedAppPath, but only where the layout is Squirrel's: the program is
+// named after the installation folder its version directory is in
+// (Discord\app-1.0.9163\Discord.exe), or that folder holds Squirrel's
+// Update.exe. Empty otherwise. A folder someone called app-2 for reasons of
+// their own, with other programs in it, is not a version of anything.
+QString squirrelUnversionedPath(const QString &path);
+
 // Does any rule name this program? A path rule matches the whole path; a bare
 // name matches the file name of any path.
 //
@@ -70,6 +90,12 @@ QString appDirectoryOf(const QString &path);
 // that file is a five-kilobyte stub whose whole job is to exec firefox-bin —
 // and exec keeps the pid, so every running process says firefox-bin. The rule
 // named a file that is never a running program.
+//
+// On Windows, both sides are compared without a Squirrel version directory (see
+// squirrelUnversionedPath), so a rule for Discord still matches the Discord that
+// the next update installs, and a rule's own directory (above) takes in the
+// programs of its version directories. Squirrel installs nothing on macOS or
+// Linux, and there a directory called app-<version> is compared as it is.
 bool appMatchesRules(const AppIdentity &app, const QStringList &rules);
 
 // The decision for one connection. `selectiveMode` is the existing split-tunnel

@@ -258,6 +258,16 @@ compare link at the bottom of its release notes.
   another profile, but the notice went on describing the deleted config until
   something else on the page changed: it could stay up over rules that were
   there, or stay away when the profile now in use had none.
+- **Windows: rules for Discord, Slack and similar apps apply to the app.** Apps
+  like these, along with GitHub Desktop and others that install into
+  AppData\Local next to an Update.exe, start through that updater, which runs
+  the app from a folder named after its version. Picking one from the list or
+  dropping its shortcut made a rule for the updater, and the app's own
+  connections never matched it. A rule made by choosing the app's file itself
+  stopped matching at the app's next update, when it moved to a new folder. The
+  rule now names the app and keeps matching after updates. A rule made the old
+  way, which shows as Update.exe, is changed to the app the first time this
+  version starts, as long as the app is still installed beside it.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle

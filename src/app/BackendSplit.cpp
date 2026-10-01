@@ -144,6 +144,35 @@ void Backend::clearExcludedRoutes() {
     persistSettings(); applySplitRules(); reapplyIfConnected(); emit splitChanged();
 }
 
+// Picking Discord, Slack or another program Squirrel installs from the list, or
+// dropping its shortcut, used to store a rule for its updater, <root>\Update.exe,
+// and none of the program's own connections ever matched it. Read at startup, such
+// a rule becomes the rule for the program, where that program is still installed
+// beside it, so nobody has to find the rule and add the program again.
+void Backend::resolveSquirrelUpdaterRules() {
+    const Qt::CaseSensitivity cs = freetunnel::appPathCaseSensitivity();
+    bool changed = false;
+    for (auto it = m_settings.profile_app_rules.begin(); it != m_settings.profile_app_rules.end(); ++it) {
+        QStringList resolved;
+        bool resolvedOne = false;
+        for (const QString &rule : std::as_const(it.value())) {
+            const QString program = freetunnel::squirrelProgramForUpdaterRule(rule);
+            resolvedOne |= !program.isEmpty();
+            const QString kept = program.isEmpty() ? rule : program;
+            if (!resolved.contains(kept, cs))
+                resolved << kept; // the program may have been listed already
+        }
+        if (resolvedOne) {
+            it.value() = resolved;
+            changed = true;
+        }
+    }
+    if (!changed)
+        return;
+    m_settings.app_rules = m_settings.profile_app_rules.value(m_settings.active_profile);
+    persistSettings();
+}
+
 bool Backend::addAppRule(const QString &rule) {
     // Unlike routes, a rule is NOT split on whitespace: program paths contain
     // spaces ("C:\\Program Files\\..."), and splitting one would turn a single
