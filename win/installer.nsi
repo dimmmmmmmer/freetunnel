@@ -27,7 +27,7 @@ Unicode true
 
 ; The same version as four numbers, which is the only form VIProductVersion
 ; takes. It cannot be derived from PRODUCT_VERSION here: a build that is not from
-; a tag carries "1.0.0-dev", and makensis rejects that outright — so it arrives
+; a tag carries "+dev.<run>", and makensis rejects that outright — so it arrives
 ; already numeric, computed alongside the display version.
 !ifndef PRODUCT_VERSION_NUM
   !define PRODUCT_VERSION_NUM "1.0.0.0"

@@ -14,9 +14,64 @@ git clone --filter=blob:none --no-checkout \
 git -C "$TMP/upstream" fetch --depth 1 origin "$REF"
 git -C "$TMP/upstream" checkout FETCH_HEAD
 
+# Applied with --fuzz=0, here and wherever the patches are applied: by default
+# GNU patch lets a hunk land with up to two of its context lines not matching,
+# which after an upstream bump can mean in the wrong place, and says so only in
+# its output. An offset is still allowed (01's client.cpp hunk is 35 lines
+# down on the current pin), so the lines each hunk expects to find must occur
+# exactly once in its file: then an exact match can only be the right place.
+# Checked before each patch, against the tree the previous ones left.
+unique_hunks() {
+  python3 - "$TMP/upstream" "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+tree, patch = Path(sys.argv[1]), Path(sys.argv[2])
+lines = patch.read_text().splitlines()
+bad = False
+target = None
+i = 0
+while i < len(lines):
+    line = lines[i]
+    i += 1
+    if line.startswith("--- "):
+        target = re.sub(r"^--- (a/)?", "", line).split("\t")[0]
+    m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@", line)
+    if not m:
+        continue
+    old_left, new_left = int(m.group(2) or 1), int(m.group(3) or 1)
+    expected = []
+    while (old_left or new_left) and i < len(lines):
+        body = lines[i] or " "  # an empty context line that lost its space
+        i += 1
+        if body.startswith("\\"):
+            continue
+        if body[0] in " -":
+            expected.append(body[1:])
+            old_left -= 1
+        if body[0] in " +":
+            new_left -= 1
+    # A hunk that creates a file (--- /dev/null), or one with nothing on its old
+    # side, has nothing to find and so no place it could wrongly land. Reading
+    # /dev/null instead found its empty text everywhere and refused the patch.
+    if target == "/dev/null" or not expected:
+        continue
+    text = (tree / target).read_text().split("\n")
+    n = len(expected)
+    hits = sum(text[k:k + n] == expected for k in range(len(text) - n + 1))
+    if hits != 1:
+        print(f"{patch.name}: the hunk for line {m.group(1)} of {target} matches "
+              f"{hits} places there, not exactly one", file=sys.stderr)
+        bad = True
+sys.exit(1 if bad else 0)
+PY
+}
+
 for p in "${PATCHES[@]}"; do
   echo "==> $(basename "$p")"
-  patch -p1 -d "$TMP/upstream" < "$p"
+  unique_hunks "$p"
+  patch -p1 --fuzz=0 -d "$TMP/upstream" < "$p"
 done
 
 # A patch that applies but lands the wrong thing is still broken, so assert the

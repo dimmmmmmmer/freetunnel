@@ -6,6 +6,11 @@ name: Tests
 on:
   push:
     branches: [main]
+    # A release is published only once this workflow has passed on the tagged
+    # commit (scripts/check-release-ci.sh, in the release job). A run on main
+    # usually covers it, but not when a later push cancelled that run or the tag
+    # is not on main, so the tag runs it too.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
   # Weekly run on a quiet main, for two reasons. The same runner-image drift the
@@ -65,17 +70,29 @@ jobs:
           arch: linux_gcc_64
           cache: true
 
-      - name: Install Qt (macOS)
+      - name: Install build deps (macOS)
         if: runner.os == 'macOS'
         run: |
           brew list ninja >/dev/null 2>&1 || brew install ninja
-          brew list qt >/dev/null 2>&1 || brew install qt
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
           # Homebrew's OpenSSL is keg-only, so CMake does not find it unaided, and
           # without it the update-signature tests skip their accept path. The
           # tests' configure now requires it on macOS; this is where it is.
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      # The Qt the macOS release is built with, not Homebrew's. `brew install qt`
+      # gave whatever Homebrew had that week (6.11 by September 2026), so the
+      # macOS tests ran on a Qt no release was ever built with, and a QT_VER bump
+      # could not reach them.
+      - name: Install Qt (macOS)
+        if: runner.os == 'macOS'
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VER }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          cache: true
 
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
@@ -114,7 +131,12 @@ jobs:
 
   coverage:
     name: Coverage (Linux)
-    runs-on: ubuntu-latest
+    # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19, and the
+    # apt packages below would move with it (lcov, cmake). The unit-test leg above
+    # stays on ubuntu-latest, the required check's name: it only has to build and
+    # pass, so it is where a newer image should show up first, as a red test leg
+    # rather than as an analyser's new opinions.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -183,7 +205,9 @@ jobs:
 
   sanitizers:
     name: ASan+UBSan (Linux)
-    runs-on: ubuntu-latest
+    # Named for the same reason as Coverage: the compiler is the image's g++, and
+    # a new major under the same label can bring findings no commit caused.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

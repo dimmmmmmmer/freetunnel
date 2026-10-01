@@ -1,4 +1,11 @@
 // cppcheck-suppress-file missingIncludeSystem
+// Qt Widgets is linked only for Qt.labs.platform's fallback (tests/CMakeLists.txt)
+// and never used here. Its QT_WIDGETS_LIB makes <QtTest> bring in the widget
+// helpers, whose qApp is a QApplication; this application is a QGuiApplication,
+// like the real one, so every QTest::mouseClick() downcast it to a type it is
+// not. Only to call a static, but undefined behaviour all the same, and UBSan
+// stops the test on it.
+#undef QT_WIDGETS_LIB
 #include <QtTest>
 
 #include <algorithm>

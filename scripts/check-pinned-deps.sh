@@ -80,6 +80,14 @@ while read -r line; do
   fail=1
 done < <(grep -rnE "^ +version: '[0-9]" .github/workflows)
 
+# ...nor a Qt from a package manager, which no declaration reaches: the macOS
+# unit tests ran on `brew install qt`, Homebrew's Qt of the week, while the
+# macOS release was built against QT_VER.
+while read -r line; do
+  echo "pinned-deps: Qt from Homebrew, use install-qt-action with \${{ env.QT_VER }}: $line" >&2
+  fail=1
+done < <(grep -rnE 'brew (install|reinstall|upgrade)( [^#]*)? qt(@[0-9]+)?([[:space:];|&]|$)' .github/workflows)
+
 while read -r line; do
   echo "pinned-deps: hardcoded conan version, use CONAN_VER: $line" >&2
   fail=1
@@ -94,6 +102,15 @@ while read -r line; do
   fail=1
 done < <(grep -rn 'vendor/trusttunnel/[A-Za-z0-9_.-]*\.patch' \
            .github/workflows scripts CONTRIBUTING.md 2>/dev/null)
+
+# ...and apply them with --fuzz=0. GNU patch's default fuzz lets a hunk land
+# with context lines that no longer match, which after an upstream bump can be
+# the wrong place; each of those places has to refuse it.
+while read -r line; do
+  echo "pinned-deps: vendored patch applied without --fuzz=0: $line" >&2
+  fail=1
+done < <(grep -rnE --exclude=check-pinned-deps.sh '(^|[^[:alnum:]_-])patch -p1' \
+           .github/workflows scripts CONTRIBUTING.md 2>/dev/null | grep -v -- '--fuzz=0')
 
 if [[ "$fail" -ne 0 ]]; then
   exit 1

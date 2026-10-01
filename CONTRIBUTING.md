@@ -53,7 +53,7 @@ endif ()
 From the upstream root:
 
 ```bash
-for p in FreeTunnel/vendor/trusttunnel/*.patch; do patch -p1 < "$p"; done
+for p in FreeTunnel/vendor/trusttunnel/*.patch; do patch -p1 --fuzz=0 < "$p"; done
 ```
 
 The patches are numbered because they are not independent — each one's context
@@ -62,8 +62,11 @@ there are three: live upload/download stats in the UI; the per-connection hook
 that per-application split tunnelling decides on; and the kill switch's pair,
 which hands a running session new split-tunnelling rules and mode instead of
 rebuilding it, and with the kill switch on keeps a first connect that fails
-retrying inside its session rather than ending it. Verified in CI via
-`FreeTunnel/scripts/verify_upstream_patch.sh`.
+retrying inside its session rather than ending it. `--fuzz=0` makes a hunk whose
+context has changed upstream fail rather than land a few lines off. Verified in
+CI via `FreeTunnel/scripts/verify_upstream_patch.sh`, which also requires the
+lines each hunk expects to occur exactly once in its file, so that a hunk cannot
+apply cleanly in the wrong place either.
 
 ### 3. Bootstrap Conan deps
 
@@ -83,13 +86,13 @@ cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DBUILD_TRUSTTUNNEL_QT=ON \
   -DDISABLE_HTTP3=ON \
-  -DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON \
   -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
 cmake --build build --target FreeTunnel -j8
 ```
 
-**HTTP/3 builds** (optional, requires Rust/quiche via upstream):
+**HTTP/3 builds** (optional; the core's QUIC is ngtcp2/nghttp3, which conan
+builds with the rest, so no Rust toolchain is needed):
 
 ```bash
 cmake -S . -B build-http3 -G Ninja \
@@ -142,13 +145,14 @@ On Windows, install OpenSSL 3 for 64-bit Windows (for example
 `choco install openssl`); CMake looks for it in `C:\Program Files\OpenSSL`, the
 installer's default, and anywhere else needs `-DOPENSSL_ROOT_DIR=` pointing at it.
 
-CI runs this on every push/PR via `.github/workflows/tests.yml` (matrix: Linux,
-macOS, Windows), plus a scheduled run every Monday so a quiet `main` still gets
-sampled. Additional Linux-only jobs: **gcov/lcov coverage**
+CI runs this via `.github/workflows/tests.yml` (matrix: Linux, macOS, Windows)
+on pushes to `main`, on pull requests and on `v*` tags, where the release waits
+for it to pass on the tagged commit, plus a scheduled run every Monday so a
+quiet `main` still gets sampled. Additional Linux-only jobs: **gcov/lcov coverage**
 (`scripts/coverage-upstream-report.sh`, merges unit tests + upstream instrumented
 build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
-Test suites — `ctest -N` lists them: deep links (incl. structured
+Test suites — `ctest -N` lists them all: deep links (incl. structured
 fuzz) and config import, config store and paths, settings, both TOML writers,
 credentials (Keychain / Credential Manager / libsecret, and whether Linux has a
 Secret Service to keep them in), release verify and version comparison, control
@@ -160,7 +164,8 @@ split tunnel, updates), QML UI smoke tests, and integration tests (config
 workflow, Backend + mock VPN, single instance, helper client, UpdateChecker
 end-to-end against a mock HTTP server).
 
-Security CI (`.github/workflows/security.yml`), on every push/PR and weekly:
+Security CI (`.github/workflows/security.yml`), on pushes to `main`, pull
+requests and `v*` tags (the release waits for it too), and weekly:
 cppcheck on `src/` and `include/`, **clang-tidy** (`scripts/run-clang-tidy.sh`),
 PR **dependency review**, upstream patch verification
 (`scripts/verify_upstream_patch.sh` against `scripts/upstream_ref.txt`), i18n
@@ -206,16 +211,20 @@ absent: `FT_SKIP_UPSTREAM_COVERAGE=1 bash scripts/coverage-report.sh`).
 `main` requires these checks in GitHub branch protection:
 
 ```text
-Unit tests (ubuntu-latest)    cppcheck                 pinned dependency refs
-Unit tests (windows-latest)   clang-tidy               i18n catalog freshness
-Unit tests (macos-15)         ASan+UBSan (Linux)       Codacy Static Code Analysis
+Unit tests (ubuntu-latest)          cppcheck                            pinned dependency refs
+Unit tests (windows-latest)         clang-tidy                          i18n catalog freshness
+Unit tests (macos-15)               ASan+UBSan (Linux)                  Codacy Static Code Analysis
+Build (freetunnel-linux-x86_64)     Build (freetunnel-macos-universal)  Build (freetunnel-windows-x86_64)
+Render bundle icons
 ```
 
 All three unit-test platforms gate a merge, not just Linux. Windows is roughly
 half of all downloads and macOS is most of the rest, and both are where this
 project's hard bugs have actually lived — a green Linux run says very little
 about either. ASan is required for the same reason: it has caught a real
-use-after-free here, not a hypothetical one.
+use-after-free here, not a hypothetical one. And the release build itself, on
+all three platforms: it is the only job that packages anything, and a pull
+request used to be able to merge with it red.
 
 Branches must also be up to date with `main` before merging (**strict**), so a
 dependabot PR that has fallen behind needs `gh pr update-branch` first.
@@ -234,7 +243,8 @@ Repository-side hygiene for Codacy:
 - [`.codacy.yml`](.codacy.yml) — excludes, **cppcheck `extra_lines`**, lizard/metric excludes
 - [`scripts/check-pinned-deps.sh`](scripts/check-pinned-deps.sh) — CI-enforced: every third-party
   Action in `.github/workflows` must be pinned to a full commit SHA (dependabot bumps stay
-  mergeable), and `QT_VER` / `CONAN_VER` must agree across workflows
+  mergeable), `QT_VER` / `CONAN_VER` must agree across workflows, and no leg may
+  take Homebrew's Qt instead of `QT_VER`'s
 
 **Note:** Codacy takes cppcheck flags only from `engines.cppcheck.extra_lines` in
 `.codacy.yml` — it cannot read a suppressions file. So the ids are written twice
@@ -275,8 +285,8 @@ finished (in Linguist, or by removing `type="unfinished"`), then run the script
 again to refresh `freetunnel_ru.qm`. The app embeds the committed `.qm`, not the
 `.ts`.
 
-CI runs `scripts/i18n-verify.sh` on every push/PR (see
-`.github/workflows/security.yml`) to ensure the catalog matches the current
+CI runs `scripts/i18n-verify.sh` with the Security workflow (see
+`.github/workflows/security.yml`, which a release also waits for) to ensure the catalog matches the current
 QML/C++ sources, the committed `.qm` is the one built from the `.ts`, and no
 translation is left unfinished (lrelease ships those as if they were done). The
 script scans only `qml/`, `src/`, `include/`, and `main.cpp` — not test trees or
@@ -345,9 +355,9 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 
 | Workflow | Purpose |
 | --- | --- |
-| `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows |
-| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows); Linux coverage + ASan. Also weekly (Mon) |
-| `.github/workflows/security.yml` | cppcheck, clang-tidy, dependency review (PRs), upstream patch verify, i18n freshness, pinned deps. Also weekly (Mon) |
+| `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows. A `v*` tag publishes only once Tests and Security have passed on the same commit |
+| `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows); Linux coverage + ASan. Also on `v*` tags and weekly (Mon) |
+| `.github/workflows/security.yml` | cppcheck, clang-tidy, dependency review (PRs), upstream patch verify, i18n freshness, pinned deps. Also on `v*` tags and weekly (Mon) |
 
 Upstream ref is pinned in [`scripts/upstream_ref.txt`](scripts/upstream_ref.txt) —
 the workflows read that file rather than carrying a SHA of their own. Bump it

@@ -31,6 +31,9 @@ engines:
       # wrapper code, so "unused struct member" is meaningless there. Real test
       # logic (tests/*.cpp) stays analyzed.
       - 'tests/mock_core/**'
+      # Exists to stop at ReleaseVerify.cpp's #error (the releaseverify_requires_openssl
+      # test), and with a -D given cppcheck reports every #error it reaches.
+      - 'tests/releaseverify_without_openssl.cpp'
     extra_lines:
       - "--suppress=missingInclude"
       - "--suppress=missingIncludeSystem"

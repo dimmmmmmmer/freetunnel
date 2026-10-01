@@ -35,9 +35,10 @@ fi
 # because they are not independent: 02 adds to the same callback struct and the
 # same event switch that 01 already touched, and 03's context lines in the
 # wrapper are where 01 and 02 left them, so each assumes the ones before it have
-# been applied. Sorted order is the contract, not a convenience.
+# been applied. Sorted order is the contract, not a convenience. --fuzz=0, as
+# in CI: a hunk whose context no longer matches fails instead of landing nearby.
 for p in "$CLIENT"/vendor/trusttunnel/*.patch; do
   echo "==> Applying $(basename "$p")"
-  patch -p1 -d "$UPSTREAM" < "$p"
+  patch -p1 --fuzz=0 -d "$UPSTREAM" < "$p"
 done
 echo "Upstream tree ready at ${UPSTREAM}"

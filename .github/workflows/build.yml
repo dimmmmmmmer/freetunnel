@@ -8,8 +8,11 @@ name: Build
 # `upstream/FreeTunnel/`, then configure CMake from the upstream root so the
 # upstream conan bootstrap runs and the `vpnlibs_trusttunnel` target exists.
 #
-# HTTP3/QUIC (quiche) is enabled, so the per-config HTTP/3 transport works in
-# the shipped binaries. This pulls Rust into the core build (quiche is Rust).
+# HTTP3/QUIC is enabled, so the per-config HTTP/3 transport works in the
+# shipped binaries. The core does QUIC with ngtcp2/nghttp3, built by conan like
+# its other dependencies; it used quiche (Rust) until 1.1.5. No leg installs
+# Rust: the core's one cargo build, setup_wizard, is a dependency of its own
+# tests, never of the FreeTunnel target.
 #
 # Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
 # signed so it launches after the user approves it in Gatekeeper; see the README.
@@ -63,7 +66,10 @@ jobs:
   # committed, so packaging cannot proceed without this artifact.
   icons:
     name: Render bundle icons
-    runs-on: ubuntu-latest
+    # Named, not ubuntu-latest, which becomes Ubuntu 26.04 from 2026-10-19: the
+    # rasterizers come from apt, and a new ImageMagick major under the same label
+    # would change the icons, or the commands, with no commit to blame.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install rasterizers
@@ -230,24 +236,12 @@ jobs:
           # Every vendored patch, in filename order — they build on each other's
           # context, which is why they are numbered. Naming one file here is what
           # broke the build when a second patch was added and the first was renamed.
+          # --fuzz=0: a hunk whose context has changed upstream fails here rather
+          # than landing a few lines off (see scripts/verify_upstream_patch.sh).
           for p in client/vendor/trusttunnel/*.patch; do
             echo "==> $(basename "$p")"
-            patch -p1 -d upstream < "$p"
+            patch -p1 --fuzz=0 -d upstream < "$p"
           done
-
-      # macOS and Windows keep the toolchain they have always had (the macOS step
-      # adds the x86_64 target through rustup). Pinned action instead of
-      # `curl https://sh.rustup.rs | sh`: a piped installer script is an
-      # unpinnable remote dependency in the job that publishes releases.
-      # Not on Linux: the FreeTunnel target compiles no Rust there. Upstream
-      # replaced quiche with ngtcp2/nghttp3 in 1.1.5, and its remaining cargo
-      # build (setup_wizard) is a dependency of `tests` only. The container has
-      # no rustup, so the action would fall back to that very piped installer.
-      - name: Install Rust
-        if: matrix.platform != 'linux'
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: stable
 
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
@@ -381,15 +375,31 @@ jobs:
           # Back off instead. 15/30/60/120 spreads five attempts over roughly four
           # minutes and costs nothing when the feed is healthy, because the loop
           # breaks on the first pass.
+          #
+          # NASM (it assembles BoringSSL) and NSIS (it builds the installer users
+          # run) are pinned to the versions the last green build used: unpinned,
+          # they were whatever the community feed served that day. A version that
+          # will not install fails the build here; bumping one is an edit to this
+          # list. Strawberry Perl stays unversioned because it is the runner
+          # image's: choco reports it "already installed" and fetches nothing, and
+          # a pin would fail the build the day the image carries a newer one.
+          $pinned = [ordered]@{ nasm = '3.2.0'; nsis = '3.13.0' }
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
           $backoff = @(15, 30, 60, 120)
           for ($i = 0; $i -le $backoff.Count; $i++) {
-              choco install -y --no-progress strawberryperl nasm nsis
-              if (Test-Path $nsis) { break }
-              if ($i -eq $backoff.Count) {
-                  throw "NSIS failed to install via Chocolatey after $($i + 1) attempts"
+              $failed = @()
+              foreach ($name in $pinned.Keys) {
+                  $version = $pinned[$name]
+                  choco install -y --no-progress $name --version $version
+                  if ($LASTEXITCODE -ne 0) { $failed += "$name $version" }
               }
-              Write-Host "NSIS not present after attempt $($i + 1) — retrying in $($backoff[$i])s…"
+              choco install -y --no-progress strawberryperl
+              if (-not (Test-Path $nsis)) { $failed += 'makensis.exe' }
+              if ($failed.Count -eq 0) { break }
+              if ($i -eq $backoff.Count) {
+                  throw "Chocolatey did not install $($failed -join ', ') after $($i + 1) attempts"
+              }
+              Write-Host "Missing after attempt $($i + 1): $($failed -join ', ') — retrying in $($backoff[$i])s…"
               Start-Sleep -Seconds $backoff[$i]
           }
           pip install -r upstream/requirements.txt
@@ -527,32 +537,50 @@ jobs:
         if: matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
 
+      # Whether the binary came out CET-marked. -fcf-protection reaches only what
+      # FreeTunnel's own CMakeLists compiles, and the linker marks the image only
+      # when every object in it carries the property, the core's and the conan
+      # libraries' included (see CMakeLists.txt). Printed rather than enforced:
+      # those are built with flags this repository does not set.
+      - name: Report CET marking (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash -e {0}
+        run: |
+          props="$(readelf -n build/FreeTunnel/FreeTunnel | grep -i 'x86 feature' || true)"
+          echo "FreeTunnel x86 feature property: ${props:-none (not CET-marked)}"
+
       - name: Compute version
         id: ver
         shell: bash
         run: |
           set -eu
+          project_version="$(sed -nE 's/^project\(FreeTunnel VERSION ([0-9.]+).*/\1/p' client/CMakeLists.txt)"
+          : "${project_version:?could not read project(FreeTunnel VERSION ...) from CMakeLists.txt}"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
             # The tag names the artifacts and the installer, but the binary
             # reports CMake's project(VERSION ...). If they drift, every shipped
             # client keeps seeing its own release as an available update.
-            project_version="$(sed -nE 's/^project\(FreeTunnel VERSION ([0-9.]+).*/\1/p' client/CMakeLists.txt)"
             if [[ "$version" != "$project_version" ]]; then
               echo "Tag v$version does not match project(FreeTunnel VERSION $project_version)" >&2
               echo "Bump CMakeLists.txt before tagging." >&2
               exit 1
             fi
-            echo "version=$version" >> "$GITHUB_OUTPUT"
           else
-            version="1.0.0-dev"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
+            # Not a release: the version it was built from, marked as this run's
+            # build. The version is bumped in the release commit, so between
+            # releases it names the last one, and dpkg sorts "+dev" after it: a CI
+            # .deb installs over that release, and the next release installs over
+            # the CI .deb. It used to be 1.0.0-dev, which apt took for a downgrade
+            # of every release since 1.0.0.
+            version="${project_version}+dev.${GITHUB_RUN_NUMBER}"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           # The same thing as four numbers, for the Windows VERSIONINFO resource,
-          # which takes nothing else. A build that is not from a tag is
-          # "1.0.0-dev", and makensis rejects that, so the suffix comes off here
-          # rather than being picked apart in NSIS.
-          echo "version_num=${version%%-*}.0" >> "$GITHUB_OUTPUT"
+          # which takes nothing else (makensis rejects the "+dev" of a build that
+          # is not from a tag), so it is the project version, not picked apart
+          # from the display one in NSIS.
+          echo "version_num=${project_version}.0" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------- Package
       - name: Prepare Linux bundle
@@ -740,7 +768,18 @@ jobs:
           export APPIMAGE_EXTRACT_AND_RUN=1
           ld=linuxdeploy-x86_64.AppImage
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage
-          appimage=$(ls -1 *.AppImage | head -1)
+          # By its exact name, which linuxdeploy builds from the desktop file's
+          # Name and the architecture. It writes it here, beside its own two
+          # AppImages, and this used to take whichever *.AppImage sorted first:
+          # ours, by the luck of the alphabet. Had the output been named anything
+          # else, or not been written at all, linuxdeploy itself would have been
+          # published as the AppImage and signed into SHA256SUMS.txt.
+          appimage=FreeTunnel-x86_64.AppImage
+          if [ ! -f "$appimage" ]; then
+            echo "::error::linuxdeploy did not write $appimage. AppImages here:"
+            ls -la -- *.AppImage || true
+            exit 1
+          fi
           # Not "linux" in the name, unlike the other artifacts: every AppImage is
           # for Linux, and the AppImage catalog flags it. The in-app updater picks
           # the asset by its .AppImage suffix, so older versions still find it.
@@ -764,10 +803,6 @@ jobs:
             # when this cache variable is unset, so naming OpenGL.framework here
             # skips the search and links OpenGL a second time instead — harmless.
             -DWrapOpenGL_AGL="$(xcrun --show-sdk-path)/System/Library/Frameworks/OpenGL.framework")
-
-          # The core deps include quiche (Rust); cross-building the x86_64 slice
-          # needs that Rust target installed (the runner only has the native one).
-          rustup target add x86_64-apple-darwin
 
           # Configure is retried: see the Linux configure comment (boringssl
           # 503 bursts on googlesource.com). Builds themselves are not retried.
@@ -836,6 +871,13 @@ jobs:
           codesign --verify --deep --strict "$APP"
           mkdir -p out
           RW=out/rw.dmg
+          # Sized from what goes in, rather than a fixed 200m that the bundle
+          # would one day outgrow (create then fails with "No space left on
+          # device"): the .app and the volume icon, a quarter again for the
+          # filesystem's own bookkeeping, and 20 MB for the journal.
+          content_kb=$(( $(du -sk "$APP" | cut -f1) + $(du -sk client/assets/logo.icns | cut -f1) ))
+          rw_kb=$(( content_kb * 5 / 4 + 20 * 1024 ))
+          echo "rw.dmg: ${rw_kb} KB for ${content_kb} KB of content"
           # Every disk device out/rw.dmg is attached as: the first whole-disk
           # node of each of its entries in hdiutil info. There can be more than
           # one. A create that fails leaves the image it made attached, with no
@@ -864,7 +906,7 @@ jobs:
             for dev in $(rw_devices); do
               hdiutil detach "$dev" -force >/dev/null 2>&1 || true
             done
-            if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size 200m \
+            if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size "${rw_kb}k" \
                  -ov -format UDRW "$RW"; then
               break
             fi
@@ -1078,6 +1120,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # To read the Tests and Security runs of this commit (see below).
+      actions: read
     steps:
       # First: actions/checkout cleans the workspace, so it has to run before the
       # artifacts land in it. Full history + tags — the notes come from
@@ -1087,8 +1131,20 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          sparse-checkout: CHANGELOG.md
+          sparse-checkout: |
+            CHANGELOG.md
+            /scripts/check-release-ci.sh
           sparse-checkout-cone-mode: false
+
+      # `needs: build` covers this workflow only. The unit tests, the sanitizers
+      # and the static analysis are in Tests and Security, which are separate runs
+      # that a tag used to publish past, finished or not, green or not. Nothing is
+      # signed or published until both have passed on this very commit; it waits
+      # while they are still running.
+      - name: Require Tests and Security to have passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-release-ci.sh "$GITHUB_SHA" tests.yml security.yml
 
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
