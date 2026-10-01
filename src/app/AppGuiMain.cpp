@@ -5,6 +5,7 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QRectF>
@@ -42,13 +43,38 @@ static void applyAppBranding(QGuiApplication &app)
 }
 
 
+// Hand the command to an instance already running, if there is one. Returns the
+// exit code when this launch is done, nothing when it is to be the instance.
+static std::optional<int> handToRunningInstance(const QString &controlArg, QStringList &trace)
+{
+    switch (forwardToRunningInstance(instanceServerNames(), controlArg)) {
+    case ForwardResult::Forwarded:
+        trace << QStringLiteral("forwarded-to-running-instance");
+        return 0;
+    case ForwardResult::Unreachable:
+        // Ours is running and could not be told. Never start beside it: two
+        // copies would drive one VPN, and this one would take the socket name
+        // over and leave that one reachable by nothing.
+        qWarning("FreeTunnel is already running but did not take the command; "
+                 "not starting a second copy");
+        trace << QStringLiteral("instance-unreachable");
+        return 1;
+    case ForwardResult::NoInstance:
+        break;
+    }
+    return std::nullopt;
+}
+
 static QLocalServer *startSingleInstanceServer(QGuiApplication &app, QString *instanceToken)
 {
     const QString kInstanceKey = freetunnel::instanceServerName();
-    QLocalServer::removeServer(kInstanceKey);
+    // Only what a crashed instance left behind (see removeStaleInstanceServer()).
+    removeStaleInstanceServer(kInstanceKey);
     if (!writeInstanceAuthToken(instanceToken))
         instanceToken->clear();
-    auto *server = new QLocalServer(&app);
+    QLocalServer *server = newInstanceServer(&app);
+    // After the stale name is cleared, which a claim of our own would stop.
+    claimInstanceName(server, kInstanceKey);
     server->setSocketOptions(QLocalServer::UserAccessOption);
     if (!server->listen(kInstanceKey)) {
         // Not fatal (the app works without single-instance forwarding), but a
@@ -91,7 +117,7 @@ static void wireLanguageChanges(QGuiApplication &app, QQmlApplicationEngine &eng
 // ready to swallow the next Quit event and dereference what is gone. Same shape as
 // setupDockReopen(), same fix.
 static QuitFilter *wireBackendLifecycle(QGuiApplication &app, Backend &backend, bool &appQuitting,
-                                        const QString &instanceToken)
+                                        QLocalServer *server, const QString &instanceToken)
 {
     auto *quitFilter = new QuitFilter();
     quitFilter->backend = &backend;
@@ -103,7 +129,16 @@ static QuitFilter *wireBackendLifecycle(QGuiApplication &app, Backend &backend, 
         appQuitting = true;
     });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
-    QObject::connect(&app, &QGuiApplication::aboutToQuit, &app, [instanceToken]() {
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, &app,
+                     [listener = QPointer<QLocalServer>(server), instanceToken]() {
+        // Stop listening before the token goes. Left listening until the
+        // application is destroyed, it would be found by a launch in between with
+        // no token left to show, which would take this for an instance it cannot
+        // reach and exit with nothing on screen. With the name gone it starts.
+        if (listener) {
+            listener->close();
+            releaseInstanceName(listener);
+        }
         // Ours, and only ours: the self-update path leaves a successor running.
         removeInstanceAuthToken(instanceToken);
     });
@@ -173,10 +208,8 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     // thread — so by the time anything below runs, the event loop has already
     // turned. Code after this point must not assume otherwise; assuming it is
     // exactly how the Dock-reopen handler came to be registered too late.
-    if (forwardToRunningInstance(freetunnel::instanceServerName(), controlArg)) {
-        step("forwarded-to-running-instance");
-        return 0;
-    }
+    if (const std::optional<int> exitNow = handToRunningInstance(controlArg, out->trace))
+        return exitNow;
     step("forward-check");
 
     QString instanceToken;
@@ -194,7 +227,8 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
 #endif
     step("backend");
 
-    out->quitFilter.reset(wireBackendLifecycle(app, backend, out->appQuitting, instanceToken));
+    out->quitFilter.reset(
+            wireBackendLifecycle(app, backend, out->appQuitting, out->server, instanceToken));
 #ifdef Q_OS_MACOS
     setupMacApplicationQuit(backend);
 #endif

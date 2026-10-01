@@ -5,19 +5,28 @@
 
 #include <QDir>
 #include <QFile>
+#include <QLocalServer>
 #include <QLocalSocket>
+#include <QLockFile>
+#include <QObject>
 #include <QRandomGenerator>
 #include <QStandardPaths>
+#include <QThread>
+
+#include <optional>
 
 #if defined(Q_OS_WIN)
 // clang-format off
 #include <windows.h>
 #include <namedpipeapi.h>
+#include <sddl.h>
 // clang-format on
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #if defined(Q_OS_LINUX)
 #include <sys/socket.h>
+#include <sys/un.h>
 #elif defined(Q_OS_MACOS)
 // getpeereid() — declared in unistd.h on macOS
 #endif
@@ -46,6 +55,19 @@ QString instanceAuthFilePath()
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     return dir + QStringLiteral("/instance-auth");
 }
+
+namespace {
+
+// The token in the fallback file, or empty when there is none.
+QString readInstanceAuthFile()
+{
+    QFile f(instanceAuthFilePath());
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(f.readAll()).trimmed();
+}
+
+} // namespace
 
 bool writeInstanceAuthToken(QString *tokenOut)
 {
@@ -83,26 +105,259 @@ bool writeInstanceAuthToken(QString *tokenOut)
     return true;
 }
 
-// The name this application's single-instance socket listens on.
+namespace {
+
+// The one name every build up to 1.2.2 listened on, whoever ran it.
+const QString kSharedInstanceName = QStringLiteral("FreeTunnelInstance");
+
+#if defined(Q_OS_WIN)
+QByteArray processUserSid(HANDLE process); // below, with the pipe-peer checks
+#endif
+
+// Who this process runs as, as text that can go into a socket name: the uid on
+// Unix, the SID on Windows. Empty when it cannot be told.
+QString currentUserTag()
+{
+#if defined(Q_OS_WIN)
+    QByteArray sid = processUserSid(::GetCurrentProcess());
+    LPWSTR text = nullptr;
+    if (sid.isEmpty() || ::ConvertSidToStringSidW(sid.data(), &text) == 0)
+        return {};
+    const QString tag = QString::fromWCharArray(text);
+    ::LocalFree(text);
+    return tag;
+#else
+    return QString::number(::getuid());
+#endif
+}
+
+// The name in the temporary directory: this user's own, or the shared one when
+// who this is cannot be told.
+QString perUserTempName()
+{
+    const QString user = currentUserTag();
+    return user.isEmpty() ? kSharedInstanceName : kSharedInstanceName + QLatin1Char('-') + user;
+}
+
+#if defined(Q_OS_LINUX)
+// $XDG_RUNTIME_DIR when it is what the spec promises — a directory of this
+// user's own that no other account may enter — and a socket path in it fits;
+// empty otherwise.
+QString privateRuntimeDir()
+{
+    const QByteArray dir = qgetenv("XDG_RUNTIME_DIR");
+    struct stat st{};
+    if (!dir.startsWith('/') || ::lstat(dir.constData(), &st) != 0 || !S_ISDIR(st.st_mode)
+        || st.st_uid != ::getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+        return {};
+    const QString clean = QDir::cleanPath(QFile::decodeName(dir));
+    const qsizetype socketPath = QFile::encodeName(clean).size() + 1 + kSharedInstanceName.size();
+    if (socketPath >= static_cast<qsizetype>(sizeof(sockaddr_un{}.sun_path)))
+        return {};
+    return clean;
+}
+#endif
+
+// The test override, or empty when there is none.
 //
-// Lives here rather than beside the listener because more than the listener
-// needs it: the self-update path has to stop owning the socket before it starts
-// the replacement, and a second copy of the string is a second thing to keep in
-// step with the test override below.
-//
-// The override matters during development: run a debug build from a checkout
-// under the production name and it connects to whatever FreeTunnel the developer
-// happens to have running — forwarding a command into their live app and then
-// exiting as though it were the second instance. It also leaves a socket in a
-// namespace shared with every other process on the machine.
-QString instanceServerName()
+// It matters during development: run a debug build from a checkout under the
+// production name and it connects to whatever FreeTunnel the developer happens
+// to have running — forwarding a command into their live app and then exiting
+// as though it were the second instance.
+QString testInstanceNameOverride()
 {
 #ifdef FT_ENABLE_TEST_HOOKS
-    const QByteArray override = qgetenv("FT_TEST_INSTANCE_NAME");
-    if (!override.isEmpty())
-        return QString::fromLocal8Bit(override);
+    return qEnvironmentVariable("FT_TEST_INSTANCE_NAME");
+#else
+    return {};
 #endif
-    return QStringLiteral("FreeTunnelInstance");
+}
+
+} // namespace
+
+// The name this user's single-instance socket listens on.
+//
+// Lives here rather than beside the listener because more than the listener
+// needs it: a second launch looks for it first (instanceServerNames()), an
+// AppImage update that cannot start the new build listens on it again, and a
+// second copy of the string is a second thing to keep in step with the test
+// override.
+//
+// One per user. A single name for the machine belonged to whoever started
+// FreeTunnel first: a Windows pipe name is one namespace for every session, and
+// on Linux the socket sat in the shared /tmp. Everyone else's launches found no
+// instance of theirs there and could not listen on it either, so every launch
+// and every link of theirs started another full copy.
+//
+// On Linux it goes in $XDG_RUNTIME_DIR, which every systemd or elogind session
+// has. A name of this user's in /tmp is still one any account can create first,
+// as a socket that turns everyone away or as a link to somewhere else; this
+// directory no one else can enter. Without it, the name in /tmp is all there is.
+// The temporary directory on macOS is the user's own already.
+QString instanceServerName()
+{
+    const QString override = testInstanceNameOverride();
+    if (!override.isEmpty())
+        return override;
+#if defined(Q_OS_LINUX)
+    const QString runtime = privateRuntimeDir();
+    if (!runtime.isEmpty())
+        return runtime + QLatin1Char('/') + kSharedInstanceName;
+#endif
+    return perUserTempName();
+}
+
+// The names after this user's own are only ever forwarded to, never listened
+// on, and what answers there has to pass the same checks as anything else. A
+// listener there that lets no one in is not given way to
+// (whatAFailedConnectMeans()).
+//
+// The shared name is tried for an update installed while an older FreeTunnel
+// keeps running. That one listens on the shared name, and a launch of the new
+// build that looked only for its own would find nothing and start a second copy
+// beside it. On Linux the name in /tmp comes before it, for a FreeTunnel that
+// was started where $XDG_RUNTIME_DIR was not set, as from a shell outside the
+// desktop session.
+QStringList instanceServerNames()
+{
+    const QString own = instanceServerName();
+    if (own == kSharedInstanceName || !testInstanceNameOverride().isEmpty())
+        return {own};
+    QStringList names{own};
+    const QString inTemp = perUserTempName();
+    if (inTemp != own && inTemp != kSharedInstanceName)
+        names << inTemp;
+    names << kSharedInstanceName;
+    return names;
+}
+
+namespace {
+
+// Where QLocalSocket looks for @p socketName: the name itself when it is a path,
+// otherwise a file of that name in the temporary directory.
+QString socketFilePath(const QString &socketName)
+{
+    return socketName.startsWith(QLatin1Char('/')) ? socketName
+                                                   : QDir::tempPath() + QLatin1Char('/') + socketName;
+}
+
+#if !defined(Q_OS_WIN)
+// Whether the socket file at @p socketName is one this user bound. The file
+// belongs to whoever bound it, and no other account can make one that is ours.
+// Looked at itself rather than through a link, which another account can leave
+// in /tmp pointing at something of this user's.
+bool socketFileIsThisUsers(const QString &socketName)
+{
+    struct stat st{};
+    return ::lstat(QFile::encodeName(socketFilePath(socketName)).constData(), &st) == 0
+            && S_ISSOCK(st.st_mode) && st.st_uid == ::getuid();
+}
+#endif
+
+// Whether a refused connection can come from a listener that is there but busy.
+// macOS turns a connection away from a full backlog with the same refusal as one
+// to a socket file nothing listens on; Linux leaves it waiting instead, and a
+// pipe on Windows is never refused. The hook lets a test on Linux take the
+// macOS path, which the system there never takes.
+bool refusalCanBeABusyListener()
+{
+#if defined(Q_OS_MACOS)
+    return true;
+#elif defined(FT_ENABLE_TEST_HOOKS) && !defined(Q_OS_WIN)
+    return qEnvironmentVariableIsSet("FT_TEST_REFUSAL_CAN_BE_BUSY");
+#else
+    return false;
+#endif
+}
+
+QString claimFilePath(const QString &socketName)
+{
+    return socketFilePath(socketName) + QStringLiteral(".lock");
+}
+
+const QString kClaimObjectName = QStringLiteral("freetunnel-instance-name-claim");
+
+// A running instance's claim on its name (claimInstanceName()), held for as long
+// as this object lives.
+class InstanceNameClaim : public QObject
+{
+public:
+    InstanceNameClaim(const QString &path, QObject *owner) : QObject(owner), m_lock(path)
+    {
+        setObjectName(kClaimObjectName);
+        // Stale only once the process that took it is gone, however long ago
+        // that was: an instance runs for days.
+        m_lock.setStaleLockTime(0);
+    }
+    bool take() { return m_lock.tryLock(0); }
+
+private:
+    QLockFile m_lock;
+};
+
+// Whether a process that is still running claims @p socketName. A claim left by
+// one that crashed is cleared on the way, as QLockFile does with a stale lock.
+bool aLiveInstanceClaims(const QString &socketName)
+{
+    QLockFile probe(claimFilePath(socketName));
+    probe.setStaleLockTime(0);
+    if (probe.tryLock(0)) {
+        probe.unlock();
+        return false;
+    }
+    return probe.error() == QLockFile::LockFailedError;
+}
+
+} // namespace
+
+bool claimInstanceName(QObject *owner, const QString &socketName)
+{
+    if (owner == nullptr || !refusalCanBeABusyListener())
+        return false;
+    auto *claim = new InstanceNameClaim(claimFilePath(socketName), owner);
+    if (claim->take())
+        return true;
+    delete claim;
+    return false;
+}
+
+void releaseInstanceName(QObject *owner)
+{
+    if (owner != nullptr)
+        qDeleteAll(owner->findChildren<QObject *>(kClaimObjectName, Qt::FindDirectChildrenOnly));
+}
+
+// Removing the name used to be unconditional at every start, and a start is not
+// proof that nothing listens there, only that nothing of ours answered: the name
+// can be held by a listener that is not ours to remove. Only a name that refuses
+// the connection outright is stale — a socket file with no listener behind it —
+// unless a live instance claims it: on macOS that refusal is also what a busy
+// instance of ours gives (refusalCanBeABusyListener()).
+//
+// What this spares is narrow, and no test of the start-up can see it. On Unix,
+// listen() with UserAccessOption renames its socket over whatever holds the name,
+// so the start that follows takes the name either way; only a name that listen()
+// then fails to take is left to its holder. A live instance of ours is kept from
+// being taken over by the launch never listening beside it: a listener of ours
+// that cannot be handed the command is Unreachable, and the launch exits.
+bool removeStaleInstanceServer(const QString &socketName)
+{
+#if defined(Q_OS_WIN)
+    // Nothing to remove: a pipe goes away with its last handle, and removeServer()
+    // does nothing there. Asking would still cost time. Qt waits five seconds for
+    // a pipe that stays busy, as one another account keeps taken does, and the
+    // launch has already waited that long for it once.
+    Q_UNUSED(socketName)
+    return false;
+#else
+    QLocalSocket probe;
+    probe.connectToServer(socketName);
+    if (probe.waitForConnected(250) || probe.error() != QLocalSocket::ConnectionRefusedError)
+        return false;
+    if (refusalCanBeABusyListener() && aLiveInstanceClaims(socketName))
+        return false;
+    return QLocalServer::removeServer(socketName);
+#endif
 }
 
 void removeInstanceAuthToken(const QString &onlyIfItMatches)
@@ -114,9 +369,18 @@ void removeInstanceAuthToken(const QString &onlyIfItMatches)
     // instance with no token at all — reachable by nothing, so every later
     // deep link starts a second copy instead of being forwarded, until the
     // next restart.
-    if (!onlyIfItMatches.isEmpty()
-        && CredentialStore::loadPassword(kInstanceAuthKey) != onlyIfItMatches)
-        return;
+    //
+    // Compared with the token where a second launch would find it: the store's,
+    // or the fallback file's when the store holds none. Comparing with the store
+    // alone never matched on Linux without a Secret Service, where the file is
+    // the only copy, and the token stayed on disk after every quit.
+    if (!onlyIfItMatches.isEmpty()) {
+        QString stored = CredentialStore::loadPassword(kInstanceAuthKey);
+        if (stored.isEmpty())
+            stored = readInstanceAuthFile();
+        if (stored != onlyIfItMatches)
+            return;
+    }
     CredentialStore::deletePassword(kInstanceAuthKey);
     QFile::remove(instanceAuthFilePath());
 }
@@ -144,18 +408,14 @@ bool readInstanceAuthToken(QString *tokenOut)
         QFile::remove(instanceAuthFilePath()); // drop stale legacy file
         return true;
     }
-    // Legacy plaintext file from builds before credential-store migration.
-    const QString path = instanceAuthFilePath();
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly))
-        return false;
-    const QString token = QString::fromUtf8(f.readAll()).trimmed();
-    f.close();
+    // The fallback file: written when the store refused the token, or left by a
+    // build from before the credential-store migration.
+    const QString token = readInstanceAuthFile();
     if (token.isEmpty())
         return false;
     if (CredentialStore::secureStorageAvailable()
             && CredentialStore::storePassword(kInstanceAuthKey, token)) {
-        QFile::remove(path);
+        QFile::remove(instanceAuthFilePath());
     }
     *tokenOut = token;
     return true;
@@ -304,16 +564,92 @@ bool localSocketPeerIsSameUser(QLocalSocket *socket, SocketEnd end)
 #endif
 }
 
-bool forwardToRunningInstance(const QString &socketName, const QString &controlArg)
-{
-    QString token;
-    if (!readInstanceAuthToken(&token))
-        return false;
+namespace {
 
-    QLocalSocket probe;
+// Whether what holds @p socketName, and did not let us in, is provably this
+// user's: an instance of ours too busy to answer, which a launch must not start
+// beside.
+//
+// The failure itself says only that something holds the name, not whose it is,
+// and another account can hold even this user's name: by creating the pipe
+// first on Windows, or the socket in the shared /tmp. Taken for ours whatever
+// it was, a listener there that answers no one, its backlog kept full or its
+// one pipe instance kept taken, made every launch exit, and FreeTunnel did not
+// start at all.
+bool heldByThisUser(const QString &socketName, QLocalSocket::LocalSocketError error)
+{
+#if defined(Q_OS_WIN)
+    // A pipe that will not open cannot be asked who made it. But a listener of
+    // ours keeps fifty instances of its pipe waiting for callers and opens
+    // another for each it takes, so a pipe that stays busy for the five seconds
+    // Qt waits on it is someone else's. Qt 6.8 reports that wait running out as
+    // a connection error, not a timeout: while connecting, it reads the wait's
+    // ERROR_SEM_TIMEOUT as ERROR_NO_DATA, a pipe being closed, which is no
+    // instance to give way to either. A timeout is taken the same way, should a
+    // later Qt call it one.
+    Q_UNUSED(socketName)
+    return error != QLocalSocket::ConnectionError && error != QLocalSocket::SocketTimeoutError;
+#else
+    Q_UNUSED(error)
+    return socketFileIsThisUsers(socketName);
+#endif
+}
+
+// Whether a refused connection to this user's own name came from a live instance
+// of ours with a full backlog, rather than from a socket file nothing listens on.
+// Only where the two look alike (macOS), and only with a running process's claim
+// on the name to tell them apart.
+bool refusedByABusyInstanceOfOurs(const QLocalSocket &probe, const QString &socketName,
+                                  bool ownName)
+{
+    return ownName && probe.error() == QLocalSocket::ConnectionRefusedError
+            && refusalCanBeABusyListener() && heldByThisUser(socketName, probe.error())
+            && aLiveInstanceClaims(socketName);
+}
+
+// A full backlog drains as soon as the instance's event loop turns again, so a
+// busy instance of ours is asked a few more times before it is given up on.
+constexpr int kBusyRetries = 5;
+constexpr unsigned long kBusyRetryPauseMs = 200;
+
+// What a connection that failed says about whether an instance of ours runs.
+// Only this user's own name can be given way to. The names after it are
+// fallbacks: the one every build up to 1.2.2 shared, which every user's launch
+// tries and any account can hold, and a failure there is no instance of ours.
+ForwardResult whatAFailedConnectMeans(const QLocalSocket &probe, const QString &socketName,
+                                      bool ownName)
+{
+    switch (probe.error()) {
+    case QLocalSocket::ConnectionRefusedError: // a socket file nothing listens on
+        return refusedByABusyInstanceOfOurs(probe, socketName, ownName) ? ForwardResult::Unreachable
+                                                                        : ForwardResult::NoInstance;
+    case QLocalSocket::ServerNotFoundError:    // no such name
+    case QLocalSocket::SocketAccessError:      // a name another user holds
+        return ForwardResult::NoInstance;
+    default:
+        break;
+    }
+    return ownName && heldByThisUser(socketName, probe.error()) ? ForwardResult::Unreachable
+                                                                : ForwardResult::NoInstance;
+}
+
+// Connect to the instance listening on @p socketName. Nothing when it is there
+// and ours; otherwise what the failure says about whether one is running.
+std::optional<ForwardResult> connectToInstance(QLocalSocket &probe, const QString &socketName,
+                                               bool ownName)
+{
     probe.connectToServer(socketName);
-    if (!probe.waitForConnected(250))
-        return false;
+    bool connected = probe.waitForConnected(250);
+    for (int retry = 0; !connected && retry < kBusyRetries
+         && refusedByABusyInstanceOfOurs(probe, socketName, ownName);
+         ++retry) {
+        QThread::msleep(kBusyRetryPauseMs);
+        probe.abort();
+        probe.connectToServer(socketName);
+        connected = probe.waitForConnected(250);
+    }
+    if (!connected)
+        return whatAFailedConnectMeans(probe, socketName, ownName);
 
     // The local-socket name lives in a world-writable namespace on Unix, so a
     // process of ANOTHER user could squat it before our real instance starts.
@@ -321,15 +657,27 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     // if an instance were already running (silent startup DoS). Only talk to a
     // listener owned by the same user.
     if (!localSocketPeerIsSameUser(&probe, SocketEnd::WeConnected))
-        return false;
+        return ForwardResult::NoInstance;
+#if !defined(Q_OS_WIN)
+    // Nor to one reached through a link. connect() follows it, so another
+    // account can point a name in /tmp at any socket of this user's, such as the
+    // session bus: that passes the peer check, takes the token and the link, and
+    // this launch exits without FreeTunnel starting.
+    if (!socketFileIsThisUsers(socketName))
+        return ForwardResult::NoInstance;
+#endif
+    return std::nullopt;
+}
 
+ForwardResult sendToInstance(QLocalSocket &probe, const QString &token, const QString &controlArg)
+{
 #if defined(Q_OS_WIN)
     letPipeServerTakeForeground(reinterpret_cast<HANDLE>(probe.socketDescriptor()));
 #endif
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
     const QByteArray msg = formatInstanceMessage(token, payload);
     if (probe.write(msg) != msg.size())
-        return false;
+        return ForwardResult::Unreachable;
     probe.flush();
     probe.waitForBytesWritten(300);
     probe.disconnectFromServer();
@@ -341,7 +689,40 @@ bool forwardToRunningInstance(const QString &socketName, const QString &controlA
     // the longest thing this channel carries, and the one where losing it means a
     // link the user clicked does nothing at all — did not.
     probe.waitForDisconnected(3000);
-    return true;
+    return ForwardResult::Forwarded;
+}
+
+} // namespace
+
+// "Could not hand it over" and "there is nothing to hand it to" used to be one
+// answer, false, and the caller started a full instance on either. With an
+// instance running that meant two copies driving one VPN — the second taking the
+// socket name over, so the first could no longer be reached by anything. It
+// happened whenever the token could not be read (a locked keyring, or an
+// instance that never managed to store one) and whenever the connection was slow.
+ForwardResult forwardToRunningInstance(const QStringList &socketNames, const QString &controlArg)
+{
+    // Read before any connection is open: the read can sit on a keyring prompt
+    // for as long as the user takes over it, and the listener gives a connection
+    // that says nothing three seconds before dropping it.
+    QString token;
+    const bool haveToken = readInstanceAuthToken(&token);
+    for (qsizetype i = 0; i < socketNames.size(); ++i) {
+        QLocalSocket probe;
+        const bool ownName = i == 0; // see instanceServerNames()
+        if (const std::optional<ForwardResult> failed =
+                    connectToInstance(probe, socketNames.at(i), ownName)) {
+            if (*failed == ForwardResult::NoInstance)
+                continue;
+            return *failed;
+        }
+        // Ours and listening. Without the token it can be told nothing, and
+        // that is still no reason to start a second copy beside it.
+        if (!haveToken)
+            return ForwardResult::Unreachable;
+        return sendToInstance(probe, token, controlArg);
+    }
+    return ForwardResult::NoInstance;
 }
 
 } // namespace freetunnel

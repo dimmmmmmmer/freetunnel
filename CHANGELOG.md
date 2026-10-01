@@ -339,10 +339,8 @@ compare link at the bottom of its release notes.
     and the download is removed once it is in place.
   - Linux: once FreeTunnel had updated itself as an AppImage, the next launch
     from the menu, or a tt:// link, could miss the new FreeTunnel and start a
-    second one beside it. The new one is now the one they reach. The update to
-    this version is still made by the version you have, so this can happen once
-    more: if two FreeTunnels are running afterwards, quit both and start
-    FreeTunnel again.
+    second one beside it. The new one is now the one they reach, from the update
+    to this version on.
 - **The Split page's notice about "Through VPN" with no rules follows a deleted
   config.** Deleting the config in use hands over to another one, which may use
   another profile, but the notice went on describing the deleted config until
@@ -353,6 +351,18 @@ compare link at the bottom of its release notes.
   is the one address bars, logs and certificates often show. The Split page
   refused it whenever the ending was spelled that way, as .рф is (xn--p1ai),
   while the same domain typed in its own alphabet was accepted. Both work now.
+- **FreeTunnel no longer starts a second copy beside the one running.** A launch
+  or a link that found FreeTunnel running but could not hand it over, because the
+  password keyring was locked, started a whole second copy, and the two then
+  drove the same VPN. Such a launch now gives way to the copy that is running and
+  closes without showing anything, so a link it carried is not acted on: open the
+  link again.
+- **Windows and Linux: everyone on a shared computer gets one FreeTunnel of their
+  own.** A second launch or a link is meant to go to the FreeTunnel already open,
+  and it did only for the first person to start FreeTunnel on that computer. For
+  anyone else, every launch and every link started another full copy. On Linux
+  the place a launch looks for it is now in your session's own runtime folder,
+  where another account can't put anything in the way.
 - **Linux: an AppImage started without FUSE can update itself and start with the
   system.** Run with --appimage-extract-and-run, as on a system without FUSE,
   FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
@@ -370,6 +380,16 @@ compare link at the bottom of its release notes.
   memory until it quit, and nothing ever read it. With logging off in Settings,
   that included the VPN core's own log. It is discarded now; the log FreeTunnel
   shows and saves is as before.
+- **Linux without a password keyring: a link that arrives while FreeTunnel
+  starts is handled, and so is every one after it.** A link or a second launch
+  that came in while FreeTunnel was still starting was set aside and never
+  handled. From then on each later one went unhandled until FreeTunnel was
+  restarted. The same could happen on any computer whose password store would
+  not keep the key that lets a second launch reach FreeTunnel.
+- **Linux without a password keyring: FreeTunnel deletes its launch key when it
+  quits.** Without a keyring, the key that lets a second launch reach the
+  FreeTunnel already open is kept in a file only you can read. The file stayed
+  behind after every quit, of no use to anyone; it is deleted on quit now.
 
 ## 1.2.2
 
