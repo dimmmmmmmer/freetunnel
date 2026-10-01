@@ -585,17 +585,36 @@ bool VpnHelperClient::ensureHelper() {
     return true;
 }
 
-#if defined(Q_OS_MACOS)
-static bool launchMacElevatedHelper(QProcess **procOut, QObject *parent, const QString &exe,
-                                    quint16 port, const QString &tokenPath, QString *err)
+// Declared in vpn_helper_launch.h, for the same reason as linuxHelperCommand: what
+// these build is run with administrator rights on the platforms most users are
+// on, and while it was built inside the functions below no test could see it.
+// Compiled everywhere, not only where it is used, because it is plain string
+// work: this way it is checked wherever the tests run, Linux included.
+namespace freetunnel {
+
+QString macHelperElevationScript(const QString &exe, quint16 port, const QString &tokenPath)
 {
     const QString inner =
             QStringLiteral("logf=$(mktemp \"${TMPDIR:-/tmp}/freetunnel-helper.XXXXXX\") || logf=/dev/null; "
                            "exec %1 --helper --port %2 --token-file %3 "
                            ">\"$logf\" 2>&1 &")
                     .arg(shellEscape(exe), QString::number(port), shellEscape(tokenPath));
-    const QString script = QStringLiteral("do shell script \"%1\" with administrator privileges")
-                                   .arg(appleScriptEscape(inner));
+    return QStringLiteral("do shell script \"%1\" with administrator privileges")
+            .arg(appleScriptEscape(inner));
+}
+
+QString windowsHelperParameters(quint16 port, const QString &tokenPath)
+{
+    return QStringLiteral("--helper --port %1 --token-file \"%2\"").arg(QString::number(port), tokenPath);
+}
+
+} // namespace freetunnel
+
+#if defined(Q_OS_MACOS)
+static bool launchMacElevatedHelper(QProcess **procOut, QObject *parent, const QString &exe,
+                                    quint16 port, const QString &tokenPath, QString *err)
+{
+    const QString script = freetunnel::macHelperElevationScript(exe, port, tokenPath);
     auto *proc = new QProcess(parent);
     proc->start(QStringLiteral("osascript"), {QStringLiteral("-e"), script});
     if (!proc->waitForStarted(5000)) {
@@ -614,8 +633,7 @@ static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QStr
                                     QString *err)
 {
     const QString exeDir = QFileInfo(exe).absolutePath();
-    const QString args = QStringLiteral("--helper --port %1 --token-file \"%2\"")
-                                 .arg(QString::number(port), tokenPath);
+    const QString args = freetunnel::windowsHelperParameters(port, tokenPath);
     SHELLEXECUTEINFOW sei{};
     sei.cbSize = sizeof(sei);
     // No SEE_MASK_NOCLOSEPROCESS. It makes ShellExecuteExW hand back a process

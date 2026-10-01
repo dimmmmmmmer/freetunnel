@@ -70,6 +70,10 @@ public:
     void releaseDisconnect();
     // Commands that arrived while a disconnect was held, in order.
     QStringList heldCommands() const;
+    // The helper going away with its session, as when it crashes or is killed:
+    // the connection is cut with no event sent first, and the next client starts
+    // from the handshake.
+    void dropClient();
 
 private:
     void adoptSocket(QTcpSocket *s);

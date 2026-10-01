@@ -147,7 +147,14 @@ inline parse_result parse(const std::string &content)
     std::string section;
     bool inMultiline = false;
     std::string multilineKey;
+    std::string multilineBody;
     size_t lineNo = 0;
+    // Under its own name and, inside a table, under the dotted one as well.
+    const auto put = [&result, &section](const std::string &key, const std::string &value) {
+        result.insert(key, value);
+        if (!section.empty())
+            result.insert(section + "." + key, value);
+    };
 
     size_t pos = 0;
     while (pos <= content.size()) {
@@ -158,9 +165,15 @@ inline parse_result parse(const std::string &content)
         ++lineNo;
 
         if (inMultiline) {
-            // Inside a """ block: only its terminator matters.
-            if (rawLine.find("\"\"\"") != std::string::npos)
-                inMultiline = false;
+            // Inside a """ block: everything up to its terminator is the value.
+            const size_t end = rawLine.find("\"\"\"");
+            if (end == std::string::npos) {
+                multilineBody += rawLine + '\n';
+                continue;
+            }
+            multilineBody += rawLine.substr(0, end);
+            inMultiline = false;
+            put(multilineKey, "\"" + multilineBody + "\"");
             continue;
         }
 
@@ -186,12 +199,17 @@ inline parse_result parse(const std::string &content)
 
         if (value.rfind("\"\"\"", 0) == 0) {
             // Opening a multi-line basic string; it may also close on this line.
-            const bool closesHere = value.size() > 3 && value.find("\"\"\"", 3) != std::string::npos;
-            inMultiline = !closesHere;
+            // Its text is kept, as toml++ keeps it: a pinned certificate arrives
+            // this way, and was read back as empty. A newline straight after the
+            // opening quotes is not part of it, in TOML as here.
+            const size_t close = value.find("\"\"\"", 3);
+            if (close != std::string::npos) {
+                put(key, "\"" + value.substr(3, close - 3) + "\"");
+                continue;
+            }
+            inMultiline = true;
             multilineKey = key;
-            result.insert(key, "");
-            if (!section.empty())
-                result.insert(section + "." + key, "");
+            multilineBody = value.size() > 3 ? value.substr(3) + '\n' : std::string();
             continue;
         }
 
@@ -204,9 +222,7 @@ inline parse_result parse(const std::string &content)
         if (quotes % 2 != 0)
             return parse_result("unterminated string at line " + std::to_string(lineNo));
 
-        result.insert(key, value);
-        if (!section.empty())
-            result.insert(section + "." + key, value);
+        put(key, value);
     }
 
     if (inMultiline)

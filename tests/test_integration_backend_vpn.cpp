@@ -54,6 +54,7 @@ private slots:
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms_data();
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms();
     void aBackendDestroyedMidSessionWithoutPrepareQuitIsSafe();
+    void theHelperGoingAwayWhileConnectedLeavesTheWindowOff();
     void aMessageTheHelperWordsIsShownInTheUsersLanguage_data();
     void aMessageTheHelperWordsIsShownInTheUsersLanguage();
     void aChangeWhileTheHelperStartsDoesNotStartItAgain();
@@ -1067,6 +1068,51 @@ void TestIntegrationBackendVpn::aBackendDestroyedMidSessionWithoutPrepareQuitIsS
         QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
     }
     QTest::qWait(50); // anything it posted on the way out is delivered here
+}
+
+// The elevated helper holds the session, and it can go away under a connected
+// window: it crashes, or something kills it. The client sees its socket close
+// and nothing else, so it is Backend that has to turn that into what the window
+// shows. Nothing may be left saying Connected or Connecting over a tunnel that is
+// gone, an edit that would rebuild a live session must not start a helper for a
+// session there is not, and Connect has to work again, from a new handshake.
+void TestIntegrationBackendVpn::theHelperGoingAwayWhileConnectedLeavesTheWindowOff()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("helpergone.example")));
+    configs.install();
+
+    MockHelperEnv env(QStringLiteral("backend-helper-gone-token"));
+    QVERIFY(env.start());
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QVERIFY(!backend.sessionTime().isEmpty());
+    const int connectionsBefore = env.server.connectionCount();
+
+    QSignalSpy state(&backend, &Backend::stateChanged);
+    env.server.dropClient();
+    QVERIFY2(QTest::qWaitFor([&]() { return !backend.connected(); }, 5000),
+             "the window still says Connected with the helper and its tunnel gone");
+    QVERIFY(state.count() > 0);
+    QVERIFY2(!backend.connecting(), "a helper that went away left the window Connecting");
+    QVERIFY(!backend.disconnecting());
+    QVERIFY(backend.sessionTime().isEmpty());
+
+    // The kill switch is a setting a live session is rebuilt for; with none
+    // there, changing it is a setting and nothing more.
+    backend.setKillSwitch(!backend.killSwitch());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectionCount(), connectionsBefore);
+    QVERIFY(!backend.connected() && !backend.connecting());
+
+    backend.connectVpn();
+    QVERIFY2(QTest::qWaitFor([&]() { return backend.connected(); }, 10000),
+             "Connect did not work again after the helper went away");
+    QCOMPARE(env.server.connectionCount(), connectionsBefore + 1);
+    QCOMPARE(env.server.connectCount(), 2);
+    backend.prepareQuit();
 }
 
 void TestIntegrationBackendVpn::aMessageTheHelperWordsIsShownInTheUsersLanguage_data()

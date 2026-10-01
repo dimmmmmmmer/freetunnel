@@ -107,6 +107,20 @@ void MockHelperServer::adoptSocket(QTcpSocket *s)
     });
 }
 
+void MockHelperServer::dropClient()
+{
+    if (m_sock) {
+        m_sock->disconnect(this);
+        m_sock->abort();
+        m_sock->deleteLater();
+        m_sock = nullptr;
+    }
+    m_buf.clear();
+    m_challenge.clear();
+    m_authed = false;
+    m_tunnelUp = false;
+}
+
 void MockHelperServer::send(const QJsonObject &e)
 {
     if (!m_authed || !m_sock)
@@ -197,6 +211,14 @@ void MockHelperServer::handle(const QJsonObject &c)
     if (cmd == QLatin1String("connect")) {
         ++m_connectCount;
         const QString toml = c.value("configToml").toString();
+        // The real helper refuses a connect that names a file instead of carrying
+        // the config: it would open that file as root. This double used to report
+        // Connected for one, so two tests asserted a session production never
+        // starts. Same refusal, same words, and no state at all.
+        if (toml.isEmpty()) {
+            send(QJsonObject{{"ev", "error"}, {"msg", "connect requires inline configToml"}});
+            return;
+        }
         auto scripted = [&toml](const QHash<QString, QString> &byValue) {
             for (auto it = byValue.cbegin(); it != byValue.cend(); ++it) {
                 if (toml.contains(QStringLiteral("\"%1\"").arg(it.key())))

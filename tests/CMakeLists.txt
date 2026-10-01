@@ -111,7 +111,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(QHotkey)
 
-find_package(OpenSSL QUIET)
+# REQUIRED on macOS and Windows, as it is for the app (../CMakeLists.txt): those
+# are the release platforms. Without OpenSSL, ReleaseVerify is built inert and
+# the update-signature tests skip their accept path, the one every release takes;
+# ctest counts a skip as a pass, so a runner without it stayed green while never
+# checking a signature. Optional on Linux, for local builds; CI installs it.
+if(APPLE OR WIN32)
+    find_package(OpenSSL REQUIRED)
+else()
+    find_package(OpenSSL QUIET)
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FreetunnelDeps.cmake)
 
@@ -299,6 +308,21 @@ add_executable(test_vpn_helper_launch
 target_include_directories(test_vpn_helper_launch PRIVATE ../include ../include/vpn)
 target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch -o ${CMAKE_CURRENT_BINARY_DIR}/report-vpn_helper_launch.txt,txt)
+
+# What macOS and Windows run elevated to start the helper, read back as each of
+# them reads it. The builders live in vpn_helper_client.cpp; the parser that
+# reads their output on the helper's side is vpn_helper_launch.cpp.
+add_executable(test_helper_elevation
+    test_helper_elevation.cpp
+    ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_launch.cpp
+    ../src/core/AppImagePath.cpp
+    ../src/core/AppUiUtils.cpp
+    ../include/vpn/vpn_helper_client.h
+)
+target_include_directories(test_helper_elevation PRIVATE ../include ../include/core ../include/vpn)
+target_link_libraries(test_helper_elevation PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+add_test(NAME helper_elevation COMMAND test_helper_elevation -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_elevation.txt,txt)
 
 add_executable(test_appimagepath
     test_appimagepath.cpp
@@ -519,6 +543,29 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
+
+# The Windows window chrome (src/app/WindowsChrome.cpp) on the one platform it runs
+# on, and on the real Windows platform plugin: under offscreen, which the rest of
+# the suite uses, the app does not set it up at all. QWindowKit comes from the
+# file the app takes it from, so the same commit and options are tested.
+if(WIN32)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/QWindowKit.cmake)
+
+    add_executable(test_windows_chrome
+        test_windows_chrome.cpp
+        ../src/app/WindowsChrome.cpp
+        ../include/app/WindowsChrome.h
+    )
+    target_include_directories(test_windows_chrome PRIVATE ../include)
+    target_compile_definitions(test_windows_chrome PRIVATE FT_HAVE_QWINDOWKIT)
+    target_link_libraries(test_windows_chrome PRIVATE
+        Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test QWindowKit::Quick)
+    add_test(NAME windows_chrome COMMAND test_windows_chrome
+        -o ${CMAKE_CURRENT_BINARY_DIR}/report-windows_chrome.txt,txt)
+    # Over the offscreen run-ctest.sh sets: there the window id is a counter, not
+    # an HWND, and the agent would hand it to Win32 as one.
+    set_tests_properties(windows_chrome PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=windows")
+endif()
 
 add_executable(test_desktopchrome test_desktopchrome.cpp)
 target_link_libraries(test_desktopchrome PRIVATE ft_desktop Qt6::Test)
@@ -784,6 +831,30 @@ if(OpenSSL_FOUND)
 endif()
 add_test(NAME backend_split COMMAND test_backend_split -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_split.txt,txt)
 
+# Backend and the MockBackend the QML tests run against, side by side, so the two
+# cannot drift apart without a test saying so.
+add_executable(test_qml_backend_parity
+    test_qml_backend_parity.cpp
+    ui/MockBackend.cpp
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+)
+target_include_directories(test_qml_backend_parity PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn)
+target_compile_definitions(test_qml_backend_parity PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_qml_backend_parity PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
+freetunnel_link_linux_secrets(test_qml_backend_parity)
+if(WIN32)
+    target_link_libraries(test_qml_backend_parity PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_qml_backend_parity PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_qml_backend_parity PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME qml_backend_parity COMMAND test_qml_backend_parity -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_backend_parity.txt,txt)
+
 # The REAL privileged helper server, built against the mock core so it needs
 # neither the VPN core nor root. Previously vpn_helper_server.cpp — the code that
 # runs as root and parses everything the GUI sends — was in no test target at all
@@ -819,6 +890,30 @@ target_compile_definitions(test_helper_server PRIVATE FT_ENABLE_TEST_HOOKS
 target_link_libraries(test_helper_server PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
 add_dependencies(test_helper_server freetunnel_test_helper)
 add_test(NAME helper_server COMMAND test_helper_server -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_server.txt,txt)
+
+# The same real helper, for what it promises about its own life (when it leaves,
+# what it refuses once claimed), for the settings only it acts on, and for random
+# input: each used to be checked against MockHelperServer, or not at all.
+# tests/real_helper.h starts it.
+foreach(suite IN ITEMS lifecycle settings fuzz)
+    add_executable(test_helper_server_${suite}
+        test_helper_server_${suite}.cpp
+        real_helper.h
+        ../src/vpn/vpn_helper_client.cpp
+        ../src/core/AppImagePath.cpp
+        ../src/core/AppUiUtils.cpp
+        ../include/vpn/vpn_helper_client.h
+    )
+    target_include_directories(test_helper_server_${suite} PRIVATE . ../include ../include/core ../include/vpn)
+    target_compile_definitions(test_helper_server_${suite} PRIVATE FT_ENABLE_TEST_HOOKS
+        FT_TEST_HELPER_BINARY="$<TARGET_FILE:freetunnel_test_helper>")
+    target_link_libraries(test_helper_server_${suite} PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+    add_dependencies(test_helper_server_${suite} freetunnel_test_helper)
+    add_test(NAME helper_server_${suite} COMMAND test_helper_server_${suite}
+        -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_server_${suite}.txt,txt)
+endforeach()
+# A config as the app writes it, for the endpoint keys only the core acts on.
+target_sources(test_helper_server_settings PRIVATE ../src/core/ConfigToml.cpp)
 
 # Backend's update state machine: the code that ends in launching an installer
 # sat at 2.3% line coverage, and both bugs found in it were found by review.
