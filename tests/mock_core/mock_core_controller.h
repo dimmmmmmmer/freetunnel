@@ -7,6 +7,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "net/network_manager.h"
 #include "vpn/vpn.h"
 
 namespace mockcore {
@@ -78,6 +80,10 @@ public:
         m_lastVerifiedChain.clear();
         m_verifyCalls = 0;
         ag::Logger::resetCounters();
+        g_outboundInterface.store(0);
+        g_tunnelActive.store(false);
+        ag::g_mockActiveIf.store(0);
+        ag::g_mockActiveIfLooks.store(0);
     }
 
     // ---- scripting from the test ----
@@ -114,6 +120,18 @@ public:
         m_certError = std::move(err);
     }
 
+    // Which adapter the core's own Windows detection calls active (0: none —
+    // no adapter has a default route). This is what the machine's network
+    // looks like to the wrapper's uplink follower; changing it is how a test
+    // unplugs a cable or docks a laptop.
+    void setActiveUplink(uint32_t ifIndex) { ag::g_mockActiveIf.store(ifIndex); }
+    // How many times the core was asked for the active adapter.
+    int activeUplinkLooks() const { return ag::g_mockActiveIfLooks.load(); }
+
+    // The core's process-wide state, which the mock otherwise only reports.
+    void setOutboundInterface(uint32_t ifIndex) { g_outboundInterface.store(ifIndex); }
+    void setTunnelActive(bool up) { g_tunnelActive.store(up); }
+
     // ---- introspection ----
     int connectCallCount()
     {
@@ -140,6 +158,36 @@ public:
         const auto it = m_clients.find(id);
         return it != m_clients.end() ? it->second.disconnects : 0;
     }
+
+    // Every network change the client was told about, oldest first, each
+    // paired with the outbound interface the core had at that moment — the
+    // core's contract is that the interface is set BEFORE the notification,
+    // and the pair is what lets a test hold the wrapper to that order. The
+    // count of system DNS reads made by then does the same for the DNS servers,
+    // which the core's DNS restarts with on the notification.
+    struct NetworkChange {
+        ag::VpnNetworkState state;
+        uint32_t outbound;
+        std::size_t dnsReads;
+    };
+    std::vector<NetworkChange> networkChanges(uint64_t id)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_clients.find(id);
+        return it != m_clients.end() ? it->second.networkChanges : std::vector<NetworkChange>{};
+    }
+
+    // Every set_system_dns() call on the client, oldest first, as the outbound
+    // interface the core had when it was made.
+    std::vector<uint32_t> systemDnsReads(uint64_t id)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_clients.find(id);
+        return it != m_clients.end() ? it->second.dnsReads : std::vector<uint32_t>{};
+    }
+
+    // The outbound interface the core would bind its own sockets to now.
+    static uint32_t outboundInterface() { return ag::vpn_network_manager_get_outbound_interface(); }
 
     // The config the most recently built core client was handed. `captured` is
     // false until a client has actually been constructed, so a test cannot pass
@@ -252,12 +300,30 @@ public:
         return ev.result;
     }
 
+    // Ask the client to protect one of the core's own sockets, as the core does
+    // before each connection it opens itself. Returns the handler's verdict, or
+    // kNoProtectHandler when there is no handler. The socket is not a real one:
+    // what a test looks at is what protecting it did to the outbound interface.
+    static constexpr int kNoProtectHandler = -434343;
+    int fireProtect(uint64_t id)
+    {
+        ag::VpnCallbacks cbs = callbacksFor(id);
+        if (!cbs.protect_handler)
+            return kNoProtectHandler;
+        sockaddr_in peer{};
+        peer.sin_family = AF_INET;
+        ag::SocketProtectEvent ev;
+        ev.peer = reinterpret_cast<const sockaddr *>(&peer);
+        cbs.protect_handler(&ev);
+        return ev.result;
+    }
+
     // ---- hooks used by the mock ag::TrustTunnelClient ----
     uint64_t registerClient(ag::VpnCallbacks cbs)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         const uint64_t id = m_nextId++;
-        m_clients[id] = Record{std::move(cbs), true, 0};
+        m_clients[id] = Record{std::move(cbs), true, 0, {}, {}};
         m_lastClientId = id;
         return id;
     }
@@ -270,9 +336,13 @@ public:
             it->second.alive = false; // keep callbacks: stale events still fire
     }
 
-    std::string onSetSystemDns(uint64_t)
+    std::string onSetSystemDns(uint64_t id)
     {
+        const uint32_t outbound = ag::vpn_network_manager_get_outbound_interface();
         std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_clients.find(id);
+        if (it != m_clients.end())
+            it->second.dnsReads.push_back(outbound);
         return m_dnsError;
     }
 
@@ -293,6 +363,16 @@ public:
         const auto it = m_clients.find(id);
         if (it != m_clients.end())
             ++it->second.disconnects;
+    }
+
+    void onNetworkChange(uint64_t id, ag::VpnNetworkState state)
+    {
+        const uint32_t outbound = ag::vpn_network_manager_get_outbound_interface();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_clients.find(id);
+        if (it != m_clients.end())
+            it->second.networkChanges.push_back(
+                    NetworkChange{state, outbound, it->second.dnsReads.size()});
     }
 
     // Called by the mock ag::TrustTunnelClient constructor, i.e. at the exact
@@ -334,6 +414,8 @@ private:
         ag::VpnCallbacks callbacks;
         bool alive = false;
         int disconnects = 0;
+        std::vector<NetworkChange> networkChanges;
+        std::vector<uint32_t> dnsReads; // outbound interface at each set_system_dns()
     };
 
     ag::VpnCallbacks callbacksFor(uint64_t id)

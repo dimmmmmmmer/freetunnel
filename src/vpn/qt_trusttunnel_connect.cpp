@@ -2,7 +2,6 @@
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
 
-#include "core/NetBind.h"
 #include "net/network_manager.h"
 
 #include <QMetaObject>
@@ -22,13 +21,26 @@
 #endif
 
 #if defined(Q_OS_WIN)
+// The adapter the core must keep its own traffic on, chosen before the tunnel
+// exists so that the tunnel can never be chosen.
+//
+// The core's own pick: the adapter carrying the default route with the lowest
+// metric, among Ethernet, Wi-Fi and mobile broadband adapters — the same one
+// set_system_dns() reads the DNS servers from, so the two cannot disagree. This
+// used to be our physicalOutboundRoute(), which asks where a packet to a public
+// address would go. Before a first connect that is the same answer; on a
+// reconnect it is not, because the previous session's tunnel is still installed
+// when the next attempt starts, its routes cover every public address, and the
+// question then lands on the tunnel — which is rightly not eligible — and falls
+// through to the first adapter that is up, in whatever order Windows lists
+// them. On a machine with Hyper-V or WSL that can be an internal virtual switch
+// with no way out. The default-route table is not affected by our tunnel, whose
+// routes are split in halves and never a default route.
 static uint32_t captureWindowsPhysicalOutbound()
 {
-    const freetunnel::PhysicalRoute route = freetunnel::physicalOutboundRoute();
-    if (route.index <= 0)
-        return 0;
-    const auto idx = static_cast<uint32_t>(route.index);
-    ag::vpn_network_manager_set_outbound_interface(idx);
+    const uint32_t idx = ag::vpn_win_detect_active_if();
+    if (idx != 0)
+        ag::vpn_network_manager_set_outbound_interface(idx);
     return idx;
 }
 #endif
@@ -99,6 +111,7 @@ void QtTrustTunnelClient::connectVpn()
     m_stopRequested = false;
     m_reconnectTimer.stop();
     m_fdWatchdogTimer.start();
+    startFollowingUplink();
     setState(State::Connecting);
     startConnectAttempt();
 }
@@ -317,8 +330,12 @@ bool QtTrustTunnelClient::applySystemDns(const AttemptPtr &ctx)
     const auto dnsErr = ctx->client->set_system_dns();
     if (!dnsErr)
         return true;
-    ctx->outcome = ConnectAttempt::Outcome::FatalStop;
-    ctx->error = QString("set_system_dns() failed: %1").arg(QString::fromStdString(dnsErr->str()));
+    // On Windows the core reads the DNS servers off the active adapter and fails
+    // when there is none, which is usually being offline, not a broken setup —
+    // see dnsFailureOutcome (qt_trusttunnel_uplink.cpp).
+    const QString coreError = QString::fromStdString(dnsErr->str());
+    ctx->error = QString("set_system_dns() failed: %1").arg(coreError);
+    ctx->outcome = dnsFailureOutcome(coreError, &ctx->error);
     retireCore(ctx->client, ctx->monitor);
     return false;
 }
@@ -408,6 +425,7 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
     case ConnectAttempt::Outcome::Connected:
         m_client = std::move(ctx->client);
         m_networkMonitor = std::move(ctx->monitor);
+        resetUplinkTracking();
         return;
     case ConnectAttempt::Outcome::Retry:
         scheduleReconnect(ctx->error);

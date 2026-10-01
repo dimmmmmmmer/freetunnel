@@ -118,6 +118,13 @@ compare link at the bottom of its release notes.
   it.** A tt:// link that turns off server certificate verification says so
   before it adds the server, but a file that did the same was added without a
   word. The message that the config was added now says it too.
+- **Windows: FreeTunnel goes around another VPN connected underneath it.** With
+  a VPN whose adapter Windows counts as a network card, such as OpenVPN with its
+  TAP adapter, which sends everything through itself without being the default
+  route, FreeTunnel's connection to its server, and the server pings on the
+  Configs page, went through that VPN. They now use the network adapter that
+  carries Windows' default route, as TrustTunnel's own clients do, so a server
+  that can only be reached through the other VPN can't be reached from FreeTunnel.
 - **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
   22.04 and needed its C library (glibc 2.35), so neither the .deb nor the
   AppImage started on Ubuntu 20.04, Debian 11 or RHEL 9 and its rebuilds. It is
@@ -137,6 +144,30 @@ compare link at the bottom of its release notes.
   connection. FreeTunnel now writes the core's messages itself, to a file it
   keeps open for as long as logging is on. With logging off they are now
   written nowhere; on macOS they used to go to a temporary file even then.
+- **Windows: the VPN moves with you to another network adapter.** It kept its own
+  traffic on the adapter it had connected over. Unplugging the network cable with
+  Wi-Fi on, undocking a laptop or unplugging a phone used for USB tethering left it
+  trying the old adapter for about a minute before it gave up and reconnected, and
+  on a computer with Hyper-V or WSL that reconnect could pick one of their internal
+  adapters and fail again. It now follows the adapter Windows uses for the
+  internet, within a few seconds of a change, the way it already did on macOS and
+  Linux, and takes that network's DNS servers along for the sites that bypass the
+  VPN.
+- **Windows: losing the network no longer ends the VPN.** With no network at all,
+  the VPN spent a minute trying to reach its server, then stopped with an error
+  about not detecting an active network interface, taking the kill switch's block
+  down with it, and stayed stopped once the network came back. It now waits for a
+  network, keeping the block if the kill switch is on, says that there is no
+  network connection, and reconnects when one is back. A computer that dials its
+  own internet connection, over PPPoE or a modem, still can't use the VPN on
+  Windows, and now gets an error that says so instead of the one about the
+  network interface; connecting through a router, Ethernet or Wi-Fi works.
+- **Windows: the server pings on the Configs page work while connected on a
+  computer with Hyper-V or WSL.** While the VPN was up they went out of the
+  first network adapter Windows listed, which on such a computer can be one of
+  their internal adapters, with no way out, so the servers showed as
+  unreachable. They now go out of the adapter that carries Windows' default
+  route, the one the VPN itself uses.
 - **The core's messages reach the log as they happen.** They were held back
   until a few kilobytes had gathered or the connection ended, so a warning could
   arrive long after it mattered, and the last ones before a disconnect never

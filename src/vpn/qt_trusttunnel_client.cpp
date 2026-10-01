@@ -61,6 +61,7 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     m_reconnectTimer.setParent(this);
     m_fdWatchdogTimer.setParent(this);
     m_networkWaitTimer.setParent(this);
+    m_uplinkTimer.setParent(this);
 
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &QtTrustTunnelClient::startConnectAttempt);
@@ -70,6 +71,13 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     // Periodically check open fd count and force clean reconnect if leaking.
     m_fdWatchdogTimer.setInterval(testHookMs("FT_TEST_FD_WATCHDOG_MS", 10000)); // every 10 s
     connect(&m_fdWatchdogTimer, &QTimer::timeout, this, &QtTrustTunnelClient::checkFdHealth);
+
+    // Windows: follow the network adapter the session runs over
+    // (qt_trusttunnel_uplink.cpp). Every 2 s: a docked laptop or an unplugged
+    // cable is noticed within a few seconds, and the look itself costs a
+    // couple of system calls.
+    m_uplinkPollMs = testHookMs("FT_TEST_UPLINK_POLL_MS", 2000);
+    connect(&m_uplinkTimer, &QTimer::timeout, this, &QtTrustTunnelClient::followUplink);
 
     // If we stay stuck in WaitingForNetwork for more than 30 s (common after
     // sleep/wake or a brief network blip where the core doesn't self-recover),
@@ -345,6 +353,7 @@ void QtTrustTunnelClient::disconnectVpn() {
     m_reconnectTimer.stop();
     m_fdWatchdogTimer.stop();
     m_networkWaitTimer.stop();
+    m_uplinkTimer.stop();
     stopCoreLogTail();
 
     // Stop the in-flight attempt. Bounded: an attempt stuck inside a blocking
@@ -737,7 +746,15 @@ ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
 void QtTrustTunnelClient::protectOutboundSocket(ag::SocketProtectEvent *event)
 {
 #ifdef Q_OS_WIN
-    pinWindowsPhysicalOutbound(m_winPhysicalIfIndex.load());
+    // Pin until the index read is still the index: the uplink follower can move
+    // it between our read and our write, and writing the old one after it
+    // would put the core back on the adapter it just left. The follower stores
+    // before it sets, so whichever of us writes last writes the newest index.
+    uint32_t ifIndex = 0;
+    do {
+        ifIndex = m_winPhysicalIfIndex.load();
+        pinWindowsPhysicalOutbound(ifIndex);
+    } while (ifIndex != m_winPhysicalIfIndex.load());
 #endif
     qt_trusttunnel_protect_outbound_socket(event);
 }
@@ -877,3 +894,6 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, 
 
 // applyCoreLogPathToConfig / resetCoreLogFile / startCoreLogTail /
 // stopCoreLogTail / pollCoreLogFile live in qt_trusttunnel_corelog.cpp.
+
+// startFollowingUplink / resetUplinkTracking / followUplink / reportUplink live
+// in qt_trusttunnel_uplink.cpp.

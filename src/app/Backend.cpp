@@ -242,6 +242,12 @@ QString Backend::friendlyVpnError(const QString &m) const
     const QString helperWords = translatedHelperWords(m);
     if (!helperWords.isEmpty())
         return helperWords;
+    // Windows with no network: the core finds no adapter to read the DNS servers
+    // off (set_system_dns(), see dnsFailureOutcome in qt_trusttunnel_uplink.cpp),
+    // and the attempt is tried again until there is one. Its own words name an
+    // interface and a function, in English, every time it is tried.
+    if (m.contains(QLatin1String("Couldn't detect active network interface")))
+        return tr("No network connection. FreeTunnel will connect as soon as there is one.");
     static const QLatin1String failedPrefix("Connection failed:");
     if (m.startsWith(failedPrefix, Qt::CaseInsensitive))
         return friendlyConnectFailure(m.mid(failedPrefix.size()).trimmed());

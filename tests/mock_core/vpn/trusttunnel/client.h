@@ -77,6 +77,11 @@ public:
 
     void disconnect() { mockcore::Controller::instance().onDisconnect(m_id); }
 
+    void notify_network_change(VpnNetworkState state)
+    {
+        mockcore::Controller::instance().onNetworkChange(m_id, state);
+    }
+
     uint64_t mockId() const { return m_id; }
 
 private:

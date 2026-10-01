@@ -23,6 +23,7 @@
 
 #include <QPointer>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QThread>
 
@@ -60,6 +61,10 @@ private slots:
         qputenv("FT_TEST_STUCK_JOIN_MS", "400");
         qputenv("FT_TEST_NETWORK_WAIT_MS", "400");
         qputenv("FT_TEST_FD_WATCHDOG_MS", "300");
+        // The uplink follower runs on Windows only in the shipping app; here it
+        // runs everywhere, so the state machine it drives is tested on every
+        // platform rather than only on the one with no developer machine.
+        qputenv("FT_TEST_FOLLOW_UPLINK", "1");
         qRegisterMetaType<QtTrustTunnelClient::State>();
         // The core log tests write the real default core log file; keep it out
         // of the developer's own data folder. And put a name in its path that no
@@ -72,6 +77,14 @@ private slots:
 
     void init()
     {
+        // The uplink* tests take their looks at the network one at a time
+        // (lookAtUplink()), so that whether two looks agreed is decided by the
+        // test and not by the scheduler; the offline* ones time the timer's
+        // looks, a second apart; the rest let the timer look every 100 ms.
+        const QByteArray test(QTest::currentTestFunction());
+        qputenv("FT_TEST_UPLINK_POLL_MS", test.startsWith("uplink")    ? "3600000"
+                                          : test.startsWith("offline") ? "1000"
+                                                                       : "100");
         mockcore::Controller::instance().reset();
         m_lastState = State::Disconnected;
         m_errors.clear();
@@ -129,8 +142,43 @@ private slots:
     void aCoreLineAfterTheSessionEndsNeverUsesAClosedFile();
     void loggingOffForTheNextSessionWritesNowhere();
     void loggingOffFromTheFirstSessionWritesNowhere();
+    void theCoreStartsOnTheAdapterItCallsActive();
+    void aSessionFollowsTheNetworkToAnotherAdapter();
+    void uplinkLossIsReportedAndSoIsItsReturn();
+    void uplinkBlipIsNotAMove();
+    void uplinkMoveGoesAheadWhenItsDnsCannotBeRead();
+    void uplinkMoveSurvivesTheNextProtect();
+    void uplinkOfANewSessionIsTheOneItWasBuiltOn();
+    void anAttemptMadeOfflineIsRetried();
+    void anAdapterBackRightAfterAnOfflineFailureStillRetries();
+    void aPppLinkTheCoreCannotUseIsNamedNotRetried();
+    void aDnsFailureWithANetworkStillStops();
+    void uplinkOfflineAsksTheCoreOnlyOnceARouteIsBack();
+    void offlineLooksKeepThePace();
 
 private:
+    // A connected session whose core was built while `ifIndex` was the active
+    // adapter. Fails the test (check QTest::currentTestFailed()) if it is not.
+    void connectOnUplink(uint32_t ifIndex, quint64 *id)
+    {
+        auto &ctl = mockcore::Controller::instance();
+        ctl.setActiveUplink(ifIndex);
+        beginConnect();
+        QTRY_VERIFY(ctl.connectCallCount() >= 1);
+        *id = ctl.lastClientId();
+        ctl.fireStateChanged(*id, ag::VPN_SS_CONNECTED);
+        QTRY_COMPARE(m_lastState, State::Connected);
+        QCOMPARE(mockcore::Controller::outboundInterface(), ifIndex);
+    }
+
+    // One look at the network, taken on the client's own thread as the timer
+    // would take it.
+    void lookAtUplink()
+    {
+        QVERIFY(QMetaObject::invokeMethod(m_client, "followUplink",
+                                          Qt::BlockingQueuedConnection));
+    }
+
     static bool listContains(const std::vector<std::string> &items, const char *needle)
     {
         return std::find(items.cbegin(), items.cend(), std::string(needle)) != items.cend();
@@ -840,6 +888,338 @@ void TestQtTrustTunnelClient::theCoreIsHandedAServerCertificateVerifier()
             QtWarningMsg,
             "TrustTunnel certificate verification failed: certificate chain is not trusted");
     QCOMPARE(ctl.fireVerifyCertificate(id, "impostor-pem", "impostor-chain"), -1);
+}
+
+// Windows is where this bites: the core is pinned to the adapter picked before
+// its tunnel exists, and that pick used to be ours — which asks where a packet
+// to a public address would go, and on a reconnect gets the answer "into the
+// previous session's tunnel", then settles for the first adapter Windows lists.
+// It is the core's own pick now, the one its DNS setup already insists on.
+// Elsewhere the core's network monitor makes this pick and the test holds
+// trivially.
+void TestQtTrustTunnelClient::theCoreStartsOnTheAdapterItCallsActive()
+{
+    auto &ctl = mockcore::Controller::instance();
+    // An index no real adapter of the machine running this has, so a pick made
+    // from the machine's own interfaces cannot pass by coincidence.
+    ctl.setActiveUplink(4242);
+
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QCOMPARE(mockcore::Controller::outboundInterface(), 4242u);
+}
+
+// The cable the session started on is unplugged and Wi-Fi is up. On Windows the
+// core never noticed: nothing in it watches the network there, so it kept
+// binding its sockets to the dead adapter until it ran out of recovery attempts
+// and dropped the session, about a minute later. The core must be pointed at the
+// new adapter first and told about it second — its API requires that order.
+// Its system DNS servers have to move too, and before it is told: they were
+// read off the old adapter, and the core restarts its DNS on the notification
+// with whatever servers it holds.
+void TestQtTrustTunnelClient::aSessionFollowsTheNetworkToAnotherAdapter()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+    QCOMPARE(ctl.systemDnsReads(id), std::vector<uint32_t>{7u}); // the attempt's own
+
+    // Nothing moved: nothing to say, however many times the timer looks.
+    QTest::qWait(500);
+    QVERIFY(ctl.networkChanges(id).empty());
+
+    ctl.setActiveUplink(9);
+    QTRY_COMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+    const auto change = ctl.networkChanges(id).front();
+    QCOMPARE(change.state, ag::VPN_NS_CONNECTED);
+    QCOMPARE(change.outbound, 9u);
+    QCOMPARE(mockcore::Controller::outboundInterface(), 9u);
+    QCOMPARE(ctl.systemDnsReads(id), (std::vector<uint32_t>{7u, 9u}));
+    QCOMPARE(change.dnsReads, std::size_t{2}); // read before the core was told
+
+    // Said once, not on every look after.
+    QTest::qWait(500);
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+// No adapter with a default route at all, then the same one back — Wi-Fi
+// dropping and rejoining. The core is told the network is gone, which parks it
+// in WAITING_FOR_NETWORK instead of spending its recovery attempts on a network
+// that is not there, and with the kill switch on that is where the session
+// waits. It then has to be told the network is back even though the adapter is
+// the same one, or it waits there for good.
+void TestQtTrustTunnelClient::uplinkLossIsReportedAndSoIsItsReturn()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+
+    ctl.setActiveUplink(0);
+    lookAtUplink();
+    QVERIFY(ctl.networkChanges(id).empty()); // one look is not enough to leave
+    lookAtUplink();
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+    QCOMPARE(ctl.networkChanges(id).at(0).state, ag::VPN_NS_NOT_CONNECTED);
+    // The binding stays: there is nothing better to point it at.
+    QCOMPARE(mockcore::Controller::outboundInterface(), 7u);
+
+    // Nor are the DNS servers read: with no adapter there are none to read.
+    QCOMPARE(ctl.systemDnsReads(id).size(), std::size_t{1});
+
+    // Back from nothing, one look is enough: the session is down until it is used.
+    // The DNS servers are read again even though the adapter is the same one —
+    // the network behind it need not be (another Wi-Fi network, another router).
+    ctl.setActiveUplink(7);
+    lookAtUplink();
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{2});
+    QCOMPARE(ctl.networkChanges(id).at(1).state, ag::VPN_NS_CONNECTED);
+    QCOMPARE(ctl.networkChanges(id).at(1).outbound, 7u);
+    QCOMPARE(ctl.systemDnsReads(id), (std::vector<uint32_t>{7u, 7u}));
+    QCOMPARE(ctl.networkChanges(id).at(1).dnsReads, std::size_t{2});
+}
+
+// The DNS servers of the new network cannot always be read — an adapter half
+// set up, a lease not yet in. The move still happens: the core keeps the
+// servers it had, which is no worse than not reading them, and the session is
+// not dropped over it.
+void TestQtTrustTunnelClient::uplinkMoveGoesAheadWhenItsDnsCannotBeRead()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+
+    ctl.setDnsError("Failed to collect DNS servers: interface not found");
+    ctl.setActiveUplink(9);
+    lookAtUplink();
+    lookAtUplink();
+    QCOMPARE(ctl.systemDnsReads(id).size(), std::size_t{2});
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+    QCOMPARE(ctl.networkChanges(id).at(0).state, ag::VPN_NS_CONNECTED);
+    QCOMPARE(ctl.networkChanges(id).at(0).outbound, 9u);
+    QVERIFY(ctl.clientAlive(id));
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+// Leaving a working adapter costs the session a reconnect, so a look that
+// disagrees with the one before it is not acted on — a route being replaced or
+// a lease being renewed must not cost two.
+void TestQtTrustTunnelClient::uplinkBlipIsNotAMove()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+
+    for (const uint32_t blip : {9u, 0u, 9u}) {
+        ctl.setActiveUplink(blip);
+        lookAtUplink();
+        ctl.setActiveUplink(7);
+        lookAtUplink();
+    }
+    QVERIFY(ctl.networkChanges(id).empty());
+    QCOMPARE(mockcore::Controller::outboundInterface(), 7u);
+}
+
+// Windows pins the outbound interface again before every socket the core
+// protects, so that a late write by anything else cannot leave the core's own
+// traffic on the wrong adapter. The pin has to move with the session: left on
+// the adapter the session started on, the first protect after a move would put
+// the core straight back on it.
+void TestQtTrustTunnelClient::uplinkMoveSurvivesTheNextProtect()
+{
+#ifndef Q_OS_WIN
+    QSKIP("only Windows pins the outbound interface on every protect");
+#else
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+
+    ctl.setActiveUplink(9);
+    lookAtUplink();
+    lookAtUplink();
+    QCOMPARE(mockcore::Controller::outboundInterface(), 9u);
+
+    // A stray write — an abandoned attempt's network monitor starting late
+    // makes exactly this one, with the adapter of its own day.
+    ag::vpn_network_manager_set_outbound_interface(7);
+    QVERIFY(ctl.fireProtect(id) != mockcore::Controller::kNoProtectHandler);
+    QCOMPARE(mockcore::Controller::outboundInterface(), 9u);
+#endif
+}
+
+// A session is judged against the adapter its own core was built on, not the
+// one the session before it ended on: otherwise reconnecting after a move would
+// start with a bogus "the network changed" and a needless second reconnect.
+void TestQtTrustTunnelClient::uplinkOfANewSessionIsTheOneItWasBuiltOn()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 first = 0;
+    connectOnUplink(7, &first);
+    if (QTest::currentTestFailed())
+        return;
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+
+    ctl.setActiveUplink(9);
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 2);
+    const quint64 second = ctl.lastClientId();
+    ctl.fireStateChanged(second, ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+    QCOMPARE(mockcore::Controller::outboundInterface(), 9u);
+
+    lookAtUplink();
+    lookAtUplink();
+    QVERIFY(ctl.networkChanges(second).empty());
+}
+
+// On Windows the core reads the system DNS servers off the active adapter and
+// fails the connect when there is none. Every session rebuilt while the network
+// was gone — after the network-wait timeout, or after the core gave up
+// recovering — hit that, and it was taken as a broken setup: the session
+// stopped in Error and never came back by itself, network or not.
+void TestQtTrustTunnelClient::anAttemptMadeOfflineIsRetried()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setActiveUplink(0);
+    ctl.setDnsError("Couldn't detect active network interface");
+
+    beginConnect();
+    // Built, failed at DNS, built again: a retry, not a stop.
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    QVERIFY(m_lastState != State::Error);
+
+    // The network comes back; the next retry gets through.
+    ctl.setDnsError({});
+    ctl.setActiveUplink(7);
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 1, kLongWaitMs);
+    ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+}
+
+// The failure says it was offline; by the time anything looks again, an
+// adapter may be back. That is the network returning, not a broken setup —
+// judging by the second look stopped such a session in Error after all.
+void TestQtTrustTunnelClient::anAdapterBackRightAfterAnOfflineFailureStillRetries()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setActiveUplink(7);
+    ctl.setDnsError("Couldn't detect active network interface");
+
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    QVERIFY(m_lastState != State::Error);
+}
+
+// Online, but over a link the core does not count as an adapter: PPPoE, or a
+// modem that brings up a PPP link. The core's DNS setup fails exactly as it
+// does offline, and retrying would show "Reconnecting" for ever. It stops, and
+// says why in words a user can act on.
+void TestQtTrustTunnelClient::aPppLinkTheCoreCannotUseIsNamedNotRetried()
+{
+    auto &ctl = mockcore::Controller::instance();
+    qputenv("FT_TEST_PPP_LINK", "1");
+    const auto noPpp = qScopeGuard([] { qunsetenv("FT_TEST_PPP_LINK"); });
+    ctl.setActiveUplink(0);
+    ctl.setDnsError("Couldn't detect active network interface");
+
+    beginConnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Error, kLongWaitMs);
+    QVERIFY(!m_errors.isEmpty());
+    QVERIFY2(m_errors.constLast().contains(QLatin1String("PPP link")),
+             qPrintable(m_errors.constLast()));
+    QTest::qWait(800); // several retry intervals
+    QCOMPARE(ctl.coreConfigCaptureCount(), 1);
+    QCOMPARE(m_lastState, State::Error);
+}
+
+// The other side of that line: with a network present, a DNS setup that fails
+// is not going to fix itself by being retried every few seconds.
+void TestQtTrustTunnelClient::aDnsFailureWithANetworkStillStops()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setActiveUplink(7);
+    ctl.setDnsError("Failed to update DNS servers");
+
+    beginConnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Error, kLongWaitMs);
+    QTest::qWait(800); // several retry intervals
+    QCOMPARE(ctl.coreConfigCaptureCount(), 1);
+    QCOMPARE(m_lastState, State::Error);
+}
+
+// Offline, the core's own look at the network writes a warning to its log each
+// time it finds nothing. Asked every 2 s, that was a warning every 2 s for as
+// long as the machine was offline; so the looks went to every 10 s, and the
+// session came back up to 10 s after the network did. Now the routing table is
+// read first, without the core, which is asked once there is a default route
+// again, and otherwise only now and then.
+void TestQtTrustTunnelClient::uplinkOfflineAsksTheCoreOnlyOnceARouteIsBack()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id);
+    if (QTest::currentTestFailed())
+        return;
+    qputenv("FT_TEST_DEFAULT_ROUTE", "0");
+    const auto noRoute = qScopeGuard([] { qunsetenv("FT_TEST_DEFAULT_ROUTE"); });
+
+    ctl.setActiveUplink(0);
+    lookAtUplink();
+    lookAtUplink();
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+    QCOMPARE(ctl.networkChanges(id).at(0).state, ag::VPN_NS_NOT_CONNECTED);
+    const int asked = ctl.activeUplinkLooks();
+
+    // Every 15th look asks all the same, should the table and the core disagree.
+    for (int round = 1; round <= 2; ++round) {
+        for (int i = 0; i < 14; ++i)
+            lookAtUplink();
+        QCOMPARE(ctl.activeUplinkLooks(), asked + round - 1);
+        lookAtUplink();
+        QCOMPARE(ctl.activeUplinkLooks(), asked + round);
+    }
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{1});
+
+    // A default route again: the next look asks, and the session goes on over
+    // the core's pick.
+    qputenv("FT_TEST_DEFAULT_ROUTE", "1");
+    ctl.setActiveUplink(9);
+    lookAtUplink();
+    QCOMPARE(ctl.activeUplinkLooks(), asked + 3);
+    QCOMPARE(ctl.networkChanges(id).size(), std::size_t{2});
+    QCOMPARE(ctl.networkChanges(id).at(1).state, ag::VPN_NS_CONNECTED);
+    QCOMPARE(ctl.networkChanges(id).at(1).outbound, 9u);
+}
+
+// Waking from sleep or rejoining Wi-Fi: the network is back a moment after it
+// went. The look after the session was parked comes one interval later, as
+// online, not five, which left the session down for up to 10 s on Windows.
+void TestQtTrustTunnelClient::offlineLooksKeepThePace()
+{
+    auto &ctl = mockcore::Controller::instance();
+    quint64 id = 0;
+    connectOnUplink(7, &id); // the timer looks every second (init())
+    if (QTest::currentTestFailed())
+        return;
+
+    ctl.setActiveUplink(0);
+    QTRY_COMPARE_WITH_TIMEOUT(ctl.networkChanges(id).size(), std::size_t{1}, 5000);
+    QCOMPARE(ctl.networkChanges(id).at(0).state, ag::VPN_NS_NOT_CONNECTED);
+    ctl.setActiveUplink(7);
+    QTRY_COMPARE_WITH_TIMEOUT(ctl.networkChanges(id).size(), std::size_t{2}, 3000);
+    QCOMPARE(ctl.networkChanges(id).at(1).state, ag::VPN_NS_CONNECTED);
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)

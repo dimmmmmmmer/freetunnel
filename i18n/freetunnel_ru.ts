@@ -369,6 +369,10 @@
         <source>Not a valid domain or subnet: %1. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel.</source>
         <translation>Неверный домен или подсеть: %1. Подсеть с /0 на конце — это все адреса: в режиме «Без VPN» она вывела бы весь их трафик из туннеля.</translation>
     </message>
+    <message>
+        <source>No network connection. FreeTunnel will connect as soon as there is one.</source>
+        <translation>Нет подключения к сети. FreeTunnel подключится, как только оно появится.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -790,6 +794,10 @@
     <message>
         <source>Failed to start network monitor</source>
         <translation>Не удалось запустить отслеживание сети</translation>
+    </message>
+    <message>
+        <source>Your internet connection is a PPP link (PPPoE or a modem), which the VPN can&apos;t run over on Windows. Connect through a router, Ethernet or Wi-Fi instead.</source>
+        <translation>Интернет подключён через PPP (PPPoE или модем), а через такое подключение VPN на Windows работать не может. Подключитесь через роутер, Ethernet или Wi-Fi.</translation>
     </message>
 </context>
 <context>
