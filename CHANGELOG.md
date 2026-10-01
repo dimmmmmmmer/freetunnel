@@ -42,6 +42,18 @@ compare link at the bottom of its release notes.
   as a new one, and FreeTunnel would have installed it over the newer one you
   had. Such updates are now refused. Every release since 1.1.8 says its version,
   so no real update is turned away.
+- **A config's password stays out of its file when a section name has a comment
+  after it.** A config file may put a comment after the name of a section, as in
+  `[endpoint] # main server`. FreeTunnel did not take such a line for a section
+  name, so every time it moved the password into the system's credential store it
+  wrote it straight back into the config file, in plain text, and it did so again
+  before every connection. Only configs written or edited by hand that way were
+  affected. The line is read as it should be now, and a config that was affected
+  loses the copy of its password the next time you connect with it. A comment
+  after `[listener.tun]` cost a config its own routes the same way, and the
+  connection used the default ones. FreeTunnel has already written the defaults
+  into such a config in place of its routes, so it does not get them back by
+  itself: import it again from the original file.
 
 ### Changed
 
@@ -64,16 +76,57 @@ compare link at the bottom of its release notes.
   connection. FreeTunnel now writes the core's messages itself, to a file it
   keeps open for as long as logging is on. With logging off they are now
   written nowhere; on macOS they used to go to a temporary file even then.
-- **The core's messages reach the log as they happen.** They were held back
-  until a few kilobytes had gathered or the connection ended, so a warning could
-  arrive long after it mattered, and the last ones before a disconnect never
-  arrived at all.
+- **Config files written by hand are read the way the VPN core reads them.** A
+  setting may be indented and its name may be in quotes, as in
+  `"password" = "…"`; a section's name may be in quotes too, as in
+  `["endpoint"]`; and a value may be in triple quotes, as in
+  `password = """…"""`. FreeTunnel only read a setting written plainly at the
+  left edge of its line, in a section named plainly, and read a value in triple
+  quotes as empty. An indented address or a quoted `["endpoint"]` made importing
+  the file fail, an indented certificate was left out of the connection and then
+  out of the file, and an indented, quoted or triple-quoted password was never
+  moved into the credential store, so the config did not connect. A setting was
+  also taken from whichever section of the file had it first: a SOCKS
+  listener's password could be used as the server's, and with a DNS list both
+  at the top of the file and under `[endpoint]`, the editor showed the one the
+  connection did not use. Each setting is read from its own section now.
+
+  What a config imported before has already lost is not brought back. If it had
+  indented, quoted or triple-quoted settings, a certificate in particular, they
+  may be gone from it: import it again from the original file. If a SOCKS listener's password was
+  taken for the server's, that password is now stored as the config's own: if the
+  config does not connect, open it in the config editor and enter the server's
+  username and password again.
+- **A config that turns off the post-quantum key exchange keeps it off when it
+  connects.** A config file may say `post_quantum_group_enabled = false`, but
+  FreeTunnel turned it back on when it moved the password out of the file, and
+  again for every connection, so the setting never took effect. The file's
+  setting is used now. A config imported before already has it turned back on in
+  its file: import it again from the original file. Saving a config in the
+  config editor still turns it back on, as the editor has no switch for it:
+  make changes to such a config in its file, and import it again.
 - **A config imported from a link keeps its whole client random.** A link can
   give the client random with a mask, as prefix/mask. FreeTunnel wrote the mask
   under a key of its own that the VPN core never reads, so the connection went
   out without it. It now goes to the core whole. Configs imported that way before
   are read back whole, without needing to be opened, and the config editor accepts
   a mask after a slash.
+- **A link's client random is checked when the link is imported.** The VPN core
+  can only use a client random written as whole bytes of hex, at most 32 of them,
+  before and after the slash. FreeTunnel took whatever a link held, so a value
+  the core could not use went into the config: the connection quietly went
+  without it, and the config editor could refuse to save the config until the
+  value was changed. Such a link is now refused, with a message saying its
+  client random is malformed. A mask with nothing before the slash is dropped on
+  import, as an empty one after it already was. The config editor checks by the
+  same rule and no longer saves an odd number of digits, or more than 64. A
+  config's share link passes its client random on as the connection uses it:
+  where the mask is one the core cannot use, the link gives the part before the
+  slash alone, as the connection does.
+- **The core's messages reach the log as they happen.** They were held back
+  until a few kilobytes had gathered or the connection ended, so a warning could
+  arrive long after it mattered, and the last ones before a disconnect never
+  arrived at all.
 - **Linux: an AppImage started without FUSE can update itself and start with the
   system.** Run with --appimage-extract-and-run, as on a system without FUSE,
   FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"

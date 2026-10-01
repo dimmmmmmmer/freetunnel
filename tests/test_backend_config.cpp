@@ -497,15 +497,18 @@ void TestBackendConfig::theEditorTakesAClientRandomWithAMask()
     QVERIFY2(link.has_value(), qPrintable(err));
     QCOMPARE(link->clientRandomPrefix, QStringLiteral("deadbeef/ffff0000"));
 
-    // Still hex only, and a slash needs a mask after it.
-    for (const QString &bad : {QStringLiteral("deadbeef/"), QStringLiteral("xyz"), QStringLiteral("dead/beef/00")}) {
+    // Still hex only, and a slash needs a mask after it. In whole bytes, too, and
+    // no more than 32 of them, or the core goes without it.
+    for (const QString &bad : {QStringLiteral("deadbeef/"), QStringLiteral("xyz"), QStringLiteral("dead/beef/00"),
+                               QStringLiteral("abc"), QStringLiteral("aa/fff"), QString(66, QLatin1Char('a'))}) {
         f[QStringLiteral("name")] = QStringLiteral("Bad");
         f[QStringLiteral("clientRandom")] = bad;
         QVERIFY2(!backend.createConfig(f), qPrintable(bad));
     }
-    QCOMPARE(errors.count(), 3);
+    QCOMPARE(errors.count(), 6);
     QCOMPARE(errors.last().at(0).toString(),
-             QStringLiteral("Client random must be hexadecimal, optionally followed by /mask"));
+             QStringLiteral("Client random must be hexadecimal in whole bytes (an even number of "
+                            "digits, at most 64), optionally followed by /mask"));
 }
 
 QTEST_MAIN(TestBackendConfig)
