@@ -208,6 +208,37 @@ compare link at the bottom of its release notes.
   access to the Keychain when macOS asks for it; on Windows it says that
   Credential Manager holds at most 2560 bytes of a password, as a longer one is
   what it refuses.
+- **A domain in another alphabet can be added in its xn-- spelling.** Such a
+  domain has two spellings, пример.рф and xn--e1afmkfd.xn--p1ai, and the second
+  is the one address bars, logs and certificates often show. The Split page
+  refused it whenever the ending was spelled that way, as .рф is (xn--p1ai),
+  while the same domain typed in its own alphabet was accepted. Both work now.
+- **An address or subnet with `*.` or a dot in front of it is refused, and the
+  message says why.** Rules such as `*.10.0.0.0/8` or `.1.2.3.4` were accepted and
+  listed, but the VPN core takes `*.` only before a domain name, so they never
+  matched anything. Under "Through VPN" the traffic they named went outside the
+  tunnel, and with no other rule nothing went through it at all. Write the address
+  or subnet on its own, as `10.0.0.0/8`. Rules like these that an earlier version
+  saved are dropped from the list.
+- **An excluded route or a split tunnelling rule of every address, such as
+  `0.0.0.0/0` or `::/0`, is refused, and the message says why.** An excluded
+  route goes around the tunnel, and one ending in /0 took all IPv4 or all IPv6
+  traffic out of it while FreeTunnel still showed you as connected. The Split
+  page took the same subnet as an address rule, and under "Bypass VPN" it did
+  the same. One added with an earlier version is removed from Excluded routes
+  or from its profile, and that traffic goes through the tunnel again.
+- **"Through VPN" keeps the full tunnel when none of its programs can be used.**
+  Settings can hold a program rule that cannot name a program on this computer,
+  such as a Windows path in settings moved to a Mac or Linux, or one edited by
+  hand. Such rules were ignored when routing but still counted as rules, so a
+  profile with only those and no addresses sent everything outside the tunnel,
+  without the notice that the full tunnel is kept. Now the full tunnel is kept,
+  and the notice says the profile has no rules that can be used.
+- **The Split page's notice about "Through VPN" with no rules follows a deleted
+  config.** Deleting the config in use hands over to another one, which may use
+  another profile, but the notice went on describing the deleted config until
+  something else on the page changed: it could stay up over rules that were
+  there, or stay away when the profile now in use had none.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle

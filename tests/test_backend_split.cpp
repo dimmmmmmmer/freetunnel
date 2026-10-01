@@ -8,6 +8,7 @@
 // the kind of change that looks right and does nothing.
 #include <QtTest>
 
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QDir>
@@ -29,6 +30,7 @@ private slots:
     void addExcludedRouteAcceptsValidAndRejectsInvalid();
     void addExcludedRouteAcceptsAPastedList();
     void addExcludedRouteIgnoresDuplicates();
+    void anExcludedRouteOfEveryAddressIsRefused();
     void removeAndClearExcludedRoutes();
     void restoreDefaultsIsANoOpWhenAlreadyDefault();
     void profileCreateSelectAndRemove();
@@ -38,12 +40,17 @@ private slots:
     void selectiveModeWithNoRulesKeepsTheFullTunnel();
     void selectiveModeIsInactiveWhileSplitIsOff();
     void appRulesAreRulesToo();
+    void aWildcardOnAnAddressIsRefusedWithTheReason();
+    void aSavedWildcardOnAnAddressIsNotARule();
+    void anAddressRuleOfEveryAddressIsRefused();
+    void appRulesThatMatchNothingAreNotRules();
     void appRulesAreValidatedDedupedAndPersisted();
     void aDroppedShortcutBecomesARuleForTheProgramItNames();
     void turningSplitTunnellingOffDoesNotInvertTheAppRules();
     void appRulesBelongToTheProfile();
     void theOneOldApplicationListSeedsEveryProfileOnce();
     void theLeakWarningPopsUpOnlyOverTheProfileItConcerns();
+    void deletingTheActiveConfigTellsTheSplitPage();
     void thePickersListComesFromABackgroundScan();
 
 private:
@@ -133,6 +140,33 @@ void TestBackendSplit::addExcludedRouteIgnoresDuplicates()
     // Duplicates within one pasted list collapse as well.
     QVERIFY(backend.addExcludedRoute(QStringLiteral("7.7.7.0/24 7.7.7.0/24")));
     QCOMPARE(backend.excludedRoutes().count(QStringLiteral("7.7.7.0/24")), 1);
+}
+
+// A /0 is a well-formed subnet, and as an exclusion it is all of that traffic
+// leaving the tunnel while the window says Connected. Refused, saying why.
+void TestBackendSplit::anExcludedRouteOfEveryAddressIsRefused()
+{
+    Backend backend;
+    backend.clearExcludedRoutes();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    for (const QString &route : {QStringLiteral("0.0.0.0/0"), QStringLiteral("::/0"),
+                                 QStringLiteral("10.0.0.0/0")}) {
+        QVERIFY2(!backend.addExcludedRoute(route), qPrintable(route));
+        QVERIFY(backend.excludedRoutes().isEmpty());
+        QVERIFY2(errors.last().at(0).toString().contains(QStringLiteral("every address")),
+                 qPrintable(errors.last().at(0).toString()));
+    }
+    // One in a pasted list leaves the rest of it to be added.
+    QVERIFY(backend.addExcludedRoute(QStringLiteral("0.0.0.0/0 192.168.0.0/16")));
+    QCOMPARE(backend.excludedRoutes(), QStringList{QStringLiteral("192.168.0.0/16")});
+    // The shortest prefix that is not everything is still a subnet.
+    QVERIFY(backend.addExcludedRoute(QStringLiteral("0.0.0.0/1")));
+    // And an ordinary mistake keeps the ordinary message.
+    for (const QString &route : {QStringLiteral("10.0.0.0/33"), QStringLiteral("10.0.0.0/-1")}) {
+        QVERIFY2(!backend.addExcludedRoute(route), qPrintable(route));
+        QVERIFY(!errors.last().at(0).toString().contains(QStringLiteral("every address")));
+    }
 }
 
 void TestBackendSplit::removeAndClearExcludedRoutes()
@@ -317,6 +351,117 @@ void TestBackendSplit::appRulesAreRulesToo()
     QVERIFY(backend.selectiveModeWouldLeak());
 }
 
+// "*.10.0.0.0/8" is an address with a wildcard in front of it, and the core has
+// no such rule. Refused, and the message says why: the subnet itself is fine.
+void TestBackendSplit::aWildcardOnAnAddressIsRefusedWithTheReason()
+{
+    Backend backend;
+    backend.clearDomains();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    QVERIFY(!backend.addDomain(QStringLiteral("*.10.0.0.0/8")));
+    QVERIFY(backend.domains().isEmpty());
+    QCOMPARE(errors.count(), 1);
+    const QString message = errors.at(0).at(0).toString();
+    QVERIFY(message.contains(QStringLiteral("*.10.0.0.0/8")));
+    QVERIFY2(message.contains(QStringLiteral("without them")), qPrintable(message));
+
+    // Written plainly, it is a rule like any other.
+    QVERIFY(backend.addDomain(QStringLiteral("10.0.0.0/8")));
+    QCOMPARE(backend.domains(), QStringList{QStringLiteral("10.0.0.0/8")});
+    // And an ordinary mistake keeps the ordinary message.
+    QVERIFY(!backend.addDomain(QStringLiteral("localhost")));
+    QVERIFY(!errors.last().at(0).toString().contains(QStringLiteral("without them")));
+}
+
+// One saved by an earlier version, which accepted it. It was the profile's only
+// rule here, so "Through VPN" counted it, put the core in selective mode with
+// nothing it could match, and sent everything around the tunnel.
+void TestBackendSplit::aSavedWildcardOnAnAddressIsNotARule()
+{
+    {
+        QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("FreeTunnelTest"), QStringLiteral("BackendSplitTest"));
+        s.setValue(QStringLiteral("bypass/profile/Default"), QStringList{QStringLiteral("*.1.2.3.4")});
+        s.setValue(QStringLiteral("bypass/profile_apps_seeded"), true);
+        s.sync();
+    }
+    Backend backend;
+    backend.setSplitEnabled(true);
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(backend.domains().isEmpty());
+    QVERIFY(!backend.selectiveModeActive());
+    QVERIFY(backend.selectiveModeWouldLeak());
+}
+
+// A rule for 0.0.0.0/0 or ::/0 is every address of its kind. The Split page took
+// it, and under "Bypass VPN" the core sent all of that traffic around the tunnel
+// while the window said Connected: the same as an excluded route of every
+// address, which Settings refuses. One saved by an earlier version is dropped.
+void TestBackendSplit::anAddressRuleOfEveryAddressIsRefused()
+{
+    {
+        QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("FreeTunnelTest"), QStringLiteral("BackendSplitTest"));
+        s.setValue(QStringLiteral("bypass/profile/Default"),
+                   QStringList{QStringLiteral("0.0.0.0/0"), QStringLiteral("10.0.0.0/8"),
+                               QStringLiteral("::/0")});
+        s.setValue(QStringLiteral("bypass/profile_apps_seeded"), true);
+        s.sync();
+    }
+    Backend backend;
+    QCOMPARE(backend.domains(), QStringList{QStringLiteral("10.0.0.0/8")});
+
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    for (const QString &rule : {QStringLiteral("0.0.0.0/0"), QStringLiteral("::/0")}) {
+        QVERIFY2(!backend.addDomain(rule), qPrintable(rule));
+        const QString message = errors.last().at(0).toString();
+        QVERIFY2(message.contains(rule) && message.contains(QStringLiteral("every address")),
+                 qPrintable(message));
+    }
+    QCOMPARE(errors.count(), 2);
+    QCOMPARE(backend.domains(), QStringList{QStringLiteral("10.0.0.0/8")});
+    // A subnet that is not all of them is a rule like any other.
+    QVERIFY(backend.addDomain(QStringLiteral("0.0.0.0/1")));
+}
+
+// Settings keep app rules as written, and the helper drops the ones that cannot
+// match. A list of only those is no rule at all, and "Through VPN" has to fall
+// back to the full tunnel for it as it does for an empty one. Counted raw, it
+// put the core in selective mode with nothing listed: everything went around.
+void TestBackendSplit::appRulesThatMatchNothingAreNotRules()
+{
+    QStringList saved{QStringLiteral("relative/firefox"), QStringLiteral("/usr/bin/")};
+#ifndef Q_OS_WIN
+    // The likeliest way to get here: settings brought over from Windows.
+    saved << QStringLiteral("C:\\Program Files\\Mozilla Firefox\\firefox.exe");
+#endif
+    {
+        QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("FreeTunnelTest"), QStringLiteral("BackendSplitTest"));
+        s.setValue(QStringLiteral("bypass/profile/Default"), QStringList{});
+        s.setValue(QStringLiteral("bypass/profile_apps/Default"), saved);
+        s.setValue(QStringLiteral("bypass/profile_apps_seeded"), true);
+        s.sync();
+    }
+    Backend backend;
+    backend.setSplitEnabled(true);
+    QSignalSpy warned(&backend, &Backend::errorOccurred);
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(backend.domains().isEmpty());
+    QCOMPARE(backend.appRules().size(), saved.size()); // still listed, as written
+    QVERIFY(!backend.selectiveModeActive());
+    QVERIFY(backend.selectiveModeWouldLeak());
+    // And the warning does not say there are no rules, over a list of them.
+    QCOMPARE(warned.count(), 1);
+    const QString warning = warned.first().first().toString();
+    QVERIFY2(warning.contains(QStringLiteral("no rules that can be used")), qPrintable(warning));
+
+    // One that can match is enough, as in appRulesAreRulesToo().
+    QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
+    QVERIFY(backend.selectiveModeActive());
+}
+
 void TestBackendSplit::appRulesAreValidatedDedupedAndPersisted()
 {
     {
@@ -469,6 +614,49 @@ void TestBackendSplit::theLeakWarningPopsUpOnlyOverTheProfileItConcerns()
     backend.clearDomains();
     QCOMPARE(errors.count(), 2);
     backend.setVpnMode(QStringLiteral("general"));
+}
+
+// Deleting the active config hands the slot to another one, and with it the
+// profile the tunnel follows. The Split page's notice reads that through
+// splitChanged, and without it went on describing the config just deleted.
+void TestBackendSplit::deletingTheActiveConfigTellsTheSplitPage()
+{
+    Backend backend;
+    // Configs are kept where every run of this suite looks (test mode puts them
+    // under ~/.qttest, not in m_home), so start from none and leave none behind,
+    // passwords included, however the case ends.
+    const auto removeAll = [&backend]() {
+        for (qsizetype n = backend.configs().size(); n > 0; --n)
+            backend.removeConfig(0);
+    };
+    removeAll();
+    const auto cleanup = qScopeGuard(removeAll);
+    backend.setSplitEnabled(true);
+    backend.selectProfile(QStringLiteral("Default"));
+    backend.clearDomains();
+    backend.clearAppRules();
+    backend.addProfile(QStringLiteral("Work"));
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    const auto config = [](const QString &name, const QString &profile) {
+        return QVariantMap{{QStringLiteral("name"), name},
+                           {QStringLiteral("hostname"), QStringLiteral("vpn.example.org")},
+                           {QStringLiteral("addresses"), QStringLiteral("198.51.100.7:443")},
+                           {QStringLiteral("username"), QStringLiteral("alice")},
+                           {QStringLiteral("password"), QStringLiteral("a")},
+                           {QStringLiteral("protocol"), QStringLiteral("http2")},
+                           {QStringLiteral("splitProfile"), profile}};
+    };
+    QVERIFY(backend.createConfig(config(QStringLiteral("Home"), QStringLiteral("Default"))));
+    QVERIFY(backend.createConfig(config(QStringLiteral("Office"), QStringLiteral("Work"))));
+    QCOMPARE(backend.activeConfigProfile(), QStringLiteral("Work")); // Office, just created
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(!backend.selectiveModeWouldLeak());
+
+    QSignalSpy changed(&backend, &Backend::splitChanged);
+    backend.removeConfig(backend.activeIndex());
+    QCOMPARE(backend.activeConfigProfile(), QStringLiteral("Default")); // Home, which is empty
+    QVERIFY(backend.selectiveModeWouldLeak());
+    QVERIFY2(changed.count() > 0, "the Split page was not told");
 }
 
 // The picker's first open scanned on the UI thread, and on Windows froze the

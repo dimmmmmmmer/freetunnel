@@ -270,6 +270,11 @@ private:
 
     std::chrono::steady_clock::time_point m_builtAt{};
     bool m_everBuilt = false;
+    // The last walk did not complete. Apart from m_everBuilt, which says whether
+    // there is a table to answer misses from: a failed walk leaves none, only
+    // the sockets it did see. It is tried again while the credit lasts, and then
+    // not before its time. See refreshIfStale().
+    bool m_walkFailed = false;
     std::chrono::milliseconds m_ttl;
     QStringList m_watch;
     // Microseconds of walking this object is still entitled to, and when that

@@ -28,6 +28,17 @@ QStringList defaultExcludedRoutes() {
         QStringLiteral("255.255.255.255/32")};
 }
 
+// A route of every address of its kind, such as 0.0.0.0/0 or ::/0. Excluded, it
+// takes all of that traffic out of the tunnel while the window says Connected,
+// and Settings refuses one (Backend::addExcludedRoute). One saved by an earlier
+// version is dropped on load, as domain rules the core cannot use are: applied it
+// is a VPN failing open, and listed but not applied it would read as an
+// exclusion still in force. The prefix is read as subnetPrefix() in
+// BackendSplit.cpp reads it, and as the Split page's address rules are.
+static bool isEveryAddressRoute(const QString &route) {
+    return isEveryAddressRule(route);
+}
+
 QStringList recommendedRussiaDomains() {
     // RU services that TrustTunnel's DOMAIN_FILTER accepts (no TLD-only *.ru / .ru).
     return sanitizedBypassRules({
@@ -208,6 +219,7 @@ AppSettings loadAppSettings() {
     out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
+    out.excluded_routes.removeIf(isEveryAddressRoute);
     loadBypassProfiles(s, out); // and, inside it, the per-profile application lists
     loadHotkeys(s, out);
     out.last_config_path = s.value("vpn/last_config_path", "").toString();

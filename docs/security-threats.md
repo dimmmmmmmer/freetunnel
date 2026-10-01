@@ -165,14 +165,23 @@ which carries the VPN password — and cannot report a tunnel that does not exis
 Pre-authentication connections are capped and time-limited so they cannot
 exhaust the root process.
 
-### Server probes leave the tunnel by design
+### Server probes go around the tunnel where the system lets them
 
-The Configs page shows a latency figure per server. Those probes bind to the
-physical interface (`IP_BOUND_IF` / `IPV6_UNICAST_IF` / source bind), so they go
-around the tunnel **even while connected** — otherwise they would measure the
-tunnel rather than the server. The consequence is that refreshing that page
-reveals the full list of configured endpoints, including servers never connected
-to, to the local network and the ISP. Traffic that is not a probe is unaffected.
+The Configs page shows a latency figure per server. Those probes are meant to
+measure the server rather than the tunnel, so on macOS and Windows each one is
+bound to the physical interface (`IP_BOUND_IF` / `IPV6_BOUND_IF`, `IP_UNICAST_IF` /
+`IPV6_UNICAST_IF`) and goes around the tunnel **even while connected**. On Linux
+the GUI, which is not root, can only bind the probe's source address, and the
+tunnel routes by destination, taking no notice of that: while connected, probes
+there go through the tunnel. While connected, the server in use is probed with a
+plain socket on every platform, because the core already routes its address
+around the tunnel.
+
+The consequence is that refreshing that page reveals the full list of configured
+endpoints, including servers never connected to, to the local network and the
+ISP: always while disconnected, and while connected too on macOS and Windows. On
+Linux while connected, it is the server you are connected to that sees the probes
+to the others, inside the tunnel. Traffic that is not a probe is unaffected.
 
 ### Per-application rules read the system's socket tables
 

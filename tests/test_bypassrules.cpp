@@ -20,6 +20,7 @@ private slots:
     void rejectsWhatIsNotARule_data();
     void punycodesInternationalDomains();
     void sanitizeDropsUnusableRulesAndDuplicates();
+    void aWildcardOnAnAddressIsRefusedAndSaysWhy();
 };
 
 // The invariant that broke. Validation and translation are two functions with
@@ -39,6 +40,10 @@ void TestBypassRules::everythingTheUiAcceptsReachesTheCore_data()
     QTest::newRow("ipv6 cidr") << QStringLiteral("2001:db8::/32");
     QTest::newRow("idn") << QStringLiteral("пример.рф");
     QTest::newRow("idn wildcard") << QStringLiteral("*.пример.рф");
+    // The same domain in the spelling an address bar or a log shows it in.
+    QTest::newRow("punycode idn") << QStringLiteral("xn--e1afmkfd.xn--p1ai");
+    QTest::newRow("punycode idn wildcard") << QStringLiteral("*.xn--e1afmkfd.xn--p1ai");
+    QTest::newRow("punycode idn in capitals") << QStringLiteral("XN--E1AFMKFD.XN--P1AI");
 }
 
 void TestBypassRules::everythingTheUiAcceptsReachesTheCore()
@@ -70,6 +75,21 @@ void TestBypassRules::rejectsWhatIsNotARule_data()
     QTest::newRow("trailing dot") << QStringLiteral("example.");
     QTest::newRow("space") << QStringLiteral("exa mple.com");
     QTest::newRow("cidr out of range") << QStringLiteral("10.0.0.0/33");
+    QTest::newRow("punycode tld ending in a hyphen") << QStringLiteral("example.xn--p1ai-");
+    QTest::newRow("punycode prefix alone") << QStringLiteral("example.xn--");
+    // A wildcard on an address. The core reads the first as subdomains of a
+    // domain called 1.2.3.4 and drops the rest as malformed, so none of them
+    // would ever match.
+    QTest::newRow("star on an address") << QStringLiteral("*.1.2.3.4");
+    QTest::newRow("dot on an address") << QStringLiteral(".1.2.3.4");
+    QTest::newRow("star on a subnet") << QStringLiteral("*.10.0.0.0/8");
+    QTest::newRow("dot on a subnet") << QStringLiteral(".10.0.0.0/8");
+    QTest::newRow("star on an ipv6 address") << QStringLiteral("*.2001:db8::1");
+    // Every address of its kind. The core takes it, and under "Bypass VPN" it
+    // took all of that traffic out of the tunnel.
+    QTest::newRow("every ipv4 address") << QStringLiteral("0.0.0.0/0");
+    QTest::newRow("every ipv6 address") << QStringLiteral("::/0");
+    QTest::newRow("every address, any base, /00") << QStringLiteral("10.0.0.0/00");
 }
 
 void TestBypassRules::rejectsWhatIsNotARule()
@@ -86,6 +106,12 @@ void TestBypassRules::punycodesInternationalDomains()
     QCOMPARE(coreBypassRuleFor(QStringLiteral("пример.рф")), QStringLiteral("xn--e1afmkfd.xn--p1ai"));
     QCOMPARE(coreBypassRuleFor(QStringLiteral("*.пример.рф")),
              QStringLiteral("*.xn--e1afmkfd.xn--p1ai"));
+    // And one already in that spelling reaches the core as the same rule, rather
+    // than being turned away for a top-level domain that is not all letters.
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("xn--e1afmkfd.xn--p1ai")),
+             coreBypassRuleFor(QStringLiteral("пример.рф")));
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("*.XN--E1AFMKFD.XN--P1AI")),
+             QStringLiteral("*.xn--e1afmkfd.xn--p1ai"));
 }
 
 void TestBypassRules::sanitizeDropsUnusableRulesAndDuplicates()
@@ -96,6 +122,23 @@ void TestBypassRules::sanitizeDropsUnusableRulesAndDuplicates()
     const QStringList out = sanitizedBypassRules(in);
     // The user's own spelling is kept as the label; only unusable rules go.
     QCOMPARE(out, QStringList({QStringLiteral("example.com"), QStringLiteral(".example.org")}));
+}
+
+// The same refusal from the two places it has to come from: the field, which
+// can say what to write instead, and a list saved by an earlier version, where
+// the rule was stored and shown and did nothing. Kept, it would also count as a
+// rule in "Through VPN", which then sent nothing at all through the tunnel.
+void TestBypassRules::aWildcardOnAnAddressIsRefusedAndSaysWhy()
+{
+    QVERIFY(isWildcardAddressRule(QStringLiteral("*.10.0.0.0/8")));
+    QVERIFY(isWildcardAddressRule(QStringLiteral(" .1.2.3.4 ")));
+    QVERIFY(!isWildcardAddressRule(QStringLiteral("*.example.com")));
+    QVERIFY(!isWildcardAddressRule(QStringLiteral("10.0.0.0/8")));
+
+    const QStringList saved{QStringLiteral("*.1.2.3.4"), QStringLiteral("example.com"),
+                            QStringLiteral("*.10.0.0.0/8")};
+    QCOMPARE(sanitizedBypassRules(saved), QStringList{QStringLiteral("example.com")});
+    QVERIFY(coreBypassRules({QStringLiteral("*.1.2.3.4"), QStringLiteral(".10.0.0.0/8")}).isEmpty());
 }
 
 QTEST_MAIN(TestBypassRules)

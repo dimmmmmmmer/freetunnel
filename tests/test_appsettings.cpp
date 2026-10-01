@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include <QCoreApplication>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -22,6 +23,7 @@ private slots:
     void profilesPreserveOrder();
     void theInsecureTmpLogPathIsMigratedOnLoad();
     void theDefaultExcludedRoutesCoverThePrivateRanges();
+    void anExcludedRouteOfEveryAddressIsDroppedOnLoad();
     void hotkeysNobodyChoseAreTurnedOffOnce_data();
     void hotkeysNobodyChoseAreTurnedOffOnce();
 };
@@ -130,6 +132,25 @@ void TestAppSettings::theInsecureTmpLogPathIsMigratedOnLoad() {
         s.sync();
     }
     QCOMPARE(loadAppSettings().log_path, chosen);
+}
+
+// Settings refuses an excluded route of every address now, and one saved before
+// that is dropped when the settings load: kept, it went on taking all IPv4 or
+// IPv6 traffic out of the tunnel while the window said Connected. The routes
+// beside it, 0.0.0.0/8 among them, are left as they were.
+void TestAppSettings::anExcludedRouteOfEveryAddressIsDroppedOnLoad() {
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("routing/excluded_routes"),
+                   QStringList{QStringLiteral("10.0.0.0/8"), QStringLiteral("0.0.0.0/0"),
+                               QStringLiteral("::/0"), QStringLiteral("0.0.0.0/8"),
+                               QStringLiteral("192.168.0.0/00"), QStringLiteral("2001:db8::/32")});
+        s.sync();
+    }
+    const auto restore = qScopeGuard([] { QSettings().remove(QStringLiteral("routing/excluded_routes")); });
+    QCOMPARE(loadAppSettings().excluded_routes,
+             (QStringList{QStringLiteral("10.0.0.0/8"), QStringLiteral("0.0.0.0/8"),
+                          QStringLiteral("2001:db8::/32")}));
 }
 
 // These are the ranges the comment calls "should never be tunnelled". Asserting
