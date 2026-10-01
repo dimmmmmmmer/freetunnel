@@ -127,7 +127,21 @@ public:
 
     ~HelperServer() override {
         if (m_vpnThread.isRunning()) {
-            QMetaObject::invokeMethod(&m_client, "disconnectVpn", Qt::BlockingQueuedConnection);
+            // Tear the session down on the VPN thread, then hand the client back
+            // to this thread before that one ends. Its members, and the timers it
+            // owns, are destroyed here, and only the thread an object lives in may
+            // destroy it. Destroyed from here while it still belonged to the
+            // stopped VPN thread, removing its first timer sent the client an
+            // event across threads, which a debug Qt asserts on: that is where
+            // the helper stopped and never exited in the Windows CI tests.
+            QThread *const here = QThread::currentThread();
+            QMetaObject::invokeMethod(
+                    &m_client,
+                    [this, here]() {
+                        m_client.disconnectVpn();
+                        m_client.moveToThread(here);
+                    },
+                    Qt::BlockingQueuedConnection);
             m_vpnThread.quit();
             m_vpnThread.wait();
         }
