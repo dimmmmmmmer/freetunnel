@@ -53,9 +53,15 @@ compare link at the bottom of its release notes.
   trust, or one that another program on your computer changed, could use them.
   These settings are now ignored; routes, DNS, the server and its certificate
   are read as before. If an imported config listed ports for the kill switch to
-  let through, they are blocked now like everything else. If it named its
-  tunnel interface, the interface gets the default name instead, so a firewall
-  rule or script that looks for the old name needs the new one.
+  let through, they are blocked now like everything else. On Windows, where
+  such ports work, you can have them back, for example to reach this computer
+  over Remote Desktop while the kill switch is on: turn on "Let the VPN config
+  open ports" in Settings → Security. That setting is for every config at once:
+  while it is on, each config you connect with, one you import later included,
+  decides again which ports bypass the kill switch, so turn it on only if you
+  trust every config you use. If a config named its tunnel interface, the
+  interface gets the default name instead, so a firewall rule or script that
+  looks for the old name needs the new one.
 - **Linux: with the AppImage, another person with an account on your computer
   could have a program of theirs run with administrator rights.** To start its
   privileged part, the AppImage unpacks itself as administrator into a temporary

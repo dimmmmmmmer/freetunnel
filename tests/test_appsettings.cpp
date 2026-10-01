@@ -46,6 +46,9 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.theme_mode, QStringLiteral("system"));
     QCOMPARE(s.auto_connect_on_start, false);
     QCOMPARE(s.killswitch_enabled, true);
+    // Off until the user says otherwise: on, a config decides what gets through
+    // the kill switch, which is exactly what the helper stopped letting it do.
+    QCOMPARE(s.killswitch_ports_from_config, false);
     QCOMPARE(s.domain_bypass_enabled, true);
     QCOMPARE(s.logging_enabled, true);
     QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
@@ -64,6 +67,7 @@ void TestAppSettings::roundTrip() {
     in.theme_mode = QStringLiteral("dark");
     in.auto_connect_on_start = true;
     in.killswitch_enabled = true;
+    in.killswitch_ports_from_config = true;
     in.domain_bypass_enabled = true;
     in.domain_bypass_rules = {QStringLiteral("github.com"), QStringLiteral("*.gov.ru")};
     in.excluded_routes = {QStringLiteral("10.0.0.0/8"), QStringLiteral("192.168.1.0/24")};
@@ -79,6 +83,7 @@ void TestAppSettings::roundTrip() {
     QCOMPARE(out.theme_mode, in.theme_mode);
     QCOMPARE(out.auto_connect_on_start, true);
     QCOMPARE(out.killswitch_enabled, true);
+    QCOMPARE(out.killswitch_ports_from_config, true);
     QCOMPARE(out.domain_bypass_enabled, true);
     QCOMPARE(out.domain_bypass_rules, in.domain_bypass_rules);
     QCOMPARE(out.excluded_routes, in.excluded_routes);

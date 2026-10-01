@@ -216,6 +216,7 @@ AppSettings loadAppSettings() {
     out.language = s.value("ui/language", "en").toString();
     out.auto_connect_on_start = s.value("vpn/auto_connect_on_start", false).toBool();
     out.killswitch_enabled = s.value("vpn/killswitch_enabled", true).toBool();
+    out.killswitch_ports_from_config = s.value("vpn/killswitch_ports_from_config", false).toBool();
     out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
     out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
@@ -238,6 +239,7 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("ui/language", cfg.language);
     s.setValue("vpn/auto_connect_on_start", cfg.auto_connect_on_start);
     s.setValue("vpn/killswitch_enabled", cfg.killswitch_enabled);
+    s.setValue("vpn/killswitch_ports_from_config", cfg.killswitch_ports_from_config);
     s.setValue("bypass/enabled", cfg.domain_bypass_enabled);
     s.setValue("bypass/mode", cfg.vpn_mode);
     s.setValue("routing/excluded_routes", cfg.excluded_routes);

@@ -108,6 +108,8 @@ private slots:
     void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
     void configKeysRootMustNotActOnAreDroppedInsideTheHelper();
     void aSplitEditReachesTheRunningSessionInsideTheHelper();
+    void theConfigsKillSwitchPortsPassOnlyWhenTheGuiAsks();
+    void aPortsCommandWithoutItsValueKeepsThePortsOut();
     void sigtermStopsTheHelperOnItsOwn();
     void aTokenFileTheGuiDidNotWriteIsLeftAlone();
 
@@ -733,6 +735,96 @@ void TestHelperServer::aSplitEditReachesTheRunningSessionInsideTheHelper()
     QCOMPARE(readCoreConfigDump(m_configDump).value(QStringLiteral("exclusions")).contains(
                      QStringLiteral("live.example")),
              false);
+}
+
+// The setting that hands the kill switch's ports back to the config crosses the
+// same boundary as the kill switch, and decodes the same way: a key the helper
+// does not find reads as off. Sent as the GUI client sends it, it has to bring
+// back the file's ports, and nothing else the helper clears.
+void TestHelperServer::theConfigsKillSwitchPortsPassOnlyWhenTheGuiAsks()
+{
+    const QString token = QStringLiteral("token-for-config-ports");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    VpnHelperClient client;
+    client.setKillSwitch(true);
+    client.setKillSwitchPortsFromConfig(true);
+    client.loadConfigFromToml(QStringLiteral("loglevel = \"warn\"\n"
+                                             "ssl_session_cache_path = \"/var/tmp/somewhere\"\n"
+                                             "killswitch_allow_ports = [3389, 5900]\n"
+                                             "[endpoint]\n"
+                                             "hostname = \"vpn.example\"\n"
+                                             "[listener.tun]\n"
+                                             "device_name = \"named-by-file\"\n"
+                                             "use_existing = true\n"
+                                             "netns = \"elsewhere\"\n"));
+    client.connectVpn();
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_configDump), 20000);
+    const QMap<QString, QString> cfg = readCoreConfigDump(m_configDump);
+
+    QCOMPARE(cfg.value(QStringLiteral("killswitch_allow_ports")), QStringLiteral("[3389, 5900]"));
+    QCOMPARE(cfg.value(QStringLiteral("killswitch_enabled")), QStringLiteral("1"));
+    QCOMPARE(cfg.value(QStringLiteral("ssl_session_cache_path")), QStringLiteral("(unset)"));
+    QCOMPARE(cfg.value(QStringLiteral("device_name")), QString());
+    QCOMPARE(cfg.value(QStringLiteral("use_existing")), QStringLiteral("0"));
+    QCOMPARE(cfg.value(QStringLiteral("netns")), QStringLiteral("(unset)"));
+
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The helper is the root side, and what it does with a command it cannot read in
+// full is the safe direction or nothing: a setKillSwitchPortsFromConfig with no
+// "enabled" in it, as a renamed or dropped key would send, has to read as off,
+// so the config's ports stay out of the kill switch. Sent raw, after an "on" the
+// missing value must replace, since the GUI client would never send it so.
+void TestHelperServer::aPortsCommandWithoutItsValueKeepsThePortsOut()
+{
+    const QString token = QStringLiteral("token-for-ports-without-value");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+
+    QTcpSocket sock;
+    sock.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
+    QVERIFY(sock.waitForConnected(3000));
+    const auto send = [&sock](const QJsonObject &o) {
+        sock.write(QJsonDocument(o).toJson(QJsonDocument::Compact) + '\n');
+        sock.flush();
+    };
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("hello")},
+                     {QStringLiteral("nonce"), QStringLiteral("ports-nonce")}});
+    QVERIFY(sock.waitForReadyRead(3000));
+    const QJsonObject challenge = QJsonDocument::fromJson(sock.readLine()).object();
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("auth")},
+                     {QStringLiteral("proof"),
+                      vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kGuiRole),
+                                            challenge.value(QStringLiteral("nonce")).toString())}});
+    QVERIFY(sock.waitForReadyRead(3000));
+    QCOMPARE(QJsonDocument::fromJson(sock.readLine()).object().value(QStringLiteral("ev")).toString(),
+             QStringLiteral("ready"));
+
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("setKillSwitch")},
+                     {QStringLiteral("enabled"), true}});
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("setKillSwitchPortsFromConfig")},
+                     {QStringLiteral("enabled"), true}});
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("setKillSwitchPortsFromConfig")}});
+    send(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("connect")},
+                     {QStringLiteral("configToml"),
+                      QStringLiteral("loglevel = \"warn\"\n"
+                                     "killswitch_allow_ports = [3389]\n"
+                                     "[endpoint]\n"
+                                     "hostname = \"vpn.example\"\n")}});
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_configDump), 20000);
+    const QMap<QString, QString> cfg = readCoreConfigDump(m_configDump);
+    QCOMPARE(cfg.value(QStringLiteral("killswitch_enabled")), QStringLiteral("1"));
+    QVERIFY2(cfg.value(QStringLiteral("killswitch_allow_ports")).isEmpty(),
+             "a ports command with no value let the config's ports through the kill switch");
 }
 
 // The helper runs as root and owns the tunnel: routes, DNS and the kill switch

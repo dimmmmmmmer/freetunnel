@@ -137,6 +137,8 @@ private slots:
     void keysThatMakeRootActOnANameNeverReachTheCore();
     void aSocksListenerIsRefused();
     void aSecondRouteListReplacesTheFirst();
+    void aConfigsKillSwitchPortsReachTheCoreOnlyWhenTheUserLetsThem();
+    void theKillSwitchPortsSettingAppliesToAConfigAlreadyLoaded();
     void theCoreIsHandedAServerCertificateVerifier();
     void coreLinesReachTheLogWhileTheSessionRuns();
     void aCoreLineAfterTheSessionEndsNeverUsesAClosedFile();
@@ -859,6 +861,84 @@ void TestQtTrustTunnelClient::keysThatMakeRootActOnANameNeverReachTheCore()
     QVERIFY2(!cfg.netns.has_value(), "root would move the tunnel into a namespace the file named");
     QVERIFY2(listContains(cfg.included_routes, "10.20.0.0/16"),
              "the routes the imported file asked for must still reach the core");
+}
+
+// The one key of those the user can hand back to the config: Windows ports the
+// kill switch lets through, which someone reaching this machine over Remote
+// Desktop with the kill switch on needs. Only while the setting is on, and only
+// that key — the setting is about the kill switch, not about trusting the file.
+// Both directions, so a wrapper that always keeps the ports fails as loudly as
+// one that never does.
+void TestQtTrustTunnelClient::aConfigsKillSwitchPortsReachTheCoreOnlyWhenTheUserLetsThem()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const QString toml = QStringLiteral("loglevel = \"warn\"\n"
+                                        "ssl_session_cache_path = \"/var/tmp/somewhere\"\n"
+                                        "killswitch_allow_ports = [3389, 5900]\n"
+                                        "[endpoint]\n"
+                                        "hostname = \"vpn.example\"\n"
+                                        "[listener.tun]\n"
+                                        "device_name = \"named-by-file\"\n"
+                                        "use_existing = true\n"
+                                        "netns = \"elsewhere\"\n");
+
+    QMetaObject::invokeMethod(m_client, "setKillSwitchPortsFromConfig",
+                              Qt::BlockingQueuedConnection, Q_ARG(bool, true));
+    beginConnect(toml);
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QCOMPARE(QString::fromStdString(cfg.killswitch_allow_ports), QStringLiteral("[3389, 5900]"));
+    QVERIFY2(!cfg.ssl_session_storage_path.has_value(),
+             "letting the config decide the kill switch's ports let it name a directory too");
+    QVERIFY(cfg.device_name.empty());
+    QVERIFY(!cfg.use_existing);
+    QVERIFY(!cfg.netns.has_value());
+
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    QMetaObject::invokeMethod(m_client, "setKillSwitchPortsFromConfig",
+                              Qt::BlockingQueuedConnection, Q_ARG(bool, false));
+    beginConnect(toml);
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    cfg = ctl.lastCoreConfig();
+    QVERIFY2(cfg.killswitch_allow_ports.empty(),
+             "the setting was turned off, and the config still opened the kill switch");
+}
+
+// The setting can arrive after the config it applies to has been read: the ports
+// are set aside when the file is, so either order gives the core the same thing.
+void TestQtTrustTunnelClient::theKillSwitchPortsSettingAppliesToAConfigAlreadyLoaded()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const QString toml = QStringLiteral("loglevel = \"warn\"\n"
+                                        "killswitch_allow_ports = [3389]\n"
+                                        "[endpoint]\n"
+                                        "hostname = \"vpn.example\"\n");
+    const auto loadThenSetThenConnect = [&](bool portsFromConfig) {
+        bool loaded = false;
+        QMetaObject::invokeMethod(
+                m_client, [&]() { loaded = m_client->loadConfigFromToml(toml); },
+                Qt::BlockingQueuedConnection);
+        QMetaObject::invokeMethod(m_client, "setKillSwitchPortsFromConfig",
+                                  Qt::BlockingQueuedConnection, Q_ARG(bool, portsFromConfig));
+        QMetaObject::invokeMethod(m_client, "connectVpn", Qt::QueuedConnection);
+        return loaded;
+    };
+
+    QVERIFY(loadThenSetThenConnect(true));
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+    QCOMPARE(QString::fromStdString(ctl.lastCoreConfig().killswitch_allow_ports),
+             QStringLiteral("[3389]"));
+
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    // Loaded while the setting is still on, so the ports are in the config when
+    // it is turned off.
+    QVERIFY(loadThenSetThenConnect(false));
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    QVERIFY(ctl.lastCoreConfig().killswitch_allow_ports.empty());
 }
 
 // FreeTunnel only writes a TUN listener. A SOCKS one is a proxy root would open on

@@ -13,6 +13,11 @@ struct AppSettings {
     QString language = "en";
     bool auto_connect_on_start = false;
     bool killswitch_enabled = true;
+    // Whether the VPN config's own killswitch_allow_ports reach the core: the
+    // ports the Windows kill switch lets through. Off, the helper drops them like
+    // the other keys a config must not choose for root (qt_trusttunnel_client.cpp);
+    // on, the user has said the config is theirs to decide that with.
+    bool killswitch_ports_from_config = false;
 
     // Domain bypass rules: domains matching these patterns skip the VPN tunnel.
     // Supports wildcards: *.example.com, exact: example.com. domain_bypass_rules

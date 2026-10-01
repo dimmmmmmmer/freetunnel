@@ -337,6 +337,14 @@ private:
                                       Q_ARG(bool, c.value("enabled").toBool()));
             return true;
         }
+        // A missing key reads as false, which keeps the config's ports out: the
+        // safe way for a renamed or dropped key to fail.
+        if (cmd == "setKillSwitchPortsFromConfig") {
+            QMetaObject::invokeMethod(&m_client, "setKillSwitchPortsFromConfig",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(bool, c.value("enabled").toBool()));
+            return true;
+        }
         if (cmd == "setLogLevel") {
             QMetaObject::invokeMethod(&m_client, "setLogLevel", Qt::QueuedConnection,
                                       Q_ARG(QString, c.value("level").toString()));

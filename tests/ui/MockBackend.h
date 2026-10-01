@@ -35,6 +35,8 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
+    Q_PROPERTY(bool killSwitchPortsFromConfig READ killSwitchPortsFromConfig WRITE
+                       setKillSwitchPortsFromConfig NOTIFY settingsChanged)
     Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged)
@@ -110,6 +112,14 @@ public:
     void setAutoConnect(bool v);
     bool killSwitch() const { return m_killSwitch; }
     void setKillSwitch(bool v);
+    bool killSwitchPortsFromConfig() const { return m_killSwitchPortsFromConfig; }
+    void setKillSwitchPortsFromConfig(bool v)
+    {
+        if (m_killSwitchPortsFromConfig == v)
+            return;
+        m_killSwitchPortsFromConfig = v;
+        emit settingsChanged();
+    }
     bool loggingEnabled() const { return m_loggingEnabled; }
     void setLoggingEnabled(bool v) {
         if (m_loggingEnabled == v)
@@ -348,6 +358,7 @@ private:
     QString m_themeMode = QStringLiteral("dark");
     bool m_autoConnect = false;
     bool m_killSwitch = false;
+    bool m_killSwitchPortsFromConfig = false;
     bool m_loggingEnabled = true;
     QString m_activeConfigProfile = QStringLiteral("Default");
     QString m_updateState;

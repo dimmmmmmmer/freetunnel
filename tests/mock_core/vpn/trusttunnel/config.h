@@ -60,7 +60,8 @@ struct TrustTunnelConfig {
             return std::nullopt;
         TrustTunnelConfig c;
         c.ssl_session_storage_path = t["ssl_session_cache_path"].value<std::string>();
-        // Kept as the raw array text: the wrapper only has to empty it.
+        // Kept as the raw array text: the wrapper only has to empty it, or pass it
+        // on untouched when the user lets the config decide.
         c.killswitch_allow_ports = t["killswitch_allow_ports"].value<std::string>().value_or("");
         if (const auto address = t["listener.socks.address"].value<std::string>()) {
             c.listener = SocksListener{*address};
