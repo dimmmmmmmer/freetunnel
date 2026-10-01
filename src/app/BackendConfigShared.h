@@ -18,6 +18,10 @@ bool storeConfigPassword(const QString &target, const QString &password);
 // target before (empty: nothing). *errOut: "write"|"password".
 bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
                             const QString &previousPassword, QString *errOut);
+// What to tell the user when that step failed on "password": the credential
+// store refused it. Worded for the store this platform has; on Linux, for whether
+// a keyring is there at all (@p storeIsThere) or is there and refused.
+QString passwordNotStoredMessage(bool storeIsThere);
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target);
 bool readValidatedImportContent(const QString &path, QString *contentOut, QString *errOut);
 bool copyImportIntoAppConfigDir(const QString &content, const QString &sourcePath, QString *targetOut);

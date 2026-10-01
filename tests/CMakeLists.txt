@@ -455,6 +455,20 @@ elseif(WIN32)
 endif()
 add_test(NAME credentialstore COMMAND test_credentialstore -o ${CMAKE_CURRENT_BINARY_DIR}/report-credentialstore.txt,txt)
 
+# Whether Linux has a Secret Service to keep passwords in, asked of a private
+# dbus-daemon, so unlike credentialstore it needs no keyring on the machine.
+if(UNIX AND NOT APPLE)
+    add_executable(test_secret_service_probe
+        test_secret_service_probe.cpp
+        ../src/core/CredentialStore.cpp
+        ../src/core/ConfigToml.cpp
+    )
+    target_include_directories(test_secret_service_probe PRIVATE ../include ../include/core)
+    target_link_libraries(test_secret_service_probe PRIVATE Qt6::Core Qt6::Test)
+    freetunnel_link_linux_secrets(test_secret_service_probe)
+    add_test(NAME secret_service_probe COMMAND test_secret_service_probe -o ${CMAKE_CURRENT_BINARY_DIR}/report-secret_service_probe.txt,txt)
+endif()
+
 add_executable(test_helper_ipc
     test_helper_ipc.cpp
     helper_ipc_mock_server.cpp

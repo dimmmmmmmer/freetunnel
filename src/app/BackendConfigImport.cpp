@@ -39,8 +39,7 @@ bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bo
         // data loss the create/edit path was fixed for.
         if (!targetPreExisted)
             QFile::remove(target);
-        emit errorOccurred(tr("Could not store the VPN password securely. Install "
-                             "gnome-keyring or KWallet, then try again."));
+        reportPasswordNotStored();
         return false;
     }
     QStringList stored = loadStoredConfigs();

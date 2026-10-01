@@ -269,12 +269,7 @@ bool Backend::createConfig(const QVariantMap &f)
     if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(), parsed.password,
                                                             passwordStoredFor(target, edit), &saveErr)) {
         if (saveErr == QLatin1String("password")) {
-            emit errorOccurred(tr("Could not store the VPN password securely. Install "
-                                 "gnome-keyring or KWallet, then try again."));
-            // The moment the app learns the credential store is not working. Ask
-            // again so the Settings banner matches what just happened instead of
-            // whatever was true when the process started.
-            recheckCredentialStorage();
+            reportPasswordNotStored();
         } else {
             emit errorOccurred(tr("Could not write config"));
         }

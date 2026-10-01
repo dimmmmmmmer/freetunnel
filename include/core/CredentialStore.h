@@ -12,6 +12,13 @@ namespace freetunnel {
 // and deletes the real app's secrets.
 QString credentialServiceName();
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+// Whether the session bus has a Secret Service on it, or can start one: the part
+// of "can libsecret store a password" that linking libsecret in does not answer.
+// Asks the bus only, so it looks nothing up and cannot raise an unlock prompt.
+bool secretServiceOnSessionBus();
+#endif
+
 // Stores VPN config passwords outside the on-disk TOML (macOS Keychain, Windows
 // Credential Manager, Linux libsecret / Secret Service). Plaintext file fallback is
 // disabled for new passwords — see secureStorageAvailable().
@@ -35,7 +42,9 @@ QString buildConnectConfigToml(const QString &configPath,
 // Delete any leftover materialized configs (crash leftovers from versions that
 // wrote password-injected temp files) — call at startup.
 void sweepStaleMaterializedConfigs();
-// Migrate/remove legacy plaintext credential files when secure storage is available.
+// Called at startup. Today that is the materialized-config sweep above and nothing
+// more: a legacy per-config password file moves into the store when loadPassword()
+// next reads it, and the legacy instance-auth file is InstanceControl's to sweep.
 void sweepLegacyPlaintextStorage();
 
 } // namespace freetunnel

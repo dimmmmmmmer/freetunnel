@@ -1,8 +1,12 @@
-# Optional Linux Secret Service (libsecret) for CredentialStore.
+# What CredentialStore needs on Linux: QtDBus always, and libsecret if it is there.
 get_filename_component(FREETUNNEL_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 macro(freetunnel_link_linux_secrets target)
     if(UNIX AND NOT APPLE)
+        # Asking the session bus whether a Secret Service is on it is how the store
+        # learns whether libsecret has anything to talk to (secretServiceOnSessionBus).
+        find_package(Qt6 COMPONENTS DBus REQUIRED)
+        target_link_libraries(${target} PRIVATE Qt6::DBus)
         find_package(PkgConfig QUIET)
         if(PkgConfig_FOUND)
             # IMPORTED_TARGET rather than the bare variables, for two reasons that

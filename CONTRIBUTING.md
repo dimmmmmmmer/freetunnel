@@ -139,9 +139,10 @@ build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
 Test suites (`ctest -N` lists them all): deep links (incl. structured
 fuzz) and config import, config store and paths, settings, both TOML writers,
-credentials (Keychain / Credential Manager / libsecret), release verify and
-version comparison, control commands and the single-instance socket, helper IPC
-from both ends (client, server, fuzz) and the elevated argv, split-tunnel bypass
+credentials (Keychain / Credential Manager / libsecret, and whether Linux has a
+Secret Service to keep them in), release verify and version comparison, control
+commands and the single-instance socket, helper IPC from both ends (client,
+server, fuzz) and the elevated argv, split-tunnel bypass
 rules and interface binding, the Backend's own units (logs, settings, config,
 split tunnel, updates), QML UI smoke tests, and integration tests (config
 workflow, Backend + mock VPN, single instance, helper client, UpdateChecker
