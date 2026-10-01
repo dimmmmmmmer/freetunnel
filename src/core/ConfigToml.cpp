@@ -61,27 +61,8 @@ static QString csvToTomlArray(const QString &csv) {
     return listToTomlArray(csv.split(',', Qt::SkipEmptyParts));
 }
 
-QString clientRandomForCore(const QString &value) {
-    QString v = value.trimmed();
-    // Every trailing slash, not only the last: "aa//" lost one and became "aa/",
-    // which is exactly the empty mask the core refuses.
-    while (v.endsWith(QLatin1Char('/')))
-        v.chop(1);
-    // Nothing before the slash leaves nothing for the mask to apply to; the core
-    // sends a random of its own either way.
-    return v.startsWith(QLatin1Char('/')) ? QString() : v;
-}
-
-bool isValidClientRandom(const QString &value) {
-    static const QRegularExpression hex(
-            QStringLiteral("^(?:[0-9a-fA-F]{2}){1,32}(?:/(?:[0-9a-fA-F]{2}){1,32})?$"));
-    return value.isEmpty() || hex.match(value).hasMatch();
-}
-
-QStringList splitDnsList(const QString &dns) {
-    static const QRegularExpression separators(QStringLiteral("[\\s,;]+"));
-    return dns.split(separators, Qt::SkipEmptyParts);
-}
+// clientRandomForCore / isValidClientRandom / splitDnsList live in
+// ConfigTomlValues.cpp.
 
 namespace {
 

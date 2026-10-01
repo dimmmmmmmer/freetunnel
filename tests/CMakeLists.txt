@@ -151,6 +151,7 @@ add_executable(test_deeplink
     test_deeplink.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
@@ -209,6 +210,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -271,6 +273,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -396,6 +399,7 @@ add_executable(test_configimport
     ../src/core/ConfigPaths.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
 target_link_libraries(test_configimport PRIVATE Qt6::Core Qt6::Test)
@@ -431,6 +435,7 @@ add_executable(test_instance_control
     ../src/core/InstanceControl.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_instance_control PRIVATE ../include ../include/core)
 target_link_libraries(test_instance_control PRIVATE Qt6::Core Qt6::Network Qt6::Test)
@@ -445,6 +450,7 @@ add_test(NAME instance_control COMMAND test_instance_control -o ${CMAKE_CURRENT_
 add_executable(test_configtoml
     test_configtoml.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_configtoml PRIVATE ../include ../include/core)
 target_link_libraries(test_configtoml PRIVATE Qt6::Core Qt6::Test)
@@ -504,6 +510,7 @@ add_executable(test_credentialstore
     test_credentialstore.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
 target_link_libraries(test_credentialstore PRIVATE Qt6::Core Qt6::Test)
@@ -522,6 +529,7 @@ if(UNIX AND NOT APPLE)
         test_secret_service_probe.cpp
         ../src/core/CredentialStore.cpp
         ../src/core/ConfigToml.cpp
+        ../src/core/ConfigTomlValues.cpp
     )
     target_include_directories(test_secret_service_probe PRIVATE ../include ../include/core)
     target_link_libraries(test_secret_service_probe PRIVATE Qt6::Core Qt6::Test)
@@ -619,6 +627,7 @@ add_executable(test_integration_config_workflow
     ../src/core/DeepLink.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
     ../src/core/CredentialStore.cpp
 )
 target_include_directories(test_integration_config_workflow PRIVATE ../include ../include/core)
@@ -638,6 +647,7 @@ add_executable(test_integration_single_instance
     ../src/core/InstanceControl.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_integration_single_instance PRIVATE ../include ../include/core)
 target_link_libraries(test_integration_single_instance PRIVATE Qt6::Core Qt6::Test Qt6::Network)
@@ -693,6 +703,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
     ../src/core/AppImagePath.cpp
@@ -956,7 +967,8 @@ foreach(suite IN ITEMS lifecycle settings fuzz)
         -o ${CMAKE_CURRENT_BINARY_DIR}/report-helper_server_${suite}.txt,txt)
 endforeach()
 # A config as the app writes it, for the endpoint keys only the core acts on.
-target_sources(test_helper_server_settings PRIVATE ../src/core/ConfigToml.cpp)
+target_sources(test_helper_server_settings PRIVATE
+    ../src/core/ConfigToml.cpp ../src/core/ConfigTomlValues.cpp)
 
 # Backend's update state machine: the code that ends in launching an installer
 # sat at 2.3% line coverage, and both bugs found in it were found by review.
