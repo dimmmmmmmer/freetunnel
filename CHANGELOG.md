@@ -101,6 +101,16 @@ compare link at the bottom of its release notes.
 - **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
   AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
   no longer finds the new version; FreeTunnel's own updater still does.
+- **Settings says that its excluded routes come on top of a config's own.** Each
+  config excludes some routes itself: one made in FreeTunnel or from a link keeps
+  local networks and multicast outside the tunnel. The list in Settings is added
+  to those, never used instead, so emptying it does not send the local network
+  through the tunnel. The page showed the list as if it were the whole set; a
+  line under it now says what it adds to.
+- **A config file that turns off certificate checks says so when you import
+  it.** A tt:// link that turns off server certificate verification says so
+  before it adds the server, but a file that did the same was added without a
+  word. The message that the config was added now says it too.
 
 ### Fixed
 
@@ -138,6 +148,49 @@ compare link at the bottom of its release notes.
   listener's password was taken for the server's, that password is now stored as
   the config's own: if the config does not connect, open it in the config editor
   and enter the server's username and password again.
+- **Saving a config in the editor keeps the config's own routing.** A config
+  file can say which addresses go through the tunnel and which stay outside it,
+  and can hold settings the editor has no field for. Saving it from the editor,
+  even with nothing changed, or renaming it, replaced that routing with
+  FreeTunnel's defaults and dropped the rest, so a config from a provider still
+  connected but sent different traffic through the tunnel. The editor now
+  changes only what it shows, and Save with nothing changed leaves the file as
+  it is. A config that was saved this way has already lost
+  those lines: import it again from the provider's file or link.
+- **A config made for a local SOCKS proxy connects again.** TrustTunnel's own
+  client can run a config as a SOCKS proxy on your computer instead of a VPN
+  tunnel. FreeTunnel always runs the tunnel, and since 1.1.8 it kept the proxy
+  setting next to it; the VPN core refuses a config that asks for both, so such
+  a config failed to connect. The proxy setting is now left out, and the config
+  connects as a VPN without being imported again. If the proxy had a password of
+  its own, an earlier version may have stored that one as the server's when you
+  tried to connect: if the config then fails to sign in, open it in the config
+  editor and enter the server's password again.
+- **Renaming a config no longer deletes your own copy of it.** A config listed
+  from a file outside FreeTunnel's folder, as a very early build could leave it,
+  was moved into FreeTunnel's folder when renamed in the editor, and the original
+  file was deleted. The original now stays where it is, as it already did when
+  such a config was deleted from the list.
+- **A config that could not be saved still connects as it did.** When saving an
+  edited config failed at the last step, with "Could not write config", its new
+  password had already been stored, while the file on disk was still the old
+  config, perhaps with another username. It then failed to connect until it was
+  saved again. The stored password is now put back as it was.
+- **Choosing a certificate file the editor cannot use no longer empties the
+  certificate field.** The editor loads a certificate only from your home,
+  Downloads, Documents or Desktop folder, or the folder for temporary files, so
+  not from another drive or a USB stick, and not from a link to another file or
+  a file over 1 MB. Such a file
+  emptied the field without a word, taking a certificate you had pasted there
+  with it, and Save then wrote the config without one. The field now keeps what
+  it holds, and a message says why the file was not loaded.
+- **A long config name is explained instead of failing.** A config's name is
+  also its file name, and a name longer than a file name may be, about 120
+  Cyrillic letters on Linux and macOS, failed with "Could not write config",
+  which said nothing about the name. Names now have a limit of 50 characters: the
+  editor says when a name is longer, and a link or file with a longer name is
+  imported under its first 50 characters. A config that already has a longer
+  name keeps it, and the same link sent again still offers to replace it.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle
@@ -168,10 +221,9 @@ compare link at the bottom of its release notes.
   connects.** A config file may say `post_quantum_group_enabled = false`, but
   FreeTunnel turned it back on when it moved the password out of the file, and
   again for every connection, so the setting never took effect. The file's
-  setting is used now. A config imported before already has it turned back on in
-  its file: import it again from the original file. Saving a config in the
-  config editor still turns it back on, as the editor has no switch for it:
-  make changes to such a config in its file, and import it again.
+  setting is used now, and saving the config in the config editor keeps it. A
+  config imported before already has it turned back on in its file: import it
+  again from the original file.
 - **A link's client random reaches the VPN core in a form it can use.** A link
   can give the client random with a mask, as prefix/mask. FreeTunnel wrote the
   mask under a key of its own that the VPN core never reads, so the connection

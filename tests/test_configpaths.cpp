@@ -22,6 +22,7 @@ private slots:
     void aNameIsKeptAsTypedUnlessAFileCannotHoldIt();
     void aNameWithNothingLeftFallsBack();
     void twoSpellingsAreOneFileOnlyWhereTheFileSystemSaysSo();
+    void aNameNobodyTypedIsCutToTheLimit();
 };
 
 void TestConfigPaths::sanitizeAndUniquePath()
@@ -189,6 +190,32 @@ void TestConfigPaths::twoSpellingsAreOneFileOnlyWhereTheFileSystemSaysSo()
         g.close();
         QVERIFY(!freetunnel::namesTheSameFile(upper, lower));
     }
+}
+
+// The limit is in characters, and a character beyond the first plane is two
+// UTF-16 units: a cut that counted units, or split them, would leave half of
+// one in the file name.
+void TestConfigPaths::aNameNobodyTypedIsCutToTheLimit()
+{
+    const int limit = freetunnel::kMaxConfigNameLength;
+    const QString shortName = QStringLiteral("Frankfurt");
+    QCOMPARE(freetunnel::clippedConfigName(shortName), shortName);
+    const QString exact(limit, QLatin1Char('a'));
+    QCOMPARE(freetunnel::clippedConfigName(exact), exact);
+    QCOMPARE(freetunnel::clippedConfigName(exact + QStringLiteral("bc")), exact);
+
+    // Fifty Cyrillic letters, each two bytes in a file name, and then some.
+    const QString cyrillic = QString(limit + 30, QChar(0x0416));
+    QCOMPARE(freetunnel::clippedConfigName(cyrillic), cyrillic.left(limit));
+
+    // Four bytes each in a file name, and two UTF-16 units each here.
+    QString flags;
+    for (int i = 0; i < limit + 5; ++i)
+        flags += QStringLiteral("\U0001F30D");
+    const QString clipped = freetunnel::clippedConfigName(flags);
+    QCOMPARE(clipped.toUcs4().size(), limit);
+    QCOMPARE(clipped.size(), 2 * limit);
+    QVERIFY(clipped.toUtf8().size() <= 200);
 }
 
 QTEST_MAIN(TestConfigPaths)

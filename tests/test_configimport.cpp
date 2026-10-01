@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include "core/ConfigImport.h"
+#include "core/ConfigPaths.h"
 #include "core/DeepLink.h"
 
 using namespace freetunnel;
@@ -14,6 +15,7 @@ private slots:
     void skipVerificationFlagPropagates();
     void fileNameFromServerName();
     void fileNameSanitized();
+    void aLongNameIsCutToTheLimit();
     void rejectsInvalidLink();
 };
 
@@ -62,6 +64,18 @@ void TestConfigImport::fileNameSanitized() {
     auto out = prepareDeepLinkImport(makeLink());
     QVERIFY(out.has_value());
     QCOMPARE(out->fileName, QStringLiteral("vpn.example.com.toml"));
+}
+
+// A link can carry a name of any length, and one too long to be a file name
+// failed to import with "Could not write config". It is cut instead.
+void TestConfigImport::aLongNameIsCutToTheLimit() {
+    const QString longName = QString(130, QChar(0x0416)); // 260 bytes as a file name
+    auto out = prepareDeepLinkImport(makeLink(longName));
+    QVERIFY(out.has_value());
+    QCOMPARE(out->fileName, longName.left(freetunnel::kMaxConfigNameLength) + QStringLiteral(".toml"));
+    // The whole name too, where a config imported before the cut still is.
+    QCOMPARE(out->unclippedFileName, longName + QStringLiteral(".toml"));
+    QVERIFY(prepareDeepLinkImport(makeLink(QStringLiteral("Work")))->unclippedFileName.isEmpty());
 }
 
 void TestConfigImport::rejectsInvalidLink() {

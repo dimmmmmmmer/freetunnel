@@ -422,6 +422,12 @@ static void carryOverUnknownTables(const QList<QPair<QString, QString>> &tables,
             c.extraEndpointKeys = unknownKeyLines(body, knownEndpointKeys());
         } else if (header == QLatin1String("listener.tun")) {
             c.tunSection = normalizeBody(body);
+        } else if (header == QLatin1String("listener") || header.startsWith(QLatin1String("listener."))) {
+            // Every other listener is left out. FreeTunnel runs the tunnel, and
+            // buildConfigToml() always writes [listener.tun]: a [listener.socks]
+            // kept beside it, as TrustTunnel's own client sets up a local proxy,
+            // named two listeners, and the core refuses such a config outright.
+            // [listener] itself holds nothing else the core reads.
         } else {
             c.extraSections += QStringLiteral("\n[%1]\n").arg(header) + normalizeBody(body);
         }

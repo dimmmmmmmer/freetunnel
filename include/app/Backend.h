@@ -174,7 +174,9 @@ public:
     Q_INVOKABLE void openLogFolder();
     Q_INVOKABLE QString logText() const; // whole log as plain text (for Copy)
     Q_INVOKABLE void copyToClipboard(const QString &text) const;
-    Q_INVOKABLE QString readTextFile(const QString &pathOrUrl) const; // for cert load
+    // For the certificate field: the file's text, or empty and errorOccurred()
+    // saying why the file was not read.
+    Q_INVOKABLE QString readTextFile(const QString &pathOrUrl);
     Q_INVOKABLE QString readBundledText(const QUrl &url) const; // qrc-only (icon recolor)
 
     bool splitEnabled() const { return m_settings.domain_bypass_enabled; }

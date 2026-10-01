@@ -3,6 +3,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QVariantMap>
 
@@ -117,6 +118,27 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
 }
 
+// The form owns the fields it shows, and nothing else. The file's own
+// [listener.tun], and the keys and tables the editor has no field for, are the
+// file's, and an edit keeps them. Built from the form alone, every Save, even one
+// that changed nothing, wrote the default routes over a provider's own and
+// dropped the rest: the config still connected, and quietly routed differently.
+// post_quantum_group_enabled is read into a field of its own rather than kept as
+// an unknown key, and the form has no switch for it, so it is carried over here
+// too; a new config has no file, and gets the default.
+// The one exception is a listener other than the tunnel, such as a SOCKS proxy:
+// FreeTunnel runs the tunnel, and the core refuses a config that names two
+// (see carryOverUnknownTables).
+void keepWhatTheFormDoesNotShow(const QString &existingToml, freetunnel::ConfigToml *ct)
+{
+    const freetunnel::ConfigToml existing = freetunnel::parseConfigToml(existingToml);
+    ct->tunSection = existing.tunSection;
+    ct->extraRootKeys = existing.extraRootKeys;
+    ct->extraEndpointKeys = existing.extraEndpointKeys;
+    ct->extraSections = existing.extraSections;
+    ct->postQuantum = existing.postQuantum;
+}
+
 // A renamed config's password moves with it: stored under the new path by the
 // save, and dropped from the old one here. A rename that only changed the letter
 // case gives two keys the Windows credential store takes for one, so deleting the
@@ -131,17 +153,49 @@ void forgetOldPassword(const QString &oldPath, const QString &target, const QStr
         CredentialStore::storePassword(newKey, password);
 }
 
+// What the credential store holds for the file a save is about to write: the
+// edited config's own password when the save goes over that file, and nothing
+// when it makes a new one (a new config, or a rename).
+QString passwordStoredFor(const QString &target, const EditSnapshot &edit)
+{
+    return freetunnel::namesTheSameFile(edit.oldPath, target) ? edit.password : QString();
+}
+
+// Whether a config file is the app's own copy, in its config directory.
+// configs.json can name a file elsewhere (a very early build listed a picked
+// .toml where it was), and that file is the user's, which is why removeConfig()
+// leaves it on disk.
+bool inAppConfigDir(const QString &path)
+{
+    const QString dir = QFileInfo(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation))
+                                .absoluteFilePath();
+    return QFileInfo(path).absolutePath() == dir;
+}
+
 // Cannot fail: naming is the last step and sanitizeConfigBaseName() always
 // produces something, falling back to the hostname and then to a generated stem.
 // Returns bool only so parseCreateConfigFields() reads as one chain of steps.
+// A typed name is taken whole (createConfig() refuses one that is too long); a
+// hostname standing in for one is cut to the limit, as a name nobody typed.
 bool finalizeParsedCreateConfig(const QVariantMap &f, ParsedCreateConfig *out)
 {
     const QString name = f.value(QStringLiteral("name")).toString().trimmed();
     out->password = out->ct.password;
     out->ct.password.clear();
     out->safeName = freetunnel::sanitizeConfigBaseName(
-            name.isEmpty() ? out->ct.hostname : name, QStringLiteral("config"));
+            name.isEmpty() ? freetunnel::clippedConfigName(out->ct.hostname) : name,
+            QStringLiteral("config"));
     return true;
+}
+
+// Whether a name is over the limit for the file it would make. A config that
+// already has a longer name (links and files could give any before the limit)
+// still saves under it: that file exists, so the name fits.
+bool nameTooLongForANewFile(const QString &safeName, const QString &oldPath)
+{
+    if (safeName.toUcs4().size() <= freetunnel::kMaxConfigNameLength)
+        return false;
+    return oldPath.isEmpty() || QFileInfo(oldPath).completeBaseName() != safeName;
 }
 
 bool parseCreateConfigFields(const QVariantMap &f, ParsedCreateConfig *out, QString *err)
@@ -167,6 +221,9 @@ void Backend::emitCreateConfigError(const QString &parseErr)
     else if (parseErr == QLatin1String("bad_client_random"))
         emit errorOccurred(tr("Client random must be hexadecimal in whole bytes (an even number of "
                               "digits, at most 64), optionally followed by /mask"));
+    else if (parseErr == QLatin1String("name_too_long"))
+        emit errorOccurred(tr("The name is too long: %1 characters at most")
+                                   .arg(freetunnel::kMaxConfigNameLength));
 }
 
 bool Backend::createConfig(const QVariantMap &f)
@@ -178,7 +235,6 @@ bool Backend::createConfig(const QVariantMap &f)
         return false;
     }
 
-    const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
     int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
     // The editor opens on a row and saves minutes later, and the list is not
     // still under it: finalizeImportedConfig() prepends an imported config and
@@ -200,12 +256,18 @@ bool Backend::createConfig(const QVariantMap &f)
     }
     const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
     const QString &oldPath = edit.oldPath;
+    if (nameTooLongForANewFile(parsed.safeName, oldPath)) {
+        emitCreateConfigError(QStringLiteral("name_too_long"));
+        return false;
+    }
+    keepWhatTheFormDoesNotShow(edit.content, &parsed.ct);
+    const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
     QString saveErr;
-    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(),
-                                                            parsed.password, &saveErr)) {
+    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(), parsed.password,
+                                                            passwordStoredFor(target, edit), &saveErr)) {
         if (saveErr == QLatin1String("password")) {
             emit errorOccurred(tr("Could not store the VPN password securely. Install "
                                  "gnome-keyring or KWallet, then try again."));
@@ -241,7 +303,11 @@ void Backend::persistCreatedConfigPaths(const QString &oldPath, const QString &t
     if (!oldPath.isEmpty() && oldPath != target) {
         // A rename that only changed the letter case is one file where the file
         // system folds case, and removing the old spelling removed the new one.
-        if (!freetunnel::namesTheSameFile(oldPath, target))
+        // And a config listed where the user keeps it is renamed into the app's
+        // directory, as any new name is: the original there is the user's file,
+        // and deleting it deleted their only copy of a config the app had merely
+        // been pointed at.
+        if (!freetunnel::namesTheSameFile(oldPath, target) && inAppConfigDir(oldPath))
             QFile::remove(oldPath);
         if (wasActive)
             m_activePath = target;

@@ -15,6 +15,10 @@ struct PreparedImport {
     // mark into '_'. A config imported then is still under it, and a link sent
     // again has to find it there to offer to replace it.
     QString legacyFileName;
+    // The whole name, when fileName had to cut it to kMaxConfigNameLength. A
+    // config imported before names were cut is under it, and is found there the
+    // same way.
+    QString unclippedFileName;
     QString tomlContent; // TOML ready to write to disk
     bool skipVerification = false;
 };

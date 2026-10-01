@@ -28,8 +28,10 @@ void TestSafeFileRead::readsFileInHome()
     tf.write("-----BEGIN CERTIFICATE-----\nTEST\n");
     tf.close();
 
-    const QString content = safeReadUserTextFile(tf.fileName());
+    UserFileRefusal refusal = UserFileRefusal::Unreadable;
+    const QString content = safeReadUserTextFile(tf.fileName(), kMaxUserTextFileBytes, &refusal);
     QVERIFY(content.contains(QStringLiteral("BEGIN CERTIFICATE")));
+    QCOMPARE(refusal, UserFileRefusal::None);
 }
 
 void TestSafeFileRead::readsFileUrlInHome()
@@ -48,7 +50,14 @@ void TestSafeFileRead::rejectsSystemPaths()
 {
     QVERIFY(safeReadUserTextFile(QStringLiteral("/etc/passwd")).isEmpty());
 #if defined(Q_OS_UNIX)
-    QVERIFY(safeReadUserTextFile(QStringLiteral("/etc/hosts")).isEmpty());
+    // And says why, which the editor passes on: a file that exists and is
+    // readable, refused for where it is.
+    UserFileRefusal refusal = UserFileRefusal::None;
+    QVERIFY(safeReadUserTextFile(QStringLiteral("/etc/hosts"), kMaxUserTextFileBytes, &refusal).isEmpty());
+    QCOMPARE(refusal, UserFileRefusal::OutsideUserFolders);
+    QVERIFY(safeReadUserTextFile(QStringLiteral("/etc/no-such-file-here"), kMaxUserTextFileBytes, &refusal)
+                    .isEmpty());
+    QCOMPARE(refusal, UserFileRefusal::Unreadable);
 #endif
 }
 
@@ -60,7 +69,9 @@ void TestSafeFileRead::rejectsOversized()
     tf.write(QByteArray(2 * 1024 * 1024, 'A'));
     tf.close();
 
-    QVERIFY(safeReadUserTextFile(tf.fileName(), 1024 * 1024).isEmpty());
+    UserFileRefusal refusal = UserFileRefusal::None;
+    QVERIFY(safeReadUserTextFile(tf.fileName(), 1024 * 1024, &refusal).isEmpty());
+    QCOMPARE(refusal, UserFileRefusal::TooLarge);
 }
 
 // docs/security-threats.md says of this function: "symlinks are rejected". No
@@ -90,8 +101,10 @@ void TestSafeFileRead::rejectsASymlinkEvenWhenItsTargetIsAllowed()
     QVERIFY(QFile::link(target.fileName(), link));
     const auto cleanup = qScopeGuard([&] { QFile::remove(link); });
 
-    QVERIFY2(safeReadUserTextFile(link).isEmpty(),
+    UserFileRefusal refusal = UserFileRefusal::None;
+    QVERIFY2(safeReadUserTextFile(link, kMaxUserTextFileBytes, &refusal).isEmpty(),
              "a symlink must be refused even when it points at a file we would read");
+    QCOMPARE(refusal, UserFileRefusal::SymLink);
 #endif
 }
 

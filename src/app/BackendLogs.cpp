@@ -119,8 +119,40 @@ void Backend::copyToClipboard(const QString &text) const {
         cb->setText(text);
 }
 
-QString Backend::readTextFile(const QString &pathOrUrl) const {
-    return safeReadUserTextFile(pathOrUrl);
+namespace {
+
+QString userFileRefusalText(UserFileRefusal refusal)
+{
+    switch (refusal) {
+    case UserFileRefusal::OutsideUserFolders:
+        return Backend::tr("A certificate can be loaded only from your home, Downloads, Documents, "
+                           "Desktop or temporary files folder. Copy it there, or paste it into the "
+                           "certificate field.");
+    case UserFileRefusal::SymLink:
+        return Backend::tr("That file is a link to another file. Choose the file itself, or "
+                           "paste the certificate into the field.");
+    case UserFileRefusal::TooLarge:
+        return Backend::tr("That file is over 1 MB, too large to be a certificate");
+    default:
+        return Backend::tr("Could not read the file");
+    }
+}
+
+} // namespace
+
+// The certificate field is the one thing that reads files here. A file the
+// reader refuses comes back empty, and the field took that as the certificate:
+// whatever was pasted there was gone, with nothing to say why, and Save wrote
+// certificate = "". The editor now keeps the field when nothing comes back, so
+// this is where the user hears why.
+QString Backend::readTextFile(const QString &pathOrUrl) {
+    UserFileRefusal refusal = UserFileRefusal::None;
+    const QString text = safeReadUserTextFile(pathOrUrl, kMaxUserTextFileBytes, &refusal);
+    if (refusal != UserFileRefusal::None)
+        emit errorOccurred(userFileRefusalText(refusal));
+    else if (text.trimmed().isEmpty())
+        emit errorOccurred(tr("That file is empty"));
+    return text;
 }
 
 QString Backend::readBundledText(const QUrl &url) const {

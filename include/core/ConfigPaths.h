@@ -39,6 +39,18 @@ bool nameMixesScripts(const QString &name);
 /// device name such as "CON" kept from being one.
 QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefix = QStringLiteral("imported"));
 
+/// The longest config name, in characters. The name is the file's name, and a
+/// file name can be 255 bytes on ext4 and APFS, 255 UTF-16 units on NTFS. Fifty
+/// characters of up to four UTF-8 bytes each come to 200 bytes, which leaves room
+/// on all three for ".toml", the "-2" that tells two configs apart and the
+/// ".XXXXXX" a save is staged under. A longer name used to fail as "Could not
+/// write config", which said nothing about the name.
+inline constexpr int kMaxConfigNameLength = 50;
+
+/// @p name cut to kMaxConfigNameLength characters, never through the middle of
+/// one. For a name the user did not type: a link's, a file's, a hostname.
+QString clippedConfigName(const QString &name);
+
 /// The stem 1.2.0 made of a name: letters, digits, '.', '-' and '_' kept, every
 /// other character '_'. For finding a config it named, never for a new one.
 QString legacyConfigBaseName(const QString &name);

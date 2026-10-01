@@ -175,7 +175,9 @@ void TestConfigToml::roundTripKeepsWhatTheEditorDoesNotUnderstand()
             "bound_if = \"en0\"\n"
             "mtu_size = 1280\n"
             "excluded_routes = [\"10.9.0.0/16\"]\n"
-            "\n[listener.socks]\n"            // a table this editor never writes
+            "\n[listener.socks]\n"            // a listener FreeTunnel does not run
+            "address = \"127.0.0.1:1080\"\n"
+            "\n[provider]\n"                  // a table this editor never writes
             "port = 1080\n");
 
     const freetunnel::ConfigToml parsed = freetunnel::parseConfigToml(original);
@@ -192,8 +194,11 @@ void TestConfigToml::roundTripKeepsWhatTheEditorDoesNotUnderstand()
              "our default routes were written over the config's own");
 
     // Sections and keys we have no field for.
-    QVERIFY2(rebuilt.contains(QStringLiteral("[listener.socks]")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("[provider]")), qPrintable(rebuilt));
     QVERIFY2(rebuilt.contains(QStringLiteral("port = 1080")), qPrintable(rebuilt));
+    // But not a second listener: the core refuses a config that names two.
+    QVERIFY2(!rebuilt.contains(QStringLiteral("[listener.socks]")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("127.0.0.1:1080")), qPrintable(rebuilt));
     QVERIFY2(rebuilt.contains(QStringLiteral("provider_quirk = 42")), qPrintable(rebuilt));
     QVERIFY2(rebuilt.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(rebuilt));
 
@@ -509,6 +514,8 @@ void TestConfigToml::anotherTablesPasswordIsNotTheServers()
             "address = \"127.0.0.1:1080\"\n"
             "username = \"socks-user\"\n"
             "password = \"socks-pass\"\n"
+            "[provider]\n"
+            "password = \"portal-pass\"\n"
             "[endpoint]\n"
             "hostname = \"vpn.example.com\"\n"
             "addresses = [\"1.2.3.4:443\"]\n"
@@ -516,9 +523,11 @@ void TestConfigToml::anotherTablesPasswordIsNotTheServers()
     const ConfigToml c = parseConfigToml(src);
     QCOMPARE(c.username, QStringLiteral("u"));
     QVERIFY2(c.password.isEmpty(), qPrintable(c.password));
-    // And the listener keeps what is its own.
-    QVERIFY2(buildConfigToml(c).contains(QStringLiteral("password = \"socks-pass\"")),
-             qPrintable(buildConfigToml(c)));
+    // And another table keeps what is its own. The SOCKS listener is not kept at
+    // all: FreeTunnel runs the tunnel, and the core refuses a config with both.
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(rebuilt.contains(QStringLiteral("password = \"portal-pass\"")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("socks-pass")), qPrintable(rebuilt));
 }
 
 // TOML lets a key be indented, and a provider's file may well be. Only keys at the

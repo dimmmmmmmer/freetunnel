@@ -22,7 +22,12 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
         name = cfg->hostname.trimmed();
     }
     PreparedImport out;
-    out.fileName = sanitizeFileName(name) + QStringLiteral(".toml");
+    // A link can name its config at any length; one too long for a file name
+    // failed to import. Cut it rather than refuse a link for its name.
+    out.fileName = sanitizeFileName(clippedConfigName(name)) + QStringLiteral(".toml");
+    const QString whole = sanitizeFileName(name) + QStringLiteral(".toml");
+    if (whole != out.fileName)
+        out.unclippedFileName = whole;
     if (!name.isEmpty())
         out.legacyFileName = legacyConfigBaseName(name) + QStringLiteral(".toml");
     out.tomlContent = deepLinkConfigToToml(*cfg);
