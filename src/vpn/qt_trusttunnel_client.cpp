@@ -105,6 +105,9 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
 }
 
 QtTrustTunnelClient::~QtTrustTunnelClient() {
+    // Only the thread this object lives in may destroy it, with the timers it
+    // owns: the helper hands it back to its own thread first (~HelperServer).
+    Q_ASSERT(thread() == QThread::currentThread());
     // Suppress all signal emission during destruction — connected slots may
     // reference this object which is already being torn down.
     m_stopRequested = true;
