@@ -52,7 +52,8 @@ Keyring (Linux desktop secrets daemon) or KWallet (KDE wallet) bridge),
 the app **refuses to save new passwords** and shows a warning in Settings.
 The one secret it still writes then is the single-instance token, which lets a
 second launch hand a link to the running app: it goes to an owner-only (0600)
-file, `instance-auth`, until a start finds a store to keep it in.
+file, `instance-auth`, until a start finds a store to keep it in, and the app
+deletes that file when it quits.
 Password files older builds wrote (0600, under `credentials/`) are **moved into
 the OS store** the first time the app reads each one with secure storage
 available — to connect, edit, share or export that config. Until then they stay

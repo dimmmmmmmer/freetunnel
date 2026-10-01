@@ -4,7 +4,12 @@
 #include <QDir>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QScopeGuard>
 #include <QTemporaryDir>
+
+#if defined(Q_OS_UNIX)
+#include <unistd.h>
+#endif
 
 #include "core/InstanceControl.h"
 #include "core/CredentialStore.h"
@@ -20,7 +25,23 @@ private slots:
     void rejectsMismatchedToken();
     void peerCredentialCheckNeedsALiveSocket();
     void quittingDoesNotDeleteASuccessorsToken();
+    void quittingRemovesATokenKeptInTheFallbackFile();
+    void theSocketNameIsPerUser();
+    void linuxPutsTheNameInTheRuntimeDirectory();
 };
+
+// XDG_RUNTIME_DIR as the test found it, put back by the guard this returns.
+static auto keepRuntimeDir()
+{
+    const bool had = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    const QByteArray value = qgetenv("XDG_RUNTIME_DIR");
+    return qScopeGuard([had, value]() {
+        if (had)
+            qputenv("XDG_RUNTIME_DIR", value);
+        else
+            qunsetenv("XDG_RUNTIME_DIR");
+    });
+}
 
 void TestInstanceControl::roundTripMessage()
 {
@@ -193,6 +214,141 @@ void TestInstanceControl::quittingDoesNotDeleteASuccessorsToken()
     // And its own quit does remove it.
     freetunnel::removeInstanceAuthToken(successor);
     QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+}
+
+// Without a Secret Service the token lives in a 0600 file beside the config, and
+// a quitting instance has to remove it from there too. The check that the token is
+// still this instance's own asked the credential store alone — which is empty in
+// exactly that case — so it never matched, and the file outlived every session.
+//
+// The file is written here by hand: writeInstanceAuthToken() falls back to it only
+// when the store refuses, and the store a test build gets never does.
+void TestInstanceControl::quittingRemovesATokenKeptInTheFallbackFile()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    // Put back on the way out: every later test would otherwise look for its
+    // config in this directory after it is gone.
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    auto restoreConfigHome = qScopeGuard([configHome] {
+        if (configHome.isEmpty())
+            qunsetenv("XDG_CONFIG_HOME");
+        else
+            qputenv("XDG_CONFIG_HOME", configHome);
+    });
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+
+    const QString path = freetunnel::instanceAuthFilePath();
+    const auto keepOnlyInTheFile = [&path](const QString &token) {
+        freetunnel::removeInstanceAuthToken(); // the store holds nothing
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QVERIFY(f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+        QCOMPARE(f.write(token.toUtf8()), static_cast<qint64>(token.toUtf8().size()));
+    };
+
+    keepOnlyInTheFile(QStringLiteral("this-instances-token"));
+    freetunnel::removeInstanceAuthToken(QStringLiteral("this-instances-token"));
+    QVERIFY2(!QFileInfo::exists(path), "the instance's own token file outlived its quit");
+    QString stored;
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+
+    // A successor's token in the file is still not this instance's to remove.
+    keepOnlyInTheFile(QStringLiteral("successors-token"));
+    freetunnel::removeInstanceAuthToken(QStringLiteral("this-instances-token"));
+    QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the successor's token must survive");
+    QCOMPARE(stored, QStringLiteral("successors-token"));
+    freetunnel::removeInstanceAuthToken();
+}
+
+// One name per user. A single name for the machine belonged to whoever started
+// FreeTunnel first — a Windows pipe name is one namespace for every session, and
+// on Linux the socket sat in the shared /tmp — and every launch and link of any
+// other user started another full copy. The shared name is still tried after the
+// user's own, since an older FreeTunnel running through an update listens
+// there; under a test override nothing but the override may be touched, or a
+// test run would talk to the developer's own FreeTunnel.
+void TestInstanceControl::theSocketNameIsPerUser()
+{
+    qunsetenv("FT_TEST_INSTANCE_NAME");
+    const auto putBack = keepRuntimeDir();
+    qunsetenv("XDG_RUNTIME_DIR");
+    const QString shared = QStringLiteral("FreeTunnelInstance");
+    const QString own = freetunnel::instanceServerName();
+#if defined(Q_OS_WIN)
+    QVERIFY2(own.startsWith(shared + QStringLiteral("-S-1-")), qPrintable(own));
+#else
+    QCOMPARE(own, shared + QLatin1Char('-') + QString::number(::getuid()));
+#endif
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({own, shared}));
+
+    qputenv("FT_TEST_INSTANCE_NAME", "FreeTunnelNameTest");
+    QCOMPARE(freetunnel::instanceServerName(), QStringLiteral("FreeTunnelNameTest"));
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({QStringLiteral("FreeTunnelNameTest")}));
+    qunsetenv("FT_TEST_INSTANCE_NAME");
+}
+
+// On Linux the name goes in $XDG_RUNTIME_DIR, which no other account can enter:
+// in /tmp another account can create even this user's own name first. Only a
+// directory that is what the variable promises counts, and without one the name
+// in /tmp is used as before. A launch still looks there, after its own name, for
+// a FreeTunnel started without the variable, and on the shared name for one from
+// before 1.2.3.
+void TestInstanceControl::linuxPutsTheNameInTheRuntimeDirectory()
+{
+#if defined(Q_OS_LINUX)
+    qunsetenv("FT_TEST_INSTANCE_NAME");
+    const auto putBack = keepRuntimeDir();
+    const QString shared = QStringLiteral("FreeTunnelInstance");
+    const QString inTemp = shared + QLatin1Char('-') + QString::number(::getuid());
+    QTemporaryDir runtime(QDir::tempPath() + QStringLiteral("/ftrt-XXXXXX"));
+    QVERIFY(runtime.isValid());
+    const QString inRuntime = runtime.path() + QStringLiteral("/FreeTunnelInstance");
+    const auto nameWith = [](const QString &dir) {
+        qputenv("XDG_RUNTIME_DIR", QFile::encodeName(dir));
+        return freetunnel::instanceServerName();
+    };
+
+    QVERIFY(QFile::setPermissions(runtime.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                          | QFileDevice::ExeOwner));
+    QCOMPARE(nameWith(runtime.path()), inRuntime);
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({inRuntime, inTemp, shared}));
+    QCOMPARE(nameWith(runtime.path() + QLatin1Char('/')), inRuntime);
+
+    // Not a directory of this user's that no one else may enter.
+    QCOMPARE(nameWith(QStringLiteral("relative/dir")), inTemp);
+    QCOMPARE(nameWith(runtime.filePath(QStringLiteral("missing"))), inTemp);
+    const QString link = runtime.path() + QStringLiteral("-link");
+    QVERIFY(QFile::link(runtime.path(), link));
+    const auto dropLink = qScopeGuard([&link]() { QFile::remove(link); });
+    QCOMPARE(nameWith(link), inTemp);
+    const QFileInfo root(QStringLiteral("/root"));
+    if (root.isDir() && root.ownerId() != ::getuid()
+        && (root.permissions() & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+                                  | QFileDevice::ReadOther | QFileDevice::WriteOther
+                                  | QFileDevice::ExeOther)) == 0)
+        QCOMPARE(nameWith(root.filePath()), inTemp);
+    QVERIFY(QFile::setPermissions(runtime.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                          | QFileDevice::ExeOwner | QFileDevice::ReadGroup
+                                                          | QFileDevice::ExeGroup));
+    QCOMPARE(nameWith(runtime.path()), inTemp);
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({inTemp, shared}));
+    QVERIFY(QFile::setPermissions(runtime.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                          | QFileDevice::ExeOwner));
+
+    // A socket path has to fit in sockaddr_un, 108 bytes.
+    const QString deep = runtime.filePath(QString(90, QLatin1Char('d')));
+    QVERIFY(QDir().mkdir(deep));
+    QVERIFY(QFile::setPermissions(deep, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                | QFileDevice::ExeOwner));
+    QCOMPARE(nameWith(deep), inTemp);
+#else
+    QSKIP("$XDG_RUNTIME_DIR is used on Linux only");
+#endif
 }
 
 #include "test_instance_control.moc"

@@ -8,12 +8,64 @@ and threat summary.
 A second launch forwards commands (`freetunnel://toggle`, `tt://…` import) to the
 running instance via a local socket (`QLocalServer`) protected by:
 
-- `UserAccessOption` (Windows) and peer-uid verification (macOS/Linux) — other
-  OS users cannot connect; the second instance also verifies the listener's
-  owner before sending the token, so a squatted socket name can't harvest it
-- Per-session random token (stored in the OS credential store when available)
+- A socket name of each user's own, created owner-only (`UserAccessOption`),
+  and a check of the peer's user on both ends (uid on macOS/Linux, SID on
+  Windows) — other OS users cannot connect; the second instance also verifies
+  the listener's owner before sending the token, so a squatted socket name
+  can't harvest it
+- Per-session random token (stored in the OS credential store when available),
+  removed when the instance quits
 - Constant-time token comparison
 - 64 KB message cap
+
+A second launch that finds the running instance but cannot hand it the command
+(the token unreadable, or no answer in time) exits rather than starting a second
+instance beside it, and a starting instance clears the socket name only when
+nothing listens on it, as after a crash. Builds up to 1.2.2 listened on one name
+shared by all users; a second launch still forwards there, after its own name,
+so an older instance left running through an update is found rather than
+duplicated.
+
+A launch gives way only to a listener that is provably this user's: one that
+passed the peer check at a socket file of this user's own (macOS/Linux: at the
+name itself, not through a link, which `connect()` would follow to any socket of
+this user's, such as the session bus), or, when the connection does not go
+through at all, such a socket file. What another account can still do with the
+name differs by system:
+
+- **Linux** puts the socket in `$XDG_RUNTIME_DIR` (`/run/user/<uid>`), a 0700
+  directory of the user's own, which every systemd or elogind session has, so
+  no other account can create this user's name or a link at it. A launch also
+  tries `/tmp/FreeTunnelInstance-<uid>` (an instance started without
+  `$XDG_RUNTIME_DIR`) and the shared `/tmp/FreeTunnelInstance`; another account
+  can hold those, but a launch never gives way to a listener there that lets no
+  one in, and one that answers fails the peer check, so all it costs is the
+  time to find that out. Without `$XDG_RUNTIME_DIR`, the user's own name is the
+  one in `/tmp`, and another account can create it first. The launch still
+  starts, but cannot take the name (the sticky `/tmp` keeps it from renaming its
+  socket over another account's file), so it runs without the single-instance
+  listener: while the other account holds the name, every further launch and
+  link starts another copy.
+- **macOS** keeps the socket in the user's own temporary directory (`$TMPDIR`),
+  which no other account can enter, the shared name included. A socket there
+  turns a connection away when its backlog is full just as it does when nothing
+  listens on it, so a refusal is taken for a stale name only when no running
+  FreeTunnel holds the lock beside it (`<name>.lock`); a busy one is asked again
+  for a second and then given way to, never cleared or taken over.
+- **Windows** has one pipe namespace for every session, and the user's SID in
+  the name is no secret, so another account can create this user's pipe first.
+  It cannot keep FreeTunnel from starting: a pipe that does not let the launch
+  in, or stays busy for the five seconds Qt waits for it, is no instance of
+  ours, since FreeTunnel's listener keeps fifty instances of its pipe waiting
+  for callers. But while the other account holds the pipe, FreeTunnel's own
+  listener may not get the name, or not every connection made to it, so as on
+  Linux without `$XDG_RUNTIME_DIR`, further launches and links can start
+  another copy, after waiting out those five seconds when the pipe is kept
+  busy. A starting FreeTunnel does not wait on the pipe a second time to see
+  whether it is stale, since a pipe goes away with its last handle.
+
+On every system the token and the command go only to a listener that passed
+these checks, so a name another account holds never receives them.
 
 ### Links opened from a web page
 

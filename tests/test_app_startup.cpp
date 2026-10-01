@@ -18,6 +18,7 @@
 #include <QWindow>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QTranslator>
 
@@ -54,6 +55,9 @@ private slots:
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
+    void aLinkSentWhileStartingIsHandled();
+    void aSecondLaunchNeverStartsBesideALiveInstance();
+    void aLaunchWhileQuittingFindsNoInstance();
     void wireInstanceServerHandsTheListenerToBackend();
 
 private:
@@ -396,6 +400,19 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
     // and the listener must not accept commands before the Backend can serve them.
     QVERIFY(startup.trace.indexOf(QStringLiteral("backend"))
             < startup.trace.indexOf(QStringLiteral("instance-wired")));
+
+    // The listener is the one that checks a peer as it accepts it
+    // (newInstanceServer()). A plain QLocalServer checks it only once the
+    // connection is handed on, and a link sent while FreeTunnel was starting
+    // was gone by then and refused; nothing but this tells the two apart once
+    // the wiring is done.
+    QLocalSocket probe;
+    probe.connectToServer(QString::fromLatin1(instanceName));
+    QVERIFY(probe.waitForConnected(2000));
+    QTRY_VERIFY_WITH_TIMEOUT(!startup.server->findChildren<QLocalSocket *>().isEmpty(), 10000);
+    QVERIFY(startup.server->findChildren<QLocalSocket *>().constFirst()
+                    ->property("freetunnelPeerIsSameUser").isValid());
+    probe.abort();
 
     // Shutdown must be reachable from what was wired: the quit path is what the
     // tray item, ⌘Q and the window's close button all end up calling.
@@ -751,7 +768,159 @@ void TestAppStartup::wireInstanceServerWithoutTokenRefusesEveryCommand()
     sendInstanceMessage(armedName, freetunnel::formatInstanceMessage(
                                            QStringLiteral("tok"),
                                            QStringLiteral("freetunnel://connect")));
-    QCOMPARE(spy.count(), 1);
+    // Waited for, like every other delivery in this file. sendInstanceMessage()
+    // returns 50 ms after the disconnect, and a plain comparison here only held
+    // while the listener happened to finish inside that: it fails as soon as the
+    // delivery runs late — a loaded runner, or a Windows pipe whose disconnect is
+    // seen after the idle timer rather than before it.
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+}
+
+// The listener is up from early in startup and wired only at its end. A second
+// launch in between, a link clicked while FreeTunnel starts, connects, sends and
+// is gone before the wiring, as a real one is: within microseconds. Its peer was
+// checked only once it was handed on, by which time the socket had let go of its
+// descriptor, so it was refused and the link was lost. And taking one connection
+// per signal after that kept the queue a connection behind for the whole
+// session: each later launch was handed the one before it, and its own command
+// waited for the next.
+void TestAppStartup::aLinkSentWhileStartingIsHandled()
+{
+    Backend backend;
+    std::unique_ptr<QLocalServer> server(freetunnel::newInstanceServer(nullptr));
+    const QString name = instanceSocketName(QStringLiteral("early"));
+    QLocalServer::removeServer(name);
+    server->setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server->listen(name));
+
+    // Sent in full, and gone, while nothing is wired yet.
+    QSignalSpy accepted(server.get(), &QLocalServer::newConnection);
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(
+                                      QStringLiteral("tok"),
+                                      QStringLiteral("freetunnel://connect")));
+    QTRY_COMPARE_WITH_TIMEOUT(accepted.count(), 1, 10000);
+    QTest::qWait(200); // and the listener has seen it go
+
+    QSignalSpy spy(&backend, &Backend::errorOccurred);
+    freetunnel::wireInstanceServer(server.get(), backend, nullptr, QStringLiteral("tok"));
+    // Its command runs once there is someone to run it, and without waiting out
+    // the listener's three-second deadline for a peer that sends nothing more.
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 1500);
+
+    // And the next launch is not handed that connection in place of its own.
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(
+                                      QStringLiteral("tok"),
+                                      QStringLiteral("freetunnel://connect")));
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 2, 10000);
+}
+
+// A second launch that finds FreeTunnel running but cannot hand it the command —
+// the token unreadable behind a locked keyring, or never stored — used to start
+// in full anyway: two copies driving one VPN, the second taking the socket name
+// over so that the first could no longer be reached by anything. It exits now,
+// before building anything, and the running one keeps its name.
+void TestAppStartup::aSecondLaunchNeverStartsBesideALiveInstance()
+{
+    const QByteArray instanceName = QByteArrayLiteral("FreeTunnelBesideTest-")
+            + QByteArray::number(QCoreApplication::applicationPid());
+    const QString name = QString::fromLatin1(instanceName);
+    qputenv("FT_TEST_INSTANCE_NAME", instanceName);
+    QLocalServer::removeServer(name);
+    auto dropName = qScopeGuard([&] {
+        qunsetenv("FT_TEST_INSTANCE_NAME");
+        QLocalServer::removeServer(name);
+    });
+
+#if defined(Q_OS_LINUX)
+    // The token is looked for in the application's config directory, and the
+    // wiring renames the application to FreeTunnel: under test mode a directory
+    // every test process that wires the app shares, where a token another one
+    // left would answer for this test. This one gets a directory of its own.
+    QTemporaryDir config;
+    QVERIFY(config.isValid());
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    qputenv("XDG_CONFIG_HOME", config.path().toUtf8());
+    QStandardPaths::setTestModeEnabled(false);
+    auto restorePaths = qScopeGuard([configHome] {
+        QStandardPaths::setTestModeEnabled(true);
+        if (configHome.isEmpty())
+            qunsetenv("XDG_CONFIG_HOME");
+        else
+            qputenv("XDG_CONFIG_HOME", configHome);
+    });
+#endif
+    QLocalServer running;
+    running.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(running.listen(name));
+    freetunnel::removeInstanceAuthToken(); // its token cannot be read
+
+    freetunnel::GuiStartup startup;
+    char arg0[] = "freetunnel";
+    char *argv[] = {arg0, nullptr};
+    int argc = 1;
+    const std::optional<int> exitNow =
+            freetunnel::wireGuiApplication(*qApp, argc, argv, &startup);
+
+    QVERIFY2(exitNow.has_value(),
+             qPrintable(startup.trace.join(QLatin1Char(' '))));
+    QCOMPARE(*exitNow, 1);
+    QCOMPARE(startup.trace,
+             QStringList({QStringLiteral("branding"), QStringLiteral("instance-unreachable")}));
+    QVERIFY(startup.server == nullptr);
+    QVERIFY(startup.backend == nullptr);
+
+    QLocalSocket probe;
+    probe.connectToServer(name);
+    QVERIFY2(probe.waitForConnected(2000), "the running instance lost its socket name");
+}
+
+// Quitting removes the instance's token, while the listener stayed up until the
+// application was destroyed. A launch in between reached it with no token to
+// show, took it for an instance it could not reach and exited with nothing on
+// screen. The listener closes first now, so that launch finds no instance and
+// starts.
+//
+// Where a busy listener is refused like a stale socket file (macOS, or Linux
+// with the test hook), the running instance claims its name, and gives the claim
+// up with the listener: the launch that starts then is the one to hold it.
+void TestAppStartup::aLaunchWhileQuittingFindsNoInstance()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("the macOS window setup needs a real window server, not offscreen");
+#else
+    const QByteArray instanceName = QByteArrayLiteral("FreeTunnelQuitTest-")
+            + QByteArray::number(QCoreApplication::applicationPid());
+    qputenv("FT_TEST_INSTANCE_NAME", instanceName);
+    qputenv("FT_TEST_REFUSAL_CAN_BE_BUSY", "1");
+    QLocalServer::removeServer(QString::fromLatin1(instanceName));
+    auto dropName = qScopeGuard([&] {
+        qunsetenv("FT_TEST_INSTANCE_NAME");
+        qunsetenv("FT_TEST_REFUSAL_CAN_BE_BUSY");
+        QLocalServer::removeServer(QString::fromLatin1(instanceName));
+    });
+    QObject successor;
+
+    freetunnel::GuiStartup startup;
+    char arg0[] = "freetunnel";
+    char *argv[] = {arg0, nullptr};
+    int argc = 1;
+    QVERIFY(!freetunnel::wireGuiApplication(*qApp, argc, argv, &startup).has_value());
+    QVERIFY(startup.server->isListening());
+#ifndef Q_OS_WIN
+    QVERIFY2(!freetunnel::claimInstanceName(&successor, QString::fromLatin1(instanceName)),
+             "the running instance does not claim its name");
+#endif
+
+    // What leaving the event loop emits; a test has no loop of its own to leave.
+    QVERIFY(QMetaObject::invokeMethod(qApp, "aboutToQuit"));
+
+    QCOMPARE(freetunnel::forwardToRunningInstance(freetunnel::instanceServerNames(), QString()),
+             freetunnel::ForwardResult::NoInstance);
+#ifndef Q_OS_WIN
+    QVERIFY2(freetunnel::claimInstanceName(&successor, QString::fromLatin1(instanceName)),
+             "a quitting instance keeps its claim on the name");
+#endif
+#endif
 }
 
 // Replacing a running AppImage closes this listener for the new build and, if

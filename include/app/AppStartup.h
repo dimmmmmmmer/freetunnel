@@ -64,6 +64,11 @@ void raiseFdLimit();
 
 void setupMacDockIcon(QGuiApplication &app, Backend &backend);
 
+// The single-instance listener, not yet listening. Checks each connection's peer
+// as it accepts it, which wireInstanceServer() relies on for connections that
+// came in, and went, before it was called.
+QLocalServer *newInstanceServer(QObject *parent);
+
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken);
 
@@ -111,7 +116,8 @@ struct GuiStartup {
 // Build the application: everything runGuiApplication() does except constructing
 // QGuiApplication and entering the event loop. Returns a value when the process
 // should exit immediately with it (0 when the command was handed to a running
-// instance, -1 when the QML failed to load), or nothing when it should exec().
+// instance, 1 when one is running but could not be handed it, -1 when the QML
+// failed to load), or nothing when it should exec().
 std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
                                       GuiStartup *out);
 

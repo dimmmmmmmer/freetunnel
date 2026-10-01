@@ -10,6 +10,7 @@
 #include <QQmlApplicationEngine>
 #include <QTimer>
 #include <QTranslator>
+#include <QVariant>
 #include <QWindow>
 
 #include <memory>
@@ -214,7 +215,49 @@ constexpr int kInstanceMessageMax = 64 * 1024;
 constexpr int kInstanceMessageIdleMs = 250;  // no more bytes for this long → done
 constexpr int kInstanceMessageDeadlineMs = 3000; // hard stop for a peer that drips
 
+// What the same-user check said about a connection's peer when the listener
+// accepted it.
+constexpr char kPeerIsSameUser[] = "freetunnelPeerIsSameUser";
+
+// The single-instance listener: a QLocalServer that asks who is on the other end
+// of a connection the moment it accepts it.
+//
+// Asked any later, the question can have no answer left. The listener is up from
+// early in startup and wired only at its end, and a second launch connects,
+// writes and is gone within microseconds. A connection accepted in between had
+// seen its peer leave, and let go of its descriptor, by the time it was handed
+// on: the check had nothing to ask and refused it, and the link the user clicked
+// while FreeTunnel was starting was lost.
+class InstanceServer : public QLocalServer {
+public:
+    using QLocalServer::QLocalServer;
+
+protected:
+    void incomingConnection(quintptr descriptor) override
+    {
+        auto *c = new QLocalSocket(this);
+        c->setSocketDescriptor(static_cast<qintptr>(descriptor));
+        c->setProperty(kPeerIsSameUser, localSocketPeerIsSameUser(c, SocketEnd::WeAccepted));
+        addPendingConnection(c);
+    }
+};
+
 } // namespace
+
+QLocalServer *newInstanceServer(QObject *parent)
+{
+    return new InstanceServer(parent);
+}
+
+// The answer the listener got when it accepted @p c, or, from a listener that did
+// not ask then, the answer now.
+static bool peerIsSameUser(QLocalSocket *c)
+{
+    const QVariant atAccept = c->property(kPeerIsSameUser);
+    if (atAccept.isValid())
+        return atAccept.toBool();
+    return localSocketPeerIsSameUser(c, SocketEnd::WeAccepted);
+}
 
 // Decide whether a buffered message may act on this instance, and say why not
 // when it may not. Every refusal here used to be silent, which made a dropped
@@ -256,7 +299,7 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
 {
     if (!c)
         return;
-    if (!localSocketPeerIsSameUser(c, freetunnel::SocketEnd::WeAccepted)) {
+    if (!peerIsSameUser(c)) {
         // Loudly. Every rejection path here used to be silent, which is how a
         // dropped control message could look exactly like one that was never sent:
         // no error, no log line, nothing for the user or for us.
@@ -309,17 +352,30 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
     // A peer that connects and then says nothing is still bounded, by the deadline
     // below.
     QTimer::singleShot(kInstanceMessageDeadlineMs, c, deliver);
+    // One accepted while startup was still running can be over already: its
+    // disconnect went by with nothing listening for it, and all it sent has been
+    // read. Waiting for the deadline would only hold its command up.
+    if (c->state() == QLocalSocket::UnconnectedState)
+        deliver();
 }
 
+// The server listens from early in startup and is wired here, at the end of it,
+// so a second launch in between is accepted with no one to hand it to. It waits
+// in the server's queue, its peer checked as it was accepted (newInstanceServer())
+// and what it sent read, and is handed over here. Taking one connection per
+// signal instead left the queue a connection behind for the whole session: each
+// later forward was handed the one before it, and its own command waited for the
+// next. Every pending connection is taken, now and on each signal.
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken)
 {
-    QObject::connect(server, &QLocalServer::newConnection, server,
-                     [server, &backend, win, instanceToken]() {
-                         handleInstanceConnection(server->nextPendingConnection(), backend, win,
-                                                  instanceToken);
-                     });
+    const auto takePending = [server, &backend, win, instanceToken]() {
+        while (QLocalSocket *c = server->nextPendingConnection())
+            handleInstanceConnection(c, backend, win, instanceToken);
+    };
+    QObject::connect(server, &QLocalServer::newConnection, server, takePending);
     backend.setInstanceServer(server);
+    takePending();
 }
 
 QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)
