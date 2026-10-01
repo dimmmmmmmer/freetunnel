@@ -989,6 +989,66 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+      # makensis only proves the installer compiles. Run what can be run without
+      # starting FreeTunnel itself, on a runner that is thrown away afterwards:
+      # the taskkill exit codes the close loop relies on, a silent install into a
+      # folder that is not ours, one into a new folder over an inbound firewall
+      # rule left by an earlier version, and a silent uninstall. After the upload,
+      # so a failure here still leaves the installer to download and look at.
+      - name: Installer smoke test (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $setup = (Resolve-Path "out\${{ matrix.artifact }}-Setup.exe").Path
+          $root = Join-Path $env:RUNNER_TEMP 'ft-setup'
+          $foreign = Join-Path $root 'foreign'
+          $app = Join-Path $root 'app'
+
+          # The close loop stops waiting on exit code 128, "not found", and on
+          # nothing else; so it must get 128 when nothing is running, and must not
+          # get it for a process that has no window, which is what the elevated
+          # helper is. ping started without a console window stands in for it.
+          cmd /c "taskkill /IM FreeTunnel.exe 2>&1"
+          if ($LASTEXITCODE -ne 128) { throw "taskkill with nothing to close exited $LASTEXITCODE, not 128" }
+          $psi = [System.Diagnostics.ProcessStartInfo]::new('ping.exe', '-n 120 127.0.0.1')
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $windowless = [System.Diagnostics.Process]::Start($psi)
+          cmd /c "taskkill /PID $($windowless.Id) 2>&1"
+          $code = $LASTEXITCODE
+          Stop-Process -Id $windowless.Id -Force -ErrorAction SilentlyContinue
+          if ($code -eq 128) { throw "taskkill on a running process with no window exited 128, as if it were gone" }
+
+          # A silent install into a folder holding someone else's files is refused.
+          New-Item -ItemType Directory -Force -Path $foreign | Out-Null
+          Set-Content -Path (Join-Path $foreign 'theirs.txt') -Value 'not FreeTunnel'
+          $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$foreign" -Wait -PassThru
+          if ($p.ExitCode -ne 2) { throw "silent install into a foreign folder exited $($p.ExitCode), not 2" }
+          if (Test-Path (Join-Path $foreign 'FreeTunnel.exe')) { throw "silent install went into a foreign folder" }
+          if (-not (Test-Path (Join-Path $foreign 'theirs.txt'))) { throw "silent install touched a foreign folder" }
+
+          # Into a new folder it installs, and an inbound rule as earlier versions
+          # added it is gone afterwards, leaving the outbound one alone.
+          netsh advfirewall firewall add rule name=FreeTunnel dir=in action=allow program="$app\FreeTunnel.exe" enable=yes profile=any
+          if ($LASTEXITCODE -ne 0) { throw "could not add the old inbound rule" }
+          $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$app" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent install exited $($p.ExitCode)" }
+          if (-not (Test-Path (Join-Path $app 'FreeTunnel.exe'))) { throw "silent install left no FreeTunnel.exe" }
+          $rules = @(Get-NetFirewallRule -DisplayName 'FreeTunnel' -ErrorAction SilentlyContinue)
+          $inbound = @($rules | Where-Object { $_.Direction -eq 'Inbound' }).Count
+          $outbound = @($rules | Where-Object { $_.Direction -eq 'Outbound' }).Count
+          if ($inbound -ne 0 -or $outbound -ne 1) { throw "firewall rules: $inbound inbound, $outbound outbound; want 0 and 1" }
+
+          # A silent uninstall, run in place so it is waited for, removes it all.
+          $p = Start-Process -FilePath (Join-Path $app 'Uninstall.exe') -ArgumentList '/S', "_?=$app" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent uninstall exited $($p.ExitCode)" }
+          if (Test-Path (Join-Path $app 'FreeTunnel.exe')) { throw "uninstall left FreeTunnel.exe behind" }
+          if (Get-NetFirewallRule -DisplayName 'FreeTunnel' -ErrorAction SilentlyContinue) { throw "uninstall left a firewall rule behind" }
+          # Not taskkill's last exit code, which the runner would otherwise report.
+          exit 0
+
   release:
     name: Publish release
     needs: build

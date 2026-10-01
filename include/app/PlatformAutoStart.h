@@ -15,6 +15,11 @@ void setPlatformAutoStart(bool enabled);
 // that has to be checkable somewhere other than a Mac.
 QString autoStartProgramFromPlist(const QString &plistXml);
 
+// The program a Windows HKCU\...\Run value starts, with its quotes taken off, or
+// an empty string when the value is empty. Exposed and compiled everywhere for
+// the same reason as the plist reader.
+QString autoStartProgramFromRunValue(const QString &commandLine);
+
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 // The program an autostart .desktop entry launches, with Desktop Entry quoting
 // undone, or an empty string when the entry has no Exec= line. Exposed for tests:

@@ -43,19 +43,49 @@ QString autoStartProgramFromPlist(const QString &plistXml)
     return value;
 }
 
+// The program a Windows Run value starts: the command line's first word, or, as
+// setPlatformAutoStart() writes it, everything inside the leading quotes. A
+// Windows path cannot contain '"', so there is no escaping to undo.
+//
+// Outside the platform guards for the same reason as the plist reader above.
+QString autoStartProgramFromRunValue(const QString &commandLine)
+{
+    const QString value = commandLine.trimmed();
+    if (!value.startsWith(QLatin1Char('"')))
+        return value.section(QLatin1Char(' '), 0, 0);
+    return value.mid(1).section(QLatin1Char('"'), 0, 0);
+}
+
 #if defined(Q_OS_WIN)
-static const char *kRunKey =
-    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+static QString runKey()
+{
+#if defined(FT_ENABLE_TEST_HOOKS)
+    // Tests only: a key of the test's own. The real one holds the developer's
+    // own autostart setting, which a test run must never write.
+    const QString override = qEnvironmentVariable("FT_TEST_RUN_KEY");
+    if (!override.isEmpty())
+        return override;
+#endif
+    return QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+}
 
 bool platformAutoStartEnabled()
 {
-    QSettings r(QString::fromLatin1(kRunKey), QSettings::NativeFormat);
-    return !r.value(QStringLiteral("FreeTunnel")).toString().isEmpty();
+    // A value being there is not the same as autostart working, as the macOS and
+    // Linux branches below found out. The value names the exe the toggle was set
+    // from, and that one can be gone: a copy run from Downloads and deleted since,
+    // or one removed by an uninstall that ran as a different account — the
+    // uninstaller clears only its own account's value. Nothing rewrites it, so
+    // Windows started nothing at logon while the toggle said "on".
+    QSettings r(runKey(), QSettings::NativeFormat);
+    const QString target =
+            autoStartProgramFromRunValue(r.value(QStringLiteral("FreeTunnel")).toString());
+    return !target.isEmpty() && QFileInfo::exists(target);
 }
 
 void setPlatformAutoStart(bool enabled)
 {
-    QSettings r(QString::fromLatin1(kRunKey), QSettings::NativeFormat);
+    QSettings r(runKey(), QSettings::NativeFormat);
     if (enabled) {
         r.setValue(QStringLiteral("FreeTunnel"),
                    QLatin1Char('"') + QDir::toNativeSeparators(QCoreApplication::applicationFilePath())

@@ -91,6 +91,13 @@ compare link at the bottom of its release notes.
   connection used the default ones. FreeTunnel has already written the defaults
   into such a config in place of its routes, so it does not get them back by
   itself: import it again from the original file.
+- **Windows: the firewall no longer lets other computers connect to
+  FreeTunnel.** The installer added a Windows Firewall rule that allowed incoming
+  connections to FreeTunnel from any network, public Wi-Fi included, and to the
+  part of it that runs with administrator rights as much as to the app.
+  FreeTunnel takes no connections from other computers, so the rule only widened
+  what could reach it. Installing this version removes it. The rule that lets
+  FreeTunnel reach your server stays.
 
 ### Changed
 
@@ -268,6 +275,34 @@ compare link at the bottom of its release notes.
   rule now names the app and keeps matching after updates. A rule made the old
   way, which shows as Update.exe, is changed to the app the first time this
   version starts, as long as the app is still installed beside it.
+- **Windows: "Launch at system startup" could say it was on while doing
+  nothing.** The setting records where FreeTunnel was when you switched it on,
+  and the switch went on showing it as on after that copy was gone: a copy run
+  from Downloads and deleted since, or one removed by an uninstall that ran
+  under another Windows account, such as an administrator's, which leaves your
+  own account's setting behind. Windows then had nothing to start. The switch
+  shows it as off now when the program it would start is not there; switch it
+  on again to have this copy start.
+- **Windows: an update waits for FreeTunnel to finish closing.** The installer
+  asks a running FreeTunnel to close and waits for it, but it took the first
+  refusal as "closed". The part of FreeTunnel that runs with administrator rights
+  always refuses, as it has no window to close: it quits when the app does, once
+  the connection is down. So the installer went on while FreeTunnel was still
+  shutting down, and could stop on files still in use. It now waits until
+  FreeTunnel has quit, for up to ten seconds, before closing it by force.
+- **Windows: uninstalling closes FreeTunnel properly.** The uninstaller ended
+  FreeTunnel by force, together with the part that runs with administrator
+  rights, so a connection that was up was cut off instead of being closed, and
+  the tray icon stayed behind until the mouse passed over it. It now asks
+  FreeTunnel to quit and waits for it, as the installer does, and uses force only
+  if FreeTunnel has not quit within ten seconds.
+- **Windows: a silent install no longer goes into a folder that holds other
+  files.** The installer refuses such a folder, because uninstalling FreeTunnel
+  deletes its folder with everything in it. But the check sat on the page where
+  you choose the folder, and an install run with /S shows no pages, so /D= could
+  name any folder at all. A silent install into a folder that is neither empty
+  nor an earlier FreeTunnel install now stops before installing anything, with
+  exit code 2.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle
