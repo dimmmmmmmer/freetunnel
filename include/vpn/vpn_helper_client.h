@@ -34,6 +34,14 @@ public:
     explicit VpnHelperClient(QObject *parent = nullptr);
     ~VpnHelperClient() override;
 
+    // Removes the token files an earlier run left in @p dir: regular `.fthelper-*`
+    // files of this user's, last changed more than @p minAgeSecs ago. The helper
+    // only reads a token file, and the GUI removes its own once the helper has
+    // answered or the attempt is given up, so one is left only when the GUI ended
+    // in between. Runs as the user, in the GUI; the constructor calls it on the
+    // directory the token files go to. Returns how many it removed.
+    static int removeStaleTokenFiles(const QString &dir, qint64 minAgeSecs);
+
     bool loadConfigFromToml(const QString &tomlContent);
     void setExtraExclusions(const std::vector<std::string> &exclusions);
     void setExcludedRoutes(const std::vector<std::string> &routes);

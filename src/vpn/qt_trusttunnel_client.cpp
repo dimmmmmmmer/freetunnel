@@ -469,7 +469,8 @@ ag::VpnConnectAction coreAction(freetunnel::AppAction action)
 }
 
 // Said once per session, in the app's own log, because the helper's stderr goes
-// to a root-owned temp file nobody reporting a problem will ever read.
+// where nobody reporting a problem will ever look: a root-owned temp file on
+// macOS, the null device on Linux, no console at all on Windows.
 //
 // Without this the feature is unobservable: a rule that never matched and a rule
 // that matched and was overruled look identical from outside, and the first

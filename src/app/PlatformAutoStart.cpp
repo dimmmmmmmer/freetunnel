@@ -145,11 +145,15 @@ static QString desktopExecQuoted(const QString &path)
 // (/tmp/.mount_FreeTuXXXXXX/usr/bin/FreeTunnel), which is unmounted on exit and
 // gets a fresh random suffix on every run — an autostart entry pointing there is
 // dead the moment it is written. The .AppImage file itself is stable, so record
-// that when the kernel confirms we are running from one.
-static QString autoStartTarget()
+// that when the kernel confirms we are running from one, started the way this
+// copy was: an AppImage run with extract-and-run may have no FUSE to mount with.
+static QString autoStartCommand()
 {
-    const QString appImage = freetunnel::runningAppImagePath();
-    return appImage.isEmpty() ? QCoreApplication::applicationFilePath() : appImage;
+    const RunningAppImage appImage = freetunnel::runningAppImage();
+    if (appImage.path.isEmpty())
+        return desktopExecQuoted(QCoreApplication::applicationFilePath());
+    return (QStringList{desktopExecQuoted(appImage.path)} + appImage.launchArguments())
+            .join(QLatin1Char(' '));
 }
 
 static void writeDesktopAutostart(const QString &path)
@@ -159,14 +163,15 @@ static void writeDesktopAutostart(const QString &path)
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QStringLiteral("[Desktop Entry]\nType=Application\nName=FreeTunnel\n"
                                "Exec=%1\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
-                        .arg(desktopExecQuoted(autoStartTarget()))
+                        .arg(autoStartCommand())
                         .toUtf8());
     }
 }
 
 // The path an Exec= line launches, unquoted, or an empty string if the line
 // carries no program. Only the first word matters: everything after it is an
-// argument, and the entry this app writes never has any.
+// argument, and the only one the entry this app writes can have is the AppImage
+// runtime's --appimage-extract-and-run.
 QString autoStartExecTarget(const QString &desktopEntry)
 {
     const QStringList lines = desktopEntry.split(QLatin1Char('\n'));

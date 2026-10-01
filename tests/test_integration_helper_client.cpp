@@ -7,13 +7,26 @@
 #include <QTcpSocket>
 
 #include <QJsonArray>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStringList>
+#include <QDateTime>
+#include <QDir>
+#include <QStandardPaths>
 #include <QTcpServer>
+#include <QTemporaryDir>
 
 #include <string>
 #include <vector>
+
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+#include <unistd.h> // getuid
+#endif
+#if defined(Q_OS_UNIX)
+#include <fcntl.h> // AT_FDCWD, AT_SYMLINK_NOFOLLOW
+#include <sys/stat.h> // utimensat
+#endif
 
 #include "helper_ipc_mock_server.h"
 #include "vpn/vpn_helper_client.h"
@@ -30,6 +43,28 @@ QStringList jsonStringArray(const QJsonObject &obj, const char *key)
     return out;
 }
 
+bool writeFile(const QString &path, const QByteArray &body)
+{
+    QFile f(path);
+    return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(body) == body.size();
+}
+
+// Last changed @p secsAgo seconds ago. On POSIX a link is aged itself, not what
+// it points to.
+bool age(const QString &path, qint64 secsAgo)
+{
+    const QDateTime then = QDateTime::currentDateTimeUtc().addSecs(-secsAgo);
+#if defined(Q_OS_UNIX)
+    const struct timespec times[2] = {{static_cast<time_t>(then.toSecsSinceEpoch()), 0},
+                                      {static_cast<time_t>(then.toSecsSinceEpoch()), 0}};
+    return ::utimensat(AT_FDCWD, QFile::encodeName(path).constData(), times, AT_SYMLINK_NOFOLLOW)
+            == 0;
+#else
+    QFile f(path);
+    return f.open(QIODevice::ReadWrite) && f.setFileTime(then, QFileDevice::FileModificationTime);
+#endif
+}
+
 } // namespace
 
 // GUI-side helper IPC client (no elevated process): mirrors VpnHelperClient handshake.
@@ -43,7 +78,11 @@ private slots:
     void realClientRefusesAChallengeCarryingNoNonce();
     void securitySettingsAreSentAsValuesNotJustCommandNames();
     void theElevatedArgvComesFromItsArgumentsAndNotTheEnvironment();
+    void theAppImageIsUnpackedWhereNobodyElseCanWrite();
+    void theHelpersOutputIsNotKeptInMemory();
     void aPeerThatNeverAnswersIsGivenUpOn();
+    void aTokenFileAnEarlierRunLeftIsRemovedAtStartup();
+    void onlyOldTokenFilesOfOursAreRemoved();
 };
 
 // linuxHelperCommand() builds the argv pkexec is asked to run AS ROOT, and until
@@ -68,12 +107,25 @@ void TestIntegrationHelperClient::theElevatedArgvComesFromItsArgumentsAndNotTheE
     const QString tokenPath = QStringLiteral("/run/user/1000/ft.token");
 
     // An AppImage build re-execs the .AppImage file, because the running
-    // executable sits in a FUSE mount root cannot read.
-    const QStringList viaAppImage = freetunnel::linuxHelperCommand(
-            exe, QStringLiteral("/home/u/FreeTunnel.AppImage"), 51820, tokenPath);
-    const QStringList expectedAppImage{QStringLiteral("env"),
-                                       QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1"),
-                                       QStringLiteral("/home/u/FreeTunnel.AppImage"),
+    // executable sits in a FUSE mount root cannot read. It goes through a shell
+    // that gives the AppImage runtime somewhere private to unpack it; what that
+    // script does is checked by running it, in
+    // theAppImageIsUnpackedWhereNobodyElseCanWrite below.
+    const QString appImage = QStringLiteral("/home/u/FreeTunnel.AppImage");
+    const QStringList viaAppImage =
+            freetunnel::linuxHelperCommand(exe, appImage, 51820, tokenPath);
+    QCOMPARE(viaAppImage.size(), 10);
+    QCOMPARE(viaAppImage.at(0), QStringLiteral("/bin/sh"));
+    QCOMPARE(viaAppImage.at(1), QStringLiteral("-c"));
+    const QString script = viaAppImage.at(2);
+    // The path is an argument to the script, never text inside it.
+    QVERIFY(!script.contains(appImage));
+    QVERIFY(!script.contains(tokenPath));
+    const QStringList expectedAppImage{QStringLiteral("/bin/sh"),
+                                       QStringLiteral("-c"),
+                                       script,
+                                       QStringLiteral("freetunnel-helper"),
+                                       appImage,
                                        QStringLiteral("--helper"),
                                        QStringLiteral("--port"),
                                        QStringLiteral("51820"),
@@ -104,14 +156,146 @@ void TestIntegrationHelperClient::theElevatedArgvComesFromItsArgumentsAndNotTheE
     });
 
     QCOMPARE(freetunnel::linuxHelperCommand(exe, QString(), 51820, tokenPath), expectedExe);
-    QCOMPARE(freetunnel::linuxHelperCommand(exe, QStringLiteral("/home/u/FreeTunnel.AppImage"),
-                                            51820, tokenPath),
-             expectedAppImage);
+    QCOMPARE(freetunnel::linuxHelperCommand(exe, appImage, 51820, tokenPath), expectedAppImage);
     for (const QStringList &cmd : {viaExe, expectedAppImage}) {
         for (const QString &arg : cmd)
             QVERIFY2(!arg.contains(QStringLiteral("evil")),
                      "the elevated argv must never pick anything up from the environment");
     }
+#endif
+}
+
+// The script linuxHelperCommand() wraps an AppImage in, run for real — as this
+// user rather than root, with a stand-in for the AppImage that reports what it
+// was given instead of unpacking anything.
+//
+// It exists because of where the AppImage runtime unpacks: under $TMPDIR. Run as
+// root with no TMPDIR, that was a fixed name in the shared /tmp, which another
+// user of the machine could prepare in advance. The runtime must get a directory
+// that root has just made for this run, that nobody else can write to, and that
+// is gone afterwards.
+//
+// The script also brings its own PATH: under sudo without secure_path it would
+// otherwise find mktemp, and hand the helper a PATH, in the user's directories.
+// A mktemp of the user's own is put first on the PATH it is started with here.
+void TestIntegrationHelperClient::theAppImageIsUnpackedWhereNobodyElseCanWrite()
+{
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    QSKIP("linuxHelperCommand() is the Linux elevation path");
+#else
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    // Paths a careless script would split or expand.
+    const QString fakeAppImage = dir.filePath(QStringLiteral("Free Tunnel $(id).AppImage"));
+    const QString tokenPath = dir.filePath(QStringLiteral("token 'a' \"b\" $HOME;x"));
+    const QString report = dir.filePath(QStringLiteral("report"));
+    {
+        QFile f(fakeAppImage);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("#!/bin/sh\n"
+                "{\n"
+                "  printf 'TMPDIR=%s\\n' \"$TMPDIR\"\n"
+                "  printf 'EXTRACT=%s\\n' \"$APPIMAGE_EXTRACT_AND_RUN\"\n"
+                "  printf 'OWNER_MODE=%s\\n' \"$(stat -c '%u %a' \"$TMPDIR\")\"\n"
+                "  printf 'PATH=%s\\n' \"$PATH\"\n"
+                "  for a in \"$@\"; do printf 'ARG=%s\\n' \"$a\"; done\n"
+                "} > \"$(dirname \"$0\")/report\"\n"
+                "exit 7\n");
+        f.close();
+        QVERIFY(f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                 | QFileDevice::ExeOwner));
+    }
+
+    const QString userBin = dir.filePath(QStringLiteral("bin"));
+    const QString decoyRan = dir.filePath(QStringLiteral("decoy-ran"));
+    QVERIFY(QDir().mkpath(userBin));
+    {
+        QFile f(userBin + QStringLiteral("/mktemp"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QStringLiteral("#!/bin/sh\n: > '%1'\nexit 1\n").arg(decoyRan).toUtf8());
+        f.close();
+        QVERIFY(f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                 | QFileDevice::ExeOwner));
+    }
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("PATH"),
+               userBin + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+
+    QStringList dirsSeen;
+    for (int run = 0; run < 2; ++run) {
+        QFile::remove(report);
+        const QStringList cmd = freetunnel::linuxHelperCommand(
+                QStringLiteral("/usr/bin/FreeTunnel"), fakeAppImage, 51820, tokenPath);
+        QProcess proc;
+        proc.setProcessEnvironment(env);
+        proc.start(cmd.first(), cmd.mid(1));
+        QVERIFY(proc.waitForFinished(10000));
+        QVERIFY2(!QFileInfo::exists(decoyRan), "root would have run a mktemp from the user's PATH");
+        // The helper's own exit is what pkexec reports, and what tells the GUI
+        // the elevation ended.
+        QCOMPARE(proc.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(proc.exitCode(), 7);
+
+        QFile r(report);
+        QVERIFY2(r.open(QIODevice::ReadOnly | QIODevice::Text), "the stand-in AppImage never ran");
+        QString tmpDir;
+        QString extract;
+        QString ownerMode;
+        QString path;
+        QStringList args;
+        for (const QString &line : QString::fromUtf8(r.readAll()).split(QLatin1Char('\n'))) {
+            if (line.startsWith(QLatin1String("TMPDIR=")))
+                tmpDir = line.mid(7);
+            else if (line.startsWith(QLatin1String("EXTRACT=")))
+                extract = line.mid(8);
+            else if (line.startsWith(QLatin1String("OWNER_MODE=")))
+                ownerMode = line.mid(11);
+            else if (line.startsWith(QLatin1String("PATH=")))
+                path = line.mid(5);
+            else if (line.startsWith(QLatin1String("ARG=")))
+                args << line.mid(4);
+        }
+
+        QVERIFY2(tmpDir.startsWith(QLatin1String("/tmp/freetunnel-helper.")),
+                 qPrintable(QStringLiteral("unpacked under \"%1\"").arg(tmpDir)));
+        QCOMPARE(extract, QStringLiteral("1"));
+        // Its owner — root, when this runs elevated — and nobody else.
+        QCOMPARE(ownerMode, QStringLiteral("%1 700").arg(::getuid()));
+        QCOMPARE(path, QStringLiteral("/usr/sbin:/usr/bin:/sbin:/bin"));
+        QCOMPARE(args,
+                 QStringList({QStringLiteral("--helper"), QStringLiteral("--port"),
+                              QStringLiteral("51820"), QStringLiteral("--token-file"), tokenPath}));
+        QVERIFY2(!QFileInfo::exists(tmpDir), "the unpacking directory outlived the helper");
+        dirsSeen << tmpDir;
+    }
+    // A new one every time, so nothing anyone prepared in advance is ever it.
+    QVERIFY(dirsSeen.at(0) != dirsSeen.at(1));
+#endif
+}
+
+// pkexec and sudo become the helper, so the QProcess that starts them holds the
+// helper's stdout and stderr for its whole life — and with session logging off,
+// the core's log goes to stderr. As pipes, QProcess read every byte of it into
+// the GUI's memory and nothing ever read it back out. A shell stands in for the
+// elevator here; what matters is what is left in the QProcess afterwards.
+void TestIntegrationHelperClient::theHelpersOutputIsNotKeptInMemory()
+{
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    QSKIP("startLinuxElevation() is the Linux elevation path");
+#else
+    QProcess proc;
+    QVERIFY(freetunnel::startLinuxElevation(
+            &proc, QStringLiteral("/bin/sh"),
+            {QStringLiteral("-c"),
+             QStringLiteral("head -c 4000000 /dev/zero; head -c 4000000 /dev/zero >&2")}));
+    QVERIFY(proc.waitForFinished(10000));
+    QCOMPARE(proc.exitCode(), 0);
+    // bytesAvailable() rather than readAll*(): with nothing to read the QProcess
+    // is write-only, and reading from it only produces a warning.
+    proc.setReadChannel(QProcess::StandardOutput);
+    QCOMPARE(proc.bytesAvailable(), 0);
+    proc.setReadChannel(QProcess::StandardError);
+    QCOMPARE(proc.bytesAvailable(), 0);
 #endif
 }
 
@@ -446,6 +630,65 @@ void TestIntegrationHelperClient::aPeerThatNeverAnswersIsGivenUpOn()
     QVERIFY2(!received.contains("super-secret"), "and it sent nothing else");
     // And it does not sit in a state the user cannot leave.
     QVERIFY(client.state() != VpnHelperClient::State::Connected);
+}
+
+// The elevated helper no longer deletes the token file it reads; the GUI removes
+// its own once the helper has answered or the attempt is given up. A GUI that
+// crashed or was killed in between left its 0600 file behind, and nothing would
+// ever have removed it. The next start does.
+void TestIntegrationHelperClient::aTokenFileAnEarlierRunLeftIsRemovedAtStartup()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const auto testModeOff = qScopeGuard([] { QStandardPaths::setTestModeEnabled(false); });
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QVERIFY(QDir().mkpath(dir));
+    const QString leftBehind = QDir(dir).filePath(QStringLiteral(".fthelper-Ab12Cd"));
+    QVERIFY(writeFile(leftBehind, "0123456789abcdef0123456789abcdef"));
+    const auto cleanUp = qScopeGuard([&] { QFile::remove(leftBehind); });
+    QVERIFY(age(leftBehind, 10 * 60));
+
+    VpnHelperClient client;
+    QVERIFY2(!QFile::exists(leftBehind), "a token file from an earlier run outlived the next start");
+}
+
+// What the sweep may remove: a regular file named as the GUI names its token
+// files, this user's, old enough that no attempt can still be using it.
+void TestIntegrationHelperClient::onlyOldTokenFilesOfOursAreRemoved()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString old = dir.filePath(QStringLiteral(".fthelper-old111"));
+    const QString fresh = dir.filePath(QStringLiteral(".fthelper-new222"));
+    const QString otherName = dir.filePath(QStringLiteral("settings.ini"));
+    for (const QString &path : {old, fresh, otherName})
+        QVERIFY(writeFile(path, "x"));
+    QVERIFY(age(old, 10 * 60));
+    QVERIFY(age(otherName, 10 * 60));
+
+#if defined(Q_OS_UNIX)
+    // A link with the name is not a token file, nor is a folder, however old.
+    QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    const QString target = elsewhere.filePath(QStringLiteral("theirs"));
+    QVERIFY(writeFile(target, "keep"));
+    QVERIFY(age(target, 10 * 60));
+    const QString link = dir.filePath(QStringLiteral(".fthelper-link33"));
+    QVERIFY(QFile::link(target, link));
+    QVERIFY(age(link, 10 * 60));
+    const QString folder = dir.filePath(QStringLiteral(".fthelper-dir444"));
+    QVERIFY(QDir().mkpath(folder));
+    QVERIFY(age(folder, 10 * 60));
+#endif
+
+    QCOMPARE(VpnHelperClient::removeStaleTokenFiles(dir.path(), 5 * 60), 1);
+    QVERIFY(!QFile::exists(old));
+    QVERIFY2(QFile::exists(fresh), "a token file young enough to be in use was removed");
+    QVERIFY2(QFile::exists(otherName), "a file not named as a token file was removed");
+#if defined(Q_OS_UNIX)
+    QVERIFY2(QFileInfo(link).isSymLink(), "a link named as a token file was removed");
+    QCOMPARE(QFileInfo(target).size(), qint64(4));
+    QVERIFY(QFileInfo(folder).isDir());
+#endif
 }
 
 #include "test_integration_helper_client.moc"

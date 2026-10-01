@@ -37,8 +37,9 @@
 
 namespace {
 
-// The helper refuses to start without a readable token file, and deletes it on
-// read — one file per launch.
+// The helper refuses to start without a readable token file named the way the
+// GUI names one (.fthelper-…), and leaves it for the GUI to delete — one file per
+// launch.
 QString writeTokenFile(const QDir &dir, const QString &name, const QString &token)
 {
     const QString path = dir.filePath(name);
@@ -105,6 +106,7 @@ private slots:
     void connectIgnoresAnyLogPathTheClientSends();
     void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
     void sigtermStopsTheHelperOnItsOwn();
+    void aTokenFileTheGuiDidNotWriteIsLeftAlone();
 
 private:
     bool startHelper(quint16 port, const QString &token);
@@ -152,7 +154,7 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
 {
     static int seq = 0;
     const QString tokenPath =
-            writeTokenFile(QDir(m_dir.path()), QStringLiteral("token-%1").arg(++seq), token);
+            writeTokenFile(QDir(m_dir.path()), QStringLiteral(".fthelper-%1").arg(++seq), token);
     if (tokenPath.isEmpty())
         return false;
     m_configDump = QDir(m_dir.path()).filePath(QStringLiteral("core-config-%1").arg(seq));
@@ -664,6 +666,39 @@ void TestHelperServer::sigtermStopsTheHelperOnItsOwn()
     QCOMPARE(m_helper->exitStatus(), QProcess::NormalExit);
     QCOMPARE(m_helper->exitCode(), 0);
 #endif
+}
+
+// The helper binary is the genuine one whoever starts it, and so is the
+// elevation prompt in front of it: anything running as the user can ask for it
+// with a --token-file of its own. It used to read whatever that named and then
+// delete it, as root or Administrator. Run the real binary on such a path: it
+// must refuse to start, and the file must be exactly as it was.
+void TestHelperServer::aTokenFileTheGuiDidNotWriteIsLeftAlone()
+{
+    const QString victim =
+            writeTokenFile(QDir(m_dir.path()), QStringLiteral("victim"), QStringLiteral("t0k3n"));
+    QVERIFY(!victim.isEmpty());
+
+    QProcess helper;
+    helper.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("FT_TEST_SKIP_PRIVILEGE_CHECK"), QStringLiteral("1"));
+    helper.setProcessEnvironment(env);
+    helper.start(QStringLiteral(FT_TEST_HELPER_BINARY),
+                 {QStringLiteral("--helper"), QStringLiteral("--port"),
+                  QString::number(freePort()), QStringLiteral("--token-file"), victim});
+    QVERIFY(helper.waitForStarted(5000));
+    const bool exited = helper.waitForFinished(5000);
+    if (!exited) {
+        helper.kill();
+        helper.waitForFinished(3000);
+    }
+    QVERIFY2(exited, "the helper started on a file the GUI never wrote");
+    QCOMPARE(helper.exitCode(), 2); // runVpnHelper: no usable token
+
+    QFile f(victim);
+    QVERIFY2(f.open(QIODevice::ReadOnly), "the helper deleted a file it was merely named");
+    QCOMPARE(f.readAll(), QByteArray("t0k3n"));
 }
 
 QTEST_MAIN(TestHelperServer)

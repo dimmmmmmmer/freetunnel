@@ -7,6 +7,34 @@ compare link at the bottom of its release notes.
 
 ## Unreleased
 
+### Security
+
+- **A program running under your account could have FreeTunnel delete any file
+  with administrator rights.** FreeTunnel's privileged part is handed a small
+  file when it starts, and once it had read the file it deleted it — whatever
+  file it had been handed. Other programs running as you can ask for that same
+  administrator prompt themselves and hand it a file of their choosing; if you
+  approved, that file was deleted, even one only an administrator may change.
+  The privileged part now reads only a file of the kind FreeTunnel writes, and
+  deletes nothing; FreeTunnel removes its own file itself. This applied on
+  Windows, macOS and Linux. A FreeTunnel administrator prompt you did not
+  expect, when you had not just connected, is one to refuse.
+- **Linux: with the AppImage, another person with an account on your computer
+  could have a program of theirs run with administrator rights.** To start its
+  privileged part, the AppImage unpacks itself as administrator into a temporary
+  folder. That folder was in the place every account shares, where someone else
+  could prepare it in advance, and what they put in it ran the next time you
+  connected. The AppImage now unpacks into a new folder that only the
+  administrator can write to, every time, and removes it afterwards. The .deb
+  was not affected. If other people have accounts on your computer and you use
+  the AppImage, update.
+
+  That covers an AppImage started the usual way. One started with
+  --appimage-extract-and-run, as where FUSE is missing, is first unpacked
+  under your own account into that shared place, by the AppImage itself, and
+  other accounts can still interfere with that copy; FreeTunnel cannot prevent
+  it. On a computer other people have accounts on, use the .deb there.
+
 ### Changed
 
 - **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
@@ -38,6 +66,23 @@ compare link at the bottom of its release notes.
   out without it. It now goes to the core whole. Configs imported that way before
   are read back whole, without needing to be opened, and the config editor accepts
   a mask after a slash.
+- **Linux: an AppImage started without FUSE can update itself and start with the
+  system.** Run with --appimage-extract-and-run, as on a system without FUSE,
+  FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
+  recorded a temporary copy that was gone once FreeTunnel quit, and updates
+  offered the .deb and left installing it to you. It now finds its .AppImage
+  file, and both start it with --appimage-extract-and-run again. The switch
+  could show on while it did not work; after updating it shows off — turn it on
+  again. To connect, its privileged part is now unpacked into /tmp, as for an
+  AppImage started normally, so where /tmp does not allow running programs,
+  pointing TMPDIR elsewhere no longer gets around that: use the .deb there. The
+  .deb is also the one for a computer other people have accounts on (see
+  Security).
+- **Linux: FreeTunnel's memory no longer grows for as long as the VPN's
+  privileged part runs.** Everything that part printed was kept in FreeTunnel's
+  memory until it quit, and nothing ever read it. With logging off in Settings,
+  that included the VPN core's own log. It is discarded now; the log FreeTunnel
+  shows and saves is as before.
 
 ## 1.2.2
 

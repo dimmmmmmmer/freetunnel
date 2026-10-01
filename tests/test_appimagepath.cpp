@@ -1,14 +1,21 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
 
+#include <QCryptographicHash>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include <QTextStream>
+
 #include "core/AppImagePath.h"
 #include "app/PlatformAutoStart.h"
 
 // The decision these functions make picks the binary that a pkexec/sudo prompt
 // will execute as root, and the path an autostart entry will launch. Both used to
 // be answered from $APPIMAGE/$APPDIR, which the attacker in the threat model
-// controls; the tests below pin that the answer now comes from mountinfo, and
-// that nothing an environment variable can say gets a foot in the door.
+// controls; the tests below pin that the answer now comes from the kernel —
+// mountinfo, or the process that unpacked the AppImage — and that nothing an
+// environment variable can say gets a foot in the door.
 class TestAppImagePath : public QObject {
     Q_OBJECT
 private slots:
@@ -17,12 +24,50 @@ private slots:
     void ignoresNonFuseMounts();
     void ignoresAMountThatDoesNotContainTheExecutable();
     void decodesOctalEscapesInPaths();
+    void anUnpackedCopyNamesItsAppImageByContent();
+    void anUnpackedCopyNeedsTheRuntimesDirectoryName();
+    void runningAppImageFindsTheFileThatUnpackedThisProcess();
     void autoStartTargetIsUnquoted();
     void autoStartTargetHandlesAMissingExecLine();
     void autoStartProgramIsReadBackOutOfThePlist();
 };
 
 namespace {
+
+// Makes a copy of this binary report what runningAppImage() says about it.
+const char kReportRunningAppImage[] = "--report-running-appimage";
+
+QString md5Hex(const QString &path)
+{
+    QFile f(path);
+    QCryptographicHash md5(QCryptographicHash::Md5);
+    if (!f.open(QIODevice::ReadOnly) || !md5.addData(&f))
+        return QString();
+    return QString::fromLatin1(md5.result().toHex());
+}
+
+#ifdef Q_OS_LINUX
+// Run a copy of this test binary from <dir>/<extractDirName>/usr/bin/FreeTunnel,
+// as a child of this process, and return the lines it reports: the AppImage, the
+// options to start it with, and the Exec= line of the autostart entry it writes
+// (into a configuration directory of its own under <dir>).
+QStringList reportFromUnpackedCopy(const QString &dir, const QString &extractDirName)
+{
+    const QString self = QFileInfo(QStringLiteral("/proc/self/exe")).canonicalFilePath();
+    const QString root = dir + QLatin1Char('/') + extractDirName;
+    const QString bin = root + QStringLiteral("/usr/bin/FreeTunnel");
+    if (!QDir().mkpath(QFileInfo(bin).absolutePath()) || !QFile::copy(self, bin))
+        return {QStringLiteral("could not copy %1").arg(self)};
+    QProcess child;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("XDG_CONFIG_HOME"), root + QStringLiteral("-config"));
+    child.setProcessEnvironment(env);
+    child.start(bin, {QString::fromLatin1(kReportRunningAppImage)});
+    if (!child.waitForFinished(10000))
+        return {QStringLiteral("the copy did not finish")};
+    return QString::fromUtf8(child.readAllStandardOutput()).split(QLatin1Char('\n'));
+}
+#endif
 
 // A realistic mountinfo: root filesystem, then the AppImage runtime's squashfuse
 // mount. Field layout is
@@ -87,6 +132,107 @@ void TestAppImagePath::decodesOctalEscapesInPaths()
              QStringLiteral("/home/u/My Apps/FreeTunnel.AppImage"));
 }
 
+// Run without FUSE (--appimage-extract-and-run), the runtime unpacks into
+// $TMPDIR/appimage_extracted_<MD5 of the AppImage> and there is no mount to ask.
+// It waits as this process's parent, so the kernel still names a file; what makes
+// it this AppImage is that its content has the MD5 the directory is named after.
+void TestAppImagePath::anUnpackedCopyNamesItsAppImageByContent()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString appImage = dir.filePath(QStringLiteral("FreeTunnel.AppImage"));
+    {
+        QFile f(appImage);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("not really an AppImage, but it has an MD5");
+    }
+    const QString digest = md5Hex(appImage);
+    QCOMPARE(digest.size(), 32);
+    const QString exe = QStringLiteral("/tmp/appimage_extracted_%1/usr/bin/FreeTunnel").arg(digest);
+
+    QCOMPARE(freetunnel::extractedAppImageSource(exe, appImage),
+             QFileInfo(appImage).canonicalFilePath());
+
+    // Any other file in its place is not it, whatever the directory says.
+    const QString other = dir.filePath(QStringLiteral("other.AppImage"));
+    {
+        QFile f(other);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("a different file");
+    }
+    QVERIFY(freetunnel::extractedAppImageSource(exe, other).isEmpty());
+    QVERIFY(freetunnel::extractedAppImageSource(exe, dir.path()).isEmpty());
+    QVERIFY(freetunnel::extractedAppImageSource(exe, QString()).isEmpty());
+}
+
+void TestAppImagePath::anUnpackedCopyNeedsTheRuntimesDirectoryName()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString appImage = dir.filePath(QStringLiteral("FreeTunnel.AppImage"));
+    {
+        QFile f(appImage);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("payload");
+    }
+    const QString digest = md5Hex(appImage);
+
+    // An ordinary install is not an AppImage, whichever process started it: this
+    // is the case where answering "yes" would have root run the parent.
+    QVERIFY(freetunnel::extractedAppImageSource(QStringLiteral("/usr/bin/FreeTunnel"), appImage)
+                    .isEmpty());
+    // The runtime writes the digest in lowercase, whole, as the entire name.
+    const QString prefix = QStringLiteral("appimage_extracted_");
+    for (const QString &name : {prefix + digest.toUpper(), prefix + digest.left(31),
+                                QStringLiteral("x_") + prefix + digest,
+                                prefix + digest + QStringLiteral("x")}) {
+        QVERIFY2(freetunnel::extractedAppImageSource(
+                         QStringLiteral("/tmp/%1/usr/bin/FreeTunnel").arg(name), appImage)
+                         .isEmpty(),
+                 qPrintable(name));
+    }
+    // The nearest such directory is the one the executable was unpacked into.
+    const QString nested = QStringLiteral("/tmp/%1%2/x/%1%3/usr/bin/FreeTunnel")
+                                   .arg(prefix, QString(32, QLatin1Char('0')), digest);
+    QCOMPARE(freetunnel::extractedAppImageSource(nested, appImage),
+             QFileInfo(appImage).canonicalFilePath());
+}
+
+// The same, end to end through /proc: this test process stands in for the
+// runtime, and a copy of this binary for the payload it unpacked and started.
+void TestAppImagePath::runningAppImageFindsTheFileThatUnpackedThisProcess()
+{
+#ifndef Q_OS_LINUX
+    QSKIP("the AppImage runtime is Linux-only");
+#else
+    const QString self = QFileInfo(QStringLiteral("/proc/self/exe")).canonicalFilePath();
+    const QString digest = md5Hex(self);
+    QCOMPARE(digest.size(), 32);
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    const QStringList unpacked =
+            reportFromUnpackedCopy(dir.path(), QStringLiteral("appimage_extracted_") + digest);
+    QCOMPARE(unpacked.value(0), self);
+    // Started again the same way — after an update, and by the autostart entry,
+    // which used to name the unpacked copy: gone as soon as FreeTunnel quit.
+    QCOMPARE(unpacked.value(1), QStringLiteral("--appimage-extract-and-run"));
+    QCOMPARE(unpacked.value(2),
+             QStringLiteral("Exec=\"%1\" --appimage-extract-and-run").arg(self));
+
+    // A parent whose content does not match the name is not the AppImage, and
+    // the entry names the executable itself, as for any other install.
+    const QString forgedName =
+            QStringLiteral("appimage_extracted_") + QString(32, QLatin1Char('0'));
+    const QStringList forged = reportFromUnpackedCopy(dir.path(), forgedName);
+    QCOMPARE(forged.value(0), QString());
+    QCOMPARE(forged.value(1), QString());
+    QCOMPARE(forged.value(2),
+             QStringLiteral("Exec=\"%1/usr/bin/FreeTunnel\"")
+                     .arg(QFileInfo(dir.filePath(forgedName)).canonicalFilePath()));
+#endif
+}
+
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 void TestAppImagePath::autoStartTargetIsUnquoted()
 {
@@ -97,6 +243,11 @@ void TestAppImagePath::autoStartTargetIsUnquoted()
              QStringLiteral("/home/u/My \"Apps\"/FreeTunnel.AppImage"));
     QCOMPARE(freetunnel::autoStartExecTarget(QStringLiteral("Exec=/usr/bin/FreeTunnel\n")),
              QStringLiteral("/usr/bin/FreeTunnel"));
+    // An AppImage that was unpacked rather than mounted is started that way again;
+    // the option after the program is not part of what has to exist.
+    QCOMPARE(freetunnel::autoStartExecTarget(QStringLiteral(
+                     "Exec=\"/home/u/FreeTunnel.AppImage\" --appimage-extract-and-run\n")),
+             QStringLiteral("/home/u/FreeTunnel.AppImage"));
 }
 
 void TestAppImagePath::autoStartTargetHandlesAMissingExecLine()
@@ -112,7 +263,6 @@ void TestAppImagePath::autoStartTargetHandlesAMissingExecLine()
 }
 #endif
 
-QTEST_MAIN(TestAppImagePath)
 // The macOS half of the same question, checked here because this is where the
 // tests run. A plist naming a bundle that has moved must not read as "on": that
 // is what left the Linux toggle lying until it was fixed, and the macOS branch
@@ -144,6 +294,33 @@ void TestAppImagePath::autoStartProgramIsReadBackOutOfThePlist()
     QVERIFY(freetunnel::autoStartProgramFromPlist(QStringLiteral("<plist><dict></dict></plist>"))
                     .isEmpty());
     QVERIFY(freetunnel::autoStartProgramFromPlist(QString()).isEmpty());
+}
+
+// Not QTEST_MAIN: runningAppImageFindsTheFileThatUnpackedThisProcess() runs a
+// copy of this binary that only reports what runningAppImage() makes of it.
+int main(int argc, char *argv[])
+{
+    if (argc == 2 && qstrcmp(argv[1], kReportRunningAppImage) == 0) {
+        QCoreApplication app(argc, argv);
+        const freetunnel::RunningAppImage running = freetunnel::runningAppImage();
+        QTextStream out(stdout);
+        out << running.path << '\n' << running.launchArguments().join(QLatin1Char(' ')) << '\n';
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+        freetunnel::setPlatformAutoStart(true);
+        QFile entry(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+                    + QStringLiteral("/autostart/freetunnel.desktop"));
+        if (entry.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            for (const QString &line : QString::fromUtf8(entry.readAll()).split(QLatin1Char('\n')))
+                if (line.startsWith(QLatin1String("Exec=")))
+                    out << line << '\n';
+        }
+#endif
+        return 0;
+    }
+    QCoreApplication app(argc, argv);
+    TestAppImagePath tc;
+    QTEST_SET_MAIN_SOURCE_PATH
+    return QTest::qExec(&tc, argc, argv);
 }
 
 #include "test_appimagepath.moc"
