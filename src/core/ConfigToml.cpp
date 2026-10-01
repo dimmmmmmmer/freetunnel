@@ -4,6 +4,8 @@
 #include <QRegularExpression>
 #include <QStringList>
 
+#include <optional>
+
 namespace freetunnel {
 
 static QString tomlEsc(const QString &s) {
@@ -61,9 +63,19 @@ static QString csvToTomlArray(const QString &csv) {
 
 QString clientRandomForCore(const QString &value) {
     QString v = value.trimmed();
-    if (v.endsWith(QLatin1Char('/')))
+    // Every trailing slash, not only the last: "aa//" lost one and became "aa/",
+    // which is exactly the empty mask the core refuses.
+    while (v.endsWith(QLatin1Char('/')))
         v.chop(1);
-    return v;
+    // Nothing before the slash leaves nothing for the mask to apply to; the core
+    // sends a random of its own either way.
+    return v.startsWith(QLatin1Char('/')) ? QString() : v;
+}
+
+bool isValidClientRandom(const QString &value) {
+    static const QRegularExpression hex(
+            QStringLiteral("^(?:[0-9a-fA-F]{2}){1,32}(?:/(?:[0-9a-fA-F]{2}){1,32})?$"));
+    return value.isEmpty() || hex.match(value).hasMatch();
 }
 
 QStringList splitDnsList(const QString &dns) {
@@ -167,6 +179,80 @@ void advanceOpenValue(OpenValue &v, const QString &line)
     }
 }
 
+// Where the comment on a line starts, or -1 when it has none. A # inside a quoted
+// string is part of the string.
+int commentStart(const QString &line)
+{
+    int i = 0;
+    while (i < line.size()) {
+        const QChar c = line.at(i);
+        if (c == QLatin1Char('#'))
+            return i;
+        if (c == QLatin1Char('"') || c == QLatin1Char('\''))
+            i = endOfQuoted(line, i);
+        else
+            ++i;
+    }
+    return -1;
+}
+
+// A key as the core names it. TOML lets any key be quoted, and `"password"` or
+// `'password'` is the same key as `password`. Compared as written, a quoted key
+// was neither read nor known: a quoted password was carried over as an unknown
+// key, never moved to the credential store and never used, and once one was
+// stored anyway the text sent to the core named the password twice, which it
+// refuses. Escapes are not decoded: a name spelled with one stays unknown, and is
+// carried over as written.
+QString unquotedKey(const QString &key)
+{
+    if (key.size() < 2)
+        return key;
+    const QChar quote = key.at(0);
+    if ((quote != QLatin1Char('"') && quote != QLatin1Char('\'')) || !key.endsWith(quote))
+        return key;
+    return key.mid(1, key.size() - 2);
+}
+
+// A table's name as the core names it. Like a key, each dotted part of it may be
+// quoted: ["endpoint"] is [endpoint], and ["listener".tun] is [listener.tun].
+// Compared as written, a quoted [endpoint] was not the endpoint, so every one of
+// its settings read empty and the import failed. A part is unquoted only where
+// the quotes change nothing; one that needs them keeps the name as written, and
+// that is right, not merely safe: ["listener.tun"] is a table of its own whose
+// name has a dot in it, not [listener.tun].
+QString tableName(const QString &written)
+{
+    static const QRegularExpression bare(QStringLiteral("^[A-Za-z0-9_-]+$"));
+    QStringList parts;
+    for (const QString &part : written.split(QLatin1Char('.'))) {
+        const QString key = unquotedKey(part.trimmed());
+        if (!bare.match(key).hasMatch())
+            return written;
+        parts << key;
+    }
+    return parts.join(QLatin1Char('.'));
+}
+
+// Whether a line opens a table, and which. A header may end in a comment,
+// `[endpoint] # main server`, as legally as any other line may. One that did was
+// not taken for a header, so its keys stayed in the table before it, the root -
+// and `password` is not a root key this editor writes, so it was carried over as
+// an unknown one: written back in plain text on every rewrite, and read again as
+// the password each time the credential store had just been given it.
+bool isTableHeader(const QString &line, QString *name)
+{
+    QString t = line.trimmed();
+    if (!t.startsWith(QLatin1Char('[')))
+        return false;
+    const int comment = commentStart(t);
+    if (comment >= 0)
+        t = t.left(comment).trimmed();
+    if (!t.endsWith(QLatin1Char(']')))
+        return false;
+    *name = tableName(t.mid(1, t.size() - 2).trimmed());
+    return true;
+}
+
 // Split a TOML document into its top-level tables: pairs of (header, body), with
 // an empty header for the keys that precede the first table. Multi-line basic
 // strings are stepped over, so a certificate block whose content happens to look
@@ -185,10 +271,10 @@ QList<QPair<QString, QString>> splitTomlTables(const QString &toml)
             advanceOpenValue(open, line);
             continue;
         }
-        const QString t = line.trimmed();
-        if (t.startsWith(QLatin1Char('[')) && t.endsWith(QLatin1Char(']'))) {
+        QString name;
+        if (isTableHeader(line, &name)) {
             out.append({header, body});
-            header = t.mid(1, t.size() - 2).trimmed();
+            header = name;
             body.clear();
             continue;
         }
@@ -215,7 +301,7 @@ QString keyOf(const QString &line)
     if (t.isEmpty() || t.startsWith(QLatin1Char('#')))
         return QString();
     const int eq = t.indexOf(QLatin1Char('='));
-    return eq < 0 ? QString() : t.left(eq).trimmed();
+    return eq < 0 ? QString() : unquotedKey(t.left(eq).trimmed());
 }
 
 // The lines of `body` whose key this editor does not write, with any multi-line
@@ -247,15 +333,6 @@ QString unknownKeyLines(const QString &body, const QStringList &known)
     return out;
 }
 
-const QStringList &knownRootKeys()
-{
-    static const QStringList k{QStringLiteral("loglevel"), QStringLiteral("vpn_mode"),
-                               QStringLiteral("killswitch_enabled"),
-                               QStringLiteral("post_quantum_group_enabled"),
-                               QStringLiteral("dns_upstreams")};
-    return k;
-}
-
 const QStringList &knownEndpointKeys()
 {
     static const QStringList k{
@@ -267,7 +344,25 @@ const QStringList &knownEndpointKeys()
             QStringLiteral("client_random_mask"),
             QStringLiteral("has_ipv6"),     QStringLiteral("skip_verification"),
             QStringLiteral("upstream_protocol"), QStringLiteral("anti_dpi"),
-            QStringLiteral("certificate")};
+            QStringLiteral("certificate"),
+            // Read from here when the endpoint has it, and written at the root,
+            // where the core reads it next (see readDns).
+            QStringLiteral("dns_upstreams")};
+    return k;
+}
+
+const QStringList &knownRootKeys()
+{
+    // The endpoint's keys as well. At the root they mean nothing to the core,
+    // which reads them from [endpoint] alone, and the one way they got there is
+    // 1.2.2 missing a header with a comment after it (see isTableHeader) and
+    // copying that table's keys up a level, password included. Not carried over,
+    // they are gone after the next rewrite.
+    static const QStringList k = QStringList{QStringLiteral("loglevel"), QStringLiteral("vpn_mode"),
+                                             QStringLiteral("killswitch_enabled"),
+                                             QStringLiteral("post_quantum_group_enabled"),
+                                             QStringLiteral("dns_upstreams")}
+            + knownEndpointKeys();
     return k;
 }
 
@@ -278,7 +373,7 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     t += QStringLiteral("loglevel = \"%1\"\n").arg(logLevel);
     t += QStringLiteral("vpn_mode = \"general\"\n");
     t += QStringLiteral("killswitch_enabled = false\n");
-    t += QStringLiteral("post_quantum_group_enabled = true\n");
+    t += QStringLiteral("post_quantum_group_enabled = %1\n").arg(c.postQuantum ? "true" : "false");
     t += QStringLiteral("dns_upstreams = [%1]\n").arg(listToTomlArray(splitDnsList(c.dns)));
     t += c.extraRootKeys;
     t += QStringLiteral("\n[endpoint]\n");
@@ -317,8 +412,8 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
 // Carry over everything ConfigToml has no field for, so buildConfigToml() can put
 // it back. Without this the round trip is lossy in a way nobody sees: the file
 // still parses, still connects, and quietly routes differently.
-static void carryOverUnknownTables(const QString &toml, ConfigToml &c) {
-    for (const auto &table : splitTomlTables(toml)) {
+static void carryOverUnknownTables(const QList<QPair<QString, QString>> &tables, ConfigToml &c) {
+    for (const auto &table : tables) {
         const QString &header = table.first;
         const QString &body = table.second;
         if (header.isEmpty()) {
@@ -363,21 +458,85 @@ QString unescapeBasic(const QString &v)
     return o;
 }
 
-// Both spellings of a TOML string. This editor writes "...", but a file it did
-// not write is free to use '...', where nothing is an escape. Reading one of
-// those as "absent" did not merely skip it: these are keys the rebuild writes
-// itself, so the value it could not read was replaced with an empty one and the
-// config was emptied in place.
-QString readString(const QString &toml, const char *key)
+// Where a key's value starts in the body of one table: just past the `=` of the
+// line that sets it, or -1 when the table does not set it.
+//
+// Per table, because the core reads each key from one table and no other. Read
+// from anywhere in the file, another table's `password` - a SOCKS listener's -
+// was taken for the server's, and once the real one had gone to the credential
+// store it was the only one left, so it was stored over the VPN password on every
+// connect. A key may also be indented, as TOML allows: only keys at the start of
+// a line were found, and as keys the rebuild writes they were not carried over
+// either, so an indented certificate came back empty, an indented address list
+// failed the import, and an indented password was neither moved to the store nor
+// used to connect. A line inside another key's multi-line value is stepped over,
+// so a certificate's text cannot pass for a key, indented or not.
+int valueStart(const QString &body, const char *key)
 {
-    const QRegularExpression basic(
-            QStringLiteral("(?m)^%1\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").arg(QLatin1String(key)));
-    const auto bm = basic.match(toml);
+    OpenValue open;
+    int pos = 0;
+    const QStringList lines = body.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (!open.open() && keyOf(line) == QLatin1String(key))
+            return pos + line.indexOf(QLatin1Char('=')) + 1;
+        advanceOpenValue(open, line);
+        pos += line.size() + 1;
+    }
+    return -1;
+}
+
+// `value` matched where `key`'s value starts in `body`, and nowhere else.
+QRegularExpressionMatch matchValue(const QString &body, const char *key, const QRegularExpression &value)
+{
+    const int at = valueStart(body, key);
+    if (at < 0)
+        return QRegularExpressionMatch();
+    return value.match(body, at, QRegularExpression::NormalMatch,
+                       QRegularExpression::AnchorAtOffsetMatchOption);
+}
+
+// A value written as a block, """...""" or '''...''', on one line or several.
+// Tried before the one-line spellings, which match the first two quotes of the
+// three and read an empty string: `password = """secret"""` lost the password,
+// which the rewrite then dropped from the file. A newline straight after the
+// opening quotes is not part of the value, as in TOML, and neither is one
+// straight before the closing quotes, which this editor writes there.
+std::optional<QString> readBlock(const QString &table, const char *key)
+{
+    static const QRegularExpression basicBlock(
+            QStringLiteral("\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
+            QRegularExpression::DotMatchesEverythingOption);
+    const auto bm = matchValue(table, key, basicBlock);
+    // Same unescaping as the quoted fields: buildConfigToml() escapes quotes and
+    // backslashes in the block, and a PEM (which has neither) still round trips
+    // byte for byte.
     if (bm.hasMatch())
         return unescapeBasic(bm.captured(1));
-    const QRegularExpression literal(
-            QStringLiteral("(?m)^%1\\s*=\\s*'([^']*)'").arg(QLatin1String(key)));
-    const auto lm = literal.match(toml);
+    static const QRegularExpression literalBlock(
+            QStringLiteral("\\s*'''\\n?(.*?)\\n?'''"),
+            QRegularExpression::DotMatchesEverythingOption);
+    const auto lm = matchValue(table, key, literalBlock);
+    // A literal block is literal: no escape is processed inside one.
+    if (lm.hasMatch())
+        return lm.captured(1);
+    return std::nullopt;
+}
+
+// Every spelling of a TOML string. This editor writes "...", but a file it did
+// not write is free to use '...', where nothing is an escape, or either kind of
+// block. Reading one of those as "absent" did not merely skip it: these are keys
+// the rebuild writes itself, so the value it could not read was replaced with an
+// empty one and the config was emptied in place.
+QString readString(const QString &table, const char *key)
+{
+    if (const std::optional<QString> block = readBlock(table, key))
+        return *block;
+    static const QRegularExpression basic(QStringLiteral("\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+    const auto bm = matchValue(table, key, basic);
+    if (bm.hasMatch())
+        return unescapeBasic(bm.captured(1));
+    static const QRegularExpression literal(QStringLiteral("\\s*'([^']*)'"));
+    const auto lm = matchValue(table, key, literal);
     return lm.hasMatch() ? lm.captured(1) : QString();
 }
 
@@ -419,21 +578,20 @@ int endOfArray(const QString &toml, int start)
 // it, however many lines that takes. A provider formats an array one entry per
 // line as readily as on one, and the single-line read that was here returned
 // nothing for the other spelling — which, for `addresses`, is the whole config.
-QString readArray(const QString &toml, const char *key)
+QString readArray(const QString &table, const char *key)
 {
-    const QRegularExpression open(
-            QStringLiteral("(?m)^%1\\s*=\\s*\\[").arg(QLatin1String(key)));
-    const auto m = open.match(toml);
+    static const QRegularExpression open(QStringLiteral("\\s*\\["));
+    const auto m = matchValue(table, key, open);
     if (!m.hasMatch())
         return QString();
     const int start = m.capturedEnd();
-    const int close = endOfArray(toml, start);
+    const int close = endOfArray(table, start);
     if (close < 0)
         return QString();
     static const QRegularExpression item(
             QStringLiteral("\"((?:[^\"\\\\]|\\\\.)*)\"|'([^']*)'"));
     QStringList out;
-    auto it = item.globalMatch(toml.mid(start, close - start));
+    auto it = item.globalMatch(table.mid(start, close - start));
     while (it.hasNext()) {
         const auto im = it.next();
         out << (im.capturedStart(1) >= 0 ? unescapeBasic(im.captured(1)) : im.captured(2));
@@ -441,71 +599,90 @@ QString readArray(const QString &toml, const char *key)
     return out.join(QStringLiteral(", "));
 }
 
-// Anchored to the start of a line so a `true`/`false` token sitting inside the
-// certificate block or a comment can't flip a flag (skip_verification in
-// particular is security-significant — it disables server cert checking).
-bool readBool(const QString &toml, const char *key, bool dflt)
+// Read on the flag's own line only (see valueStart), so a `true`/`false` token
+// sitting inside the certificate block or a comment can't flip a flag
+// (skip_verification in particular is security-significant — it disables server
+// cert checking).
+bool readBool(const QString &table, const char *key, bool dflt)
 {
-    const QRegularExpression re(
-            QStringLiteral("(?m)^%1\\s*=\\s*(true|false)\\b").arg(QLatin1String(key)));
-    const auto m = re.match(toml);
+    static const QRegularExpression re(QStringLiteral("\\s*(true|false)\\b"));
+    const auto m = matchValue(table, key, re);
     return m.hasMatch() ? (m.captured(1) == QLatin1String("true")) : dflt;
 }
 
-// Every spelling a certificate can arrive in, not only the one written here.
-// `certificate` is a key the rebuild writes itself, so a spelling the reader did
-// not know was not merely skipped: it was written back as an empty value, and
-// the pinned trust anchor was gone from the file on disk.
-QString readCertificate(const QString &toml)
+// The body of the first table of that name; the root is the one with none.
+QString tableBody(const QList<QPair<QString, QString>> &tables, const QString &name)
 {
-    static const QRegularExpression basicBlock(
-            QStringLiteral("(?m)^certificate\\s*=\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
-            QRegularExpression::DotMatchesEverythingOption);
-    const auto bm = basicBlock.match(toml);
-    // Same unescaping as the quoted fields: buildConfigToml() escapes quotes and
-    // backslashes in the block, and a PEM (which has neither) still round trips
-    // byte for byte.
-    if (bm.hasMatch())
-        return unescapeBasic(bm.captured(1));
-    static const QRegularExpression literalBlock(
-            QStringLiteral("(?m)^certificate\\s*=\\s*'''\\n?(.*?)\\n?'''"),
-            QRegularExpression::DotMatchesEverythingOption);
-    const auto lm = literalBlock.match(toml);
-    // A literal block is literal: no escape is processed inside one.
-    if (lm.hasMatch())
-        return lm.captured(1);
-    return readString(toml, "certificate");
+    for (const auto &table : tables) {
+        if (table.first == name)
+            return table.second;
+    }
+    return QString();
+}
+
+// The endpoint's password, or failing that one left at the root, where 1.2.2 put
+// it when it missed a header with a comment after it (see isTableHeader). It is
+// still the password: it goes to the credential store like any other, and the
+// rewrite that follows does not carry it over (see knownRootKeys).
+QString readPassword(const QString &root, const QString &endpoint)
+{
+    const QString own = readString(endpoint, "password");
+    return own.isEmpty() ? readString(root, "password") : own;
+}
+
+// The DNS list where the core looks for it: [endpoint] first, and the root only
+// when the endpoint has no list. TrustTunnel's own template puts it in [endpoint];
+// this editor writes it at the root, which the core reads next, so the endpoint's
+// copy is not carried over (see knownEndpointKeys) and the list written back is
+// the one the core uses. Kept, it would have overridden any change made here.
+QString readDns(const QString &root, const QString &endpoint)
+{
+    static const QRegularExpression list(QStringLiteral("\\s*\\["));
+    const bool own = matchValue(endpoint, "dns_upstreams", list).hasMatch();
+    return readArray(own ? endpoint : root, "dns_upstreams");
+}
+
+// A config imported from a link by 1.2.2 or earlier has the mask under a key of
+// its own, which the core never read: the connection went out without it. Joined
+// back on here, which is also the path to the core, so such a config works again
+// without being opened. A mask with no prefix had nothing to mask and is dropped,
+// as the core effectively did.
+QString readClientRandom(const QString &endpoint)
+{
+    const QString prefix = readString(endpoint, "client_random");
+    const QString mask = readString(endpoint, "client_random_mask").trimmed();
+    if (!mask.isEmpty() && !prefix.trimmed().isEmpty() && !prefix.contains(QLatin1Char('/')))
+        return clientRandomForCore(prefix.trimmed() + QLatin1Char('/') + mask);
+    return clientRandomForCore(prefix);
 }
 
 } // namespace
 
+// Each key from the table the core reads it from (see valueStart).
 ConfigToml parseConfigToml(const QString &toml) {
     ConfigToml c;
-    c.hostname = readString(toml, "hostname");
-    c.addresses = readArray(toml, "addresses");
-    c.username = readString(toml, "username");
-    c.password = readString(toml, "password");
-    c.protocol = readString(toml, "upstream_protocol");
+    const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
+    const QString root = tableBody(tables, QString());
+    const QString endpoint = tableBody(tables, QStringLiteral("endpoint"));
+    c.hostname = readString(endpoint, "hostname");
+    c.addresses = readArray(endpoint, "addresses");
+    c.username = readString(endpoint, "username");
+    c.password = readPassword(root, endpoint);
+    c.protocol = readString(endpoint, "upstream_protocol");
     if (c.protocol.isEmpty())
         c.protocol = QStringLiteral("http2");
-    c.dns = readArray(toml, "dns_upstreams");
-    c.customSni = readString(toml, "custom_sni");
-    c.clientRandom = readString(toml, "client_random");
-    // A config imported from a link by 1.2.2 or earlier has the mask under a key
-    // of its own, which the core never read: the connection went out without it.
-    // Joined back on here, which is also the path to the core, so such a config
-    // works again without being opened. A mask with no prefix had nothing to
-    // mask and is dropped, as the core effectively did.
-    const QString mask = readString(toml, "client_random_mask").trimmed();
-    if (!mask.isEmpty() && !c.clientRandom.trimmed().isEmpty() && !c.clientRandom.contains(QLatin1Char('/')))
-        c.clientRandom = c.clientRandom.trimmed() + QLatin1Char('/') + mask;
-    c.clientRandom = clientRandomForCore(c.clientRandom);
-    c.allowIpv6 = readBool(toml, "has_ipv6", true);
-    c.skipVerification = readBool(toml, "skip_verification", false);
-    c.antiDpi = readBool(toml, "anti_dpi", false);
-    c.certificate = readCertificate(toml);
+    c.dns = readDns(root, endpoint);
+    c.postQuantum = readBool(root, "post_quantum_group_enabled", true);
+    c.customSni = readString(endpoint, "custom_sni");
+    c.clientRandom = readClientRandom(endpoint);
+    c.allowIpv6 = readBool(endpoint, "has_ipv6", true);
+    c.skipVerification = readBool(endpoint, "skip_verification", false);
+    c.antiDpi = readBool(endpoint, "anti_dpi", false);
+    // In every spelling (see readString): the rebuild writes it itself, so one it
+    // could not read was written back empty, and the pinned trust anchor was gone.
+    c.certificate = readString(endpoint, "certificate");
 
-    carryOverUnknownTables(toml, c);
+    carryOverUnknownTables(tables, c);
     return c;
 }
 } // namespace freetunnel

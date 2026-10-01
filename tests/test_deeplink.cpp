@@ -28,7 +28,31 @@ private slots:
     void acceptsTrustTunnelQrFragment();
     void aCertificateChainSurvivesTheLink();
     void aMaskedClientRandomReachesTheConfigWhole();
+    void aClientRandomTheCoreCannotUseIsRefused();
+    void aShareLinkKeepsThePrefixTheCoreUses();
 };
+
+// A link with the required fields and the given client random, byte for byte as
+// a link from elsewhere could carry it: encodeDeepLink() only writes good ones.
+static QString linkWithClientRandom(const QByteArray &clientRandom)
+{
+    QByteArray p;
+    auto tlv = [&](char tag, const QByteArray &v) {
+        p.append(tag);
+        if (v.size() > 63) // a two-byte varint length
+            p.append(static_cast<char>(0x40 | (v.size() >> 8)));
+        p.append(static_cast<char>(v.size() & 0xFF));
+        p.append(v);
+    };
+    tlv(0x01, "vpn.example.com");
+    tlv(0x02, "1.2.3.4:443");
+    tlv(0x05, "u");
+    tlv(0x06, "p");
+    tlv(0x0B, clientRandom);
+    return QStringLiteral("tt://?")
+            + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
+                                             | QByteArray::OmitTrailingEquals));
+}
 
 void TestDeepLink::roundTrip() {
     DeepLinkConfig in;
@@ -344,6 +368,89 @@ void TestDeepLink::aMaskedClientRandomReachesTheConfigWhole() {
     // With nothing after the slash the core refuses the whole config: no mask then.
     in.clientRandomPrefix = "deadbeef/";
     QVERIFY(deepLinkConfigToToml(in).contains(QStringLiteral("client_random = \"deadbeef\"\n")));
+}
+
+// The core decodes the prefix and the mask as whole bytes in hex, quietly does
+// without a part it cannot decode, and uses no more than the 32 bytes of a TLS
+// client random. A link's value was taken as it came: one trailing slash was
+// dropped and nothing else looked at, so "aa//" went on as "aa/", the empty mask
+// that makes the core refuse the config, and any other text went into the config
+// for the editor to refuse later.
+void TestDeepLink::aClientRandomTheCoreCannotUseIsRefused()
+{
+    // What the core reads as no mask, or as no prefix, is repaired.
+    const QList<QPair<QByteArray, QString>> repaired{
+            {"deadbeef/", QStringLiteral("deadbeef")},
+            {"aa//", QStringLiteral("aa")},
+            {"aa/ff00///", QStringLiteral("aa/ff00")},
+            {"/ffff", QString()},
+            {"//", QString()},
+            {" AABB/ff00 ", QStringLiteral("AABB/ff00")},
+    };
+    for (const auto &[raw, written] : repaired) {
+        QString err;
+        const auto cfg = parseDeepLink(linkWithClientRandom(raw), &err);
+        QVERIFY2(cfg.has_value(), qPrintable(QString::fromLatin1(raw) + QStringLiteral(": ") + err));
+        const QString toml = deepLinkConfigToToml(*cfg);
+        QVERIFY2(toml.contains(QStringLiteral("client_random = \"%1\"\n").arg(written)), qPrintable(toml));
+    }
+
+    // Anything else is damage, and the link is refused as for any other.
+    const QByteArray tooLong(66, 'a');
+    for (const QByteArray &bad : {QByteArray("xyz"), QByteArray("abc"), QByteArray("aa/bbb"),
+                                  QByteArray("aa/bb/cc"), QByteArray("aa//bb"), QByteArray("aa bb"),
+                                  tooLong, QByteArray("aa/") + tooLong}) {
+        QString err;
+        QVERIFY2(!parseDeepLink(linkWithClientRandom(bad), &err).has_value(), bad.constData());
+        QVERIFY2(err.contains(QStringLiteral("client_random")), qPrintable(err));
+    }
+    // The longest that is still whole: 32 bytes each side.
+    const QByteArray longest = QByteArray(64, 'f') + '/' + QByteArray(64, '0');
+    QVERIFY(parseDeepLink(linkWithClientRandom(longest)).has_value());
+
+    // And a config's own link never carries one its import would refuse.
+    DeepLinkConfig own;
+    own.hostname = QStringLiteral("vpn.example.com");
+    own.addresses = {QStringLiteral("1.2.3.4:443")};
+    own.username = QStringLiteral("u");
+    own.password = QStringLiteral("p");
+    own.clientRandomPrefix = QStringLiteral("abc");
+    QString err;
+    auto back = parseDeepLink(encodeDeepLink(own), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QVERIFY(back->clientRandomPrefix.isEmpty());
+    own.clientRandomPrefix = QStringLiteral("aa//");
+    back = parseDeepLink(encodeDeepLink(own), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->clientRandomPrefix, QStringLiteral("aa"));
+}
+
+// A mask the core cannot decode is done without, and the prefix goes out
+// unmasked. 1.2.2 could leave such a pair in a config, prefix and mask under keys
+// of their own; its share link left the client random out altogether, so whoever
+// imported it connected without one, unlike the config it came from.
+void TestDeepLink::aShareLinkKeepsThePrefixTheCoreUses()
+{
+    const ConfigToml stored = parseConfigToml(QStringLiteral(
+            "[endpoint]\nhostname = \"vpn.example.com\"\naddresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\npassword = \"p\"\n"
+            "client_random = \"deadbeef\"\nclient_random_mask = \"fff\"\n"));
+    DeepLinkConfig own;
+    own.hostname = stored.hostname;
+    own.addresses = {stored.addresses};
+    own.username = stored.username;
+    own.password = stored.password;
+    own.clientRandomPrefix = stored.clientRandom;
+    QString err;
+    auto back = parseDeepLink(encodeDeepLink(own), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->clientRandomPrefix, QStringLiteral("deadbeef"));
+
+    // A prefix the core cannot decode leaves nothing for it to use either.
+    own.clientRandomPrefix = QStringLiteral("abc/ffff");
+    back = parseDeepLink(encodeDeepLink(own), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QVERIFY(back->clientRandomPrefix.isEmpty());
 }
 
 QTEST_MAIN(TestDeepLink)

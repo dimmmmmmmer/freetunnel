@@ -67,9 +67,32 @@ Value is a concatenation of entries: each entry is `varint length` + UTF-8 bytes
 ### Tag `0x0B` — client random
 
 UTF-8 string `prefix` or `prefix/mask` (hex). Slash separates prefix and mask.
-FreeTunnel writes it to the config's `client_random` unchanged, which is how the
-TrustTunnel core reads it (it splits at the slash itself and has no separate mask
-key). An empty mask after the slash is dropped, since the core rejects it.
+FreeTunnel writes it to the config's `client_random` in the form the core reads,
+after the repairs listed below. That one key is where the TrustTunnel core looks
+(it splits at the slash itself and has no separate mask key).
+
+The prefix and the mask are each whole bytes in hex (an even number of digits,
+either case), at most 32 bytes (64 digits), the size of a TLS client random. The
+core decodes each part as bytes and does without one it cannot decode, and uses
+no more than 32 bytes, so nothing else is of use to it. Two edge cases are
+repaired rather than refused:
+
+- Trailing slashes (`deadbeef/`, `aa//`): an empty mask, for which the core
+  rejects the whole config. They are dropped, leaving the prefix alone.
+- A mask with no prefix (`/ffff`): there is nothing for it to mask, and the core
+  sends a random client random of its own. The field is dropped.
+
+Any other value makes the import fail.
+
+A config's share link never carries a value its import would refuse. When the
+value as a whole would be refused but its prefix would not, as with a mask of an
+odd number of digits, the link carries the prefix alone: the core does without a
+mask it cannot decode and sends the prefix unmasked, so whoever imports the link
+connects as the config does. Any other such value is left out.
+
+The config editor checks a value by the same rule but repairs neither edge case.
+It refuses trailing slashes and a mask with no prefix, and asks you to fix the
+value.
 
 ## Validation rules
 
@@ -81,6 +104,7 @@ Import fails when:
 - `version > 1`
 - Missing hostname, any address, username, or password
 - Malformed DNS upstream list
+- Client random that is not `prefix[/mask]` in whole bytes of hex (see tag `0x0B`)
 
 Passwords from deep links are stored in the OS credential store, not in the
 on-disk TOML.

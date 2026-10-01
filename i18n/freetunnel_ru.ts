@@ -310,8 +310,8 @@
         <translation>Обновление загружено в %1 — установите его через менеджер пакетов.</translation>
     </message>
     <message>
-        <source>Client random must be hexadecimal, optionally followed by /mask</source>
-        <translation>Client random должен быть в hex-формате, можно с /маской</translation>
+        <source>Client random must be hexadecimal in whole bytes (an even number of digits, at most 64), optionally followed by /mask</source>
+        <translation>Client random должен быть в hex-формате целыми байтами (чётное число цифр, не больше 64), можно с /маской</translation>
     </message>
     <message>
         <source>The new version could not be started — FreeTunnel was left as it was.</source>
@@ -540,6 +540,10 @@
     <message>
         <source>invalid base64url payload</source>
         <translation>данные ссылки не в формате base64url</translation>
+    </message>
+    <message>
+        <source>malformed client_random value</source>
+        <translation>повреждено значение client_random</translation>
     </message>
 </context>
 <context>

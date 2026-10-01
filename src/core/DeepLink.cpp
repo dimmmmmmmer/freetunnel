@@ -193,7 +193,6 @@ bool applyDeepLinkStringTlv(quint64 tag, const QByteArray &value, DeepLinkConfig
     case 0x03: cfg.customSni = QString::fromUtf8(value); return true;
     case 0x05: cfg.username = QString::fromUtf8(value); flags.user = true; return true;
     case 0x06: cfg.password = QString::fromUtf8(value); flags.pass = true; return true;
-    case 0x0B: cfg.clientRandomPrefix = QString::fromUtf8(value); return true;
     case 0x0C: cfg.name = QString::fromUtf8(value); return true;
     default: return false;
     }
@@ -238,6 +237,22 @@ bool applyDeepLinkScalarTlv(quint64 tag, const QByteArray &value, DeepLinkConfig
     }
 }
 
+// The client random, "prefix[/mask]" in hex. It was taken as it came, so a value
+// the core cannot use reached the config all the same - the core quietly does
+// without a part it cannot decode - and with it the editor, which then refused
+// to save the config until it was changed. What the core reads as no mask, or no
+// prefix, is repaired as clientRandomForCore() does; anything else means the link
+// was damaged, and it is refused like any other damage.
+bool applyDeepLinkClientRandomTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
+{
+    cfg.clientRandomPrefix = QString::fromUtf8(value);
+    if (isValidClientRandom(clientRandomForCore(cfg.clientRandomPrefix)))
+        return true;
+    if (error)
+        *error = QCoreApplication::translate("DeepLink", "malformed client_random value");
+    return false;
+}
+
 bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
                       DeepLinkFieldFlags &flags, QString *error)
 {
@@ -245,6 +260,8 @@ bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
         return true;
     if (applyDeepLinkScalarTlv(tag, value, cfg))
         return true;
+    if (tag == 0x0B)
+        return applyDeepLinkClientRandomTlv(value, cfg, error);
     if (tag == 0x0D) {
         bool ok = false;
         cfg.dnsUpstreams = decodeStringList(value, &ok);
@@ -325,16 +342,33 @@ void writeOptionalDeepLinkFlagTlvs(QByteArray &p, const DeepLinkConfig &cfg)
         writeTlv(p, 0x0A, QByteArray(1, '\1'));
 }
 
+// The client random as a link carries it: as the core reads it, and not at all
+// when the core could not use it, rather than in a link the import refuses.
+//
+// A mask the core cannot decode is the exception. The core does without the mask
+// and sends the prefix unmasked, and 1.2.2 could leave a pair like that behind
+// ("deadbeef" and "fff"); dropping the whole value left whoever imported the link
+// connecting differently from this config. The prefix alone is what is used.
+QString clientRandomForLink(const QString &value)
+{
+    const QString v = clientRandomForCore(value);
+    if (isValidClientRandom(v))
+        return v;
+    const QString prefix = v.section(QLatin1Char('/'), 0, 0);
+    return isValidClientRandom(prefix) ? prefix : QString();
+}
+
 void writeOptionalDeepLinkMetaTlvs(QByteArray &p, const DeepLinkConfig &cfg)
 {
+    const QString clientRandom = clientRandomForLink(cfg.clientRandomPrefix);
     if (!cfg.customSni.isEmpty())
         writeTlv(p, 0x03, cfg.customSni.toUtf8());
     if (!cfg.certificate.isEmpty())
         writeTlv(p, 0x08, cfg.certificate);
     if (cfg.upstreamProtocol != UpstreamProtocol::Http2)
         writeTlv(p, 0x09, varintBytes(static_cast<quint64>(cfg.upstreamProtocol)));
-    if (!cfg.clientRandomPrefix.isEmpty())
-        writeTlv(p, 0x0B, cfg.clientRandomPrefix.toUtf8());
+    if (!clientRandom.isEmpty())
+        writeTlv(p, 0x0B, clientRandom.toUtf8());
     if (!cfg.name.isEmpty())
         writeTlv(p, 0x0C, cfg.name.toUtf8());
     if (!cfg.dnsUpstreams.isEmpty())

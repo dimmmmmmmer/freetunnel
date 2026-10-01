@@ -11,6 +11,17 @@ class TestConfigToml : public QObject {
     Q_OBJECT
 
 private slots:
+    void aCommentAfterATableHeaderKeepsTheTable();
+    void endpointKeysLeftAtTheRootAreClearedOut();
+    void anotherTablesPasswordIsNotTheServers();
+    void indentedKeysAreRead();
+    void aQuotedKeyIsTheSameKey();
+    void aQuotedTableNameIsTheSameTable();
+    void aValueInTripleQuotesIsRead();
+    void aCertificatesTextIsNotReadAsKeys();
+    void theDnsListIsReadWhereTheCoreReadsIt();
+    void postQuantumStaysOffWhenTheConfigTurnsItOff();
+    void aClientRandomGoesToTheCoreInAFormItTakes();
     void anOldSplitClientRandomIsJoinedBack();
     void dnsServersAreOneEntryEachHoweverSeparated();
     void roundTripKeepsWhatTheEditorDoesNotUnderstand();
@@ -90,8 +101,9 @@ void TestConfigToml::defaultsProtocol() {
 void TestConfigToml::boolFlagsAreLineAnchored() {
     // A `skip_verification = true` substring sitting inside another value (e.g. a
     // pasted certificate body) must NOT flip the real flag — it's only honored
-    // when it stands alone at the start of a line.
+    // as the key of a line of its own.
     const QString toml = QStringLiteral(
+            "[endpoint]\n"
             "skip_verification = false\n"
             "has_ipv6 = true\n"
             "anti_dpi = false\n"
@@ -104,8 +116,22 @@ void TestConfigToml::boolFlagsAreLineAnchored() {
     QCOMPARE(c.allowIpv6, true);
 
     // And a genuine line-anchored flag is still read.
-    ConfigToml on = parseConfigToml(QStringLiteral("skip_verification = true\n"));
+    ConfigToml on = parseConfigToml(QStringLiteral("[endpoint]\nskip_verification = true\n"));
     QCOMPARE(on.skipVerification, true);
+
+    // From [endpoint] only, which is where the core reads it. Anywhere else the
+    // core does not see it, and reading it there would hand the next rewrite a
+    // switched-off certificate check to write into [endpoint].
+    const ConfigToml elsewhere = parseConfigToml(QStringLiteral(
+            "skip_verification = true\n"
+            "[endpoint]\n"
+            "hostname = \"h\"\n"
+            "[listener.socks]\n"
+            "anti_dpi = true\n"));
+    QVERIFY(!elsewhere.skipVerification);
+    QVERIFY(!elsewhere.antiDpi);
+    QVERIFY2(!buildConfigToml(elsewhere).contains(QStringLiteral("skip_verification = true")),
+             qPrintable(buildConfigToml(elsewhere)));
 }
 
 // The test above always spells the flags out. What it never covers is a config
@@ -117,6 +143,7 @@ void TestConfigToml::boolFlagsAreLineAnchored() {
 // Found by mutation: flipping that default to `true` broke nothing in the suite.
 void TestConfigToml::securityFlagsDefaultClosed() {
     const ConfigToml c = parseConfigToml(QStringLiteral(
+            "[endpoint]\n"
             "hostname = \"vpn.example.com\"\n"
             "username = \"u\"\n"));
     QVERIFY2(!c.skipVerification,
@@ -381,6 +408,361 @@ void TestConfigToml::anOldSplitClientRandomIsJoinedBack()
 
     // A mask with no prefix masked nothing, then or now.
     QCOMPARE(parseConfigToml(config(QString(), QStringLiteral("ff"))).clientRandom, QString());
+}
+
+// A table header may end in a comment, and one that did was not taken for a
+// header: its keys stayed at the root, where `password` is not a key this editor
+// writes, so the rewrite that moves the password into the credential store wrote
+// it straight back in plain text - on every connect, for good. A commented
+// [listener.tun] lost its routes the same way, to the defaults.
+void TestConfigToml::aCommentAfterATableHeaderKeepsTheTable()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "[endpoint] # the provider's server\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "password = \"s3cret\"\n"
+            "[listener.tun]   #routes, see #12\n"
+            "mtu_size = 1280\n"
+            "excluded_routes = [\"10.9.0.0/16\"]\n"
+            "[ \"odd#name\" ] # a # inside quotes is not the comment\n"
+            "x = 1\n");
+
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QVERIFY2(c.extraRootKeys.isEmpty(), qPrintable(c.extraRootKeys));
+    QVERIFY2(c.tunSection.contains(QStringLiteral("mtu_size = 1280")), qPrintable(c.tunSection));
+    QVERIFY2(c.extraSections.contains(QStringLiteral("[\"odd#name\"]\nx = 1\n")), qPrintable(c.extraSections));
+
+    // What migrateConfigPassword() writes once the store has taken the password.
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3cret")), qPrintable(rebuilt));
+    QVERIFY2(parseConfigToml(rebuilt).password.isEmpty(), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("excluded_routes = [\"10.9.0.0/16\"]")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("192.168.0.0/16")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// What 1.2.2 made of such a config, as it is on disk now: the endpoint's keys up
+// at the root, password among them, then an [endpoint] of its own without one.
+// The password there is still the one to store, and the next rewrite clears the
+// root out, so it does not stay in the file.
+void TestConfigToml::endpointKeysLeftAtTheRootAreClearedOut()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "vpn_mode = \"general\"\n"
+            "killswitch_enabled = false\n"
+            "post_quantum_group_enabled = true\n"
+            "dns_upstreams = []\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "password = \"s3cret\"\n"
+            "certificate = \"\"\"\n"
+            "-----BEGIN CERTIFICATE-----\n"
+            "MIIB\n"
+            "-----END CERTIFICATE-----\n"
+            "\"\"\"\n"
+            "provider_quirk = 42\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "client_random = \"\"\n"
+            "custom_sni = \"\"\n"
+            "has_ipv6 = true\n"
+            "skip_verification = false\n"
+            "upstream_protocol = \"http2\"\n"
+            "anti_dpi = false\n"
+            "certificate = \"\"\"\n"
+            "-----BEGIN CERTIFICATE-----\n"
+            "MIIB\n"
+            "-----END CERTIFICATE-----\n"
+            "\"\"\"\n"
+            "\n[listener.tun]\n"
+            "mtu_size = 1280\n");
+
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QCOMPARE(c.extraRootKeys, QStringLiteral("provider_quirk = 42\n"));
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3cret")), qPrintable(rebuilt));
+    QCOMPARE(rebuilt.count(QStringLiteral("hostname = ")), 1);
+    QCOMPARE(rebuilt.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QVERIFY2(rebuilt.contains(QStringLiteral("provider_quirk = 42")), qPrintable(rebuilt));
+}
+
+// Each key is read from the table the core reads it from. Read from anywhere, a
+// SOCKS listener's password was the server's whenever [endpoint] had none - which
+// is every time after the first, since the first migration moves the real one
+// into the credential store. The next one then stored the listener's over it.
+void TestConfigToml::anotherTablesPasswordIsNotTheServers()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "[listener.socks]\n"
+            "address = \"127.0.0.1:1080\"\n"
+            "username = \"socks-user\"\n"
+            "password = \"socks-pass\"\n"
+            "[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n");
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.username, QStringLiteral("u"));
+    QVERIFY2(c.password.isEmpty(), qPrintable(c.password));
+    // And the listener keeps what is its own.
+    QVERIFY2(buildConfigToml(c).contains(QStringLiteral("password = \"socks-pass\"")),
+             qPrintable(buildConfigToml(c)));
+}
+
+// TOML lets a key be indented, and a provider's file may well be. Only keys at the
+// start of a line were read, and since these are keys the rebuild writes, an
+// indented one was not carried over either: the certificate came back empty, the
+// address list empty (so the import was refused), and the password was neither
+// moved to the credential store nor used to connect.
+void TestConfigToml::indentedKeysAreRead()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "  dns_upstreams = [\"9.9.9.9\"]\n"
+            "[endpoint]\n"
+            "    hostname = \"vpn.example.com\"\n"
+            "    addresses = [\n"
+            "        \"1.2.3.4:443\",\n"
+            "    ]\n"
+            "\tusername = 'u'\n"
+            "    password = \"s3cret\"\n"
+            "    skip_verification = false\n"
+            "    anti_dpi = true\n"
+            "    certificate = \"\"\"\n"
+            "-----BEGIN CERTIFICATE-----\n"
+            "MIIB\n"
+            "-----END CERTIFICATE-----\"\"\"\n"
+            "[listener.tun]\n"
+            "  mtu_size = 1280\n");
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.addresses, QStringLiteral("1.2.3.4:443"));
+    QCOMPARE(c.username, QStringLiteral("u"));
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QCOMPARE(c.antiDpi, true);
+    QCOMPARE(c.dns, QStringLiteral("9.9.9.9"));
+    QCOMPARE(c.certificate, QStringLiteral("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"));
+
+    // The rewrite after the password has gone to the store: everything else kept.
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3cret")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("MIIB")), qPrintable(rebuilt));
+    QCOMPARE(parseConfigToml(rebuilt).addresses, QStringLiteral("1.2.3.4:443"));
+}
+
+// TOML lets a key be quoted, and "password" names the same key as password. A
+// quoted key was compared as written, so it was neither read nor known: a quoted
+// password stayed in the file as an unknown key, and a quoted key the rebuild
+// writes itself came back twice, which the core refuses.
+void TestConfigToml::aQuotedKeyIsTheSameKey()
+{
+    const QString src = QStringLiteral(
+            "\"loglevel\" = \"debug\"\n"
+            "[endpoint]\n"
+            "\"hostname\" = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "'username' = 'u'\n"
+            "  \"password\" = \"s3cret\"\n"
+            "\"anti_dpi\" = true\n"
+            "\"has.dot\" = 1\n");
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.username, QStringLiteral("u"));
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QVERIFY(c.antiDpi);
+
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3cret")), qPrintable(rebuilt));
+    QCOMPARE(rebuilt.count(QStringLiteral("loglevel")), 1);
+    QCOMPARE(rebuilt.count(QStringLiteral("hostname")), 1);
+    QCOMPARE(rebuilt.count(QStringLiteral("anti_dpi")), 1);
+    // A quoted name that is none of these keys is someone else's, kept as written.
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n\"has.dot\" = 1\n")), qPrintable(rebuilt));
+}
+
+// A table's name may be quoted as a key's may, part by part. Read as written,
+// ["endpoint"] was not the endpoint: every setting in it read empty and the
+// import failed. A part that needs its quotes names another table, though:
+// ['listener.tun'] has a dot in its name and is not [listener.tun].
+void TestConfigToml::aQuotedTableNameIsTheSameTable()
+{
+    const QString src = QStringLiteral(
+            "[\"endpoint\"]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "password = \"s3cret\"\n"
+            "[ \"listener\" . tun ]\n"
+            "included_routes = [\"10.0.0.0/8\"]\n"
+            "['listener.tun']\n"
+            "dotted = 1\n"
+            "[\"my server\"]\n"
+            "spaced = 2\n");
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.addresses, QStringLiteral("1.2.3.4:443"));
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QVERIFY2(c.tunSection.contains(QStringLiteral("10.0.0.0/8")), qPrintable(c.tunSection));
+    QVERIFY2(!c.tunSection.contains(QStringLiteral("dotted")), qPrintable(c.tunSection));
+
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3cret")), qPrintable(rebuilt));
+    QCOMPARE(rebuilt.count(QStringLiteral("[endpoint]")), 1);
+    QCOMPARE(rebuilt.count(QStringLiteral("hostname")), 1);
+    QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n['listener.tun']\ndotted = 1\n")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n[\"my server\"]\nspaced = 2\n")), qPrintable(rebuilt));
+}
+
+// A value in triple quotes, on one line or several. The one-line spellings were
+// tried alone, and matched the first two quotes of the three: an empty value,
+// so the password was neither stored nor kept, and the rewrite dropped it.
+void TestConfigToml::aValueInTripleQuotesIsRead()
+{
+    const QString src = QStringLiteral(
+            "[endpoint]\n"
+            "hostname = \"\"\"vpn.example.com\"\"\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = '''u'''\n"
+            "password = \"\"\"s3\"cr\\\\et\"\"\"\n"
+            "custom_sni = '''\n"
+            "sni.example.com'''\n"
+            "anti_dpi = true\n");
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.username, QStringLiteral("u"));
+    QCOMPARE(c.password, QStringLiteral("s3\"cr\\et"));
+    QCOMPARE(c.customSni, QStringLiteral("sni.example.com"));
+    QVERIFY(c.antiDpi);
+
+    c.password.clear();
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("s3")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("hostname = \"vpn.example.com\"\n")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("custom_sni = \"sni.example.com\"\n")), qPrintable(rebuilt));
+}
+
+// A certificate is the one value that can hold anything, and now that a key may
+// be indented, an indented line of its text must not be read as one.
+void TestConfigToml::aCertificatesTextIsNotReadAsKeys()
+{
+    const QString src = QStringLiteral(
+            "[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "certificate = \"\"\"\n"
+            "-----BEGIN CERTIFICATE-----\n"
+            "skip_verification = true\n"
+            "  password = \"from-the-cert\"\n"
+            "-----END CERTIFICATE-----\n"
+            "\"\"\"\n"
+            "anti_dpi = false\n");
+    const ConfigToml c = parseConfigToml(src);
+    QVERIFY(!c.skipVerification);
+    QVERIFY2(c.password.isEmpty(), qPrintable(c.password));
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+}
+
+// TrustTunnel's own template puts dns_upstreams in [endpoint], and the core takes
+// that list over the one at the root. This editor writes the root's: it read
+// whichever came first in the file, and kept the endpoint's as an unknown key, so
+// a list changed here was not the one the core used.
+void TestConfigToml::theDnsListIsReadWhereTheCoreReadsIt()
+{
+    const QString src = QStringLiteral(
+            "dns_upstreams = [\"8.8.8.8\"]\n"
+            "[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "dns_upstreams = [\"tls://1.1.1.1\"]\n");
+    ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.dns, QStringLiteral("tls://1.1.1.1"));
+    c.dns = QStringLiteral("9.9.9.9");
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("dns_upstreams")), 1);
+    QCOMPARE(parseConfigToml(rebuilt).dns, QStringLiteral("9.9.9.9"));
+
+    // An empty list in [endpoint] is still the endpoint's: the core uses it.
+    const ConfigToml none = parseConfigToml(QStringLiteral(
+            "dns_upstreams = [\"8.8.8.8\"]\n[endpoint]\ndns_upstreams = []\n"));
+    QCOMPARE(none.dns, QString());
+    // And with none there, the root's - as with something there that is not a list,
+    // which the core passes over.
+    QCOMPARE(parseConfigToml(QStringLiteral("dns_upstreams = [\"8.8.8.8\"]\n[endpoint]\n")).dns,
+             QStringLiteral("8.8.8.8"));
+    QCOMPARE(parseConfigToml(QStringLiteral(
+                     "dns_upstreams = [\"8.8.8.8\"]\n[endpoint]\ndns_upstreams = \"1.1.1.1\"\n")).dns,
+             QStringLiteral("8.8.8.8"));
+}
+
+// The editor has no switch for the post-quantum key exchange, so a config that
+// turned it off had it turned on again by the next rewrite, and by the connect
+// path every time: the core never saw the file's setting.
+void TestConfigToml::postQuantumStaysOffWhenTheConfigTurnsItOff()
+{
+    const QString off = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "post_quantum_group_enabled = false\n"
+            "[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n");
+    const ConfigToml c = parseConfigToml(off);
+    QVERIFY(!c.postQuantum);
+    const QString rebuilt = buildConfigToml(c, QStringLiteral("warn"));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\npost_quantum_group_enabled = false\n")), qPrintable(rebuilt));
+    QCOMPARE(rebuilt.count(QStringLiteral("post_quantum_group_enabled")), 1);
+
+    // Not mentioned, it is on, as it is in the core.
+    QVERIFY(parseConfigToml(QStringLiteral("[endpoint]\nhostname = \"h\"\n")).postQuantum);
+    QVERIFY(buildConfigToml(ConfigToml()).contains(QStringLiteral("post_quantum_group_enabled = true\n")));
+}
+
+// The core splits client_random at the first slash and refuses the whole config
+// when nothing follows it. Only one trailing slash was dropped, so "aa//" reached
+// it as "aa/". And the editor and link import check a value against the one rule
+// of what the core can use: whole bytes of hex, at most 32, before and after.
+void TestConfigToml::aClientRandomGoesToTheCoreInAFormItTakes()
+{
+    QCOMPARE(clientRandomForCore(QStringLiteral("deadbeef/")), QStringLiteral("deadbeef"));
+    QCOMPARE(clientRandomForCore(QStringLiteral("aa//")), QStringLiteral("aa"));
+    QCOMPARE(clientRandomForCore(QStringLiteral(" aa/ff00/// ")), QStringLiteral("aa/ff00"));
+    QCOMPARE(clientRandomForCore(QStringLiteral("/ffff")), QString());
+    QCOMPARE(clientRandomForCore(QStringLiteral("aa/bb/cc")), QStringLiteral("aa/bb/cc"));
+
+    // From the file too, whatever wrote it, and the 1.2.2 pair the same way.
+    const auto endpoint = [](const QString &keys) {
+        return QStringLiteral("[endpoint]\nhostname = \"h\"\n") + keys;
+    };
+    QCOMPARE(parseConfigToml(endpoint(QStringLiteral("client_random = \"aa////\"\n"))).clientRandom,
+             QStringLiteral("aa"));
+    QCOMPARE(parseConfigToml(endpoint(QStringLiteral("client_random = \"aa\"\nclient_random_mask = \"/\"\n")))
+                     .clientRandom,
+             QStringLiteral("aa"));
+    QVERIFY(buildConfigToml(parseConfigToml(endpoint(QStringLiteral("client_random = \"/ff\"\n"))))
+                    .contains(QStringLiteral("client_random = \"\"\n")));
+
+    for (const QString &good : {QString(), QStringLiteral("aa"), QStringLiteral("DeadBeef"),
+                                QStringLiteral("aa/ff00"), QString(64, QLatin1Char('f')),
+                                QString(64, QLatin1Char('f')) + QStringLiteral("/") + QString(64, QLatin1Char('0'))})
+        QVERIFY2(isValidClientRandom(good), qPrintable(good));
+    for (const QString &bad : {QStringLiteral("abc"), QStringLiteral("zz"), QStringLiteral("aa/"),
+                               QStringLiteral("/aa"), QStringLiteral("aa/bbb"), QStringLiteral("aa/bb/cc"),
+                               QStringLiteral(" aa"), QString(66, QLatin1Char('f')),
+                               QStringLiteral("aa/") + QString(66, QLatin1Char('0'))})
+        QVERIFY2(!isValidClientRandom(bad), qPrintable(bad));
 }
 
 QTEST_MAIN(TestConfigToml)

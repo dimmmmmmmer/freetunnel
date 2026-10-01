@@ -24,6 +24,10 @@ struct ConfigToml {
     bool allowIpv6 = true;
     bool skipVerification = false; // accept the server's TLS cert without validation
     bool antiDpi = false;          // enable the core's anti-DPI obfuscation
+    // post_quantum_group_enabled, as the file has it. The editor has no switch for
+    // it, but a config may turn it off, and every rewrite turned it back on - the
+    // connect path's included, so the core never saw the file's setting.
+    bool postQuantum = true;
 
     // Everything in the file that this editor does not itself generate, kept
     // verbatim so a round trip does not throw it away.
@@ -48,8 +52,16 @@ ConfigToml parseConfigToml(const QString &toml);
 // A client random as the core reads it, from the one `client_random` key:
 // "prefix" or "prefix/mask", in hex. The core splits at the slash itself and has
 // no key for the mask alone, and it refuses the whole config when the slash is
-// followed by nothing, so an empty mask is dropped here.
+// followed by nothing, so an empty mask is dropped here (however many slashes
+// it took), and so is a mask with no prefix in front of it, which masks nothing.
 QString clientRandomForCore(const QString &value);
+
+// Whether the core can use a client random as it is written: empty, or a prefix
+// and an optional /mask, each whole bytes in hex and at most 32 of them, the size
+// of a TLS client random. The core decodes each part as bytes and quietly does
+// without one it cannot decode - an odd digit out is enough - and uses no more
+// than 32 bytes. The config editor and link import both check with this.
+bool isValidClientRandom(const QString &value);
 
 // The DNS servers in a list as the editor takes it, one per entry, separated by
 // commas, semicolons or spaces. Validation and everything written from the list
