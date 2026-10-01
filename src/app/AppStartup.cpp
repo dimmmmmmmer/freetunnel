@@ -296,6 +296,7 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                          handleInstanceConnection(server->nextPendingConnection(), backend, win,
                                                   instanceToken);
                      });
+    backend.setInstanceServer(server);
 }
 
 QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)

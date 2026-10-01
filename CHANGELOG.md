@@ -34,6 +34,14 @@ compare link at the bottom of its release notes.
   under your own account into that shared place, by the AppImage itself, and
   other accounts can still interfere with that copy; FreeTunnel cannot prevent
   it. On a computer other people have accounts on, use the .deb there.
+- **An update has to say which version it is.** Since 1.1.8 FreeTunnel has
+  checked that an update was signed for the version on offer, but an update from
+  before 1.1.8, which does not say, was still accepted. Someone able to pass
+  themselves off as GitHub's servers to your computer, which takes a security
+  certificate your computer trusts, could have offered one of those old versions
+  as a new one, and FreeTunnel would have installed it over the newer one you
+  had. Such updates are now refused. Every release since 1.1.8 says its version,
+  so no real update is turned away.
 
 ### Changed
 
@@ -83,6 +91,27 @@ compare link at the bottom of its release notes.
   memory until it quit, and nothing ever read it. With logging off in Settings,
   that included the VPN core's own log. It is discarded now; the log FreeTunnel
   shows and saves is as before.
+- **Updates in Settings**
+  - "Check for updates" clicked just after FreeTunnel started, while its own
+    check was still under way, could offer the update a second time in the middle
+    of downloading it, and taking that offer made the download fail. The click
+    now waits for the check already under way.
+  - Every downloaded update stayed in FreeTunnel's cache folder for good, 100 MB
+    or more each time. Downloads are now cleared out the next time FreeTunnel
+    starts, including those that earlier versions left there. That includes a
+    .deb (Linux) or disk image (macOS) you have not installed yet, which
+    FreeTunnel then offers again; a disk image that is still open stays open.
+  - Linux: when FreeTunnel runs as an AppImage and the updated file could not be
+    made runnable or started, FreeTunnel quit all the same, and none was left
+    running. It now puts back the file it was started from, stays open and says
+    so, and ↻ tries again. The old file is kept until the new one has started,
+    and the download is removed once it is in place.
+  - Linux: once FreeTunnel had updated itself as an AppImage, the next launch
+    from the menu, or a tt:// link, could miss the new FreeTunnel and start a
+    second one beside it. The new one is now the one they reach. The update to
+    this version is still made by the version you have, so this can happen once
+    more: if two FreeTunnels are running afterwards, quit both and start
+    FreeTunnel again.
 
 ## 1.2.2
 

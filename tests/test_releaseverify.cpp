@@ -6,6 +6,13 @@
 #include "core/ReleaseSigning.h"
 #include "core/ReleaseVerify.h"
 
+#if __has_include(<openssl/evp.h>)
+#define FT_TEST_HAVE_OPENSSL 1
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#endif
+
 class TestReleaseVerify : public QObject {
     Q_OBJECT
 
@@ -13,6 +20,7 @@ private slots:
     void parseSums();
     void verifyMatch();
     void verifyMismatch();
+    void hashesAFileOverTheOldMemoryCap();
     void versionFromSumsReadsTheSignedVersion();
     void signatureVerificationIsCompiledIn();
     void ed25519Valid();
@@ -20,12 +28,22 @@ private slots:
     void theShippedSigningKeyIsAUsableEd25519PublicKey();
 };
 
+// The manifest as the release job writes it, with the asset names it publishes.
 void TestReleaseVerify::parseSums()
 {
-    const QByteArray sums = "abc123  freetunnel-linux-x86_64.AppImage\n"
-                            "def456  freetunnel-linux-x86_64.deb\n";
-    QCOMPARE(expectedSha256FromSums(sums, QStringLiteral("freetunnel-linux-x86_64.AppImage")),
+    const QByteArray sums = "#version=1.2.3\n"
+                            "abc123  freetunnel-linux-x86_64.deb\n"
+                            "def456  freetunnel-macos-universal.dmg\n"
+                            "789abc  freetunnel-windows-x86_64-Setup.exe\n"
+                            "DEF012  freetunnel-x86_64.AppImage\n";
+    QCOMPARE(expectedSha256FromSums(sums, QStringLiteral("freetunnel-x86_64.AppImage")),
+             QStringLiteral("def012"));
+    QCOMPARE(expectedSha256FromSums(sums, QStringLiteral("freetunnel-linux-x86_64.deb")),
              QStringLiteral("abc123"));
+    QCOMPARE(expectedSha256FromSums(sums, QStringLiteral("freetunnel-windows-x86_64-Setup.exe")),
+             QStringLiteral("789abc"));
+    // The AppImage's old name is in no manifest any more.
+    QVERIFY(expectedSha256FromSums(sums, QStringLiteral("freetunnel-linux-x86_64.AppImage")).isEmpty());
     QVERIFY(expectedSha256FromSums(sums, QStringLiteral("missing")).isEmpty());
 }
 
@@ -53,6 +71,21 @@ void TestReleaseVerify::verifyMismatch()
     QVERIFY(!verifyFileAgainstSums(tf.fileName(), sums, QStringLiteral("test.bin")));
 }
 
+// The installer used to be read into memory whole to be hashed, behind a 512 MB
+// cap, and a file over the cap hashed to nothing — which the updater reports as
+// a SHA-256 mismatch, the same words it uses for a tampered download. A sparse
+// file one byte over the old cap: no disk space, and the digest of that many
+// zero bytes is known (`head -c 536870913 /dev/zero | sha256sum`).
+void TestReleaseVerify::hashesAFileOverTheOldMemoryCap()
+{
+    QTemporaryFile tf;
+    QVERIFY(tf.open());
+    QVERIFY(tf.resize(512LL * 1024 * 1024 + 1));
+    tf.close();
+    QCOMPARE(sha256HexOfFile(tf.fileName()),
+             QStringLiteral("7c40fe5ce847740d0f0d0cdde3949d6585804cdec3ae61a15b923165699c8137"));
+}
+
 // The version line is what makes a signature mean "this release" rather than
 // merely "we built these bytes". Parsing it is independent of OpenSSL, so unlike
 // the verification tests this one runs everywhere — which matters, because the
@@ -70,8 +103,8 @@ void TestReleaseVerify::versionFromSumsReadsTheSignedVersion()
     QCOMPARE(expectedSha256FromSums(versioned, QStringLiteral("freetunnel-linux-x86_64.deb")),
              QStringLiteral("abc123"));
 
-    // Releases published before this existed carry no version, and must stay
-    // installable — refusing them would strand the clients this protects.
+    // Releases published before 1.1.8 carry no version; the updater refuses
+    // them, and needs to be told there is none rather than handed a guess.
     QVERIFY(versionFromSums("abc123  freetunnel-linux-x86_64.deb\n").isEmpty());
     QVERIFY(versionFromSums(QByteArray()).isEmpty());
 
@@ -175,17 +208,23 @@ void TestReleaseVerify::theShippedSigningKeyIsAUsableEd25519PublicKey()
     if (!releaseSignatureVerificationAvailable())
         QSKIP("built without OpenSSL: the key cannot be load-tested here");
 
+#ifdef FT_TEST_HAVE_OPENSSL
     // Well-formed is not enough — OpenSSL has to accept it as an Ed25519 key, which
-    // is what verifyEd25519Signature() will ask of it at update time. Feeding it a
-    // signature we know is wrong proves the key LOADS: a key OpenSSL cannot parse
-    // and a good key rejecting a bad signature are both "false" at the call site,
-    // so distinguish them by checking that a garbage key fails the same way for a
-    // different reason — see ed25519Invalid for the signature-level case.
-    QVERIFY(!verifyEd25519Signature(QByteArrayLiteral("payload"),
-                                    QByteArrayLiteral("not-a-signature"), pem));
-    QVERIFY(!verifyEd25519Signature(
-            QByteArrayLiteral("payload"), QByteArrayLiteral("not-a-signature"),
-            QByteArrayLiteral("-----BEGIN PUBLIC KEY-----\nbroken\n-----END PUBLIC KEY-----\n")));
+    // is what verifyEd25519Signature() will ask of it at update time. That cannot
+    // be asked through verifyEd25519Signature(): a key OpenSSL cannot read and a
+    // good key refusing a bad signature both come back "false", so the check this
+    // replaces passed for a key no signature could ever satisfy — one whose END
+    // line had lost a dash, say, which the shape check above does not read. Load
+    // it the way ReleaseVerify does instead.
+    BIO *bio = BIO_new_mem_buf(pem.constData(), static_cast<int>(pem.size()));
+    QVERIFY(bio);
+    EVP_PKEY *key = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+    QVERIFY2(key, "OpenSSL cannot read the shipped release signing key");
+    const int type = EVP_PKEY_id(key);
+    EVP_PKEY_free(key);
+    QCOMPARE(type, EVP_PKEY_ED25519);
+#endif
 }
 
 QTEST_MAIN(TestReleaseVerify)

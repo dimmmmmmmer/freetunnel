@@ -52,6 +52,14 @@ RunningAppImage runningAppImage();
 // runningAppImage().path, for the callers that only need the file.
 QString runningAppImagePath();
 
+// The AppImage the updater downloads for, replaces and starts again:
+// runningAppImage(), except that a test-hook build takes the file from
+// FT_TEST_UPDATER_APPIMAGE (and an unpacked start from
+// FT_TEST_UPDATER_APPIMAGE_EXTRACTED=1), so the replacement can be tested by a
+// process that is not an AppImage. A function of its own so that not even a test
+// build lets the environment choose what the elevation path hands to pkexec.
+RunningAppImage updatableAppImage();
+
 // The mount source (the "what is this mounted from" field) of the mount that
 // contains `path`, or an empty string when no mount matches or the mount is not
 // a FUSE mount. Split out from the /proc reading above so the parsing — nested

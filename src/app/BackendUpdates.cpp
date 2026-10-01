@@ -32,9 +32,28 @@ static bool installingClosesTheApp(const UpdateChecker::ReleaseInfo &info)
     return false;
 #else
     return info.assetName.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)
-            && !freetunnel::runningAppImagePath().isEmpty();
+            && !freetunnel::updatableAppImage().path.isEmpty();
 #endif
 }
+
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+// Hand the verified download to whatever installs it. True when that started.
+static bool startInstaller(const QString &path)
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Lets a test see an installer that will not start without making Windows
+    // run a file that is not a program: on a fresh CI runner such a launch hung
+    // past the test's time limit, while the same test run again took seconds.
+    if (qEnvironmentVariableIsSet("FT_TEST_INSTALLER_WONT_START"))
+        return false;
+#endif
+#if defined(Q_OS_WIN)
+    return QProcess::startDetached(path, {});
+#else
+    return QProcess::startDetached(QStringLiteral("open"), {path});
+#endif
+}
+#endif
 
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 // Open the folder holding the verified download, so "we could not install this
@@ -43,6 +62,65 @@ static bool installingClosesTheApp(const UpdateChecker::ReleaseInfo &info)
 static bool revealDownload(const QString &path)
 {
     return QProcess::startDetached(QStringLiteral("xdg-open"), {QFileInfo(path).absolutePath()});
+}
+
+// Put the build that was running back where it was, over whatever replaced it.
+static void restoreAppImage(const QString &current, const QString &backup)
+{
+    QFile::remove(current);
+    QFile::rename(backup, current);
+}
+
+// Put the verified download where the running AppImage is. The running one is
+// renamed aside to <name>.old rather than overwritten, so that whichever step
+// fails — the rename, the copy, or making the copy executable (QFile::copy
+// keeps the staged file's owner-only mode, so it is not executable until then)
+// — the original goes back where it was. True with the new file in place and
+// executable; the .old stays until the new one has been started.
+static bool swapInAppImage(const QString &download, const QString &current, const QString &backup)
+{
+    QFile::remove(backup);
+    if (!QFile::rename(current, backup))
+        return false;
+    if (QFile::copy(download, current)
+        && QFile::setPermissions(current, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                  | QFileDevice::ExeOwner | QFileDevice::ReadGroup
+                                                  | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                                                  | QFileDevice::ExeOther))
+        return true;
+    restoreAppImage(current, backup);
+    return false;
+}
+
+// Give the single-instance name up to the replacement by closing this instance's
+// listener, which unlinks the name. Only unlinking it, as this used to, left the
+// listener listening — and the application destroys it on the way out, and a
+// listener being destroyed unlinks its name again: by then the replacement's
+// socket. The new FreeTunnel ran on where nothing could reach it, and the next
+// launch or tt:// link started a second one beside it. A closed listener has no
+// name left to unlink. Connections it already accepted are sockets of their own
+// and keep working.
+static void giveUpTheInstanceName(QLocalServer *server)
+{
+    if (server)
+        server->close();
+    else
+        QLocalServer::removeServer(freetunnel::instanceServerName());
+}
+
+// The replacement did not start, so this instance stays — and has to be the one
+// a second launch or a tt:// link reaches again, or that starts a second
+// FreeTunnel beside it. Listening again on the listener closed for the
+// replacement puts it back. The token was never touched. False, with the same
+// warning as when the application first listens, when the name could not be
+// taken again; true when there is no listener to put back.
+static bool listenAsTheRunningInstanceAgain(QLocalServer *server)
+{
+    if (!server || server->listen(freetunnel::instanceServerName()))
+        return true;
+    qWarning("Single-instance server failed to listen again on '%s': %s",
+             qPrintable(freetunnel::instanceServerName()), qPrintable(server->errorString()));
+    return false;
 }
 
 // Install a verified Linux download, or say honestly that we cannot.
@@ -55,7 +133,7 @@ static bool revealDownload(const QString &path)
 // the installed .deb nor the .AppImage the user launches.
 void Backend::applyLinuxUpdate(const QString &path)
 {
-    const freetunnel::RunningAppImage running = freetunnel::runningAppImage();
+    const freetunnel::RunningAppImage running = freetunnel::updatableAppImage();
     const QString current = running.path;
     if (!path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive) || current.isEmpty()) {
         // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
@@ -83,38 +161,16 @@ void Backend::applyLinuxUpdate(const QString &path)
     }
 
     // Replace the AppImage the user actually launches, then restart from it. The
-    // path comes from the kernel (see runningAppImagePath), never from $APPIMAGE,
-    // so a hostile environment cannot redirect this write.
+    // path comes from the kernel (see runningAppImage), never from $APPIMAGE,
+    // so a hostile environment cannot redirect this write. (Only a test build
+    // lets the environment name it; see updatableAppImage.)
     const QString backup = current + QStringLiteral(".old");
-    QFile::remove(backup);
-    // A failure here is an error the row can retry, not "ready": left there, it
-    // showed the download arrow, and the arrow opened the release page instead.
-    if (!QFile::rename(current, backup)) {
-        m_updateState = QStringLiteral("error");
-        m_updateErrorFromDownload = true;
-        setUpdateMessage([current] {
+    if (!swapInAppImage(path, current, backup)) {
+        failAppImageUpdate([current] {
             return tr("Could not replace %1 — check that you can write to it.").arg(current);
-        });
-        emit updateChanged();
-        revealDownload(path);
+        }, path);
         return;
     }
-    if (!QFile::copy(path, current)) {
-        QFile::rename(backup, current); // put the working build back
-        m_updateState = QStringLiteral("error");
-        m_updateErrorFromDownload = true;
-        setUpdateMessage([current] {
-            return tr("Could not replace %1 — check that you can write to it.").arg(current);
-        });
-        emit updateChanged();
-        revealDownload(path);
-        return;
-    }
-    QFile::setPermissions(current, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                                           | QFileDevice::ExeOwner | QFileDevice::ReadGroup
-                                           | QFileDevice::ExeGroup | QFileDevice::ReadOther
-                                           | QFileDevice::ExeOther);
-    QFile::remove(backup);
 
     // Give up the single-instance socket BEFORE the replacement starts, because
     // quitting does not do it. quitApplication() only posts an exit; the listening
@@ -124,19 +180,49 @@ void Backend::applyLinuxUpdate(const QString &path)
     // in that window connects, forwards "focus", and exits — which leaves nothing
     // running at all, and is the bug this ordering was written to avoid.
     //
-    // Unlinking the name is enough and is the least it can be: the socket this
-    // process still holds keeps working for anything already connected, while a
-    // new connectToServer() finds nothing and the replacement starts normally.
-    // The token is deliberately left alone — the replacement writes its own, and
-    // the quit handler now removes only a token that is still ours.
-    QLocalServer::removeServer(freetunnel::instanceServerName());
+    // Closing the listener rather than only unlinking its name: see
+    // giveUpTheInstanceName. A new connectToServer() finds nothing and the
+    // replacement starts normally. The token is deliberately left alone — the
+    // replacement writes its own, and the quit handler now removes only a token
+    // that is still ours.
+    giveUpTheInstanceName(m_instanceServer);
 
+    // This used to quit whether or not the replacement started, which left no
+    // FreeTunnel running at all when it did not. Now this one stays, on the build
+    // it was started from, and says so. Started the way this copy was: an AppImage
+    // that had to be unpacked rather than mounted may not start any other way.
+    if (!QProcess::startDetached(current, running.launchArguments())) {
+        restoreAppImage(current, backup);
+        if (!listenAsTheRunningInstanceAgain(m_instanceServer)) {
+            appendLog(QStringLiteral("WARN"),
+                      tr("FreeTunnel could not take back the name later launches look for "
+                         "(%1), so opening it again may start a second FreeTunnel. Restart "
+                         "FreeTunnel to fix this.")
+                              .arg(m_instanceServer->errorString()));
+        }
+        failAppImageUpdate([] { return tr("The new version could not be started — "
+                                          "FreeTunnel was left as it was."); },
+                           path);
+        return;
+    }
+    // Started: neither the old build nor the download is needed any more.
+    QFile::remove(backup);
+    QFile::remove(path);
     setUpdateMessage([] { return tr("Update installed — restarting"); });
     emit updateChanged();
-    // The way this copy was started: an AppImage that had to be unpacked rather
-    // than mounted would otherwise fail to start again, and nothing would be left.
-    QProcess::startDetached(current, running.launchArguments());
     quitApplication();
+}
+
+// A replacement that failed is an error the row can retry, not "ready": left
+// there, it showed the download arrow, and the arrow opened the release page
+// instead. The download is shown, for installing by hand.
+void Backend::failAppImageUpdate(std::function<QString()> words, const QString &path)
+{
+    m_updateState = QStringLiteral("error");
+    m_updateErrorFromDownload = true;
+    setUpdateMessage(std::move(words));
+    emit updateChanged();
+    revealDownload(path);
 }
 #endif
 
@@ -185,13 +271,8 @@ void Backend::wireUpdaterSignals()
             [this](const QString &path) {
                 // Quitting, or saying the installer opened, when it never started
                 // left the user with no FreeTunnel, or a line waiting on nothing.
-#if defined(Q_OS_WIN)
-                const bool started = QProcess::startDetached(path, {});
-#elif defined(Q_OS_MACOS)
-                const bool started = QProcess::startDetached(QStringLiteral("open"), {path});
-#endif
 #if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
-                if (!started) {
+                if (!startInstaller(path)) {
                     m_updateState = QStringLiteral("error");
                     m_updateErrorFromDownload = true;
                     setUpdateMessage([] { return tr("The downloaded installer could not be started"); });
@@ -255,6 +336,9 @@ void Backend::ensureUpdater()
     if (m_updater)
         return;
     m_updater = new UpdateChecker(QStringLiteral("dimmmmmmmer/freetunnel"), appVersion(), this);
+    // Made once a run and before any download, so anything staged is an earlier
+    // run's, done with.
+    m_updater->discardStagedDownloads();
     wireUpdaterSignals();
 }
 
@@ -321,6 +405,18 @@ void Backend::downloadUpdate() {
 
 void Backend::openUrl(const QString &url) {
     openHttpUrl(url);
+}
+
+// Handed over rather than looked up among the application's children: a lookup
+// that found nothing, or another QLocalServer, would fail without a word.
+void Backend::setInstanceServer(QLocalServer *server)
+{
+    m_instanceServer = server;
+}
+
+QLocalServer *Backend::instanceServer() const
+{
+    return m_instanceServer;
 }
 
 void Backend::startWindowDrag(QObject *window) {

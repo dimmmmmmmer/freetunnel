@@ -313,6 +313,14 @@
         <source>Client random must be hexadecimal, optionally followed by /mask</source>
         <translation>Client random должен быть в hex-формате, можно с /маской</translation>
     </message>
+    <message>
+        <source>The new version could not be started — FreeTunnel was left as it was.</source>
+        <translation>Не удалось запустить новую версию — FreeTunnel остался прежним.</translation>
+    </message>
+    <message>
+        <source>FreeTunnel could not take back the name later launches look for (%1), so opening it again may start a second FreeTunnel. Restart FreeTunnel to fix this.</source>
+        <translation>FreeTunnel не смог снова занять имя, по которому его находят следующие запуски (%1), поэтому при повторном открытии может запуститься второй FreeTunnel. Чтобы это исправить, перезапустите FreeTunnel.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -1031,6 +1039,10 @@
     <message>
         <source>the server stopped responding</source>
         <translation>сервер перестал отвечать</translation>
+    </message>
+    <message>
+        <source>This update does not say which version it is — refusing to install it.</source>
+        <translation>В обновлении не указана его версия — обновление отменено.</translation>
     </message>
 </context>
 <context>

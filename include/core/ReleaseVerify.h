@@ -12,10 +12,10 @@ QString expectedSha256FromSums(const QByteArray &sumsContent, const QString &ass
 // line, or an empty string when it has none.
 //
 // The signature proves the manifest is ours; this is what says WHICH release it
-// belongs to. Without it an attacker who can forge the release metadata replays
-// an older, genuine manifest and signature and every check passes, pinning the
-// user short of the newest build. Releases published before this line existed
-// have none, and must keep updating — see the caller.
+// belongs to. Without it a genuine manifest and signature from another release
+// could be served under a forged tag and every check would pass. Releases from
+// before 1.1.8 have no such line, and the updater refuses a manifest without
+// one — see the caller.
 QString versionFromSums(const QByteArray &sumsContent);
 
 // Return the lowercase SHA-256 hex digest of @p filePath, or empty on failure.

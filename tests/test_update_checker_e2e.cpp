@@ -11,6 +11,9 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryFile>
+#include <QScopeGuard>
+
+#include <algorithm>
 
 #include "core/ReleaseVerify.h"
 #include "core/UpdateChecker.h"
@@ -48,13 +51,19 @@ private slots:
     void downloadRejectsInvalidSignature();
     void downloadAcceptsGenuinelySignedRelease();
     void downloadRejectsAManifestSignedForAnotherVersion();
-    void downloadAcceptsAManifestFromBeforeVersionBinding();
+    void downloadRefusesAManifestThatNamesNoVersion();
     void downloadRejectsSignatureOverOtherContent();
     void rejectsAssetsFromAnotherRepo();
     void rejectsAssetsWhosePathTagDiffersFromTheRelease();
     void acceptsAssetsPublishedUnderThisReleaseTag();
     void replacesHostileHtmlUrlWithTheCanonicalReleasePage();
     void rejectsImplausibleTag();
+    void picksThisPlatformsInstallerFromARealRelease();
+    // Declared on every platform: moc does not see the compiler's own platform
+    // macros under MSVC, so a slot declared only for Linux reaches the moc file
+    // on Windows too. The bodies skip where they do not apply.
+    void anAppImageInstallPicksTheAppImage();
+    void aLinuxInstallTakesTheOtherKindWhenItsOwnIsMissing();
 };
 
 #ifdef FT_TEST_HAVE_OPENSSL
@@ -466,19 +475,21 @@ void TestUpdateCheckerE2e::downloadRejectsInvalidSignature()
 }
 
 #ifdef FT_TEST_HAVE_OPENSSL
-// The manifest a real release ships: one line, the installer's true digest.
+// The manifest a release from before 1.1.8 shipped: one line, the installer's
+// true digest, and nothing saying which release it belongs to.
 static QByteArray sumsManifestFor(const QByteArray &installerBody, const QString &assetName)
 {
     return (sha256HexOfBytes(installerBody) + QStringLiteral("  ") + assetName + QChar('\n'))
             .toUtf8();
 }
 
-// The manifest a release built after version binding produces: the same content,
-// with the release it belongs to written into the bytes the signature covers.
+// The manifest every release since 1.1.8 ships: the same content, with the
+// release it belongs to written into the bytes the signature covers, spelled the
+// way the release job writes it.
 static QByteArray versionedSumsManifestFor(const QByteArray &installerBody,
                                            const QString &assetName, const QString &version)
 {
-    return (QStringLiteral("version=") + version + QChar('\n')).toUtf8()
+    return (QStringLiteral("#version=") + version + QChar('\n')).toUtf8()
             + sumsManifestFor(installerBody, assetName);
 }
 
@@ -550,7 +561,8 @@ void TestUpdateCheckerE2e::downloadAcceptsGenuinelySignedRelease()
     qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
 
     const QByteArray installerBody = QByteArrayLiteral("genuinely-signed-installer-payload");
-    const QByteArray sums = sumsManifestFor(installerBody, testInstallerAssetName());
+    const QByteArray sums = versionedSumsManifestFor(installerBody, testInstallerAssetName(),
+                                                     QStringLiteral("2.0.0"));
     const QByteArray signature = signWithTestKey(sums);
     QVERIFY(!signature.isEmpty());
     serveSignedRelease(http, base, installerBody, sums, signature);
@@ -603,11 +615,13 @@ void TestUpdateCheckerE2e::downloadRejectsSignatureOverOtherContent()
     qunsetenv("FT_TEST_SKIP_UPDATE_SIG");
 
     const QByteArray installerBody = QByteArrayLiteral("genuinely-signed-installer-payload");
-    const QByteArray sums = sumsManifestFor(installerBody, testInstallerAssetName());
-    // Signed with the trusted key, but over the previous release's manifest.
+    const QByteArray sums = versionedSumsManifestFor(installerBody, testInstallerAssetName(),
+                                                     QStringLiteral("2.0.0"));
+    // Signed with the trusted key, but over another manifest for the same version.
     const QByteArray signature =
-            signWithTestKey(sumsManifestFor(QByteArrayLiteral("some-older-release"),
-                                            testInstallerAssetName()));
+            signWithTestKey(versionedSumsManifestFor(QByteArrayLiteral("some-other-build"),
+                                                     testInstallerAssetName(),
+                                                     QStringLiteral("2.0.0")));
     QVERIFY(!signature.isEmpty());
     QVERIFY(signature != signWithTestKey(sums));
     serveSignedRelease(http, base, installerBody, sums, signature);
@@ -818,10 +832,129 @@ void TestUpdateCheckerE2e::rejectsImplausibleTag()
     qunsetenv("FT_GITHUB_API_BASE");
 }
 
+// Every other test here names its installer freetunnel-test.*, so how a real
+// release's assets are told apart — and on Linux, the .deb from the AppImage —
+// was covered by nothing but reading the code. These are the names the release
+// job publishes, on github.com under the release's tag, so the URL checks run
+// too.
+static const QStringList kRealReleaseAssets = {
+    QStringLiteral("SHA256SUMS.txt"),
+    QStringLiteral("SHA256SUMS.txt.sig"),
+    QStringLiteral("freetunnel-linux-x86_64.deb"),
+    QStringLiteral("freetunnel-macos-universal.dmg"),
+    QStringLiteral("freetunnel-windows-x86_64-Setup.exe"),
+    QStringLiteral("freetunnel-x86_64.AppImage"),
+};
+
+static const QString kRealAssetBase =
+        QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v2.0.0/");
+
+static QJsonObject realRelease(const QStringList &assetNames)
+{
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = QStringLiteral("v2.0.0");
+    release[QStringLiteral("html_url")] =
+            QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/tag/v2.0.0");
+    QJsonArray assets;
+    for (const QString &name : assetNames)
+        assets.append(assetJson(name, kRealAssetBase + name));
+    release[QStringLiteral("assets")] = assets;
+    return release;
+}
+
+// The installer this check would download from @p assetNames, in that order —
+// GitHub's order is not ours to rely on, and taking whichever matched last once
+// sent a .deb install an AppImage.
+static QString chosenInstaller(MockHttpServer &http, const QStringList &assetNames)
+{
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    if (!runCheck(http, realRelease(assetNames), checker, available, none) || available.isEmpty())
+        return QStringLiteral("<no update offered>");
+    const UpdateChecker::ReleaseInfo &info = checker.latestRelease();
+    if (info.assetName.isEmpty())
+        return QStringLiteral("<no installer chosen>");
+    if (info.installerUrl != kRealAssetBase + info.assetName)
+        return QStringLiteral("<url %1 for %2>").arg(info.installerUrl, info.assetName);
+    if (assetNames.contains(QStringLiteral("SHA256SUMS.txt.sig"))
+        && (info.checksumsUrl != kRealAssetBase + QStringLiteral("SHA256SUMS.txt")
+            || info.signatureUrl != kRealAssetBase + QStringLiteral("SHA256SUMS.txt.sig")))
+        return QStringLiteral("<manifest not found>");
+    return info.assetName;
+}
+
+static QStringList reversed(QStringList list)
+{
+    std::reverse(list.begin(), list.end());
+    return list;
+}
+
+void TestUpdateCheckerE2e::picksThisPlatformsInstallerFromARealRelease()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+#if defined(_WIN32)
+    const QString expected = QStringLiteral("freetunnel-windows-x86_64-Setup.exe");
+#elif defined(__APPLE__)
+    const QString expected = QStringLiteral("freetunnel-macos-universal.dmg");
+#else
+    // Not running from an AppImage, so installed from the .deb.
+    const QString expected = QStringLiteral("freetunnel-linux-x86_64.deb");
+#endif
+    QCOMPARE(chosenInstaller(http, kRealReleaseAssets), expected);
+    QCOMPARE(chosenInstaller(http, reversed(kRealReleaseAssets)), expected);
+}
+
+// Running from an AppImage, the AppImage, under the name it has had since it
+// lost "linux": the updater goes by the suffix, so that rename reached it.
+void TestUpdateCheckerE2e::anAppImageInstallPicksTheAppImage()
+{
+#if defined(_WIN32) || defined(__APPLE__)
+    QSKIP("The AppImage is only offered on Linux.");
+#else
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    qputenv("FT_TEST_UPDATER_APPIMAGE", "/opt/FreeTunnel.AppImage");
+    const auto unset = qScopeGuard([] {
+        qunsetenv("FT_GITHUB_API_BASE");
+        qunsetenv("FT_TEST_UPDATER_APPIMAGE");
+    });
+    const QString expected = QStringLiteral("freetunnel-x86_64.AppImage");
+    QCOMPARE(chosenInstaller(http, kRealReleaseAssets), expected);
+    QCOMPARE(chosenInstaller(http, reversed(kRealReleaseAssets)), expected);
+#endif
+}
+
+// A release that publishes only one Linux kind still offers it, rather than
+// nothing; installing it is then up to what the row says it can do.
+void TestUpdateCheckerE2e::aLinuxInstallTakesTheOtherKindWhenItsOwnIsMissing()
+{
+#if defined(_WIN32) || defined(__APPLE__)
+    QSKIP("The .deb and the AppImage are only offered on Linux.");
+#else
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] {
+        qunsetenv("FT_GITHUB_API_BASE");
+        qunsetenv("FT_TEST_UPDATER_APPIMAGE");
+    });
+    const QString deb = QStringLiteral("freetunnel-linux-x86_64.deb");
+    const QString appImage = QStringLiteral("freetunnel-x86_64.AppImage");
+    QCOMPARE(chosenInstaller(http, {QStringLiteral("SHA256SUMS.txt"), appImage}), appImage);
+    qputenv("FT_TEST_UPDATER_APPIMAGE", "/opt/FreeTunnel.AppImage");
+    QCOMPARE(chosenInstaller(http, {QStringLiteral("SHA256SUMS.txt"), deb}), deb);
+#endif
+}
+
 // Replay: a manifest and signature that are entirely genuine, just from another
-// release. Everything an attacker who controls the release metadata can present
-// verifies — the key is real, the hashes are real, the assets are real — so the
-// version inside the signed bytes is the only thing that can catch it.
+// release. Everything an attacker who can serve github.com's download paths can
+// present verifies — the key is real, the hashes are real, the assets are real —
+// so the version inside the signed bytes is the only thing that can catch it.
 void TestUpdateCheckerE2e::downloadRejectsAManifestSignedForAnotherVersion()
 {
 #ifndef FT_TEST_HAVE_OPENSSL
@@ -863,13 +996,16 @@ void TestUpdateCheckerE2e::downloadRejectsAManifestSignedForAnotherVersion()
 #endif
 }
 
-// Every release published before the version line existed has none, and those
-// clients have to keep updating — refusing them would strand exactly the users
-// this check exists to protect, on the build they already have.
-void TestUpdateCheckerE2e::downloadAcceptsAManifestFromBeforeVersionBinding()
+// Rollback: the genuine, signed manifest of a release from before 1.1.8, which
+// says nothing about which release it is, offered under a higher tag. Whoever
+// can serve github.com's download paths can do that with any of those releases,
+// and every other check passes — the key, the hashes and the installer are all
+// real. It used to be accepted so that such releases stayed installable, but
+// every release since 1.1.8 has the line, and only newer releases are offered.
+void TestUpdateCheckerE2e::downloadRefusesAManifestThatNamesNoVersion()
 {
 #ifndef FT_TEST_HAVE_OPENSSL
-    QSKIP("Built without OpenSSL headers, so the accept path cannot be exercised.");
+    QSKIP("Built without OpenSSL headers, so no signature can be produced to replay.");
 #else
     QVERIFY(signedReleaseFixtureIsWired());
 
@@ -882,6 +1018,7 @@ void TestUpdateCheckerE2e::downloadAcceptsAManifestFromBeforeVersionBinding()
     const QByteArray installerBody = QByteArrayLiteral("legacy-unversioned-payload");
     const QByteArray sums = sumsManifestFor(installerBody, testInstallerAssetName());
     const QByteArray signature = signWithTestKey(sums);
+    QVERIFY(!signature.isEmpty());
     serveSignedRelease(http, base, installerBody, sums, signature);
 
     UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
@@ -893,9 +1030,13 @@ void TestUpdateCheckerE2e::downloadAcceptsAManifestFromBeforeVersionBinding()
     QSignalSpy failed(&checker, &UpdateChecker::downloadFailed);
     checker.downloadLatest();
     QVERIFY(QTest::qWaitFor([&]() { return ready.count() > 0 || failed.count() > 0; }, 10000));
-    QVERIFY2(failed.isEmpty(), qPrintable(failed.isEmpty() ? QString()
-                                                           : failed.at(0).at(0).toString()));
-    QCOMPARE(ready.count(), 1);
+    QCOMPARE(ready.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QVERIFY2(failed.at(0).at(0).toString().contains(QStringLiteral("which version")),
+             qPrintable(failed.at(0).at(0).toString()));
+    QCOMPARE(failureKind(failed), UpdateChecker::DownloadFailure::Refused);
+    // Refused before the installer was asked for: nothing was staged to be run.
+    QCOMPARE(http.requestCount(QStringLiteral("/installer")), 0);
 #endif
 }
 

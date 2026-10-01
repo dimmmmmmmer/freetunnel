@@ -149,6 +149,20 @@ QString updateStagingDir()
             + QStringLiteral("/updates");
 }
 
+#if defined(Q_OS_UNIX)
+// The staging dir is one we made: a real directory, not a symlink pointed
+// elsewhere, owned by us. Asked before staging a download and before clearing
+// downloads out. CacheLocation follows XDG_CACHE_HOME, which can point somewhere
+// shared, where another user could put a symlink in its place: staging would
+// then write where they chose, and clearing out would delete every file of ours
+// in the directory it points to. *st is filled in for the caller's own checks.
+bool stagingDirIsOurs(const QString &dir, struct stat *st)
+{
+    return ::lstat(QFile::encodeName(dir).constData(), st) == 0 && S_ISDIR(st->st_mode)
+           && st->st_uid == ::geteuid();
+}
+#endif
+
 // Create the staging dir and prove we got what we asked for: a real directory
 // (not a symlink pointed elsewhere), owned by us, with nothing for group/other.
 // Refuse to download at all rather than stage an executable somewhere another
@@ -166,8 +180,7 @@ bool prepareStagingDir(const QString &dir, QString *error)
     }
 #if defined(Q_OS_UNIX)
     struct stat st = {};
-    if (::lstat(QFile::encodeName(dir).constData(), &st) != 0 || !S_ISDIR(st.st_mode)
-        || st.st_uid != ::geteuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+    if (!stagingDirIsOurs(dir, &st) || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
         *error = QCoreApplication::translate("UpdateChecker", "The update download directory is not private to this user");
         return false;
     }
@@ -251,6 +264,17 @@ UpdateChecker::UpdateChecker(const QString &githubRepo,
 
 void UpdateChecker::checkNow()
 {
+    // One check at a time. Backend starts one by itself at startup, and a click on
+    // "Check for updates" while that was still out started a second. Each answer
+    // resets m_latest and announces the release, so the later one arrived after
+    // the earlier had started a download, offered the same download again in the
+    // middle of it, and a click on that wrote a second copy into the staging file
+    // the first was still writing. A check asked for now gets the running one's
+    // answer, which is the same answer.
+    if (m_checkInFlight)
+        return;
+    m_checkInFlight = true;
+
     // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
     const QString url = githubApiUrl(QStringLiteral("/repos/%1/releases/latest").arg(m_githubRepo));
 
@@ -339,7 +363,7 @@ void UpdateChecker::selectReleaseAssets(const QJsonObject &release, const QStrin
 #if !defined(_WIN32) && !defined(__APPLE__)
     // Prefer the artifact matching how this copy was installed; fall back to the
     // other rather than offering nothing, since a release may publish only one.
-    const bool preferAppImage = !freetunnel::runningAppImagePath().isEmpty();
+    const bool preferAppImage = !freetunnel::updatableAppImage().path.isEmpty();
     const bool useAppImage = preferAppImage ? !found.appImageUrl.isEmpty()
                                             : found.debUrl.isEmpty();
     m_latest.installerUrl = useAppImage ? found.appImageUrl : found.debUrl;
@@ -352,6 +376,7 @@ void UpdateChecker::selectReleaseAssets(const QJsonObject &release, const QStrin
 
 void UpdateChecker::onCheckFinished(QNetworkReply *reply)
 {
+    m_checkInFlight = false;
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
@@ -429,6 +454,28 @@ void UpdateChecker::downloadLatest()
     fetchChecksumsThenInstaller();
 }
 
+// Called once a run, before any download: whatever is staged by then is from an
+// earlier run, and has been installed or never will be. An AppImage was copied
+// out, an installer or disk image has run, and a .deb left waiting is offered
+// again by the next check. Nothing else ever removed them, so each update left
+// 100 MB or more behind for good — and a download kept under an asset name a
+// later release no longer uses (the AppImage's, renamed) was not even replaced.
+// The directory is ours alone (see prepareStagingDir), so all of it can go; a
+// file still in use, as an installer still running on Windows, stays until the
+// next start. One that is not ours is left alone, as a download would refuse it.
+void UpdateChecker::discardStagedDownloads()
+{
+    const QString path = updateStagingDir();
+#if defined(Q_OS_UNIX)
+    struct stat st = {};
+    if (!stagingDirIsOurs(path, &st))
+        return;
+#endif
+    const QDir dir(path);
+    for (const QString &name : dir.entryList(QDir::Files | QDir::Hidden | QDir::System))
+        QFile::remove(dir.filePath(name));
+}
+
 void UpdateChecker::fetchChecksumsThenInstaller()
 {
     QNetworkRequest req(m_latest.checksumsUrl);
@@ -499,14 +546,22 @@ void UpdateChecker::onSignatureFetched(QNetworkReply *reply)
     }
 
     // The signature says the manifest is ours. This says which release it is for.
-    // Asset names carry no version, so a genuine manifest and signature from an
-    // OLDER release verify perfectly when replayed by whoever controls the release
-    // metadata — leaving the user short of the build they were told they were
-    // getting. An empty version means a release published before this line
-    // existed; those must keep updating, or the fix would strand exactly the
-    // clients it is meant to protect.
+    // Asset names carry no version, so a genuine manifest and signature from
+    // another release verify perfectly when served under the advertised tag —
+    // which takes someone able to serve github.com's own download paths, not
+    // just the API. A manifest with no version line at all is refused too: every
+    // release since 1.1.8 writes one, and those before it are exactly what such
+    // a replay would offer under a forged, higher tag, rolling the user back onto
+    // a build with known holes. Only a newer release is ever offered, so no client
+    // running this check is still waiting for one without the line.
     const QString manifestVersion = versionFromSums(m_checksumsData);
-    if (!manifestVersion.isEmpty() && manifestVersion != m_latest.version) {
+    if (manifestVersion.isEmpty()) {
+        emit downloadFailed(tr("This update does not say which version it is — refusing to "
+                               "install it."),
+                            DownloadFailure::Refused);
+        return;
+    }
+    if (manifestVersion != m_latest.version) {
         emit downloadFailed(
                 tr("This update is signed for version %1, but %2 was offered — "
                    "aborting.")

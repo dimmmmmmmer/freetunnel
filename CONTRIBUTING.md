@@ -286,6 +286,9 @@ verifies them against the public key in `include/core/ReleaseSigning.h`.
 **This repo is already configured:** the public key is in `ReleaseSigning.h`,
 the private key lives in the GitHub Actions secret `ED25519_SIGNING_KEY`, and
 tagged releases publish `SHA256SUMS.txt` + `SHA256SUMS.txt.sig` (see v1.0.6).
+The release job opens the manifest with a `#version=<tag without v>` line, and
+the updater refuses a manifest without one or naming another version, so a
+manifest made by any other route must carry it too.
 
 To rotate keys:
 

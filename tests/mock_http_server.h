@@ -7,6 +7,8 @@
 #include <QTcpServer>
 #include <QString>
 
+class QTcpSocket;
+
 // Minimal loopback HTTP/1.1 server for UpdateChecker integration tests.
 class MockHttpServer : public QObject {
     Q_OBJECT
@@ -17,6 +19,9 @@ public:
         QByteArray contentType = QByteArrayLiteral("application/json");
         // Take the request and never answer: a connection that has stalled.
         bool silent = false;
+        // Answer only after this long: a slow server, which keeps a request in
+        // flight while the test starts another.
+        int delayMs = 0;
     };
 
     explicit MockHttpServer(QObject *parent = nullptr);
@@ -32,6 +37,7 @@ public:
 
 private:
     void onNewConnection();
+    static void respond(QTcpSocket *sock, const Route &route);
 
     QTcpServer m_server;
     QHash<QString, Route> m_routes;
