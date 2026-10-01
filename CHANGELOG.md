@@ -42,6 +42,20 @@ compare link at the bottom of its release notes.
   deletes nothing; FreeTunnel removes its own file itself. This applied on
   Windows, macOS and Linux. A FreeTunnel administrator prompt you did not
   expect, when you had not just connected, is one to refuse.
+- **A config file can no longer have FreeTunnel's privileged part act on files,
+  interfaces or kill-switch ports the file names.** FreeTunnel keeps the
+  settings of an imported config that it has no editor for, so that saving the
+  file loses nothing, and it passed them all to the VPN core, which runs with
+  administrator rights. A few of them do more than shape the tunnel: a folder in
+  which the core deleted and wrote files, ports that Windows let through the
+  kill switch, the name of the tunnel interface, and on Linux an existing
+  interface or network namespace to use. A config from someone you do not
+  trust, or one that another program on your computer changed, could use them.
+  These settings are now ignored; routes, DNS, the server and its certificate
+  are read as before. If an imported config listed ports for the kill switch to
+  let through, they are blocked now like everything else. If it named its
+  tunnel interface, the interface gets the default name instead, so a firewall
+  rule or script that looks for the old name needs the new one.
 - **Linux: with the AppImage, another person with an account on your computer
   could have a program of theirs run with administrator rights.** To start its
   privileged part, the AppImage unpacks itself as administrator into a temporary

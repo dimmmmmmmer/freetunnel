@@ -326,7 +326,15 @@ See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
 
 Upstream ref is pinned in [`scripts/upstream_ref.txt`](scripts/upstream_ref.txt) —
 the workflows read that file rather than carrying a SHA of their own. Bump it
-with the patch script re-verified.
+with the patch script re-verified. That script also fails when the new core reads
+a config key the old one did not: the elevated helper passes the core every key
+it is sent, except those `clearKeysRootMustNotTakeFromAConfig()` in
+`src/vpn/qt_trusttunnel_client.cpp` clears. Read what the core does with the new
+key; if it points the core, running as root, at a file, an interface or a port,
+clear it there as well. Then add it to the list in the script, by its full TOML
+path (`listener.tun.netns`, not `netns`). The script fails, too, on a read it
+cannot place in a table and on a listed key it no longer finds; its comments say
+why, and what to do about each.
 
 ## Reporting bugs
 

@@ -105,6 +105,7 @@ private slots:
     void newestConnectionCanStillAuthenticateUnderPreAuthPressure();
     void connectIgnoresAnyLogPathTheClientSends();
     void killSwitchAndSplitSettingsReachTheCoreInsideTheHelper();
+    void configKeysRootMustNotActOnAreDroppedInsideTheHelper();
     void sigtermStopsTheHelperOnItsOwn();
     void aTokenFileTheGuiDidNotWriteIsLeftAlone();
 
@@ -636,6 +637,49 @@ void TestHelperServer::killSwitchAndSplitSettingsReachTheCoreInsideTheHelper()
     for (const auto &e : errors)
         QVERIFY2(!e.at(0).toString().contains(QStringLiteral("authenticate")),
                  qPrintable(e.at(0).toString()));
+
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The config TOML crosses the privilege boundary as text and the helper is what
+// parses it, so the helper is where the keys FreeTunnel never writes have to stop
+// — not the GUI, which is the less trusted side, and which keeps unknown keys of
+// an imported file on purpose. Sent here exactly as the GUI client sends it, with
+// a session-cache directory, kill-switch exceptions, an interface name and a
+// network namespace that would all have root act on something the file chose.
+void TestHelperServer::configKeysRootMustNotActOnAreDroppedInsideTheHelper()
+{
+    const QString token = QStringLiteral("token-for-dropped-keys");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(port));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    VpnHelperClient client;
+    client.loadConfigFromToml(QStringLiteral("loglevel = \"warn\"\n"
+                                             "ssl_session_cache_path = \"/var/tmp/somewhere\"\n"
+                                             "killswitch_allow_ports = [3389, 5900]\n"
+                                             "[endpoint]\n"
+                                             "hostname = \"vpn.example\"\n"
+                                             "[listener.tun]\n"
+                                             "device_name = \"named-by-file\"\n"
+                                             "use_existing = true\n"
+                                             "netns = \"elsewhere\"\n"
+                                             "included_routes = [\"10.20.0.0/16\"]\n"));
+    client.connectVpn();
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_configDump), 20000);
+    const QMap<QString, QString> cfg = readCoreConfigDump(m_configDump);
+
+    QCOMPARE(cfg.value(QStringLiteral("ssl_session_cache_path")), QStringLiteral("(unset)"));
+    QCOMPARE(cfg.value(QStringLiteral("killswitch_allow_ports")), QString());
+    QCOMPARE(cfg.value(QStringLiteral("device_name")), QString());
+    QCOMPARE(cfg.value(QStringLiteral("use_existing")), QStringLiteral("0"));
+    QCOMPARE(cfg.value(QStringLiteral("netns")), QStringLiteral("(unset)"));
+    // Not a blanket reset of the listener: the file's own routing is kept.
+    QCOMPARE(cfg.value(QStringLiteral("included_routes")), QStringLiteral("10.20.0.0/16"));
 
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");

@@ -46,7 +46,9 @@ public:
     explicit QtTrustTunnelClient(QObject *parent = nullptr);
     ~QtTrustTunnelClient();
 
-    void setConfig(ag::TrustTunnelConfig config);
+    // The only way in for a config. This object runs in the elevated helper, and
+    // what it must refuse or clear is done here, so there is deliberately no
+    // setter that takes a config already built.
     bool loadConfigFromToml(const QString &tomlContent);
     void setReconnectBoundsMs(int initialDelayMs, int maxDelayMs);
 

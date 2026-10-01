@@ -120,6 +120,8 @@ private slots:
     void logLevelIsReadBackFromConfig();
     void killSwitchAndVpnModeReachTheCoreConfig();
     void splitRoutesAndExclusionsReachTheCoreConfig();
+    void keysThatMakeRootActOnANameNeverReachTheCore();
+    void aSocksListenerIsRefused();
     void theCoreIsHandedAServerCertificateVerifier();
     void coreLinesReachTheLogWhileTheSessionRuns();
     void aCoreLineAfterTheSessionEndsNeverUsesAClosedFile();
@@ -683,6 +685,63 @@ void TestQtTrustTunnelClient::splitRoutesAndExclusionsReachTheCoreConfig()
     const QString exclusions = QString::fromStdString(cfg.exclusions);
     QVERIFY2(exclusions.contains(QStringLiteral("intranet.example")), qPrintable(exclusions));
     QVERIFY2(exclusions.contains(QStringLiteral("printer.local")), qPrintable(exclusions));
+}
+
+// This object is the root helper's, and the TOML it is handed keeps every key an
+// imported file had. A file can name a directory for the core to delete and write
+// files in, ports for the kill switch to let through, and an interface name or a
+// network namespace for root to set up — none of which FreeTunnel ever writes.
+// They have to be gone by the time the core is built, while the routing the same
+// file asked for stays: that is the user's, and the reason to import it.
+void TestQtTrustTunnelClient::keysThatMakeRootActOnANameNeverReachTheCore()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    beginConnect(QStringLiteral("loglevel = \"warn\"\n"
+                                "ssl_session_cache_path = \"/var/tmp/somewhere\"\n"
+                                "killswitch_allow_ports = [3389, 5900]\n"
+                                "[endpoint]\n"
+                                "hostname = \"vpn.example\"\n"
+                                "[listener.tun]\n"
+                                "device_name = \"named-by-file\"\n"
+                                "use_existing = true\n"
+                                "netns = \"elsewhere\"\n"
+                                "included_routes = [\"10.20.0.0/16\"]\n"));
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    const mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QVERIFY2(!cfg.ssl_session_storage_path.has_value(),
+             "root would empty and refill a directory the config file named");
+    QVERIFY2(cfg.killswitch_allow_ports.empty(),
+             "the kill switch would let traffic through on ports the config file chose");
+    QVERIFY2(cfg.device_name.empty(), "root would set up an interface under a name the file chose");
+    QVERIFY(!cfg.use_existing);
+    QVERIFY2(!cfg.netns.has_value(), "root would move the tunnel into a namespace the file named");
+    QVERIFY2(listContains(cfg.included_routes, "10.20.0.0/16"),
+             "the routes the imported file asked for must still reach the core");
+}
+
+// FreeTunnel only writes a TUN listener. A SOCKS one is a proxy root would open on
+// the address the TOML names, and there would be no tunnel interface for the
+// routes, the DNS or the kill switch — while the app reports the VPN as up.
+void TestQtTrustTunnelClient::aSocksListenerIsRefused()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const int before = ctl.connectCallCount();
+
+    beginConnect(QStringLiteral("loglevel = \"warn\"\n"
+                                "[endpoint]\n"
+                                "hostname = \"vpn.example\"\n"
+                                "[listener.socks]\n"
+                                "address = \"0.0.0.0:1080\"\n"));
+
+    QTRY_COMPARE(m_lastState, State::Error);
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QVERIFY(m_errors.join(QLatin1Char('|'))
+                    .contains(QStringLiteral("Invalid TrustTunnel config structure")));
+    QCOMPARE(ctl.connectCallCount(), before);
+    QCOMPARE(ctl.coreConfigCaptureCount(), 0);
 }
 
 // The core asks the app to vet the server's certificate through the callbacks it
