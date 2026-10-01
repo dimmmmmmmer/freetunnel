@@ -1,0 +1,56 @@
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
++++ b/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -116,6 +116,15 @@ public:
+     void notify_sleep();
+     void notify_wake();
+ 
++    // Added by FreeTunnel: hand the running session a new VPN mode and exclusion
++    // list, through the core's vpn_update_exclusions(). The tunnel device, its
++    // routes and the kill switch stay as they are; the core closes the client
++    // connections it is carrying, so that each is opened again under the new
++    // rules. Does nothing when no session is running. Call it from the thread
++    // that calls disconnect(), and never from inside a callback: the core takes
++    // the lock that vpn_stop() holds while it waits for the core's thread.
++    void update_exclusions(VpnMode mode, std::string_view exclusions);
++
+     bool process_client_packets(VpnPackets packets);
+ 
+     ~TrustTunnelClient();
+--- a/trusttunnel/src/client.cpp
++++ b/trusttunnel/src/client.cpp
+@@ -117,6 +117,13 @@ void TrustTunnelClient::notify_wake() {
+     }
+ }
+ 
++// Added by FreeTunnel, see the header.
++void TrustTunnelClient::update_exclusions(VpnMode mode, std::string_view exclusions) {
++    if (Vpn *vpn = m_vpn.load()) {
++        vpn_update_exclusions(vpn, mode, {exclusions.data(), (uint32_t) exclusions.size()});
++    }
++}
++
+ bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
+     return m_vpn && vpn_process_client_packets(m_vpn, packets);
+ }
+@@ -333,6 +340,21 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
+                     },
+     };
+ 
++    // Added by FreeTunnel: with the kill switch on, a first connect that fails
++    // goes into the core's recovery loop, as a connection that dropped does,
++    // instead of ending the session after a few attempts. The kill switch lives
++    // in this session, so ending it lifted the block for as long as the app took
++    // to build the next one. Errors the core treats as final (authentication,
++    // the server's certificate) still end it. Without the kill switch the core's
++    // default stays: a session that never came up ends, and the app says so and
++    // starts over. One of the core's transitions under this policy, the network
++    // coming back before the first connect, goes through retry_connect(), which
++    // asserts that the default policy is in use; it is harmless where NDEBUG is
++    // defined, as in release builds, and aborts a build without it.
++    if (m_config.killswitch_enabled) {
++        parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;
++    }
++
+     {
+         VpnError err = vpn_connect(m_vpn, &parameters);
+         if (err.code != 0) {

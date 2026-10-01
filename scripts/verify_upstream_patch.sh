@@ -29,6 +29,16 @@ grep -q 'connect_request_handler' \
   "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
 grep -q 'ft_fill_connect_snapshot' \
   "$TMP/upstream/trusttunnel/src/client.cpp"
+# 03: rule and mode edits reach the running session, and with the kill switch
+# on a first connect that fails keeps the session (and the block) while the
+# core retries. The retry check names the field and the value, since a policy
+# set on the wrong struct would still mention the constant.
+grep -q 'void update_exclusions(VpnMode mode, std::string_view exclusions);' \
+  "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
+grep -q 'vpn_update_exclusions(vpn, mode,' \
+  "$TMP/upstream/trusttunnel/src/client.cpp"
+grep -q 'parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;' \
+  "$TMP/upstream/trusttunnel/src/client.cpp"
 
 # The elevated helper hands the core every key of the config the GUI sends,
 # except the few that would point root at a file, an interface or a hole in the

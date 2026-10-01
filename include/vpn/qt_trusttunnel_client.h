@@ -67,6 +67,13 @@ public:
     // and domains lists: in general mode these apps leave the tunnel, in
     // selective mode they are the only ones that enter it.
     Q_INVOKABLE void setAppRules(const QStringList &rules);
+    // The three split-tunnelling settings as one change: the domain and address
+    // rules, the mode and the program rules. A running session takes the rules and
+    // the mode live (vendor patch 03); each of the setters above also does, but
+    // one at a time, so between two of them the session would route by a mix of
+    // old and new that is neither what the user had nor what they asked for.
+    Q_INVOKABLE void setSplitRouting(const QStringList &domains, bool selective,
+                                     const QStringList &appRules);
     Q_INVOKABLE void setKillSwitch(bool enabled);
     // Whether the core writes a session log at all. The PATH is ours to choose —
     // it is never accepted from outside, see the note in the .cpp.
@@ -98,6 +105,14 @@ private:
         std::atomic<quint64> attemptGen{0};
     };
     using GuardPtr = std::shared_ptr<LifetimeGuard>;
+    // What the core routes by, and the part of a session that can change while it
+    // runs: the mode, and the exclusion list (the config's own entries, then the
+    // domain and address rules).
+    struct Routing {
+        ag::VpnMode mode = ag::VPN_MODE_GENERAL;
+        std::string exclusions;
+        bool operator==(const Routing &) const = default;
+    };
     // One connect attempt, owned entirely by the worker thread that runs it.
     // Everything the attempt needs travels in here, and the worker touches the
     // owner ONLY under the guard mutex — so an abandoned attempt cannot reach a
@@ -111,6 +126,7 @@ private:
         GuardPtr guard;
         quint64 attemptGen = 0;
         ag::TrustTunnelConfig config;
+        Routing routing; // what `config` routes by, kept after it moves into the core
         std::string boundIf;
         ag::VpnCallbacks callbacks;
         // The previous session, retired by the worker: disconnecting a live core
@@ -154,6 +170,13 @@ private:
     void handleCoreWaitingForNetwork();
     void handleCoreDisconnected(int errCode, const QString &errText);
     void setConfigLocked(ag::TrustTunnelConfig config);
+    std::string exclusionsLocked() const;
+    void storeExclusionsLocked(std::vector<std::string> exclusions);
+    void storeModeLocked(bool selective);
+    // Hand the running session the current rules and mode, if they differ from
+    // what it routes by. Owner thread, like everything else that touches m_client.
+    void applyRoutingToSession();
+    void reportFirstConnectFailure(int errCode, const QString &errText);
     void applyCoreLogPathToConfig();
     void applyCoreLogPathToConfigLocked();
     void resetCoreLogFile();
@@ -201,6 +224,13 @@ private:
 
     std::unique_ptr<ag::TrustTunnelClient> m_client;
     std::unique_ptr<ag::AutoNetworkMonitor> m_networkMonitor;
+    // What m_client routes by: what it was built with, then every live update.
+    // Read only while m_client is set, and set whenever it is adopted.
+    Routing m_sessionRouting;
+    // The reasons already given this session for not having connected yet, as the
+    // core goes round its recovery loop: each is said once, not once per round,
+    // even when two of them take turns.
+    QStringList m_firstConnectFailuresSaid;
     // Guards the config working set: m_config, m_lastConfigToml,
     // m_extraExcludedRoutes, m_originalExcludedRoutes, m_extraExclusions,
     // m_originalExclusions, m_selectiveMode, m_killSwitch, m_loggingEnabled,

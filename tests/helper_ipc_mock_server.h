@@ -46,6 +46,9 @@ public:
     // settings this carries decide whether traffic is blocked and what is routed,
     // so the double has to keep the values, not just the verbs.
     QJsonObject lastMessageFor(const QString &cmd) const { return m_lastByCmd.value(cmd); }
+    // How many of a command have arrived, for the tests that care that an edit
+    // went out as one command and not as several.
+    int countFor(const QString &cmd) const { return m_countByCmd.value(cmd); }
     int connectionCount() const { return m_connectionCount; }
     int connectCount() const { return m_connectCount; }
 
@@ -85,6 +88,7 @@ private:
     int m_connectionCount = 0;
     int m_connectCount = 0;
     bool m_tunnelUp = false;
+    QHash<QString, int> m_countByCmd;
     QHash<QString, QString> m_failing;
     QHash<QString, QString> m_refusing;
     QString m_teardownError;

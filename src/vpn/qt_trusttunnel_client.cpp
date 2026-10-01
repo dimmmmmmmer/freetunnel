@@ -213,24 +213,50 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     // Save original exclusions before we touch them so they can be restored
     // if the user changes bypass rules later.
     m_originalExclusions = m_config->exclusions;
-    for (const auto &ex : m_extraExclusions) {
-        if (!m_config->exclusions.empty() && m_config->exclusions.back() != ' ') {
-            m_config->exclusions.push_back(' ');
-        }
-        m_config->exclusions.append(ex);
-    }
+    m_config->exclusions = exclusionsLocked();
     // Routing policy: general = bypass the exclusions, selective = route only them.
     m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
     m_config->killswitch_enabled = m_killSwitch;
 }
 
+// The config's own exclusions, then ours. What a session is built with and what
+// a running one is handed live, so both come from here.
+std::string QtTrustTunnelClient::exclusionsLocked() const {
+    std::string out = m_originalExclusions;
+    for (const auto &ex : m_extraExclusions) {
+        if (!out.empty() && out.back() != ' ')
+            out.push_back(' ');
+        out.append(ex);
+    }
+    return out;
+}
+
+void QtTrustTunnelClient::storeExclusionsLocked(std::vector<std::string> exclusions) {
+    m_extraExclusions = std::move(exclusions);
+    // Recomposed from the config's own list every time, so a removed rule goes
+    // and nothing accumulates.
+    if (m_config.has_value())
+        m_config->exclusions = exclusionsLocked();
+}
+
+void QtTrustTunnelClient::storeModeLocked(bool selective) {
+    m_selectiveMode = selective;
+    if (m_config.has_value())
+        m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+}
+
 void QtTrustTunnelClient::setVpnMode(bool selective) {
+    // On this thread only, for the order below; see setSplitRouting().
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, selective]() { setVpnMode(selective); },
+                                  Qt::QueuedConnection);
+        return;
+    }
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
-        m_selectiveMode = selective;
-        if (m_config.has_value())
-            m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+        storeModeLocked(selective);
     }
+    applyRoutingToSession(); // the core first, as in setSplitRouting()
     // App rules read the mode the same way the routes and domains lists do, so
     // it has to reach their snapshot too — otherwise switching mode would flip
     // every list except this one.
@@ -245,6 +271,91 @@ void QtTrustTunnelClient::setAppRules(const QStringList &rules) {
     const QStringList clean = freetunnel::sanitizedAppRules(rules);
     std::lock_guard<std::mutex> lk(m_appRules->mutex);
     m_appRules->rules = clean;
+}
+
+void QtTrustTunnelClient::setSplitRouting(const QStringList &domains, bool selective,
+                                          const QStringList &appRules) {
+    // The order of the two steps below is what keeps an edit safe, and it holds
+    // only if both run here, on the thread that owns the session.
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(
+                this, [this, domains, selective, appRules]() {
+                    setSplitRouting(domains, selective, appRules);
+                },
+                Qt::QueuedConnection);
+        return;
+    }
+    std::vector<std::string> exclusions;
+    exclusions.reserve(static_cast<size_t>(domains.size()));
+    std::transform(domains.cbegin(), domains.cend(), std::back_inserter(exclusions),
+                   [](const QString &d) { return d.toStdString(); });
+    const QStringList clean = freetunnel::sanitizedAppRules(appRules);
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        storeExclusionsLocked(std::move(exclusions));
+        storeModeLocked(selective);
+    }
+    // A connection is routed in two places: the program rules decide it when it
+    // arrives, on the core wrapper's own thread, and the core applies the mode
+    // and the address rules when it completes the connection, on the core's
+    // thread, in the order its queue was filled. So the core is handed the new
+    // mode and addresses first, in one update, and the program rules change
+    // after: any connection decided by the new program rules is completed after
+    // the update, and takes the new mode with them. Taking the last program out
+    // of "Through VPN" is the case this is for; the other order would complete
+    // such a connection with no rule under the old selective mode, which sends it
+    // around the tunnel. What is left: a connection decided by the OLD program
+    // rules in the very moment of the change can still be completed under the
+    // new mode. That routes it as the old or the new settings would, or keeps it
+    // in the tunnel, except when one edit both turns "Through VPN" on and lists a
+    // program in it, as adding the first program with no addresses listed does:
+    // a connection that program starts in that same instant can leave the tunnel
+    // once. Nothing can change both places at once.
+    applyRoutingToSession();
+    std::lock_guard<std::mutex> lk(m_appRules->mutex);
+    m_appRules->rules = clean;
+    m_appRules->selective = selective;
+}
+
+void QtTrustTunnelClient::applyRoutingToSession() {
+    // m_client is this thread's alone: it is adopted, retired and torn down here.
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this]() { applyRoutingToSession(); },
+                                  Qt::QueuedConnection);
+        return;
+    }
+    if (!m_client)
+        return; // the next session is built from the working set, which has it
+    Routing wanted;
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        wanted.mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+        wanted.exclusions = exclusionsLocked();
+    }
+    // The GUI sends every list again after any split-tunnelling edit, a program
+    // rule included. The core resets every connection it carries when it takes
+    // new exclusions, so passing on one that changes nothing would cut them all
+    // for an edit that did not concern them.
+    if (wanted == m_sessionRouting)
+        return;
+    // Outside the lock: the core takes its own, and m_configMutex is never held
+    // across a call into it.
+    //
+    // The core keeps one pending update, not a queue: vpn_update_exclusions()
+    // holds its task in a single slot, so an update handed over before the core's
+    // loop has run the previous one cancels that one. Two edits in quick
+    // succession (a burst of commands from the GUI, or an edit right after the
+    // hand-over at adoption) can reach the session as the second alone. For what
+    // the session ends up routing by, that loses nothing: every update carries
+    // the whole of it, the mode and the full list, never just what one edit
+    // changed, and m_sessionRouting is the last update handed over, which is the
+    // one the core keeps, so the check above stays right. What it can cost is
+    // the order the program rules rely on (setSplitRouting()): a connection
+    // decided by the overtaken edit's program rules is completed under the mode
+    // from before it. That is the same instant an edit already has, and it needs
+    // two edits within one turn of the core's loop.
+    m_client->update_exclusions(wanted.mode, wanted.exclusions);
+    m_sessionRouting = std::move(wanted);
 }
 
 void QtTrustTunnelClient::setKillSwitch(bool enabled) {
@@ -418,19 +529,11 @@ void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excl
 }
 
 void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
-    std::lock_guard<std::mutex> lk(m_configMutex);
-    m_extraExclusions = exclusions;
-    if (m_config.has_value()) {
-        // Restore original config exclusions first, then append new ones.
-        // This prevents duplicate/stale entries from accumulating.
-        m_config->exclusions = m_originalExclusions;
-        for (const auto &ex : m_extraExclusions) {
-            if (!m_config->exclusions.empty() && m_config->exclusions.back() != ' ') {
-                m_config->exclusions.push_back(' ');
-            }
-            m_config->exclusions.append(ex);
-        }
+    {
+        std::lock_guard<std::mutex> lk(m_configMutex);
+        storeExclusionsLocked(exclusions);
     }
+    applyRoutingToSession();
 }
 
 void QtTrustTunnelClient::postCoreStateChanged(quint64 session, int coreState, int errCode,
@@ -845,6 +948,22 @@ void QtTrustTunnelClient::handleCoreRecovery(const QString &reason)
         emit connectionInfo(reason);
 }
 
+// A session that has not connected yet waits for recovery only when the kill
+// switch has the core keep trying (vendor patch 03). Without it the core ends the
+// session and handleCoreDisconnected() says why; with it the session carries on,
+// rightly still Connecting, and this is where the user learns that the server is
+// failing rather than slow. Once per reason, not once per round of retries.
+void QtTrustTunnelClient::reportFirstConnectFailure(int errCode, const QString &errText)
+{
+    if (m_everConnected)
+        return;
+    const QString reason = qt_trusttunnel_format_vpn_error(errCode, errText);
+    if (reason.isEmpty() || m_firstConnectFailuresSaid.contains(reason))
+        return;
+    m_firstConnectFailuresSaid.append(reason);
+    emit vpnError(QStringLiteral("Connection failed: %1").arg(reason));
+}
+
 void QtTrustTunnelClient::handleCoreWaitingForNetwork()
 {
     setState(State::WaitingForNetwork);
@@ -878,6 +997,7 @@ void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, 
         break;
     case ag::VPN_SS_WAITING_RECOVERY:
         handleCoreRecovery(recoveryReason(QStringLiteral("waiting recovery"), errCode, errText));
+        reportFirstConnectFailure(errCode, errText);
         break;
     case ag::VPN_SS_WAITING_FOR_NETWORK:
         handleCoreWaitingForNetwork();

@@ -50,6 +50,11 @@ public:
     // Per-application split tunnelling; read the same way as the routes list,
     // with setVpnMode deciding which way a match goes.
     void setAppRules(const std::vector<std::string> &rules);
+    // The three above as one command, which is how an edit made while connected
+    // has to travel: the helper hands them to the running session together, so
+    // nothing is routed by half of an edit.
+    void setSplitRouting(const std::vector<std::string> &exclusions, bool selective,
+                         const std::vector<std::string> &appRules);
     void setKillSwitch(bool enabled);
     void setLogLevel(const QString &level); // "warn"/"info"/… applied live, no reconnect
     void setSessionLogging(bool enabled);
@@ -62,10 +67,12 @@ public:
     // it goes out with every current setting (handleReadyEvent) once it is.
     bool helperReady() const { return m_helloAcked; }
     // Whether a setting the running session was BUILT with has changed since the
-    // last connect went out: the domain list, the routes, the mode or the kill
-    // switch. The helper reads those once, when it builds the session, so only a
-    // new session applies them. True when there is no such connect: none has gone
-    // out, or the GUI has ended its session or lost the helper since.
+    // last connect went out: the excluded routes or the kill switch. Those go into
+    // the system's routing and the traffic block when the session is built, so
+    // only a new session applies them. The split-tunnelling rules and the mode
+    // reach a running session live, and are not among them. True when there is no
+    // such connect: none has gone out, or the GUI has ended its session or lost
+    // the helper since.
     bool sessionSettingsChanged() const;
 
 signals:
@@ -100,12 +107,10 @@ private:
     void setState(State s);
     void fail(const QString &msg);
 
-    // What a session is built from, as opposed to what the helper reads per
-    // connection (the app rules, the log level), which reaches it live.
+    // What a session is built from and keeps, as opposed to what reaches it
+    // live: the rules, the mode and the log level.
     struct SessionSettings {
-        std::vector<std::string> exclusions;
         std::vector<std::string> excludedRoutes;
-        bool selective = false;
         bool killSwitch = false;
         bool operator==(const SessionSettings &) const = default;
     };

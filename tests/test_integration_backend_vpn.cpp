@@ -44,8 +44,8 @@ private slots:
     void aSwitchToAFailingServerSaysSoAndTheNextPickStillSwitches();
     void aSecondPickWhileTheFirstReadsItsPasswordWins();
     void anEditMadeWhileConnectingReachesTheSession();
-    void aProgramRuleReachesTheRunningSessionWithoutARebuild();
-    void aProgramRuleThatSwitchesTheModeRebuildsTheSession();
+    void aRuleEditReachesTheRunningSessionWithoutARebuild();
+    void aModeChangeReachesTheRunningSessionWithItsRules();
     void anExcludedRouteEditRebuildsTheSession();
     void anEarlierRebuildsSafetyNetLeavesTheNextOneAlone();
     void savingAFixedPasswordWhileConnectingStartsAgain();
@@ -569,10 +569,10 @@ void TestIntegrationBackendVpn::aSecondPickWhileTheFirstReadsItsPasswordWins()
     backend.prepareQuit();
 }
 
-// Rules, mode and the kill switch go out with a connect, and a session that is
-// already connecting or retrying keeps the copy it was given. An edit made then
-// waited for a Connected that a failing server never reaches, so the toggle
-// showed the new setting while the attempt kept the old one.
+// The excluded routes and the kill switch go out with a connect, and a session
+// that is already connecting or retrying keeps the copy it was given. An edit
+// made then waited for a Connected that a failing server never reaches, so the
+// toggle showed the new setting while the attempt kept the old one.
 void TestIntegrationBackendVpn::anEditMadeWhileConnectingReachesTheSession()
 {
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
@@ -604,11 +604,12 @@ void TestIntegrationBackendVpn::anEditMadeWhileConnectingReachesTheSession()
     backend.prepareQuit();
 }
 
-// A program rule is read by the helper on every connection, so it reaches a
-// running session the moment it is sent. Each one used to rebuild the tunnel as
-// well: every open connection dropped and, with the kill switch on, nothing was
-// blocked while the new session came up — for a change that needed neither.
-void TestIntegrationBackendVpn::aProgramRuleReachesTheRunningSessionWithoutARebuild()
+// Split-tunnelling rules reach a running session as they change: the helper
+// reads program rules on every connection, and hands address rules and the mode
+// to the session itself (vendor patch 03). Each edit used to rebuild the tunnel
+// as well: every open connection dropped and, with the kill switch on, nothing
+// was blocked while the new session came up — for a change that needed neither.
+void TestIntegrationBackendVpn::aRuleEditReachesTheRunningSessionWithoutARebuild()
 {
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     TestConfigs configs;
@@ -628,40 +629,40 @@ void TestIntegrationBackendVpn::aProgramRuleReachesTheRunningSessionWithoutARebu
     QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
     QCOMPARE(env.server.connectCount(), 1);
 
-    const auto sentRules = [&env]() {
-        return env.server.lastMessageFor(QStringLiteral("setAppRules"))
-                .value(QStringLiteral("rules"))
+    const auto sent = [&env](const char *key) {
+        return env.server.lastMessageFor(QStringLiteral("setSplitRouting"))
+                .value(QLatin1String(key))
                 .toArray();
     };
     QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
     QVERIFY(QTest::qWaitFor(
-            [&]() { return sentRules().contains(QJsonValue(QStringLiteral("firefox"))); }, 5000));
+            [&]() { return sent("rules").contains(QJsonValue(QStringLiteral("firefox"))); }, 5000));
     backend.removeAppRule(0);
-    QVERIFY(QTest::qWaitFor([&]() { return sentRules().isEmpty(); }, 5000));
+    QVERIFY(QTest::qWaitFor([&]() { return sent("rules").isEmpty(); }, 5000));
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return sent("domains").contains(QJsonValue(QStringLiteral("example.com"))); },
+            5000));
     QTest::qWait(200); // a disconnect would follow the rules in the same burst
     QVERIFY2(env.server.lastMessageFor(QStringLiteral("disconnect")).isEmpty(),
-             "a program rule tore the running tunnel down");
+             "a split-tunnelling rule tore the running tunnel down");
     QCOMPARE(env.server.connectCount(), 1);
     QVERIFY(backend.connected());
-
-    // What the session is built from still needs a new one: a domain rule.
-    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
-    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
-                             10000),
-             "a domain rule has to rebuild the session to reach it");
 
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
     backend.prepareQuit();
 }
 
-// The exception to the test above. In "Through VPN" with no address rules, the
-// first program rule is what takes the core from the full tunnel to selective,
-// and removing the last one takes it back. Neither the domain list nor the
-// routes change, so the mode alone has to call for the new session. The way
-// back is the one that leaks: a session left selective with nothing listed
-// sends every connection around the tunnel while the window says Connected.
-void TestIntegrationBackendVpn::aProgramRuleThatSwitchesTheModeRebuildsTheSession()
+// The mode reaches a running session too, and always in the same command as the
+// rules it is read with. In "Through VPN" with no address rules, the first
+// program rule takes the core from the full tunnel to selective and removing the
+// last takes it back; sent apart from the rule, the mode would route the session
+// for a moment by the new mode with the old list. That way back is the one that
+// leaks: a session left selective with nothing listed sends every connection
+// around the tunnel while the window says Connected. The Mode switch and split
+// tunnelling's own switch go the same way, and none of these builds a new session.
+void TestIntegrationBackendVpn::aModeChangeReachesTheRunningSessionWithItsRules()
 {
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     TestConfigs configs;
@@ -677,24 +678,49 @@ void TestIntegrationBackendVpn::aProgramRuleThatSwitchesTheModeRebuildsTheSessio
     backend.setVpnMode(QStringLiteral("selective"));
     backend.connectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
-    const auto sentSelective = [&env]() {
-        return env.server.lastMessageFor(QStringLiteral("setMode"))
-                .value(QStringLiteral("selective"))
-                .toBool();
+    // Nothing listed yet, so the full tunnel; told with the rest when the helper
+    // came up, before there was a session.
+    QVERIFY(!env.server.lastMessageFor(QStringLiteral("setMode"))
+                     .value(QStringLiteral("selective"))
+                     .toBool());
+    const int modeCommands = env.server.countFor(QStringLiteral("setMode"));
+    const int domainCommands = env.server.countFor(QStringLiteral("setExclusions"));
+    const int programCommands = env.server.countFor(QStringLiteral("setAppRules"));
+
+    // One edit, one command, carrying the mode and both lists as they now are.
+    const auto sentIs = [&env](bool selective, const QStringList &domains,
+                               const QStringList &rules) {
+        const QJsonObject m = env.server.lastMessageFor(QStringLiteral("setSplitRouting"));
+        return !m.isEmpty() && m.value(QStringLiteral("selective")).toBool() == selective
+                && m.value(QStringLiteral("domains")).toVariant().toStringList() == domains
+                && m.value(QStringLiteral("rules")).toVariant().toStringList() == rules;
     };
-    QVERIFY(!sentSelective()); // nothing listed yet, so the full tunnel
+    const QStringList none;
+    const QStringList firefox{QStringLiteral("firefox")};
+    const QStringList example{QStringLiteral("example.com")};
 
     QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
-    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
-                             10000),
-             "the first program rule in Through VPN has to rebuild the session as selective");
-    QVERIFY(sentSelective());
-
+    QVERIFY2(QTest::qWaitFor([&]() { return sentIs(true, none, firefox); }, 5000),
+             "the first program rule in Through VPN has to make the session selective with it");
     backend.removeAppRule(0);
-    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 3 && backend.connected(); },
-                             10000),
+    QVERIFY2(QTest::qWaitFor([&]() { return sentIs(false, none, none); }, 5000),
              "removing the last program rule left the session selective with nothing listed");
-    QVERIFY(!sentSelective());
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QVERIFY(QTest::qWaitFor([&]() { return sentIs(true, example, none); }, 5000));
+    backend.setVpnMode(QStringLiteral("general"));
+    QVERIFY(QTest::qWaitFor([&]() { return sentIs(false, example, none); }, 5000));
+    backend.setSplitEnabled(false);
+    QVERIFY(QTest::qWaitFor([&]() { return sentIs(false, none, none); }, 5000));
+
+    QTest::qWait(200); // a disconnect would follow the last edit in the same burst
+    QCOMPARE(env.server.countFor(QStringLiteral("setSplitRouting")), 5);
+    QCOMPARE(env.server.countFor(QStringLiteral("setMode")), modeCommands);
+    QCOMPARE(env.server.countFor(QStringLiteral("setExclusions")), domainCommands);
+    QCOMPARE(env.server.countFor(QStringLiteral("setAppRules")), programCommands);
+    QVERIFY2(env.server.lastMessageFor(QStringLiteral("disconnect")).isEmpty(),
+             "a mode change tore the running tunnel down");
+    QCOMPARE(env.server.connectCount(), 1);
+    QVERIFY(backend.connected());
 
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));

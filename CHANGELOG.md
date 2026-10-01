@@ -102,12 +102,12 @@ compare link at the bottom of its release notes.
 ### Changed
 
 - **The kill switch says what it covers.** Its line in Settings said it blocked
-  traffic outside the VPN, which it does while a connection that dropped is
-  being brought back. Nothing is blocked while the VPN is off or stopped by an
-  error, and the block lifts for a moment whenever a session is built anew, as
-  when you switch configs or change split tunnelling while connected. The line
-  now reads "block traffic if the VPN drops", and the README says when it
-  applies.
+  traffic outside the VPN, which it does while FreeTunnel connects or brings
+  back a connection that dropped. Nothing is blocked while the VPN is off or
+  stopped by an error, and the block lifts for a moment whenever a session is
+  built anew: when you switch configs, or change the excluded routes or the
+  kill switch itself while connected. The line now reads "block traffic if the
+  VPN drops", and the README says when it applies.
 - **Settings says that its excluded routes come on top of a config's own.** Each
   config excludes some routes itself: one made in FreeTunnel or from a link keeps
   local networks and multicast outside the tunnel. The list in Settings is added
@@ -203,14 +203,28 @@ compare link at the bottom of its release notes.
   rule now names the app and keeps matching after updates. A rule made the old
   way, which shows as Update.exe, is changed to the app the first time this
   version starts, as long as the app is still installed beside it.
-- **A program rule takes effect without reconnecting.** Adding or removing a
-  program on the Split tunnelling page while connected rebuilt the whole tunnel,
-  dropping every open connection, and with the kill switch on nothing was
-  blocked while it came back. The rule now applies from the program's next
-  connection and the tunnel stays up. It still reconnects when a rule changes
-  what the tunnel carries as a whole, as adding the first program to "Through
-  VPN", or removing the last, does when no addresses are listed there. A domain
-  added while split tunnelling is off no longer reconnects either.
+- **Split tunnelling changes take effect without reconnecting.** Adding or
+  removing a domain, an address or a program on the Split tunnelling page,
+  switching its mode, or turning split tunnelling on or off while connected
+  rebuilt the whole tunnel: every open connection dropped, and with the kill
+  switch on nothing was blocked while it came back. The change now reaches the
+  running tunnel, which stays up with its kill switch. A program rule applies
+  from the program's next connection. A change to the domains, the addresses or
+  the mode restarts the connections that are open, so that they follow the new
+  rules. The excluded routes in Settings still reconnect, as does the kill
+  switch itself.
+- **With the kill switch on, a server that cannot be reached no longer lets
+  traffic out between attempts.** A first connect that failed ended the session
+  after five tries, and FreeTunnel built a new one, round after round; each
+  time, traffic went out unblocked between taking the old session down and
+  bringing the new one up. The session now stays up and keeps trying, with
+  traffic blocked, until it connects or you press Disconnect. Meanwhile the
+  status reads "Connecting…", or "Waiting for network…" while there is no
+  network, and why it is failing is shown once for each reason. A server that
+  refuses the login or its certificate still ends the session, and FreeTunnel
+  builds a new one as before, with the block lifting in between. A config that
+  names its server by a domain name gets no session at all, and so no block,
+  while that name cannot be looked up.
 - **Saving a config in the editor keeps the config's own routing.** A config
   file can say which addresses go through the tunnel and which stay outside it,
   and can hold settings the editor has no field for. Saving it from the editor,
@@ -356,7 +370,7 @@ compare link at the bottom of its release notes.
   disconnect came before there was anything to disconnect, and the connection on
   startup followed a moment later. A disconnect now calls that connection off.
 - **Two changes made close together no longer show "Off" mid-switch.**
-  Switching configs, or changing split tunnelling or the kill switch, twice
+  Switching configs, or changing the excluded routes or the kill switch, twice
   within five seconds while connected could show "Off" for a moment during the
   second change when the old tunnel was slow to go down.
 - **Updates in Settings**

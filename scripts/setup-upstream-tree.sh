@@ -33,7 +33,8 @@ fi
 
 # Every patch in vendor/trusttunnel/, in filename order. They are numbered
 # because they are not independent: 02 adds to the same callback struct and the
-# same event switch that 01 already touched, so its context lines assume 01 has
+# same event switch that 01 already touched, and 03's context lines in the
+# wrapper are where 01 and 02 left them, so each assumes the ones before it have
 # been applied. Sorted order is the contract, not a convenience.
 for p in "$CLIENT"/vendor/trusttunnel/*.patch; do
   echo "==> Applying $(basename "$p")"
