@@ -24,7 +24,7 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.8.*'
+  QT_VER: '6.8.3'
 
 # Least privilege by default: no job needs to write to the repo except the
 # release job, which asks for contents: write explicitly. Without this the
@@ -129,12 +129,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Qt linguist tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-l10n-tools
-          # Debian/Ubuntu ship lupdate under /usr/lib/qt6/bin — put it on PATH.
-          echo "/usr/lib/qt6/bin" >> "$GITHUB_PATH"
+      # The linguist tools of the Qt the release is built with, not the runner
+      # distro's qt6-l10n-tools, whose Qt is whatever that Ubuntu release carries:
+      # the check regenerates the catalogue and compares bytes, so another lupdate
+      # or lrelease can ask for different ones than those the developer's Qt wrote
+      # and the app ships. QT_VER is an exact version for that reason, the one
+      # CONTRIBUTING tells developers to use. i18n-update.sh takes the tools from
+      # $QT_ROOT_DIR, set here.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VER }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
 
       - name: Verify translation catalog is up to date
         run: bash scripts/i18n-verify.sh

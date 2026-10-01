@@ -24,7 +24,7 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.8.*'
+  QT_VER: '6.8.3'
   # Exact pin, same as build.yml: conan drives every native dependency fetch.
   CONAN_VER: '2.31.1'
 

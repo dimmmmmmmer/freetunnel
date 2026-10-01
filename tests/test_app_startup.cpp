@@ -46,6 +46,7 @@ private slots:
     void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
     void applyLanguageLoadsQtsOwnRussianToo();
+    void qtsOwnRussianIsFoundWhereWindowsAndMacShipIt();
     void guiWiringBuildsTheAppInAKnownOrder();
     void wireInstanceServerForwardsCommand();
     void aSecondLaunchBringsTheWindowBack();
@@ -269,6 +270,49 @@ void TestAppStartup::applyLanguageLoadsQtsOwnRussianToo()
     QVERIFY2(!russian.isEmpty() && russian.at(0).script() == QChar::Script_Cyrillic, qPrintable(russian));
     freetunnel::applyLanguage(*qGuiApp, engine, translator, QStringLiteral("en"));
     QCOMPARE(QCoreApplication::translate("QPlatformTheme", "Cancel"), QStringLiteral("Cancel"));
+}
+
+// The packaged app has nothing in Qt's own translations path on Windows and macOS.
+// Windows ships windeployqt's merged catalogue as translations\qt_ru.qm beside
+// FreeTunnel.exe; the macOS bundle has qtbase_ru.qm in Contents/Resources/
+// translations, beside Contents/MacOS. Laid out that way here, around a Qt
+// translations path that holds nothing. A copy of qtbase_ru.qm stands in for the
+// merged file, which holds the same messages.
+void TestAppStartup::qtsOwnRussianIsFoundWhereWindowsAndMacShipIt()
+{
+    const QString qtbase = QLibraryInfo::path(QLibraryInfo::TranslationsPath)
+            + QStringLiteral("/qtbase_ru.qm");
+    if (!QFile::exists(qtbase))
+        QSKIP("this Qt was installed without its translations");
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString nothingHere = root.filePath(QStringLiteral("qt-translations"));
+    QVERIFY(QDir().mkpath(nothingHere));
+    const QString windowsApp = root.filePath(QStringLiteral("FreeTunnel"));
+    QVERIFY(QDir().mkpath(windowsApp + QStringLiteral("/translations")));
+    QVERIFY(QFile::copy(qtbase, windowsApp + QStringLiteral("/translations/qt_ru.qm")));
+    const QString macBundle = root.filePath(QStringLiteral("FreeTunnel.app/Contents"));
+    QVERIFY(QDir().mkpath(macBundle + QStringLiteral("/MacOS")));
+    QVERIFY(QDir().mkpath(macBundle + QStringLiteral("/Resources/translations")));
+    QVERIFY(QFile::copy(qtbase, macBundle + QStringLiteral("/Resources/translations/qtbase_ru.qm")));
+
+    const auto cancel = []() { return QCoreApplication::translate("QPlatformTheme", "Cancel"); };
+    QCOMPARE(cancel(), QStringLiteral("Cancel"));
+    for (const QString &appDir : {windowsApp, macBundle + QStringLiteral("/MacOS")}) {
+        {
+            QTranslator owner; // its children, the catalogues, go with it
+            QVERIFY2(freetunnel::installQtCatalogues(*qGuiApp, &owner, QStringLiteral("ru"),
+                                                     freetunnel::qtCatalogueDirs(nothingHere, appDir)),
+                     qPrintable(appDir));
+            const QString russian = cancel();
+            QVERIFY2(!russian.isEmpty() && russian.at(0).script() == QChar::Script_Cyrillic,
+                     qPrintable(appDir + QStringLiteral(": ") + russian));
+        }
+        QCOMPARE(cancel(), QStringLiteral("Cancel"));
+    }
+    QTranslator owner;
+    QVERIFY(!freetunnel::installQtCatalogues(*qGuiApp, &owner, QStringLiteral("ru"),
+                                             freetunnel::qtCatalogueDirs(nothingHere, nothingHere)));
 }
 
 QString TestAppStartup::instanceSocketName(const QString &suffix)

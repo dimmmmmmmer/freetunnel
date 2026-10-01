@@ -5,7 +5,7 @@
     <name>App</name>
     <message>
         <source>Quit</source>
-        <translation type="unfinished">Выход</translation>
+        <translation>Выход</translation>
     </message>
 </context>
 <context>
@@ -191,15 +191,15 @@
     </message>
     <message>
         <source>Toggle VPN</source>
-        <translation type="unfinished">Переключить VPN</translation>
+        <translation>Переключить VPN</translation>
     </message>
     <message>
         <source>Connect</source>
-        <translation type="unfinished">Подключить</translation>
+        <translation>Подключить</translation>
     </message>
     <message>
         <source>Disconnect</source>
-        <translation type="unfinished">Отключить</translation>
+        <translation>Отключить</translation>
     </message>
     <message>
         <source>Hotkey “%1” (%2) is not a valid key sequence — ignored.</source>

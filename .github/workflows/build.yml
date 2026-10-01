@@ -38,8 +38,11 @@ env:
   CONAN_VER: '2.31.1'
   # One Qt version per workflow, checked across workflows by
   # scripts/check-pinned-deps.sh — a release built against a different Qt than
-  # the one the tests ran on is not the thing that was tested.
-  QT_VER: '6.8.*'
+  # the one the tests ran on is not the thing that was tested. Exact, not 6.8.*:
+  # the i18n check (security.yml) rebuilds the Russian .qm and compares bytes with
+  # the one developers commit, so it needs the very lrelease CONTRIBUTING names.
+  # 6.8.3 is also the last open-source 6.8 release.
+  QT_VER: '6.8.3'
   # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
   # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -609,6 +612,12 @@ jobs:
           # through the separate secret-tool program, and refuses them without it.
           test -e AppDir/usr/lib/libsecret-1.so.0 \
             || { echo "::error::built without libsecret: install libsecret-1-dev and pkg-config"; exit 1; }
+          # Qt's own words in Russian: the drawn file dialog's buttons, the reason
+          # in a network error. The Qt plugin copies Qt's catalogues to
+          # usr/translations and its qt.conf makes that Qt's translations path,
+          # where AppStartup looks first. Checked, as the other two platforms are.
+          test -e AppDir/usr/translations/qtbase_ru.qm \
+            || { echo "::error::Qt's Russian catalogue (usr/translations/qtbase_ru.qm) was not deployed"; exit 1; }
 
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
@@ -801,6 +810,13 @@ jobs:
           # runner image. The app uses no SQL, so drop those plugins first.
           rm -rf "$QT_ROOT_DIR/plugins/sqldrivers"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
+          # Qt's own words in Russian, such as the reason in a network error.
+          # macdeployqt copies no catalogues, so a Russian session had them in
+          # English. AppStartup looks for them in Contents/Resources/translations;
+          # a missing file fails the build here.
+          mkdir -p "$APP/Contents/Resources/translations"
+          cp "$QT_ROOT_DIR/translations/qtbase_ru.qm" "$QT_ROOT_DIR/translations/qtdeclarative_ru.qm" \
+            "$APP/Contents/Resources/translations/"
           cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
           # UIDesignRequiresCompatibility makes an app built with the new SDK look
           # as if it were built with an old one. It is a documented, copy-pasted
@@ -949,7 +965,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\assets | Out-Null
           Copy-Item client\assets\logo.ico dist\assets\ -Force
           Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
-          & $deploy --release --no-translations --qmldir client\qml dist\FreeTunnel.exe
+          # Russian only, the one language the app has besides English: windeployqt
+          # merges Qt's catalogues for the modules it deploys into
+          # translations\qt_ru.qm, which AppStartup loads for Qt's own words (the
+          # reason in a network error). It was --no-translations, so those stayed
+          # English in a Russian session.
+          & $deploy --release --translations ru --qmldir client\qml dist\FreeTunnel.exe
+          if (-not (Test-Path "dist\translations\qt_ru.qm")) { throw "Qt's Russian catalogue (translations\qt_ru.qm) was not deployed" }
 
           # Bundle the MSVC runtime (MSVCP140.dll, VCRUNTIME140*.dll) so the app
           # launches on a clean Windows without a separately installed VC++
