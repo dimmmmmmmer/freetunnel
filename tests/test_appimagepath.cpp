@@ -2,7 +2,11 @@
 #include <QtTest>
 
 #include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
 #include <QProcess>
+#include <QScopeGuard>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -30,6 +34,8 @@ private slots:
     void autoStartTargetIsUnquoted();
     void autoStartTargetHandlesAMissingExecLine();
     void autoStartProgramIsReadBackOutOfThePlist();
+    void autoStartProgramIsReadBackOutOfTheRunValue();
+    void windowsAutoStartIsOffWhenItsProgramIsGone();
 };
 
 namespace {
@@ -294,6 +300,87 @@ void TestAppImagePath::autoStartProgramIsReadBackOutOfThePlist()
     QVERIFY(freetunnel::autoStartProgramFromPlist(QStringLiteral("<plist><dict></dict></plist>"))
                     .isEmpty());
     QVERIFY(freetunnel::autoStartProgramFromPlist(QString()).isEmpty());
+}
+
+// And the Windows half. The Run value used to count as "on" for being there at
+// all, so the program it names has to be read out of it before anyone can ask
+// whether that program still exists.
+void TestAppImagePath::autoStartProgramIsReadBackOutOfTheRunValue()
+{
+    // As setPlatformAutoStart() writes it: quoted, because Program Files has a
+    // space in it.
+    QCOMPARE(freetunnel::autoStartProgramFromRunValue(
+                     QStringLiteral("\"C:\\Program Files\\FreeTunnel\\FreeTunnel.exe\"")),
+             QStringLiteral("C:\\Program Files\\FreeTunnel\\FreeTunnel.exe"));
+    // Arguments after the quotes are not part of the program.
+    QCOMPARE(freetunnel::autoStartProgramFromRunValue(
+                     QStringLiteral(" \"D:\\Apps\\FreeTunnel.exe\" --minimized ")),
+             QStringLiteral("D:\\Apps\\FreeTunnel.exe"));
+    // Unquoted, which this app never writes, the first word is the program.
+    QCOMPARE(freetunnel::autoStartProgramFromRunValue(
+                     QStringLiteral("C:\\Tools\\FreeTunnel.exe --minimized")),
+             QStringLiteral("C:\\Tools\\FreeTunnel.exe"));
+
+    QVERIFY(freetunnel::autoStartProgramFromRunValue(QString()).isEmpty());
+    QVERIFY(freetunnel::autoStartProgramFromRunValue(QStringLiteral("\"\"")).isEmpty());
+}
+
+// The same question asked of the real thing, on the platform it is for, through
+// the registry. Not the real Run key: it holds the developer's own autostart
+// setting, which test_backend_settings will not touch either, and a test that
+// died between writing and restoring it would leave it naming a file in a
+// temporary folder. FT_TEST_RUN_KEY points the code at a key of the test's own,
+// and that key goes when the test does.
+void TestAppImagePath::windowsAutoStartIsOffWhenItsProgramIsGone()
+{
+#if defined(Q_OS_WIN)
+    const QString testRoot = QStringLiteral("HKEY_CURRENT_USER\\Software\\FreeTunnelTest");
+    const QString testGroup = QStringLiteral("Run-%1").arg(QCoreApplication::applicationPid());
+    const QString realKey =
+            QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+    const QString name = QStringLiteral("FreeTunnel");
+    const QVariant realBefore = QSettings(realKey, QSettings::NativeFormat).value(name);
+    qputenv("FT_TEST_RUN_KEY", (testRoot + QLatin1Char('\\') + testGroup).toUtf8());
+    const auto restore = qScopeGuard([&testRoot, &testGroup] {
+        qunsetenv("FT_TEST_RUN_KEY");
+        QSettings root(testRoot, QSettings::NativeFormat);
+        root.remove(testGroup);
+        root.sync();
+    });
+    QSettings run(testRoot + QLatin1Char('\\') + testGroup, QSettings::NativeFormat);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    // A space in the path, as in Program Files, so the quotes have to come off
+    // before the file can be looked for.
+    QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("Free Tunnel")));
+    const QString exe =
+            QDir::toNativeSeparators(dir.filePath(QStringLiteral("Free Tunnel/FreeTunnel.exe")));
+    run.setValue(name, QLatin1Char('"') + exe + QLatin1Char('"'));
+    run.sync();
+    QVERIFY2(!freetunnel::platformAutoStartEnabled(),
+             "a Run value naming a program that is not there read as on");
+
+    QFile file(exe);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+    QVERIFY2(freetunnel::platformAutoStartEnabled(),
+             "a Run value naming a program that is there read as off");
+
+    // The switch itself, which registers the program that is running.
+    freetunnel::setPlatformAutoStart(false);
+    QVERIFY(!freetunnel::platformAutoStartEnabled());
+    freetunnel::setPlatformAutoStart(true);
+    QVERIFY(freetunnel::platformAutoStartEnabled());
+    run.sync();
+    QCOMPARE(freetunnel::autoStartProgramFromRunValue(run.value(name).toString()),
+             QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+
+    // And none of it reached the real Run key.
+    QCOMPARE(QSettings(realKey, QSettings::NativeFormat).value(name), realBefore);
+#else
+    QSKIP("the Run key is Windows-only");
+#endif
 }
 
 // Not QTEST_MAIN: runningAppImageFindsTheFileThatUnpackedThisProcess() runs a

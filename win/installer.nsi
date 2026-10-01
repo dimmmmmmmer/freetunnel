@@ -91,7 +91,9 @@ VIAddVersionKey "ProductVersion"   "${PRODUCT_VERSION}"
 ;--------------------------------
 ; Install directory safety
 
-Function DirectoryLeave
+; Pushes "1" when $INSTDIR is new, empty or an earlier FreeTunnel install, and
+; "0" when it already holds someone else's files. Uses $0 and $1.
+Function CheckInstallDir
   ; New directory, or a previous FreeTunnel install being upgraded: fine.
   IfFileExists "$INSTDIR\*.*" 0 dirOk
   IfFileExists "$INSTDIR\${PRODUCT_EXE}" dirOk 0
@@ -104,11 +106,8 @@ Function DirectoryLeave
     StrCmp $1 "." dirNext
     StrCmp $1 ".." dirNext
     FindClose $0
-    MessageBox MB_ICONEXCLAMATION|MB_OK \
-      "$INSTDIR already contains other files.$\n$\nUninstalling FreeTunnel removes \
-this folder and everything in it, so FreeTunnel will not install into a folder \
-it does not own. Choose an empty or new folder."
-    Abort
+    Push "0"
+    Return
   dirNext:
     FindNext $0 $1
     Goto dirScan
@@ -116,6 +115,33 @@ it does not own. Choose an empty or new folder."
   FindClose $0
 
   dirOk:
+  Push "1"
+FunctionEnd
+
+Function DirectoryLeave
+  Call CheckInstallDir
+  Pop $0
+  StrCmp $0 "1" dirAccepted
+    MessageBox MB_ICONEXCLAMATION|MB_OK \
+      "$INSTDIR already contains other files.$\n$\nUninstalling FreeTunnel removes \
+this folder and everything in it, so FreeTunnel will not install into a folder \
+it does not own. Choose an empty or new folder."
+    Abort
+  dirAccepted:
+FunctionEnd
+
+; A silent install (/S) shows no pages, so the check above never ran for it and
+; /D= could put FreeTunnel into any folder at all — which the uninstaller would
+; later delete whole. Same check, with nobody to ask: the installer stops before
+; touching anything, with exit code 2 for whatever started it.
+Function .onInit
+  IfSilent 0 initDone
+    Call CheckInstallDir
+    Pop $0
+    StrCmp $0 "1" initDone
+    SetErrorLevel 2
+    Abort
+  initDone:
 FunctionEnd
 
 ;--------------------------------
@@ -125,29 +151,34 @@ FunctionEnd
 !insertmacro MUI_LANGUAGE "Russian"
 
 ;--------------------------------
-; Installer Section
+; Closing a running FreeTunnel
 
-Section "Install"
-  ; Close a running FreeTunnel before touching a single file. Without this the
-  ; install fails partway through on "file in use" — which is what everyone
-  ; upgrading over a running copy hit, whether they used the in-app updater or
-  ; downloaded the installer themselves.
-  ;
-  ; Politely first, and that matters: FreeTunnel holds a VPN tunnel and a
-  ; privileged helper, and a forced kill leaves both up with nothing left to shut
-  ; them down. taskkill without /F posts WM_CLOSE, which runs the app's own quit
-  ; path — tunnel down, helper stopped, tray icon gone.
+; Close every running FreeTunnel.exe and wait until none is left. Inserted into
+; both the install and the uninstall section; uses $0 and $1.
+;
+; Politely first, and that matters: FreeTunnel holds a VPN tunnel and a
+; privileged helper, and a forced kill leaves both up with nothing left to shut
+; them down. taskkill without /F posts WM_CLOSE, which runs the app's own quit
+; path — tunnel down, helper stopped, tray icon gone.
+;
+; Then wait for "no such process", which taskkill reports as exit code 128, and
+; for nothing else. Any non-zero code used to count as closed, but taskkill also
+; fails on a FreeTunnel.exe that has no window to post WM_CLOSE to: the elevated
+; helper, which is the same exe and never has one, and the app itself once its
+; window has closed while it is still shutting down. The loop then went straight
+; on to files both still held. The helper quits by itself once the app has gone,
+; after taking the tunnel down, so it is waited for like the app. A code this
+; does not expect only makes the wait run its full length before the forced kill.
+!macro CLOSE_FREETUNNEL
   DetailPrint "Closing FreeTunnel if it is running..."
   StrCpy $1 0
   closeLoop:
     nsExec::Exec 'taskkill /IM "${PRODUCT_EXE}"'
     Pop $0
-    ; Non-zero means "no such process": either it was never running or it has now
-    ; finished shutting down.
-    StrCmp $0 "0" 0 closed
+    StrCmp $0 "128" closed
     IntOp $1 $1 + 1
     ; ~10 s is generous for a clean shutdown; past that it is not coming down on
-    ; its own and a stuck process must not block the upgrade forever.
+    ; its own and a stuck process must not block the install or uninstall forever.
     IntCmp $1 20 forceClose "" forceClose
     Sleep 500
     Goto closeLoop
@@ -157,6 +188,17 @@ Section "Install"
     Pop $0
     Sleep 1000
   closed:
+!macroend
+
+;--------------------------------
+; Installer Section
+
+Section "Install"
+  ; Close a running FreeTunnel before touching a single file. Without this the
+  ; install fails partway through on "file in use" — which is what everyone
+  ; upgrading over a running copy hit, whether they used the in-app updater or
+  ; downloaded the installer themselves.
+  !insertmacro CLOSE_FREETUNNEL
 
   SetOutPath "$INSTDIR"
 
@@ -214,9 +256,21 @@ Section "Install"
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKLM "${PRODUCT_UNINST_KEY}" "EstimatedSize" $0
 
-  ; Windows Firewall: allow the VPN client through (both TCP and UDP)
+  ; Windows Firewall: let FreeTunnel reach its VPN server, over TCP and UDP
+  ; alike, where outgoing traffic is blocked unless a rule allows it.
+  ;
+  ; Outgoing only. An inbound rule used to sit beside this one, letting anyone on
+  ; any network, public Wi-Fi included, open connections to FreeTunnel.exe — the
+  ; elevated helper as much as the app. Nothing needs it: the app and the helper
+  ; listen on 127.0.0.1 only (the helper's channel, and the VPN core's DNS proxy),
+  ; the single-instance channel is a named pipe, and the TUN listener moves
+  ; packets through the Wintun driver, not through sockets. Loopback is not
+  ; filtered by the firewall, and replies to FreeTunnel's own connections to the
+  ; server are let in without a rule.
+  ;
+  ; Deleting by name removes every rule of that name in both directions, so this
+  ; is also what takes an earlier version's inbound rule away on upgrade.
   nsExec::Exec 'netsh advfirewall firewall delete rule name="${PRODUCT_NAME}"'
-  nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=in action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=out action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
 
   ; URL protocol handlers: route freetunnel:// and tt:// links to the app
@@ -239,6 +293,12 @@ SectionEnd
 ; Uninstaller Section
 
 Section "Uninstall"
+  ; The way the installer does it, and for the same reason. This used to be a
+  ; bare taskkill /F, which took the app and its elevated helper down mid-session
+  ; with the tunnel still up and nothing left to close it. First, too: it uses
+  ; $0, which holds the answer below.
+  !insertmacro CLOSE_FREETUNNEL
+
   ; Is this actually our install directory? The directory page accepts any
   ; existing folder (e.g. D:\Tools), and an unconditional recursive delete there
   ; would take everything else in it with us. Decide BEFORE removing the very
@@ -246,9 +306,6 @@ Section "Uninstall"
   StrCpy $0 "0"
   IfFileExists "$INSTDIR\${PRODUCT_EXE}" 0 +2
     StrCpy $0 "1"
-
-  ; Kill running instance
-  nsExec::Exec 'taskkill /F /IM ${PRODUCT_EXE}'
 
   ; Remove files
   Delete "$INSTDIR\${PRODUCT_EXE}"
