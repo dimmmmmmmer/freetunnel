@@ -196,6 +196,9 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     ag::Logger::set_log_level(m_logLevel);
     if (std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
         auto &tun = std::get<ag::TrustTunnelConfig::TunListener>(m_config->listener);
+        // Kept for the same reason as m_originalExclusions below: a later route
+        // list has to replace ours, not pile on top of it.
+        m_originalExcludedRoutes = tun.excluded_routes;
         tun.excluded_routes.insert(tun.excluded_routes.end(), m_extraExcludedRoutes.begin(), m_extraExcludedRoutes.end());
     }
     // Append extra exclusions (domain bypass rules)
@@ -395,6 +398,12 @@ void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excl
     m_extraExcludedRoutes = excludeRoutes;
     if (m_config.has_value() && std::holds_alternative<ag::TrustTunnelConfig::TunListener>(m_config->listener)) {
         auto &tun = std::get<ag::TrustTunnelConfig::TunListener>(m_config->listener);
+        // Restore the config's own routes first, exactly as setExtraExclusions()
+        // does for domains. Appending to what was already there kept every route
+        // of the previous list, so a config loaded before an edit would build its
+        // session with a route the user had just removed. Today the helper uses a
+        // loaded config straight away, which is luck this setter should not need.
+        tun.excluded_routes = m_originalExcludedRoutes;
         tun.excluded_routes.insert(tun.excluded_routes.end(), m_extraExcludedRoutes.begin(), m_extraExcludedRoutes.end());
     }
 }

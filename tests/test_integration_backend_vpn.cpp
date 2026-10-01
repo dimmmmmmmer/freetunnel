@@ -3,9 +3,11 @@
 
 #include <algorithm>
 
+#include <QJsonArray>
 #include <QJsonObject>
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
 #include <QSettings>
@@ -42,6 +44,10 @@ private slots:
     void aSwitchToAFailingServerSaysSoAndTheNextPickStillSwitches();
     void aSecondPickWhileTheFirstReadsItsPasswordWins();
     void anEditMadeWhileConnectingReachesTheSession();
+    void aProgramRuleReachesTheRunningSessionWithoutARebuild();
+    void aProgramRuleThatSwitchesTheModeRebuildsTheSession();
+    void anExcludedRouteEditRebuildsTheSession();
+    void anEarlierRebuildsSafetyNetLeavesTheNextOneAlone();
     void savingAFixedPasswordWhileConnectingStartsAgain();
     void aConnectRefusedWithoutAStateEndsConnecting();
     void aFailureBeforeTheSessionCameUpIsSaidInTheUsersTerms_data();
@@ -322,6 +328,18 @@ void TestIntegrationBackendVpn::togglingTheKillSwitchWhileConnectedReachesTheCor
              "flipping the kill switch on a live connection must reach the core, not just "
              "the settings file");
     QCOMPARE(backend.killSwitch(), true);
+    // And reach it in force. The core reads the kill switch when a session is
+    // built, so the running one has to be rebuilt; the message alone leaves the
+    // session as it was. A rebuild is skipped only when nothing the session was
+    // built with changed, and the kill switch is one of those things.
+    QVERIFY2(QTest::qWaitFor([&]() { return server.connectCount() == 2 && backend.connected(); },
+                             10000),
+             "the kill switch is read when a session is built, so turning it on while "
+             "connected has to rebuild the session");
+    backend.setKillSwitch(false);
+    QVERIFY2(QTest::qWaitFor([&]() { return server.connectCount() == 3 && backend.connected(); },
+                             10000),
+             "turning the kill switch off while connected has to rebuild the session too");
 
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
@@ -584,6 +602,235 @@ void TestIntegrationBackendVpn::anEditMadeWhileConnectingReachesTheSession()
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
     backend.prepareQuit();
+}
+
+// A program rule is read by the helper on every connection, so it reaches a
+// running session the moment it is sent. Each one used to rebuild the tunnel as
+// well: every open connection dropped and, with the kill switch on, nothing was
+// blocked while the new session came up — for a change that needed neither.
+void TestIntegrationBackendVpn::aProgramRuleReachesTheRunningSessionWithoutARebuild()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("apprule-live")));
+    configs.install();
+    AppSettings settings = loadAppSettings();
+    settings.killswitch_enabled = true;
+    settings.domain_bypass_enabled = true;
+    settings.vpn_mode = QStringLiteral("general");
+    saveAppSettings(settings);
+
+    MockHelperEnv env(QStringLiteral("backend-apprule-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(env.server.connectCount(), 1);
+
+    const auto sentRules = [&env]() {
+        return env.server.lastMessageFor(QStringLiteral("setAppRules"))
+                .value(QStringLiteral("rules"))
+                .toArray();
+    };
+    QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return sentRules().contains(QJsonValue(QStringLiteral("firefox"))); }, 5000));
+    backend.removeAppRule(0);
+    QVERIFY(QTest::qWaitFor([&]() { return sentRules().isEmpty(); }, 5000));
+    QTest::qWait(200); // a disconnect would follow the rules in the same burst
+    QVERIFY2(env.server.lastMessageFor(QStringLiteral("disconnect")).isEmpty(),
+             "a program rule tore the running tunnel down");
+    QCOMPARE(env.server.connectCount(), 1);
+    QVERIFY(backend.connected());
+
+    // What the session is built from still needs a new one: a domain rule.
+    QVERIFY(backend.addDomain(QStringLiteral("example.com")));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
+                             10000),
+             "a domain rule has to rebuild the session to reach it");
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// The exception to the test above. In "Through VPN" with no address rules, the
+// first program rule is what takes the core from the full tunnel to selective,
+// and removing the last one takes it back. Neither the domain list nor the
+// routes change, so the mode alone has to call for the new session. The way
+// back is the one that leaks: a session left selective with nothing listed
+// sends every connection around the tunnel while the window says Connected.
+void TestIntegrationBackendVpn::aProgramRuleThatSwitchesTheModeRebuildsTheSession()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("apprule-mode")));
+    configs.install();
+
+    MockHelperEnv env(QStringLiteral("backend-apprule-mode-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    // Set as the Split page sets them, so whatever decides the mode decides it here.
+    backend.setSplitEnabled(true);
+    backend.setVpnMode(QStringLiteral("selective"));
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    const auto sentSelective = [&env]() {
+        return env.server.lastMessageFor(QStringLiteral("setMode"))
+                .value(QStringLiteral("selective"))
+                .toBool();
+    };
+    QVERIFY(!sentSelective()); // nothing listed yet, so the full tunnel
+
+    QVERIFY(backend.addAppRule(QStringLiteral("firefox")));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
+                             10000),
+             "the first program rule in Through VPN has to rebuild the session as selective");
+    QVERIFY(sentSelective());
+
+    backend.removeAppRule(0);
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 3 && backend.connected(); },
+                             10000),
+             "removing the last program rule left the session selective with nothing listed");
+    QVERIFY(!sentSelective());
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// Excluded routes go into the system's routing when a session is built, so an
+// edit to them needs a new session as much as a domain rule does: a route added
+// or removed would otherwise stay out of the tunnel's routing until a reconnect.
+void TestIntegrationBackendVpn::anExcludedRouteEditRebuildsTheSession()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("route-edit")));
+    configs.install(); // split tunnelling off: the routes are the only thing that changes
+
+    MockHelperEnv env(QStringLiteral("backend-route-edit-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    const auto sentRoutes = [&env]() {
+        return env.server.lastMessageFor(QStringLiteral("setRoutes"))
+                .value(QStringLiteral("excluded"))
+                .toArray();
+    };
+    const QJsonValue route(QStringLiteral("198.51.100.0/24"));
+
+    QVERIFY(backend.addExcludedRoute(route.toString()));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
+                             10000),
+             "an added route has to rebuild the session to reach it");
+    QVERIFY(sentRoutes().contains(route));
+
+    backend.removeExcludedRoute(static_cast<int>(backend.excludedRoutes().indexOf(route.toString())));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 3 && backend.connected(); },
+                             10000),
+             "a removed route has to rebuild the session to leave it");
+    QVERIFY(!sentRoutes().contains(route));
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// Each rebuild arms a five-second net in case the old session's Disconnected
+// never arrives. Nothing disarmed it, so an earlier rebuild's net, still counting
+// down, found the flag a later rebuild had set and connected while that later
+// teardown was still under way. The old session's Disconnected then landed on a
+// switch that was no longer marked as one, and the UI read "Off" mid-switch.
+void TestIntegrationBackendVpn::anEarlierRebuildsSafetyNetLeavesTheNextOneAlone()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("safetynet")));
+    configs.install();
+
+    MockHelperEnv env(QStringLiteral("backend-safetynet-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+
+    QElapsedTimer sinceFirst;
+    sinceFirst.start();
+    backend.setKillSwitch(!backend.killSwitch()); // the first rebuild, answered at once
+    QVERIFY(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); },
+                            5000));
+    // Three seconds into the first net, so it runs out while the second rebuild's
+    // teardown is held, and three seconds before that rebuild's own net does.
+    QTest::qWait(3000);
+
+    bool readOff = false;
+    bool released = false;
+    bool oldSessionEnded = false;
+    QObject::connect(&backend, &Backend::stateChanged, &backend, [&]() {
+        if (released && !backend.connected())
+            oldSessionEnded = true;
+        if (!backend.connected() && !backend.connecting() && !backend.disconnecting())
+            readOff = true;
+    });
+    // The two nets are told apart by WHEN a connect attempt starts during the held
+    // teardown, not by whether one has by some fixed time: a stalled runner can
+    // reach any fixed time after the second net's own attempt, which that net is
+    // there to make. Timed by the Backend's log line for the attempt, which a net
+    // writes as it fires, rather than by when the mock gets round to reading it.
+    auto *logs = qobject_cast<QAbstractItemModel *>(backend.logModel());
+    QVERIFY(logs);
+    qint64 secondAt = -1;
+    qint64 attemptAt = -1;
+    QObject::connect(logs, &QAbstractItemModel::rowsInserted, &backend,
+                     [&](const QModelIndex &, int, int last) {
+                         if (secondAt < 0 || released || attemptAt >= 0)
+                             return;
+                         const QString line = logs->index(last, 0).data(LogModel::MsgRole).toString();
+                         if (line.contains(QStringLiteral("safetynet")))
+                             attemptAt = sinceFirst.elapsed();
+                     });
+    env.server.holdNextDisconnect();
+    secondAt = sinceFirst.elapsed();
+    backend.setKillSwitch(!backend.killSwitch()); // the second, whose teardown is slow
+
+    // Five-second timers are coarse and may run up to 5 % early, so the second
+    // rebuild's own net cannot fire before this.
+    const qint64 secondNetEarliest = secondAt + 4500;
+    // Well past the first net, which runs out by 5250 ms, and short of the second.
+    QVERIFY(QTest::qWaitFor([&]() { return sinceFirst.elapsed() > secondNetEarliest - 1500; }, 10000));
+    // qWaitFor looks before it handles events, so after a stall a net that is due
+    // already has not fired yet. Let it, so that it is counted here rather than
+    // after the release.
+    QCoreApplication::processEvents();
+    QVERIFY2(attemptAt < 0 || attemptAt >= secondNetEarliest,
+             qPrintable(QStringLiteral("the first rebuild's safety net started a connect %1 ms "
+                                       "into the second teardown, before that teardown was done")
+                                .arg(attemptAt - secondAt)));
+    // Only a stalled runner gets here with an attempt made, and it is the second
+    // net's. That one is meant to connect mid-teardown, and the "Off" the end of
+    // the teardown then shows is not what this test is about.
+    const bool secondNetFired = attemptAt >= 0;
+
+    released = true;
+    env.server.releaseDisconnect();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return oldSessionEnded && env.server.connectCount() == 3 && backend.connected(); },
+            10000));
+    const bool readOffMidRebuild = readOff;
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+    if (secondNetFired)
+        QSKIP("The runner stalled past the second rebuild's own safety net, so whether the UI "
+              "read Off mid-rebuild cannot be told here.");
+    QVERIFY2(!readOffMidRebuild, "the UI read Off in the middle of a rebuild");
 }
 
 // A wrong password makes the core retry, with the config it was handed, for as

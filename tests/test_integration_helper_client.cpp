@@ -17,6 +17,7 @@
 #include <QTcpServer>
 #include <QTemporaryDir>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,7 @@ private slots:
     void realClientRefusesPeerThatSkipsTheChallenge();
     void realClientRefusesAChallengeCarryingNoNonce();
     void securitySettingsAreSentAsValuesNotJustCommandNames();
+    void aHelperThatGoesAwayTakesItsSessionWithIt();
     void theElevatedArgvComesFromItsArgumentsAndNotTheEnvironment();
     void theAppImageIsUnpackedWhereNobodyElseCanWrite();
     void theHelpersOutputIsNotKeptInMemory();
@@ -586,6 +588,37 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
 
     qunsetenv("FT_TEST_HELPER_PORT");
     qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// sessionSettingsChanged() is how the GUI decides whether an edit made while
+// connected needs a new session, and "no session" must read as changed so the
+// next connect carries everything. A helper that goes away takes its session
+// with it, and the record of what that session was built from has to go too,
+// or the answer describes a session that no longer exists.
+void TestIntegrationHelperClient::aHelperThatGoesAwayTakesItsSessionWithIt()
+{
+    const QString token = QStringLiteral("session-gone-token");
+    auto server = std::make_unique<MockHelperServer>(token);
+    QVERIFY(server->listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server->port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    const auto clear = qScopeGuard([]() {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+    });
+
+    VpnHelperClient client;
+    client.setKillSwitch(true);
+    client.loadConfigFromToml(QStringLiteral("[endpoint]\nhostname = \"vpn.example\"\n"));
+    QVERIFY(client.sessionSettingsChanged()); // nothing has connected yet
+    client.connectVpn();
+    QTRY_VERIFY_WITH_TIMEOUT(server->connectCount() == 1, 10000);
+    QVERIFY(!client.sessionSettingsChanged());
+
+    server.reset(); // the helper exits, and its end of the socket closes
+    QTRY_VERIFY_WITH_TIMEOUT(!client.helperReady(), 5000);
+    QVERIFY2(client.sessionSettingsChanged(),
+             "the settings of a session whose helper is gone still read as the running ones");
 }
 
 QTEST_MAIN(TestIntegrationHelperClient)

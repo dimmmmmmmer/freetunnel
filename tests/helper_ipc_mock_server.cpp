@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include <utility>
+
 #include "vpn/vpn_helper_protocol.h"
 
 MockHelperServer::MockHelperServer(const QString &token, QObject *parent)
@@ -176,6 +178,10 @@ void MockHelperServer::handle(const QJsonObject &c)
         return;
     }
 
+    if (m_holding) {
+        m_held.append(c);
+        return;
+    }
     m_lastCmd = cmd;
     // Keep the whole message, not just its name. The settings commands used to be
     // swallowed here after recording the verb, so a test could confirm that a
@@ -212,6 +218,9 @@ void MockHelperServer::handle(const QJsonObject &c)
         send(QJsonObject{{"ev", "state"}, {"state", "Connected"}});
         send(QJsonObject{{"ev", "stats"}, {"up", 1024.0}, {"down", 2048.0}});
         m_tunnelUp = true;
+    } else if (cmd == QLatin1String("disconnect") && m_holdNextDisconnect) {
+        m_holdNextDisconnect = false;
+        m_holding = true; // answered, and the rest handled, by releaseDisconnect()
     } else if (cmd == QLatin1String("disconnect")) {
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnecting"}});
         if (m_tunnelUp && !m_teardownError.isEmpty())
@@ -221,6 +230,26 @@ void MockHelperServer::handle(const QJsonObject &c)
     } else if (cmd == QLatin1String("quit")) {
         emit quitRequested();
     }
+}
+
+void MockHelperServer::releaseDisconnect()
+{
+    m_holdNextDisconnect = false;
+    if (!m_holding)
+        return;
+    m_holding = false;
+    handle(QJsonObject{{"cmd", "disconnect"}});
+    const QList<QJsonObject> held = std::exchange(m_held, {});
+    for (const QJsonObject &c : held)
+        handle(c);
+}
+
+QStringList MockHelperServer::heldCommands() const
+{
+    QStringList cmds;
+    for (const QJsonObject &c : m_held)
+        cmds << c.value("cmd").toString();
+    return cmds;
 }
 
 bool mockHelperHandshake(MockHelperServer &server, QTcpSocket &client, const QString &token)

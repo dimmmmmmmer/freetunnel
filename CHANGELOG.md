@@ -101,6 +101,13 @@ compare link at the bottom of its release notes.
 - **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
   AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
   no longer finds the new version; FreeTunnel's own updater still does.
+- **The kill switch says what it covers.** Its line in Settings said it blocked
+  traffic outside the VPN, which it does while a connection that dropped is
+  being brought back. Nothing is blocked while the VPN is off or stopped by an
+  error, and the block lifts for a moment whenever a session is built anew, as
+  when you switch configs or change split tunnelling while connected. The line
+  now reads "block traffic if the VPN drops", and the README says when it
+  applies.
 - **Settings says that its excluded routes come on top of a config's own.** Each
   config excludes some routes itself: one made in FreeTunnel or from a link keeps
   local networks and multicast outside the tunnel. The list in Settings is added
@@ -127,6 +134,18 @@ compare link at the bottom of its release notes.
   until a few kilobytes had gathered or the connection ended, so a warning could
   arrive long after it mattered, and the last ones before a disconnect never
   arrived at all.
+- **A program rule takes effect without reconnecting.** Adding or removing a
+  program on the Split tunnelling page while connected rebuilt the whole tunnel,
+  dropping every open connection, and with the kill switch on nothing was
+  blocked while it came back. The rule now applies from the program's next
+  connection and the tunnel stays up. It still reconnects when a rule changes
+  what the tunnel carries as a whole, as adding the first program to "Through
+  VPN", or removing the last, does when no addresses are listed there. A domain
+  added while split tunnelling is off no longer reconnects either.
+- **Two changes made close together no longer show "Off" mid-switch.**
+  Switching configs, or changing split tunnelling or the kill switch, twice
+  within five seconds while connected could show "Off" for a moment during the
+  second change when the old tunnel was slow to go down.
 - **Config files written by hand are read the way the VPN core reads them.** A
   setting may be indented and its name may be in quotes, as in
   `"password" = "…"`; a section's name may be in quotes too, as in

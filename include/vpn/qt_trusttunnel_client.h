@@ -193,16 +193,17 @@ private:
     std::unique_ptr<ag::TrustTunnelClient> m_client;
     std::unique_ptr<ag::AutoNetworkMonitor> m_networkMonitor;
     // Guards the config working set: m_config, m_lastConfigToml,
-    // m_extraExcludedRoutes, m_extraExclusions, m_originalExclusions,
-    // m_selectiveMode, m_killSwitch, m_loggingEnabled, m_logLevel and
-    // m_coreLogPath. The IPC setters run on this object's thread while the
-    // connect thread moves the config into the core client — the
+    // m_extraExcludedRoutes, m_originalExcludedRoutes, m_extraExclusions,
+    // m_originalExclusions, m_selectiveMode, m_killSwitch, m_loggingEnabled,
+    // m_logLevel and m_coreLogPath. The IPC setters run on this object's
+    // thread while the connect thread moves the config into the core client — the
     // unsynchronised move-out used to corrupt the heap in a root process.
     // Never held across a blocking core call, so it cannot deadlock the join.
     mutable std::mutex m_configMutex;
     std::optional<ag::TrustTunnelConfig> m_config;
     QString m_lastConfigToml; // in-memory config for reconnect without on-disk secrets
     std::vector<std::string> m_extraExcludedRoutes;
+    std::vector<std::string> m_originalExcludedRoutes; // routes from config file before our additions
     std::vector<std::string> m_extraExclusions;
     std::string m_originalExclusions; // exclusions from config file before our additions
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)

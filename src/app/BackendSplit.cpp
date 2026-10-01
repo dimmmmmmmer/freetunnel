@@ -539,8 +539,16 @@ void Backend::reconnectActiveConfig() {
     // Reconnect once the old session has actually reached Disconnected (driven
     // from onVpnClientStateChanged), not after a fixed delay that could fire
     // mid-teardown and leave the previous tunnel up. The timer is only a safety
-    // net for a Disconnected event that never arrives.
-    QTimer::singleShot(5000, this, [this]() { firePendingReconnect(); });
+    // net for a Disconnected event that never arrives — and only for THIS
+    // teardown. An earlier rebuild's net, still counting down, used to find the
+    // pending flag a later rebuild had set and connect while that teardown was
+    // still under way; its Disconnected then landed on a switch no longer marked
+    // as one, and the UI read "Off" in the middle of it.
+    const quint64 reconnectGen = ++m_reconnectGen;
+    QTimer::singleShot(5000, this, [this, reconnectGen]() {
+        if (reconnectGen == m_reconnectGen)
+            firePendingReconnect();
+    });
 }
 
 void Backend::firePendingReconnect() {
@@ -559,15 +567,25 @@ void Backend::firePendingReconnect() {
 }
 
 void Backend::reapplyIfConnected() {
-    // Rules, mode and the kill switch are sent with a connect. Before one reaches
-    // a running helper (the credential read, the teardown of a switch, a helper
-    // still starting) the edit goes out with it. After that the session holds its
-    // own copy and only a rebuild applies the edit — connected or still
-    // connecting. Waiting for Connected used to leave an edit made while
+    // Address rules, routes, mode and the kill switch are sent with a connect.
+    // Before one reaches a running helper (the credential read, the teardown of a
+    // switch, a helper still starting) the edit goes out with it. After that the
+    // session holds its own copy and only a rebuild applies the edit — connected
+    // or still connecting. Waiting for Connected used to leave an edit made while
     // connecting on screen and out of the tunnel until a manual reconnect.
     if (m_inConnect || m_awaitingToml || m_pendingReconnect)
         return;
     if (!m_connected && !m_client.helperReady())
+        return;
+    // But only an edit to something the session was built with needs a new one.
+    // Program rules have already gone out (applySplitRules) and the helper reads
+    // them on every connection, so a rebuild for one only dropped every open
+    // connection — and, with the kill switch on, the traffic block for as long as
+    // the rebuild took. The same holds for an edit that changes nothing the
+    // session holds, such as a domain added while split tunnelling is off. A
+    // program rule that switches the mode does change it: the first one in
+    // "Through VPN" with no address rules, or the last one taken out of it.
+    if (!m_client.sessionSettingsChanged())
         return;
     reconnectActiveConfig();
 }

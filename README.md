@@ -81,6 +81,21 @@ their place: a config made in FreeTunnel or imported from a link already keeps
 local networks and multicast outside the tunnel, and emptying the list in
 Settings does not change that.
 
+## Kill switch
+
+The kill switch in **Settings** is for a connection that drops: while
+FreeTunnel brings it back, connections that would have gone out over the open
+network are refused instead.
+
+The block belongs to the running VPN session, so it is not a firewall of its
+own. Nothing is blocked while the VPN is off or after an error has stopped it,
+and the block lifts for the moment it takes to build a session anew: when you
+switch configs, change split tunnelling or the kill switch while connected, or
+when FreeTunnel starts over after the server stopped answering. A program rule
+is the exception among those changes: it applies without a new session. The
+one time it does not is under *Through VPN* with no addresses listed, where the
+first program added, or the last one removed, changes what the tunnel carries.
+
 ## External control
 
 - **Commands and links**: `freetunnel://toggle`, `freetunnel://connect`,

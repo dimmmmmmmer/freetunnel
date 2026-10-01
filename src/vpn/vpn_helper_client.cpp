@@ -297,6 +297,18 @@ void VpnHelperClient::connectVpn() {
     c["loggingEnabled"] = m_loggingEnabled;
     c["configToml"] = m_configToml; // inline only — the helper refuses file paths
     send(c);
+    // Every setting reached the helper before this connect did (they are sent as
+    // they change, and all of them again on "ready"), so this is what the
+    // session about to be built is built from.
+    m_sessionBuiltWith = sessionSettings();
+}
+
+VpnHelperClient::SessionSettings VpnHelperClient::sessionSettings() const {
+    return {m_exclusions, m_excludedRoutes, m_selective, m_killSwitch};
+}
+
+bool VpnHelperClient::sessionSettingsChanged() const {
+    return !m_sessionBuiltWith || *m_sessionBuiltWith != sessionSettings();
 }
 
 void VpnHelperClient::disconnectVpn() {
@@ -314,10 +326,12 @@ void VpnHelperClient::disconnectVpn() {
     }
     if (!m_sock) return;
     QJsonObject c; c["cmd"] = "disconnect"; send(c);
+    m_sessionBuiltWith.reset();
 }
 
 void VpnHelperClient::abortStartup() {
     m_connectPending = false;
+    m_sessionBuiltWith.reset(); // a helper going away takes its session with it
     m_starting = false;
     m_helloAcked = false;
     m_peerProven = false;
@@ -467,6 +481,7 @@ void VpnHelperClient::wireHelperSocket(bool testHelper)
         m_helloAcked = false;
         m_peerProven = false;
         m_starting = false;
+        m_sessionBuiltWith.reset(); // the helper took its session with it
         if (m_state != State::Disconnected)
             setState(State::Disconnected);
     });
