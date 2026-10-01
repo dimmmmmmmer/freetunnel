@@ -160,36 +160,51 @@ The update check trusts the GitHub Application Programming Interface (API)
 response for *which* release exists. Everything it names is then checked: asset
 Uniform Resource Locators (URLs) must sit under this repository's release
 download path for the advertised tag, `SHA256SUMS.txt` must carry a valid Ed25519
-signature from the compiled-in key, and the installer's SHA-256 must appear in
-that manifest.
+signature from the compiled-in key, the manifest must name the version being
+offered, and the installer's SHA-256 must appear in that manifest. Only a version
+newer than the installed one is offered at all.
 
-None of that used to establish *which version* the signature belonged to. The
-signed material is the manifest, and neither it nor the asset names carried a
-version — `freetunnel-linux-x86_64.deb` is the same name in every release. So an
-attacker able to forge the API response (a compromised transport to
-`api.github.com`, not a passive network observer) could present an **older, real**
-release: its tag, its assets, its manifest and its genuine signature. Every check
-passed, because everything was authentic — just stale. `isVersionNewer()` kept it
-above the version already installed, so it could not roll a user backwards; the
-harm was pinning them short of the newest build, and so short of a fix they were
-waiting for.
+What is left depends on what an attacker can impersonate. Without a certificate
+the machine trusts, an attacker on the network can at most block the check.
+With one:
 
-The manifest now opens with a `version=X` line, inside the bytes the signature
-covers, and the updater refuses a manifest whose version is not the one being
-offered. Two details are load-bearing:
+- **Forging the API response alone** (a TLS-intercepting proxy the machine
+  trusts, or a compromised certificate authority, used against
+  `api.github.com`). The asset URLs must point at the advertised tag's download
+  path, and the real `github.com` serves only that release's real assets there.
+  So the attacker chooses which genuine release is on offer — any one newer than
+  the installed build, not necessarily the newest — or claims there is none.
+  That can hold a user back, short of a fix they are waiting for. It cannot
+  install anything the release job did not publish, nor move a user backwards.
+  This is inherent in asking the API which release is newest: no check on the
+  client tells a withheld release from one that does not exist.
+- **Impersonating `github.com` as well** (the same capability, used against the
+  download host and the host it redirects to). Now any bytes can be served under
+  any path, so the tag in the URL binds nothing, and the asset names carry no
+  version — `freetunnel-linux-x86_64.deb` is the same name in every release. What
+  is left is the signed manifest. Since 1.1.8 the release job writes a
+  `#version=X` line into it, inside the bytes the signature covers, and the
+  updater refuses a manifest whose version is not the one being offered. A
+  manifest signed for one release cannot be served as another's, and this
+  attacker too is left choosing among genuine releases newer than the installed
+  one.
 
-- **Written as `#version=X`.** The `#` is for the people who verify the file by
-  hand: `sha256sum -c` calls any line it cannot parse "improperly formatted",
-  which reads like tampering and fails outright under `--strict`. It tolerates
-  comments. The absence of a space keeps the line a single field, and the manifest
-  parser in every already-shipped client skips lines with fewer than two fields —
-  so old clients neither trip over it nor mistake it for an asset name.
-- **A missing version is accepted.** Releases published before this existed have
-  no such line. Refusing them would strand exactly the clients this protects on
-  the build they already have, which is worse than the replay it prevents — a
-  deployed client cannot be taught to enforce anything by changing the server
-  side. The check therefore tightens by itself as pre-migration releases age out
-  of being the newest thing on offer.
+Releases before 1.1.8 have no version line. FreeTunnel 1.1.8 to 1.2.2 accepted a
+manifest without one, so that those releases stayed installable, and that undid
+the binding against the second attacker: any pre-1.1.8 release, offered under a
+forged higher tag, passed every check — a rollback onto a build with known holes.
+The updater now refuses a manifest that names no version. No client running that
+check can be stranded by it, because it is only ever offered a newer release, and
+every release since 1.1.8 has the line. Clients from before this change, 1.2.2
+and earlier, keep accepting such manifests until they update.
+
+The line is written as `#version=X`, and the spelling is load-bearing. The `#`
+is for the people who verify the file by hand: `sha256sum -c` calls any line it
+cannot parse "improperly formatted", which reads like tampering and fails
+outright under `--strict`. It tolerates comments. The absence of a space keeps
+the line a single field, and the manifest parser in every already-shipped client
+skips lines with fewer than two fields — so old clients neither trip over it nor
+mistake it for an asset name.
 
 ## Deep links (`tt://`)
 
@@ -205,7 +220,7 @@ downloads, documents, or desktop directories; symlinks are rejected.
 
 | Threat | Mitigation |
 | --- | --- |
-| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature, bound to the release version |
+| Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature naming its release version; at worst a withheld update, never an unsigned or older build |
 | Malicious `tt://` link | TLV parser limits; cred store separation |
 | Other local user | Socket access-control list (ACL) + loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb |

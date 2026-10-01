@@ -179,4 +179,17 @@ QString runningAppImagePath()
     return runningAppImage().path;
 }
 
+RunningAppImage updatableAppImage()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    const QString override = qEnvironmentVariable("FT_TEST_UPDATER_APPIMAGE");
+    if (!override.isEmpty()) {
+        const bool extracted =
+                qEnvironmentVariable("FT_TEST_UPDATER_APPIMAGE_EXTRACTED") == QLatin1String("1");
+        return {override, extracted};
+    }
+#endif
+    return runningAppImage();
+}
+
 } // namespace freetunnel

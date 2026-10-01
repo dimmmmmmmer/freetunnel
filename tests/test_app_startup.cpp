@@ -46,6 +46,7 @@ private slots:
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
+    void wireInstanceServerHandsTheListenerToBackend();
 
 private:
     // Every test gets its own socket so a listener left over from the previous
@@ -603,6 +604,19 @@ void TestAppStartup::wireInstanceServerWithoutTokenRefusesEveryCommand()
                                            QStringLiteral("tok"),
                                            QStringLiteral("freetunnel://connect")));
     QCOMPARE(spy.count(), 1);
+}
+
+// Replacing a running AppImage closes this listener for the new build and, if
+// that build does not start, listens on it again (Backend::applyLinuxUpdate).
+// Backend is handed it here. It used to look for it among the application's
+// children, which finds nothing, or the wrong listener, without a word.
+void TestAppStartup::wireInstanceServerHandsTheListenerToBackend()
+{
+    Backend backend;
+    QLocalServer server;
+    QCOMPARE(backend.instanceServer(), nullptr);
+    freetunnel::wireInstanceServer(&server, backend, nullptr, QStringLiteral("tok"));
+    QCOMPARE(backend.instanceServer(), &server);
 }
 
 QTEST_MAIN(TestAppStartup)

@@ -59,9 +59,22 @@ The in-app updater requires:
 3. Secure Hash Algorithm 256-bit (SHA-256) match of the downloaded installer
    against the published checksum list (`SHA256SUMS.txt`)
 4. A `#version=` line inside the signed bytes naming the release the manifest
-   belongs to — without it an authentic manifest from an **older** release could
-   be replayed to pin a user short of the newest build
-   (see [docs/security-threats.md](docs/security-threats.md))
+   belongs to, equal to the version being offered. A manifest without one is
+   refused; every release since 1.1.8 has it. Without this an authentic manifest
+   from another release could be served as this one's — including one from
+   before 1.1.8, offered under a higher version number to roll a user back
+
+Asset Uniform Resource Locators (URLs) must also sit under this repository's
+release download path for the release being offered, and only a version newer
+than the installed one is offered at all. What these leave to an attacker who can
+tamper with the update traffic is to withhold updates, or to offer a genuine
+release that is newer than the installed one but not the newest; never an
+unsigned build, nor one older than the installed one. That takes impersonating
+GitHub over TLS (a certificate the machine trusts), not merely watching the
+network. FreeTunnel 1.2.2 and earlier accepted a manifest without the version
+line (before 1.1.8 they did not read it at all), which left them open to the
+rollback above from an attacker who could impersonate `github.com` itself. See
+[docs/security-threats.md](docs/security-threats.md).
 
 The release job signs `SHA256SUMS.txt` with the `ED25519_SIGNING_KEY` GitHub
 Actions secret (OpenSSL (open-source TLS and cryptography toolkit) Ed25519

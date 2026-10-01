@@ -2,6 +2,7 @@
 #include "mock_http_server.h"
 
 #include <QTcpSocket>
+#include <QTimer>
 
 MockHttpServer::MockHttpServer(QObject *parent)
     : QObject(parent)
@@ -52,20 +53,28 @@ void MockHttpServer::onNewConnection()
             const Route route = m_routes.value(path);
             if (route.silent)
                 return;
-            const QByteArray body = route.body;
-            QByteArray response = QByteArrayLiteral("HTTP/1.1 ");
-            response += QByteArray::number(route.status);
-            response += route.status == 200 ? QByteArrayLiteral(" OK\r\n")
-                                          : QByteArrayLiteral(" Error\r\n");
-            response += QByteArrayLiteral("Content-Type: ");
-            response += route.contentType;
-            response += QByteArrayLiteral("\r\nContent-Length: ");
-            response += QByteArray::number(body.size());
-            response += QByteArrayLiteral("\r\nConnection: close\r\n\r\n");
-            response += body;
-            sock->write(response);
-            sock->flush();
-            sock->disconnectFromHost();
+            if (route.delayMs > 0)
+                QTimer::singleShot(route.delayMs, sock, [sock, route]() { respond(sock, route); });
+            else
+                respond(sock, route);
         });
     }
+}
+
+void MockHttpServer::respond(QTcpSocket *sock, const Route &route)
+{
+    const QByteArray body = route.body;
+    QByteArray response = QByteArrayLiteral("HTTP/1.1 ");
+    response += QByteArray::number(route.status);
+    response += route.status == 200 ? QByteArrayLiteral(" OK\r\n")
+                                  : QByteArrayLiteral(" Error\r\n");
+    response += QByteArrayLiteral("Content-Type: ");
+    response += route.contentType;
+    response += QByteArrayLiteral("\r\nContent-Length: ");
+    response += QByteArray::number(body.size());
+    response += QByteArrayLiteral("\r\nConnection: close\r\n\r\n");
+    response += body;
+    sock->write(response);
+    sock->flush();
+    sock->disconnectFromHost();
 }

@@ -48,16 +48,15 @@ QString sha256HexOfFile(const QString &filePath)
     QFile f(filePath);
     if (!f.open(QIODevice::ReadOnly))
         return QString();
-    // Release installers are bounded; single read avoids chunked-loop static analysis noise.
-    constexpr qint64 kMaxBytes = 512LL * 1024 * 1024;
-    const qint64 size = f.size();
-    if (size < 0 || size > kMaxBytes)
-        return QString();
-    const QByteArray data = f.readAll();
-    if (data.size() != size)
-        return QString();
+    // Streamed from the file. Reading it whole put a 100+ MB installer in memory
+    // in one piece, which the download path is written never to do, and the cap
+    // that bounded that turned any installer over 512 MB into an empty hash —
+    // reported to the user as a SHA-256 mismatch, as though it had been tampered
+    // with. addData() reads to the end and says whether it got there, so a read
+    // error still fails the check.
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    hash.addData(data);
+    if (!hash.addData(&f))
+        return QString();
     return QString::fromLatin1(hash.result().toHex());
 }
 

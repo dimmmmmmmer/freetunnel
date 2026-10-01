@@ -50,8 +50,12 @@ public:
                            const QString &currentVersion,
                            QObject *parent = nullptr);
 
-    /// Trigger an update check immediately.
+    /// Trigger an update check immediately. While one is already running this
+    /// does nothing: the running check's answer is the one to wait for.
     void checkNow();
+
+    /// Delete whatever earlier runs left in the update staging directory.
+    void discardStagedDownloads();
 
     /// Download the latest release installer after updateAvailable, verifying
     /// against SHA256SUMS.txt when available.
@@ -91,6 +95,7 @@ private:
     QByteArray m_checksumsData;
     QByteArray m_signatureData;
     QString m_downloadPath;
+    bool m_checkInFlight = false;
     // Installer download is streamed to disk so a 100+ MB asset never sits in
     // RAM in one piece; the SHA-256 is then taken from the finished file.
     std::unique_ptr<QFile> m_installerOut;

@@ -8,6 +8,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <QPointer>
 
 #include <functional>
 #include <optional>
@@ -26,6 +27,7 @@ class QHostAddress;
 #include "vpn/vpn_helper_client.h"
 
 class QHotkey;
+class QLocalServer;
 class UpdateChecker;
 
 namespace freetunnel {
@@ -250,6 +252,11 @@ public:
     Q_INVOKABLE void downloadUpdate();
     Q_INVOKABLE void openLatestRelease();
     Q_INVOKABLE void openUrl(const QString &url);
+    // The single-instance listener (startSingleInstanceServer), handed over by
+    // wireInstanceServer(). Replacing a running AppImage gives up its name for the
+    // new build, and listens on it again if that build does not start.
+    void setInstanceServer(QLocalServer *server);
+    QLocalServer *instanceServer() const;
     // Begin a native window move (drag). `window` is the QML Window root.
     Q_INVOKABLE void startWindowDrag(QObject *window);
 
@@ -349,6 +356,7 @@ private:
     // Install a verified Linux download: replace the running .AppImage and
     // restart, or explain why the user has to finish the job themselves.
     void applyLinuxUpdate(const QString &path);
+    void failAppImageUpdate(std::function<QString()> words, const QString &path);
 #endif
     void restoreReplacedConfig(const QString &target, const QByteArray &previousToml);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
@@ -401,6 +409,8 @@ private:
     void noteUnavailableHotkeys();
 
     UpdateChecker *m_updater = nullptr;
+    // Owned by the application, not by us; see setInstanceServer().
+    QPointer<QLocalServer> m_instanceServer;
     bool m_updateCheckUserInitiated = false;
     QString m_updateState, m_updateMessage, m_latestVersion, m_latestUrl;
     std::function<QString()> m_updateWords; // says m_updateMessage; see setUpdateMessage()
