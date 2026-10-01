@@ -57,6 +57,7 @@ private slots:
     void aSharedDirectoryIsNeverOneApplication_data();
     void aSquirrelProgramIsOneProgramAcrossItsUpdates();
     void aFolderCalledAppTwoIsAVersionOnlyInASquirrelInstall();
+    void whetherAFolderHoldsTheUpdaterIsRememberedForAWhile();
 };
 
 // The ordinary case: the user types "firefox" and means firefox, wherever the
@@ -374,10 +375,12 @@ void TestAppRules::aFolderCalledAppTwoIsAVersionOnlyInASquirrelInstall()
     // The program named after the folder is.
     QCOMPARE(freetunnel::squirrelUnversionedPath(same), rule);
 
-    // With Squirrel's updater in the folder, so is every program in it.
+    // With Squirrel's updater in the folder, so is every program in it. (Put
+    // there after the folder was asked about, which is remembered for a while.)
     QFile updater(QDir(QDir::fromNativeSeparators(root)).filePath(QStringLiteral("Update.exe")));
     QVERIFY(updater.open(QIODevice::WriteOnly));
     updater.close();
+    freetunnel::forgetSquirrelUpdaters();
     QCOMPARE(freetunnel::squirrelUnversionedPath(other),
              root + QDir::separator() + QStringLiteral("bar.exe"));
 #if defined(Q_OS_WIN)
@@ -387,6 +390,50 @@ void TestAppRules::aFolderCalledAppTwoIsAVersionOnlyInASquirrelInstall()
     QVERIFY(!freetunnel::appMatchesRules(appAt(same), {rule}));
     QVERIFY(!freetunnel::appMatchesRules(appAt(other), {rule}));
 #endif
+}
+
+// On Windows the helper asks whether a version directory's folder holds
+// Update.exe for every connection, about the program and about each rule, and
+// asked the disk each time. The answer only changes when Squirrel installs or
+// removes something, so it is remembered for a while per folder, in a table
+// that is emptied rather than grown once it holds 64 folders.
+void TestAppRules::whetherAFolderHoldsTheUpdaterIsRememberedForAWhile()
+{
+    freetunnel::forgetSquirrelUpdaters();
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = QDir::toNativeSeparators(dir.filePath(QStringLiteral("tool")));
+    const QString program = root + QDir::separator() + QStringLiteral("app-3")
+            + QDir::separator() + QStringLiteral("helper.exe");
+    const QString unversioned = root + QDir::separator() + QStringLiteral("helper.exe");
+    QVERIFY(QDir().mkpath(QDir::fromNativeSeparators(root) + QStringLiteral("/app-3")));
+    QFile updater(QDir(QDir::fromNativeSeparators(root)).filePath(QStringLiteral("Update.exe")));
+    QVERIFY(updater.open(QIODevice::WriteOnly));
+    updater.close();
+    QCOMPARE(freetunnel::squirrelUnversionedPath(program), unversioned);
+
+    // Gone from the disk, and still the answer: it was not looked for again.
+    QVERIFY(updater.remove());
+    QVERIFY2(freetunnel::squirrelUnversionedPath(program) == unversioned,
+             "the folder was looked at again on the next question");
+
+    // But only so many folders are remembered. Asked about 64 others, the table
+    // is emptied, and this folder is looked at afresh.
+    for (int i = 0; i < 64; ++i) {
+        const QString elsewhere = QDir::toNativeSeparators(
+                dir.filePath(QStringLiteral("other-%1/app-1/x.exe").arg(i)));
+        QVERIFY(freetunnel::squirrelUnversionedPath(elsewhere).isEmpty());
+    }
+    QVERIFY2(freetunnel::squirrelUnversionedPath(program).isEmpty(),
+             "the table grew past its bound instead of starting over");
+
+    // And forgetting is immediate.
+    QVERIFY(updater.open(QIODevice::WriteOnly));
+    updater.close();
+    QVERIFY(freetunnel::squirrelUnversionedPath(program).isEmpty());
+    freetunnel::forgetSquirrelUpdaters();
+    QCOMPARE(freetunnel::squirrelUnversionedPath(program), unversioned);
+    freetunnel::forgetSquirrelUpdaters();
 }
 
 QTEST_MAIN(TestAppRules)

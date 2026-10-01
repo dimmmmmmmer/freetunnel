@@ -3,7 +3,11 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
+
+#include <chrono>
+#include <mutex>
 
 namespace freetunnel {
 
@@ -159,6 +163,61 @@ QString unversionedAppPath(const QString &path)
     return QDir::toNativeSeparators(QDir(directory.path()).filePath(file.fileName()));
 }
 
+namespace {
+
+// Whether a folder holds Squirrel's Update.exe, remembered per folder for a
+// while. On Windows the helper asks for every connection, about the program
+// and about each rule, and the answer only changes when Squirrel installs or
+// removes an application, so a file check each time bought nothing. Bounded:
+// a full table is emptied rather than grown, since what is asked about is the
+// handful of programs and rules in use, and anything more is churn.
+class SquirrelUpdaterCache {
+public:
+    static constexpr std::chrono::seconds kFreshFor{30};
+    static constexpr qsizetype kMaxFolders = 64;
+
+    static SquirrelUpdaterCache &instance()
+    {
+        static SquirrelUpdaterCache cache;
+        return cache;
+    }
+
+    bool updaterIn(const QString &root)
+    {
+        const QString key = appPathCaseSensitivity() == Qt::CaseInsensitive ? root.toLower() : root;
+        const auto now = std::chrono::steady_clock::now();
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            const auto it = m_folders.constFind(key);
+            if (it != m_folders.cend() && now - it->checkedAt < kFreshFor)
+                return it->present;
+        }
+        // Outside the lock: a slow disk must not hold up every other connection.
+        const bool present = QFileInfo(QDir(root).filePath(QStringLiteral("Update.exe"))).isFile();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_folders.size() >= kMaxFolders && !m_folders.contains(key))
+            m_folders.clear();
+        m_folders.insert(key, Entry{present, now});
+        return present;
+    }
+
+    void clear()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_folders.clear();
+    }
+
+private:
+    struct Entry {
+        bool present = false;
+        std::chrono::steady_clock::time_point checkedAt;
+    };
+    std::mutex m_mutex;
+    QHash<QString, Entry> m_folders;
+};
+
+} // namespace
+
 QString squirrelUnversionedPath(const QString &path)
 {
     const QString unversioned = unversionedAppPath(path);
@@ -170,9 +229,14 @@ QString squirrelUnversionedPath(const QString &path)
     const QFileInfo program(QDir::fromNativeSeparators(unversioned));
     const QString root = program.path();
     if (program.completeBaseName().compare(QFileInfo(root).fileName(), Qt::CaseInsensitive) == 0
-        || QFileInfo(QDir(root).filePath(QStringLiteral("Update.exe"))).isFile())
+        || SquirrelUpdaterCache::instance().updaterIn(root))
         return unversioned;
     return {};
+}
+
+void forgetSquirrelUpdaters()
+{
+    SquirrelUpdaterCache::instance().clear();
 }
 
 namespace {
