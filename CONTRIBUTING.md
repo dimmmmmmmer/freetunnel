@@ -7,7 +7,8 @@ testing, translations, and CI.
 
 - **TrustTunnelClient** upstream checkout ([TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient))
 - CMake 3.16+, C++20 compiler (clang recommended for Linux)
-- Qt 6.8+ (Gui, Qml, Quick, Network, Svg)
+- Qt 6.8+ (Gui, Qml, Quick, Network, Svg); CI and the releases use 6.8.3, and the
+  translation check needs exactly that (see Translations)
 - Python 3 + Conan 2.31.1 (for upstream native deps — same pin as CI)
 - Ninja (recommended)
 
@@ -73,7 +74,7 @@ pip install -r requirements.txt "conan==2.31.1"  # same pin as CI
 From the **upstream root** (not `FreeTunnel/`):
 
 ```bash
-export QT_ROOT_DIR=/path/to/Qt/6.8.x/gcc_64   # or macOS/Windows Qt prefix
+export QT_ROOT_DIR=/path/to/Qt/6.8.3/gcc_64   # or macOS/Windows Qt prefix
 
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -251,16 +252,28 @@ Strings use `qsTr()` in QML and `tr()` in C++. Russian is in `i18n/freetunnel_ru
 ```
 
 This runs `lupdate` (extract new/changed strings) and `lrelease` (compile
-`.qm`). Requires Qt linguist tools (`lupdate`, `lrelease`) on PATH — typically
-`$QT_ROOT_DIR/bin/lupdate` and `lupdate`.
+`.qm`). It takes Qt's linguist tools from `$QT_ROOT_DIR/bin` when that is set,
+and from PATH otherwise. Use Qt 6.8.3, the exact version CI pins (`QT_VER` in
+the workflows): CI rebuilds the `.ts` and the `.qm` with it and compares the
+bytes, and another Qt's tools, a later patch release included, may write
+different ones. Both scripts print the tools' versions, and warn when they are
+not that one.
 
-Edit `i18n/freetunnel_ru.ts` in Qt Linguist or by hand, then run the script
-again to refresh `freetunnel_ru.qm`.
+Edit `i18n/freetunnel_ru.ts` in Qt Linguist or by hand, mark each translation
+finished (in Linguist, or by removing `type="unfinished"`), then run the script
+again to refresh `freetunnel_ru.qm`. The app embeds the committed `.qm`, not the
+`.ts`.
 
 CI runs `scripts/i18n-verify.sh` on every push/PR (see
 `.github/workflows/security.yml`) to ensure the catalog matches the current
-QML/C++ sources. The script scans only `qml/`, `src/`, `include/`, and
-`main.cpp` — not test trees or FetchContent dependencies.
+QML/C++ sources, the committed `.qm` is the one built from the `.ts`, and no
+translation is left unfinished (lrelease ships those as if they were done). The
+script scans only `qml/`, `src/`, `include/`, and `main.cpp` — not test trees or
+FetchContent dependencies.
+
+Qt's own words (the file dialog Qt draws on Linux, the reason in a network
+error) come from Qt's catalogues, which the release packaging ships beside the
+app on all three platforms and `build.yml` checks for.
 
 ## Code signing (distribution)
 

@@ -28,21 +28,25 @@
 
 namespace freetunnel {
 
-namespace {
+QStringList qtCatalogueDirs(const QString &qtTranslationsPath, const QString &appDir)
+{
+    return {qtTranslationsPath,
+            // Windows: windeployqt's merged qt_<lang>.qm beside FreeTunnel.exe.
+            appDir + QStringLiteral("/translations"),
+            appDir + QStringLiteral("/../translations"),
+            // macOS: Contents/Resources/translations, from Contents/MacOS.
+            appDir + QStringLiteral("/../Resources/translations")};
+}
 
 // Qt's own words — Open, Save and Cancel in the file dialog Qt draws where the
-// desktop offers none, the macOS application menu — come from Qt's catalogues.
-// They ship beside the app and were never loaded, so those dialogs said "Open"
-// and "Cancel" under a Russian title. Where they are depends on how the app was
-// deployed; the first place that has them wins. Parented to @p owner, so they go
-// when it does.
-void installQtCatalogues(QGuiApplication &app, QTranslator *owner, const QString &lang)
+// desktop offers none, the reason in a network error — come from Qt's
+// catalogues. They ship beside the app and were never loaded, so those dialogs
+// said "Open" and "Cancel" under a Russian title. Where they are depends on how
+// the app was deployed; the first place that has them wins. Parented to @p owner,
+// so they go when it does.
+bool installQtCatalogues(QGuiApplication &app, QTranslator *owner, const QString &lang,
+                         const QStringList &dirs)
 {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QStringList dirs{QLibraryInfo::path(QLibraryInfo::TranslationsPath),
-                           appDir + QStringLiteral("/translations"),
-                           appDir + QStringLiteral("/../translations"),
-                           appDir + QStringLiteral("/../Resources/translations")};
     for (const QString &dir : dirs) {
         auto *qtbase = new QTranslator(owner);
         // qt_<lang> is the umbrella windeployqt ships; it pulls in qtbase itself.
@@ -57,11 +61,10 @@ void installQtCatalogues(QGuiApplication &app, QTranslator *owner, const QString
             app.installTranslator(declarative);
         else
             delete declarative;
-        return;
+        return true;
     }
+    return false;
 }
-
-} // namespace
 
 void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
                    QTranslator *&tr, const QString &lang)
@@ -73,7 +76,9 @@ void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
     }
     if (lang == QLatin1String("ru")) {
         tr = new QTranslator(&app);
-        installQtCatalogues(app, tr, lang);
+        installQtCatalogues(app, tr, lang,
+                            qtCatalogueDirs(QLibraryInfo::path(QLibraryInfo::TranslationsPath),
+                                            QCoreApplication::applicationDirPath()));
         // Installed last so it is asked first: the most recently installed
         // translator is the one Qt tries before the others.
         if (tr->load(QStringLiteral(":/i18n/freetunnel_ru.qm")))

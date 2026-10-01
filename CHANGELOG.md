@@ -363,6 +363,11 @@ compare link at the bottom of its release notes.
   With the app hidden by ⌘H or Hide Others, the window still counted as open: no
   notification came, and the error was gone before you saw it. Hidden that way
   counts as away now.
+- **Windows and macOS: in Russian, the reason an update check or download failed
+  is in Russian too.** When checking for or downloading an update failed, the
+  reason after «Ошибка сети:» or «Не удалось скачать:» stayed in English, as did
+  the one in brackets when the VPN helper could not be reached. Those words come
+  from Qt, and Qt's own Russian was shipped only with the Linux packages.
 - **FreeTunnel no longer starts a second copy beside the one running.** A launch
   or a link that found FreeTunnel running but could not hand it over, because the
   password keyring was locked, started a whole second copy, and the two then

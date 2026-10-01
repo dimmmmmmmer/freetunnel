@@ -58,6 +58,16 @@ namespace freetunnel {
 void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
                    QTranslator *&translator, const QString &lang);
 
+// Where applyLanguage() looks for Qt's own catalogues, in order: Qt's translations
+// path, then where each platform's packaging puts them beside the app.
+QStringList qtCatalogueDirs(const QString &qtTranslationsPath, const QString &appDir);
+
+// Install Qt's catalogues for @p lang from the first of @p dirs that has them
+// (qtbase_<lang>, or the merged qt_<lang>, and qtdeclarative_<lang> beside it),
+// parented to @p owner. False when none has them.
+bool installQtCatalogues(QGuiApplication &app, QTranslator *owner, const QString &lang,
+                         const QStringList &dirs);
+
 QString controlArgFrom(int argc, char *argv[]);
 
 void raiseFdLimit();
