@@ -308,8 +308,8 @@ endif ()
 
 # OpenSSL for in-app Ed25519 verification (UpdateChecker). On Linux the VPN
 # core links Conan BoringSSL statically; FindOpenSSL would pick distro libcrypto
-# and break HTTP/3 builds (ECH/HPKE live in BoringSSL libssl.a, not in 22.04's
-# OpenSSL 3.0). macOS/Windows use the system/Homebrew/MSVC package explicitly.
+# and break HTTP/3 builds (ECH/HPKE live in BoringSSL libssl.a, not in a distro's
+# OpenSSL). macOS/Windows use the system/Homebrew/MSVC package explicitly.
 if (UNIX AND NOT APPLE)
     if (NOT DISABLE_HTTP3)
         # Conan's boringssl package exposes the OpenSSL::SSL/Crypto targets; the

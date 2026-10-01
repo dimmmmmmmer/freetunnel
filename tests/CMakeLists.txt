@@ -9,7 +9,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 # Allow plaintext credential fallback only for local dev without a keyring.
-# CI starts gnome-keyring via dbus-run-session (see .github/workflows/tests.yml).
+# CI starts gnome-keyring via dbus-run-session (scripts/run-ctest.sh, which
+# .github/workflows/tests.yml runs).
 if (NOT DEFINED ENV{CI})
     add_compile_definitions(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
 endif()
