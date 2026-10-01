@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QUrl>
 
+#include "core/AppRules.h"
 #include "core/AppShortcut.h"
 
 #ifdef Q_OS_WIN
@@ -35,6 +36,38 @@ QString expectedRule(const QString &path)
     return QDir::toNativeSeparators(canonical.isEmpty() ? path : canonical);
 }
 
+void touch(const QString &path)
+{
+    QDir().mkpath(QFileInfo(path).path());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly))
+        f.close();
+}
+
+// A program as Squirrel installs it — Discord, Slack, GitHub Desktop — and the
+// paths a test needs from it. Nothing here is ever run: the resolver reads
+// names, and an empty file is as good a program as a real one for that.
+struct SquirrelInstall {
+    QString root;      // %LocalAppData%\Discord
+    QString updater;   // ...\Update.exe, what the shortcut points at
+    QString versioned; // ...\app-1.0.9163\Discord.exe, what actually runs
+    QString rule;      // ...\Discord.exe, the one name that outlives an update
+};
+
+SquirrelInstall makeSquirrelInstall(const QString &parent)
+{
+    SquirrelInstall s;
+    s.root = parent + QStringLiteral("/Discord");
+    s.updater = s.root + QStringLiteral("/Update.exe");
+    s.versioned = s.root + QStringLiteral("/app-1.0.9163/Discord.exe");
+    touch(s.updater);
+    touch(s.versioned);
+    // Squirrel's own bookkeeping, which must not be mistaken for a version.
+    touch(s.root + QStringLiteral("/packages/RELEASES"));
+    s.rule = expectedRule(s.root) + QDir::separator() + QStringLiteral("Discord.exe");
+    return s;
+}
+
 } // namespace
 
 class TestAppShortcut : public QObject {
@@ -56,6 +89,11 @@ private slots:
     void aSymlinkedProgramIsStoredAsWhatTheKernelWillReport();
     void aBundleReachedThroughASymlinkIsStoredResolved();
     void aWindowsShortcutResolvesToWhatItPointsAt();
+    void aSquirrelShortcutStandsForTheProgramItStarts();
+    void aSquirrelShortcutStandsForTheProgramItStarts_data();
+    void aSquirrelProgramPickedOnItsOwnLosesItsVersion();
+    void aSquirrelShortcutOnWindowsStandsForTheProgramItStarts();
+    void aRuleStoredForTheUpdaterStandsForItsProgram();
 };
 
 void TestAppShortcut::readsTheProgramOutOfADesktopEntry_data()
@@ -384,7 +422,7 @@ namespace {
 // Write a .lnk the way an installer does, so the reader can be tested against
 // something it did not also write. Returns false when the shell will not play
 // along, which is a reason to skip rather than to fail.
-bool writeShortcut(const QString &linkPath, const QString &target)
+bool writeShortcut(const QString &linkPath, const QString &target, const QString &arguments = QString())
 {
     const HRESULT init = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const bool weInitialised = SUCCEEDED(init);
@@ -392,7 +430,8 @@ bool writeShortcut(const QString &linkPath, const QString &target)
     IShellLinkW *link = nullptr;
     if (SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
                                      IID_IShellLinkW, reinterpret_cast<void **>(&link)))) {
-        if (SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(target.utf16())))) {
+        if (SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(target.utf16())))
+            && SUCCEEDED(link->SetArguments(reinterpret_cast<LPCWSTR>(arguments.utf16())))) {
             IPersistFile *file = nullptr;
             if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&file)))) {
                 const QString native = QDir::toNativeSeparators(linkPath);
@@ -449,6 +488,148 @@ void TestAppShortcut::aWindowsShortcutResolvesToWhatItPointsAt()
         QCOMPARE(resolved.toLower(), expectedRule(notepad).toLower());
     }
 #endif
+}
+
+void TestAppShortcut::aSquirrelShortcutStandsForTheProgramItStarts_data()
+{
+    QTest::addColumn<QString>("arguments");
+    QTest::addColumn<bool>("startsDiscord");
+
+    // Discord's own shortcut, and the way Squirrel writes the others.
+    QTest::newRow("Discord") << QStringLiteral("--processStart Discord.exe") << true;
+    QTest::newRow("quoted") << QStringLiteral("--processStart \"Discord.exe\"") << true;
+    QTest::newRow("with arguments for the program")
+            << QStringLiteral("--processStart \"Discord.exe\" --process-start-args \"--start-minimized\"")
+            << true;
+    QTest::newRow("with an equals sign") << QStringLiteral("--processStart=Discord.exe") << true;
+    QTest::newRow("and wait") << QStringLiteral("--processStartAndWait \"Discord.exe\"") << true;
+    // Update.exe picked or dropped on its own says nothing about which program;
+    // Squirrel names the directory after it.
+    QTest::newRow("no arguments") << QString() << true;
+
+    // A program no installed version has, one outside the version directory,
+    // and a shortcut that starts nothing are not followed. What is left is the
+    // answer from before, Update.exe: a rule that matches little, but not one
+    // for a program the shortcut does not start.
+    QTest::newRow("not installed") << QStringLiteral("--processStart \"Missing.exe\"") << false;
+    QTest::newRow("another installation")
+            << QStringLiteral("--processStart \"..\\..\\Slack\\app-4.41.105\\slack.exe\"") << false;
+    QTest::newRow("another installation, forward slashes")
+            << QStringLiteral("--processStart ../../Slack/app-4.41.105/slack.exe") << false;
+    QTest::newRow("starts nothing") << QStringLiteral("--uninstall") << false;
+}
+
+// Reported by reasoning rather than by a user, which is why it is pinned here:
+// the shortcut Squirrel puts in the Start Menu points at Update.exe and names
+// the program only in its arguments. Read for its target alone, picking Discord
+// from the list stored a rule for Update.exe, which exits before Discord opens a
+// single connection — so the rule was listed, looked right, and matched nothing.
+void TestAppShortcut::aSquirrelShortcutStandsForTheProgramItStarts()
+{
+    QFETCH(QString, arguments);
+    QFETCH(bool, startsDiscord);
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const SquirrelInstall discord = makeSquirrelInstall(dir.path());
+    // Installed beside it, so a shortcut that reaches over into it would find
+    // a program there to name.
+    touch(dir.filePath(QStringLiteral("Slack/Update.exe")));
+    touch(dir.filePath(QStringLiteral("Slack/app-4.41.105/slack.exe")));
+
+    const QString rule = freetunnel::ruleForProgram(discord.updater, arguments);
+    if (!startsDiscord) {
+        QCOMPARE(rule, expectedRule(discord.updater));
+        return;
+    }
+    QCOMPARE(rule, discord.rule);
+#if defined(Q_OS_WIN)
+    // And the rule does what it is for: it matches Discord as it runs today,
+    // and as it will run from the directory the next update installs. Only on
+    // Windows, the one place Squirrel installs (see test_apprules).
+    const QString running = expectedRule(discord.versioned);
+    QVERIFY(freetunnel::appMatchesRules({running, QStringLiteral("Discord.exe")}, {rule}));
+    const QString updated = QString(running).replace(QStringLiteral("app-1.0.9163"),
+                                                     QStringLiteral("app-1.0.9170"));
+    QVERIFY(freetunnel::appMatchesRules({updated, QStringLiteral("Discord.exe")}, {rule}));
+#endif
+}
+
+// The other two ways in: Update.exe found by browsing, and the program picked
+// out of today's version directory, which is where someone who goes looking
+// for Discord.exe finds it. Both have to give the rule the shortcut gives, or
+// the second stops matching at the next update and the two do not deduplicate.
+void TestAppShortcut::aSquirrelProgramPickedOnItsOwnLosesItsVersion()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const SquirrelInstall discord = makeSquirrelInstall(dir.path());
+
+    QCOMPARE(freetunnel::resolveApplicationTarget(discord.versioned), discord.rule);
+    QCOMPARE(freetunnel::resolveApplicationTarget(QUrl::fromLocalFile(discord.versioned).toString()),
+             discord.rule);
+    QCOMPARE(freetunnel::resolveApplicationTarget(discord.updater), discord.rule);
+
+    // Without Update.exe beside it, a directory called app-<something> is just
+    // a directory, and the program in it is stored as it is.
+    const QString unrelated = dir.filePath(QStringLiteral("Tool/app-2.0/tool.exe"));
+    touch(unrelated);
+    QCOMPARE(freetunnel::resolveApplicationTarget(unrelated), expectedRule(unrelated));
+    // And an Update.exe with no versions beside it is some other vendor's
+    // updater, which is a program like any other.
+    const QString vendorUpdater = dir.filePath(QStringLiteral("Vendor/Update.exe"));
+    touch(vendorUpdater);
+    QCOMPARE(freetunnel::resolveApplicationTarget(vendorUpdater), expectedRule(vendorUpdater));
+}
+
+// The same through a real shortcut, read by the shell: that the arguments are
+// read out of the .lnk at all is the part only Windows can show.
+void TestAppShortcut::aSquirrelShortcutOnWindowsStandsForTheProgramItStarts()
+{
+#ifndef Q_OS_WIN
+    QSKIP("a .lnk is a Windows shortcut");
+#else
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const SquirrelInstall discord = makeSquirrelInstall(dir.path());
+
+    const QString link = dir.filePath(QStringLiteral("Discord.lnk"));
+    QVERIFY2(writeShortcut(link, QDir::toNativeSeparators(discord.updater),
+                           QStringLiteral("--processStart \"Discord.exe\"")),
+             "the shell would not write a shortcut");
+    QCOMPARE(freetunnel::resolveApplicationTarget(link), discord.rule);
+    QCOMPARE(freetunnel::resolveApplicationTarget(QUrl::fromLocalFile(link).toString()), discord.rule);
+#endif
+}
+
+// What the first half of this left behind: a rule an earlier version stored for
+// Update.exe, which only a Squirrel shortcut or the updater itself produced. The
+// shortcut is gone by then, but the updater says which program it installs, as
+// it does when it is picked on its own today.
+void TestAppShortcut::aRuleStoredForTheUpdaterStandsForItsProgram()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const SquirrelInstall discord = makeSquirrelInstall(dir.path());
+
+    QCOMPARE(freetunnel::squirrelProgramForUpdaterRule(QDir::toNativeSeparators(discord.updater)),
+             discord.rule);
+    // In any case, as Windows spells it however it likes.
+    const QString lower = QDir::toNativeSeparators(QFileInfo(discord.updater).path()
+                                                   + QStringLiteral("/update.exe"));
+    QCOMPARE(freetunnel::squirrelProgramForUpdaterRule(lower), discord.rule);
+
+    // Anything else stays the rule it is.
+    QVERIFY(freetunnel::squirrelProgramForUpdaterRule(discord.rule).isEmpty());
+    QVERIFY(freetunnel::squirrelProgramForUpdaterRule(discord.versioned).isEmpty());
+    QVERIFY(freetunnel::squirrelProgramForUpdaterRule(QStringLiteral("Update.exe")).isEmpty());
+    // An updater with no versions of its folder's program beside it is some other
+    // vendor's, or one whose program is gone: nothing to stand for.
+    const QString vendorUpdater = dir.filePath(QStringLiteral("Vendor/Update.exe"));
+    touch(vendorUpdater);
+    touch(dir.filePath(QStringLiteral("Vendor/app-1.0/Other.exe")));
+    QVERIFY(freetunnel::squirrelProgramForUpdaterRule(vendorUpdater).isEmpty());
+    QVERIFY(freetunnel::squirrelProgramForUpdaterRule(dir.filePath(QStringLiteral("Gone/Update.exe")))
+                    .isEmpty());
 }
 
 QTEST_MAIN(TestAppShortcut)

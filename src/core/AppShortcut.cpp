@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/AppShortcut.h"
 
+#include "core/AppRules.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -144,7 +146,92 @@ QString absoluteExecutable(const QString &program)
     return found.isEmpty() ? QString() : storedRuleForm(found);
 }
 
+// Squirrel, the installer behind Discord, Slack, GitHub Desktop and many other
+// Electron applications on Windows, lays a program out like this:
+//
+//   %LocalAppData%\Discord\Update.exe
+//   %LocalAppData%\Discord\app-1.0.9163\Discord.exe
+//
+// and its Start Menu shortcut runs Update.exe --processStart Discord.exe, which
+// starts the program out of the newest version directory and exits. Read for
+// its target alone, that shortcut stored a rule for Update.exe, and not one of
+// Discord's own connections ever matched it. Whichever of the three someone
+// hands over, the shortcut, Update.exe or the program in today's directory, the
+// rule is the program without its version.
+bool isSquirrelUpdater(const QFileInfo &file)
+{
+    return file.fileName().compare(QLatin1String("Update.exe"), Qt::CaseInsensitive) == 0;
+}
+
+// --processStart "Discord.exe", in any of the spellings Update.exe accepts, out
+// of whatever else the shortcut passes along.
+QString squirrelProgramFromArguments(const QString &arguments)
+{
+    static const QRegularExpression re(
+            QStringLiteral("(?:^|\\s)--processStart(?:AndWait)?(?:=|\\s+)(?:\"([^\"]*)\"|(\\S+))"),
+            QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch m = re.match(arguments);
+    return m.captured(1).isEmpty() ? m.captured(2) : m.captured(1);
+}
+
+// `program` as one of the versions under `root` has it, named without the
+// version. Only a plain file name is looked for: Update.exe starts nothing
+// outside the version directory, and neither may a rule taken from a shortcut.
+QString squirrelInstalledProgram(const QString &root, const QString &program)
+{
+    if (program.isEmpty() || program.contains(QLatin1Char('/'))
+        || program.contains(QLatin1Char('\\')))
+        return {};
+    const QDir dir(root);
+    const QStringList versions =
+            dir.entryList({QStringLiteral("app-*")}, QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &version : versions) {
+        const QString candidate = dir.filePath(version + QLatin1Char('/') + program);
+        if (!QFileInfo(candidate).isFile())
+            continue;
+        // Spelled as every other rule first, then without the version: the
+        // directory may be reached through a junction or an 8.3 name.
+        const QString rule = unversionedAppPath(storedRuleForm(candidate));
+        if (!rule.isEmpty())
+            return rule;
+    }
+    return {};
+}
+
+// The rule for a file that belongs to a Squirrel installation, or empty when it
+// does not belong to one.
+QString squirrelRuleFor(const QString &file, const QString &arguments)
+{
+    const QFileInfo info(file);
+    if (isSquirrelUpdater(info)) {
+        // A shortcut names the program. Update.exe picked on its own does not,
+        // and Squirrel names the directory after the program it installs.
+        const QString program = arguments.trimmed().isEmpty()
+                ? info.dir().dirName() + QStringLiteral(".exe")
+                : squirrelProgramFromArguments(arguments);
+        return squirrelInstalledProgram(info.absolutePath(), program);
+    }
+    // The program picked out of today's version directory. Update.exe beside
+    // that directory is what says Squirrel made it, rather than something else
+    // that happens to have a folder called app-2.
+    const QString unversioned = unversionedAppPath(info.absoluteFilePath());
+    if (unversioned.isEmpty()
+        || !QFileInfo(QFileInfo(unversioned).dir(), QStringLiteral("Update.exe")).isFile())
+        return {};
+    return unversionedAppPath(storedRuleForm(file));
+}
+
 #ifdef Q_OS_WIN
+// What the shortcut passes to its target. For a Squirrel shortcut that is the
+// whole of what it says: the target is Update.exe, whichever program it starts.
+QString shortcutArguments(IShellLinkW *link)
+{
+    wchar_t arguments[1024] = {};
+    if (FAILED(link->GetArguments(arguments, static_cast<int>(std::size(arguments)))))
+        return {};
+    return QString::fromWCharArray(arguments);
+}
+
 QString resolveWindowsShortcut(const QString &lnkPath)
 {
     // The GUI thread has COM initialised already; a worker may not. Accept both,
@@ -153,6 +240,7 @@ QString resolveWindowsShortcut(const QString &lnkPath)
     const bool weInitialised = SUCCEEDED(init);
 
     QString result;
+    QString arguments;
     IShellLinkW *link = nullptr;
     if (SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW,
                                      reinterpret_cast<void **>(&link)))) {
@@ -167,6 +255,7 @@ QString resolveWindowsShortcut(const QString &lnkPath)
                 if (SUCCEEDED(link->GetPath(target, static_cast<int>(std::size(target)), nullptr,
                                             SLGP_RAWPATH))) {
                     result = QString::fromWCharArray(target);
+                    arguments = shortcutArguments(link);
                 }
             }
             file->Release();
@@ -196,8 +285,9 @@ QString resolveWindowsShortcut(const QString &lnkPath)
         return {};
     // Through the same spelling as every other rule: a shortcut can name its
     // target through a junction or in 8.3 form, and the running process is
-    // reported as neither.
-    return storedRuleForm(result);
+    // reported as neither. With the arguments, because a Squirrel shortcut
+    // names its program there and not in the target.
+    return ruleForProgram(result, arguments);
 }
 #endif
 
@@ -245,6 +335,20 @@ QString executableInsideBundle(const QString &bundlePath)
 }
 
 } // namespace
+
+QString ruleForProgram(const QString &program, const QString &arguments)
+{
+    const QString squirrel = squirrelRuleFor(program, arguments);
+    return squirrel.isEmpty() ? storedRuleForm(program) : squirrel;
+}
+
+QString squirrelProgramForUpdaterRule(const QString &rule)
+{
+    const QFileInfo updater(QDir::fromNativeSeparators(rule.trimmed()));
+    if (!updater.isAbsolute() || !isSquirrelUpdater(updater))
+        return {};
+    return squirrelRuleFor(updater.filePath(), QString());
+}
 
 // Exported so InstalledApps reads .desktop keys with this parser instead of a
 // byte-identical copy of it: two copies are two places to fix the next quirk in,
@@ -411,7 +515,7 @@ QString resolveApplicationTarget(const QString &pathOrUrl)
     // rather than becoming a rule that silently never matches.
     if (!info.isFile())
         return {};
-    return storedRuleForm(info.absoluteFilePath());
+    return ruleForProgram(info.absoluteFilePath(), QString());
 }
 
 } // namespace freetunnel

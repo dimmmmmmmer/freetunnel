@@ -303,6 +303,7 @@ signals:
 private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reportPasswordNotStored(); // a save or import the credential store refused
+    void resolveSquirrelUpdaterRules(); // rules an earlier version stored for Update.exe
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(bool warnOfLeak = true); // push the active CONFIG's profile rules to the core

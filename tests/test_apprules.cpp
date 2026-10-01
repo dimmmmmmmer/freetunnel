@@ -7,6 +7,8 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 
 #include "core/AppRules.h"
 
@@ -53,6 +55,8 @@ private slots:
     void aRuleCoversTheDirectoryAProgramHasToItself();
     void aSharedDirectoryIsNeverOneApplication();
     void aSharedDirectoryIsNeverOneApplication_data();
+    void aSquirrelProgramIsOneProgramAcrossItsUpdates();
+    void aFolderCalledAppTwoIsAVersionOnlyInASquirrelInstall();
 };
 
 // The ordinary case: the user types "firefox" and means firefox, wherever the
@@ -296,6 +300,93 @@ void TestAppRules::aSharedDirectoryIsNeverOneApplication()
     const QString neighbour = QFileInfo(QDir::fromNativeSeparators(rule)).path()
             + QStringLiteral("/something-else");
     QVERIFY(!freetunnel::appMatchesRules(appAt(QDir::toNativeSeparators(neighbour)), {rule}));
+}
+
+// Discord, Slack and the other programs Squirrel installs on Windows run out of
+// %LocalAppData%\<App>\app-<version>\, and every update installs a new one of
+// those and deletes the old. A rule compared against the path as the system
+// reports it matched the version that was current when it was added and went
+// quiet at the next update, which for Discord is a matter of days.
+void TestAppRules::aSquirrelProgramIsOneProgramAcrossItsUpdates()
+{
+    const auto discord = [](const char *tail) {
+        return absPath(QStringLiteral("Users/me/AppData/Local/Discord/") + QString::fromLatin1(tail));
+    };
+    const QString rule = discord("Discord.exe");
+    const QString today = discord("app-1.0.9163/Discord.exe");
+    const QString nextWeek = discord("app-1.0.9170/Discord.exe");
+
+    QCOMPARE(freetunnel::unversionedAppPath(today), rule);
+    QVERIFY(freetunnel::unversionedAppPath(rule).isEmpty());
+    // Named after its installation folder, it is laid out as Squirrel lays a
+    // program out, and that much is told from the path.
+    QCOMPARE(freetunnel::squirrelUnversionedPath(today), rule);
+
+#if defined(Q_OS_WIN)
+    QVERIFY2(freetunnel::appMatchesRules(appAt(today), {rule}), "the version running now");
+    QVERIFY2(freetunnel::appMatchesRules(appAt(nextWeek), {rule}), "and the next update's");
+    // A rule someone added by picking the program inside today's directory
+    // still means Discord after the update, not only the version it was then.
+    QVERIFY(freetunnel::appMatchesRules(appAt(nextWeek), {today}));
+#else
+    // Squirrel installs nothing here, and a version directory is a directory.
+    QVERIFY(!freetunnel::appMatchesRules(appAt(today), {rule}));
+    QVERIFY(!freetunnel::appMatchesRules(appAt(nextWeek), {today}));
+#endif
+    // Its updater lives beside the versions, in the directory named after it.
+    QVERIFY(freetunnel::appMatchesRules(appAt(discord("Update.exe")), {rule}));
+
+    // But only Discord's versions, and only Discord.
+    QVERIFY(!freetunnel::appMatchesRules(
+            appAt(absPath(QStringLiteral("Users/me/AppData/Local/slack/app-4.41.105/slack.exe"))), {rule}));
+    QVERIFY(!freetunnel::appMatchesRules(
+            appAt(absPath(QStringLiteral("Users/me/AppData/Local/Other/app-1.0.9163/Discord.exe"))), {rule}));
+    // A directory is a version only when Squirrel would have named it: app-,
+    // then the version's first digit.
+    for (const char *notAVersion : {"app-data/Discord.exe", "app-/Discord.exe", "application-1.0/Discord.exe",
+                                    "packages/Discord.exe", "app-1.0.9163/sub/Discord.exe"}) {
+        const QString path = discord(notAVersion);
+        QVERIFY2(freetunnel::unversionedAppPath(path).isEmpty(), notAVersion);
+        QVERIFY2(!freetunnel::appMatchesRules(appAt(path), {rule}), notAVersion);
+    }
+}
+
+// Stripping app-<digits> from every path widened every rule: with a program's
+// own directory covered, a rule for C:\Tools\foo\foo.exe also took in whatever
+// ran from C:\Tools\foo\app-2\. A version directory is only a version where
+// Squirrel made it: the program is named after the installation folder, or
+// Squirrel's Update.exe is in that folder. And only on Windows.
+void TestAppRules::aFolderCalledAppTwoIsAVersionOnlyInASquirrelInstall()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = QDir::toNativeSeparators(dir.filePath(QStringLiteral("foo")));
+    const QString rule = root + QDir::separator() + QStringLiteral("foo.exe");
+    const QString other = root + QDir::separator() + QStringLiteral("app-2")
+            + QDir::separator() + QStringLiteral("bar.exe");
+    const QString same = root + QDir::separator() + QStringLiteral("app-2")
+            + QDir::separator() + QStringLiteral("foo.exe");
+    QVERIFY(QDir().mkpath(QDir::fromNativeSeparators(root) + QStringLiteral("/app-2")));
+
+    // Another program in a folder called app-2 is not a version of anything.
+    QVERIFY(freetunnel::squirrelUnversionedPath(other).isEmpty());
+    QVERIFY(!freetunnel::appMatchesRules(appAt(other), {rule}));
+    // The program named after the folder is.
+    QCOMPARE(freetunnel::squirrelUnversionedPath(same), rule);
+
+    // With Squirrel's updater in the folder, so is every program in it.
+    QFile updater(QDir(QDir::fromNativeSeparators(root)).filePath(QStringLiteral("Update.exe")));
+    QVERIFY(updater.open(QIODevice::WriteOnly));
+    updater.close();
+    QCOMPARE(freetunnel::squirrelUnversionedPath(other),
+             root + QDir::separator() + QStringLiteral("bar.exe"));
+#if defined(Q_OS_WIN)
+    QVERIFY(freetunnel::appMatchesRules(appAt(same), {rule}));
+    QVERIFY(freetunnel::appMatchesRules(appAt(other), {rule}));
+#else
+    QVERIFY(!freetunnel::appMatchesRules(appAt(same), {rule}));
+    QVERIFY(!freetunnel::appMatchesRules(appAt(other), {rule}));
+#endif
 }
 
 QTEST_MAIN(TestAppRules)
