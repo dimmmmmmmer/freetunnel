@@ -591,9 +591,12 @@ jobs:
           rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/FreeTunnel/FreeTunnel AppDir/usr/bin/
           cp client/assets/logo-256.png AppDir/usr/share/icons/hicolor/256x256/apps/freetunnel.png
+          # --url-handler: a URL the desktop hands over is a link, which any web
+          # page can open, not a command someone ran; a link that would turn the
+          # VPN off is asked about. From the menu %u is empty and it does nothing.
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
-            'Exec=FreeTunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'Exec=FreeTunnel --url-handler %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
             'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > AppDir/usr/share/applications/freetunnel.desktop
           PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --plugin qt \
@@ -639,9 +642,10 @@ jobs:
           done
           cp client/assets/logo-256.png \
             "$root/usr/share/pixmaps/freetunnel.png"
+          # --url-handler as in the AppImage's entry above.
           printf '%s\n' \
             '[Desktop Entry]' 'Type=Application' 'Name=FreeTunnel' \
-            'Exec=freetunnel %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
+            'Exec=freetunnel --url-handler %u' 'Icon=freetunnel' 'Categories=Network;' 'Terminal=false' \
             'MimeType=x-scheme-handler/freetunnel;x-scheme-handler/tt;' \
             > "$root/usr/share/applications/freetunnel.desktop"
           installed_kb=$(du -sk "$root" | cut -f1)

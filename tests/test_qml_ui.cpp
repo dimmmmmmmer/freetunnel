@@ -121,6 +121,8 @@ private slots:
     void confirmDialogShowsTheThirdButtonOnlyWhenItHasOne();
     void confirmDialogAnswersReturnAndEscape();
     void aSecondConfirmQueuesInsteadOfReplacingTheLiveOne();
+    void aLinkAsksOnceBeforeDisconnecting();
+    void aLinksImportIsAnsweredByAClick();
     void aHotkeyNeedsAModifierAndBackspaceUnbinds();
     void aConfirmDialogTakesTheKeyboardFromAHotkeyField();
     void theUpdateArrowBendsUnderThePointerAndBack();
@@ -609,6 +611,20 @@ void TestQmlUi::confirmDialogAnswersReturnAndEscape()
     QTest::keyClick(&window, Qt::Key_Return);
     QCOMPARE(confirmed.count(), 1);
     QVERIFY(root->property("visible").toBool());
+
+    // A two-button question can ask for the same: a link's request to turn the
+    // VPN off is answered by clicking, and Escape still cancels it.
+    QMetaObject::invokeMethod(root, "close");
+    root->setProperty("altText", QString());
+    root->setProperty("returnConfirms", false);
+    QMetaObject::invokeMethod(root, "open");
+    QTRY_VERIFY(root->property("armed").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    QTest::keyClick(&window, Qt::Key_Enter);
+    QCOMPARE(confirmed.count(), 1);
+    QVERIFY(root->property("visible").toBool());
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QVERIFY(!root->property("visible").toBool());
 }
 
 void TestQmlUi::confirmDialogShowsTheThirdButtonOnlyWhenItHasOne()
@@ -736,6 +752,141 @@ void TestQmlUi::aSecondConfirmQueuesInsteadOfReplacingTheLiveOne()
     dialog->setProperty("visible", false);
     QVERIFY(QMetaObject::invokeMethod(dialog, "confirmed"));
     QCOMPARE(m_backend.property("confirmLog").toString(), QStringLiteral("AB"));
+}
+
+// A freetunnel:// link that would turn the VPN off is asked about, and the
+// question has to be answerable: a yes disconnects. A page can open the link as
+// often as it likes, and every one used to be a dialog of its own to dismiss.
+//
+// And only a click answers yes. The page chose the moment the question comes up,
+// with the window brought forward to take the keys, so a page that has the user
+// hold Enter first had auto-repeat answer Disconnect as soon as the dialog armed.
+// Checked on both ways it reaches the screen, directly and from the queue behind
+// another question, since the queue carries the setting separately.
+void TestQmlUi::aLinkAsksOnceBeforeDisconnecting()
+{
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    QVERIFY2(component.isReady(), component.errorString().toUtf8().constData());
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(!root.isNull(), component.errorString().toUtf8().constData());
+    auto *window = qobject_cast<QQuickWindow *>(root.data());
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(dialog);
+
+    m_backend.setConnected(true);
+    auto restore = qScopeGuard([&] { m_backend.setConnected(false); });
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkDisconnectConfirmationRequired"));
+    QVERIFY2(dialog->property("visible").toBool(), "a link that disconnects was not asked about");
+    QCOMPARE(dialog->property("confirmText").toString(), QStringLiteral("Disconnect"));
+    const QString question = dialog->property("text").toString();
+    QVERIFY(!question.isEmpty());
+
+    // A click already on its way when the window comes forward lands on the
+    // question before anyone has read it: a click is no answer until the dialog
+    // has armed, just as Return is not.
+    auto *button = dialog->findChild<QQuickItem *>(QStringLiteral("confirmButton"));
+    QVERIFY(button);
+    const QPoint onDisconnect =
+            button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+    QVERIFY(!dialog->property("armed").toBool());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, onDisconnect);
+    QVERIFY2(m_backend.connected(), "a click before the question armed answered Disconnect");
+    QVERIFY(dialog->property("visible").toBool());
+
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkDisconnectConfirmationRequired"));
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkDisconnectConfirmationRequired"));
+    QCOMPARE(root->property("confirmQueue").toList().size(), 0);
+    QCOMPARE(dialog->property("text").toString(), question);
+    QVERIFY(m_backend.connected()); // nothing happens before the answer
+
+    // Return held past the arming delay, as auto-repeat sends it.
+    const auto holdReturn = [&] {
+        if (!QTest::qWaitFor([&] { return dialog->property("armed").toBool(); }))
+            return false;
+        QTest::keyClick(window, Qt::Key_Return);
+        QTest::keyClick(window, Qt::Key_Enter);
+        return true;
+    };
+    QVERIFY(holdReturn());
+    QVERIFY2(dialog->property("visible").toBool() && m_backend.connected(),
+             "Return answered Disconnect to a question a link put up");
+    QTest::keyClick(window, Qt::Key_Escape); // Escape still says no
+    QVERIFY(!dialog->property("visible").toBool());
+    QVERIFY(m_backend.connected());
+
+    // Behind another question: it waits its turn, still once, and comes up just
+    // as deaf to Return.
+    QVERIFY(QMetaObject::invokeMethod(root.data(), "showConfirm",
+                                      Q_ARG(QVariant, QStringLiteral("Import it?")),
+                                      Q_ARG(QVariant, QStringLiteral("Import")),
+                                      Q_ARG(QVariant, QVariant())));
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkDisconnectConfirmationRequired"));
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkDisconnectConfirmationRequired"));
+    QCOMPARE(root->property("confirmQueue").toList().size(), 1);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_COMPARE(dialog->property("text").toString(), question);
+    QVERIFY(holdReturn());
+    QVERIFY2(dialog->property("visible").toBool() && m_backend.connected(),
+             "Return answered Disconnect to a link's question that had waited in the queue");
+
+    // A click on Disconnect, once armed, is the answer.
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, onDisconnect);
+    QVERIFY2(!m_backend.connected(), "confirming did not disconnect");
+    // And no second copy of the question comes up behind it.
+    QTest::qWait(50);
+    QVERIFY(!dialog->property("visible").toBool());
+}
+
+// A tt:// link's import question is answered the same way: any page can open
+// one, at a moment of its choosing, so neither a held Return nor a click that
+// arrives as the question does may import the config it carries.
+void TestQmlUi::aLinksImportIsAnsweredByAClick()
+{
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    QVERIFY2(component.isReady(), component.errorString().toUtf8().constData());
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(!root.isNull(), component.errorString().toUtf8().constData());
+    auto *window = qobject_cast<QQuickWindow *>(root.data());
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(dialog);
+    QSignalSpy imported(&m_backend, SIGNAL(configImported(QString)));
+    QVERIFY(imported.isValid());
+
+    QVERIFY(QMetaObject::invokeMethod(&m_backend, "deepLinkImportConfirmationRequired",
+                                      Q_ARG(QString, QStringLiteral("Add a VPN server from this link?")),
+                                      Q_ARG(QString, QStringLiteral("tt://example")),
+                                      Q_ARG(QString, QString())));
+    QVERIFY2(dialog->property("visible").toBool(), "a link's import was not asked about");
+    QCOMPARE(dialog->property("confirmText").toString(), QStringLiteral("Import"));
+    auto *button = dialog->findChild<QQuickItem *>(QStringLiteral("confirmButton"));
+    QVERIFY(button);
+    const QPoint onImport =
+            button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+
+    QVERIFY(!dialog->property("armed").toBool());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, onImport);
+    QCOMPARE(imported.count(), 0);
+    QVERIFY(dialog->property("visible").toBool());
+
+    QTRY_VERIFY(dialog->property("armed").toBool());
+    QTest::keyClick(window, Qt::Key_Return);
+    QTest::keyClick(window, Qt::Key_Enter);
+    QVERIFY2(dialog->property("visible").toBool() && imported.isEmpty(),
+             "Return answered Import to a question a link put up");
+
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, onImport);
+    QCOMPARE(imported.count(), 1);
+    QVERIFY(!dialog->property("visible").toBool());
 }
 
 namespace {

@@ -18,14 +18,19 @@
 #include <QWindow>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QTranslator>
 
 #include "app/AppStartup.h"
 #include "app/Backend.h"
 #include "core/AppSettings.h"
 #include "core/ConfigStore.h"
+#include "core/ConfigToml.h"
+#include "core/ControlCommand.h"
+#include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 #include "core/InstanceControl.h"
+#include "helper_ipc_mock_server.h"
 
 class TestAppStartup : public QObject {
     Q_OBJECT
@@ -33,7 +38,9 @@ class TestAppStartup : public QObject {
 private slots:
     void initTestCase();
     void controlArgFromArgv();
+    void aUrlHandlerLaunchIsALink();
     void urlOpenFilterBuffersUntilReady();
+    void aLinkOpenedAtLaunchIsAskedAboutInTheWindow();
     void quitFilterEmitsShutdown();
     void prepareQuitRequestsApplicationQuit();
     void applyLanguageLoadsRussian();
@@ -42,6 +49,7 @@ private slots:
     void wireInstanceServerForwardsCommand();
     void aSecondLaunchBringsTheWindowBack();
     void aForwardedToggleLeavesTheWindowAlone();
+    void aForwardedLinkThatWouldDisconnectAsksInTheWindow();
     void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
@@ -54,6 +62,8 @@ private:
     // did not arrive" is worthless if it might have arrived somewhere else.
     static QString instanceSocketName(const QString &suffix);
     static void sendInstanceMessage(const QString &socketName, const QByteArray &msg);
+    // A config of its own, stored and made the active one, deleted with the guard.
+    static QString storeActiveConfig(const QString &hostname, bool withPassword);
 };
 
 void TestAppStartup::initTestCase()
@@ -83,6 +93,96 @@ void TestAppStartup::controlArgFromArgv()
     QCOMPARE(freetunnel::controlArgFrom(2, argvToggle), QStringLiteral("freetunnel://toggle"));
     QCOMPARE(freetunnel::controlArgFrom(2, argvTt), QStringLiteral("tt://?abc"));
     QVERIFY(freetunnel::controlArgFrom(2, argvNone).isEmpty());
+}
+
+// The URL handler starts FreeTunnel as "FreeTunnel --url-handler <url>", and a
+// command someone runs is the same URL without it. Only the first may be asked
+// about, so the difference has to survive into the control string.
+void TestAppStartup::aUrlHandlerLaunchIsALink()
+{
+    using freetunnel::ControlAction;
+    using freetunnel::controlArgFrom;
+    using freetunnel::parseControlCommand;
+    char arg0[] = "FreeTunnel";
+    char handler[] = "--url-handler";
+    char disconnect[] = "freetunnel://disconnect";
+    char *argvLink[] = {arg0, handler, disconnect, nullptr};
+    char *argvMarkAfter[] = {arg0, disconnect, handler, nullptr};
+    char *argvCommand[] = {arg0, disconnect, nullptr};
+    char *argvMenu[] = {arg0, handler, nullptr};
+
+    const auto link = parseControlCommand(controlArgFrom(3, argvLink));
+    QCOMPARE(link.action, ControlAction::Disconnect);
+    QVERIFY(link.fromLink);
+    QVERIFY(parseControlCommand(controlArgFrom(3, argvMarkAfter)).fromLink);
+
+    const auto command = parseControlCommand(controlArgFrom(2, argvCommand));
+    QCOMPARE(command.action, ControlAction::Disconnect);
+    QVERIFY(!command.fromLink);
+
+    // The menu entry is the same line with no URL: an ordinary start.
+    QVERIFY(controlArgFrom(2, argvMenu).isEmpty());
+}
+
+QString TestAppStartup::storeActiveConfig(const QString &hostname, bool withPassword)
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QTemporaryFile file(QDir(base).filePath(hostname + QStringLiteral("-XXXXXX.toml")));
+    file.setAutoRemove(false);
+    if (!file.open())
+        return QString();
+    freetunnel::ConfigToml cfg;
+    cfg.hostname = hostname;
+    cfg.addresses = QStringLiteral("203.0.113.60:443");
+    cfg.username = QStringLiteral("user");
+    file.write(freetunnel::buildConfigToml(cfg).toUtf8());
+    file.close();
+    if (withPassword
+        && !freetunnel::CredentialStore::storePassword(file.fileName(), QStringLiteral("secret")))
+        return QString();
+    saveStoredConfigs({file.fileName()});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = file.fileName();
+    saveAppSettings(settings);
+    return file.fileName();
+}
+
+// macOS opens a freetunnel:// link by handing the URL to the app as an event,
+// starting the app first if it is not running. With "Connect on startup" on, a
+// page that opens freetunnel://disconnect would keep the VPN off: that is asked,
+// in a window brought up for it, and until it is answered nothing is called off.
+void TestAppStartup::aLinkOpenedAtLaunchIsAskedAboutInTheWindow()
+{
+    const QString config = storeActiveConfig(QStringLiteral("fileopen-server"), false);
+    QVERIFY(!config.isEmpty());
+    AppSettings settings = loadAppSettings();
+    settings.auto_connect_on_start = true;
+    saveAppSettings(settings);
+    auto restore = qScopeGuard([&] {
+        saveAppSettings(AppSettings{});
+        saveStoredConfigs({});
+        QFile::remove(config);
+    });
+
+    UrlOpenFilter filter;
+    qApp->installEventFilter(&filter);
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    // Delivered before the app is ready, as at a launch the link caused.
+    QFileOpenEvent ev(QUrl(QStringLiteral("freetunnel://disconnect")));
+    QCoreApplication::sendEvent(qApp, &ev);
+
+    Backend backend; // "Connect on startup" is armed from here
+    QSignalSpy asked(&backend, &Backend::deepLinkDisconnectConfirmationRequired);
+    filter.ready(&backend, &window);
+    QCOMPARE(asked.count(), 1);
+    QVERIFY2(!(window.windowStates() & Qt::WindowMinimized),
+             "the question was put in a window left minimised");
+    // What a yes does, and it keeps the auto-connect from starting anything here.
+    backend.disconnectVpn();
 }
 
 void TestAppStartup::urlOpenFilterBuffersUntilReady()
@@ -428,6 +528,54 @@ void TestAppStartup::aForwardedToggleLeavesTheWindowAlone()
     QTRY_VERIFY_WITH_TIMEOUT(handled.count() > 0, 10000);
     QCoreApplication::processEvents();
     QVERIFY2(window.windowStates() & Qt::WindowMinimized, "a toggle brought the window up");
+}
+
+// The same toggle forwarded as a link, from a second launch the URL handler
+// started, while the VPN is up: that would turn it off on a web page's say-so,
+// so it is a question, and the window comes up for it.
+void TestAppStartup::aForwardedLinkThatWouldDisconnectAsksInTheWindow()
+{
+    const QString config = storeActiveConfig(QStringLiteral("forwarded-link-server"), true);
+    QVERIFY(!config.isEmpty());
+    const QString token = QStringLiteral("app-startup-helper-token");
+    MockHelperServer helper(token);
+    QVERIFY(helper.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(helper.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    auto restore = qScopeGuard([&] {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+        freetunnel::CredentialStore::deletePassword(config);
+        saveAppSettings(AppSettings{});
+        saveStoredConfigs({});
+        QFile::remove(config);
+    });
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+
+    QLocalServer server;
+    const QString name = instanceSocketName(QStringLiteral("linktoggle"));
+    QLocalServer::removeServer(name);
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server.listen(name));
+    QWindow window;
+    window.resize(200, 200);
+    window.show();
+    window.setWindowStates(Qt::WindowMinimized);
+    freetunnel::wireInstanceServer(&server, backend, &window, QStringLiteral("tok"));
+
+    QSignalSpy asked(&backend, &Backend::deepLinkDisconnectConfirmationRequired);
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(
+                                      QStringLiteral("tok"),
+                                      freetunnel::linkControlString(
+                                              QStringLiteral("freetunnel://toggle"))));
+    QTRY_COMPARE_WITH_TIMEOUT(asked.count(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!(window.windowStates() & Qt::WindowMinimized), 10000);
+    QVERIFY2(backend.connected() && !backend.disconnecting(),
+             "a forwarded link turned the VPN off without asking");
+    backend.prepareQuit();
 }
 
 // A peer whose first bytes are slow to arrive must still be heard. The listener

@@ -661,6 +661,10 @@
         <source>Cancel connecting</source>
         <translation>Отменить подключение</translation>
     </message>
+    <message>
+        <source>A link from another app asks to turn off the VPN. Disconnect?</source>
+        <translation>Ссылка из другого приложения просит выключить VPN. Отключить?</translation>
+    </message>
 </context>
 <context>
     <name>QObject</name>

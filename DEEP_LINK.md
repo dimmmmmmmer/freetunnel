@@ -126,9 +126,52 @@ Application control uses a different scheme (not TLV):
 | `freetunnel://disconnect` | Disconnect |
 
 Handled by `ControlCommand.cpp` and forwarded to a running single-instance app
-via a local socket.
+via a local socket. The verb is case-insensitive and a trailing slash is
+ignored. A disconnect given while "Connect on startup" has not yet connected
+calls that connection off.
+
+### Run as a command, or opened as a link
+
+The same URL reaches FreeTunnel in two ways, and they are not trusted alike:
+
+- **Run as a command** — the program started with the URL as its argument. This
+  is what a Stream Deck button, a launcher or a script should do. A running
+  FreeTunnel acts on it at once, without bringing up the window, as with the
+  global hotkeys; otherwise FreeTunnel starts and acts on it.
+- **Opened as a link** — through the system's URL handling: a browser, a
+  document, the Windows Run box, `xdg-open`, `open` on macOS, or a Stream Deck
+  action that opens a URL. Any web page can open a link, so a link that would
+  turn the VPN off — `disconnect`, or `toggle` while connected or connecting —
+  brings up the window and asks first. So does a `disconnect` link while
+  "Connect on startup" is still about to connect. Only a click answers the
+  question, and only once it has been up for a moment; Return does not.
+  `connect` and a `toggle` that connects go ahead; `tt://` imports always ask,
+  and are answered the same way.
+
+| OS | Run as a command |
+| --- | --- |
+| Windows | `"C:\Program Files\FreeTunnel\FreeTunnel.exe" freetunnel://toggle` (or your install folder) |
+| macOS | `/Applications/FreeTunnel.app/Contents/MacOS/FreeTunnel freetunnel://toggle` |
+| Linux (.deb) | `freetunnel freetunnel://toggle` |
+| Linux (AppImage) | `/path/to/freetunnel-x86_64.AppImage freetunnel://toggle` |
+
+On macOS, `open freetunnel://toggle` goes through LaunchServices, so it is a
+link, not a command.
+
+How the two are told apart: the URL handler registrations — the installer's
+`freetunnel` and `tt` keys under `HKLM\Software\Classes` on Windows, the
+`.desktop` file of the .deb and of the AppImage on Linux — start the app as
+`FreeTunnel --url-handler <url>`. macOS hands links over as Apple events
+(`QFileOpenEvent`), never on the command line, and every one is a link. A link
+is passed on as a marked control string (`linkControlString()`), so it is still
+a link once forwarded to the running instance. A registration made some other
+way, without `--url-handler`, makes links look like commands; that includes a
+menu entry AppImageLauncher or Gear Lever made from an older AppImage.
 
 ## Tests
 
 Round-trip encode/decode, injection stripping, and edge cases are covered in
-`tests/test_deeplink.cpp` and `tests/test_configimport.cpp`.
+`tests/test_deeplink.cpp` and `tests/test_configimport.cpp`. Control links: the
+parser and the link mark in `tests/test_control.cpp`, `--url-handler`, macOS
+link events and forwarding in `tests/test_app_startup.cpp`, what a link may do
+in `tests/test_integration_backend_vpn.cpp`, the question in `tests/test_qml_ui.cpp`.

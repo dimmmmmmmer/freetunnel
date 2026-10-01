@@ -220,15 +220,18 @@ Section "Install"
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=out action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
 
   ; URL protocol handlers: route freetunnel:// and tt:// links to the app
-  ; (e.g. freetunnel://toggle, or a tt:// config-import link).
+  ; (e.g. freetunnel://toggle, or a tt:// config-import link). --url-handler
+  ; tells the app the URL was opened as a link, which any web page can do, and
+  ; not run as a command: a link that would turn the VPN off is asked about.
+  ; It goes before the URL, where nothing in the URL can take it off.
   WriteRegStr HKLM "Software\Classes\freetunnel" "" "URL:FreeTunnel Protocol"
   WriteRegStr HKLM "Software\Classes\freetunnel" "URL Protocol" ""
   WriteRegStr HKLM "Software\Classes\freetunnel\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
-  WriteRegStr HKLM "Software\Classes\freetunnel\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
+  WriteRegStr HKLM "Software\Classes\freetunnel\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" --url-handler "%1"'
   WriteRegStr HKLM "Software\Classes\tt" "" "URL:FreeTunnel Protocol"
   WriteRegStr HKLM "Software\Classes\tt" "URL Protocol" ""
   WriteRegStr HKLM "Software\Classes\tt\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXE},0"
-  WriteRegStr HKLM "Software\Classes\tt\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
+  WriteRegStr HKLM "Software\Classes\tt\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" --url-handler "%1"'
 
 SectionEnd
 

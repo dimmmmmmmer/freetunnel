@@ -94,12 +94,15 @@ Window {
         }
         // Every deep-link import is confirmed, not just the ones that disable
         // certificate verification — so the button is a plain «Import»; the
-        // backend's message carries any warning about the link itself.
+        // backend's message carries any warning about the link itself. Answered
+        // by a click only, as a link's disconnect is: a page chose when this
+        // comes up, and a held Return or a click already on its way would import
+        // a config the page chose without anyone reading the question.
         function onDeepLinkImportConfirmationRequired(message, link, existingName) {
             if (existingName === "") {
-                showConfirm(message, qsTr("Import"), function() {
-                    backend.confirmDeepLinkImport(link, false)
-                })
+                showConfirmWithAlternate(message, qsTr("Import"), "",
+                                         function() { backend.confirmDeepLinkImport(link, false) },
+                                         null, false)
                 return
             }
             // Name collision: replacing is what the user usually means when a link
@@ -109,7 +112,19 @@ Window {
             // primary button; "Add copy" is the safe fallback and stays neutral.
             showConfirmWithAlternate(message, qsTr("Replace"), qsTr("Add copy"),
                                      function() { backend.confirmDeepLinkImport(link, true) },
-                                     function() { backend.confirmDeepLinkImport(link, false) })
+                                     function() { backend.confirmDeepLinkImport(link, false) },
+                                     false)
+        }
+        // A freetunnel:// link (which any web page can open) asked to turn the
+        // VPN off. Asked once, however many times the page opens it, and answered
+        // by a click only: the page chose when this comes up, so a held Return
+        // must not be what says yes.
+        function onDeepLinkDisconnectConfirmationRequired() {
+            const message = qsTr("A link from another app asks to turn off the VPN. Disconnect?")
+            if (confirmPending(message))
+                return
+            showConfirmWithAlternate(message, qsTr("Disconnect"), "",
+                                     function() { backend.disconnectVpn() }, null, false)
         }
     }
 
@@ -878,10 +893,11 @@ Window {
     // Requests that arrived while a dialog was already up, oldest first.
     property var confirmQueue: []
     function showConfirm(message, confirmLabel, cb) {
-        showConfirmWithAlternate(message, confirmLabel, "", cb, null)
+        showConfirmWithAlternate(message, confirmLabel, "", cb, null, true)
     }
-    // altLabel === "" keeps the plain two-button dialog.
-    function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb) {
+    // altLabel === "" keeps the plain two-button dialog. returnConfirms false
+    // leaves the answer to a click (see ConfirmDialog).
+    function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb, returnConfirms) {
         // A second request used to overwrite the live dialog in place, so the
         // user answered a question they never read using the buttons of the
         // previous one — and the callback that ran was the new one. Deep links
@@ -889,24 +905,32 @@ Window {
         // queue instead of clobbering.
         if (winConfirm.visible) {
             confirmQueue.push({ message: message, confirmLabel: confirmLabel,
-                                altLabel: altLabel, cb: cb, altCb: altCb })
+                                altLabel: altLabel, cb: cb, altCb: altCb,
+                                returnConfirms: returnConfirms })
             return
         }
-        applyConfirm(message, confirmLabel, altLabel, cb, altCb)
+        applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms)
     }
-    function applyConfirm(message, confirmLabel, altLabel, cb, altCb) {
+    function applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms) {
         winConfirm.text = message
         winConfirm.confirmText = confirmLabel
         winConfirm.altText = altLabel
+        winConfirm.returnConfirms = returnConfirms
         win.confirmCb = cb
         win.confirmAltCb = altCb
         winConfirm.open()
+    }
+    // Whether this question is on screen already, or waiting its turn.
+    function confirmPending(message) {
+        return (winConfirm.visible && winConfirm.text === message)
+                || confirmQueue.some(function(q) { return q.message === message })
     }
     function showNextConfirm() {
         if (winConfirm.visible || confirmQueue.length === 0)
             return
         var next = confirmQueue.shift()
-        applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb)
+        applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb,
+                     next.returnConfirms)
     }
     // Drawn above everything, the editor's own "Discard unsaved changes?" included,
     // so it owns Return and Escape while it is up and that one stands down (see

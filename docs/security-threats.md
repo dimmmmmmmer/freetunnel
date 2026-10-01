@@ -15,6 +15,32 @@ running instance via a local socket (`QLocalServer`) protected by:
 - Constant-time token comparison
 - 64 KB message cap
 
+### Links opened from a web page
+
+`freetunnel://` and `tt://` are registered with the system, so any web page can
+open one. The browser's prompt about opening FreeTunnel was the only gate, and
+the user can tell it to stop asking. So a link cannot turn the VPN off by
+itself: `freetunnel://disconnect`, or `toggle` while the tunnel is up or coming
+up, brings up the window and asks (so does a `disconnect` that would keep
+"Connect on startup" from connecting). The question is answered by a click
+only: the page decides when it appears, and the window comes forward to take
+the keyboard, so a Return the user is already holding must not be the answer.
+Nor is a click that lands in the first moment, as one already on its way when
+the window came forward would. The kill switch is no defence here, since a
+disconnect the user asks for removes it with the session. Connecting is not
+asked about. Every `tt://` import is, answered the same way, since the config it
+adds is the page's choice.
+
+A command run directly — the executable started with the URL as an argument, as
+a Stream Deck button or a script does — still acts without asking; that is the
+point of it. The two are told apart by `--url-handler`, which the Windows
+installer's registrations and the Linux `.desktop` files put before the URL,
+where nothing in the URL can remove it; on macOS links arrive as Apple events
+and are always treated as links. A scheme registration made without the flag
+(by hand, by a desktop-integration tool that drops arguments, or by
+AppImageLauncher or Gear Lever from an AppImage older than the flag) turns links
+back into commands.
+
 ### Known limitation: same-user local processes
 
 Any process running as the **same OS user** can:
@@ -221,7 +247,8 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | Threat | Mitigation |
 | --- | --- |
 | Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature naming its release version; at worst a withheld update, never an unsigned or older build |
-| Malicious `tt://` link | TLV parser limits; cred store separation |
+| Malicious `tt://` link | TLV parser limits; cred store separation; every import asks, answered by a click |
+| Web page opens `freetunnel://disconnect` or `toggle` | Asks in the window, answered by a click once the question has been up a moment, before turning the VPN off |
 | Other local user | Socket access-control list (ACL) + loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb |
 | TOML injection | `tomlEsc()` strips control chars |

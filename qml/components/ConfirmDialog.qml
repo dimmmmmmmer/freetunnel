@@ -122,6 +122,7 @@ Item {
                     Text { id: c3t; anchors.centerIn: parent; text: cd.altText; color: theme.text; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
                     MouseArea { id: c3; anchors.fill: parent; hoverEnabled: true
+                                enabled: cd.clickAnswers
                                 onClicked: { cd.visible = false; cd.alternate() } } }
                 Rectangle { objectName: "confirmButton"
                     width: cd.buttonWidth(c2t); height: 32; radius: 8
@@ -130,6 +131,7 @@ Item {
                     Text { id: c2t; anchors.centerIn: parent; text: cd.confirmText; color: "white"; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
                     MouseArea { id: c2; anchors.fill: parent; hoverEnabled: true
+                                enabled: cd.clickAnswers
                                 onClicked: { cd.visible = false; cd.confirmed() } } }
             }
         }
@@ -167,7 +169,19 @@ Item {
     // collision, where the primary action replaces an existing config with one a
     // link chose — there is no answer safe enough to be the default, so that one
     // is decided by clicking.
+    // returnConfirms false does the same for a two-button question a link put up
+    // whose yes is the harm: a page that has the user hold Enter and then opens
+    // freetunnel://disconnect brings the window forward, and auto-repeat outlasts
+    // any arming delay. Escape still cancels.
+    property bool returnConfirms: true
+    // A question answered only by a click waits out the same arming before a
+    // click on a yes counts, for the same reason: a page can bring the window
+    // forward under a click already on its way, or in the middle of a run of
+    // them, and that click is no more a choice than a held Return. Until then a
+    // click there does nothing (the card takes it), and Cancel works at once.
+    readonly property bool clickAnswers: armed || returnConfirms
     Shortcut { sequences: ["Return", "Enter"]
                enabled: cd.visible && cd.escapeOwner && cd.armed && cd.altText === ""
+                        && cd.returnConfirms
                onActivated: { cd.visible = false; cd.confirmed() } }
 }

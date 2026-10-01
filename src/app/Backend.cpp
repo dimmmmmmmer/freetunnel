@@ -58,9 +58,13 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     // Background update check: badge Settings when a newer release exists.
     QTimer::singleShot(1200, this, [this] { checkForUpdates(false); });
 
-    // Connect on startup if requested (deferred so the window shows first).
-    if (m_settings.auto_connect_on_start && !m_activePath.isEmpty())
-        QTimer::singleShot(600, this, [this] { connectVpn(); });
+    // Connect on startup if requested (deferred so the window shows first),
+    // unless a disconnect is asked for in the meantime: see disconnectVpn().
+    if (m_settings.auto_connect_on_start && !m_activePath.isEmpty()) {
+        m_autoConnectTimer.setSingleShot(true);
+        connect(&m_autoConnectTimer, &QTimer::timeout, this, &Backend::connectVpn);
+        m_autoConnectTimer.start(600);
+    }
 }
 
 Backend::~Backend()
@@ -496,6 +500,11 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
 }
 
 void Backend::disconnectVpn() {
+    // A disconnect wins over a connect-on-startup that has not started yet.
+    // "Disconnect" handed over with the launch, by a script or a Stream Deck,
+    // found nothing up to take down, and the auto-connect brought the tunnel up
+    // 600 ms later all the same.
+    m_autoConnectTimer.stop();
     if (!m_connected && !m_connecting)
         return; // nothing to disconnect or cancel
     ++m_connectGen; // a credential read still in flight must not start a session
@@ -603,9 +612,28 @@ void Backend::retranslate()
         emit pingsChanged();
 }
 
-void Backend::handleControl(const QString &command) {
+// Any web page can open a link, so a link that would take the tunnel down, or
+// keep "Connect on startup" from bringing it up, is asked about first. A command
+// someone runs, from a script or a Stream Deck button, is theirs and acts at
+// once, as the hotkeys do. Connecting is never asked about.
+bool Backend::linkWouldTurnVpnOff(const freetunnel::ControlCommand &cmd) const
+{
+    using freetunnel::ControlAction;
+    if (!cmd.fromLink)
+        return false;
+    const bool up = m_connected || m_connecting;
+    if (cmd.action == ControlAction::Toggle)
+        return up;
+    return cmd.action == ControlAction::Disconnect && (up || m_autoConnectTimer.isActive());
+}
+
+bool Backend::handleControl(const QString &command) {
     using freetunnel::ControlAction;
     const auto cmd = freetunnel::parseControlCommand(command);
+    if (linkWouldTurnVpnOff(cmd)) {
+        emit deepLinkDisconnectConfirmationRequired();
+        return true;
+    }
     switch (cmd.action) {
     case ControlAction::ImportLink: importDeepLink(cmd.payload); break;
     case ControlAction::Toggle:     toggle(); break;
@@ -613,6 +641,7 @@ void Backend::handleControl(const QString &command) {
     case ControlAction::Disconnect: disconnectVpn(); break;
     case ControlAction::None:       break; // window raise handled by the caller
     }
+    return false;
 }
 
 void Backend::selectConfig(int index) {

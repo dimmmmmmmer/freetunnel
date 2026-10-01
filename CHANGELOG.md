@@ -9,6 +9,29 @@ compare link at the bottom of its release notes.
 
 ### Security
 
+- **A freetunnel:// link asks before it turns the VPN off.** Any web page or app
+  could open freetunnel://disconnect or freetunnel://toggle and turn the VPN off
+  on the spot, kill switch and all, so that your traffic went out without it. The
+  browser's question about opening FreeTunnel was the only thing in the way, and
+  it can be told to stop asking. A link that would turn the VPN off now brings up
+  the window and asks first, and the question is answered with a click, once it
+  has been on screen for a moment: Return does not answer it, and nor does a
+  click that lands as it appears. Connecting works as before.
+
+  A Stream Deck button or a script that runs FreeTunnel with the command is not
+  asked, as long as it runs the program rather than opening the link: on Windows
+  `"C:\Program Files\FreeTunnel\FreeTunnel.exe" freetunnel://toggle`, on macOS
+  `/Applications/FreeTunnel.app/Contents/MacOS/FreeTunnel freetunnel://toggle`
+  (`open freetunnel://toggle` opens a link, and asks). "External control" in the
+  README has the details.
+
+  Linux: if AppImageLauncher or Gear Lever added the AppImage to your menu, add
+  it again once you have updated. The menu entry made from an older AppImage
+  hands links over as commands, and they are not asked about.
+
+  The question a tt:// link asks before it adds a server is answered the same
+  way now. A Return already held down when it came up could answer Import, and
+  add a server the page had chosen.
 - **A program running under your account could have FreeTunnel delete any file
   with administrator rights.** FreeTunnel's privileged part is handed a small
   file when it starts, and once it had read the file it deleted it — whatever
@@ -105,6 +128,11 @@ compare link at the bottom of its release notes.
   its file: import it again from the original file. Saving a config in the
   config editor still turns it back on, as the editor has no switch for it:
   make changes to such a config in its file, and import it again.
+- **Starting FreeTunnel with "disconnect" keeps the VPN off.** With "Connect on
+  startup" on, a script or a Stream Deck button that started FreeTunnel with
+  freetunnel://disconnect while it was not running left it connected: the
+  disconnect came before there was anything to disconnect, and the connection on
+  startup followed a moment later. A disconnect now calls that connection off.
 - **A config imported from a link keeps its whole client random.** A link can
   give the client random with a mask, as prefix/mask. FreeTunnel wrote the mask
   under a key of its own that the VPN core never reads, so the connection went

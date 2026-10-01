@@ -82,12 +82,26 @@ void applyLanguage(QGuiApplication &app, QQmlApplicationEngine &engine,
 }
 
 // cppcheck-suppress constParameter
+static bool hasArgument(int argc, char *argv[], QLatin1String wanted)
+{
+    for (int i = 1; i < argc; ++i) {
+        if (QString::fromLocal8Bit(argv[i]) == wanted)
+            return true;
+    }
+    return false;
+}
+
+// cppcheck-suppress constParameter
 QString controlArgFrom(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
-        if (a.startsWith(QStringLiteral("tt://")) || a.startsWith(QStringLiteral("freetunnel://")))
-            return a;
+        if (!a.startsWith(QStringLiteral("tt://")) && !a.startsWith(QStringLiteral("freetunnel://")))
+            continue;
+        // Marked as a link when the URL handler started us. Looked for anywhere
+        // on the line, not just before the URL: the registration puts it first,
+        // and nothing the URL carries can take it off again.
+        return hasArgument(argc, argv, kUrlHandlerArg) ? linkControlString(a) : a;
     }
     return QString();
 }
@@ -141,11 +155,21 @@ static void raiseMainWindow(QWindow *win)
 // are the user asking for the window from outside it. freetunnel://toggle,
 // connect and disconnect are not: they come from a keyboard shortcut, a script
 // or a Stream Deck and act silently, as the in-app hotkeys do. Bringing the
-// window up for them took focus from whatever the user was typing into.
+// window up for them took focus from whatever the user was typing into. The
+// exception is one that came as a link and would turn the VPN off: Backend asks
+// about it instead, and says so, and the window comes up for the question.
 static bool commandWantsWindow(const QString &command)
 {
     const ControlAction action = parseControlCommand(command).action;
     return action == ControlAction::None || action == ControlAction::ImportLink;
+}
+
+// Act on a command from outside the window. True when the window should come
+// forward for it: the user asked for the window, or Backend asked them something.
+static bool runControlCommand(Backend &backend, const QString &command)
+{
+    const bool asked = backend.handleControl(command);
+    return asked || commandWantsWindow(command);
 }
 
 namespace {
@@ -258,8 +282,7 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         QString cmd;
         if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
             return;
-        be->handleControl(cmd);
-        if (commandWantsWindow(cmd))
+        if (runControlCommand(*be, cmd))
             freetunnel::bringWindowForward(win);
     };
 
@@ -388,10 +411,13 @@ bool UrlOpenFilter::eventFilter(QObject *o, QEvent *e)
 
 void UrlOpenFilter::apply(const QString &u)
 {
-    backend->handleControl(u);
+    // Always a link. This is how macOS hands over a URL it was asked to open —
+    // by a browser, `open`, any app — and never how a command run with the URL
+    // as an argument arrives: that reaches the running instance over its socket.
+    const QString command = freetunnel::linkControlString(u);
     // bringWindowForward, not the activation-time raise: a window minimised to
     // the Dock stayed there, with the import question in it unseen.
-    if (freetunnel::commandWantsWindow(u))
+    if (freetunnel::runControlCommand(*backend, command))
         freetunnel::bringWindowForward(win);
 }
 
