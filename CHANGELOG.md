@@ -19,6 +19,19 @@ compare link at the bottom of its release notes.
 
 ### Fixed
 
+- **Disconnecting, switching servers or turning logging off no longer puts the
+  connection at risk.** The VPN core closed its log file when a session ended
+  but went on writing its messages to it, inside the privileged helper that holds
+  the tunnel and the kill switch. Whatever it logged after a disconnect or a
+  server switch went there, and so did everything in the next session if you
+  had turned logging off in between. That could crash the helper and drop the
+  connection. FreeTunnel now writes the core's messages itself, to a file it
+  keeps open for as long as logging is on. With logging off they are now
+  written nowhere; on macOS they used to go to a temporary file even then.
+- **The core's messages reach the log as they happen.** They were held back
+  until a few kilobytes had gathered or the connection ended, so a warning could
+  arrive long after it mattered, and the last ones before a disconnect never
+  arrived at all.
 - **A config imported from a link keeps its whole client random.** A link can
   give the client random with a mask, as prefix/mask. FreeTunnel wrote the mask
   under a key of its own that the VPN core never reads, so the connection went

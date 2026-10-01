@@ -293,9 +293,10 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
         m_config.reset();
     }
     // Start each session from an empty core log. The GUI keeps the durable copy
-    // (every line reaches it over IPC), so this file is only a hand-off buffer —
-    // and truncating it here, BEFORE the core opens it, avoids doing so behind a
-    // descriptor the core already holds.
+    // (every line reaches it over IPC), so this file is only a hand-off buffer.
+    // The file is ours, not the core's (CoreLogSink, qt_trusttunnel_corelog.cpp),
+    // so the previous session's client — retired below, on the worker — can go
+    // on logging while it is swapped for a fresh one.
     resetCoreLogFile();
     // Start tailing before the attempt, not after it succeeds: a connect that
     // FAILS is precisely when the core's own diagnostics are worth having, and

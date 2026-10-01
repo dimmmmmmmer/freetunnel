@@ -9,6 +9,9 @@
 #include <functional>
 #include <string>
 
+// Where the real vpn.h gets ag::Logger and ag::LogLevel from, too.
+#include "common/logger.h"
+
 #ifdef _WIN32
 #include <winsock2.h>
 // sockaddr_in6 lives here, not in winsock2.h — the static_assert below needs it.
@@ -56,14 +59,6 @@ enum VpnFilteredConnectionAction {
     VPN_FCA_BYPASS,
     VPN_FCA_TUNNEL,
     VPN_FCA_REJECT,
-};
-
-enum LogLevel {
-    LOG_LEVEL_ERROR,
-    LOG_LEVEL_WARN,
-    LOG_LEVEL_INFO,
-    LOG_LEVEL_DEBUG,
-    LOG_LEVEL_TRACE,
 };
 
 enum VpnMode {
@@ -162,18 +157,6 @@ struct VpnCallbacks {
     std::function<void(VpnTunnelConnectionStatsEvent *)> tunnel_stats_handler;
     std::function<void(VpnConnectionInfoEvent *)> connection_info_handler;
     std::function<void(const VpnConnectRequestSnapshot &, VpnConnectDecision *)> connect_request_handler;
-};
-
-struct Logger {
-    // Recorded so tests can assert that the Verbose-logs toggle actually reaches
-    // the core: the wrapper reads `loglevel` back out of the config TOML and
-    // pushes it here, and that readback silently regressed once already.
-    static LogLevel &last_level()
-    {
-        static LogLevel level = LOG_LEVEL_INFO;
-        return level;
-    }
-    static void set_log_level(LogLevel l) { last_level() = l; }
 };
 
 } // namespace ag

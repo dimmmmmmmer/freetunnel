@@ -409,8 +409,8 @@ private:
             send(e);
             return;
         }
-        // Only whether to log — never where. The core creates the file and its
-        // parent directory as root, so a caller-supplied path was a root
+        // Only whether to log — never where. The log file and its parent
+        // directory are created as root, so a caller-supplied path was a root
         // file-write primitive; the client derives its own path now, which
         // removes the class rather than fencing it in.
         const bool loggingEnabled = c.value(QStringLiteral("loggingEnabled")).toBool(true);

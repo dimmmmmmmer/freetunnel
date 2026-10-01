@@ -8,7 +8,9 @@
 #include <QElapsedTimer>
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QTcpServer>
 
 #ifdef Q_OS_WIN
@@ -20,6 +22,7 @@
 #endif
 
 #include <QPointer>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QThread>
 
@@ -34,11 +37,15 @@
 
 #include "mock_core_controller.h"
 #include "qt_trusttunnel_client.h"
+#include "qt_trusttunnel_platform.h"
 
 using State = QtTrustTunnelClient::State;
 
 namespace {
 constexpr int kLongWaitMs = 20000;
+// Set in the copy of this test binary that a test starts to get a process in
+// which no session has run yet.
+constexpr char kFreshProcessEnv[] = "FT_TEST_FRESH_PROCESS";
 } // namespace
 
 class TestQtTrustTunnelClient : public QObject {
@@ -54,6 +61,13 @@ private slots:
         qputenv("FT_TEST_NETWORK_WAIT_MS", "400");
         qputenv("FT_TEST_FD_WATCHDOG_MS", "300");
         qRegisterMetaType<QtTrustTunnelClient::State>();
+        // The core log tests write the real default core log file; keep it out
+        // of the developer's own data folder. And put a name in its path that no
+        // ANSI code page has, as a profile folder named in Cyrillic does: on
+        // Windows a file opened by such a path with plain fopen() is not found.
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(
+                QStringLiteral("test_qt_trusttunnel_client-тест"));
     }
 
     void init()
@@ -107,6 +121,10 @@ private slots:
     void killSwitchAndVpnModeReachTheCoreConfig();
     void splitRoutesAndExclusionsReachTheCoreConfig();
     void theCoreIsHandedAServerCertificateVerifier();
+    void coreLinesReachTheLogWhileTheSessionRuns();
+    void aCoreLineAfterTheSessionEndsNeverUsesAClosedFile();
+    void loggingOffForTheNextSessionWritesNowhere();
+    void loggingOffFromTheFirstSessionWritesNowhere();
 
 private:
     static bool listContains(const std::vector<std::string> &items, const char *needle)
@@ -133,6 +151,37 @@ private:
     void requestDisconnect()
     {
         QMetaObject::invokeMethod(m_client, "disconnectVpn", Qt::QueuedConnection);
+    }
+
+    // Queued like every other command, so it lands before a beginConnect sent
+    // after it — the order the helper server sends the two in.
+    void setSessionLogging(bool enabled)
+    {
+        QMetaObject::invokeMethod(m_client, "setSessionLogging", Qt::QueuedConnection,
+                                  Q_ARG(bool, enabled));
+    }
+
+    void connectAndSettle()
+    {
+        auto &ctl = mockcore::Controller::instance();
+        const int before = ctl.connectCallCount();
+        beginConnect();
+        QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() > before, kLongWaitMs);
+        ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_CONNECTED);
+        QTRY_COMPARE(m_lastState, State::Connected);
+    }
+
+    static bool anyLineContains(const QSignalSpy &spy, const QString &text)
+    {
+        return std::any_of(spy.cbegin(), spy.cend(), [&text](const QList<QVariant> &args) {
+            return args.at(0).toString().contains(text);
+        });
+    }
+
+    static QByteArray coreLogFileContents()
+    {
+        QFile f(qt_trusttunnel_default_core_log_path());
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     }
 
     QThread *m_thread = nullptr;
@@ -704,6 +753,104 @@ void TestQtTrustTunnelClient::aBurstPastTheLookupBudgetIsKeptInTheTunnel()
         keptIn = ctl.fireConnectRequest(id, req).action == ag::VPN_CA_FORCE_REDIRECT;
     }
     QVERIFY2(keptIn, "the budget must run out and unexamined connections stay in the tunnel");
+}
+
+// The core logs through one callback for the whole process. Left to itself, the
+// core client owned the file behind it: it opened the file when given a path,
+// pointed the callback at it, closed it when the client was destroyed and left
+// the callback pointing at the closed file. The helper is one process with a new
+// core client for every session, so core lines went through a closed FILE in a
+// root process. These run with logging on, which every other test here turns off.
+
+// A line logged in the middle of a session has to reach the GUI then, not when a
+// buffer fills or the session ends: the core's own file was fully buffered, and
+// a warning about the connection showed up long after it mattered, or never.
+void TestQtTrustTunnelClient::coreLinesReachTheLogWhileTheSessionRuns()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QSignalSpy lines(m_client, &QtTrustTunnelClient::coreLogLine);
+    setSessionLogging(true);
+    connectAndSettle();
+
+    ctl.coreLog(ag::LOG_LEVEL_WARN, "upstream stopped answering");
+    QTRY_VERIFY(anyLineContains(lines, QStringLiteral("upstream stopped answering")));
+    QCOMPARE(ctl.coreLogWritesThroughClosedFile(), 0);
+}
+
+// The core keeps logging after a session is over — its threads do not ask which
+// client set the callback — and that line must not go through the file the
+// destroyed client closed.
+void TestQtTrustTunnelClient::aCoreLineAfterTheSessionEndsNeverUsesAClosedFile()
+{
+    auto &ctl = mockcore::Controller::instance();
+    setSessionLogging(true);
+    connectAndSettle();
+    const quint64 id = ctl.lastClientId();
+
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    QTRY_VERIFY(!ctl.clientAlive(id));
+
+    ctl.coreLog(ag::LOG_LEVEL_WARN, "late line from a core thread");
+    QCOMPARE(ctl.coreLogWritesThroughClosedFile(), 0);
+    // Still logging, so it is kept: the file belongs to the helper now, and it
+    // stays open until the next session or until logging is switched off.
+    QVERIFY(coreLogFileContents().contains("late line from a core thread"));
+}
+
+// Switching logging off for the next session left the callback where the
+// previous client had put it — on a file closed when that client was destroyed
+// — so EVERY line of the new session went through it. Logging off has to mean
+// nowhere: not the old file, and not stderr either, which in the helper is a
+// pipe or a temp file nobody reads.
+void TestQtTrustTunnelClient::loggingOffForTheNextSessionWritesNowhere()
+{
+    auto &ctl = mockcore::Controller::instance();
+    setSessionLogging(true);
+    connectAndSettle();
+    const quint64 firstId = ctl.lastClientId();
+
+    setSessionLogging(false);
+    connectAndSettle(); // a config switch: the first client is retired first
+    QTRY_VERIFY(!ctl.clientAlive(firstId));
+
+    ctl.coreLog(ag::LOG_LEVEL_WARN, "said with logging off");
+    QCOMPARE(ctl.coreLogWritesThroughClosedFile(), 0);
+    QCOMPARE(ctl.coreLogLinesToStderr(), 0);
+    QVERIFY(!coreLogFileContents().contains("said with logging off"));
+}
+
+// With logging off from the helper's first session there is no closed file, but
+// the core's default callback writes to stderr, which in the helper is pkexec's
+// pipe to the GUI (never read) or a root-owned temp file on macOS. The sink has
+// to be installed for that session too, so its lines go nowhere. Only a process
+// in which nothing has replaced the core's callback yet can show that, so this
+// runs itself again, alone, in a new process.
+void TestQtTrustTunnelClient::loggingOffFromTheFirstSessionWritesNowhere()
+{
+    if (!qEnvironmentVariableIsSet(kFreshProcessEnv)) {
+        QProcess child;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QString::fromLatin1(kFreshProcessEnv), QStringLiteral("1"));
+        child.setProcessEnvironment(env);
+        child.setProcessChannelMode(QProcess::MergedChannels);
+        child.start(QCoreApplication::applicationFilePath(),
+                    {QString::fromLatin1(QTest::currentTestFunction())});
+        QVERIFY2(child.waitForFinished(3 * kLongWaitMs), "the test in a new process did not finish");
+        const QByteArray output = child.readAll();
+        QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+                 output.constData());
+        return;
+    }
+
+    auto &ctl = mockcore::Controller::instance();
+    QVERIFY2(ctl.coreLoggerCallbackSets() == 0,
+             "something replaced the core's logger before the first session; this proves nothing");
+    connectAndSettle(); // logging off, as init() leaves it
+
+    ctl.coreLog(ag::LOG_LEVEL_WARN, "said with logging off from the start");
+    QCOMPARE(ctl.coreLogLinesToStderr(), 0);
+    QCOMPARE(ctl.coreLogWritesThroughClosedFile(), 0);
 }
 
 #include "test_qt_trusttunnel_client.moc"
