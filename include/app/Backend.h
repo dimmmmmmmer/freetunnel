@@ -336,6 +336,7 @@ private:
     QString nameForPath(const QString &path) const;
     void ensureUpdater();
     void wireUpdaterSignals();
+    void onUpdateDownloadReady(const QString &path); // start or install a verified download
     void wireVpnClientSignals();
     void onVpnClientStateChanged(VpnHelperClient::State st);
     void onVpnErrorReceived(const QString &m);
