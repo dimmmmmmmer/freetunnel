@@ -74,12 +74,33 @@ Item {
                     // What it covers, not more. The block lives in the VPN core's
                     // session, so it holds while a dropped connection is recovered
                     // and is gone while the VPN is off or a session is being built
-                    // anew (a config switch, a split-tunnel change). "Outside the
+                    // anew (a config switch, an excluded-route edit). "Outside the
                     // VPN" promised all of that; the README says the rest.
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("block traffic if the VPN drops"); color: theme.textFaint; font.pixelSize: 12 }
                 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
+            // Hands the kill switch's exceptions back to the VPN config: the ports
+            // its killswitch_allow_ports names, which the helper drops while this is
+            // off. Only the Windows core has such exceptions, so elsewhere the
+            // switch would do nothing and is not shown. Dimmed with the kill switch,
+            // as without it nothing is blocked.
+            RowLayout { objectName: "killSwitchPortsRow"
+                Layout.fillWidth: true; Layout.preferredHeight: Math.max(42, implicitHeight + 8)
+                visible: Qt.platform.os === "windows"
+                enabled: backend.killSwitch
+                opacity: backend.killSwitch ? 1 : 0.45
+                ColumnLayout {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("Let the VPN config open ports"); color: theme.text; font.pixelSize: 14 }
+                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap
+                           text: qsTr("the config decides which ports bypass the kill switch")
+                           color: theme.textFaint; font.pixelSize: 12 }
+                }
+                Toggle { objectName: "killSwitchPortsToggle"; accent: theme.accent; offColor: theme.toggleOff
+                         checked: backend.killSwitchPortsFromConfig
+                         onToggled: function(v){ backend.killSwitchPortsFromConfig = v } } }
             Item { Layout.preferredHeight: 16 }
 
             // ----- Excluded routes (subnets that bypass the tunnel) -----

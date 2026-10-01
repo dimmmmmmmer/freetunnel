@@ -201,6 +201,17 @@ sent, and refuses a config whose listener is a SOCKS proxy rather than a tunnel
 interface. Routes, DNS, the endpoint and its certificate pass through untouched:
 they are what a config is for.
 
+The kill-switch ports are the one key the user can hand back to the config, since
+reaching the machine from outside (Remote Desktop, say) with the kill switch on
+needs them. A Windows-only setting, "Let the VPN config open ports", off by
+default, tells the helper to keep them; the other keys stay cleared either way.
+It travels to the helper as the kill switch itself does, so a process able to
+send it could as well turn the kill switch off: it gives same-user malware
+nothing it did not have. It is one setting for every config, though, not a
+choice made for one: while it is on, every config the user connects with,
+including one imported or swapped in later, again chooses which ports bypass
+the kill switch. Turning it on is trusting every config in use.
+
 Mitigations already in place: no remote attack surface for control IPC, tokens
 rotate each session, helper binds to loopback only.
 
@@ -241,9 +252,10 @@ down and built another every round.
 What is left, and is accepted:
 
 - **Building a session anew** lifts the block for the time it takes: switching
-  configs, editing the excluded routes or the kill switch itself while
-  connected (both are read when a session is built), and starting over after
-  an error the core treats as final, such as a refused login or certificate.
+  configs, editing the excluded routes, the kill switch itself or (on Windows)
+  whether a config may open ports in it while connected (all are read when a
+  session is built), and starting over after an error the core treats as
+  final, such as a refused login or certificate.
 - **No session, no block.** The VPN being off, an error that stops it, and a
   config whose server is a domain name that cannot be resolved (the core needs
   its address before a session can start) all leave traffic unblocked.
@@ -370,7 +382,7 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | Other local user | Socket access-control list (ACL) + loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb |
 | TOML injection | `tomlEsc()` strips control chars |
-| Config keys that point the elevated core at a path, interface or port | Helper clears the five such keys (session-cache folder, kill-switch ports, interface name, attach, namespace); tunnel listener only; an upstream bump whose core reads a new key fails `verify_upstream_patch.sh` |
+| Config keys that point the elevated core at a path, interface or port | Helper clears the five such keys (session-cache folder, kill-switch ports, interface name, attach, namespace; the ports kept only if the user turns that on, for every config); tunnel listener only; an upstream bump whose core reads a new key fails `verify_upstream_patch.sh` |
 | Operator learns which app opened a flow | Program name kept out of the core decision, local log only |
 | Unsigned installer | User warnings; in-app hash verify before install |
 | Traffic leaving outside the tunnel while it is not connected | Kill switch, held by one session through rule edits and failed first connects; remaining gaps listed above |

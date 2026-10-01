@@ -176,7 +176,10 @@ void QtTrustTunnelClient::teardownClient() {
 //    shaped like a cached session when it starts, and writes new ones (following
 //    symlinks) when it stops. Unset, it keeps sessions in memory.
 //  - killswitch_allow_ports: Windows ports the kill switch lets through, in both
-//    directions, around the tunnel.
+//    directions, around the tunnel. The one exception to "cleared": the user can
+//    let the config decide this (setKillSwitchPortsFromConfig), and setConfigLocked
+//    then puts the file's ports back. Off by default, so a config cannot open the
+//    kill switch on its own.
 //  - device_name, use_existing, netns: which interface root creates or attaches
 //    to, under what name, and in which network namespace (the last two on Linux).
 //
@@ -197,6 +200,7 @@ static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
 
 void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
+    m_configAllowPorts = m_config->killswitch_allow_ports;
     clearKeysRootMustNotTakeFromAConfig(*m_config);
     // m_logLevel is set from the config TOML's loglevel in the load functions
     // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
@@ -217,6 +221,7 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     // Routing policy: general = bypass the exclusions, selective = route only them.
     m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
     m_config->killswitch_enabled = m_killSwitch;
+    applyKillSwitchPortsToConfigLocked();
 }
 
 // The config's own exclusions, then ours. What a session is built with and what
@@ -363,6 +368,19 @@ void QtTrustTunnelClient::setKillSwitch(bool enabled) {
     m_killSwitch = enabled;
     if (m_config.has_value())
         m_config->killswitch_enabled = enabled;
+}
+
+void QtTrustTunnelClient::setKillSwitchPortsFromConfig(bool enabled) {
+    std::lock_guard<std::mutex> lk(m_configMutex);
+    m_killSwitchPortsFromConfig = enabled;
+    if (m_config.has_value())
+        applyKillSwitchPortsToConfigLocked();
+}
+
+// The file's own ports while the user lets the config decide them, none otherwise.
+void QtTrustTunnelClient::applyKillSwitchPortsToConfigLocked() {
+    m_config->killswitch_allow_ports =
+            m_killSwitchPortsFromConfig ? m_configAllowPorts : std::string();
 }
 
 void QtTrustTunnelClient::setSessionLogging(bool enabled)

@@ -501,6 +501,7 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
     m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
+    m_client.setKillSwitchPortsFromConfig(m_settings.killswitch_ports_from_config);
     m_client.setLogLevel(m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn"));
     m_client.setSessionLogging(m_settings.logging_enabled);
     m_client.connectVpn();

@@ -51,6 +51,11 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY settingsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY settingsChanged)
     Q_PROPERTY(bool killSwitch READ killSwitch WRITE setKillSwitch NOTIFY settingsChanged)
+    // Let the VPN config's own kill-switch exceptions (killswitch_allow_ports)
+    // apply. Off by default: the config then has no say in what the kill switch
+    // lets through. Only the Windows core has such exceptions.
+    Q_PROPERTY(bool killSwitchPortsFromConfig READ killSwitchPortsFromConfig WRITE
+                       setKillSwitchPortsFromConfig NOTIFY settingsChanged)
     Q_PROPERTY(QObject *logModel READ logModel CONSTANT)
     Q_PROPERTY(bool splitEnabled READ splitEnabled WRITE setSplitEnabled NOTIFY splitChanged)
     Q_PROPERTY(QString vpnMode READ vpnMode WRITE setVpnMode NOTIFY splitChanged) // general|selective
@@ -127,12 +132,14 @@ public:
     const QString &themeMode() const { return m_settings.theme_mode; }
     bool autoConnect() const { return m_settings.auto_connect_on_start; }
     bool killSwitch() const { return m_settings.killswitch_enabled; }
+    bool killSwitchPortsFromConfig() const { return m_settings.killswitch_ports_from_config; }
     bool loggingEnabled() const { return m_settings.logging_enabled; }
     bool verboseLogs() const { return m_settings.verbose_logs; }
     void setLanguage(const QString &v);
     void setThemeMode(const QString &v);
     void setAutoConnect(bool v);
     void setKillSwitch(bool v);
+    void setKillSwitchPortsFromConfig(bool v);
     void setLoggingEnabled(bool v);
     void setVerboseLogs(bool v);
 

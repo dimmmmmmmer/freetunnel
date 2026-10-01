@@ -64,3 +64,13 @@ void Backend::setKillSwitch(bool v) {
     reapplyIfConnected();
     emit settingsChanged();
 }
+// Travels and applies exactly like the kill switch itself: the helper decides
+// what the core gets, and the ports are fixed when the tunnel is built, so a live
+// session is rebuilt with them.
+void Backend::setKillSwitchPortsFromConfig(bool v) {
+    if (m_settings.killswitch_ports_from_config == v) return;
+    m_settings.killswitch_ports_from_config = v; persistSettings();
+    m_client.setKillSwitchPortsFromConfig(v);
+    reapplyIfConnected();
+    emit settingsChanged();
+}

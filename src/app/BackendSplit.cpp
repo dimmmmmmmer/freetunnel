@@ -541,7 +541,7 @@ void Backend::applySplitRules(bool warnOfLeak) {
 }
 
 // A config switch, and an edit to what a session is built with (the excluded
-// routes, the kill switch), binds only when the tunnel is (re)built. If we're
+// routes, the kill switch and its config ports), binds only when the tunnel is (re)built. If we're
 // connected, seamlessly rebuild it so edits apply immediately rather than only
 // after a manual reconnect. No-op (and no re-elevation) when disconnected.
 void Backend::reconnectActiveConfig() {
@@ -598,17 +598,18 @@ void Backend::firePendingReconnect() {
 }
 
 void Backend::reapplyIfConnected() {
-    // The excluded routes and the kill switch are sent with a connect. Before one
-    // reaches a running helper (the credential read, the teardown of a switch, a
-    // helper still starting) the edit goes out with it. After that the session
-    // holds its own copy and only a rebuild applies the edit — connected or still
-    // connecting. Waiting for Connected used to leave an edit made while
-    // connecting on screen and out of the tunnel until a manual reconnect.
+    // The excluded routes and the kill switch (with whether the config's own
+    // ports may pass it) are sent with a connect. Before one reaches a running
+    // helper (the credential read, the teardown of a switch, a helper still
+    // starting) the edit goes out with it. After that the session holds its own
+    // copy and only a rebuild applies the edit — connected or still connecting.
+    // Waiting for Connected used to leave an edit made while connecting on screen
+    // and out of the tunnel until a manual reconnect.
     if (m_inConnect || m_awaitingToml || m_pendingReconnect)
         return;
     if (!m_connected && !m_client.helperReady())
         return;
-    // But only an edit to one of those two needs a new session. Everything else
+    // But only an edit to one of those needs a new session. Everything else
     // on the Split tunnelling page (address rules, program rules, the mode, the
     // switch itself) has already gone out in applySplitRules(), and the helper
     // hands it to the running session, or to one still being built once it is.

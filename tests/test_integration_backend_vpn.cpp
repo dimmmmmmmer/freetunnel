@@ -40,6 +40,7 @@ private slots:
     void connectPushesTheSecuritySettingsToTheHelper();
     void connectWithNoRulesAsksForTheFullTunnelNotSelective();
     void togglingTheKillSwitchWhileConnectedReachesTheCore();
+    void theConfigsKillSwitchPortsSettingReachesTheHelperAndTheLiveSession();
     void configSwitchSuppressesCoreDisconnectToast();
     void aSwitchToAFailingServerSaysSoAndTheNextPickStillSwitches();
     void aSecondPickWhileTheFirstReadsItsPasswordWins();
@@ -340,6 +341,66 @@ void TestIntegrationBackendVpn::togglingTheKillSwitchWhileConnectedReachesTheCor
     QVERIFY2(QTest::qWaitFor([&]() { return server.connectCount() == 3 && backend.connected(); },
                              10000),
              "turning the kill switch off while connected has to rebuild the session too");
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+    qunsetenv("FT_TEST_HELPER_PORT");
+    qunsetenv("FT_TEST_HELPER_TOKEN");
+}
+
+// The setting that lets a config's kill-switch ports through goes the kill
+// switch's way: pushed from the persisted settings on connect, and, changed on a
+// live connection, sent and applied by rebuilding the session, since the ports
+// are fixed when the tunnel is. A toggle that only reached the settings file
+// would leave Remote Desktop blocked, or open, until the next manual reconnect.
+void TestIntegrationBackendVpn::theConfigsKillSwitchPortsSettingReachesTheHelperAndTheLiveSession()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QString configPath;
+    QVERIFY(writeTestConfig(base, QStringLiteral("killports.example"), &configPath));
+    QVERIFY(freetunnel::CredentialStore::storePassword(configPath, QStringLiteral("secret")));
+
+    saveStoredConfigs({configPath});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = configPath;
+    settings.killswitch_enabled = true;
+    settings.killswitch_ports_from_config = true;
+    saveAppSettings(settings);
+    const auto restore = qScopeGuard([] {
+        AppSettings s = loadAppSettings();
+        s.killswitch_ports_from_config = false;
+        saveAppSettings(s);
+    });
+
+    const QString token = QStringLiteral("backend-killports-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+
+    Backend backend;
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    const QJsonObject sent = server.lastMessageFor(QStringLiteral("setKillSwitchPortsFromConfig"));
+    QVERIFY2(sent.contains(QStringLiteral("enabled")),
+             "connect never told the helper whether the config's ports apply");
+    QCOMPARE(sent.value(QStringLiteral("enabled")).toBool(), true);
+    const int connectsBefore = server.connectCount();
+
+    backend.setKillSwitchPortsFromConfig(false);
+    QVERIFY2(QTest::qWaitFor(
+                     [&]() {
+                         return !server.lastMessageFor(QStringLiteral("setKillSwitchPortsFromConfig"))
+                                         .value(QStringLiteral("enabled")).toBool()
+                                 && server.connectCount() > connectsBefore
+                                 && backend.connected();
+                     },
+                     10000),
+             "turning the setting off on a live connection must reach the helper and rebuild "
+             "the session, not just the settings file");
+    QCOMPARE(backend.killSwitchPortsFromConfig(), false);
 
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));

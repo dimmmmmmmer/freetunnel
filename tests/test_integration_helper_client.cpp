@@ -540,6 +540,7 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
 
     VpnHelperClient client;
     client.setKillSwitch(true);
+    client.setKillSwitchPortsFromConfig(true);
     client.setVpnMode(true);
     client.setExcludedRoutes(std::vector<std::string>{"10.66.0.0/16"});
     client.setExtraExclusions(std::vector<std::string>{"intranet.example"});
@@ -562,6 +563,14 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
     QVERIFY2(mode.contains(QStringLiteral("selective")), "setMode carried no \"selective\" key");
     QCOMPARE(mode.value(QStringLiteral("selective")).toBool(), true);
 
+    // Here a lost key fails safe (the config's ports stay out), but it fails just
+    // as silently: someone who turned the setting on for Remote Desktop would find
+    // it blocked with nothing saying why.
+    const QJsonObject ports = server.lastMessageFor(QStringLiteral("setKillSwitchPortsFromConfig"));
+    QVERIFY2(ports.contains(QStringLiteral("enabled")),
+             "setKillSwitchPortsFromConfig carried no \"enabled\" key");
+    QCOMPARE(ports.value(QStringLiteral("enabled")).toBool(), true);
+
     QCOMPARE(jsonStringArray(server.lastMessageFor(QStringLiteral("setRoutes")), "excluded"),
              QStringList{QStringLiteral("10.66.0.0/16")});
     QCOMPARE(jsonStringArray(server.lastMessageFor(QStringLiteral("setExclusions")), "domains"),
@@ -571,6 +580,7 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
     // true is exactly as broken as one that drops the value, and only this half of
     // the assertion can tell them apart.
     client.setKillSwitch(false);
+    client.setKillSwitchPortsFromConfig(false);
     client.setVpnMode(false);
     QTRY_VERIFY_WITH_TIMEOUT(
             server.lastMessageFor(QStringLiteral("setKillSwitch"))
@@ -583,8 +593,15 @@ void TestIntegrationHelperClient::securitySettingsAreSentAsValuesNotJustCommandN
                                      .toBool()
                                      == false,
                              10000);
+    QTRY_VERIFY_WITH_TIMEOUT(server.lastMessageFor(QStringLiteral("setKillSwitchPortsFromConfig"))
+                                     .value(QStringLiteral("enabled"))
+                                     .toBool()
+                                     == false,
+                             10000);
     // Still the right key, not merely a missing one decoding to false.
     QVERIFY(server.lastMessageFor(QStringLiteral("setKillSwitch"))
+                    .contains(QStringLiteral("enabled")));
+    QVERIFY(server.lastMessageFor(QStringLiteral("setKillSwitchPortsFromConfig"))
                     .contains(QStringLiteral("enabled")));
 
     qunsetenv("FT_TEST_HELPER_PORT");

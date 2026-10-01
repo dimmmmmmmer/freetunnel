@@ -114,6 +114,7 @@ private slots:
     void theUpdateLineDoesWhatItOffers();
     void restoringDefaultRoutesAsksFirst();
     void theExcludedRoutesSayTheyAddToTheConfigsOwn();
+    void theKillSwitchPortsSwitchIsBoundToItsSetting();
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
@@ -2840,6 +2841,52 @@ void TestQmlUi::theExcludedRoutesSayTheyAddToTheConfigsOwn()
     QVERIFY2(note->isVisible(), "said with the list empty, which is when it matters");
     QVERIFY2(note->property("text").toString().contains(QStringLiteral("in addition to")),
              qPrintable(note->property("text").toString()));
+    delete root;
+}
+
+// The switch that lets a VPN config decide which ports get through the kill
+// switch. Bound both ways to its setting, standing down with the kill switch off,
+// and shown only on Windows, the one platform whose core has such ports.
+void TestQmlUi::theKillSwitchPortsSwitchIsBoundToItsSetting()
+{
+    m_backend.setKillSwitch(true);
+    const auto restore = qScopeGuard([this] {
+        m_backend.setKillSwitch(false);
+        m_backend.setKillSwitchPortsFromConfig(false);
+    });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *row = root->findChild<QQuickItem *>(QStringLiteral("killSwitchPortsRow"));
+    auto *toggle = root->findChild<QQuickItem *>(QStringLiteral("killSwitchPortsToggle"));
+    QVERIFY(row && toggle);
+#ifdef Q_OS_WIN
+    QVERIFY(row->isVisible());
+#else
+    QVERIFY2(!row->isVisible(), "a switch for ports only the Windows kill switch has");
+#endif
+
+    QCOMPARE(toggle->property("checked").toBool(), false);
+    m_backend.setKillSwitchPortsFromConfig(true);
+    QCOMPARE(toggle->property("checked").toBool(), true);
+    m_backend.setKillSwitchPortsFromConfig(false);
+    QCOMPARE(toggle->property("checked").toBool(), false);
+
+#ifdef Q_OS_WIN
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(toggle));
+#else
+    // Hidden here, so there is nothing to click; this is what a click emits.
+    QVERIFY(QMetaObject::invokeMethod(toggle, "toggled", Q_ARG(bool, true)));
+#endif
+    QVERIFY2(m_backend.killSwitchPortsFromConfig(), "the switch never reached the setting");
+
+    m_backend.setKillSwitch(false);
+    QVERIFY2(!row->isEnabled(), "with the kill switch off there is nothing for it to open");
+#ifdef Q_OS_WIN
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(toggle));
+    QVERIFY(m_backend.killSwitchPortsFromConfig());
+#endif
     delete root;
 }
 

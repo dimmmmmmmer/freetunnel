@@ -291,6 +291,14 @@ void VpnHelperClient::setKillSwitch(bool enabled) {
     }
 }
 
+void VpnHelperClient::setKillSwitchPortsFromConfig(bool enabled) {
+    m_killSwitchPortsFromConfig = enabled;
+    if (m_helloAcked) {
+        QJsonObject c; c["cmd"] = "setKillSwitchPortsFromConfig"; c["enabled"] = enabled;
+        send(c);
+    }
+}
+
 void VpnHelperClient::setLogLevel(const QString &level) {
     m_logLevel = level;
     if (m_helloAcked) {
@@ -323,7 +331,7 @@ void VpnHelperClient::connectVpn() {
 }
 
 VpnHelperClient::SessionSettings VpnHelperClient::sessionSettings() const {
-    return {m_excludedRoutes, m_killSwitch};
+    return {m_excludedRoutes, m_killSwitch, m_killSwitchPortsFromConfig};
 }
 
 bool VpnHelperClient::sessionSettingsChanged() const {
@@ -731,6 +739,7 @@ void VpnHelperClient::handleReadyEvent()
     clearTokenFile();
     setVpnMode(m_selective);
     setKillSwitch(m_killSwitch);
+    setKillSwitchPortsFromConfig(m_killSwitchPortsFromConfig);
     setLogLevel(m_logLevel);
     setExtraExclusions(m_exclusions);
     setExcludedRoutes(m_excludedRoutes);

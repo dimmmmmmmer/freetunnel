@@ -938,6 +938,14 @@
         <source>block traffic if the VPN drops</source>
         <translation>блокировать трафик при обрыве VPN</translation>
     </message>
+    <message>
+        <source>Let the VPN config open ports</source>
+        <translation>Разрешить конфигу VPN открывать порты</translation>
+    </message>
+    <message>
+        <source>the config decides which ports bypass the kill switch</source>
+        <translation>какие порты идут в обход аварийного отключения, решает конфиг</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>

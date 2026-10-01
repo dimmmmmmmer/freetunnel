@@ -75,6 +75,9 @@ public:
     Q_INVOKABLE void setSplitRouting(const QStringList &domains, bool selective,
                                      const QStringList &appRules);
     Q_INVOKABLE void setKillSwitch(bool enabled);
+    // Whether the config's own killswitch_allow_ports reach the core. They do not
+    // unless the user turned this on; see clearKeysRootMustNotTakeFromAConfig.
+    Q_INVOKABLE void setKillSwitchPortsFromConfig(bool enabled);
     // Whether the core writes a session log at all. The PATH is ours to choose —
     // it is never accepted from outside, see the note in the .cpp.
     Q_INVOKABLE void setSessionLogging(bool enabled);
@@ -177,6 +180,7 @@ private:
     // what it routes by. Owner thread, like everything else that touches m_client.
     void applyRoutingToSession();
     void reportFirstConnectFailure(int errCode, const QString &errText);
+    void applyKillSwitchPortsToConfigLocked();
     void applyCoreLogPathToConfig();
     void applyCoreLogPathToConfigLocked();
     void resetCoreLogFile();
@@ -233,7 +237,8 @@ private:
     QStringList m_firstConnectFailuresSaid;
     // Guards the config working set: m_config, m_lastConfigToml,
     // m_extraExcludedRoutes, m_originalExcludedRoutes, m_extraExclusions,
-    // m_originalExclusions, m_selectiveMode, m_killSwitch, m_loggingEnabled,
+    // m_originalExclusions, m_selectiveMode, m_killSwitch,
+    // m_killSwitchPortsFromConfig, m_configAllowPorts, m_loggingEnabled,
     // m_logLevel and m_coreLogPath. The IPC setters run on this object's
     // thread while the connect thread moves the config into the core client — the
     // unsynchronised move-out used to corrupt the heap in a root process.
@@ -247,6 +252,10 @@ private:
     std::string m_originalExclusions; // exclusions from config file before our additions
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)
     bool m_killSwitch = false;
+    bool m_killSwitchPortsFromConfig = false;
+    // The config's killswitch_allow_ports, kept aside before they are cleared, so
+    // that turning the setting on applies them without the config being sent again.
+    std::string m_configAllowPorts;
     bool m_loggingEnabled = true;
     QTimer m_reconnectTimer;
     QTimer m_fdWatchdogTimer;

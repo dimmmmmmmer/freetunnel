@@ -56,6 +56,9 @@ public:
     void setSplitRouting(const std::vector<std::string> &exclusions, bool selective,
                          const std::vector<std::string> &appRules);
     void setKillSwitch(bool enabled);
+    // Whether the config's own kill-switch exceptions apply. The helper drops
+    // them unless this says otherwise.
+    void setKillSwitchPortsFromConfig(bool enabled);
     void setLogLevel(const QString &level); // "warn"/"info"/… applied live, no reconnect
     void setSessionLogging(bool enabled);
 
@@ -67,9 +70,10 @@ public:
     // it goes out with every current setting (handleReadyEvent) once it is.
     bool helperReady() const { return m_helloAcked; }
     // Whether a setting the running session was BUILT with has changed since the
-    // last connect went out: the excluded routes or the kill switch. Those go into
-    // the system's routing and the traffic block when the session is built, so
-    // only a new session applies them. The split-tunnelling rules and the mode
+    // last connect went out: the excluded routes, the kill switch, or whether the
+    // config's own kill-switch ports apply. Those go into the system's routing and
+    // the traffic block when the session is built, so only a new session applies
+    // them. The split-tunnelling rules and the mode
     // reach a running session live, and are not among them. True when there is no
     // such connect: none has gone out, or the GUI has ended its session or lost
     // the helper since.
@@ -112,6 +116,7 @@ private:
     struct SessionSettings {
         std::vector<std::string> excludedRoutes;
         bool killSwitch = false;
+        bool killSwitchPortsFromConfig = false;
         bool operator==(const SessionSettings &) const = default;
     };
     SessionSettings sessionSettings() const;
@@ -134,6 +139,7 @@ private:
     // gave up on) leaves it set until the next connect replaces it; nothing is
     // built in between for it to be wrong about.
     std::optional<SessionSettings> m_sessionBuiltWith;
+    bool m_killSwitchPortsFromConfig = false;
     QString m_logLevel = QStringLiteral("warn");
     bool m_loggingEnabled = true;
     State m_state = State::Disconnected;

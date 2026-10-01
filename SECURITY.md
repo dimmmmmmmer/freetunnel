@@ -34,7 +34,11 @@ core act on something the file names: a directory to keep TLS sessions in, ports
 to let through the kill switch, a name for the tunnel interface, an existing
 interface to attach to, a network namespace. The helper clears those before the
 core sees the config, and accepts only a tunnel (TUN) listener, not a SOCKS
-proxy (see [docs/security-threats.md](docs/security-threats.md)).
+proxy (see [docs/security-threats.md](docs/security-threats.md)). The kill-switch
+ports are the one exception a user can make: on Windows, the setting "Let the VPN
+config open ports", off by default, has the helper keep them, and the config then
+decides which ports bypass the kill switch. It applies to every config, one
+imported later included, so it is for someone who trusts every config they use.
 
 ## Credential storage
 

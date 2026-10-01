@@ -82,6 +82,7 @@ void TestBackendSettings::preferencesSurviveARestart_data()
     QTest::newRow("themeMode") << QStringLiteral("themeMode");
     QTest::newRow("autoConnect") << QStringLiteral("autoConnect");
     QTest::newRow("killSwitch") << QStringLiteral("killSwitch");
+    QTest::newRow("killSwitchPortsFromConfig") << QStringLiteral("killSwitchPortsFromConfig");
     QTest::newRow("verboseLogs") << QStringLiteral("verboseLogs");
     QTest::newRow("loggingEnabled") << QStringLiteral("loggingEnabled");
 }
@@ -102,6 +103,8 @@ void TestBackendSettings::preferencesSurviveARestart()
             backend.setAutoConnect(true);
         else if (key == QLatin1String("killSwitch"))
             backend.setKillSwitch(false);
+        else if (key == QLatin1String("killSwitchPortsFromConfig"))
+            backend.setKillSwitchPortsFromConfig(true);
         else if (key == QLatin1String("verboseLogs"))
             backend.setVerboseLogs(true);
         else if (key == QLatin1String("loggingEnabled"))
@@ -119,6 +122,8 @@ void TestBackendSettings::preferencesSurviveARestart()
         QCOMPARE(restarted.autoConnect(), true);
     else if (key == QLatin1String("killSwitch"))
         QCOMPARE(restarted.killSwitch(), false);
+    else if (key == QLatin1String("killSwitchPortsFromConfig"))
+        QCOMPARE(restarted.killSwitchPortsFromConfig(), true);
     else if (key == QLatin1String("verboseLogs"))
         QCOMPARE(restarted.verboseLogs(), true);
     else if (key == QLatin1String("loggingEnabled"))
@@ -135,6 +140,7 @@ void TestBackendSettings::settingTheSameValueIsSilent()
     backend.setThemeMode(QStringLiteral("dark"));
     backend.setAutoConnect(true);
     backend.setKillSwitch(true);
+    backend.setKillSwitchPortsFromConfig(true);
     backend.setVerboseLogs(true);
     backend.setLoggingEnabled(true);
 
@@ -142,6 +148,7 @@ void TestBackendSettings::settingTheSameValueIsSilent()
     backend.setThemeMode(QStringLiteral("dark"));
     backend.setAutoConnect(true);
     backend.setKillSwitch(true);
+    backend.setKillSwitchPortsFromConfig(true);
     backend.setVerboseLogs(true);
     backend.setLoggingEnabled(true);
     QCOMPARE(changed.count(), 0);
