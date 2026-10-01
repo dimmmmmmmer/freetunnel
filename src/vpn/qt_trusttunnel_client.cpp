@@ -219,10 +219,10 @@ void QtTrustTunnelClient::setKillSwitch(bool enabled) {
 void QtTrustTunnelClient::setSessionLogging(bool enabled)
 {
     // The path is derived here and never supplied by the caller. This object
-    // runs inside the ELEVATED helper, and the core creates (and creates the
-    // parent directory of) whatever it is told to use — so accepting a path over
-    // IPC was a root file-write primitive that had to be fenced in with owner,
-    // symlink and canonicality checks. Not offering the choice removes the whole
+    // runs inside the ELEVATED helper, which creates the log file (and its
+    // parent directory) wherever this says — so accepting a path over IPC was a
+    // root file-write primitive that had to be fenced in with owner, symlink and
+    // canonicality checks. Not offering the choice removes the whole
     // class instead of guarding it: the file below is a transport buffer the
     // helper tails and forwards, and the GUI keeps the durable log.
     {

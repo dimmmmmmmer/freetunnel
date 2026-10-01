@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <utility>
@@ -32,6 +33,16 @@ public:
         : m_config(std::move(config)),
           m_id(mockcore::Controller::instance().registerClient(std::move(callbacks)))
     {
+        // What the real constructor does with a log path (trusttunnel/src/
+        // client.cpp): open the file itself and point the process-wide logger
+        // at it. The destructor closes the file and leaves the logger pointing
+        // at it — exactly as the real one does, because that is the hazard a
+        // long-lived process has to stay clear of.
+        if (!m_config.log_file_path.empty()) {
+            m_logfile_handler.emplace(m_config.log_file_path);
+            m_logtofile.emplace(m_logfile_handler->get_file());
+            Logger::set_callback(*m_logtofile);
+        }
         // Snapshot the config the moment it crosses into the core. Kill switch,
         // routing mode, split routes and domain exclusions all end their journey
         // here, and the real core keeps them private afterwards — so this is the
@@ -69,6 +80,31 @@ public:
     uint64_t mockId() const { return m_id; }
 
 private:
+    // As in the real header, fclose() and all. A file that failed to open is not
+    // passed to fclose here, which the real one does do; that is a crash of its
+    // own, and not one a test of the wrapper wants to reproduce.
+    class FileHandler {
+    public:
+        explicit FileHandler(const std::string &filename) : m_file(std::fopen(filename.c_str(), "w"))
+        {
+            if (m_file)
+                Logger::noteFileOpened(m_file);
+        }
+        ~FileHandler()
+        {
+            if (!m_file)
+                return;
+            std::fclose(m_file);
+            Logger::noteFileClosed(m_file);
+        }
+        FileHandler(const FileHandler &) = delete;
+        FileHandler &operator=(const FileHandler &) = delete;
+        FILE *get_file() { return m_file; }
+
+    private:
+        FILE *m_file;
+    };
+
     static mockcore::CoreConfigSnapshot snapshotOf(const TrustTunnelConfig &cfg)
     {
         mockcore::CoreConfigSnapshot snap;
@@ -88,6 +124,10 @@ private:
 
     TrustTunnelConfig m_config;
     uint64_t m_id = 0;
+    // In the real header's order, so the file is closed at the same point of
+    // destruction as there.
+    std::optional<FileHandler> m_logfile_handler;
+    std::optional<Logger::LogToFile> m_logtofile;
 };
 
 } // namespace ag

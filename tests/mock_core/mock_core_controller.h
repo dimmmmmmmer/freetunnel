@@ -68,6 +68,7 @@ public:
         m_lastVerifiedCert.clear();
         m_lastVerifiedChain.clear();
         m_verifyCalls = 0;
+        ag::Logger::resetCounters();
     }
 
     // ---- scripting from the test ----
@@ -164,6 +165,13 @@ public:
         return m_verifyCalls;
     }
 
+    // Core log lines that went through a FILE the core had already closed, and
+    // lines that went to the process's stderr — which, in the helper, is a pipe
+    // or a file nobody reads. Both since the last reset().
+    int coreLogWritesThroughClosedFile() { return ag::Logger::writesThroughClosedFile(); }
+    int coreLogLinesToStderr() { return ag::Logger::linesToStderr(); }
+    int coreLoggerCallbackSets() { return ag::Logger::callbackSets(); }
+
     // ---- event injection ----
     void fireStateChanged(uint64_t id, ag::VpnSessionState state, int code = ag::VPN_EC_NOERROR,
                           const char *text = nullptr)
@@ -204,6 +212,12 @@ public:
         cbs.connect_request_handler(req, &decision);
         return decision;
     }
+
+    // Log a line the way any part of the core does: through the process-wide
+    // logger, to whatever its callback was last set to. The core logs from its
+    // own threads whenever it has something to say, including after the client
+    // that set the callback is gone, so this belongs to no client.
+    void coreLog(ag::LogLevel level, const std::string &text) { ag::Logger("MOCK_CORE").log(level, text); }
 
     // Returned by fireVerifyCertificate when the client installed no verify
     // handler at all. A missing handler leaves event->result at whatever the core
