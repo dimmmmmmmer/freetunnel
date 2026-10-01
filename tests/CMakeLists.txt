@@ -187,6 +187,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
     ../src/app/Backend.cpp
+    ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
@@ -248,6 +249,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
     ../src/app/Backend.cpp
+    ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp
@@ -669,6 +671,7 @@ set(BACKEND_TEST_SOURCES
     helper_ipc_mock_server.h
     ../i18n/i18n.qrc
     ../src/app/Backend.cpp
+    ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
     ../src/app/BackendUpdates.cpp
     ../src/app/BackendSettings.cpp

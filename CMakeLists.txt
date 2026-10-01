@@ -93,6 +93,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/PlatformAutoStart.cpp
     include/app/PlatformAutoStart.h
     src/app/Backend.cpp
+    src/app/BackendConnect.cpp
     src/app/BackendHotkeys.cpp
     src/app/BackendUpdates.cpp
     src/app/BackendSettings.cpp
