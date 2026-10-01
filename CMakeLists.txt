@@ -149,6 +149,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/vpn/qt_trusttunnel_fdwatch.cpp
     src/vpn/qt_trusttunnel_uplink.cpp
     src/vpn/qt_trusttunnel_connect.cpp
+    src/vpn/qt_trusttunnel_callbacks.cpp
     src/vpn/qt_trusttunnel_events.cpp
     src/vpn/qt_trusttunnel_events.h
     src/vpn/qt_trusttunnel_platform.cpp
