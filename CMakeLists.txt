@@ -133,6 +133,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/core/NetBind.cpp
     src/core/ProcessLookup.cpp
     src/core/ProcessLookupSockets.cpp
+    src/core/ProcessLookupWalk.cpp
     include/core/NetBind.h
     src/core/AppUiUtils.cpp
     include/core/AppUiUtils.h

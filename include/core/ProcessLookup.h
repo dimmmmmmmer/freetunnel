@@ -141,6 +141,12 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int fam
 QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno);
 #endif
 
+// How an IPv6 socket spells an IPv4 address, given in host byte order:
+// ::ffff:a.b.c.d. Defined in ProcessLookup.cpp, where SocketOwnerTable::find
+// looks a flow up by it, and declared here for the macOS walk in
+// ProcessLookupWalk.cpp, which records such a socket under it.
+SocketAddress v4MappedAddress(quint32 hostOrder);
+
 // Resolves connections to the program that opened them.
 //
 // The operating system binds a socket's local port before the first packet that
