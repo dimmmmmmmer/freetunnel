@@ -69,11 +69,12 @@ helper may read a file that small which the user could not; it serves only as
 the key for the handshake, and what leaves the helper is a hash over a nonce,
 which gives nothing away unless the file's contents can be guessed.
 
-Over IPC, the connect command must carry an inline config (a file path is
-refused), and the core's log path is chosen by the helper itself and is not part
-of the protocol at all — the GUI receives log lines over IPC and keeps the
-durable copy. And the elevated argv is derived from the running executable rather
-than from the environment.
+Nor does the helper act on paths the GUI names, whether in the protocol or
+inside the config (see below). Over IPC, the connect command must carry an inline
+config (a file path is refused), and the core's log path is chosen by the helper
+itself and is not part of the protocol at all — the GUI receives log lines over
+IPC and keeps the durable copy. And the elevated argv is derived from the running
+executable rather than from the environment.
 
 That last part is the one worth spelling out, because it was wrong once. On Linux
 an AppImage build has to re-exec the `.AppImage` file rather than the executable
@@ -135,6 +136,18 @@ an AppImage started normally. One started with `--appimage-extract-and-run` and 
 `TMPDIR` that allows execution used to get by, because root ran the copy the user
 had unpacked there; now that it knows its `.AppImage` and root unpacks that
 afresh in `/tmp`, it no longer does. The .deb is the way on such a system.
+
+The config is the other way in. The core reads more of it than FreeTunnel ever
+writes, and an imported file keeps every key the editor does not know, so that
+saving it loses nothing. Most of those keys only shape the tunnel. A few would
+have the core, running as root, act on something the file names: a directory to
+keep TLS sessions in, where the core deletes and writes files; ports the Windows
+kill switch lets through; the name to give the tunnel interface; and, on Linux,
+an existing interface to attach to and a network namespace to set ours up in.
+The helper clears those keys before the core sees the config, whatever the GUI
+sent, and refuses a config whose listener is a SOCKS proxy rather than a tunnel
+interface. Routes, DNS, the endpoint and its certificate pass through untouched:
+they are what a config is for.
 
 Mitigations already in place: no remote attack surface for control IPC, tokens
 rotate each session, helper binds to loopback only.
@@ -252,5 +265,6 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | Other local user | Socket access-control list (ACL) + loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb |
 | TOML injection | `tomlEsc()` strips control chars |
+| Config keys that point the elevated core at a path, interface or port | Helper clears the five such keys (session-cache folder, kill-switch ports, interface name, attach, namespace); tunnel listener only; an upstream bump whose core reads a new key fails `verify_upstream_patch.sh` |
 | Operator learns which app opened a flow | Program name kept out of the core decision, local log only |
 | Unsigned installer | User warnings; in-app hash verify before install |

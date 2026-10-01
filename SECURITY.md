@@ -28,6 +28,14 @@ travels over the socket, and each protocol line is capped at 512 kilobytes (KB)
 single-instance socket, over which an already-running copy accepts control
 commands, caps a message at 64 KB.
 
+The helper does not take the config it receives at its word. An imported config
+keeps keys FreeTunnel never writes, and a few of them would have the elevated VPN
+core act on something the file names: a directory to keep TLS sessions in, ports
+to let through the kill switch, a name for the tunnel interface, an existing
+interface to attach to, a network namespace. The helper clears those before the
+core sees the config, and accepts only a tunnel (TUN) listener, not a SOCKS
+proxy (see [docs/security-threats.md](docs/security-threats.md)).
+
 ## Credential storage
 
 Virtual private network (VPN) passwords are **not stored in user-editable

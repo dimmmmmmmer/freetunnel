@@ -112,12 +112,18 @@ private:
         snap.mode = static_cast<int>(cfg.mode);
         snap.loglevel = static_cast<int>(cfg.loglevel);
         snap.exclusions = cfg.exclusions;
+        snap.ssl_session_storage_path = cfg.ssl_session_storage_path;
+        snap.killswitch_allow_ports = cfg.killswitch_allow_ports;
         // A non-tun listener carries no routes at all, which is why this is a
         // get_if and not a get: reading the wrong alternative would throw inside
-        // a core constructor, and the wrapper is allowed to hand over either.
+        // a core constructor. The wrapper refuses a SOCKS listener, but a test
+        // that proves so by disabling the refusal must still get as far as here.
         if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&cfg.listener)) {
             snap.included_routes = tun->included_routes;
             snap.excluded_routes = tun->excluded_routes;
+            snap.device_name = tun->device_name;
+            snap.use_existing = tun->use_existing;
+            snap.netns = tun->netns;
         }
         return snap;
     }

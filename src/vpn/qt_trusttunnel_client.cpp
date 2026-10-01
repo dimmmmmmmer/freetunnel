@@ -156,13 +156,40 @@ void QtTrustTunnelClient::teardownClient() {
 #endif
 }
 
-void QtTrustTunnelClient::setConfig(ag::TrustTunnelConfig config) {
-    std::lock_guard<std::mutex> lk(m_configMutex);
-    setConfigLocked(std::move(config));
+// The core honours more of a config than FreeTunnel ever writes, and this object
+// runs in the ELEVATED helper, on whatever TOML the unprivileged GUI hands it.
+// That TOML still carries every key an imported file had — ConfigToml keeps what
+// it does not understand, so that a round trip loses nothing — and a process that
+// has read the IPC token can send anything at all. Most of those keys only shape
+// the tunnel. These make root act on a name the file chose, or open the kill
+// switch:
+//
+//  - ssl_session_cache_path: a directory in which the core deletes every file
+//    shaped like a cached session when it starts, and writes new ones (following
+//    symlinks) when it stops. Unset, it keeps sessions in memory.
+//  - killswitch_allow_ports: Windows ports the kill switch lets through, in both
+//    directions, around the tunnel.
+//  - device_name, use_existing, netns: which interface root creates or attaches
+//    to, under what name, and in which network namespace (the last two on Linux).
+//
+// Only these: the rest of the file still reaches the core, and a key a newer core
+// starts reading is caught by scripts/verify_upstream_patch.sh, not here. Cleared
+// rather than checked: FreeTunnel writes none of them, and an interface the
+// system names works just as well as one the file named.
+static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
+{
+    config.ssl_session_storage_path.reset();
+    config.killswitch_allow_ports.clear();
+    if (auto *tun = std::get_if<ag::TrustTunnelConfig::TunListener>(&config.listener)) {
+        tun->device_name.clear();
+        tun->use_existing = false;
+        tun->netns.reset();
+    }
 }
 
 void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
+    clearKeysRootMustNotTakeFromAConfig(*m_config);
     // m_logLevel is set from the config TOML's loglevel in the load functions
     // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
     m_config->loglevel = m_logLevel;
@@ -263,7 +290,11 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     }
 
     auto config = ag::TrustTunnelConfig::build_config(parsed.table());
-    if (!config.has_value()) {
+    // FreeTunnel only ever writes a [listener.tun]. A SOCKS listener instead is a
+    // proxy that root would open on whatever address the TOML names, with no
+    // tunnel interface for routes, DNS or the kill switch to hold on to.
+    if (!config.has_value()
+        || !std::holds_alternative<ag::TrustTunnelConfig::TunListener>(config->listener)) {
         setState(State::Error);
         emit vpnError(tr("Invalid TrustTunnel config structure"));
         return false;

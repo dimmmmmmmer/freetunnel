@@ -13,6 +13,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,6 +43,14 @@ struct CoreConfigSnapshot {
     std::string exclusions;
     std::vector<std::string> included_routes;
     std::vector<std::string> excluded_routes;
+    // Keys an imported config can carry that would have root act on a name the
+    // file chose, or open the kill switch. The wrapper clears them; these show
+    // whether it did.
+    std::optional<std::string> ssl_session_storage_path;
+    std::string killswitch_allow_ports;
+    std::string device_name;
+    bool use_existing = false;
+    std::optional<std::string> netns;
 };
 
 class Controller {
@@ -357,6 +366,13 @@ private:
         return out;
     }
 
+    // An optional the core reads as "absent" must not look like an empty value
+    // that is present: the core treats those two differently.
+    static std::string orUnset(const std::optional<std::string> &value)
+    {
+        return value ? oneLine(*value) : std::string("(unset)");
+    }
+
     static void dumpCoreConfig(const CoreConfigSnapshot &snap)
     {
         const char *path = std::getenv("FT_TEST_CORE_CONFIG_DUMP");
@@ -378,6 +394,11 @@ private:
             out << "exclusions=" << oneLine(snap.exclusions) << '\n';
             out << "included_routes=" << oneLine(joinList(snap.included_routes)) << '\n';
             out << "excluded_routes=" << oneLine(joinList(snap.excluded_routes)) << '\n';
+            out << "ssl_session_cache_path=" << orUnset(snap.ssl_session_storage_path) << '\n';
+            out << "killswitch_allow_ports=" << oneLine(snap.killswitch_allow_ports) << '\n';
+            out << "device_name=" << oneLine(snap.device_name) << '\n';
+            out << "use_existing=" << (snap.use_existing ? 1 : 0) << '\n';
+            out << "netns=" << orUnset(snap.netns) << '\n';
         }
         // Publish by rename so a reader polling for the file never gets a
         // half-written one. The remove() is for Windows, whose rename() refuses
