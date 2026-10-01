@@ -215,6 +215,7 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
     ../include/app/AppStartup.h
     ../include/app/Backend.h
@@ -275,6 +276,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
     ../include/app/AppStartup.h
     ../include/app/Backend.h
@@ -317,11 +319,12 @@ target_link_libraries(test_vpn_helper_launch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME vpn_helper_launch COMMAND test_vpn_helper_launch -o ${CMAKE_CURRENT_BINARY_DIR}/report-vpn_helper_launch.txt,txt)
 
 # What macOS and Windows run elevated to start the helper, read back as each of
-# them reads it. The builders live in vpn_helper_client.cpp; the parser that
+# them reads it. The builders live in vpn_helper_elevation.cpp; the parser that
 # reads their output on the helper's side is vpn_helper_launch.cpp.
 add_executable(test_helper_elevation
     test_helper_elevation.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/vpn/vpn_helper_launch.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/AppUiUtils.cpp
@@ -648,6 +651,7 @@ add_executable(test_integration_helper_client
     # The real GUI-side client, so the handshake tests exercise production code
     # rather than two test doubles talking to each other.
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/AppUiUtils.cpp
     ../include/vpn/vpn_helper_client.h
@@ -693,6 +697,7 @@ set(BACKEND_TEST_SOURCES
     ../src/core/CredentialStore.cpp
     ../src/core/InstanceControl.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
@@ -912,6 +917,7 @@ target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network ft_a
 add_executable(test_helper_server
     test_helper_server.cpp
     ../src/vpn/vpn_helper_client.cpp
+    ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/AppUiUtils.cpp
     ../include/vpn/vpn_helper_client.h  # AUTOMOC needs the Q_OBJECT header listed
@@ -932,6 +938,7 @@ foreach(suite IN ITEMS lifecycle settings fuzz)
         test_helper_server_${suite}.cpp
         real_helper.h
         ../src/vpn/vpn_helper_client.cpp
+        ../src/vpn/vpn_helper_elevation.cpp
         ../src/core/AppImagePath.cpp
         ../src/core/AppUiUtils.cpp
         ../include/vpn/vpn_helper_client.h
