@@ -101,13 +101,6 @@ compare link at the bottom of its release notes.
 
 ### Changed
 
-- **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
-  22.04 and needed its C library (glibc 2.35), so neither the .deb nor the
-  AppImage started on Ubuntu 20.04, Debian 11 or RHEL 9 and its rebuilds. It is
-  built on Ubuntu 20.04 now and needs glibc 2.31.
-- **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
-  AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
-  no longer finds the new version; FreeTunnel's own updater still does.
 - **The kill switch says what it covers.** Its line in Settings said it blocked
   traffic outside the VPN, which it does while a connection that dropped is
   being brought back. Nothing is blocked while the VPN is off or stopped by an
@@ -125,6 +118,13 @@ compare link at the bottom of its release notes.
   it.** A tt:// link that turns off server certificate verification says so
   before it adds the server, but a file that did the same was added without a
   word. The message that the config was added now says it too.
+- **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
+  22.04 and needed its C library (glibc 2.35), so neither the .deb nor the
+  AppImage started on Ubuntu 20.04, Debian 11 or RHEL 9 and its rebuilds. It is
+  built on Ubuntu 20.04 now and needs glibc 2.31.
+- **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
+  AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
+  no longer finds the new version; FreeTunnel's own updater still does.
 
 ### Fixed
 
@@ -141,6 +141,37 @@ compare link at the bottom of its release notes.
   until a few kilobytes had gathered or the connection ended, so a warning could
   arrive long after it mattered, and the last ones before a disconnect never
   arrived at all.
+- **An excluded route or a split tunnelling rule of every address, such as
+  `0.0.0.0/0` or `::/0`, is refused, and the message says why.** An excluded
+  route goes around the tunnel, and one ending in /0 took all IPv4 or all IPv6
+  traffic out of it while FreeTunnel still showed you as connected. The Split
+  page took the same subnet as an address rule, and under "Bypass VPN" it did
+  the same. One added with an earlier version is removed from Excluded routes
+  or from its profile, and that traffic goes through the tunnel again.
+- **"Through VPN" keeps the full tunnel when none of its programs can be used.**
+  Settings can hold a program rule that cannot name a program on this computer,
+  such as a Windows path in settings moved to a Mac or Linux, or one edited by
+  hand. Such rules were ignored when routing but still counted as rules, so a
+  profile with only those and no addresses sent everything outside the tunnel,
+  without the notice that the full tunnel is kept. Now the full tunnel is kept,
+  and the notice says the profile has no rules that can be used.
+- **An address or subnet with `*.` or a dot in front of it is refused, and the
+  message says why.** Rules such as `*.10.0.0.0/8` or `.1.2.3.4` were accepted and
+  listed, but the VPN core takes `*.` only before a domain name, so they never
+  matched anything. Under "Through VPN" the traffic they named went outside the
+  tunnel, and with no other rule nothing went through it at all. Write the address
+  or subnet on its own, as `10.0.0.0/8`. Rules like these that an earlier version
+  saved are dropped from the list.
+- **Windows: rules for Discord, Slack and similar apps apply to the app.** Apps
+  like these, along with GitHub Desktop and others that install into
+  AppData\Local next to an Update.exe, start through that updater, which runs
+  the app from a folder named after its version. Picking one from the list or
+  dropping its shortcut made a rule for the updater, and the app's own
+  connections never matched it. A rule made by choosing the app's file itself
+  stopped matching at the app's next update, when it moved to a new folder. The
+  rule now names the app and keeps matching after updates. A rule made the old
+  way, which shows as Update.exe, is changed to the app the first time this
+  version starts, as long as the app is still installed beside it.
 - **A program rule takes effect without reconnecting.** Adding or removing a
   program on the Split tunnelling page while connected rebuilt the whole tunnel,
   dropping every open connection, and with the kill switch on nothing was
@@ -149,10 +180,15 @@ compare link at the bottom of its release notes.
   what the tunnel carries as a whole, as adding the first program to "Through
   VPN", or removing the last, does when no addresses are listed there. A domain
   added while split tunnelling is off no longer reconnects either.
-- **Two changes made close together no longer show "Off" mid-switch.**
-  Switching configs, or changing split tunnelling or the kill switch, twice
-  within five seconds while connected could show "Off" for a moment during the
-  second change when the old tunnel was slow to go down.
+- **Saving a config in the editor keeps the config's own routing.** A config
+  file can say which addresses go through the tunnel and which stay outside it,
+  and can hold settings the editor has no field for. Saving it from the editor,
+  even with nothing changed, or renaming it, replaced that routing with
+  FreeTunnel's defaults and dropped the rest, so a config from a provider still
+  connected but sent different traffic through the tunnel. The editor now
+  changes only what it shows, and Save with nothing changed leaves the file as
+  it is. A config that was saved this way has already lost those lines: import
+  it again from the provider's file or link.
 - **Config files written by hand are read the way the VPN core reads them.** A
   setting may be indented and its name may be in quotes, as in
   `"password" = "…"`; a section's name may be in quotes too, as in
@@ -174,161 +210,15 @@ compare link at the bottom of its release notes.
   listener's password was taken for the server's, that password is now stored as
   the config's own: if the config does not connect, open it in the config editor
   and enter the server's username and password again.
-- **Saving a config in the editor keeps the config's own routing.** A config
-  file can say which addresses go through the tunnel and which stay outside it,
-  and can hold settings the editor has no field for. Saving it from the editor,
-  even with nothing changed, or renaming it, replaced that routing with
-  FreeTunnel's defaults and dropped the rest, so a config from a provider still
-  connected but sent different traffic through the tunnel. The editor now
-  changes only what it shows, and Save with nothing changed leaves the file as
-  it is. A config that was saved this way has already lost
-  those lines: import it again from the provider's file or link.
 - **A config made for a local SOCKS proxy connects again.** TrustTunnel's own
   client can run a config as a SOCKS proxy on your computer instead of a VPN
   tunnel. FreeTunnel always runs the tunnel, and since 1.1.8 it kept the proxy
   setting next to it; the VPN core refuses a config that asks for both, so such
   a config failed to connect. The proxy setting is now left out, and the config
   connects as a VPN without being imported again. If the proxy had a password of
-  its own, an earlier version may have stored that one as the server's when you
-  tried to connect: if the config then fails to sign in, open it in the config
-  editor and enter the server's password again.
-- **Renaming a config no longer deletes your own copy of it.** A config listed
-  from a file outside FreeTunnel's folder, as a very early build could leave it,
-  was moved into FreeTunnel's folder when renamed in the editor, and the original
-  file was deleted. The original now stays where it is, as it already did when
-  such a config was deleted from the list.
-- **A config that could not be saved still connects as it did.** When saving an
-  edited config failed at the last step, with "Could not write config", its new
-  password had already been stored, while the file on disk was still the old
-  config, perhaps with another username. It then failed to connect until it was
-  saved again. The stored password is now put back as it was.
-- **Choosing a certificate file the editor cannot use no longer empties the
-  certificate field.** The editor loads a certificate only from your home,
-  Downloads, Documents or Desktop folder, or the folder for temporary files, so
-  not from another drive or a USB stick, and not from a link to another file or
-  a file over 1 MB. Such a file
-  emptied the field without a word, taking a certificate you had pasted there
-  with it, and Save then wrote the config without one. The field now keeps what
-  it holds, and a message says why the file was not loaded.
-- **A long config name is explained instead of failing.** A config's name is
-  also its file name, and a name longer than a file name may be, about 120
-  Cyrillic letters on Linux and macOS, failed with "Could not write config",
-  which said nothing about the name. Names now have a limit of 50 characters: the
-  editor says when a name is longer, and a link or file with a longer name is
-  imported under its first 50 characters. A config that already has a longer
-  name keeps it, and the same link sent again still offers to replace it.
-- **Linux: Settings says so when there is no keyring to keep passwords in.**
-  FreeTunnel keeps VPN passwords in the desktop's keyring, such as GNOME Keyring
-  or KWallet, and nowhere else. On a desktop without one, every save of a config
-  with a password failed, and the warning in Settings that explains why never
-  appeared: any desktop session was taken for one with a keyring. FreeTunnel now
-  asks for the keyring itself, so the warning shows, and asks again when an
-  import fails as well as when a save does. It also no longer tells you to
-  install secret-tool, which FreeTunnel does not need. When a keyring is there
-  and still refused the password, as when its unlock prompt was closed, the
-  message now says to unlock it and try again, rather than to install one.
-- **macOS and Windows: a password that could not be saved is explained in your
-  system's terms.** When the Keychain or Windows Credential Manager refused a VPN
-  password, FreeTunnel told you to install gnome-keyring or KWallet, which are
-  Linux programs. It now names the store that refused. On macOS it says to allow
-  access to the Keychain when macOS asks for it; on Windows it says that
-  Credential Manager holds at most 2560 bytes of a password, as a longer one is
-  what it refuses.
-- **A domain in another alphabet can be added in its xn-- spelling.** Such a
-  domain has two spellings, пример.рф and xn--e1afmkfd.xn--p1ai, and the second
-  is the one address bars, logs and certificates often show. The Split page
-  refused it whenever the ending was spelled that way, as .рф is (xn--p1ai),
-  while the same domain typed in its own alphabet was accepted. Both work now.
-- **An address or subnet with `*.` or a dot in front of it is refused, and the
-  message says why.** Rules such as `*.10.0.0.0/8` or `.1.2.3.4` were accepted and
-  listed, but the VPN core takes `*.` only before a domain name, so they never
-  matched anything. Under "Through VPN" the traffic they named went outside the
-  tunnel, and with no other rule nothing went through it at all. Write the address
-  or subnet on its own, as `10.0.0.0/8`. Rules like these that an earlier version
-  saved are dropped from the list.
-- **An excluded route or a split tunnelling rule of every address, such as
-  `0.0.0.0/0` or `::/0`, is refused, and the message says why.** An excluded
-  route goes around the tunnel, and one ending in /0 took all IPv4 or all IPv6
-  traffic out of it while FreeTunnel still showed you as connected. The Split
-  page took the same subnet as an address rule, and under "Bypass VPN" it did
-  the same. One added with an earlier version is removed from Excluded routes
-  or from its profile, and that traffic goes through the tunnel again.
-- **"Through VPN" keeps the full tunnel when none of its programs can be used.**
-  Settings can hold a program rule that cannot name a program on this computer,
-  such as a Windows path in settings moved to a Mac or Linux, or one edited by
-  hand. Such rules were ignored when routing but still counted as rules, so a
-  profile with only those and no addresses sent everything outside the tunnel,
-  without the notice that the full tunnel is kept. Now the full tunnel is kept,
-  and the notice says the profile has no rules that can be used.
-- **The Split page's notice about "Through VPN" with no rules follows a deleted
-  config.** Deleting the config in use hands over to another one, which may use
-  another profile, but the notice went on describing the deleted config until
-  something else on the page changed: it could stay up over rules that were
-  there, or stay away when the profile now in use had none.
-- **Windows: rules for Discord, Slack and similar apps apply to the app.** Apps
-  like these, along with GitHub Desktop and others that install into
-  AppData\Local next to an Update.exe, start through that updater, which runs
-  the app from a folder named after its version. Picking one from the list or
-  dropping its shortcut made a rule for the updater, and the app's own
-  connections never matched it. A rule made by choosing the app's file itself
-  stopped matching at the app's next update, when it moved to a new folder. The
-  rule now names the app and keeps matching after updates. A rule made the old
-  way, which shows as Update.exe, is changed to the app the first time this
-  version starts, as long as the app is still installed beside it.
-- **Windows: "Launch at system startup" could say it was on while doing
-  nothing.** The setting records where FreeTunnel was when you switched it on,
-  and the switch went on showing it as on after that copy was gone: a copy run
-  from Downloads and deleted since, or one removed by an uninstall that ran
-  under another Windows account, such as an administrator's, which leaves your
-  own account's setting behind. Windows then had nothing to start. The switch
-  shows it as off now when the program it would start is not there; switch it
-  on again to have this copy start.
-- **Windows: an update waits for FreeTunnel to finish closing.** The installer
-  asks a running FreeTunnel to close and waits for it, but it took the first
-  refusal as "closed". The part of FreeTunnel that runs with administrator rights
-  always refuses, as it has no window to close: it quits when the app does, once
-  the connection is down. So the installer went on while FreeTunnel was still
-  shutting down, and could stop on files still in use. It now waits until
-  FreeTunnel has quit, for up to ten seconds, before closing it by force.
-- **Windows: uninstalling closes FreeTunnel properly.** The uninstaller ended
-  FreeTunnel by force, together with the part that runs with administrator
-  rights, so a connection that was up was cut off instead of being closed, and
-  the tray icon stayed behind until the mouse passed over it. It now asks
-  FreeTunnel to quit and waits for it, as the installer does, and uses force only
-  if FreeTunnel has not quit within ten seconds.
-- **Windows: a silent install no longer goes into a folder that holds other
-  files.** The installer refuses such a folder, because uninstalling FreeTunnel
-  deletes its folder with everything in it. But the check sat on the page where
-  you choose the folder, and an install run with /S shows no pages, so /D= could
-  name any folder at all. A silent install into a folder that is neither empty
-  nor an earlier FreeTunnel install now stops before installing anything, with
-  exit code 2.
-- **Updates in Settings**
-  - "Check for updates" clicked just after FreeTunnel started, while its own
-    check was still under way, could offer the update a second time in the middle
-    of downloading it, and taking that offer made the download fail. The click
-    now waits for the check already under way.
-  - Every downloaded update stayed in FreeTunnel's cache folder for good, 100 MB
-    or more each time. Downloads are now cleared out the next time FreeTunnel
-    starts, including those that earlier versions left there. That includes a
-    .deb (Linux) or disk image (macOS) you have not installed yet, which
-    FreeTunnel then offers again; a disk image that is still open stays open.
-  - Linux: when FreeTunnel runs as an AppImage and the updated file could not be
-    made runnable or started, FreeTunnel quit all the same, and none was left
-    running. It now puts back the file it was started from, stays open and says
-    so, and ↻ tries again. The old file is kept until the new one has started,
-    and the download is removed once it is in place.
-  - Linux: once FreeTunnel had updated itself as an AppImage, the next launch
-    from the menu, or a tt:// link, could miss the new FreeTunnel and start a
-    second one beside it. The new one is now the one they reach. The update to
-    this version is still made by the version you have, so this can happen once
-    more: if two FreeTunnels are running afterwards, quit both and start
-    FreeTunnel again.
-- **Starting FreeTunnel with "disconnect" keeps the VPN off.** With "Connect on
-  startup" on, a script or a Stream Deck button that started FreeTunnel with
-  freetunnel://disconnect while it was not running left it connected: the
-  disconnect came before there was anything to disconnect, and the connection on
-  startup followed a moment later. A disconnect now calls that connection off.
+  its own, an earlier version may have stored it as the server's when you tried
+  to connect, as the entry above describes: if the config then fails to sign in,
+  open it in the config editor and enter the server's password again.
 - **A config that turns off the post-quantum key exchange keeps it off when it
   connects.** A config file may say `post_quantum_group_enabled = false`, but
   FreeTunnel turned it back on when it moved the password out of the file, and
@@ -353,6 +243,116 @@ compare link at the bottom of its release notes.
   more than 64. A config's share link passes its client random on as the
   connection uses it: where the mask is one the core cannot use, the link gives
   the part before the slash alone, as the connection does.
+- **A config that could not be saved still connects as it did.** When saving an
+  edited config failed at the last step, with "Could not write config", its new
+  password had already been stored, while the file on disk was still the old
+  config, perhaps with another username. It then failed to connect until it was
+  saved again. The stored password is now put back as it was.
+- **Renaming a config no longer deletes your own copy of it.** A config listed
+  from a file outside FreeTunnel's folder, as a very early build could leave it,
+  was moved into FreeTunnel's folder when renamed in the editor, and the original
+  file was deleted. The original now stays where it is, as it already did when
+  such a config was deleted from the list.
+- **Choosing a certificate file the editor cannot use no longer empties the
+  certificate field.** The editor loads a certificate only from your home,
+  Downloads, Documents or Desktop folder, or the folder for temporary files, so
+  not from another drive or a USB stick, and not from a link to another file or
+  a file over 1 MB. Such a file emptied the field without a word, taking a
+  certificate you had pasted there with it, and Save then wrote the config
+  without one. The field now keeps what it holds, and a message says why the
+  file was not loaded.
+- **A long config name is explained instead of failing.** A config's name is
+  also its file name, and a name longer than a file name may be, about 120
+  Cyrillic letters on Linux and macOS, failed with "Could not write config",
+  which said nothing about the name. Names now have a limit of 50 characters: the
+  editor says when a name is longer, and a link or file with a longer name is
+  imported under its first 50 characters. A config that already has a longer
+  name keeps it, and the same link sent again still offers to replace it.
+- **Linux: Settings says so when there is no keyring to keep passwords in.**
+  FreeTunnel keeps VPN passwords in the desktop's keyring, such as GNOME Keyring
+  or KWallet, and nowhere else. On a desktop without one, every save of a config
+  with a password failed, and the warning in Settings that explains why never
+  appeared: any desktop session was taken for one with a keyring. FreeTunnel now
+  asks for the keyring itself, so the warning shows, and asks again when an
+  import fails as well as when a save does. It also no longer tells you to
+  install secret-tool, which FreeTunnel does not need. When a keyring is there
+  and still refused the password, as when its unlock prompt was closed, the
+  message now says to unlock it and try again, rather than to install one.
+- **macOS and Windows: a password that could not be saved is explained in your
+  system's terms.** When the Keychain or Windows Credential Manager refused a VPN
+  password, FreeTunnel told you to install gnome-keyring or KWallet, which are
+  Linux programs. It now names the store that refused. On macOS it says to allow
+  access to the Keychain when macOS asks for it. On Windows, where the refusal
+  known to happen is a password longer than Credential Manager holds, it says
+  that the limit is 2560 bytes.
+- **Windows: an update waits for FreeTunnel to finish closing.** The installer
+  asks a running FreeTunnel to close and waits for it, but it took the first
+  refusal as "closed". The part of FreeTunnel that runs with administrator rights
+  always refuses, as it has no window to close: it quits when the app does, once
+  the connection is down. So the installer went on while FreeTunnel was still
+  shutting down, and could stop on files still in use. It now waits until
+  FreeTunnel has quit, for up to ten seconds, before closing it by force.
+- **Windows: uninstalling closes FreeTunnel properly.** The uninstaller ended
+  FreeTunnel by force, together with the part that runs with administrator
+  rights, so a connection that was up was cut off instead of being closed, and
+  the tray icon stayed behind until the mouse passed over it. It now asks
+  FreeTunnel to quit and waits for it, as the installer does, and uses force only
+  if FreeTunnel has not quit within ten seconds.
+- **Windows: a silent install no longer goes into a folder that holds other
+  files.** The installer refuses such a folder, because uninstalling FreeTunnel
+  deletes its folder with everything in it. But the check sat on the page where
+  you choose the folder, and an install run with /S shows no pages, so /D= could
+  name any folder at all. A silent install into a folder that is neither empty
+  nor an earlier FreeTunnel install now stops before installing anything, with
+  exit code 2.
+- **Windows: "Launch at system startup" could say it was on while doing
+  nothing.** The setting records where FreeTunnel was when you switched it on,
+  and the switch went on showing it as on after that copy was gone: a copy run
+  from Downloads and deleted since, or one removed by an uninstall that ran
+  under another Windows account, such as an administrator's, which leaves your
+  own account's setting behind. Windows then had nothing to start. The switch
+  shows it as off now when the program it would start is not there; switch it
+  on again to have this copy start.
+- **Starting FreeTunnel with "disconnect" keeps the VPN off.** With "Connect on
+  startup" on, a script or a Stream Deck button that started FreeTunnel with
+  freetunnel://disconnect while it was not running left it connected: the
+  disconnect came before there was anything to disconnect, and the connection on
+  startup followed a moment later. A disconnect now calls that connection off.
+- **Two changes made close together no longer show "Off" mid-switch.**
+  Switching configs, or changing split tunnelling or the kill switch, twice
+  within five seconds while connected could show "Off" for a moment during the
+  second change when the old tunnel was slow to go down.
+- **Updates in Settings**
+  - "Check for updates" clicked just after FreeTunnel started, while its own
+    check was still under way, could offer the update a second time in the middle
+    of downloading it, and taking that offer made the download fail. The click
+    now waits for the check already under way.
+  - Every downloaded update stayed in FreeTunnel's cache folder for good, 100 MB
+    or more each time. Downloads are now cleared out the next time FreeTunnel
+    starts, including those that earlier versions left there. That includes a
+    .deb (Linux) or disk image (macOS) you have not installed yet, which
+    FreeTunnel then offers again; a disk image that is still open stays open.
+  - Linux: when FreeTunnel runs as an AppImage and the updated file could not be
+    made runnable or started, FreeTunnel quit all the same, and none was left
+    running. It now puts back the file it was started from, stays open and says
+    so, and ↻ tries again. The old file is kept until the new one has started,
+    and the download is removed once it is in place.
+  - Linux: once FreeTunnel had updated itself as an AppImage, the next launch
+    from the menu, or a tt:// link, could miss the new FreeTunnel and start a
+    second one beside it. The new one is now the one they reach. The update to
+    this version is still made by the version you have, so this can happen once
+    more: if two FreeTunnels are running afterwards, quit both and start
+    FreeTunnel again.
+- **The Split page's notice about "Through VPN" with no rules follows a deleted
+  config.** Deleting the config in use hands over to another one, which may use
+  another profile, but the notice went on describing the deleted config until
+  something else on the page changed: it could stay up over rules that were
+  there, or stay away when the profile now in use had none.
+- **A domain in another alphabet can be added in its xn-- spelling.** Such a
+  domain has two spellings, пример.рф and xn--e1afmkfd.xn--p1ai, and the second
+  is the one address bars, logs and certificates often show. The Split page
+  refused it whenever the ending was spelled that way, as .рф is (xn--p1ai),
+  while the same domain typed in its own alphabet was accepted. Both work now.
 - **Linux: an AppImage started without FUSE can update itself and start with the
   system.** Run with --appimage-extract-and-run, as on a system without FUSE,
   FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
