@@ -268,6 +268,12 @@ compare link at the bottom of its release notes.
   editor says when a name is longer, and a link or file with a longer name is
   imported under its first 50 characters. A config that already has a longer
   name keeps it, and the same link sent again still offers to replace it.
+- **Pasting over the config editor no longer imports.** ⌘V or Ctrl+V on the
+  Configs page adds a config from a link in the clipboard. It did the same with
+  the config editor open over the page whenever the cursor was not in one of its
+  fields, and put "No tt:// link in the clipboard", or a question about adding a
+  server, on top of the config being edited. It now works only while the Configs
+  page itself is in front.
 - **Linux: Settings says so when there is no keyring to keep passwords in.**
   FreeTunnel keeps VPN passwords in the desktop's keyring, such as GNOME Keyring
   or KWallet, and nowhere else. On a desktop without one, every save of a config
@@ -351,6 +357,12 @@ compare link at the bottom of its release notes.
   is the one address bars, logs and certificates often show. The Split page
   refused it whenever the ending was spelled that way, as .рф is (xn--p1ai),
   while the same domain typed in its own alphabet was accepted. Both work now.
+- **macOS: a failure is reported while FreeTunnel is hidden with ⌘H.** When
+  something started from the menu-bar menu fails with the window away, a
+  notification says so, and the error waits in the window until you open it.
+  With the app hidden by ⌘H or Hide Others, the window still counted as open: no
+  notification came, and the error was gone before you saw it. Hidden that way
+  counts as away now.
 - **FreeTunnel no longer starts a second copy beside the one running.** A launch
   or a link that found FreeTunnel running but could not hand it over, because the
   password keyring was locked, started a whole second copy, and the two then

@@ -1,12 +1,14 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
-// macOS-only: make the window's title bar transparent and let the content view
-// extend underneath it, so the app background flows behind the traffic-light
-// buttons (a "unified" title bar). No-op on other platforms.
+// macOS only. Nothing here is declared on other platforms, so every caller sits
+// behind Q_OS_MACOS.
 #ifdef __APPLE__
 #include <functional>
 
+// Make the window's title bar transparent and let the content view extend
+// underneath it, so the app background flows behind the traffic-light buttons (a
+// "unified" title bar).
 void applyMacUnifiedTitlebar(unsigned long long nsViewPtr);
 
 // Retarget the window's red close button so it runs `onClose` — hide to tray —
@@ -24,6 +26,12 @@ void installMacWindowCloseToTray(unsigned long long nsViewPtr, std::function<voi
 // click — NOT on status-bar (menu-bar) icon clicks or Cmd-Tab — so a window hidden
 // to the menu bar is not spuriously re-shown every time the app happens to activate.
 void installMacDockReopenHandler(std::function<void()> onReopen);
+
+// Run `onChange(true)` when the app is hidden — ⌘H, Hide Others from another app —
+// and `onChange(false)` when it is shown again, plus once now with the state it is
+// in. Hiding orders the windows out without closing or minimising them, and Qt is
+// not told: QWindow::isVisible() stays true throughout.
+void installMacApplicationHiddenHandler(std::function<void(bool hidden)> onChange);
 
 // Where the three window buttons actually are, in the window's own coordinates:
 // top-left origin, points — the same units QML works in. Empty (all zero) when

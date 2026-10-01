@@ -65,8 +65,13 @@ Item {
     // on every load, so it can never open the menu on a later visit.
     Component.onCompleted: if (shell.openAddMenu) { shell.openAddMenu = false; importMenu.open = true }
 
-    // Cmd/Ctrl+V tries to import a config from the clipboard.
-    Shortcut { sequences: [StandardKey.Paste]; onActivated: backend.importFromClipboard() }
+    // Cmd/Ctrl+V tries to import a config from the clipboard — only while this page
+    // is what the user is looking at. It stays loaded under the config editor, and
+    // a window shortcut does not care what covers it: a paste over the editor that
+    // no field took put "No tt:// link" or an import prompt on top of the form.
+    Shortcut { sequences: [StandardKey.Paste]
+               enabled: shell.overlay === "" && !shell.windowPopupOpen
+               onActivated: backend.importFromClipboard() }
     // Header: Add (+) opens the import/create menu, Ping (speedometer).
     RowLayout {
         id: cfgHdr

@@ -157,8 +157,8 @@ static void setupMacApplicationQuit(Backend &backend)
 #endif
 
 // The native macOS window setup, lifted out of the wiring so that function stays
-// readable — it is four calls that only exist on one platform and only make sense
-// once the window does.
+// readable — it is a handful of calls that only exist on one platform and only make
+// sense once the window does.
 static void setupMacWindow(QWindow *win, bool *appQuitting)
 {
 #ifdef Q_OS_MACOS
@@ -175,6 +175,14 @@ static void setupMacWindow(QWindow *win, bool *appQuitting)
     QObject::connect(win, &QWindow::visibleChanged, win, publishControls);
     QObject::connect(win, &QWindow::widthChanged, win, publishControls);
     QObject::connect(win, &QWindow::windowStateChanged, win, publishControls);
+    // And whether the app is hidden (⌘H, Hide Others). AppKit orders the window out
+    // for that without Qt hearing of it, so the window still counts as visible and
+    // the QML would take itself to be in view. See Main.qml's inView.
+    const QPointer<QWindow> guard(win);
+    installMacApplicationHiddenHandler([guard](bool hidden) {
+        if (guard)
+            guard->setProperty("macAppHidden", hidden);
+    });
     // The red close button hides to tray; everything else (⌘Q, Quit menu) quits.
     installMacWindowCloseToTray(win->winId(), [win]() { freetunnel::hideWindowToTray(win); });
     // Bring the hidden window back only on a real Dock-icon click — not on every

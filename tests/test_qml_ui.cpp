@@ -71,6 +71,7 @@ private slots:
     void theTrayMenuShowsConfigNamesAsTyped();
     void doubleClickingTheLogoTogglesOnce();
     void aToastWaitsForAWindowThatIsAway();
+    void aWindowHiddenWithTheAppIsAway();
     void onlyATrayActionsFailureIsNotified();
     void theTickedConfigInTheTrayTurnsTheConnectionOnAndOff();
     void aMinimisedWindowIsBroughtBack();
@@ -104,6 +105,7 @@ private slots:
     void escapeStandsDownForTheEditorsFileDialog();
     void aRefusedCertificateFileKeepsTheField();
     void anUnchangedEditClosesWithoutSaving();
+    void pasteImportsOnlyWhileTheConfigsPageIsInFront();
     void tabMovesThroughTheEditorsFields();
     void aToastStaysOffTheEditorsButtons();
     void clearEmptiesTheLogEvenWithASelection();
@@ -1363,6 +1365,36 @@ void TestQmlUi::aToastWaitsForAWindowThatIsAway()
     delete root;
 }
 
+// ⌘H hides the whole application on macOS. AppKit orders the window out for it
+// and Qt is not told, so the window still counted as in view: a toast ran out
+// unseen, and a connection started from the menu bar failed without a word. The
+// macOS glue reports the hiding as macAppHidden; this is what the window has to
+// do with it, which is the same as for a window hidden to the menu bar.
+void TestQmlUi::aWindowHiddenWithTheAppIsAway()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *timer = root->findChild<QObject *>(QStringLiteral("toastTimer"));
+    QObject *trayToggle = root->findChild<QObject *>(QStringLiteral("trayToggle"));
+    QVERIFY(timer && trayToggle);
+    const auto restore = qScopeGuard([this] { m_backend.setConnecting(false); });
+
+    root->setProperty("macAppHidden", true);
+    QVERIFY(window->isVisible()); // as far as Qt knows, which is the point
+    QVERIFY(QMetaObject::invokeMethod(trayToggle, "triggered"));
+    QVERIFY2(root->property("errorsGoToTray").toBool(), "a menu-bar action's failure is said");
+    emit m_backend.errorOccurred(QStringLiteral("The server did not answer"));
+    QVERIFY2(!timer->property("running").toBool(), "nobody can read it yet");
+
+    root->setProperty("macAppHidden", false);
+    QVERIFY2(timer->property("running").toBool(), "its time starts when the app is back");
+    delete root;
+}
+
 // The configs in the tray menu, driven the way the menu drives them: it flips a
 // checkable item's tick itself, then reports the click. Choosing the ticked one
 // used to clear its tick and do nothing else.
@@ -2522,6 +2554,51 @@ void TestQmlUi::aRefusedCertificateFileKeepsTheField()
     QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
     QCOMPARE(cert->property("text").toString(), m_backend.textFileContent);
     m_backend.textFileContent.clear();
+    delete root;
+}
+
+// ⌘V on Configs imports a link from the clipboard. The page stays loaded under
+// the config editor, and the shortcut is the window's, so a paste over the form
+// that no field took was an import all the same: "No tt:// link in the
+// clipboard", or an import prompt, on top of the half-edited config.
+void TestQmlUi::pasteImportsOnlyWhileTheConfigsPageIsInFront()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window));
+    root->setProperty("currentPage", 1);
+    const int before = m_backend.clipboardImports;
+    QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier); // ⌘V on macOS
+    QCOMPARE(m_backend.clipboardImports, before + 1);
+
+    // The editor, with the keyboard on its card: a click on its empty space.
+    root->setProperty("overlay", QStringLiteral("create"));
+    QQuickItem *overlay = nullptr;
+    QTRY_VERIFY((overlay = root->findChild<QQuickItem *>(QStringLiteral("createOverlay"))) != nullptr);
+    QQuickItem *title = textIn(overlay, QStringLiteral("New config"));
+    QVERIFY(title);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(title));
+    QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(m_backend.clipboardImports, before + 1);
+    root->setProperty("overlay", QString());
+
+    // Nor while the window is asking something over the page.
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    QMetaObject::invokeMethod(root, "showConfirm", Q_ARG(QVariant, QStringLiteral("Delete it?")),
+                              Q_ARG(QVariant, QStringLiteral("Delete")), Q_ARG(QVariant, QVariant()));
+    QVERIFY(prompt->property("visible").toBool());
+    QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(m_backend.clipboardImports, before + 1);
+    QMetaObject::invokeMethod(prompt, "close");
+
+    QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(m_backend.clipboardImports, before + 2);
     delete root;
 }
 
