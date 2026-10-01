@@ -27,12 +27,27 @@ This is typical for desktop apps without a system daemon. Malware running as the
 same user can toggle VPN or import configs; it **cannot** read Keychain/Secret
 Service entries without OS APIs available to that user anyway.
 
-What it **cannot** do is reach root through us: the elevated helper does not act
-on paths the GUI names. The connect command must carry an inline config (a file
-path is refused), the core's log path is chosen by the helper itself and is not
-part of the protocol at all — the GUI receives log lines over IPC and keeps the
-durable copy — and the elevated argv is derived from the running executable
-rather than from the environment.
+What it **cannot** do is turn the elevated helper to ends of its own — and that
+has to hold whoever starts the helper, because such a process can start the
+genuine binary itself, with arguments of its choosing, behind an administrator
+prompt that is the real one. From its command line the helper takes a port and
+the path of the token file, and that file it only reads, and only if it could be
+one: named `.fthelper-…`, a regular file rather than a link to another (on Linux
+and macOS not a second hard link either), of at most 128 bytes. It deletes
+nothing; the GUI removes its own token file, as the user, and at its next start
+any that a GUI which ended before the helper answered left behind. It used to
+read whatever it was named and then delete it, so a prompt the user approved
+could delete any file as root or Administrator. On Windows a folder in the path can
+still be made to lead to another file without the name showing it, so there the
+helper may read a file that small which the user could not; it serves only as
+the key for the handshake, and what leaves the helper is a hash over a nonce,
+which gives nothing away unless the file's contents can be guessed.
+
+Over IPC, the connect command must carry an inline config (a file path is
+refused), and the core's log path is chosen by the helper itself and is not part
+of the protocol at all — the GUI receives log lines over IPC and keeps the
+durable copy. And the elevated argv is derived from the running executable rather
+than from the environment.
 
 That last part is the one worth spelling out, because it was wrong once. On Linux
 an AppImage build has to re-exec the `.AppImage` file rather than the executable
@@ -43,9 +58,57 @@ only had to be a path *prefix* of the executable, so `APPDIR=/usr` passed for an
 ordinary `/usr/bin/FreeTunnel` install and `$APPIMAGE` was then run as root. The
 answer now comes from the kernel: `runningAppImagePath()` resolves
 `/proc/self/exe`, finds the FUSE mount containing it in `/proc/self/mountinfo`,
-and takes that mount's backing file. When the kernel does not name a regular file
-there, elevation falls back to the running executable rather than guessing — a
-prompt that is about to run something as root gets a definite answer or none.
+and takes that mount's backing file. An AppImage started without FUSE
+(`--appimage-extract-and-run`) has no mount: the runtime unpacks it into
+`appimage_extracted_<MD5 of the AppImage>` and waits as the app's parent, so the
+answer is `/proc/<parent>/exe`, accepted only when that file's MD5 is the one in
+the directory's name. When the kernel does not name a regular file either way,
+elevation falls back to the running executable rather than guessing — a prompt
+that is about to run something as root gets a definite answer or none.
+
+With the .deb, whose files only root can change, we know of no way left for
+same-user malware to reach root through us: however it is started, the helper
+does no more than the GUI could ask of it. The AppImage is the exception, and
+cannot be otherwise: the file the administrator prompt runs is the `.AppImage`
+itself, and it belongs to the user. Anything running as that user can replace
+it, and the next time the user authorizes a connection, root runs the
+replacement — the position of any program a user runs with sudo out of their own
+home directory. Where that matters, use the .deb.
+
+Root does not mount the AppImage; it unpacks it, with the runtime's
+extract-and-run, which also works where there is no FUSE. Where it unpacked to
+was a way in for **other** users of the machine: pkexec does not pass `TMPDIR`
+on, so root unpacked under a fixed name in the shared `/tmp`, which another
+account could prepare in advance. The elevated command is now a short `/bin/sh`
+script that gives the runtime a directory root has just made for this run with
+`mktemp -d` — a new name every time, mode 0700 — and removes it when the helper
+exits. The AppImage and the helper's arguments reach the script as `"$@"` and
+are never part of its text. `/run` would have been the obvious place, but Debian
+and Ubuntu mount it `noexec`, and the runtime executes what it unpacks; a fixed
+directory on disk would keep a copy of the app after every shutdown that caught
+the helper running, where `/tmp` is emptied at boot. The script sets its own
+`PATH` before it runs anything, and the helper inherits it: under sudo without
+`secure_path` it would otherwise be the user's.
+
+That protects what root unpacks, and with it an AppImage started normally,
+through FUSE. It does not protect an AppImage started with
+`--appimage-extract-and-run`, as where FUSE is missing, which autostart and the
+restart after an update keep doing for a copy started that way. Before
+FreeTunnel runs at all, the AppImage's own runtime unpacks it, as the user, into
+the shared `/tmp`, and other accounts on the machine can interfere with that
+copy, and so with what runs as the user. Nothing FreeTunnel does can help
+there, since it has not started yet. On a machine shared with other accounts
+and without FUSE, use the .deb, or set `TMPDIR` to a directory only the user can
+write to for the whole login session. Setting it only in the shell the AppImage
+is started from does not reach autostart, which starts it from the session's
+environment; the restart after an update inherits it from the running copy.
+
+The price is `/tmp` itself: where it is mounted `noexec`, the runtime cannot run
+what it unpacked there, and the AppImage cannot connect. That was already so for
+an AppImage started normally. One started with `--appimage-extract-and-run` and a
+`TMPDIR` that allows execution used to get by, because root ran the copy the user
+had unpacked there; now that it knows its `.AppImage` and root unpacks that
+afresh in `/tmp`, it no longer does. The .deb is the way on such a system.
 
 Mitigations already in place: no remote attack surface for control IPC, tokens
 rotate each session, helper binds to loopback only.
@@ -144,8 +207,8 @@ downloads, documents, or desktop directories; symlinks are rejected.
 | --- | --- |
 | Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature, bound to the release version |
 | Malicious `tt://` link | TLV parser limits; cred store separation |
-| Other local user | Socket access-control list (ACL) + loopback-only helper |
-| Same-user malware | Documented limitation; OS credential APIs |
+| Other local user | Socket access-control list (ACL) + loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) |
+| Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb |
 | TOML injection | `tomlEsc()` strips control chars |
 | Operator learns which app opened a flow | Program name kept out of the core decision, local log only |
 | Unsigned installer | User warnings; in-app hash verify before install |

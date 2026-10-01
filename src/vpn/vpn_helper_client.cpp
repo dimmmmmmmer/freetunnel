@@ -3,6 +3,7 @@
 #include "vpn/vpn_helper_launch.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -18,6 +19,11 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
+#if defined(Q_OS_UNIX)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #include "core/AppImagePath.h" // runningAppImagePath (Linux elevation target)
 #include "core/AppUiUtils.h" // shellEscape / appleScriptEscape (macOS)
 #include "vpn/vpn_helper_protocol.h"
@@ -32,6 +38,39 @@ const QHostAddress kLoopback = QHostAddress(QStringLiteral("127.0.0.1"));
 // machine.
 constexpr int kHandshakeDeadlineMs = 15000;
 
+// The token file, in this user's own config directory. The helper accepts only a
+// file named this way (readHelperTokenFile).
+const QLatin1String kTokenFilePattern(".fthelper-*");
+
+QString tokenFileDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+}
+
+// A token file this old belongs to no attempt: the GUI gives the helper a minute
+// to answer and then removes its file itself, and the helper quits on its own
+// one-minute deadline.
+constexpr qint64 kStaleTokenFileSecs = 5 * 60;
+
+// Only a regular file of this user's, not a link, last changed before @p cutoff.
+// From lstat on POSIX, so a link is judged as itself; QFile::remove() unlinks the
+// name and never follows a link that took its place in between.
+bool isStaleTokenFileOfOurs(const QString &path, const QDateTime &cutoff)
+{
+#if defined(Q_OS_UNIX)
+    struct stat st = {};
+    if (::lstat(QFile::encodeName(path).constData(), &st) != 0)
+        return false;
+    return S_ISREG(st.st_mode) && st.st_uid == ::geteuid()
+            && st.st_mtime < cutoff.toSecsSinceEpoch();
+#else
+    // The folder is under the user's own profile, which other accounts cannot
+    // write to; Qt reports no owner on Windows without an NTFS lookup.
+    const QFileInfo fi(path);
+    return fi.isFile() && !fi.isSymLink() && fi.lastModified() < cutoff;
+#endif
+}
+
 } // namespace
 
 #ifdef Q_OS_WIN
@@ -40,9 +79,38 @@ constexpr int kHandshakeDeadlineMs = 15000;
 #endif
 
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
-// Declared in vpn_helper_launch.h and deliberately NOT in the anonymous namespace
-// below: this builds the argv pkexec runs as root, and while it was file-local no
-// test could reach it. External linkage here rather than a move to
+namespace {
+
+// What root runs an AppImage through, with the AppImage and the helper's
+// arguments as "$@" — never part of this text, so no path can change what it says.
+//
+// Root runs the AppImage with extract-and-run, which also works where there is no
+// FUSE — where this copy may itself have been started that way. But the runtime
+// unpacks under $TMPDIR, and pkexec does not pass TMPDIR on, so root unpacked
+// under a fixed name in the shared /tmp, which another user of the machine could
+// prepare in advance. So the runtime gets a TMPDIR that root has just created for
+// this run alone (mktemp -d: a new name, mode 0700), removed once the helper
+// exits. Under /tmp because the runtime execs what it unpacks, and /run is
+// mounted noexec on Debian and Ubuntu. Not a fixed directory of our own: a helper
+// still running at shutdown is killed before the runtime cleans up, and /tmp is
+// emptied at boot.
+//
+// The PATH comes first. pkexec sets a fixed one of its own, but sudo passes the
+// user's on where secure_path is unset (as on Arch), and mktemp and rm run as
+// root — as does the helper, whose core runs ip and resolvectl by name.
+const char kUnpackWhereOnlyRootCanWrite[] =
+        "PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH\n"
+        "d=$(mktemp -d /tmp/freetunnel-helper.XXXXXXXXXX) || exit 1\n"
+        "TMPDIR=\"$d\" APPIMAGE_EXTRACT_AND_RUN=1 \"$@\"\n"
+        "s=$?\n"
+        "rm -rf -- \"$d\"\n"
+        "exit $s\n";
+
+} // namespace
+
+// Declared in vpn_helper_launch.h and deliberately NOT in an anonymous namespace:
+// these build and start what pkexec runs as root, and while they were file-local
+// no test could reach them. External linkage here rather than a move to
 // vpn_helper_launch.cpp, which would mean adding that source to nine test targets
 // that already compile this one.
 namespace freetunnel {
@@ -54,10 +122,15 @@ QStringList linuxHelperCommand(const QString &exe, const QString &appImage, quin
     // `appImage` names the binary the user is about to authorize as root, so it
     // must come from the kernel (freetunnel::runningAppImagePath) and never from
     // $APPIMAGE/$APPDIR. Re-exec is needed at all because the running executable
-    // lives inside a user-private FUSE mount that root cannot read; the AppImage
-    // file behind it is a normal file that root can.
+    // lives inside a user-private FUSE mount that root cannot read, or, unpacked
+    // without FUSE, in a directory its user owns; the AppImage file behind it is
+    // a normal file that root can read and unpack for itself.
     if (!appImage.isEmpty()) {
-        cmd << QStringLiteral("env") << QStringLiteral("APPIMAGE_EXTRACT_AND_RUN=1") << appImage;
+        // Through a shell that gives the runtime a directory of root's own to
+        // unpack the AppImage into: see kUnpackWhereOnlyRootCanWrite.
+        cmd << QStringLiteral("/bin/sh") << QStringLiteral("-c")
+            << QString::fromLatin1(kUnpackWhereOnlyRootCanWrite)
+            << QStringLiteral("freetunnel-helper") << appImage;
     } else {
         cmd << exe;
     }
@@ -66,16 +139,18 @@ QStringList linuxHelperCommand(const QString &exe, const QString &appImage, quin
     return cmd;
 }
 
-} // namespace freetunnel
-
-namespace {
-
 bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringList &helperCmd)
 {
     QStringList args;
     if (elevator == QLatin1String("sudo"))
         args << QStringLiteral("--");
     args += helperCmd;
+    // pkexec and sudo become the helper, so whatever is attached here is the
+    // helper's stdout and stderr for as long as it runs — and with session
+    // logging off, the core writes its log to stderr. Left as pipes, QProcess
+    // read all of it into this process's memory, where nothing ever looked at it.
+    proc->setStandardOutputFile(QProcess::nullDevice());
+    proc->setStandardErrorFile(QProcess::nullDevice());
     proc->start(elevator, args);
     if (!proc->waitForStarted(5000))
         return false;
@@ -84,10 +159,31 @@ bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringL
     return true;
 }
 
-} // namespace
+} // namespace freetunnel
 #endif
 
-VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent) {}
+VpnHelperClient::VpnHelperClient(QObject *parent) : QObject(parent)
+{
+    removeStaleTokenFiles(tokenFileDir(), kStaleTokenFileSecs);
+}
+
+int VpnHelperClient::removeStaleTokenFiles(const QString &dir, qint64 minAgeSecs)
+{
+    const QDateTime cutoff = QDateTime::currentDateTimeUtc().addSecs(-minAgeSecs);
+    const QDir d(dir);
+    int removed = 0;
+    // Every kind of entry, so that a link or a folder with the name is seen and
+    // turned away here rather than left out of the listing by Qt's own rules.
+    const QStringList names = d.entryList({kTokenFilePattern},
+                                          QDir::AllEntries | QDir::Hidden | QDir::System
+                                                  | QDir::NoDotAndDotDot);
+    for (const QString &name : names) {
+        const QString path = d.filePath(name);
+        if (isStaleTokenFileOfOurs(path, cutoff) && QFile::remove(path))
+            ++removed;
+    }
+    return removed;
+}
 
 VpnHelperClient::~VpnHelperClient() {
     shutdown();
@@ -282,7 +378,7 @@ bool VpnHelperClient::configureProductionHelper()
                       .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'))
                       .arg(QRandomGenerator::system()->generate64(), 16, 16, QLatin1Char('0'));
     clearTokenFile();
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString dir = tokenFileDir();
     QDir().mkpath(dir);
     QTemporaryFile tf(dir + QStringLiteral("/.fthelper-XXXXXX"));
     tf.setAutoRemove(false);
@@ -330,8 +426,9 @@ void VpnHelperClient::watchElevationOutcome()
                 if (status == QProcess::NormalExit && code == 0)
                     return;
 #else
-                // pkexec and sudo exec INTO the helper, so while it runs they
-                // are it. Either of them exiting before the connection is made
+                // pkexec and sudo exec INTO the helper (for an AppImage, into a
+                // shell that waits for it), so they last exactly as long as it
+                // does. Either of them exiting before the connection is made
                 // means there is nothing left to connect to, whatever the code.
                 Q_UNUSED(code)
                 Q_UNUSED(status)
@@ -514,13 +611,13 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
             freetunnel::linuxHelperCommand(exe, freetunnel::runningAppImagePath(), port,
                                            tokenPath);
 
-    if (startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
+    if (freetunnel::startLinuxElevation(m_proc, QStringLiteral("pkexec"), helperCmd))
         return true;
 
     m_proc->deleteLater();
     m_proc = new QProcess(this);
 
-    if (startLinuxElevation(m_proc, QStringLiteral("sudo"), helperCmd))
+    if (freetunnel::startLinuxElevation(m_proc, QStringLiteral("sudo"), helperCmd))
         return true;
 
     if (err) {
@@ -595,6 +692,8 @@ void VpnHelperClient::handleReadyEvent()
 {
     m_helloAcked = true;
     if (m_handshake) { m_handshake->stop(); m_handshake->deleteLater(); m_handshake = nullptr; }
+    // The helper has read the token — its challenge proved as much — and leaves
+    // the file to us: running elevated, it deletes nothing (readHelperTokenFile).
     clearTokenFile();
     setVpnMode(m_selective);
     setKillSwitch(m_killSwitch);

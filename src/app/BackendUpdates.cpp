@@ -55,7 +55,8 @@ static bool revealDownload(const QString &path)
 // the installed .deb nor the .AppImage the user launches.
 void Backend::applyLinuxUpdate(const QString &path)
 {
-    const QString current = freetunnel::runningAppImagePath();
+    const freetunnel::RunningAppImage running = freetunnel::runningAppImage();
+    const QString current = running.path;
     if (!path.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive) || current.isEmpty()) {
         // A .deb (or an AppImage we cannot locate on disk) is not ours to install:
         // that is the package manager's job, and doing it silently would need root.
@@ -132,7 +133,9 @@ void Backend::applyLinuxUpdate(const QString &path)
 
     setUpdateMessage([] { return tr("Update installed — restarting"); });
     emit updateChanged();
-    QProcess::startDetached(current, {});
+    // The way this copy was started: an AppImage that had to be unpacked rather
+    // than mounted would otherwise fail to start again, and nothing would be left.
+    QProcess::startDetached(current, running.launchArguments());
     quitApplication();
 }
 #endif

@@ -6,6 +6,8 @@
 #include <QString>
 #include <QStringList>
 
+class QProcess;
+
 namespace freetunnel {
 
 struct HelperLaunchConfig {
@@ -14,10 +16,12 @@ struct HelperLaunchConfig {
     bool ok() const { return port != 0 && !token.isEmpty(); }
 };
 
-/// Parse `--helper --port P --token-file F` arguments (reads and deletes token file).
+/// Parse `--helper --port P --token-file F` arguments (reads the token file).
 HelperLaunchConfig parseHelperLaunchArgs(const QStringList &args);
 
-/// Read a one-time token from a helper launch file and remove the file.
+/// Read a one-time token from a helper launch file. Empty unless @p path names
+/// what the GUI writes — a regular `.fthelper-*` file of at most 128 bytes —
+/// and the file is left in place: the GUI removes it, as the user.
 QString readHelperTokenFile(const QString &path);
 
 // Build the argv that pkexec is asked to run AS ROOT on Linux.
@@ -26,12 +30,19 @@ QString readHelperTokenFile(const QString &path);
 // $APPIMAGE or $APPDIR: an attacker who can set the GUI's environment sets both
 // sides of any check between them, and this string names the binary the user is
 // about to authorize as root. Empty means "not an AppImage build" and the running
-// executable is used instead.
+// executable is used instead. An AppImage is started through /bin/sh, which gives
+// the AppImage runtime a directory of root's own to unpack it into.
 //
 // Declared here, beside the parser that reads these arguments back, because it
 // used to be file-local in vpn_helper_client.cpp and therefore untested — the one
 // function in the codebase whose output is executed with full privilege.
 QStringList linuxHelperCommand(const QString &exe, const QString &appImage, quint16 port,
                                const QString &tokenPath);
+
+// Start `elevator` (pkexec or sudo) on @p helperCmd in @p proc. True once the
+// elevator is running; for pkexec, only if it has not already given up a second
+// later. The helper's stdout and stderr go to the null device: nothing reads them,
+// and as pipes they piled up in this process's memory for the helper's lifetime.
+bool startLinuxElevation(QProcess *proc, const QString &elevator, const QStringList &helperCmd);
 
 } // namespace freetunnel
