@@ -204,6 +204,8 @@ public:
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
+    int createConfigCalls = 0;
+    QVariantMap lastCreateConfig;
     Q_INVOKABLE QVariantMap configFields(int index) const;
     Q_INVOKABLE QString configDeepLink(int index) const
     {
@@ -226,7 +228,15 @@ public:
     QString logPathOverride;
     Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
     Q_INVOKABLE void copyToClipboard(const QString &) const {}
-    Q_INVOKABLE QString readTextFile(const QString &) const { return QString(); }
+    // What a certificate pick reads. Empty by default, which is what the real one
+    // returns for a file it refuses.
+    QString textFileContent;
+    int textFileReads = 0;
+    Q_INVOKABLE QString readTextFile(const QString &)
+    {
+        ++textFileReads;
+        return textFileContent;
+    }
     Q_INVOKABLE bool addDomain(const QString &) { return false; }
     Q_INVOKABLE void removeDomain(int) {}
     Q_INVOKABLE void clearDomains() {}

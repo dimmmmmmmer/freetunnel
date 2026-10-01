@@ -4,12 +4,15 @@
 #include <QClipboard>
 #include <QDir>
 #include <QGuiApplication>
+#include <QScopeGuard>
 #include <QStandardPaths>
 
 #include <QCoreApplication>
 #include <QSignalSpy>
 
 #include "app/Backend.h"
+#include "core/ConfigImport.h"
+#include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
@@ -20,17 +23,21 @@ class TestBackendDeepLinkImport : public QObject {
 private slots:
     void initTestCase();
     void skipVerificationRequiresConfirmation();
+    void theConfirmationNamesTheServerAndWarns();
     void confirmImportsUnsafeLink();
     void secondLinkWithTheSameNameOffersReplace();
     void replaceOverwritesInsteadOfAddingACopy();
     void aLinkSentAgainFindsTheConfig120Named();
     void addingACopyKeepsBothConfigs();
     void replaceDoesNotInheritTheOldStoredPassword();
+    void aLinkWithAVeryLongNameImports();
+    void aLinkSentAgainFindsTheConfigItNamedWhole();
 
     void importFileRejectsAMissingFile();
     void importFileRejectsSomethingThatIsNotAConfig();
     void importFileCopiesTheConfigIntoTheAppDirectory();
     void importFileLeavesTheOriginalAlone();
+    void importFileSaysWhenTheConfigSkipsCertificateChecks();
     void clipboardImportNeedsALink();
     void cleanupTestCase();
 };
@@ -166,6 +173,33 @@ void TestBackendDeepLinkImport::importFileLeavesTheOriginalAlone()
     QFile::remove(path);
 }
 
+// A link that turns off certificate verification says so before it is added.
+// A file did not: one that turned it off was imported without a word.
+void TestBackendDeepLinkImport::importFileSaysWhenTheConfigSkipsCertificateChecks()
+{
+    QByteArray body = validImportBody();
+    body.append("skip_verification = true\n");
+    const QString path = writeTempConfig(QStringLiteral("unchecked.toml"), body);
+    QVERIFY(!path.isEmpty());
+    const QString plain = writeTempConfig(QStringLiteral("checked.toml"), validImportBody());
+    QVERIFY(!plain.isEmpty());
+
+    Backend backend;
+    QSignalSpy notices(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.importFile(path));
+    QCOMPARE(notices.count(), 1);
+    const QString notice = notices.at(0).at(0).toString();
+    QVERIFY2(notice.contains(QStringLiteral("unchecked"))
+                     && notice.contains(QStringLiteral("certificate verification")),
+             qPrintable(notice));
+
+    // A config that checks certificates is added with nothing more to say.
+    QVERIFY(backend.importFile(plain));
+    QCOMPARE(notices.count(), 1);
+    QFile::remove(path);
+    QFile::remove(plain);
+}
+
 // "Paste link" is aimed at a clipboard that usually holds something else
 // entirely, so the two failures have to read differently: nothing there at all,
 // versus something there that is not one of our links.
@@ -250,6 +284,50 @@ void TestBackendDeepLinkImport::skipVerificationRequiresConfirmation()
     QVERIFY(!backend.importDeepLink(unsafeLink()));
     QCOMPARE(confirmSpy.count(), 1);
     QCOMPARE(importedSpy.count(), 0);
+}
+
+// The confirmation is all the defence a link meets, and what it says is that
+// defence: the server the config will really connect to, a warning when the name
+// mixes alphabets as a look-alike does, and one when the link turns certificate
+// checks off. Only that the question was asked used to be tested, so any of the
+// three could have gone quietly.
+void TestBackendDeepLinkImport::theConfirmationNamesTheServerAndWarns()
+{
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    const auto ask = [&](const freetunnel::DeepLinkConfig &c) {
+        const int before = confirmSpy.count();
+        if (backend.importDeepLink(freetunnel::encodeDeepLink(c)) || confirmSpy.count() != before + 1)
+            return QString();
+        return confirmSpy.last().at(0).toString();
+    };
+
+    // "Wоrk" with a Cyrillic о, aimed somewhere else, with the checks off.
+    freetunnel::DeepLinkConfig c;
+    c.name = QStringLiteral("W\u043Erk");
+    c.hostname = QStringLiteral("look-alike.example.net");
+    c.addresses = {QStringLiteral("203.0.113.66:443")};
+    c.username = QStringLiteral("user");
+    c.password = QStringLiteral("pass");
+    c.skipVerification = true;
+    const QString hostile = ask(c);
+    QVERIFY2(hostile.contains(QStringLiteral("Server: look-alike.example.net")), qPrintable(hostile));
+    QVERIFY2(hostile.contains(QStringLiteral("This name mixes letters from different alphabets.")),
+             qPrintable(hostile));
+    QVERIFY2(hostile.contains(QStringLiteral("This link turns off server certificate verification.")),
+             qPrintable(hostile));
+
+    // An ordinary link is told only what is true of it. A name in one alphabet
+    // is ordinary, Cyrillic included.
+    c.skipVerification = false;
+    c.hostname = QStringLiteral("plain.example.net");
+    for (const QString &name : {QStringLiteral("Work"), QStringLiteral("\u0420\u0430\u0431\u043E\u0442\u0430")}) {
+        c.name = name;
+        const QString plain = ask(c);
+        QVERIFY2(plain.contains(QStringLiteral("Server: plain.example.net")), qPrintable(plain));
+        QVERIFY2(!plain.contains(QStringLiteral("alphabets")), qPrintable(plain));
+        QVERIFY2(!plain.contains(QStringLiteral("certificate")), qPrintable(plain));
+    }
 }
 
 void TestBackendDeepLinkImport::confirmImportsUnsafeLink()
@@ -363,6 +441,90 @@ void TestBackendDeepLinkImport::replaceDoesNotInheritTheOldStoredPassword()
              "replacing a config kept the previous password for the new server");
 
     freetunnel::CredentialStore::deletePassword(key);
+}
+
+// A link names its config, at any length, and the name is the file's name. One
+// past the file system's 255 bytes, as 130 Cyrillic letters are, failed to
+// import with "Could not write config". It is cut to the limit instead.
+void TestBackendDeepLinkImport::aLinkWithAVeryLongNameImports()
+{
+    freetunnel::DeepLinkConfig c;
+    c.name = QString(130, QChar(0x0416));
+    c.hostname = QStringLiteral("long-name.example.com");
+    c.addresses = {QStringLiteral("203.0.113.11:443")};
+    c.username = QStringLiteral("user");
+    c.password = QStringLiteral("pass");
+
+    Backend backend;
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.confirmDeepLinkImport(freetunnel::encodeDeepLink(c)));
+    QCOMPARE(failed.count(), 0);
+    QVERIFY(backend.configs().contains(c.name.left(freetunnel::kMaxConfigNameLength)));
+}
+
+// A name past the limit was taken whole before it was cut, and a file system
+// takes 60 Latin letters easily, so a config imported then has its whole name.
+// The same link sent again looked only for the cut name, found nothing, and
+// offered to add a second copy beside it instead of replacing it.
+void TestBackendDeepLinkImport::aLinkSentAgainFindsTheConfigItNamedWhole()
+{
+    freetunnel::DeepLinkConfig c;
+    c.name = QStringLiteral("Frankfurt ").repeated(6).trimmed(); // 59 characters
+    c.hostname = QStringLiteral("whole-name.example.com");
+    c.addresses = {QStringLiteral("203.0.113.12:443")};
+    c.username = QStringLiteral("user");
+    c.password = QStringLiteral("pass");
+    const QString link = freetunnel::encodeDeepLink(c);
+    {
+        Backend first;
+        QVERIFY(first.confirmDeepLinkImport(link));
+    }
+    // Put it where 1.2.2 would have.
+    const QString made = importedConfigPath(QStringLiteral("whole-name.example.com"));
+    QVERIFY(!made.isEmpty());
+    const QString whole = QFileInfo(made).dir().filePath(c.name + QStringLiteral(".toml"));
+    QVERIFY(QFile::rename(made, whole));
+    QStringList stored = loadStoredConfigs();
+    stored.replace(stored.indexOf(made), whole);
+    // And another config, named with the 50 characters the link's name is cut to:
+    // the question cannot show the two apart, so the link must not land on it.
+    const auto prepared = freetunnel::prepareDeepLinkImport(link, nullptr);
+    QVERIFY(prepared && !prepared->unclippedFileName.isEmpty());
+    const QString clipped = QFileInfo(made).dir().filePath(prepared->fileName);
+    QVERIFY(!QFileInfo::exists(clipped));
+    const QByteArray otherBody("[endpoint]\n"
+                               "hostname = \"another.example.com\"\n"
+                               "addresses = [\"203.0.113.13:443\"]\n"
+                               "username = \"other\"\n");
+    {
+        QFile other(clipped);
+        QVERIFY(other.open(QIODevice::WriteOnly));
+        other.write(otherBody);
+    }
+    stored.append(clipped);
+    saveStoredConfigs(stored);
+    const auto cleanUp = qScopeGuard([&] {
+        for (const QString &path : {whole, clipped}) {
+            freetunnel::CredentialStore::deletePassword(
+                    freetunnel::CredentialStore::keyForConfigPath(path));
+            QFile::remove(path);
+        }
+    });
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importDeepLink(link));
+    QCOMPARE(confirmSpy.count(), 1);
+    QCOMPARE(confirmSpy.first().at(2).toString(), c.name);
+
+    // And Replace lands on it, under the name it has, and leaves the other alone.
+    const int before = backend.configs().size();
+    QVERIFY(backend.confirmDeepLinkImport(link, /*replaceExisting=*/true));
+    QCOMPARE(backend.configs().size(), before);
+    QVERIFY(backend.configs().contains(c.name));
+    QFile other(clipped);
+    QVERIFY(other.open(QIODevice::ReadOnly));
+    QCOMPARE(other.readAll(), otherBody);
 }
 
 QTEST_MAIN(TestBackendDeepLinkImport)

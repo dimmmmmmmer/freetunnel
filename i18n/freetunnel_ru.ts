@@ -321,6 +321,30 @@
         <source>FreeTunnel could not take back the name later launches look for (%1), so opening it again may start a second FreeTunnel. Restart FreeTunnel to fix this.</source>
         <translation>FreeTunnel не смог снова занять имя, по которому его находят следующие запуски (%1), поэтому при повторном открытии может запуститься второй FreeTunnel. Чтобы это исправить, перезапустите FreeTunnel.</translation>
     </message>
+    <message>
+        <source>That file is a link to another file. Choose the file itself, or paste the certificate into the field.</source>
+        <translation>Этот файл — ссылка на другой файл. Выберите сам файл или вставьте сертификат в поле.</translation>
+    </message>
+    <message>
+        <source>That file is over 1 MB, too large to be a certificate</source>
+        <translation>Файл больше 1 МБ — слишком велик для сертификата</translation>
+    </message>
+    <message>
+        <source>That file is empty</source>
+        <translation>Файл пуст</translation>
+    </message>
+    <message>
+        <source>The name is too long: %1 characters at most</source>
+        <translation>Слишком длинное имя: не больше %1 символов</translation>
+    </message>
+    <message>
+        <source>Config added: %1. It turns off server certificate verification.</source>
+        <translation>Конфиг добавлен: %1. В нём отключена проверка сертификата сервера.</translation>
+    </message>
+    <message>
+        <source>A certificate can be loaded only from your home, Downloads, Documents, Desktop or temporary files folder. Copy it there, or paste it into the certificate field.</source>
+        <translation>Сертификат загружается только из домашней папки, папок «Загрузки», «Документы», «Рабочий стол» или папки временных файлов. Скопируйте файл туда или вставьте сертификат в поле.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -877,6 +901,10 @@
     <message>
         <source>Replace</source>
         <translation>Заменить</translation>
+    </message>
+    <message>
+        <source>for every config, in addition to the routes the config excludes itself (by default, local networks and multicast)</source>
+        <translation>для всех конфигураций, в дополнение к маршрутам, которые исключает сама конфигурация (по умолчанию — локальные сети и мультикаст)</translation>
     </message>
 </context>
 <context>

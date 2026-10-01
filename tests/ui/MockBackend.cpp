@@ -224,7 +224,12 @@ bool MockBackend::importFile(const QString &)
     emit configImported(QStringLiteral("Imported"));
     return true;
 }
-bool MockBackend::createConfig(const QVariantMap &) { return true; }
+bool MockBackend::createConfig(const QVariantMap &fields)
+{
+    ++createConfigCalls;
+    lastCreateConfig = fields;
+    return true;
+}
 
 QVariantMap MockBackend::configFields(int index) const
 {

@@ -22,14 +22,16 @@ bool pathUnderRoot(const QString &canonical, const QString &root)
     return canonical == rootCanon || canonical.startsWith(rootCanon + QLatin1Char('/'));
 }
 
-bool isAllowedUserFile(const QFileInfo &fi)
+UserFileRefusal userFileRefusal(const QFileInfo &fi)
 {
-    if (!fi.exists() || !fi.isFile() || fi.isSymLink())
-        return false;
+    if (!fi.exists() || !fi.isFile())
+        return UserFileRefusal::Unreadable;
+    if (fi.isSymLink())
+        return UserFileRefusal::SymLink;
 
     const QString canonical = fi.canonicalFilePath();
     if (canonical.isEmpty())
-        return false;
+        return UserFileRefusal::Unreadable;
 
     const QStringList roots = {
         QDir::homePath(),
@@ -38,8 +40,9 @@ bool isAllowedUserFile(const QFileInfo &fi)
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
         QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
     };
-    return std::any_of(roots.cbegin(), roots.cend(),
-                       [&](const QString &root) { return pathUnderRoot(canonical, root); });
+    const bool allowed = std::any_of(roots.cbegin(), roots.cend(),
+                                     [&](const QString &root) { return pathUnderRoot(canonical, root); });
+    return allowed ? UserFileRefusal::None : UserFileRefusal::OutsideUserFolders;
 }
 
 } // namespace
@@ -55,8 +58,11 @@ bool openHttpUrl(const QString &urlStr)
     return QDesktopServices::openUrl(url);
 }
 
-QString safeReadUserTextFile(const QString &pathOrUrl, qint64 maxBytes)
+QString safeReadUserTextFile(const QString &pathOrUrl, qint64 maxBytes, UserFileRefusal *refusal)
 {
+    UserFileRefusal unused = UserFileRefusal::None;
+    UserFileRefusal &why = refusal ? *refusal : unused;
+    why = UserFileRefusal::Unreadable;
     QString p = pathOrUrl.trimmed();
     if (p.startsWith(QStringLiteral("file://")))
         p = QUrl(p).toLocalFile();
@@ -64,14 +70,19 @@ QString safeReadUserTextFile(const QString &pathOrUrl, qint64 maxBytes)
         return QString();
 
     const QFileInfo fi(p);
-    if (!isAllowedUserFile(fi))
+    why = userFileRefusal(fi);
+    if (why != UserFileRefusal::None)
         return QString();
-    if (fi.size() > maxBytes)
+    if (fi.size() > maxBytes) {
+        why = UserFileRefusal::TooLarge;
         return QString();
+    }
 
     QFile f(fi.canonicalFilePath());
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        why = UserFileRefusal::Unreadable;
         return QString();
+    }
     return QString::fromUtf8(f.readAll());
 }
 

@@ -75,6 +75,12 @@ Rules are grouped into profiles — addresses and programs both — and a config
 be tied to one, so a set for work and a set for everything else can be switched
 between without retyping either.
 
+**Settings → Excluded routes** lists subnets that stay outside the tunnel for
+every config. They are added to the routes a config excludes itself, not used in
+their place: a config made in FreeTunnel or imported from a link already keeps
+local networks and multicast outside the tunnel, and emptying the list in
+Settings does not change that.
+
 ## External control
 
 - **Commands and links**: `freetunnel://toggle`, `freetunnel://connect`,

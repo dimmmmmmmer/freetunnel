@@ -102,6 +102,8 @@ private slots:
     void chipsAreCutOnlyWhereTheRowEnds();
     void theWindowConfirmOwnsTheKeysOverTheEditorsPrompt();
     void escapeStandsDownForTheEditorsFileDialog();
+    void aRefusedCertificateFileKeepsTheField();
+    void anUnchangedEditClosesWithoutSaving();
     void tabMovesThroughTheEditorsFields();
     void aToastStaysOffTheEditorsButtons();
     void clearEmptiesTheLogEvenWithASelection();
@@ -109,6 +111,7 @@ private slots:
     void theLogsPageSaysWhenLoggingIsOff();
     void theUpdateLineDoesWhatItOffers();
     void restoringDefaultRoutesAsksFirst();
+    void theExcludedRoutesSayTheyAddToTheConfigsOwn();
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
@@ -2493,6 +2496,35 @@ void TestQmlUi::escapeStandsDownForTheEditorsFileDialog()
     delete root;
 }
 
+// A certificate file the backend will not read (outside the user's folders, a
+// link, over 1 MB) comes back as an empty text, and the field took it: a
+// certificate pasted there was wiped, with nothing to say so, and Save wrote none.
+void TestQmlUi::aRefusedCertificateFileKeepsTheField()
+{
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *dialog = nullptr;
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("certificateDialog"))) != nullptr);
+    QObject *cert = root->findChild<QObject *>(QStringLiteral("certificateField"));
+    QVERIFY(cert);
+    const QString pasted = QStringLiteral("-----BEGIN CERTIFICATE-----\nPASTED\n-----END CERTIFICATE-----");
+    cert->setProperty("text", pasted);
+
+    m_backend.textFileContent.clear();
+    const int reads = m_backend.textFileReads;
+    QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
+    QCOMPARE(m_backend.textFileReads, reads + 1); // the pick was taken to the backend
+    QCOMPARE(cert->property("text").toString(), pasted);
+
+    // A file that is read still replaces what was there.
+    m_backend.textFileContent = QStringLiteral("-----BEGIN CERTIFICATE-----\nLOADED\n-----END CERTIFICATE-----");
+    QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
+    QCOMPARE(cert->property("text").toString(), m_backend.textFileContent);
+    m_backend.textFileContent.clear();
+    delete root;
+}
+
 // Tab did nothing in the editor: plain text inputs are not in the tab chain.
 void TestQmlUi::tabMovesThroughTheEditorsFields()
 {
@@ -2711,6 +2743,26 @@ void TestQmlUi::restoringDefaultRoutesAsksFirst()
     QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(restore));
     QCOMPARE(m_backend.routeRestores, before);
     QVERIFY2(!m_shell.lastConfirm.isEmpty(), "Restore defaults asks before replacing the list");
+    delete root;
+}
+
+// The routes listed in Settings are added to the ones a config excludes itself,
+// never in their place, so emptying the list leaves the local networks outside
+// the tunnel all the same. The page showed the list as if it were the whole set.
+void TestQmlUi::theExcludedRoutesSayTheyAddToTheConfigsOwn()
+{
+    const QStringList routes = m_backend.excludedRoutes();
+    m_backend.setExcludedRoutes({});
+    const auto restoreRoutes = qScopeGuard([&] { m_backend.setExcludedRoutes(routes); });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *note = root->findChild<QQuickItem *>(QStringLiteral("excludedRoutesNote"));
+    QVERIFY(note);
+    QVERIFY2(note->isVisible(), "said with the list empty, which is when it matters");
+    QVERIFY2(note->property("text").toString().contains(QStringLiteral("in addition to")),
+             qPrintable(note->property("text").toString()));
     delete root;
 }
 
@@ -3479,6 +3531,50 @@ void TestQmlUi::theEditorsBackArrowTakesANearMiss()
                       glyph->mapToScene(QPointF(-4, glyph->height() / 2)).toPoint());
     QCOMPARE(m_shell.overlay(), QString());
     delete root;
+}
+
+// A Save with nothing changed wrote the config's file all the same, in the form
+// the editor writes: the file's comments were gone and its keys in another order.
+// With nothing to save, Save now closes the editor, as Cancel does.
+void TestQmlUi::anUnchangedEditClosesWithoutSaving()
+{
+    const auto restore = qScopeGuard([this] {
+        m_shell.setEditIndex(-1);
+        m_shell.setOverlay(QString());
+    });
+    const int saves = m_backend.createConfigCalls;
+    // Opens the editor on the first config (or a new one), lets `change` edit it,
+    // and presses Save.
+    const auto saveAfter = [this](int editIndex, const QString &change) {
+        m_shell.setEditIndex(editIndex);
+        m_shell.setOverlay(QStringLiteral("create"));
+        QObject *root = loadPage("CreateConfigOverlay.qml");
+        QVERIFY(root);
+        QQuickWindow window;
+        QQuickItem *page = showInWindow(root, window, 400, 700);
+        QVERIFY(page);
+        if (!change.isEmpty())
+            evaluateIn(root, change);
+        evaluateIn(root, QStringLiteral("formFlick.contentY = Math.max(0, formFlick.contentHeight - formFlick.height)"));
+        QQuickItem *save = namedIn(page, QStringLiteral("saveButton"));
+        QVERIFY(save);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(save));
+        delete root;
+    };
+
+    saveAfter(0, QString());
+    QCOMPARE(m_backend.createConfigCalls, saves);
+    QCOMPARE(m_shell.overlay(), QString());
+    QCOMPARE(m_shell.editIndex(), -1);
+
+    // Changed, it is saved.
+    saveAfter(0, QStringLiteral("fName.text = fName.text + ' 2'"));
+    QCOMPARE(m_backend.createConfigCalls, saves + 1);
+    QCOMPARE(m_backend.lastCreateConfig.value(QStringLiteral("name")).toString(),
+             m_backend.configs().value(0) + QStringLiteral(" 2"));
+    // And a new config is always taken to the backend, which says what is missing.
+    saveAfter(-1, QString());
+    QCOMPARE(m_backend.createConfigCalls, saves + 2);
 }
 
 // The first open of the picker scanned on the UI thread, and on Windows the

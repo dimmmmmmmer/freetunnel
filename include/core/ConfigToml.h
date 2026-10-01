@@ -40,7 +40,7 @@ struct ConfigToml {
     QString tunSection;         // [listener.tun] body; empty = write the defaults
     QString extraRootKeys;      // unknown keys before the first table
     QString extraEndpointKeys;  // unknown keys inside [endpoint]
-    QString extraSections;      // whole tables other than [endpoint]/[listener.tun]
+    QString extraSections;      // whole tables other than [endpoint] and [listener.*]
 };
 
 // Render a ConfigToml to the client TOML format.

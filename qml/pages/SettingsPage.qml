@@ -106,6 +106,14 @@ Item {
                         cursorShape: Qt.PointingHandCursor; onClicked: shell.showConfirm(qsTr("Clear all excluded routes?"),
                         qsTr("Clear"), function(){ backend.clearExcludedRoutes() }) } }
             }
+            // The list is not the whole set. A config excludes routes of its own
+            // (local networks and multicast, in one made here or from a link), and
+            // these are added to them, never in their place: emptying the list did
+            // not send the local network into the tunnel, and nothing said why.
+            Text { objectName: "excludedRoutesNote"; Layout.fillWidth: true; Layout.topMargin: 2
+                   wrapMode: Text.WordWrap
+                   text: qsTr("for every config, in addition to the routes the config excludes itself (by default, local networks and multicast)")
+                   color: theme.textFaint; font.pixelSize: 12 }
             Flow {
                 Layout.fillWidth: true; spacing: 6
                 visible: backend.excludedRoutes.length > 0

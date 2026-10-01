@@ -94,6 +94,12 @@ The config editor checks a value by the same rule but repairs neither edge case.
 It refuses trailing slashes and a mask with no prefix, and asks you to fix the
 value.
 
+### Tag `0x0C` — display name
+
+The name the config is listed under, which is also its file name. A link without
+one is named after its hostname. Either is cut to 50 characters, the most a
+config name can have.
+
 ## Validation rules
 
 Import fails when:

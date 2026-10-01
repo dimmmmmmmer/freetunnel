@@ -78,6 +78,15 @@ bool writeAll(QSaveFile *file, const QByteArray &body)
     return true;
 }
 
+void restorePassword(const QString &target, const QString &previous)
+{
+    const QString key = freetunnel::CredentialStore::keyForConfigPath(target);
+    if (previous.isEmpty())
+        freetunnel::CredentialStore::deletePassword(key);
+    else
+        freetunnel::CredentialStore::storePassword(key, previous);
+}
+
 } // namespace
 
 bool writeConfigFile(const QString &target, const QByteArray &body)
@@ -103,7 +112,7 @@ bool storeConfigPassword(const QString &target, const QString &password)
 }
 
 bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
-                            QString *errOut)
+                            const QString &previousPassword, QString *errOut)
 {
     // Editing a config saves over the ORIGINAL file (ownerConfigPathForSave reuses
     // oldPath when the name is unchanged). The old order — truncate the file, then
@@ -125,6 +134,11 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
         return false;
     }
     if (!file.commit()) {
+        // The other way round from the case above, and as bad: the store holds the
+        // new password while the file is still the old config, perhaps with
+        // another username, and every connect fails until the next good save.
+        // Put the store back to what the file on disk goes with.
+        restorePassword(target, previousPassword);
         if (errOut)
             *errOut = QStringLiteral("write");
         return false;
@@ -167,7 +181,10 @@ bool copyImportIntoAppConfigDir(const QString &content, const QString &sourcePat
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
-    const QString stem = freetunnel::sanitizeConfigBaseName(QFileInfo(sourcePath).completeBaseName());
+    // Clipped: the source's own name fits its directory, not always with the
+    // "-2" or the staging suffix a copy here can need.
+    const QString stem = freetunnel::sanitizeConfigBaseName(
+            freetunnel::clippedConfigName(QFileInfo(sourcePath).completeBaseName()));
     QString target = freetunnel::uniqueOwnerConfigPath(stem);
     if (QFileInfo(target).absoluteFilePath() == QFileInfo(sourcePath).absoluteFilePath())
         target = freetunnel::uniqueOwnerConfigPath(stem + QStringLiteral("-copy"));

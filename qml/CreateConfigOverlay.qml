@@ -218,7 +218,14 @@ Item {
                 Dialogs.FileDialog {
                     id: certFileDlg; objectName: "certificateDialog"; title: qsTr("Select a certificate")
                     nameFilters: ["PEM (*.pem *.crt *.cer)", qsTr("All files (*)")]
-                    onAccepted: fCert.text = backend.readTextFile(certFileDlg.selectedFile.toString())
+                    // A file the backend will not read comes back empty, with a
+                    // message saying why. Assigned as it was, the empty text wiped
+                    // a certificate pasted in the field, and Save wrote none.
+                    onAccepted: {
+                        const pem = backend.readTextFile(certFileDlg.selectedFile.toString())
+                        if (pem && pem.trim() !== "")
+                            fCert.text = pem
+                    }
                 }
                 Row { width: parent.width; layoutDirection: Qt.RightToLeft; spacing: 8
                         topPadding: 6; bottomPadding: 12
@@ -229,6 +236,13 @@ Item {
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text { id: saveText; objectName: "saveLabel"; anchors.centerIn: parent; text: qsTr("Save"); color: theme.accentText; font.pixelSize: 14 }
                         MouseArea { id: saveMa; anchors.fill: parent; hoverEnabled: true; onClicked: {
+                            // Nothing changed, nothing to write. Saved anyway, the
+                            // file came back in the form the editor writes: its
+                            // comments gone and its keys in another order.
+                            if (cform.editing && cform.snapshot() === cform.snap) {
+                                cform.close()
+                                return
+                            }
                             var ok = backend.createConfig({
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,

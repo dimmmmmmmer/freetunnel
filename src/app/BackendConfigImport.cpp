@@ -82,7 +82,16 @@ bool Backend::importFile(const QString &path)
         emit errorOccurred(tr("Could not write config"));
         return false;
     }
-    return finalizeImportedConfig(target, m_activePath.isEmpty());
+    if (!finalizeImportedConfig(target, m_activePath.isEmpty()))
+        return false;
+    // A link that turns certificate checks off says so in its question, before
+    // anything is added. A file the user picked is added at once, and said
+    // nothing: this notice takes the place of the "Config added" one.
+    if (freetunnel::parseConfigToml(content).skipVerification) {
+        emit errorOccurred(tr("Config added: %1. It turns off server certificate verification.")
+                                   .arg(nameForPath(target)));
+    }
+    return true;
 }
 
 // Put the config a failed replace was about to overwrite back on disk — a link
@@ -102,17 +111,23 @@ void Backend::restoreReplacedConfig(const QString &target, const QByteArray &pre
 // instead let a link replace a config while its real password survived under the
 // other key, ready to be sent to the link author's server.
 //
-// And under the name 1.2.0 would have given it: it turned spaces into '_', so a
-// config imported then from "My Server" is My_Server.toml, and the same link sent
-// again found nothing to replace and added a second copy.
+// And under the names earlier versions gave it. A name past the limit is cut
+// now, and a config imported before that has it whole. 1.2.0 turned spaces into
+// '_', so a config imported then from "My Server" is My_Server.toml. Looked for
+// under today's name alone, the same link sent again found nothing to replace and
+// added a second copy. The whole name comes first: it can only be the config this
+// link made, while the cut one can belong to another whose name has the same
+// first 50 characters, which the question could not tell apart from this one.
 QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    const QString current = freetunnel::existingConfigPath(base, prepared.fileName);
-    if (!current.isEmpty() || prepared.legacyFileName.isEmpty()
-        || prepared.legacyFileName == prepared.fileName)
-        return current;
-    return freetunnel::existingConfigPath(base, prepared.legacyFileName);
+    for (const QString &name : {prepared.unclippedFileName, prepared.fileName, prepared.legacyFileName}) {
+        // existingConfigPath() takes an empty name for the directory itself.
+        const QString found = name.isEmpty() ? QString() : freetunnel::existingConfigPath(base, name);
+        if (!found.isEmpty())
+            return found;
+    }
+    return QString();
 }
 
 bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,

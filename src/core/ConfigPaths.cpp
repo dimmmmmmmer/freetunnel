@@ -143,6 +143,16 @@ QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefi
     return safe;
 }
 
+QString clippedConfigName(const QString &name)
+{
+    // Counted in code points, as the limit is: a character beyond the first
+    // plane is two UTF-16 units, and cutting between them leaves half of one.
+    qsizetype units = 0;
+    for (int n = 0; n < kMaxConfigNameLength && units < name.size(); ++n)
+        units += (name.at(units).isHighSurrogate() && units + 1 < name.size()) ? 2 : 1;
+    return name.left(units);
+}
+
 QString uniqueOwnerConfigPath(const QString &stem)
 {
     const QString base = ensureOwnerConfigDir();

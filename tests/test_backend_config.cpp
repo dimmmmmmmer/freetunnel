@@ -15,18 +15,25 @@
 #include <QThread>
 
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
+#include <QTimer>
 
 #include "app/Backend.h"
 #include "app/BackendConfigShared.h"
+#include "core/ConfigPaths.h"
+#include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+
+#include <functional>
 
 class TestBackendConfig : public QObject {
     Q_OBJECT
@@ -53,10 +60,23 @@ private slots:
     void theConnectConfigIsBuiltOffTheGuiThread();
     void anEditSavesTheConfigItOpenedEvenIfTheListMoved();
     void anEditOfADeletedConfigIsRefused();
+    void anEditKeepsWhatTheFormDoesNotShow();
+    void anEditKeepsPostQuantumOff();
+    void aProxyListenerIsNotKeptBesideTheTunnel();
+    void renamingAConfigKeptElsewhereLeavesTheOriginal();
+    void aFailedCommitPutsThePreviousPasswordBack();
+    void aFailedEditSaveKeepsTheStoredPassword();
+    void aRefusedCertificateFileIsExplained();
+    void theEditorRefusesANameTooLongForAFile();
+    void aConfigWithALongerNameStillSaves();
 
 private:
     // A complete, valid create form; individual cases override what they exercise.
     static QVariantMap form(const QString &name, const QString &password);
+    // The form as the editor sends it back for row `index`: every field it was
+    // opened with, plus which config it is saving.
+    static QVariantMap editorForm(const Backend &backend, int index);
+    static QString readAll(const QString &path);
     QString pathFor(const Backend &backend, int index) const;
     static void assertOwnerOnly(const QString &path);
 
@@ -114,6 +134,20 @@ QVariantMap TestBackendConfig::form(const QString &name, const QString &password
     f[QStringLiteral("protocol")] = QStringLiteral("http2");
     f[QStringLiteral("dns")] = QStringLiteral("1.1.1.1");
     return f;
+}
+
+QVariantMap TestBackendConfig::editorForm(const Backend &backend, int index)
+{
+    QVariantMap f = backend.configFields(index);
+    f[QStringLiteral("editIndex")] = index;
+    f[QStringLiteral("editPath")] = f.value(QStringLiteral("path"));
+    return f;
+}
+
+QString TestBackendConfig::readAll(const QString &path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
 }
 
 // Owner-only is a POSIX-mode claim. On Windows the code relies on the config
@@ -237,7 +271,7 @@ void TestBackendConfig::aFailedSaveLeavesTheExistingConfigIntact()
     QVERIFY(QDir().mkpath(blocked));
     QString err;
     QVERIFY(!freetunnel::backend_config::saveConfigWithPassword(
-            blocked, QByteArrayLiteral("body\n"), QStringLiteral("pw"), &err));
+            blocked, QByteArrayLiteral("body\n"), QStringLiteral("pw"), QString(), &err));
     QCOMPARE(err, QStringLiteral("write"));
 
     // The untouched config next to it is still exactly what it was.
@@ -248,6 +282,189 @@ void TestBackendConfig::aFailedSaveLeavesTheExistingConfigIntact()
             freetunnel::CredentialStore::keyForConfigPath(blocked));
     QDir().rmdir(blocked);
     QFile::remove(target);
+}
+
+namespace {
+
+// Whether a QSaveFile writing `target` has staged its body. Qt names the staged
+// file "<target>.XXXXXX", next to the target, except on Linux, where it is
+// opened without a name (O_TMPFILE) and only the process's open files show it,
+// as "<directory>/#<inode> (deleted)". A test that times something "between
+// staging and commit" asks this, so that a store call added before the staging
+// makes it fail instead of letting the save stop at open and pass unexamined.
+bool bodyIsStaged(const QString &target)
+{
+    const QFileInfo fi(target);
+    const QString prefix = fi.fileName() + QLatin1Char('.');
+    const QStringList siblings = fi.dir().entryList(QDir::Files | QDir::Hidden);
+    for (const QString &name : siblings) {
+        if (name.startsWith(prefix) && name.size() == prefix.size() + 6)
+            return true;
+    }
+#if defined(Q_OS_LINUX)
+    const QString unnamed = QFileInfo(fi.absolutePath()).canonicalFilePath() + QStringLiteral("/#");
+    const QFileInfoList fds = QDir(QStringLiteral("/proc/self/fd"))
+                                      .entryInfoList(QDir::System | QDir::Files | QDir::NoDotAndDotDot);
+    for (const QFileInfo &fd : fds) {
+        if (fd.symLinkTarget().startsWith(unnamed))
+            return true;
+    }
+#endif
+    return false;
+}
+
+} // namespace
+
+// The other half of the same promise. The password goes into the store before
+// the file is committed, so a commit that failed left the store holding the new
+// password and the file the old config: a connect then sent the new password
+// with the old username, and failed with nothing to say why.
+//
+// The commit is made to fail from inside the save. On this thread the credential
+// store is called through a local event loop (see withoutFreezingTheUi), which
+// runs the call queued here after the body is staged and before it is committed;
+// it puts a directory where the file was, and no rename can replace that.
+void TestBackendConfig::aFailedCommitPutsThePreviousPasswordBack()
+{
+    using freetunnel::CredentialStore;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString target = QDir(dir).filePath(QStringLiteral("committed.toml"));
+    QVERIFY(freetunnel::backend_config::writeConfigFile(target, QByteArrayLiteral("original\n")));
+    const QString key = CredentialStore::keyForConfigPath(target);
+    QVERIFY(CredentialStore::storePassword(key, QStringLiteral("old-pass")));
+    auto tidy = qScopeGuard([&] {
+        CredentialStore::deletePassword(key);
+        QDir().rmdir(target);
+        QFile::remove(target);
+    });
+
+    bool staged = false;
+    bool swapped = false;
+    QTimer::singleShot(0, this, [&] {
+        staged = bodyIsStaged(target);
+        swapped = QFile::remove(target) && QDir().mkdir(target);
+    });
+    QString err;
+    const bool saved = freetunnel::backend_config::saveConfigWithPassword(
+            target, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QStringLiteral("old-pass"),
+            &err);
+    QVERIFY2(swapped, "the file was not swapped out between staging and commit");
+    QVERIFY2(staged, "the file was swapped out before the body was staged");
+    QVERIFY(!saved);
+    QCOMPARE(err, QStringLiteral("write"));
+    QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("old-pass"));
+
+    // A file that had no password before has none after.
+    const QString fresh = QDir(dir).filePath(QStringLiteral("fresh.toml"));
+    const QString freshKey = CredentialStore::keyForConfigPath(fresh);
+    auto tidyFresh = qScopeGuard([&] {
+        CredentialStore::deletePassword(freshKey);
+        QDir().rmdir(fresh);
+    });
+    staged = false;
+    swapped = false;
+    QTimer::singleShot(0, this, [&] {
+        staged = bodyIsStaged(fresh);
+        swapped = QDir().mkdir(fresh);
+    });
+    QVERIFY(!freetunnel::backend_config::saveConfigWithPassword(
+            fresh, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QString(), &err));
+    QVERIFY(swapped);
+    QVERIFY2(staged, "the new file was blocked before the body was staged");
+    QVERIFY2(CredentialStore::loadPassword(freshKey).isEmpty(),
+             "a password was left behind for a config that was never written");
+}
+
+namespace {
+
+// Runs `act` in the credential store's local event loop that comes after the
+// first `calls` of them. Every store call on this thread turns a local event loop
+// until its worker is done (see withoutFreezingTheUi), and a plain queued call
+// runs in the first one. In createConfig() that is the edit snapshot's lookup of
+// the old password, before the body is staged: a directory put in place there
+// fails the save at open, before the store is touched. A worker's end reaches its
+// loop as a queued call to QEventLoop::quit, so those are counted and `act` is
+// queued behind the last; no event loop turns between two store calls, so it
+// runs in the next one.
+class AfterCredentialCalls : public QObject {
+public:
+    AfterCredentialCalls(int calls, std::function<void()> act) : m_left(calls), m_act(std::move(act))
+    {
+        QCoreApplication::instance()->installEventFilter(this);
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (m_left > 0 && event->type() == QEvent::MetaCall && qobject_cast<QEventLoop *>(watched)
+                && --m_left == 0)
+            QMetaObject::invokeMethod(this, m_act, Qt::QueuedConnection);
+        return false;
+    }
+
+private:
+    int m_left;
+    std::function<void()> m_act;
+};
+
+} // namespace
+
+// The restore above puts back what it is told the store held, and the editor's
+// save is what tells it. A wrong answer is worse than the bug it fixes: an
+// in-place edit told "nothing" deleted the stored password when its commit
+// failed, leaving the old config without one; a rename told the old password
+// left it under a file that was never written.
+void TestBackendConfig::aFailedEditSaveKeepsTheStoredPassword()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("old-pass"))));
+    const QString path = pathFor(backend, 0);
+    QVERIFY(!path.isEmpty());
+    const QString key = CredentialStore::keyForConfigPath(path);
+    const QString renamed = QFileInfo(path).dir().filePath(QStringLiteral("Beta.toml"));
+    const QString renamedKey = CredentialStore::keyForConfigPath(renamed);
+    auto tidy = qScopeGuard([&] {
+        CredentialStore::deletePassword(key);
+        CredentialStore::deletePassword(renamedKey);
+        QDir().rmdir(path);
+        QDir().rmdir(renamed);
+    });
+    bool staged = false;
+    bool swapped = false;
+
+    // Renamed, so the save makes a new file, and that commit fails.
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("name")] = QStringLiteral("Beta");
+    edit[QStringLiteral("password")] = QStringLiteral("new-pass");
+    {
+        AfterCredentialCalls block(1, [&] {
+            staged = bodyIsStaged(renamed);
+            swapped = QDir().mkdir(renamed);
+        });
+        QVERIFY(!backend.createConfig(edit));
+    }
+    QVERIFY2(swapped, "the new file was not blocked between staging and commit");
+    QVERIFY2(staged, "the new file was blocked before the body was staged");
+    QVERIFY2(CredentialStore::loadPassword(renamedKey).isEmpty(),
+             "a password was left behind for a config that was never written");
+    QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("old-pass"));
+    QVERIFY(QDir().rmdir(renamed));
+
+    // Saved over the same file, and that commit fails.
+    edit[QStringLiteral("name")] = QStringLiteral("Alpha");
+    staged = false;
+    swapped = false;
+    {
+        AfterCredentialCalls swap(1, [&] {
+            staged = bodyIsStaged(path);
+            swapped = QFile::remove(path) && QDir().mkdir(path);
+        });
+        QVERIFY(!backend.createConfig(edit));
+    }
+    QVERIFY2(swapped, "the file was not swapped out between staging and commit");
+    QVERIFY2(staged, "the file was swapped out before the body was staged");
+    QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("old-pass"));
 }
 
 // Export is the one path that deliberately writes the password in cleartext, into
@@ -573,6 +790,313 @@ void TestBackendConfig::anEditOfADeletedConfigIsRefused()
     QVERIFY(!backend.createConfig(edit));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(backend.configs().size(), 0);
+}
+
+// A provider's config says how it wants to be routed, and can carry keys and
+// tables the editor has no field for. The editor built the file from the form
+// alone, so even a Save that changed nothing wrote the default routes over the
+// provider's and dropped the rest — and a rename did the same.
+void TestBackendConfig::anEditKeepsWhatTheFormDoesNotShow()
+{
+    const QString source = QDir(m_home.path()).filePath(QStringLiteral("provider.toml"));
+    QFile out(source);
+    QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    out.write("loglevel = \"info\"\n"
+              "exclusions = [\"intranet.example.org\"]\n"
+              "dns_upstreams = [\"1.1.1.1\"]\n"
+              "\n[endpoint]\n"
+              "hostname = \"vpn.example.org\"\n"
+              "addresses = [\"198.51.100.7:443\"]\n"
+              "username = \"alice\"\n"
+              "password = \"hunter2\"\n"
+              "provider_hint = \"kept\"\n"
+              "\n[listener.tun]\n"
+              "included_routes = [\"0.0.0.0/0\"]\n"
+              "excluded_routes = [\"10.9.0.0/16\"]\n"
+              "mtu_size = 1280\n"
+              "\n[provider]\n"
+              "plan = \"basic\"\n");
+    out.close();
+
+    Backend backend;
+    QVERIFY(backend.importFile(source));
+    QFile::remove(source);
+
+    // Saved as it opened, then renamed.
+    for (const QString &name : {QStringLiteral("provider"), QStringLiteral("Renamed")}) {
+        QVariantMap edit = editorForm(backend, 0);
+        edit[QStringLiteral("name")] = name;
+        QVERIFY(backend.createConfig(edit));
+        QCOMPARE(backend.configs(), QStringList{name});
+        const QString saved = readAll(backend.configFields(0).value(QStringLiteral("path")).toString());
+        const auto keeps = [&](const char *text) {
+            return saved.contains(QLatin1String(text));
+        };
+        QVERIFY2(keeps("excluded_routes = [\"10.9.0.0/16\"]") && keeps("mtu_size = 1280"),
+                 qPrintable(QStringLiteral("the file's own routing was replaced:\n") + saved));
+        QVERIFY2(!keeps("192.168.0.0/16"), qPrintable(saved)); // not the defaults on top
+        QVERIFY2(keeps("exclusions = [\"intranet.example.org\"]"), qPrintable(saved));
+        QVERIFY2(keeps("provider_hint = \"kept\""), qPrintable(saved));
+        QVERIFY2(keeps("[provider]") && keeps("plan = \"basic\""), qPrintable(saved));
+        QVERIFY2(!keeps("hunter2"), qPrintable(saved)); // and the password stays out
+    }
+}
+
+// A config may turn the post-quantum key exchange off. The editor has no switch
+// for it, and its Save built the file from the form, which wrote the default
+// back: saved once, even unchanged, the config had it on again.
+void TestBackendConfig::anEditKeepsPostQuantumOff()
+{
+    const QString source = QDir(m_home.path()).filePath(QStringLiteral("classic.toml"));
+    QFile out(source);
+    QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    out.write("loglevel = \"info\"\n"
+              "post_quantum_group_enabled = false\n"
+              "\n[endpoint]\n"
+              "hostname = \"vpn.example.org\"\n"
+              "addresses = [\"198.51.100.7:443\"]\n"
+              "username = \"alice\"\n"
+              "password = \"hunter2\"\n");
+    out.close();
+
+    Backend backend;
+    QVERIFY(backend.importFile(source));
+    QFile::remove(source);
+
+    // Saved as it opened, then renamed: both write the file anew.
+    for (const QString &name : {QStringLiteral("classic"), QStringLiteral("Classic, renamed")}) {
+        QVariantMap edit = editorForm(backend, 0);
+        edit[QStringLiteral("name")] = name;
+        QVERIFY(backend.createConfig(edit));
+        QCOMPARE(backend.configs(), QStringList{name});
+        const QString path = backend.configFields(0).value(QStringLiteral("path")).toString();
+        const QString saved = readAll(path);
+        QVERIFY2(saved.contains(QStringLiteral("post_quantum_group_enabled = false")),
+                 qPrintable(QStringLiteral("the editor turned post-quantum back on:\n") + saved));
+        QVERIFY2(!freetunnel::parseConfigToml(saved).postQuantum, qPrintable(saved));
+        QVERIFY2(freetunnel::buildConnectConfigToml(path).contains(
+                         QStringLiteral("post_quantum_group_enabled = false")),
+                 "the connection turned post-quantum back on");
+    }
+
+    // A config made in the editor has no file to keep it from, and gets the default.
+    QVERIFY(backend.createConfig(form(QStringLiteral("fresh"), QStringLiteral("pw"))));
+    const QString fresh = readAll(pathFor(backend, backend.configs().indexOf(QStringLiteral("fresh"))));
+    QVERIFY2(fresh.contains(QStringLiteral("post_quantum_group_enabled = true")), qPrintable(fresh));
+}
+
+// TrustTunnel's own client can run a config as a local SOCKS proxy instead of a
+// tunnel; its setup writes [listener] and [listener.socks] for that. FreeTunnel
+// runs the tunnel and always writes [listener.tun], and carrying the proxy's
+// tables over beside it named two listeners, which the core refuses: imported,
+// such a config could not connect. The editor's save had been the one way to
+// repair it, by dropping every table the form does not show, and keeping those
+// (above) would have taken that away as well.
+void TestBackendConfig::aProxyListenerIsNotKeptBesideTheTunnel()
+{
+    using freetunnel::CredentialStore;
+    const auto oneListener = [](const QString &toml) {
+        return toml.count(QStringLiteral("[listener.tun]")) == 1
+                && !toml.contains(QStringLiteral("[listener]"))
+                && !toml.contains(QStringLiteral("[listener.socks]"))
+                && !toml.contains(QStringLiteral("127.0.0.1:1080"));
+    };
+
+    // As 1.1.8 to 1.2.2 left one after importing it: the password in the store,
+    // and the proxy's tables after the tunnel's.
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString path = QDir(dir).filePath(QStringLiteral("proxy.toml"));
+    QVERIFY(freetunnel::backend_config::writeConfigFile(
+            path, QByteArrayLiteral("loglevel = \"info\"\n"
+                                    "vpn_mode = \"general\"\n"
+                                    "\n[endpoint]\n"
+                                    "hostname = \"vpn.example.org\"\n"
+                                    "addresses = [\"198.51.100.7:443\"]\n"
+                                    "username = \"alice\"\n"
+                                    "\n[listener.tun]\n"
+                                    "included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n"
+                                    "\n[listener]\n"
+                                    "\n[listener.socks]\n"
+                                    "address = \"127.0.0.1:1080\"\n")));
+    QVERIFY(CredentialStore::storePassword(CredentialStore::keyForConfigPath(path),
+                                           QStringLiteral("hunter2")));
+    saveStoredConfigs({path});
+
+    // It connects as it is, without being opened...
+    const QString connect = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(connect.contains(QStringLiteral("hunter2")), "no password to connect with");
+    QVERIFY2(oneListener(connect), qPrintable(connect));
+    // ...and a save from the editor writes it as the core takes it.
+    Backend backend;
+    QVERIFY(backend.createConfig(editorForm(backend, 0)));
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("proxy")});
+    const QString saved = readAll(path);
+    QVERIFY2(oneListener(saved), qPrintable(saved));
+
+    // And one imported from a file as TrustTunnel's setup writes it is a tunnel.
+    const QString source = QDir(m_home.path()).filePath(QStringLiteral("socks.toml"));
+    QFile out(source);
+    QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    out.write("loglevel = \"info\"\n"
+              "vpn_mode = \"general\"\n"
+              "killswitch_enabled = false\n"
+              "\n[endpoint]\n"
+              "hostname = \"vpn.example.org\"\n"
+              "addresses = [\"198.51.100.8:443\"]\n"
+              "username = \"bob\"\n"
+              "password = \"swordfish\"\n"
+              "\n# Defines the way to listen to network traffic by the kind of the nested table.\n"
+              "[listener]\n"
+              "\n[listener.socks]\n"
+              "address = \"127.0.0.1:1080\"\n"
+              "username = \"\"\n"
+              "password = \"\"\n");
+    out.close();
+    QVERIFY(backend.importFile(source));
+    QFile::remove(source);
+    QCOMPARE(backend.configs().value(0), QStringLiteral("socks"));
+    const QString imported = readAll(backend.configFields(0).value(QStringLiteral("path")).toString());
+    QVERIFY2(oneListener(imported), qPrintable(imported));
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("password")).toString(),
+             QStringLiteral("swordfish"));
+}
+
+// configs.json can name a config outside the app's directory (a very early build
+// listed a picked file where it was instead of copying it). A rename moves the
+// config into the app's directory, and it deleted the original: the user's own
+// file, which removeConfig() has always left alone.
+void TestBackendConfig::renamingAConfigKeptElsewhereLeavesTheOriginal()
+{
+    QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    const QString original = QDir(elsewhere.path()).filePath(QStringLiteral("work.toml"));
+    const QByteArray body("[endpoint]\n"
+                          "hostname = \"vpn.example.org\"\n"
+                          "addresses = [\"198.51.100.7:443\"]\n"
+                          "username = \"alice\"\n"
+                          "password = \"hunter2\"\n");
+    QFile out(original);
+    QVERIFY(out.open(QIODevice::WriteOnly));
+    out.write(body);
+    out.close();
+    saveStoredConfigs({original});
+
+    Backend backend;
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("work")});
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("name")] = QStringLiteral("Work, renamed");
+    QVERIFY(backend.createConfig(edit));
+
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("Work, renamed")});
+    const QString moved = backend.configFields(0).value(QStringLiteral("path")).toString();
+    QCOMPARE(QFileInfo(moved).absolutePath(),
+             QFileInfo(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation))
+                     .absoluteFilePath());
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("password")).toString(),
+             QStringLiteral("hunter2"));
+    QVERIFY2(QFileInfo::exists(original), "renaming the config deleted the user's own file");
+    QCOMPARE(readAll(original).toUtf8(), body);
+}
+
+// The editor keeps its certificate field when a pick reads nothing, so the
+// reason has to come from here: before, the pick wiped the field without a word.
+void TestBackendConfig::aRefusedCertificateFileIsExplained()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    const auto lastError = [&] { return errors.isEmpty() ? QString() : errors.last().at(0).toString(); };
+
+    QTemporaryFile big(QDir::tempPath() + QStringLiteral("/ft-cert-big-XXXXXX.pem"));
+    QVERIFY(big.open());
+    big.write(QByteArray(2 * 1024 * 1024, 'A'));
+    big.close();
+    QVERIFY(backend.readTextFile(big.fileName()).isEmpty());
+    QCOMPARE(errors.count(), 1);
+    QVERIFY2(lastError().contains(QStringLiteral("1 MB")), qPrintable(lastError()));
+
+    QTemporaryFile empty(QDir::tempPath() + QStringLiteral("/ft-cert-empty-XXXXXX.pem"));
+    QVERIFY(empty.open());
+    empty.close();
+    QVERIFY(backend.readTextFile(empty.fileName()).isEmpty());
+    QCOMPARE(errors.count(), 2);
+    QCOMPARE(lastError(), QStringLiteral("That file is empty"));
+
+#if defined(Q_OS_UNIX)
+    QVERIFY(backend.readTextFile(QStringLiteral("/etc/hosts")).isEmpty());
+    QCOMPARE(errors.count(), 3);
+    QVERIFY2(lastError().contains(QStringLiteral("Downloads")), qPrintable(lastError()));
+    // The temporary files folder is allowed as well (the files read below are
+    // there), and the message says so.
+    QVERIFY2(lastError().contains(QStringLiteral("temporary files")), qPrintable(lastError()));
+#endif
+
+    // A file that is read is returned, and nothing is said.
+    QTemporaryFile pem(QDir::tempPath() + QStringLiteral("/ft-cert-XXXXXX.pem"));
+    QVERIFY(pem.open());
+    pem.write("-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n");
+    pem.close();
+    const int before = errors.count();
+    QVERIFY(backend.readTextFile(pem.fileName()).contains(QStringLiteral("TEST")));
+    QCOMPARE(errors.count(), before);
+}
+
+// A name is a file name, and one too long for the file system failed as "Could
+// not write config", which said nothing about the name. The editor now says what
+// is wrong, and before anything is written.
+void TestBackendConfig::theEditorRefusesANameTooLongForAFile()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    const int limit = freetunnel::kMaxConfigNameLength;
+    // Two bytes a letter in a file name: 260 of the 255 there are, which failed.
+    QVERIFY(!backend.createConfig(form(QString(130, QChar(0x0416)), QStringLiteral("pw"))));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.last().at(0).toString(),
+             QStringLiteral("The name is too long: %1 characters at most").arg(limit));
+    QVERIFY(!backend.createConfig(form(QString(limit + 1, QLatin1Char('a')), QStringLiteral("pw"))));
+    QCOMPARE(errors.count(), 2);
+    QVERIFY(backend.configs().isEmpty());
+
+    const QString atLimit(limit, QChar(0x0416));
+    QVERIFY(backend.createConfig(form(atLimit, QStringLiteral("pw"))));
+    QCOMPARE(backend.configs(), QStringList{atLimit});
+
+    // Left empty, the name is the hostname, and a long one is cut rather than
+    // refused: nobody typed it.
+    QVariantMap unnamed = form(QString(), QStringLiteral("pw"));
+    unnamed[QStringLiteral("hostname")] = QString(70, QLatin1Char('h')) + QStringLiteral(".example.org");
+    QVERIFY(backend.createConfig(unnamed));
+    QVERIFY(backend.configs().contains(QString(limit, QLatin1Char('h'))));
+}
+
+// A config that already has a longer name, from a link or a file before the
+// limit, still saves under it. Only a new name has to fit.
+void TestBackendConfig::aConfigWithALongerNameStillSaves()
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString longName(freetunnel::kMaxConfigNameLength + 10, QLatin1Char('n'));
+    const QString path = QDir(dir).filePath(longName + QStringLiteral(".toml"));
+    QVERIFY(freetunnel::backend_config::writeConfigFile(
+            path, QByteArrayLiteral("[endpoint]\n"
+                                    "hostname = \"vpn.example.org\"\n"
+                                    "addresses = [\"198.51.100.7:443\"]\n"
+                                    "username = \"alice\"\n"
+                                    "password = \"hunter2\"\n")));
+    saveStoredConfigs({path});
+
+    Backend backend;
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("username")] = QStringLiteral("bob");
+    QVERIFY(backend.createConfig(edit));
+    QCOMPARE(backend.configs(), QStringList{longName});
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("username")).toString(), QStringLiteral("bob"));
+
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    edit = editorForm(backend, 0);
+    edit[QStringLiteral("name")] = longName + QStringLiteral("x");
+    QVERIFY(!backend.createConfig(edit));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(backend.configs(), QStringList{longName});
 }
 
 #include "test_backend_config.moc"
