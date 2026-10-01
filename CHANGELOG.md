@@ -53,10 +53,10 @@ compare link at the bottom of its release notes.
   the AppImage, update.
 
   That covers an AppImage started the usual way. One started with
-  --appimage-extract-and-run, as where FUSE is missing, is first unpacked
-  under your own account into that shared place, by the AppImage itself, and
+  --appimage-extract-and-run, as where FUSE is missing, is first unpacked by
+  the AppImage itself, under your own account, into that shared place, and
   other accounts can still interfere with that copy; FreeTunnel cannot prevent
-  it. On a computer other people have accounts on, use the .deb there.
+  it. Without FUSE, on a computer other people have accounts on, use the .deb.
 - **An update has to say which version it is.** Since 1.1.8 FreeTunnel has
   checked that an update was signed for the version on offer, but an update from
   before 1.1.8, which does not say, was still accepted. Someone able to pass
@@ -99,6 +99,10 @@ compare link at the bottom of its release notes.
   connection. FreeTunnel now writes the core's messages itself, to a file it
   keeps open for as long as logging is on. With logging off they are now
   written nowhere; on macOS they used to go to a temporary file even then.
+- **The core's messages reach the log as they happen.** They were held back
+  until a few kilobytes had gathered or the connection ended, so a warning could
+  arrive long after it mattered, and the last ones before a disconnect never
+  arrived at all.
 - **Config files written by hand are read the way the VPN core reads them.** A
   setting may be indented and its name may be in quotes, as in
   `"password" = "…"`; a section's name may be in quotes too, as in
@@ -116,62 +120,10 @@ compare link at the bottom of its release notes.
 
   What a config imported before has already lost is not brought back. If it had
   indented, quoted or triple-quoted settings, a certificate in particular, they
-  may be gone from it: import it again from the original file. If a SOCKS listener's password was
-  taken for the server's, that password is now stored as the config's own: if the
-  config does not connect, open it in the config editor and enter the server's
-  username and password again.
-- **A config that turns off the post-quantum key exchange keeps it off when it
-  connects.** A config file may say `post_quantum_group_enabled = false`, but
-  FreeTunnel turned it back on when it moved the password out of the file, and
-  again for every connection, so the setting never took effect. The file's
-  setting is used now. A config imported before already has it turned back on in
-  its file: import it again from the original file. Saving a config in the
-  config editor still turns it back on, as the editor has no switch for it:
-  make changes to such a config in its file, and import it again.
-- **Starting FreeTunnel with "disconnect" keeps the VPN off.** With "Connect on
-  startup" on, a script or a Stream Deck button that started FreeTunnel with
-  freetunnel://disconnect while it was not running left it connected: the
-  disconnect came before there was anything to disconnect, and the connection on
-  startup followed a moment later. A disconnect now calls that connection off.
-- **A config imported from a link keeps its whole client random.** A link can
-  give the client random with a mask, as prefix/mask. FreeTunnel wrote the mask
-  under a key of its own that the VPN core never reads, so the connection went
-  out without it. It now goes to the core whole. Configs imported that way before
-  are read back whole, without needing to be opened, and the config editor accepts
-  a mask after a slash.
-- **A link's client random is checked when the link is imported.** The VPN core
-  can only use a client random written as whole bytes of hex, at most 32 of them,
-  before and after the slash. FreeTunnel took whatever a link held, so a value
-  the core could not use went into the config: the connection quietly went
-  without it, and the config editor could refuse to save the config until the
-  value was changed. Such a link is now refused, with a message saying its
-  client random is malformed. A mask with nothing before the slash is dropped on
-  import, as an empty one after it already was. The config editor checks by the
-  same rule and no longer saves an odd number of digits, or more than 64. A
-  config's share link passes its client random on as the connection uses it:
-  where the mask is one the core cannot use, the link gives the part before the
-  slash alone, as the connection does.
-- **The core's messages reach the log as they happen.** They were held back
-  until a few kilobytes had gathered or the connection ended, so a warning could
-  arrive long after it mattered, and the last ones before a disconnect never
-  arrived at all.
-- **Linux: an AppImage started without FUSE can update itself and start with the
-  system.** Run with --appimage-extract-and-run, as on a system without FUSE,
-  FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
-  recorded a temporary copy that was gone once FreeTunnel quit, and updates
-  offered the .deb and left installing it to you. It now finds its .AppImage
-  file, and both start it with --appimage-extract-and-run again. The switch
-  could show on while it did not work; after updating it shows off — turn it on
-  again. To connect, its privileged part is now unpacked into /tmp, as for an
-  AppImage started normally, so where /tmp does not allow running programs,
-  pointing TMPDIR elsewhere no longer gets around that: use the .deb there. The
-  .deb is also the one for a computer other people have accounts on (see
-  Security).
-- **Linux: FreeTunnel's memory no longer grows for as long as the VPN's
-  privileged part runs.** Everything that part printed was kept in FreeTunnel's
-  memory until it quit, and nothing ever read it. With logging off in Settings,
-  that included the VPN core's own log. It is discarded now; the log FreeTunnel
-  shows and saves is as before.
+  may be gone from it: import it again from the original file. If a SOCKS
+  listener's password was taken for the server's, that password is now stored as
+  the config's own: if the config does not connect, open it in the config editor
+  and enter the server's username and password again.
 - **Updates in Settings**
   - "Check for updates" clicked just after FreeTunnel started, while its own
     check was still under way, could offer the update a second time in the middle
@@ -193,6 +145,53 @@ compare link at the bottom of its release notes.
     this version is still made by the version you have, so this can happen once
     more: if two FreeTunnels are running afterwards, quit both and start
     FreeTunnel again.
+- **Starting FreeTunnel with "disconnect" keeps the VPN off.** With "Connect on
+  startup" on, a script or a Stream Deck button that started FreeTunnel with
+  freetunnel://disconnect while it was not running left it connected: the
+  disconnect came before there was anything to disconnect, and the connection on
+  startup followed a moment later. A disconnect now calls that connection off.
+- **A config that turns off the post-quantum key exchange keeps it off when it
+  connects.** A config file may say `post_quantum_group_enabled = false`, but
+  FreeTunnel turned it back on when it moved the password out of the file, and
+  again for every connection, so the setting never took effect. The file's
+  setting is used now. A config imported before already has it turned back on in
+  its file: import it again from the original file. Saving a config in the
+  config editor still turns it back on, as the editor has no switch for it:
+  make changes to such a config in its file, and import it again.
+- **A link's client random reaches the VPN core in a form it can use.** A link
+  can give the client random with a mask, as prefix/mask. FreeTunnel wrote the
+  mask under a key of its own that the VPN core never reads, so the connection
+  went out without it. It now goes to the core whole, and configs imported that
+  way before are read back whole, without needing to be opened.
+
+  The core can only use whole bytes of hex, at most 32 of them, before and after
+  the slash, and FreeTunnel took whatever a link held: a value the core could
+  not use went into the config, the connection quietly went without it, and the
+  config editor could refuse to save the config until the value was changed.
+  Such a link is now refused, with a message saying its client random is
+  malformed. A mask with nothing before the slash is dropped on import, as an
+  empty one after it already was. The config editor accepts a mask after a slash
+  and checks by the same rule, so it no longer saves an odd number of digits, or
+  more than 64. A config's share link passes its client random on as the
+  connection uses it: where the mask is one the core cannot use, the link gives
+  the part before the slash alone, as the connection does.
+- **Linux: an AppImage started without FUSE can update itself and start with the
+  system.** Run with --appimage-extract-and-run, as on a system without FUSE,
+  FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
+  recorded a temporary copy that was gone once FreeTunnel quit, and updates
+  offered the .deb and left installing it to you. It now finds its .AppImage
+  file, and both start it with --appimage-extract-and-run again. The switch
+  could show on while it did not work; after updating it shows off — turn it on
+  again. To connect, its privileged part is now unpacked into /tmp, as for an
+  AppImage started normally, so where /tmp does not allow running programs,
+  pointing TMPDIR elsewhere no longer gets around that: use the .deb there. The
+  .deb is also the one for a computer other people have accounts on (see
+  Security).
+- **Linux: FreeTunnel's memory no longer grows for as long as the VPN's
+  privileged part runs.** Everything that part printed was kept in FreeTunnel's
+  memory until it quit, and nothing ever read it. With logging off in Settings,
+  that included the VPN core's own log. It is discarded now; the log FreeTunnel
+  shows and saves is as before.
 
 ## 1.2.2
 
