@@ -5,6 +5,7 @@
 #import <objc/runtime.h>
 
 #include <functional>
+#include <memory>
 #include <utility>
 
 // QWindow::winId() returns the backing NSView* on macOS. Reach its NSWindow and
@@ -20,8 +21,9 @@ void applyMacUnifiedTitlebar(unsigned long long nsViewPtr) {
     window.titlebarAppearsTransparent = YES;
     window.titleVisibility = NSWindowTitleHidden;
     window.styleMask |= NSWindowStyleMaskFullSizeContentView;
-    // Dragging is handled explicitly by a top drag-bar in QML (startSystemMove),
-    // so the whole background is not draggable.
+    // Not movableByWindowBackground: the window moves only from the title band the
+    // QML draws, which hands the press to macHandleTitlebarPress() below (Qt's
+    // startSystemMove() only when that cannot).
 }
 
 MacRect macWindowControlsRect(unsigned long long nsViewPtr) {
@@ -198,6 +200,30 @@ void installMacWindowCloseToTray(unsigned long long nsViewPtr, std::function<voi
     target = [[FTCloseButtonTarget alloc] initWithHandler:std::move(onClose)];
     closeButton.target = target;
     closeButton.action = @selector(ftClosePressed:);
+}
+
+void installMacApplicationHiddenHandler(std::function<void(bool hidden)> onChange) {
+    // Shared by both blocks, which outlive this call. Never removed, like the Dock
+    // handler below: one per process, for the app's lifetime.
+    auto handler = std::make_shared<std::function<void(bool)>>(std::move(onChange));
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:NSApplicationDidHideNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        (*handler)(true);
+                    }];
+    [center addObserverForName:NSApplicationDidUnhideNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        (*handler)(false);
+                    }];
+    // Launched hidden (open -j, a login item set to hide), the app may have been
+    // hidden before anything here was listening.
+    (*handler)(NSApp.hidden);
 }
 
 // Handler object for the Dock-icon reopen Apple Event ('rapp').

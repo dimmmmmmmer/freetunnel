@@ -704,7 +704,12 @@ Window {
     // Hidden to the tray or the menu bar, or minimised: a toast drawn now would
     // time out before anyone could read it. Not "onScreen": a property named like
     // a handler is read as one when its signal is declared in QML, as onAccent was.
-    readonly property bool inView: visible && visibility !== Window.Minimized
+    //
+    // Or the whole app hidden on macOS (⌘H, Hide Others). AppKit orders the window
+    // out for that and Qt is not told, so `visible` stays true. macAppHidden is set
+    // from C++ (setupMacWindow), as macControlsRect is.
+    property bool macAppHidden: false
+    readonly property bool inView: visible && visibility !== Window.Minimized && !macAppHidden
     // Something the user started from the tray has yet to succeed or fail.
     property bool trayActionWaiting: false
     property bool wasConnected: backend.connected

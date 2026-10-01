@@ -301,7 +301,8 @@ public:
     Q_INVOKABLE void startWindowDrag(QObject *) { ++windowDrags; }
     int windowDrags = 0;
     Q_INVOKABLE void pingConfigs() {}
-    Q_INVOKABLE bool importFromClipboard() { return false; }
+    Q_INVOKABLE bool importFromClipboard() { ++clipboardImports; return false; }
+    int clipboardImports = 0;
     Q_INVOKABLE void prepareQuit()
     {
         m_shutdownPrepared = true;
