@@ -137,7 +137,7 @@ sampled. Additional Linux-only jobs: **gcov/lcov coverage**
 (`scripts/coverage-upstream-report.sh`, merges unit tests + upstream instrumented
 build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
 
-Test suites — 36 targets, `ctest -N` lists them: deep links (incl. structured
+Test suites (`ctest -N` lists them all): deep links (incl. structured
 fuzz) and config import, config store and paths, settings, both TOML writers,
 credentials (Keychain / Credential Manager / libsecret), release verify and
 version comparison, control commands and the single-instance socket, helper IPC

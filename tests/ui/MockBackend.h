@@ -318,6 +318,7 @@ signals:
     void errorOccurred(const QString &msg);
     void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
                                             const QString &existingName);
+    void deepLinkDisconnectConfirmationRequired();
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 

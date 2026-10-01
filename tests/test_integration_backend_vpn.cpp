@@ -23,6 +23,7 @@
 #include "core/AppSettings.h"
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
+#include "core/ControlCommand.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 #include "helper_ipc_mock_server.h"
@@ -50,6 +51,8 @@ private slots:
     void aMessageTheHelperWordsIsShownInTheUsersLanguage();
     void aChangeWhileTheHelperStartsDoesNotStartItAgain();
     void deletingActiveConfigWhileConnectedTearsDownTunnel();
+    void aDisconnectAtLaunchWinsOverConnectOnStartup();
+    void aLinkAsksBeforeTurningTheVpnOffACommandDoesNot();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
 };
@@ -872,6 +875,151 @@ void TestIntegrationBackendVpn::deletingActiveConfigWhileConnectedTearsDownTunne
     freetunnel::CredentialStore::deletePassword(configB);
     QFile::remove(configA);
     QFile::remove(configB);
+}
+
+// "Disconnect" handed over with the launch — a script or a Stream Deck running
+// FreeTunnel with freetunnel://disconnect while it was not running — is acted on
+// before "Connect on startup" has started anything. It found nothing to take
+// down, and the auto-connect brought the tunnel up 600 ms later all the same.
+void TestIntegrationBackendVpn::aDisconnectAtLaunchWinsOverConnectOnStartup()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QString config;
+    QVERIFY(writeTestConfig(base, QStringLiteral("autoconnect-server"), &config));
+    saveStoredConfigs({config});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = config;
+    settings.auto_connect_on_start = true;
+    saveAppSettings(settings);
+
+    const QString token = QStringLiteral("backend-autoconnect-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    auto cleanup = qScopeGuard([&] {
+        AppSettings off = loadAppSettings();
+        off.auto_connect_on_start = false;
+        saveAppSettings(off);
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+        freetunnel::CredentialStore::deletePassword(config);
+        QFile::remove(config);
+    });
+
+    // First that the setup does auto-connect: otherwise the second half would
+    // pass for the wrong reason.
+    {
+        Backend backend;
+        QVERIFY2(QTest::qWaitFor([&]() { return backend.connected(); }, 10000),
+                 "connect on startup did not connect, so the check below proves nothing");
+        backend.prepareQuit();
+    }
+    const int connectsBefore = server.connectCount();
+
+    {
+        Backend backend;
+        backend.handleControl(QStringLiteral("freetunnel://disconnect"));
+        QTest::qWait(1500); // well past the 600 ms the auto-connect waits
+        QVERIFY2(!backend.connected() && !backend.connecting(),
+                 "connect on startup overrode the disconnect given with the launch");
+        QCOMPARE(server.connectCount(), connectsBefore);
+        backend.prepareQuit();
+    }
+
+    // Opened as a link rather than run, the same disconnect would keep the VPN
+    // off on a web page's say-so, so it is a question; until it is answered, the
+    // connection on startup goes ahead. A helper of its own, as a new launch
+    // has: the first Backend told the first one to quit.
+    MockHelperServer second(token);
+    QVERIFY(second.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(second.port()));
+    Backend linked;
+    QSignalSpy asked(&linked, &Backend::deepLinkDisconnectConfirmationRequired);
+    QVERIFY(linked.handleControl(
+            freetunnel::linkControlString(QStringLiteral("freetunnel://disconnect"))));
+    QCOMPARE(asked.count(), 1);
+    QVERIFY(QTest::qWaitFor([&]() { return linked.connected(); }, 10000));
+    linked.prepareQuit();
+}
+
+// freetunnel:// links are registered with the system, so any web page can open
+// one, and a disconnect or a toggle used to take the tunnel down on the spot.
+// Opened as a link, anything that would turn the VPN off is now a question; the
+// same URL run as a command, as a Stream Deck button does, acts at once.
+void TestIntegrationBackendVpn::aLinkAsksBeforeTurningTheVpnOffACommandDoesNot()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    QString config;
+    QVERIFY(writeTestConfig(base, QStringLiteral("link-server"), &config));
+    saveStoredConfigs({config});
+    AppSettings settings = loadAppSettings();
+    settings.last_config_path = config;
+    saveAppSettings(settings);
+
+    const QString token = QStringLiteral("backend-link-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    auto cleanup = qScopeGuard([&] {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+        freetunnel::CredentialStore::deletePassword(config);
+        QFile::remove(config);
+    });
+    const auto link = [](const char *url) {
+        return freetunnel::linkControlString(QString::fromLatin1(url));
+    };
+
+    Backend backend;
+    QSignalSpy asked(&backend, &Backend::deepLinkDisconnectConfirmationRequired);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+
+    QVERIFY(backend.handleControl(link("freetunnel://disconnect")));
+    QVERIFY(backend.handleControl(link("freetunnel://toggle")));
+    QVERIFY(!backend.handleControl(link("freetunnel://connect")));
+    QCOMPARE(asked.count(), 2);
+    QTest::qWait(300);
+    QVERIFY2(backend.connected() && !backend.disconnecting(),
+             "a link turned the VPN off without asking");
+
+    // The command someone runs is not asked about.
+    QVERIFY(!backend.handleControl(QStringLiteral("freetunnel://disconnect")));
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    QCOMPARE(asked.count(), 2);
+
+    // With the VPN off there is nothing to ask about: a link disconnect does
+    // nothing, and a link toggle connects, as connecting is never asked about.
+    QVERIFY(!backend.handleControl(link("freetunnel://disconnect")));
+    QVERIFY(!backend.handleControl(link("freetunnel://toggle")));
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(asked.count(), 2);
+
+    // While an attempt is still going, a link that would call it off is asked
+    // about as well: calling it off takes down the kill switch armed for it.
+    QVERIFY(!backend.handleControl(QStringLiteral("freetunnel://disconnect")));
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return !backend.connected() && !backend.connecting() && !backend.disconnecting(); },
+            5000));
+    server.failConnectsWith(QStringLiteral("link-server"),
+                            QStringLiteral("Connection failed: endpoint timed out (~30s)"));
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return anyErrorIs(errors, QStringLiteral("Server isn't responding (timed out).")); },
+            10000));
+    QVERIFY(backend.connecting()); // the core keeps retrying
+    QVERIFY(backend.handleControl(link("freetunnel://disconnect")));
+    QVERIFY(backend.handleControl(link("freetunnel://toggle")));
+    QCOMPARE(asked.count(), 4);
+    QTest::qWait(300);
+    QVERIFY2(backend.connecting() && !backend.disconnecting(),
+             "a link called off a connection attempt without asking");
+    backend.prepareQuit();
 }
 
 void TestIntegrationBackendVpn::exportRoundTrips()

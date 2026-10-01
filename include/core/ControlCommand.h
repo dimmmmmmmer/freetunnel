@@ -20,11 +20,28 @@ enum class ControlAction {
 struct ControlCommand {
     ControlAction action = ControlAction::None;
     QString payload; // set for ImportLink
+    // Opened as a link, through the operating system's URL handler, rather than
+    // run as a command. Any web page can open a link, so one that would turn the
+    // VPN off is asked about first (Backend::handleControl); a command someone
+    // runs — a script, a Stream Deck button — is theirs and acts at once.
+    bool fromLink = false;
 };
 
+// The argument the URL-handler registrations put before the URL: the
+// installer's freetunnel:// and tt:// entries on Windows, the .desktop files on
+// Linux. It is how a link the system opened is told from a command someone ran
+// with the same URL. (macOS hands links over as events, never on the command
+// line; see UrlOpenFilter.)
+inline constexpr QLatin1String kUrlHandlerArg("--url-handler");
+
+// The control string for a URL that arrived as a link: the URL behind a mark
+// that parseControlCommand() reads back as fromLink. The mark travels with the
+// string, so a link forwarded to the running instance is still a link there.
+QString linkControlString(const QString &url);
+
 // Parse a raw control string, e.g. "freetunnel://toggle", "tt://?<...>",
-// "focus", or "". Accepts an optional "freetunnel://" scheme prefix and is
-// case-insensitive for the verb.
+// "focus", "", or any of them marked by linkControlString(). Accepts an optional
+// "freetunnel://" scheme prefix and is case-insensitive for the verb.
 ControlCommand parseControlCommand(const QString &raw);
 
 } // namespace freetunnel

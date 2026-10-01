@@ -77,10 +77,21 @@ between without retyping either.
 
 ## External control
 
-- **Deep links**: `freetunnel://toggle`, `freetunnel://connect`,
+- **Commands and links**: `freetunnel://toggle`, `freetunnel://connect`,
   `freetunnel://disconnect`, plus `tt://…` for import. The app is
-  single-instance — launching again with a link forwards the command to the
-  running window.
+  single-instance — launching again with one forwards it to the running window.
+  - **From a Stream Deck button or a script**, run FreeTunnel with the command
+    as its argument. A running FreeTunnel acts on it at once and leaves the
+    window alone, as with the hotkeys; otherwise FreeTunnel starts and acts on it:
+    - Windows: `"C:\Program Files\FreeTunnel\FreeTunnel.exe" freetunnel://toggle`
+      (or wherever you installed it)
+    - macOS: `/Applications/FreeTunnel.app/Contents/MacOS/FreeTunnel freetunnel://toggle`
+    - Linux: `freetunnel freetunnel://toggle` (.deb), or the AppImage's path
+      followed by `freetunnel://toggle`
+  - **Opened as a link** — from a browser, a document, `open` on macOS,
+    `xdg-open` — the same URL works too, but any web page can open a link, so
+    one that would turn the VPN off brings up the window and asks first.
+    Connecting is not asked about. See [DEEP_LINK.md](DEEP_LINK.md#freetunnel-control-links-separate).
 - **Global hotkeys** — configured in Settings (toggle / connect / disconnect);
   work even when the window is minimized.
 - **System tray** — quick actions; closing the window hides to tray instead of

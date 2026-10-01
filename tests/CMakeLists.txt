@@ -165,6 +165,8 @@ endif()
 
 set(APP_STARTUP_TEST_SOURCES
     test_app_startup.cpp
+    helper_ipc_mock_server.cpp
+    helper_ipc_mock_server.h
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
     ../src/app/Backend.cpp

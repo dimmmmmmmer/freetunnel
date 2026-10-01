@@ -31,6 +31,7 @@ class QLocalServer;
 class UpdateChecker;
 
 namespace freetunnel {
+struct ControlCommand;
 struct PreparedImport;
 }
 
@@ -142,8 +143,11 @@ public:
     Q_INVOKABLE void quitApplication();
     Q_INVOKABLE bool applicationClosingDown() const;
     // Handle a control command from a deep link / second instance:
-    // "freetunnel://toggle|connect|disconnect" or a "tt://" config import.
-    void handleControl(const QString &command);
+    // "freetunnel://toggle|connect|disconnect" or a "tt://" config import, run
+    // as a command or opened as a link (see parseControlCommand). Returns true
+    // when it asked the user instead of acting — a link that would turn the VPN
+    // off — so the caller can bring the window forward for the question.
+    bool handleControl(const QString &command);
     Q_INVOKABLE void selectConfig(int index);
     Q_INVOKABLE void removeConfig(int index);
     Q_INVOKABLE void moveConfig(int from, int to); // manual reorder (drag in the list)
@@ -289,6 +293,8 @@ signals:
     // name is free — the UI offers "replace" only in the first case.
     void deepLinkImportConfirmationRequired(const QString &message, const QString &link,
                                             const QString &existingName);
+    // A link asked to turn the VPN off; the UI asks, and disconnects on a yes.
+    void deepLinkDisconnectConfirmationRequired();
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
 
@@ -365,6 +371,7 @@ private:
     void applyVpnClientState(VpnHelperClient::State st);
     void clearReapplyingIfDone(VpnHelperClient::State st, bool nowConnected);
     bool shouldSkipConnectAttempt() const;
+    bool linkWouldTurnVpnOff(const freetunnel::ControlCommand &cmd) const;
     void logConnectAttempt();
     // The connect TOML is built off the GUI thread: assembling it reads the
     // password out of the OS credential store, and that call blocks — on macOS
@@ -439,6 +446,7 @@ private:
     QTimer m_ticker;
     QTimer m_logTrimTimer; // hourly size check; startup-only trim let long
                            // sessions grow the file without bound
+    QTimer m_autoConnectTimer; // "Connect on startup", until it fires or a disconnect stops it
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
 
