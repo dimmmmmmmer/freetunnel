@@ -73,7 +73,15 @@ QString unversionedAppPath(const QString &path);
 // (Discord\app-1.0.9163\Discord.exe), or that folder holds Squirrel's
 // Update.exe. Empty otherwise. A folder someone called app-2 for reasons of
 // their own, with other programs in it, is not a version of anything.
+//
+// Whether a folder holds Update.exe is remembered for half a minute per folder,
+// for at most 64 folders: on Windows the helper asks this for every connection.
 QString squirrelUnversionedPath(const QString &path);
+
+// Forget what squirrelUnversionedPath() remembers about Update.exe, so that the
+// next answer looks at the folder again: after an Update.exe was put in or taken
+// out, where waiting half a minute will not do.
+void forgetSquirrelUpdaters();
 
 // Does any rule name this program? A path rule matches the whole path; a bare
 // name matches the file name of any path.
