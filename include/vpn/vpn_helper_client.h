@@ -9,6 +9,7 @@
 #include <QByteArray>
 #include <QObject>
 #include <QString>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,12 @@ public:
     // The helper is up and has authenticated. Until then a connect is queued, and
     // it goes out with every current setting (handleReadyEvent) once it is.
     bool helperReady() const { return m_helloAcked; }
+    // Whether a setting the running session was BUILT with has changed since the
+    // last connect went out: the domain list, the routes, the mode or the kill
+    // switch. The helper reads those once, when it builds the session, so only a
+    // new session applies them. True when there is no such connect: none has gone
+    // out, or the GUI has ended its session or lost the helper since.
+    bool sessionSettingsChanged() const;
 
 signals:
     void stateChanged(VpnHelperClient::State state);
@@ -93,6 +100,17 @@ private:
     void setState(State s);
     void fail(const QString &msg);
 
+    // What a session is built from, as opposed to what the helper reads per
+    // connection (the app rules, the log level), which reaches it live.
+    struct SessionSettings {
+        std::vector<std::string> exclusions;
+        std::vector<std::string> excludedRoutes;
+        bool selective = false;
+        bool killSwitch = false;
+        bool operator==(const SessionSettings &) const = default;
+    };
+    SessionSettings sessionSettings() const;
+
     QProcess *m_proc = nullptr;
     QTcpSocket *m_sock = nullptr;
     quint16 m_tcpPort = 0;
@@ -106,6 +124,11 @@ private:
     bool m_selective = false;
     std::vector<std::string> m_appRules;
     bool m_killSwitch = false;
+    // As the last connect carried them. Cleared when the GUI ends that session or
+    // loses the helper. A session the core ends by itself (an error, a drop it
+    // gave up on) leaves it set until the next connect replaces it; nothing is
+    // built in between for it to be wrong about.
+    std::optional<SessionSettings> m_sessionBuiltWith;
     QString m_logLevel = QStringLiteral("warn");
     bool m_loggingEnabled = true;
     State m_state = State::Disconnected;

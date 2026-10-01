@@ -104,6 +104,7 @@ private slots:
     void connectReachesConnectedAndDisconnects();
     void anAppRuleTakesItsOwnConnectionOutOfTheTunnel();
     void selectiveModeSendsAMatchedAppTheOtherWay();
+    void aRuleAddedMidSessionDecidesTheNextConnection();
     void withNoAppRulesNothingIsForcedAndNothingIsLookedUp();
     void aBurstPastTheLookupBudgetIsKeptInTheTunnel();
     void staleEventFromPreviousSessionIsIgnored();
@@ -122,6 +123,7 @@ private slots:
     void splitRoutesAndExclusionsReachTheCoreConfig();
     void keysThatMakeRootActOnANameNeverReachTheCore();
     void aSocksListenerIsRefused();
+    void aSecondRouteListReplacesTheFirst();
     void theCoreIsHandedAServerCertificateVerifier();
     void coreLinesReachTheLogWhileTheSessionRuns();
     void aCoreLineAfterTheSessionEndsNeverUsesAClosedFile();
@@ -276,6 +278,41 @@ void TestQtTrustTunnelClient::selectiveModeSendsAMatchedAppTheOtherWay()
     req.src_ip = "127.0.0.1";
 
     QCOMPARE(ctl.fireConnectRequest(id, req).action, ag::VPN_CA_FORCE_REDIRECT);
+}
+
+// The GUI no longer rebuilds the tunnel when a program rule changes: it counts on
+// this object reading the rules on every connection. Were they ever captured per
+// session instead, a rule added while connected would silently do nothing until
+// the next reconnect — so the running session is held to it here.
+void TestQtTrustTunnelClient::aRuleAddedMidSessionDecidesTheNextConnection()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    m_client->setVpnMode(false);
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    const quint64 id = ctl.lastClientId();
+    ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED);
+    QTRY_COMPARE(m_lastState, State::Connected);
+
+    ag::VpnConnectRequestSnapshot req;
+    req.id = 4;
+    req.proto = IPPROTO_TCP;
+    req.family = AF_INET;
+    req.src_port = server.serverPort();
+    req.src_ip = "127.0.0.1";
+    QCOMPARE(ctl.fireConnectRequest(id, req).action, ag::VPN_CA_DEFAULT);
+
+    QMetaObject::invokeMethod(
+            m_client, "setAppRules", Qt::BlockingQueuedConnection,
+            Q_ARG(QStringList,
+                  QStringList({QFileInfo(QCoreApplication::applicationFilePath()).fileName()})));
+    req.id = 5;
+    QCOMPARE(ctl.fireConnectRequest(id, req).action, ag::VPN_CA_FORCE_BYPASS);
+    QCOMPARE(ctl.connectCallCount(), 1); // the same session, not a new one
+    QVERIFY(ctl.clientAlive(id));
 }
 
 // With the feature unused, every connection must take exactly the path it took
@@ -742,6 +779,37 @@ void TestQtTrustTunnelClient::aSocksListenerIsRefused()
                     .contains(QStringLiteral("Invalid TrustTunnel config structure")));
     QCOMPARE(ctl.connectCallCount(), before);
     QCOMPARE(ctl.coreConfigCaptureCount(), 0);
+}
+
+// The route list is a setting, like the domain list beside it: a second one
+// replaces the first. While a loaded config was waiting to be used, a second list
+// was appended to the first, so a route taken off the list still reached the
+// core and would have stayed outside the tunnel for the whole session.
+void TestQtTrustTunnelClient::aSecondRouteListReplacesTheFirst()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    bool loaded = false;
+    QMetaObject::invokeMethod(
+            m_client, [this, &loaded]() { loaded = m_client->loadConfigFromToml(validConfigToml()); },
+            Qt::BlockingQueuedConnection);
+    QVERIFY(loaded);
+    QMetaObject::invokeMethod(m_client, "setExcludedRouteStrings", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("10.66.0.0/16")})));
+    QMetaObject::invokeMethod(m_client, "setExcludedRouteStrings", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("192.168.7.0/24")})));
+
+    // connectVpn, not beginConnect: the latter loads the config afresh, and the
+    // config already loaded is the one this is about.
+    QMetaObject::invokeMethod(m_client, "connectVpn", Qt::QueuedConnection);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    const mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QVERIFY2(!listContains(cfg.excluded_routes, "10.66.0.0/16"),
+             "a route taken off the list still reached the core");
+    QCOMPARE(std::count(cfg.excluded_routes.cbegin(), cfg.excluded_routes.cend(),
+                        std::string("192.168.7.0/24")),
+             1);
 }
 
 // The core asks the app to vet the server's certificate through the callbacks it

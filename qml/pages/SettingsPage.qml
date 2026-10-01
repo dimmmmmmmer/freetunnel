@@ -71,8 +71,13 @@ Item {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("Kill switch"); color: theme.text; font.pixelSize: 14 }
+                    // What it covers, not more. The block lives in the VPN core's
+                    // session, so it holds while a dropped connection is recovered
+                    // and is gone while the VPN is off or a session is being built
+                    // anew (a config switch, a split-tunnel change). "Outside the
+                    // VPN" promised all of that; the README says the rest.
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
-                           text: qsTr("block traffic outside the VPN"); color: theme.textFaint; font.pixelSize: 12 }
+                           text: qsTr("block traffic if the VPN drops"); color: theme.textFaint; font.pixelSize: 12 }
                 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.killSwitch; onToggled: function(v){ backend.killSwitch = v } } }
             Item { Layout.preferredHeight: 16 }

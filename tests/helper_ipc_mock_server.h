@@ -4,10 +4,12 @@
 #include <QHash>
 #include <QHostAddress>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QString>
+#include <QStringList>
 
 // Loopback mock of vpn_helper_server JSON protocol (no VPN core). Used by
 // test_helper_ipc to validate the IPC contract the GUI relies on.
@@ -56,6 +58,15 @@ public:
     void refuseConnectsWith(const QString &value, const QString &error) { m_refusing.insert(value, error); }
     // The old session reports `error` while a disconnect is tearing it down.
     void setTeardownError(const QString &error) { m_teardownError = error; }
+    // Answer the next disconnect only on releaseDisconnect(), and hold every
+    // command after it until then: the real helper's VPN thread does nothing else
+    // while a teardown blocks, and one stuck behind a connect takes seconds.
+    void holdNextDisconnect() { m_holdNextDisconnect = true; }
+    // Also lets a disconnect not read yet go through when it is: a test released
+    // before this side got to it would otherwise hold it for good.
+    void releaseDisconnect();
+    // Commands that arrived while a disconnect was held, in order.
+    QStringList heldCommands() const;
 
 private:
     void adoptSocket(QTcpSocket *s);
@@ -77,6 +88,9 @@ private:
     QHash<QString, QString> m_failing;
     QHash<QString, QString> m_refusing;
     QString m_teardownError;
+    bool m_holdNextDisconnect = false;
+    bool m_holding = false;
+    QList<QJsonObject> m_held;
 
 signals:
     void quitRequested();

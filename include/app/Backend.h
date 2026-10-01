@@ -311,7 +311,7 @@ private:
     void startConnectAttempt();   // connectVpn() past its "already busy" check
     void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
     void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
-    void reapplyIfConnected(); // rebuild the tunnel so rule changes take effect live
+    void reapplyIfConnected(); // rebuild the tunnel when an edit needs a new session
     void reapplyIfEditingActiveProfile(); // live-apply only if the edited profile is the active config's
     void trimLogFile();     // cap the log file size so it never grows unbounded
     void loadLogTail();     // restore recent on-disk log lines into the view at startup
@@ -462,6 +462,7 @@ private:
     // ordinary attempt, and its failures are the user's to see.
     bool m_reapplying = false;
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
+    quint64 m_reconnectGen = 0; // per rebuild: only the latest one's safety net may fire
     bool m_awaitingToml = false;  // credential read in flight; nothing sent to the helper yet
     bool m_inConnect = false;     // inside onConnectTomlReady(): suppress live-reapply
     // Bumped by anything that supersedes an in-flight connect, so a credential
