@@ -4,6 +4,7 @@
 // the native core and drive its state machine via mockcore::Controller.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -30,6 +31,11 @@ enum VpnSessionState {
     VPN_SS_RECOVERING,
     VPN_SS_WAITING_RECOVERY,
     VPN_SS_WAITING_FOR_NETWORK,
+};
+
+enum VpnNetworkState {
+    VPN_NS_CONNECTED,
+    VPN_NS_NOT_CONNECTED,
 };
 
 enum VpnErrorCode {
@@ -158,5 +164,23 @@ struct VpnCallbacks {
     std::function<void(VpnConnectionInfoEvent *)> connection_info_handler;
     std::function<void(const VpnConnectRequestSnapshot &, VpnConnectDecision *)> connect_request_handler;
 };
+
+// The scripted answer of vpn_win_detect_active_if() below, and how many times it
+// was asked: the real one writes a warning to the core's log each time it finds
+// nothing.
+inline std::atomic<uint32_t> g_mockActiveIf{0};
+inline std::atomic<int> g_mockActiveIfLooks{0};
+
+// The core's own pick of the active network adapter. The real one is declared
+// in net/utils.h (which the real vpn/vpn.h includes) and exists on Windows only;
+// the mock offers it everywhere because the test build compiles the wrapper's
+// uplink follower on every platform, so that it is tested where the tests run.
+// The wrapper must therefore keep its call behind Q_OS_WIN or the test hooks —
+// this mock cannot catch a call outside that guard, the real Linux build will.
+inline uint32_t vpn_win_detect_active_if()
+{
+    ++g_mockActiveIfLooks;
+    return g_mockActiveIf.load();
+}
 
 } // namespace ag

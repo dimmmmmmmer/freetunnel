@@ -85,6 +85,7 @@ signals:
 private slots:
     void doConnectAttemptInThread();
     void pollCoreLogFile();
+    void followUplink(); // qt_trusttunnel_uplink.cpp
 
 private:
     // Shared with every connect attempt and with the core callbacks. An
@@ -166,6 +167,14 @@ private:
     void protectOutboundSocket(ag::SocketProtectEvent *event);
     static int countOpenFds();
     static int getFdLimit();
+    // qt_trusttunnel_uplink.cpp: on Windows, nothing in the core notices the
+    // network adapter changing, so these (and the followUplink slot) tell it.
+    void startFollowingUplink();
+    void resetUplinkTracking();
+    void reportUplink(uint32_t ifIndex);
+    // What a failed set_system_dns() means for the attempt; may reword `error`.
+    static ConnectAttempt::Outcome dnsFailureOutcome(const QString &coreError,
+                                                     QString *error); // worker thread
 
     // The connect-request handler runs on the core wrapper's own thread and may
     // still be running while this object is being destroyed. It DOES capture
@@ -226,6 +235,15 @@ private:
     // for working exactly as asked.
     QList<int> m_fdSamples;
     QTimer m_networkWaitTimer;   // fires if we stay in WaitingForNetwork too long
+    // Looks at the machine's active network adapter while a session is up
+    // (Windows; see qt_trusttunnel_uplink.cpp). Seen is the last look, reported
+    // what the core was last told — 0 for "no network". Quiet looks are those
+    // taken offline without asking the core (followUplink()).
+    QTimer m_uplinkTimer;
+    int m_uplinkPollMs = 2000;
+    uint32_t m_uplinkSeen = 0;
+    uint32_t m_uplinkReported = 0;
+    int m_quietOfflineLooks = 0;
     QTimer *m_coreLogPoll = nullptr;
     // Heap-allocated and unparented on purpose: a connect attempt stuck inside
     // a blocking native call is ABANDONED (thread pointer dropped, deleted on
@@ -266,7 +284,8 @@ private:
     // socket-protect callback, which runs on a core thread — so a plain uint32_t
     // was a data race. Aligned 32-bit loads happen not to tear on the platforms
     // this ships to, which is exactly why it would never show up as a bug; it is
-    // still undefined behaviour and the fix costs nothing.
+    // still undefined behaviour and the fix costs nothing. The uplink follower
+    // moves it when the network adapter changes.
     std::atomic<uint32_t> m_winPhysicalIfIndex{0};
 #endif
 };

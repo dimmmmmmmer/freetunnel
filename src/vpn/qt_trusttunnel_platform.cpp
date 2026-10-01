@@ -98,12 +98,29 @@ ag::LogLevel qt_trusttunnel_parse_log_level(const QString &level)
     return ag::LOG_LEVEL_INFO;
 }
 
+#if defined(__APPLE__) || defined(__linux__)
+// No outbound interface is known, so there is nothing to bind the socket to.
+// While a tunnel is up its routes would carry the socket straight back into it,
+// so it must fail; with no tunnel, ordinary routing is the right path and it
+// must not. That is the core's own rule since 1.1.5 (trusttunnel_client.cpp,
+// "fail closed while any tunnel is active"), and what vpn_win_socket_protect()
+// does on Windows. The copies below predated it: macOS let the socket through
+// even with the tunnel up, and Linux failed it even with no tunnel at all.
+static void protectWithoutInterface(ag::SocketProtectEvent *event)
+{
+    if (ag::vpn_network_manager_get_tunnel_active())
+        event->result = -1;
+}
+#endif
+
 #if defined(__APPLE__)
 static void protectOutboundSocketApple(ag::SocketProtectEvent *event)
 {
     const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
-    if (idx == 0)
+    if (idx == 0) {
+        protectWithoutInterface(event);
         return;
+    }
     const int level = event->peer->sa_family == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP;
     const int opt = event->peer->sa_family == AF_INET6 ? IPV6_BOUND_IF : IP_BOUND_IF;
     if (setsockopt(event->fd, level, opt, &idx, sizeof(idx)) != 0)
@@ -114,12 +131,12 @@ static void protectOutboundSocketApple(ag::SocketProtectEvent *event)
 #if defined(__linux__)
 static void protectOutboundSocketLinux(ag::SocketProtectEvent *event)
 {
-    if (geteuid() != 0) {
-        event->result = -1;
-        return;
-    }
     const uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
     if (idx == 0) {
+        protectWithoutInterface(event);
+        return;
+    }
+    if (geteuid() != 0) {
         event->result = -1;
         return;
     }

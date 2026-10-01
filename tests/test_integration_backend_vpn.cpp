@@ -921,6 +921,10 @@ void TestIntegrationBackendVpn::aFailureBeforeTheSessionCameUpIsSaidInTheUsersTe
                                  << QStringLiteral("Authentication failed — check the username and password.");
     QTest::newRow("no answer") << QStringLiteral("Connection failed: endpoint timed out (~30s)")
                                << QStringLiteral("Server isn't responding (timed out).");
+    // Windows with no network at all, which is retried until there is one.
+    QTest::newRow("no network")
+            << QStringLiteral("set_system_dns() failed: Couldn't detect active network interface")
+            << QStringLiteral("No network connection. FreeTunnel will connect as soon as there is one.");
     QTest::newRow("anything else keeps its reason")
             << QStringLiteral("Connection failed: tls handshake (CERTIFICATE_VERIFICATION_FAILED)")
             << QStringLiteral("Couldn't connect to the server: tls handshake "

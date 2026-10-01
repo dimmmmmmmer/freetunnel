@@ -682,6 +682,7 @@ add_executable(test_qt_trusttunnel_client
     ../src/vpn/qt_trusttunnel_client.cpp
     ../src/vpn/qt_trusttunnel_corelog.cpp
     ../src/vpn/qt_trusttunnel_fdwatch.cpp
+    ../src/vpn/qt_trusttunnel_uplink.cpp
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
@@ -794,6 +795,7 @@ add_executable(freetunnel_test_helper
     ../src/vpn/qt_trusttunnel_client.cpp
     ../src/vpn/qt_trusttunnel_corelog.cpp
     ../src/vpn/qt_trusttunnel_fdwatch.cpp
+    ../src/vpn/qt_trusttunnel_uplink.cpp
     ../src/vpn/qt_trusttunnel_connect.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp

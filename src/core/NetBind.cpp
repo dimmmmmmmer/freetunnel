@@ -10,6 +10,9 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 // clang-format on
+
+#include <set>
+#include <vector>
 #endif
 
 #include "core/NetBind.h"
@@ -70,7 +73,11 @@ bool windowsInterfaceIsVirtual(int index)
 }
 #endif
 
-bool interfaceIsVirtual(const QString &name) {
+} // namespace
+
+// Outside the anonymous namespace only so that test_netbind can hold the list
+// to what it is for; nothing else calls it.
+bool freetunnel::interfaceIsVirtual(const QString &name) {
     static const QStringList kVirt = {QStringLiteral("utun"), QStringLiteral("tun"),
                                       QStringLiteral("tap"),  QStringLiteral("ppp"),
                                       QStringLiteral("ipsec"), QStringLiteral("wg"),
@@ -87,6 +94,8 @@ bool interfaceIsVirtual(const QString &name) {
 #endif
     return false;
 }
+
+namespace {
 
 void pickInterfaceRouteAddresses(const QNetworkInterface &ni, QHostAddress *v4, QHostAddress *v6)
 {
@@ -118,7 +127,7 @@ bool interfaceEligibleForRoute(const QNetworkInterface &ni, bool requireRunning)
 {
     const auto flags = ni.flags();
     if (!flags.testFlag(QNetworkInterface::IsUp) || flags.testFlag(QNetworkInterface::IsLoopBack)
-            || interfaceIsVirtual(ni.name()))
+            || freetunnel::interfaceIsVirtual(ni.name()))
         return false;
 #if defined(Q_OS_WIN)
     if (windowsInterfaceIsVirtual(ni.index()))
@@ -232,7 +241,9 @@ bool bindSocketToRouteIndex(int fd, const freetunnel::PhysicalRoute &r, bool v6)
     return ::setsockopt(fd, level, opt, &idx, sizeof(idx)) == 0;
 }
 #elif defined(Q_OS_WIN)
-bool bindSocketToRouteIndex(int fd, const freetunnel::PhysicalRoute &r, bool v6)
+// SOCKET, not int, for the reason queryRouteSourceOnSocket gives: the caller
+// holds a 64-bit handle, and an int parameter narrowed it on the way in.
+bool bindSocketToRouteIndex(SOCKET fd, const freetunnel::PhysicalRoute &r, bool v6)
 {
     if (v6) {
         DWORD idx = static_cast<DWORD>(r.index);
@@ -242,6 +253,92 @@ bool bindSocketToRouteIndex(int fd, const freetunnel::PhysicalRoute &r, bool v6)
     DWORD beIdx = htonl(static_cast<DWORD>(r.index));
     return ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF,
                         reinterpret_cast<char *>(&beIdx), sizeof(beIdx)) == 0;
+}
+#endif
+
+#if defined(Q_OS_WIN)
+// The adapters the core counts as physical (is_physical_adapter in
+// native_libs_common): Ethernet, Wi-Fi and mobile broadband, up or dormant, with
+// an address. Wintun is IF_TYPE_PROP_VIRTUAL and never one; a Hyper-V or WSL
+// switch is Ethernet to Windows, and is kept out by having no default route.
+std::set<int> windowsPhysicalAdapters()
+{
+    constexpr ULONG kFlags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    std::set<int> out;
+    ULONG size = 15 * 1024;
+    std::vector<unsigned char> buf;
+    ULONG ret = ERROR_BUFFER_OVERFLOW;
+    for (int tries = 0; tries < 3 && ret == ERROR_BUFFER_OVERFLOW; ++tries) {
+        buf.resize(size);
+        ret = ::GetAdaptersAddresses(AF_UNSPEC, kFlags, nullptr,
+                                     reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data()), &size);
+    }
+    if (ret != NO_ERROR)
+        return out;
+    for (auto *a = reinterpret_cast<const IP_ADAPTER_ADDRESSES *>(buf.data()); a != nullptr;
+         a = a->Next) {
+        const bool physicalType = a->IfType == IF_TYPE_ETHERNET_CSMACD || a->IfType == IF_TYPE_IEEE80211
+                || a->IfType == IF_TYPE_WWANPP || a->IfType == IF_TYPE_WWANPP2;
+        const bool online = a->OperStatus == IfOperStatusUp || a->OperStatus == IfOperStatusDormant;
+        if (!physicalType || !online || a->FirstUnicastAddress == nullptr)
+            continue;
+        if (a->IfIndex != 0)
+            out.insert(static_cast<int>(a->IfIndex));
+        if (a->Ipv6IfIndex != 0)
+            out.insert(static_cast<int>(a->Ipv6IfIndex));
+    }
+    return out;
+}
+
+// Every default route in the table for @p family, with its interface's metric
+// added and whether that interface is connected, as the core reads them.
+void appendWindowsDefaultRoutes(ADDRESS_FAMILY family, QList<freetunnel::DefaultRoute> *out)
+{
+    PMIB_IPFORWARD_TABLE2 table = nullptr;
+    if (::GetIpForwardTable2(family, &table) != NO_ERROR || table == nullptr)
+        return;
+    for (ULONG i = 0; i < table->NumEntries; ++i) {
+        const MIB_IPFORWARD_ROW2 &route = table->Table[i];
+        if (route.DestinationPrefix.PrefixLength != 0)
+            continue;
+        const SOCKADDR_INET &prefix = route.DestinationPrefix.Prefix;
+        const bool any = family == AF_INET ? prefix.Ipv4.sin_addr.s_addr == INADDR_ANY
+                                           : IN6_IS_ADDR_UNSPECIFIED(&prefix.Ipv6.sin6_addr) != FALSE;
+        if (!any)
+            continue;
+        MIB_IPINTERFACE_ROW row;
+        ::InitializeIpInterfaceEntry(&row);
+        row.Family = family;
+        row.InterfaceIndex = route.InterfaceIndex;
+        freetunnel::DefaultRoute r;
+        r.index = static_cast<int>(route.InterfaceIndex);
+        r.v6 = family == AF_INET6;
+        if (::GetIpInterfaceEntry(&row) == NO_ERROR) {
+            r.connected = row.Connected != FALSE;
+            r.metric = static_cast<quint64>(route.Metric) + row.Metric;
+        }
+        out->append(r);
+    }
+    ::FreeMibTable(table);
+}
+
+// Linux reads the default route's interface out of /proc/net/route below; this
+// is the Windows side of it. Without it, a probe made while connected asked
+// where a packet to a public address would go, which is into the tunnel, and
+// fell back to the first adapter Windows lists, which on a machine with Hyper-V
+// or WSL can be an internal switch with no way out.
+std::optional<freetunnel::PhysicalRoute> routeForDefaultGateway()
+{
+    const int index = freetunnel::windowsDefaultRouteInterface();
+    if (index <= 0)
+        return std::nullopt;
+    const QNetworkInterface ni = QNetworkInterface::interfaceFromIndex(index);
+    if (!ni.isValid() || !interfaceEligibleForRoute(ni, false))
+        return std::nullopt;
+    const freetunnel::PhysicalRoute r = routeFromInterface(ni);
+    if (r.index > 0)
+        return r;
+    return std::nullopt;
 }
 #endif
 
@@ -316,8 +413,39 @@ bool attachNativeBoundSocket(QTcpSocket *sock, const freetunnel::PhysicalRoute &
 
 namespace freetunnel {
 
+int pickDefaultRouteInterface(const QList<DefaultRoute> &routes,
+                              const std::function<bool(int index)> &eligible)
+{
+    for (const bool v6 : {false, true}) {
+        const DefaultRoute *best = nullptr;
+        for (const DefaultRoute &r : routes) {
+            if (r.v6 != v6 || !r.connected || r.index <= 0 || !eligible(r.index))
+                continue;
+            if (best == nullptr || r.metric < best->metric)
+                best = &r;
+        }
+        if (best != nullptr)
+            return best->index;
+    }
+    return 0;
+}
+
+#if defined(Q_OS_WIN)
+int windowsDefaultRouteInterface()
+{
+    const std::set<int> physical = windowsPhysicalAdapters();
+    if (physical.empty())
+        return 0;
+    QList<DefaultRoute> routes;
+    appendWindowsDefaultRoutes(AF_INET, &routes);
+    appendWindowsDefaultRoutes(AF_INET6, &routes);
+    return pickDefaultRouteInterface(routes,
+                                     [&physical](int index) { return physical.count(index) > 0; });
+}
+#endif
+
 PhysicalRoute physicalOutboundRoute() {
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
     if (const auto routed = routeForDefaultGateway())
         return *routed;
 #endif

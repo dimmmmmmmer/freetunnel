@@ -51,6 +51,22 @@ private slots:
     void aTrustedServerCertificateIsAccepted();
     void aRefusedServerCertificateIsRejected();
     void verifyingANullCertificateEventIsInert();
+
+    void withNoInterfaceAndNoTunnelASocketTakesOrdinaryRoutes();
+    void withNoInterfaceATunnelMakesProtectionFail();
+
+private:
+    // Protect one socket the way the core asks for it, and hand back the verdict.
+    static int protectOneSocket()
+    {
+        sockaddr_in peer = {};
+        peer.sin_family = AF_INET;
+        ag::SocketProtectEvent ev;
+        ev.peer = reinterpret_cast<const sockaddr *>(&peer);
+        ev.result = 42; // a value no handler writes, so "untouched" cannot pass as success
+        qt_trusttunnel_protect_outbound_socket(&ev);
+        return ev.result;
+    }
 };
 
 // WAITING_RECOVERY carries its error in waiting_recovery_info; every other state
@@ -381,6 +397,37 @@ void TestVpnEvents::aConnectionWithNoDomainIsNamedByItsAddress()
     ev.dst = nullptr;
     QCOMPARE(qt_trusttunnel_connection_info_line(&ev),
              QStringLiteral("bypass unknown destination"));
+}
+
+// The core asks for every socket of its own to be protected — bound to the
+// physical adapter so its traffic cannot be routed into the tunnel it serves.
+// When no adapter is known there is nothing to bind to, and the core's rule
+// since 1.1.5 is: with no tunnel up, ordinary routing is the right path. The
+// Linux handler predated that rule and failed every such socket, so a session
+// started before the core had found an adapter could not reach its server
+// even where a route to it existed.
+void TestVpnEvents::withNoInterfaceAndNoTunnelASocketTakesOrdinaryRoutes()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.reset();
+    ctl.setOutboundInterface(0);
+    ctl.setTunnelActive(false);
+
+    QCOMPARE(protectOneSocket(), 0);
+}
+
+// The other half of the rule: with a tunnel up, a socket that cannot be bound
+// would follow the tunnel's routes straight back into the tunnel, so protecting
+// it must fail. The macOS handler predated this and let such a socket through.
+void TestVpnEvents::withNoInterfaceATunnelMakesProtectionFail()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.reset();
+    ctl.setOutboundInterface(0);
+    ctl.setTunnelActive(true);
+
+    QCOMPARE(protectOneSocket(), -1);
+    ctl.reset();
 }
 
 QTEST_MAIN(TestVpnEvents)
