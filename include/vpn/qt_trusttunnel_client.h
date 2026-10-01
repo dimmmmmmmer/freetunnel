@@ -162,6 +162,10 @@ private:
     // captures, which is where the seam already was.
     std::function<void(const ag::VpnConnectRequestSnapshot &, ag::VpnConnectDecision *)>
     makeConnectRequestHandler(const GuardPtr &guard, quint64 session);
+    // How that handler reaches back to log: under the guard, and only while
+    // `self` is alive. Static, so it is never a call on a destroyed object.
+    static void postConnectionInfoIfAlive(QtTrustTunnelClient *self, const GuardPtr &guard,
+                                          quint64 session, const QString &line);
     bool joinOrAbandonConnectThread(int waitMs);
     void startConnectAttempt();
     void scheduleReconnect(const QString &reason);

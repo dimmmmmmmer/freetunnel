@@ -165,6 +165,40 @@ QString decisionLine(const ag::VpnConnectRequestSnapshot &req, const freetunnel:
     return QStringLiteral("app %1 → %2").arg(who, what);
 }
 
+// What the rules decided for one connection, given what the walk saw of it.
+freetunnel::AppAction connectionAction(const freetunnel::AppIdentity &app, const QStringList &rules,
+                                       bool selective, bool lookWasSkipped)
+{
+    freetunnel::AppAction act = freetunnel::appActionFor(app, rules, selective);
+    // A connection we could not afford to look at is not a connection we
+    // established nothing about — it is one we know nothing about, and the
+    // two must not be answered the same way.
+    //
+    // In "Through VPN" the core's default is to leave the tunnel, so
+    // answering "no rule" for an unexamined connection puts it on the open
+    // network; if it did belong to a listed program, that is the exact leak
+    // this feature exists to prevent. Keeping it in the tunnel is the wrong
+    // answer only for a program nobody listed, and being wrong in that
+    // direction costs bandwidth rather than privacy. It is also what the
+    // rest of this client already does when it cannot tell: an empty rule
+    // set falls back to the full tunnel for the same reason.
+    //
+    // Only in selective mode. In bypass mode the default already keeps the
+    // connection inside the tunnel, so there is nothing to correct.
+    if (lookWasSkipped && selective && act == freetunnel::AppAction::Default)
+        act = freetunnel::AppAction::ForceTunnel;
+    return act;
+}
+
+// Said once per session, when the walk's budget runs out; see where it is used.
+QString skipWarningLine(bool selective)
+{
+    return QStringLiteral("app rules: no budget left to look again — connections are "
+                          "being answered without one%1")
+            .arg(selective ? QStringLiteral(", and kept in the tunnel")
+                           : QString());
+}
+
 } // namespace
 
 // Split out of makeCallbacks, which had grown to 145 lines around it. The seam
@@ -212,25 +246,7 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
                                          QString::fromStdString(req.src_ip)};
         bool lookWasSkipped = false;
         const freetunnel::AppIdentity app = lookup->resolve(flow, &lookWasSkipped);
-        freetunnel::AppAction act = freetunnel::appActionFor(app, rules, selective);
-        // A connection we could not afford to look at is not a connection we
-        // established nothing about — it is one we know nothing about, and the
-        // two must not be answered the same way.
-        //
-        // In "Through VPN" the core's default is to leave the tunnel, so
-        // answering "no rule" for an unexamined connection puts it on the open
-        // network; if it did belong to a listed program, that is the exact leak
-        // this feature exists to prevent. Keeping it in the tunnel is the wrong
-        // answer only for a program nobody listed, and being wrong in that
-        // direction costs bandwidth rather than privacy. It is also what the
-        // rest of this client already does when it cannot tell: an empty rule
-        // set falls back to the full tunnel for the same reason.
-        //
-        // Only in selective mode. In bypass mode the default already keeps the
-        // connection inside the tunnel, so there is nothing to correct.
-        if (lookWasSkipped && selective && act == freetunnel::AppAction::Default)
-            act = freetunnel::AppAction::ForceTunnel;
-        decision->action = coreAction(act);
+        decision->action = coreAction(connectionAction(app, rules, selective, lookWasSkipped));
         // decision->app_name is deliberately NOT set. It looks like a harmless way
         // to get the program into the core's own log, and it is not: the core
         // passes it to the upstream, which puts it in the CONNECT request sent
@@ -246,22 +262,14 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // the first few dozen connections of a burst and then appears not to.
         if (lookWasSkipped && !*skipWarned) {
             *skipWarned = true;
-            const QString line =
-                    QStringLiteral("app rules: no budget left to look again — connections are "
-                                   "being answered without one%1")
-                            .arg(selective ? QStringLiteral(", and kept in the tunnel")
-                                           : QString());
-            std::lock_guard<std::mutex> lk(guard->mutex);
-            if (guard->alive)
-                postConnectionInfo(session, line);
+            const QString line = skipWarningLine(selective);
+            postConnectionInfoIfAlive(this, guard, session, line);
         }
 
         if (!*scanWarned) {
             *scanWarned = true;
             const QString line = scanReportLine(*lookup, rules);
-            std::lock_guard<std::mutex> lk(guard->mutex);
-            if (guard->alive)
-                postConnectionInfo(session, line);
+            postConnectionInfoIfAlive(this, guard, session, line);
         }
 
         const bool routed = decision->action == ag::VPN_CA_FORCE_BYPASS
@@ -274,10 +282,20 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         const QString line = decisionLine(req, app, decision->action);
         // The lookup above may be slow; the guard is taken only now, and only
         // to reach back into an object that may have been destroyed meanwhile.
-        std::lock_guard<std::mutex> lk(guard->mutex);
-        if (guard->alive)
-            postConnectionInfo(session, line);
+        postConnectionInfoIfAlive(this, guard, session, line);
     };
+}
+
+// How the handler above reaches back to log, three times over: under the guard,
+// and only while the owner is alive. Static, so that nothing is ever called on
+// an object that may already have been destroyed.
+void QtTrustTunnelClient::postConnectionInfoIfAlive(QtTrustTunnelClient *self,
+                                                    const GuardPtr &guard, quint64 session,
+                                                    const QString &line)
+{
+    std::lock_guard<std::mutex> lk(guard->mutex);
+    if (guard->alive)
+        self->postConnectionInfo(session, line);
 }
 
 ag::VpnCallbacks QtTrustTunnelClient::makeCallbacks(const GuardPtr &guard) {
