@@ -8,9 +8,9 @@
 // hostile inputs and no random ones, and none at all after authentication, where
 // every command reaches the VPN client inside the helper. A crash here is a
 // denial of service against a root process, and under the sanitizer job a
-// memory error in it (ASan) ends the child with a non-zero status, which these
-// check. Undefined behaviour (UBSan) is only reported on the child's stderr
-// there, and does not fail them.
+// memory error (ASan) or undefined behaviour (UBSan, built there with
+// -fno-sanitize-recover=undefined) in it ends the child with a non-zero status,
+// which these check.
 //
 // The seeds are fixed so a failure repeats; FT_FUZZ_SEED picks others, and the
 // one in use is printed either way.

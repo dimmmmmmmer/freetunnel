@@ -5,6 +5,9 @@ name: Security
 on:
   push:
     branches: [main]
+    # Run on the tag as well: a release waits for this workflow to pass on the
+    # tagged commit (see the same trigger in tests.yml).
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
   # This repository goes quiet for weeks at a time. Without a scheduled run the
@@ -36,12 +39,25 @@ permissions:
 jobs:
   cppcheck:
     name: cppcheck
-    runs-on: ubuntu-latest
+    # Named, not ubuntu-latest. That label becomes Ubuntu 26.04 from 2026-10-19,
+    # and apt's cppcheck with it: a newer analyser finds new things, and main
+    # would turn red with no commit to blame. Moving to a newer one is a change
+    # of its own, made on purpose, with its findings in the same PR.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install cppcheck
-        run: sudo apt-get update && sudo apt-get install -y cppcheck
+        run: |
+          set -eu
+          sudo apt-get update && sudo apt-get install -y cppcheck
+          # 24.04 ships 2.13. Say so if the image ever hands us another.
+          v="$(cppcheck --version)"
+          echo "$v"
+          case "$v" in
+            'Cppcheck 2.13'*) ;;
+            *) echo "::error::expected cppcheck 2.13 (Ubuntu 24.04), got '$v'"; exit 1 ;;
+          esac
 
       - name: Run cppcheck
         run: |
@@ -92,14 +108,16 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
-    runs-on: ubuntu-latest
+    # Named, and clang-tidy by its major, for the reason given at cppcheck: on
+    # 26.04 the unversioned package is a newer clang-tidy with checks of its own.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-tidy libssl-dev libsecret-1-dev pkg-config \
+          sudo apt-get install -y cmake ninja-build clang-tidy-18 libssl-dev libsecret-1-dev pkg-config \
             libxcb1-dev
 
       - name: Install Qt
@@ -112,6 +130,8 @@ jobs:
           cache: true
 
       - name: Run clang-tidy
+        env:
+          CLANG_TIDY: clang-tidy-18
         run: bash scripts/run-clang-tidy.sh build-tidy
 
   upstream-patch:
@@ -125,7 +145,9 @@ jobs:
 
   i18n:
     name: i18n catalog freshness
-    runs-on: ubuntu-latest
+    # Named, as at cppcheck: the check diffs lupdate's output against the
+    # committed catalog, and on 26.04 apt's lupdate is a newer Qt's.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

@@ -49,6 +49,10 @@ Checks: >
 #     with far less noise.
 WarningsAsErrors: '*'
 # Anchored: the old '(include|src)/.*' was unanchored, so /usr/include/glib-2.0/…
-# matched "include/" and third-party headers were linted as ours.
-HeaderFilterRegex: '(^|/)(include|src)/[^/]*\.h$'
+# matched "include/" and third-party headers were linted as ours. And named: every
+# header of ours sits one directory down, in app/, core/ or vpn/, and the
+# '(include|src)/[^/]*\.h$' that replaced it matched none of them, so findings in
+# headers were dropped without a word. scripts/run-clang-tidy.sh now checks this
+# line against the tree before it runs, so a new directory cannot fall out again.
+HeaderFilterRegex: '(^|/)(include|src)/(app|core|vpn)/[^/]*\.h$'
 FormatStyle: none

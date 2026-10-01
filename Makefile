@@ -16,12 +16,10 @@ check_tools:
 .PHONY: configure
 configure: check_tools
 	cmake -S .. -B $(BUILD_DIR) \
-		-Uquiche_DIR \
 		-UDISABLE_HTTP3 \
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DBUILD_TRUSTTUNNEL_QT=ON \
 		-DDISABLE_HTTP3:BOOL=$(QT_DISABLE_HTTP3) \
-		-DCMAKE_DISABLE_FIND_PACKAGE_quiche=ON \
 		$(if $(CMAKE_PREFIX_PATH),-DCMAKE_PREFIX_PATH=$(CMAKE_PREFIX_PATH),)
 
 .PHONY: build

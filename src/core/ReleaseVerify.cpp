@@ -9,6 +9,13 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #define FT_HAVE_OPENSSL 1
+#elif defined(FT_REQUIRE_OPENSSL)
+// The build links OpenSSL (CMakeLists.txt says so with FT_REQUIRE_OPENSSL), yet
+// its headers are not on this file's include path. Compiled on regardless, the
+// updater would verify nothing and refuse every release as unsigned, and the
+// tests that would notice skip themselves for want of the same headers. On
+// Linux the headers come only from the core's conan BoringSSL targets.
+#error "OpenSSL is linked but <openssl/evp.h> is not visible: update signatures could not be verified"
 #endif
 
 QString expectedSha256FromSums(const QByteArray &sumsContent, const QString &assetName)

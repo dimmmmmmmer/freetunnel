@@ -9,6 +9,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 COMPONENTS Gui Qml Quick Network Svg REQUIRED)
 set(TRUSTTUNNEL_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." CACHE PATH "Path to TrustTunnelClient repository root")
 
+# Indirect-branch tracking / shadow stack markers (CET). Harmless on CPUs without
+# CET, and required for the loader to enable it on those that do. The linker marks
+# an image CET-enabled only when EVERY input object carries the property, so this
+# has to be a directory-wide flag rather than one target's option — and therefore
+# has to be set BEFORE any target is created, because add_compile_options() only
+# applies to targets declared after it. That includes QHotkey's, which
+# FetchContent creates just below; this used to come after it, and QHotkey's
+# objects were built without the flag.
+#
+# This directory is as far as it reaches. The VPN core is compiled by the
+# upstream project that includes this one, and its conan dependencies by conan,
+# each with flags of their own: unless their objects carry the property as well,
+# the executable is not CET-marked, whatever is set here. The Linux release
+# build prints what the binary ended up with.
+if(UNIX AND NOT APPLE AND NOT MSVC)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-fcf-protection=full" FT_HAS_CF_PROTECTION)
+    if(FT_HAS_CF_PROTECTION)
+        add_compile_options(-fcf-protection=full)
+    endif()
+endif()
+
 # QHotkey: cross-platform global (system-wide) hotkeys. Fetched at configure
 # time; builds a small static lib linked into the app.
 include(FetchContent)
@@ -34,17 +56,13 @@ if (WIN32)
     include(${CMAKE_CURRENT_LIST_DIR}/cmake/QWindowKit.cmake)
 endif ()
 
-set(FREETUNNEL_GIT_VERSION "unknown")
+# No FreeTunnel commit is compiled in. There was one, FREETUNNEL_GIT_VERSION,
+# that nothing read, and in CI it was not even FreeTunnel's: the client is
+# copied into the upstream tree without its .git, so `git rev-parse HEAD` here
+# answered with the core's commit.
 set(FREETUNNEL_CORE_REF "unknown")
 find_package(Git QUIET)
 if (GIT_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
-        OUTPUT_VARIABLE FREETUNNEL_GIT_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
     # The TrustTunnel core lives in the parent (upstream) checkout. Prefer the
     # nearest *stable* release tag (skip beta/rc/alpha pre-releases), falling
     # back to a short commit when no stable tag is reachable.
@@ -66,20 +84,6 @@ if (WIN32)
     set(APP_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/appicon.rc")
     configure_file(win/appicon.rc.in "${APP_ICON_RC}" @ONLY)
 endif ()
-
-# Indirect-branch tracking / shadow stack markers (CET). Harmless on CPUs without
-# CET, and required for the loader to enable it on those that do. The linker marks
-# an image CET-enabled only when EVERY input object carries the property, so this
-# has to be a directory-wide flag rather than one target's option — and therefore
-# has to be set BEFORE any target is created, because add_compile_options() only
-# applies to targets declared after it.
-if(UNIX AND NOT APPLE AND NOT MSVC)
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-fcf-protection=full" FT_HAS_CF_PROTECTION)
-    if(FT_HAS_CF_PROTECTION)
-        add_compile_options(-fcf-protection=full)
-    endif()
-endif()
 
 add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
@@ -164,7 +168,6 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
 
 target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_VERSION="${PROJECT_VERSION}"
-    FREETUNNEL_GIT_VERSION="${FREETUNNEL_GIT_VERSION}"
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
 )
 
@@ -320,6 +323,11 @@ if (UNIX AND NOT APPLE)
         target_link_options(FreeTunnel PRIVATE "LINKER:--start-group")
         target_link_libraries(FreeTunnel PRIVATE OpenSSL::SSL OpenSSL::Crypto)
         target_link_options(FreeTunnel PRIVATE "LINKER:--end-group")
+        # Linked, so required: ReleaseVerify.cpp refuses to compile without the
+        # headers rather than quietly building an updater that verifies nothing.
+        # The release container has no distro OpenSSL, so these come only from
+        # the conan targets above.
+        target_compile_definitions(FreeTunnel PRIVATE FT_REQUIRE_OPENSSL)
     endif ()
     if (NOT OpenSSL_FOUND AND NOT TARGET OpenSSL::Crypto)
         # The HTTP/3-off path is the documented local dev build (CONTRIBUTING),
@@ -341,6 +349,8 @@ else ()
     # they would have fired. Fail the configure instead.
     find_package(OpenSSL REQUIRED)
     target_link_libraries(FreeTunnel PRIVATE OpenSSL::Crypto)
+    # And the headers with it (see the Linux branch).
+    target_compile_definitions(FreeTunnel PRIVATE FT_REQUIRE_OPENSSL)
 endif ()
 
 if (APPLE)

@@ -59,14 +59,20 @@ if (FT_ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif ()
 if (FT_ENABLE_SANITIZERS)
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
+    # -fno-sanitize-recover: by default UBSan prints what it found and carries on,
+    # so a test that hit undefined behaviour still exited 0, and ctest keeps a
+    # passing test's output to itself. The job was green whatever UBSan said.
+    # ASan already stops at its first finding; this makes UBSan do the same.
+    # test_ubsan_canary below fails if that ever stops being true.
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=undefined
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined -fno-sanitize-recover=undefined)
 endif ()
 
 find_package(Qt6 COMPONENTS Core Gui Qml Quick Test Network Svg REQUIRED)
 # Qt 6.9 and later ship the private modules as packages of their own, to be asked
-# for by name (the macOS job builds against Homebrew's current Qt); before that,
-# finding Gui brought GuiPrivate with it.
+# for by name (a local build against Homebrew's or a distro's current Qt; CI
+# builds against QT_VER); before that, finding Gui brought GuiPrivate with it.
 if(NOT TARGET Qt6::GuiPrivate)
     find_package(Qt6 COMPONENTS GuiPrivate REQUIRED)
 endif()
@@ -461,8 +467,31 @@ target_link_libraries(test_releaseverify PRIVATE Qt6::Core Qt6::Test)
 find_package(OpenSSL QUIET)
 if (OpenSSL_FOUND)
     target_link_libraries(test_releaseverify PRIVATE OpenSSL::Crypto)
+    # As in the app: with OpenSSL linked, a ReleaseVerify.cpp that cannot see its
+    # headers is a build error here, not a run of skipped tests.
+    target_compile_definitions(test_releaseverify PRIVATE FT_REQUIRE_OPENSSL)
 endif()
 add_test(NAME releaseverify COMMAND test_releaseverify -o ${CMAKE_CURRENT_BINARY_DIR}/report-releaseverify.txt,txt)
+
+# ...and that FT_REQUIRE_OPENSSL really stops such a build: compile
+# ReleaseVerify.cpp with it, without OpenSSL's include path, and expect its
+# #error. Only where the compiler cannot find the headers on its own (macOS,
+# Windows, a Linux box without libssl-dev); where they sit in /usr/include,
+# nothing can hide them. A target of its own, built by the test, not by `all`,
+# and from a file outside src/, so clang-tidy never sees it.
+include(CheckIncludeFileCXX)
+check_include_file_cxx(openssl/evp.h FT_OPENSSL_ON_DEFAULT_PATH)
+if (NOT FT_OPENSSL_ON_DEFAULT_PATH)
+    add_library(releaseverify_without_openssl OBJECT EXCLUDE_FROM_ALL
+                releaseverify_without_openssl.cpp)
+    target_include_directories(releaseverify_without_openssl PRIVATE ../include ../include/core)
+    target_link_libraries(releaseverify_without_openssl PRIVATE Qt6::Core)
+    add_test(NAME releaseverify_requires_openssl
+             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                     --target releaseverify_without_openssl)
+    set_tests_properties(releaseverify_requires_openssl PROPERTIES
+        PASS_REGULAR_EXPRESSION "OpenSSL is linked but <openssl/evp.h> is not visible")
+endif ()
 
 add_executable(test_credentialstore
     test_credentialstore.cpp
@@ -975,3 +1004,27 @@ inline constexpr const char *kReleaseSigningPublicKeyPem =
 } // namespace freetunnel
 ]==])
 target_include_directories(test_update_checker_e2e BEFORE PRIVATE "${FT_SIGNING_FIXTURE_DIR}")
+
+# Proof that a UBSan finding fails the sanitizer job (see FT_ENABLE_SANITIZERS
+# above). The canary overflows a signed int and has to die doing it; if it ever
+# exits 0, UBSan has gone back to reporting and carrying on.
+if (FT_ENABLE_SANITIZERS)
+    add_executable(test_ubsan_canary test_ubsan_canary.cpp)
+    add_test(NAME ubsan_canary COMMAND test_ubsan_canary)
+    set_tests_properties(ubsan_canary PROPERTIES WILL_FAIL TRUE)
+endif ()
+
+# The release job's check that Tests and Security passed on the tagged commit
+# (scripts/check-release-ci.sh) only ever runs on a tag, so it is tested here,
+# on every push, against a stand-in gh. Linux only: it is a bash script for an
+# ubuntu runner, and a bash found on Windows can be WSL's.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(FT_BASH bash)
+    find_program(FT_JQ jq)
+    if (FT_BASH AND FT_JQ)
+        add_test(NAME release_ci_gate
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_ci_gate.sh)
+    else ()
+        message(STATUS "release_ci_gate not built: it needs bash and jq")
+    endif ()
+endif ()
