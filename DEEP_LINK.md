@@ -131,10 +131,15 @@ Application control uses a different scheme (not TLV):
 | `freetunnel://connect` | Connect |
 | `freetunnel://disconnect` | Disconnect |
 
-Handled by `ControlCommand.cpp` and forwarded to a running single-instance app
-via a local socket. The verb is case-insensitive and a trailing slash is
-ignored. A disconnect given while "Connect on startup" has not yet connected
-calls that connection off.
+Handled by `ControlCommand.cpp`. A launch that finds FreeTunnel already running
+for the same user forwards the command to it over a local socket
+(`InstanceControl.cpp`; [docs/security-threats.md](docs/security-threats.md)
+has the details) and exits. If that copy is running but cannot be handed the
+command, as when the keyring holding the socket's token is locked, the launch
+exits without acting on it rather than start a second copy; run it again. The
+verb is case-insensitive and slashes after the scheme are ignored. A disconnect
+given while "Connect on startup" has not yet connected calls that connection
+off.
 
 ### Run as a command, or opened as a link
 
@@ -179,5 +184,7 @@ menu entry AppImageLauncher or Gear Lever made from an older AppImage.
 Round-trip encode/decode, injection stripping, and edge cases are covered in
 `tests/test_deeplink.cpp` and `tests/test_configimport.cpp`. Control links: the
 parser and the link mark in `tests/test_control.cpp`, `--url-handler`, macOS
-link events and forwarding in `tests/test_app_startup.cpp`, what a link may do
-in `tests/test_integration_backend_vpn.cpp`, the question in `tests/test_qml_ui.cpp`.
+link events and forwarding in `tests/test_app_startup.cpp`, the socket a
+launch forwards over in `tests/test_instance_control.cpp` and
+`tests/test_integration_single_instance.cpp`, what a link may do in
+`tests/test_integration_backend_vpn.cpp`, the question in `tests/test_qml_ui.cpp`.

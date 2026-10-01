@@ -151,10 +151,11 @@ void QtTrustTunnelClient::resetCoreLogFile()
 
 void QtTrustTunnelClient::startCoreLogTail()
 {
-    // Called from ensureClientReady on the connect thread: a QTimer created
-    // there would be parented across threads (Qt drops the parent) and take the
-    // connect thread's affinity, where no event loop ever runs — the poll never
-    // fired and no core log line reached the GUI. Marshal onto our own thread.
+    // Called from prepareAttempt(), on our own thread. It used to be called on
+    // the connect thread, where a QTimer created here would be parented across
+    // threads (Qt drops the parent) and take that thread's affinity, where no
+    // event loop ever runs — the poll never fired and no core log line reached
+    // the GUI. A call from any other thread is still marshalled onto ours.
     if (QThread::currentThread() != thread()) {
         QMetaObject::invokeMethod(this, [this]() { startCoreLogTail(); }, Qt::QueuedConnection);
         return;

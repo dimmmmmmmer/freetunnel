@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Prepare an upstream TrustTunnelClient tree with this client injected as FreeTunnel/.
-# Used by CI build/coverage jobs. Requires git and python3.
+# Used by the Linux coverage job in CI, through scripts/coverage-upstream-report.sh;
+# the release build in .github/workflows/build.yml takes the same steps inline.
+# Requires git, tar and patch.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

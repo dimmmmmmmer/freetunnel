@@ -140,13 +140,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Verify telemetry patch applies to pinned upstream
+      - name: Verify the vendored patches apply to pinned upstream
         run: bash scripts/verify_upstream_patch.sh
 
   i18n:
     name: i18n catalog freshness
-    # Named, as at cppcheck: the check diffs lupdate's output against the
-    # committed catalog, and on 26.04 apt's lupdate is a newer Qt's.
+    # Named, as at cppcheck, so that a new image is a change made on purpose.
+    # The linguist tools themselves come from QT_VER's Qt (below), not from apt.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

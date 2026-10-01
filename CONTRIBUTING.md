@@ -6,7 +6,8 @@ testing, translations, and CI.
 ## Prerequisites
 
 - **TrustTunnelClient** upstream checkout ([TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient))
-- CMake 3.16+, C++20 compiler (clang recommended for Linux)
+- CMake 3.24+ for the app (the upstream tree requires it; the unit tests alone
+  configure with 3.16+), C++20 compiler (clang recommended for Linux)
 - Qt 6.8+ (Gui, Qml, Quick, Network, Svg); CI and the releases use 6.8.3, and the
   translation check needs exactly that (see Translations)
 - Python 3 + Conan 2.31.1 (for upstream native deps — same pin as CI)
@@ -19,10 +20,12 @@ upstream CMake tree so the `vpnlibs_trusttunnel` target exists.
 
 Steps 1 and 2 are already automated — `scripts/setup-upstream-tree.sh` clones
 upstream at the pinned ref, copies this client in as `FreeTunnel/`, appends the
-`add_subdirectory()` hook and applies the vendored patches, which is exactly what
-CI does. Use it to reproduce a CI build. It **copies** the client rather than
-linking it, so for day-to-day work on FreeTunnel itself follow the manual steps
-below and keep editing your own checkout.
+`add_subdirectory()` hook and applies the vendored patches. The release build in
+`.github/workflows/build.yml` takes the same steps itself, and the Linux coverage
+job runs this script (through `scripts/coverage-upstream-report.sh`), so use it
+to reproduce a CI build. It **copies** the client rather than linking it, so for
+day-to-day work on FreeTunnel itself follow the manual steps below and keep
+editing your own checkout.
 
 ### 1. Clone upstream and inject FreeTunnel
 
@@ -58,15 +61,24 @@ for p in FreeTunnel/vendor/trusttunnel/*.patch; do patch -p1 --fuzz=0 < "$p"; do
 
 The patches are numbered because they are not independent — each one's context
 lines assume the previous is applied, so apply them in filename order. Today
-there are three: live upload/download stats in the UI; the per-connection hook
-that per-application split tunnelling decides on; and the kill switch's pair,
-which hands a running session new split-tunnelling rules and mode instead of
-rebuilding it, and with the kill switch on keeps a first connect that fails
-retrying inside its session rather than ending it. `--fuzz=0` makes a hunk whose
-context has changed upstream fail rather than land a few lines off. Verified in
-CI via `FreeTunnel/scripts/verify_upstream_patch.sh`, which also requires the
-lines each hunk expects to occur exactly once in its file, so that a hunk cannot
-apply cleanly in the wrong place either.
+there are three, all in the core's C++ wrapper (`trusttunnel/`):
+
+- `01-tunnel-stats-handler.patch` — per-connection upload/download counts, for
+  the live speeds in the UI.
+- `02-connect-request-handler.patch` — the per-connection hook that
+  per-application split tunnelling decides on.
+- `03-live-exclusions-and-connect-retry.patch` — hands a running session new
+  split-tunnelling rules and mode instead of rebuilding it, and with the kill
+  switch on keeps a first connect that fails retrying inside its session rather
+  than ending it.
+
+`--fuzz=0` makes a hunk whose context has changed upstream fail rather than land
+a few lines off. Verified in CI via `FreeTunnel/scripts/verify_upstream_patch.sh`,
+which also requires the lines each hunk expects to occur exactly once in its
+file, so that a hunk cannot apply cleanly in the wrong place either. Name no
+patch file in a script, a workflow or this guide's commands: everything applies
+the directory's `*.patch` in order, and `scripts/check-pinned-deps.sh` fails on
+a path to one patch, or on a `patch -p1` without `--fuzz=0`.
 
 ### 3. Bootstrap Conan deps
 
@@ -119,17 +131,21 @@ make QT_DISABLE_HTTP3=OFF CMAKE_PREFIX_PATH="$QT_ROOT_DIR" build
 | macOS | `build/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel` |
 | Windows | `build\FreeTunnel\FreeTunnel.exe` |
 
-VPN connect requires elevation (UAC / sudo / macOS admin prompt).
+VPN connect requires elevation (UAC on Windows, an administrator prompt on macOS,
+pkexec on Linux, or sudo where pkexec cannot run).
 
 ## Unit tests (fast, no VPN core)
 
 From `FreeTunnel/tests/`:
 
 ```bash
-cmake -S . -B build-tests -G Ninja
+cmake -S . -B build-tests -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 cmake --build build-tests -j
 QT_QPA_PLATFORM=offscreen bash ../scripts/run-ctest.sh build-tests
 ```
+
+The first configure fetches QHotkey (and on Windows QWindowKit) at their pinned
+commits, so it needs the network once.
 
 CI runs exactly that wrapper, and on Linux it matters: `credentialstore` talks to
 a real Secret Service, so on a desktop without an unlocked keyring it is the one
@@ -150,19 +166,26 @@ on pushes to `main`, on pull requests and on `v*` tags, where the release waits
 for it to pass on the tagged commit, plus a scheduled run every Monday so a
 quiet `main` still gets sampled. Additional Linux-only jobs: **gcov/lcov coverage**
 (`scripts/coverage-upstream-report.sh`, merges unit tests + upstream instrumented
-build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`).
+build) and **ASan+UBSan** (`-DFT_ENABLE_SANITIZERS=ON`), where a UBSan finding
+fails the test that hit it, as an ASan one does (`ubsan_canary` checks that).
 
-Test suites — `ctest -N` lists them all: deep links (incl. structured
-fuzz) and config import, config store and paths, settings, both TOML writers,
-credentials (Keychain / Credential Manager / libsecret, and whether Linux has a
-Secret Service to keep them in), release verify and version comparison, control
-commands and the single-instance socket, helper IPC from both ends (client,
-server, and fuzzing of both the real helper and its test double), the real
-helper's lifecycle and the elevated argv, split-tunnel bypass
-rules and interface binding, the Backend's own units (logs, settings, config,
-split tunnel, updates), QML UI smoke tests, and integration tests (config
-workflow, Backend + mock VPN, single instance, helper client, UpdateChecker
-end-to-end against a mock HTTP server).
+Test suites — `ctest -N` lists them all, and which ones a platform builds
+differs (`windows_chrome` is Windows-only, `release_ci_gate` Linux-only and
+needs jq, and `ubsan_canary`, which must fail, is built only with the
+sanitizers): deep links (incl. structured fuzz) and config import, config store
+and paths, settings, both TOML writers, safe file reads, credentials (Keychain /
+Credential Manager / libsecret, and whether Linux has a Secret Service to keep
+them in), release verify (with and without OpenSSL) and version comparison,
+control commands, app startup and the single-instance socket, helper IPC from
+both ends (client, server, and fuzzing of both the real helper and its test
+double), the real helper's lifecycle and settings, the command each system is
+asked to run elevated, split-tunnel bypass rules, program rules (the
+installed-apps list, shortcuts, socket-owner lookup) and interface binding, the
+core wrapper against a mock core and its events, the Backend's own units (logs,
+settings, config, split tunnel, updates), the window chrome on Linux and
+Windows, QML UI tests and the QML/Backend property parity, the release job's CI
+gate, and integration tests (config workflow, Backend + mock VPN, single
+instance, helper client, UpdateChecker end-to-end against a mock HTTP server).
 
 Security CI (`.github/workflows/security.yml`), on pushes to `main`, pull
 requests and `v*` tags (the release waits for it too), and weekly:
@@ -203,8 +226,11 @@ shows **0%** until the report is uploaded with the correct token.
 3. Re-run **Coverage (Linux)** or push to `main`.
 
 The upload step is in [`.github/workflows/tests.yml`](.github/workflows/tests.yml). Local report:
-`bash scripts/coverage-upstream-report.sh` (unit tests only locally if conan is
-absent: `FT_SKIP_UPSTREAM_COVERAGE=1 bash scripts/coverage-report.sh`).
+`bash scripts/coverage-upstream-report.sh`, which builds the unit tests with
+coverage and then, where conan is installed, the whole app from an upstream tree
+it sets up. For the unit tests alone, run `bash scripts/coverage-report.sh`, or
+the first script with `FT_SKIP_UPSTREAM_COVERAGE=1`; without conan it stops after
+the unit tests by itself.
 
 ### Branch protection and Codacy status checks
 
@@ -243,8 +269,12 @@ Repository-side hygiene for Codacy:
 - [`.codacy.yml`](.codacy.yml) — excludes, **cppcheck `extra_lines`**, lizard/metric excludes
 - [`scripts/check-pinned-deps.sh`](scripts/check-pinned-deps.sh) — CI-enforced: every third-party
   Action in `.github/workflows` must be pinned to a full commit SHA (dependabot bumps stay
-  mergeable), `QT_VER` / `CONAN_VER` must agree across workflows, and no leg may
-  take Homebrew's Qt instead of `QT_VER`'s
+  mergeable); QHotkey and QWindowKit are fetched at full commit SHAs, QWindowKit
+  declared only in `cmake/QWindowKit.cmake`, which the app and the tests both
+  include; the upstream ref, the boringssl recipe, linuxdeploy and the Linux build
+  container are pinned; `QT_VER` / `CONAN_VER` must agree across workflows, and no
+  leg may take Homebrew's Qt instead of `QT_VER`'s; and the vendored patches are
+  applied as a directory, with `--fuzz=0`
 
 **Note:** Codacy takes cppcheck flags only from `engines.cppcheck.extra_lines` in
 `.codacy.yml` — it cannot read a suppressions file. So the ids are written twice
@@ -349,7 +379,9 @@ integrity is covered by SHA256 + Ed25519 on the release manifest instead.
 
 ## Deep links
 
-See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification.
+See [DEEP_LINK.md](DEEP_LINK.md) for the `tt://` TLV specification, and for the
+`freetunnel://` control links: how a link opened by the system is told from the
+same URL run as a command, and which links ask first.
 
 ## CI workflows
 

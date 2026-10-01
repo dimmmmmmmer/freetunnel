@@ -17,7 +17,7 @@ FreeTunnel splits privileges:
 | Component | Privilege level | Role |
 | --- | --- | --- |
 | GUI (`FreeTunnel`) | Normal user | Qt Modeling Language (QML) UI, settings, update checks |
-| Helper (`--helper`) | Elevated (User Account Control on Windows / sudo on Unix / pkexec on Linux) | Virtual private network (VPN) tunnel via TrustTunnel core |
+| Helper (`--helper`) | Elevated (User Account Control on Windows / an administrator prompt through `osascript` on macOS / pkexec on Linux, or sudo where pkexec cannot run) | Virtual private network (VPN) tunnel via TrustTunnel core |
 
 The GUI talks to the helper over **loopback** (local-only) Transmission Control
 Protocol (TCP) on the Internet Protocol version 4 (IPv4) loopback address
