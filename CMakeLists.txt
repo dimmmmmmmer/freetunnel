@@ -130,6 +130,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/core/InstanceControl.cpp
     include/core/InstanceControl.h
     src/core/ConfigToml.cpp
+    src/core/ConfigTomlValues.cpp
     include/core/ConfigToml.h
     src/core/NetBind.cpp
     src/core/ProcessLookup.cpp
