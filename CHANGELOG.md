@@ -111,9 +111,10 @@ compare link at the bottom of its release notes.
   traffic outside the VPN, which it does while FreeTunnel connects or brings
   back a connection that dropped. Nothing is blocked while the VPN is off or
   stopped by an error, and the block lifts for a moment whenever a session is
-  built anew: when you switch configs, or change the excluded routes or the
-  kill switch itself while connected. The line now reads "block traffic if the
-  VPN drops", and the README says when it applies.
+  built anew: when, while connected, you switch configs or change the excluded
+  routes, the kill switch itself or, on Windows, "Let the VPN config open
+  ports". The line now reads "block traffic if the VPN drops", and the README
+  says when it applies.
 - **Settings says that its excluded routes come on top of a config's own.** Each
   config excludes some routes itself: one made in FreeTunnel or from a link keeps
   local networks and multicast outside the tunnel. The list in Settings is added
@@ -150,15 +151,32 @@ compare link at the bottom of its release notes.
   connection. FreeTunnel now writes the core's messages itself, to a file it
   keeps open for as long as logging is on. With logging off they are now
   written nowhere; on macOS they used to go to a temporary file even then.
-- **Windows: the VPN moves with you to another network adapter.** It kept its own
-  traffic on the adapter it had connected over. Unplugging the network cable with
-  Wi-Fi on, undocking a laptop or unplugging a phone used for USB tethering left it
-  trying the old adapter for about a minute before it gave up and reconnected, and
-  on a computer with Hyper-V or WSL that reconnect could pick one of their internal
-  adapters and fail again. It now follows the adapter Windows uses for the
-  internet, within a few seconds of a change, the way it already did on macOS and
-  Linux, and takes that network's DNS servers along for the sites that bypass the
-  VPN.
+- **The core's messages reach the log as they happen.** They were held back
+  until a few kilobytes had gathered or the connection ended, so a warning could
+  arrive long after it mattered, and the last ones before a disconnect never
+  arrived at all.
+- **With the kill switch on, a server that cannot be reached no longer lets
+  traffic out between attempts.** A first connect that failed ended the session
+  after five tries, and FreeTunnel built a new one, round after round; each
+  time, traffic went out unblocked between taking the old session down and
+  bringing the new one up. The session now stays up and keeps trying, with
+  traffic blocked, until it connects or you press Disconnect. Meanwhile the
+  status reads "Connecting…", or "Waiting for network…" while there is no
+  network, and why it is failing is shown once for each reason. A server that
+  refuses the login or its certificate still ends the session, and FreeTunnel
+  builds a new one as before, with the block lifting in between. A config that
+  names its server by a domain name gets no session at all, and so no block,
+  while that name cannot be looked up.
+- **Split tunnelling changes take effect without reconnecting.** Adding or
+  removing a domain, an address or a program on the Split tunnelling page,
+  switching its mode, or turning split tunnelling on or off while connected
+  rebuilt the whole tunnel: every open connection dropped, and with the kill
+  switch on nothing was blocked while it came back. The change now reaches the
+  running tunnel, which stays up with its kill switch. A program rule applies
+  from the program's next connection. A change to the domains, the addresses or
+  the mode restarts the connections that are open, so that they follow the new
+  rules. Switching configs, and changing the excluded routes or the kill switch
+  in Settings, still reconnect.
 - **Windows: losing the network no longer ends the VPN.** With no network at all,
   the VPN spent a minute trying to reach its server, then stopped with an error
   about not detecting an active network interface, taking the kill switch's block
@@ -168,16 +186,15 @@ compare link at the bottom of its release notes.
   own internet connection, over PPPoE or a modem, still can't use the VPN on
   Windows, and now gets an error that says so instead of the one about the
   network interface; connecting through a router, Ethernet or Wi-Fi works.
-- **Windows: the server pings on the Configs page work while connected on a
-  computer with Hyper-V or WSL.** While the VPN was up they went out of the
-  first network adapter Windows listed, which on such a computer can be one of
-  their internal adapters, with no way out, so the servers showed as
-  unreachable. They now go out of the adapter that carries Windows' default
-  route, the one the VPN itself uses.
-- **The core's messages reach the log as they happen.** They were held back
-  until a few kilobytes had gathered or the connection ended, so a warning could
-  arrive long after it mattered, and the last ones before a disconnect never
-  arrived at all.
+- **Windows: the VPN moves with you to another network adapter.** It kept its own
+  traffic on the adapter it had connected over. Unplugging the network cable with
+  Wi-Fi on, undocking a laptop or unplugging a phone used for USB tethering left it
+  trying the old adapter for about a minute before it gave up and reconnected, and
+  on a computer with Hyper-V or WSL that reconnect could pick one of their internal
+  adapters and fail again. It now follows the adapter Windows uses for the
+  internet, within a few seconds of a change, the way it already did on macOS and
+  Linux, and takes that network's DNS servers along for the sites that bypass the
+  VPN.
 - **An excluded route or a split tunnelling rule of every address, such as
   `0.0.0.0/0` or `::/0`, is refused, and the message says why.** An excluded
   route goes around the tunnel, and one ending in /0 took all IPv4 or all IPv6
@@ -209,28 +226,6 @@ compare link at the bottom of its release notes.
   rule now names the app and keeps matching after updates. A rule made the old
   way, which shows as Update.exe, is changed to the app the first time this
   version starts, as long as the app is still installed beside it.
-- **Split tunnelling changes take effect without reconnecting.** Adding or
-  removing a domain, an address or a program on the Split tunnelling page,
-  switching its mode, or turning split tunnelling on or off while connected
-  rebuilt the whole tunnel: every open connection dropped, and with the kill
-  switch on nothing was blocked while it came back. The change now reaches the
-  running tunnel, which stays up with its kill switch. A program rule applies
-  from the program's next connection. A change to the domains, the addresses or
-  the mode restarts the connections that are open, so that they follow the new
-  rules. The excluded routes in Settings still reconnect, as does the kill
-  switch itself.
-- **With the kill switch on, a server that cannot be reached no longer lets
-  traffic out between attempts.** A first connect that failed ended the session
-  after five tries, and FreeTunnel built a new one, round after round; each
-  time, traffic went out unblocked between taking the old session down and
-  bringing the new one up. The session now stays up and keeps trying, with
-  traffic blocked, until it connects or you press Disconnect. Meanwhile the
-  status reads "Connecting…", or "Waiting for network…" while there is no
-  network, and why it is failing is shown once for each reason. A server that
-  refuses the login or its certificate still ends the session, and FreeTunnel
-  builds a new one as before, with the block lifting in between. A config that
-  names its server by a domain name gets no session at all, and so no block,
-  while that name cannot be looked up.
 - **Saving a config in the editor keeps the config's own routing.** A config
   file can say which addresses go through the tunnel and which stay outside it,
   and can hold settings the editor has no field for. Saving it from the editor,
@@ -342,6 +337,27 @@ compare link at the bottom of its release notes.
   access to the Keychain when macOS asks for it. On Windows, where the refusal
   known to happen is a password longer than Credential Manager holds, it says
   that the limit is 2560 bytes.
+- **FreeTunnel no longer starts a second copy beside the one running.** A launch
+  or a link that found FreeTunnel running but could not hand it over, because the
+  password keyring was locked, started a whole second copy, and the two then
+  drove the same VPN. Such a launch now gives way to the copy that is running and
+  closes without showing anything, so a link it carried is not acted on: open the
+  link again.
+- **Windows and Linux: everyone on a shared computer gets one FreeTunnel of their
+  own.** A second launch or a link is meant to go to the FreeTunnel already open,
+  and it did only for the first person to start FreeTunnel on that computer. For
+  anyone else, every launch and every link started another full copy. On Linux
+  the place a launch looks for it is now in your session's own runtime folder,
+  where another account can't put anything in the way.
+- **Linux without a password keyring: a link that arrives while FreeTunnel
+  starts is handled, and the launch key is deleted on quit.** Without a keyring,
+  the key that lets a second launch or a link reach the FreeTunnel already open
+  is kept in a file only you can read. A link or a second launch that came in
+  while FreeTunnel was still starting was set aside and never handled, and from
+  then on each later one went unhandled until FreeTunnel was restarted; the same
+  could happen on any computer whose password store would not keep that key.
+  The file also stayed behind after every quit, of no use to anyone. Both are
+  fixed.
 - **Windows: an update waits for FreeTunnel to finish closing.** The installer
   asks a running FreeTunnel to close and waits for it, but it took the first
   refusal as "closed". The part of FreeTunnel that runs with administrator rights
@@ -398,6 +414,12 @@ compare link at the bottom of its release notes.
     from the menu, or a tt:// link, could miss the new FreeTunnel and start a
     second one beside it. The new one is now the one they reach, from the update
     to this version on.
+- **Windows: the server pings on the Configs page work while connected on a
+  computer with Hyper-V or WSL.** While the VPN was up they went out of the
+  first network adapter Windows listed, which on such a computer can be one of
+  their internal adapters, with no way out, so the servers showed as
+  unreachable. They now go out of the adapter that carries Windows' default
+  route, the one the VPN itself uses.
 - **The Split page's notice about "Through VPN" with no rules follows a deleted
   config.** Deleting the config in use hands over to another one, which may use
   another profile, but the notice went on describing the deleted config until
@@ -419,18 +441,6 @@ compare link at the bottom of its release notes.
   reason after «Ошибка сети:» or «Не удалось скачать:» stayed in English, as did
   the one in brackets when the VPN helper could not be reached. Those words come
   from Qt, and Qt's own Russian was shipped only with the Linux packages.
-- **FreeTunnel no longer starts a second copy beside the one running.** A launch
-  or a link that found FreeTunnel running but could not hand it over, because the
-  password keyring was locked, started a whole second copy, and the two then
-  drove the same VPN. Such a launch now gives way to the copy that is running and
-  closes without showing anything, so a link it carried is not acted on: open the
-  link again.
-- **Windows and Linux: everyone on a shared computer gets one FreeTunnel of their
-  own.** A second launch or a link is meant to go to the FreeTunnel already open,
-  and it did only for the first person to start FreeTunnel on that computer. For
-  anyone else, every launch and every link started another full copy. On Linux
-  the place a launch looks for it is now in your session's own runtime folder,
-  where another account can't put anything in the way.
 - **Linux: an AppImage started without FUSE can update itself and start with the
   system.** Run with --appimage-extract-and-run, as on a system without FUSE,
   FreeTunnel did not recognise itself as an AppImage. "Launch at system startup"
@@ -448,16 +458,6 @@ compare link at the bottom of its release notes.
   memory until it quit, and nothing ever read it. With logging off in Settings,
   that included the VPN core's own log. It is discarded now; the log FreeTunnel
   shows and saves is as before.
-- **Linux without a password keyring: a link that arrives while FreeTunnel
-  starts is handled, and so is every one after it.** A link or a second launch
-  that came in while FreeTunnel was still starting was set aside and never
-  handled. From then on each later one went unhandled until FreeTunnel was
-  restarted. The same could happen on any computer whose password store would
-  not keep the key that lets a second launch reach FreeTunnel.
-- **Linux without a password keyring: FreeTunnel deletes its launch key when it
-  quits.** Without a keyring, the key that lets a second launch reach the
-  FreeTunnel already open is kept in a file only you can read. The file stayed
-  behind after every quit, of no use to anyone; it is deleted on quit now.
 
 ## 1.2.2
 
