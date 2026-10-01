@@ -356,6 +356,7 @@ private:
         int editIndex = -1;
     };
     void emitCreateConfigError(const QString &parseErr);
+    std::optional<int> editIndexForSave(const QVariantMap &f); // createConfig()'s row, or nothing if gone
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);

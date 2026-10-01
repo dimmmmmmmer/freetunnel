@@ -7,6 +7,8 @@
 #include <QStandardPaths>
 #include <QVariantMap>
 
+#include <optional>
+
 #include "BackendConfigShared.h"
 #include "core/AppSettings.h"
 #include "core/ConfigImport.h"
@@ -226,15 +228,11 @@ void Backend::emitCreateConfigError(const QString &parseErr)
                                    .arg(freetunnel::kMaxConfigNameLength));
 }
 
-bool Backend::createConfig(const QVariantMap &f)
+// The row a save from the editor writes over: -1 for a new config, or nothing,
+// once the error is said, when the config it was opened on has gone. Split out
+// of createConfig().
+std::optional<int> Backend::editIndexForSave(const QVariantMap &f)
 {
-    ParsedCreateConfig parsed;
-    QString parseErr;
-    if (!parseCreateConfigFields(f, &parsed, &parseErr)) {
-        emitCreateConfigError(parseErr);
-        return false;
-    }
-
     int editIndex = f.value(QStringLiteral("editIndex"), -1).toInt();
     // The editor opens on a row and saves minutes later, and the list is not
     // still under it: finalizeImportedConfig() prepends an imported config and
@@ -251,9 +249,25 @@ bool Backend::createConfig(const QVariantMap &f)
         if (editIndex < 0) {
             emit errorOccurred(tr("That configuration is no longer there — it may have been "
                                   "deleted while you were editing it."));
-            return false;
+            return std::nullopt;
         }
     }
+    return editIndex;
+}
+
+bool Backend::createConfig(const QVariantMap &f)
+{
+    ParsedCreateConfig parsed;
+    QString parseErr;
+    if (!parseCreateConfigFields(f, &parsed, &parseErr)) {
+        emitCreateConfigError(parseErr);
+        return false;
+    }
+
+    const std::optional<int> resolvedIndex = editIndexForSave(f);
+    if (!resolvedIndex)
+        return false;
+    const int editIndex = *resolvedIndex;
     const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
     const QString &oldPath = edit.oldPath;
     if (nameTooLongForANewFile(parsed.safeName, oldPath)) {
