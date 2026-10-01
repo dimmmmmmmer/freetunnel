@@ -268,39 +268,7 @@ void Backend::wireUpdaterSignals()
                 emit updateChanged();
             });
     connect(m_updater, &UpdateChecker::downloadReady, this,
-            [this](const QString &path) {
-                // Quitting, or saying the installer opened, when it never started
-                // left the user with no FreeTunnel, or a line waiting on nothing.
-#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
-                if (!startInstaller(path)) {
-                    m_updateState = QStringLiteral("error");
-                    m_updateErrorFromDownload = true;
-                    setUpdateMessage([] { return tr("The downloaded installer could not be started"); });
-                    emit updateChanged();
-                    return;
-                }
-#endif
-                m_updateState = QStringLiteral("ready");
-#if defined(Q_OS_WIN)
-                // Then get out of its way. The installer cannot replace files this
-                // process has open, and it should not have to force us out either:
-                // a forced kill would leave the tunnel up and the privileged helper
-                // running with nothing left to stop them. Quitting here runs the
-                // ordinary shutdown — tunnel down, helper stopped — while the
-                // installer waits for us (see win/installer.nsi).
-                setUpdateMessage([] { return tr("Update downloaded — closing FreeTunnel to install it"); });
-                emit updateChanged();
-                quitApplication();
-#elif defined(Q_OS_MACOS)
-                // What happens next is the user's: the line stays up all session.
-                setUpdateMessage([] { return tr("Update downloaded — install it from the disk image that opened"); });
-                emit updateChanged();
-#else
-                setUpdateMessage([] { return tr("Update downloaded — opening installer"); });
-                emit updateChanged();
-                applyLinuxUpdate(path);
-#endif
-            });
+            [this](const QString &path) { onUpdateDownloadReady(path); });
     connect(m_updater, &UpdateChecker::downloadFailed, this,
             [this](const QString &msg, UpdateChecker::DownloadFailure kind) {
         m_updateState = QStringLiteral("error");
@@ -329,6 +297,43 @@ void Backend::wireUpdaterSignals()
         });
         emit updateChanged();
     });
+}
+
+// What a verified download does next: start the installer, or on Linux install
+// it here. Split out of wireUpdaterSignals(), where it was half the function.
+void Backend::onUpdateDownloadReady(const QString &path)
+{
+    // Quitting, or saying the installer opened, when it never started
+    // left the user with no FreeTunnel, or a line waiting on nothing.
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    if (!startInstaller(path)) {
+        m_updateState = QStringLiteral("error");
+        m_updateErrorFromDownload = true;
+        setUpdateMessage([] { return tr("The downloaded installer could not be started"); });
+        emit updateChanged();
+        return;
+    }
+#endif
+    m_updateState = QStringLiteral("ready");
+#if defined(Q_OS_WIN)
+    // Then get out of its way. The installer cannot replace files this
+    // process has open, and it should not have to force us out either:
+    // a forced kill would leave the tunnel up and the privileged helper
+    // running with nothing left to stop them. Quitting here runs the
+    // ordinary shutdown — tunnel down, helper stopped — while the
+    // installer waits for us (see win/installer.nsi).
+    setUpdateMessage([] { return tr("Update downloaded — closing FreeTunnel to install it"); });
+    emit updateChanged();
+    quitApplication();
+#elif defined(Q_OS_MACOS)
+    // What happens next is the user's: the line stays up all session.
+    setUpdateMessage([] { return tr("Update downloaded — install it from the disk image that opened"); });
+    emit updateChanged();
+#else
+    setUpdateMessage([] { return tr("Update downloaded — opening installer"); });
+    emit updateChanged();
+    applyLinuxUpdate(path);
+#endif
 }
 
 void Backend::ensureUpdater()
