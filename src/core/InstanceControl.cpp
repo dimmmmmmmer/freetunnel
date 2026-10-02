@@ -67,17 +67,20 @@ QString readInstanceAuthFile()
     return QString::fromUtf8(f.readAll()).trimmed();
 }
 
-} // namespace
-
-bool writeInstanceAuthToken(QString *tokenOut)
+// The token where a second launch would find it: the store's, or the fallback
+// file's when the store holds none.
+QString storedInstanceAuthToken()
 {
-    const QString token = randomInstanceToken();
+    const QString stored = CredentialStore::loadPassword(kInstanceAuthKey);
+    return stored.isEmpty() ? readInstanceAuthFile() : stored;
+}
+
+bool storeInstanceAuthToken(const QString &token)
+{
     // Prefer OS credential storage over a plaintext file (same-user malware can
     // still read it, but not by simply cat-ing a predictable path).
     if (CredentialStore::storePassword(kInstanceAuthKey, token)) {
         QFile::remove(instanceAuthFilePath()); // drop legacy file from older builds
-        if (tokenOut)
-            *tokenOut = token;
         return true;
     }
     // Fallback when Linux has no Secret Service — keep single-instance working.
@@ -100,9 +103,32 @@ bool writeInstanceAuthToken(QString *tokenOut)
         f.remove();
         return false;
     }
+    return true;
+}
+
+} // namespace
+
+bool writeInstanceAuthToken(QString *tokenOut)
+{
+    const QString token = randomInstanceToken();
+    if (!storeInstanceAuthToken(token))
+        return false;
     if (tokenOut)
         *tokenOut = token;
     return true;
+}
+
+// The same token, never a new one: the listener checks every command against
+// the one it was started with, so no other lets a launch in. Written only when
+// it is not what a launch would read already, so an instance whose token is in
+// place changes nothing.
+bool restoreInstanceAuthToken(const QString &token)
+{
+    if (token.isEmpty())
+        return false;
+    if (storedInstanceAuthToken() == token)
+        return true;
+    return storeInstanceAuthToken(token);
 }
 
 namespace {
@@ -374,13 +400,13 @@ void removeInstanceAuthToken(const QString &onlyIfItMatches)
     // or the fallback file's when the store holds none. Comparing with the store
     // alone never matched on Linux without a Secret Service, where the file is
     // the only copy, and the token stayed on disk after every quit.
-    if (!onlyIfItMatches.isEmpty()) {
-        QString stored = CredentialStore::loadPassword(kInstanceAuthKey);
-        if (stored.isEmpty())
-            stored = readInstanceAuthFile();
-        if (stored != onlyIfItMatches)
-            return;
-    }
+    //
+    // Comparing and deleting are still two calls to the store, and a token the
+    // replacement writes between them goes all the same. That is why a running
+    // instance puts its token back (restoreInstanceAuthToken()), and why one that
+    // handed its name over does not come here at all.
+    if (!onlyIfItMatches.isEmpty() && storedInstanceAuthToken() != onlyIfItMatches)
+        return;
     CredentialStore::deletePassword(kInstanceAuthKey);
     QFile::remove(instanceAuthFilePath());
 }

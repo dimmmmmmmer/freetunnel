@@ -26,6 +26,7 @@ private slots:
     void peerCredentialCheckNeedsALiveSocket();
     void quittingDoesNotDeleteASuccessorsToken();
     void quittingRemovesATokenKeptInTheFallbackFile();
+    void aRunningInstancePutsItsTokenBack();
     void theSocketNameIsPerUser();
     void linuxPutsTheNameInTheRuntimeDirectory();
 };
@@ -263,6 +264,50 @@ void TestInstanceControl::quittingRemovesATokenKeptInTheFallbackFile()
     QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the successor's token must survive");
     QCOMPARE(stored, QStringLiteral("successors-token"));
     freetunnel::removeInstanceAuthToken();
+}
+
+// An older FreeTunnel quitting through an update compares the stored token with
+// its own and then deletes it, in two calls to the store, so a token its
+// successor writes between them is deleted all the same. The successor puts its
+// own back: the same token, which is what its listener checks, and only when a
+// launch would not read it already.
+void TestInstanceControl::aRunningInstancePutsItsTokenBack()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    auto restoreConfigHome = qScopeGuard([configHome] {
+        if (configHome.isEmpty())
+            qunsetenv("XDG_CONFIG_HOME");
+        else
+            qputenv("XDG_CONFIG_HOME", configHome);
+    });
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+
+    QString mine;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&mine));
+    freetunnel::removeInstanceAuthToken(); // the predecessor's deletion, after the write
+    QString stored;
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+    QVERIFY(freetunnel::restoreInstanceAuthToken(mine));
+    QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the token was not put back");
+    QCOMPARE(stored, mine);
+
+    // A launch reads one token, so another one there is replaced as well.
+    QString other;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&other));
+    QVERIFY(freetunnel::restoreInstanceAuthToken(mine));
+    QVERIFY(freetunnel::readInstanceAuthToken(&stored));
+    QCOMPARE(stored, mine);
+    QVERIFY(freetunnel::restoreInstanceAuthToken(mine)); // in place: nothing to do
+
+    // An instance that never had a token has none to put back.
+    freetunnel::removeInstanceAuthToken();
+    QVERIFY(!freetunnel::restoreInstanceAuthToken(QString()));
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
 }
 
 // One name per user. A single name for the machine belonged to whoever started

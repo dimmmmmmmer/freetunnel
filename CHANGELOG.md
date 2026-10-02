@@ -13,6 +13,10 @@ compare link at the bottom of its release notes.
   and uninstalling no longer leaves files behind, when FreeTunnel is slow to
   close.** After closing it by force at ten seconds, both now wait up to about
   five seconds more for it to exit.
+- **Linux: after the AppImage updates itself, launches and freetunnel:// or
+  tt:// links reach the new FreeTunnel instead of doing nothing until a
+  restart.** Updating from 1.2.3 is covered too. If one launch or link still
+  does nothing, open it again: the next one works.
 
 ## 1.2.3
 

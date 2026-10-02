@@ -306,6 +306,9 @@ signals:
     void deepLinkDisconnectConfirmationRequired();
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
+    // The single-instance name was given up to a new build that started
+    // (applyLinuxUpdate). The token stored from then on is that build's.
+    void instanceNameHandedOver();
 
 private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
@@ -376,6 +379,7 @@ private:
     // restart, or explain why the user has to finish the job themselves.
     void applyLinuxUpdate(const QString &path);
     void failAppImageUpdate(std::function<QString()> words, const QString &path);
+    void quitForTheNewBuild();
 #endif
     void restoreReplacedConfig(const QString &target, const QByteArray &previousToml);
     void persistCreatedConfigPaths(const QString &oldPath, const QString &target, bool editing,
