@@ -169,6 +169,13 @@ FunctionEnd
 ; on to files both still held. The helper quits by itself once the app has gone,
 ; after taking the tunnel down, so it is waited for like the app. A code this
 ; does not expect only makes the wait run its full length before the forced kill.
+;
+; The forced kill is waited for the same way, for a few seconds. taskkill /F
+; only starts the exit: Windows still has to close everything the process held,
+; its tunnel adapter among them, before it is gone and its files are free. A
+; fixed second used to follow, after which the install could stop on "Error
+; opening file for writing" and the uninstall leave files behind. Past the cap
+; it goes on all the same, as it did; a stuck process must not block it.
 !macro CLOSE_FREETUNNEL
   DetailPrint "Closing FreeTunnel if it is running..."
   StrCpy $1 0
@@ -186,7 +193,18 @@ FunctionEnd
     DetailPrint "FreeTunnel did not exit; closing it forcibly."
     nsExec::Exec 'taskkill /F /IM "${PRODUCT_EXE}"'
     Pop $0
-    Sleep 1000
+    StrCpy $1 0
+  forceWait:
+    nsExec::Exec 'taskkill /IM "${PRODUCT_EXE}"'
+    Pop $0
+    StrCmp $0 "128" closed
+    IntOp $1 $1 + 1
+    ; ~5 s, on top of the ~10 s above.
+    IntCmp $1 10 stillExiting "" stillExiting
+    Sleep 500
+    Goto forceWait
+  stillExiting:
+    DetailPrint "FreeTunnel is still exiting; carrying on."
   closed:
 !macroend
 
