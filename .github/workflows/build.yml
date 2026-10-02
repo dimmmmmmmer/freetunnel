@@ -1285,6 +1285,8 @@ jobs:
           sparse-checkout: |
             CHANGELOG.md
             /scripts/check-release-ci.sh
+            /scripts/verify-release-signature.sh
+            /include/core/ReleaseSigning.h
           sparse-checkout-cone-mode: false
 
       # `needs: build` covers this workflow only. The unit tests, the sanitizers
@@ -1365,6 +1367,16 @@ jobs:
           openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS.txt -out SHA256SUMS.txt.sig
           rm -f ed25519.pem
           ls -la SHA256SUMS.txt.sig
+
+      # Signing works with whatever key the secret holds, and nothing above ties
+      # that key to the public one every build compiles in. A secret that stopped
+      # matching include/core/ReleaseSigning.h would publish a release that every
+      # installed copy refuses as an update. So check the signature the way the
+      # updater will, against the header of this very commit, before publishing.
+      - name: Check the signature against the app's public key
+        run: |
+          bash scripts/verify-release-signature.sh include/core/ReleaseSigning.h \
+            artifacts/SHA256SUMS.txt artifacts/SHA256SUMS.txt.sig
 
       # What changed comes from CHANGELOG.md, so every release says something
       # about ITSELF. The install notes are the part that is identical every

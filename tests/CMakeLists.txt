@@ -1044,13 +1044,23 @@ endif ()
 # (scripts/check-release-ci.sh) only ever runs on a tag, so it is tested here,
 # on every push, against a stand-in gh. Linux only: it is a bash script for an
 # ubuntu runner, and a bash found on Windows can be WSL's.
+# The same job's check that the signature it makes verifies against the key in
+# include/core/ReleaseSigning.h (scripts/verify-release-signature.sh) is tested
+# the same way, with throwaway keys, and on Linux only for the same reasons.
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
+    find_program(FT_OPENSSL_CLI openssl)
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_ci_gate.sh)
     else ()
         message(STATUS "release_ci_gate not built: it needs bash and jq")
+    endif ()
+    if (FT_BASH AND FT_OPENSSL_CLI)
+        add_test(NAME release_signature
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_signature.sh)
+    else ()
+        message(STATUS "release_signature not built: it needs bash and openssl")
     endif ()
 endif ()

@@ -243,6 +243,7 @@ the update-signature tests would skip the path every release takes.
 | --- | --- |
 | `windows_chrome` | On Windows only |
 | `release_ci_gate` | On Linux only; needs jq |
+| `release_signature` | On Linux only; needs openssl |
 | `ubsan_canary` | Only with the sanitizers; it must fail |
 
 What the suites cover:
@@ -264,7 +265,7 @@ What the suites cover:
 - The Backend's own units (logs, settings, config, split tunnel, updates)
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
-- The release job's CI gate
+- The release job's CI gate and signature check
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 
@@ -508,6 +509,9 @@ auto-loaded config file. (One used to sit here claiming otherwise.)
      (`scripts/check-release-ci.sh`; runs from pull requests do not count);
    - writes `SHA256SUMS.txt` and signs it with `ED25519_SIGNING_KEY` (see
      [Signed updates (Ed25519)](#signed-updates-ed25519));
+   - checks that signature against the public key the app is built with, in
+     `include/core/ReleaseSigning.h` at the tagged commit
+     (`scripts/verify-release-signature.sh`);
    - takes the release notes from the `## X.Y.Z` section of `CHANGELOG.md`, and
      appends the install notes and a compare link to the previous release;
    - publishes the installers, `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` to
@@ -518,6 +522,8 @@ The release stops, and publishes nothing, when:
 - the tag does not match the version in `CMakeLists.txt`;
 - `CHANGELOG.md` has no `## X.Y.Z` section;
 - the `ED25519_SIGNING_KEY` secret is not set;
+- the signature does not verify against the key in `ReleaseSigning.h`, as when
+  the secret no longer matches it;
 - Tests or Security has no passing run on the commit.
 
 ### Writing release notes
