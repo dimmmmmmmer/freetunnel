@@ -5,6 +5,15 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
+## Unreleased
+
+### Fixed
+
+- **Windows: installing no longer stops on "Error opening file for writing",
+  and uninstalling no longer leaves files behind, when FreeTunnel is slow to
+  close.** After closing it by force at ten seconds, both now wait up to about
+  five seconds more for it to exit.
+
 ## 1.2.3
 
 ### Highlights
