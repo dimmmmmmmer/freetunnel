@@ -832,6 +832,7 @@ void TestBackendUpdates::anAppImageThatWillNotStartIsPutBack()
     Backend backend;
     backend.setInstanceServer(&listener);
     QSignalSpy shutdown(&backend, &Backend::aboutToShutdown);
+    QSignalSpy handedOver(&backend, &Backend::instanceNameHandedOver);
     backend.checkForUpdates(true);
     QTRY_COMPARE_WITH_TIMEOUT(backend.updateState(), QStringLiteral("available"), 10000);
     backend.downloadUpdate();
@@ -840,6 +841,7 @@ void TestBackendUpdates::anAppImageThatWillNotStartIsPutBack()
     QVERIFY2(backend.updateMessage().contains(QStringLiteral("could not be started")),
              qPrintable(backend.updateMessage()));
     QCOMPARE(shutdown.count(), 0);
+    QCOMPARE(handedOver.count(), 0); // and its token is its own still, to delete on quit
     QCOMPARE(installed.contents(), QByteArrayLiteral("the running build"));
     QVERIFY(!QFile::exists(installed.backup));
     QLocalSocket probe;
@@ -940,6 +942,7 @@ void TestBackendUpdates::anAppImageReplacesItselfAndRestarts()
     Backend backend;
     backend.setInstanceServer(listener.get());
     QSignalSpy shutdown(&backend, &Backend::aboutToShutdown);
+    QSignalSpy handedOver(&backend, &Backend::instanceNameHandedOver);
     backend.checkForUpdates(true);
     QTRY_COMPARE_WITH_TIMEOUT(backend.updateState(), QStringLiteral("available"), 10000);
     // Said before the click: installing an AppImage closes FreeTunnel.
@@ -947,6 +950,8 @@ void TestBackendUpdates::anAppImageReplacesItselfAndRestarts()
              qPrintable(backend.updateMessage()));
     backend.downloadUpdate();
     QTRY_COMPARE_WITH_TIMEOUT(shutdown.count(), 1, 10000);
+    // Quitting is to leave the token to the new build (wireBackendLifecycle()).
+    QCOMPARE(handedOver.count(), 1);
 
     QCOMPARE(backend.updateState(), QStringLiteral("ready"));
     QCOMPARE(installed.contents(), newBuild);

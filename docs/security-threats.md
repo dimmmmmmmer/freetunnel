@@ -379,7 +379,9 @@ the running instance via a local socket (`QLocalServer`).
   - the second instance verifies the listener's owner before sending the token,
     so a squatted socket name can't harvest it;
   - a per-session random token (stored in the OS credential store when
-    available), removed when the instance quits;
+    available), stored again by the running instance if it goes missing or is
+    replaced, and removed when the instance quits, other than for an update it
+    started, whose new build writes its own;
   - constant-time token comparison;
   - a 64 KB message cap;
   - a launch gives way only to a listener that is provably this user's: one that

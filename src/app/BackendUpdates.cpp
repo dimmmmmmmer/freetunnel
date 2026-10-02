@@ -183,8 +183,8 @@ void Backend::applyLinuxUpdate(const QString &path)
     // Closing the listener rather than only unlinking its name: see
     // giveUpTheInstanceName. A new connectToServer() finds nothing and the
     // replacement starts normally. The token is deliberately left alone — the
-    // replacement writes its own, and the quit handler now removes only a token
-    // that is still ours.
+    // replacement writes its own, and once it has started the quit handler
+    // removes nothing (instanceNameHandedOver).
     giveUpTheInstanceName(m_instanceServer);
 
     // This used to quit whether or not the replacement started, which left no
@@ -210,6 +210,15 @@ void Backend::applyLinuxUpdate(const QString &path)
     QFile::remove(path);
     setUpdateMessage([] { return tr("Update installed — restarting"); });
     emit updateChanged();
+    quitForTheNewBuild();
+}
+
+// Quit, leaving the token to the new build, which has started and been given the
+// name. Quitting compares the stored token with this instance's and then deletes
+// it, and one the new build wrote in between went too; this way it deletes nothing.
+void Backend::quitForTheNewBuild()
+{
+    emit instanceNameHandedOver();
     quitApplication();
 }
 

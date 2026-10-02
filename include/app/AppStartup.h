@@ -82,6 +82,12 @@ QLocalServer *newInstanceServer(QObject *parent);
 void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
                         const QString &instanceToken);
 
+// Put this instance's token back where a launch reads it, should it have gone
+// from there, for as long as @p server listens (restoreInstanceAuthToken()).
+// Done a few seconds after wireInstanceServer(), and whenever a launch could not
+// show the token.
+void keepInstanceTokenStored(const QLocalServer *server, const QString &instanceToken);
+
 // Returns the object that owns the reopen wiring, or nullptr where there is none
 // (macOS reopens through the native Dock event instead). The caller must keep it
 // alive no longer than @p appQuitting: the filter and the connections read that

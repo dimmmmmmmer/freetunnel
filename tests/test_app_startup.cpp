@@ -60,6 +60,9 @@ private slots:
     void aSecondLaunchNeverStartsBesideALiveInstance();
     void aLaunchWhileQuittingFindsNoInstance();
     void wireInstanceServerHandsTheListenerToBackend();
+    void aTokenDeletedAsTheInstanceStartsIsPutBack();
+    void aLaunchWithNoTokenToShowHasItPutBack();
+    void aQuitAfterHandingTheNameOverLeavesTheToken();
 
 private:
     // Every test gets its own socket so a listener left over from the previous
@@ -978,6 +981,113 @@ void TestAppStartup::wireInstanceServerHandsTheListenerToBackend()
     QCOMPARE(backend.instanceServer(), nullptr);
     freetunnel::wireInstanceServer(&server, backend, nullptr, QStringLiteral("tok"));
     QCOMPARE(backend.instanceServer(), &server);
+}
+
+// An AppImage update has the old FreeTunnel start the new one and quit. As it
+// quits it compares the stored token with its own and then deletes it, in two
+// calls to the store, and the new one's token, written in between, went with
+// it. Every launch and link after that found FreeTunnel running with no token
+// to show it and gave up, until FreeTunnel was restarted. A few seconds after
+// the listener is wired the instance looks again, and puts its token back.
+void TestAppStartup::aTokenDeletedAsTheInstanceStartsIsPutBack()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("the macOS window setup needs a real window server, not offscreen");
+#else
+    const QString name = instanceSocketName(QStringLiteral("token-start"));
+    qputenv("FT_TEST_INSTANCE_NAME", name.toUtf8());
+    QLocalServer::removeServer(name);
+    auto dropName = qScopeGuard([&] {
+        qunsetenv("FT_TEST_INSTANCE_NAME");
+        QLocalServer::removeServer(name);
+    });
+    freetunnel::GuiStartup startup;
+    char arg0[] = "freetunnel";
+    char *argv[] = {arg0, nullptr};
+    QVERIFY(!freetunnel::wireGuiApplication(*qApp, 1, argv, &startup).has_value());
+    const auto stopListening = qScopeGuard([&startup] { startup.server->close(); });
+    QString token;
+    QVERIFY(freetunnel::readInstanceAuthToken(&token));
+
+    freetunnel::removeInstanceAuthToken(); // the old FreeTunnel's, just after it was written
+    QString stored;
+    QVERIFY(!freetunnel::readInstanceAuthToken(&stored));
+    // With no launch to set it off.
+    QTRY_VERIFY_WITH_TIMEOUT(freetunnel::readInstanceAuthToken(&stored) && stored == token,
+                             15000);
+#endif
+}
+
+// And whenever a launch could not show the token, however late the old
+// FreeTunnel deleted it: that launch has given up already, but the next one is
+// handed its command. Only the launch can set it off here, the later look being
+// put off past the end of the test.
+void TestAppStartup::aLaunchWithNoTokenToShowHasItPutBack()
+{
+    qputenv("FT_TEST_TOKEN_RECHECK_MS", "600000");
+    auto unsetHook = qScopeGuard([] { qunsetenv("FT_TEST_TOKEN_RECHECK_MS"); });
+    Backend backend;
+    std::unique_ptr<QLocalServer> server(freetunnel::newInstanceServer(nullptr));
+    const QString name = instanceSocketName(QStringLiteral("token-launch"));
+    QLocalServer::removeServer(name);
+    server->setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY(server->listen(name));
+    QString token;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&token));
+    freetunnel::wireInstanceServer(server.get(), backend, nullptr, token);
+
+    freetunnel::removeInstanceAuthToken();
+    QCOMPARE(freetunnel::forwardToRunningInstance({name}, QString()),
+             freetunnel::ForwardResult::Unreachable);
+    QString stored;
+    QTRY_VERIFY_WITH_TIMEOUT(freetunnel::readInstanceAuthToken(&stored) && stored == token,
+                             10000);
+
+    QSignalSpy spy(&backend, &Backend::errorOccurred);
+    sendInstanceMessage(name, freetunnel::formatInstanceMessage(
+                                      stored, QStringLiteral("freetunnel://connect")));
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+}
+
+// Replacing a running AppImage hands the name to the new build once that has
+// started (Backend::applyLinuxUpdate), and the new build writes a token of its
+// own. Quitting then deleted the stored token if it compared as ours, and the
+// new build's, written between the comparison and the deletion, went with it.
+// Once the name is handed over, quitting leaves the token alone, and a listener
+// closed for the new build does not put its token back over the new build's.
+void TestAppStartup::aQuitAfterHandingTheNameOverLeavesTheToken()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("the macOS window setup needs a real window server, not offscreen");
+#else
+    const QString name = instanceSocketName(QStringLiteral("handover"));
+    qputenv("FT_TEST_INSTANCE_NAME", name.toUtf8());
+    QLocalServer::removeServer(name);
+    auto dropName = qScopeGuard([&] {
+        qunsetenv("FT_TEST_INSTANCE_NAME");
+        QLocalServer::removeServer(name);
+    });
+    freetunnel::GuiStartup startup;
+    char arg0[] = "freetunnel";
+    char *argv[] = {arg0, nullptr};
+    QVERIFY(!freetunnel::wireGuiApplication(*qApp, 1, argv, &startup).has_value());
+    QString token;
+    QVERIFY(freetunnel::readInstanceAuthToken(&token));
+
+    // What applyLinuxUpdate does once the new build has started.
+    startup.server->close();
+    emit startup.backend->instanceNameHandedOver();
+    QVERIFY(QMetaObject::invokeMethod(qApp, "aboutToQuit"));
+    QString stored;
+    QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "quitting deleted the token");
+    QCOMPARE(stored, token);
+
+    QString newBuilds;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&newBuilds));
+    freetunnel::keepInstanceTokenStored(startup.server, token);
+    QVERIFY(freetunnel::readInstanceAuthToken(&stored));
+    QCOMPARE(stored, newBuilds);
+#endif
 }
 
 QTEST_MAIN(TestAppStartup)

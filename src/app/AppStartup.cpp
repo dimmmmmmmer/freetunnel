@@ -7,6 +7,7 @@
 #include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QTimer>
 #include <QTranslator>
@@ -296,11 +297,29 @@ static bool authorizeInstanceMessage(const QByteArray &buf, QLocalSocket *c,
     return true;
 }
 
+// A launch reads the token from the store to reach this instance, and the token
+// can go from there while this instance runs. An older FreeTunnel quitting
+// through an update compares the stored token with its own and then deletes it,
+// two calls to the store, and a token this instance wrote between them was
+// deleted with it: every later launch and link found FreeTunnel running and
+// could hand it nothing, until it was restarted. So the same token goes back,
+// a few seconds after the listener is wired and whenever a launch could not
+// show it.
+//
+// Only while this instance listens. A listener closed for a replacement
+// (Backend::applyLinuxUpdate) has given its name away, and the token stored by
+// then is the replacement's.
+void keepInstanceTokenStored(const QLocalServer *server, const QString &instanceToken)
+{
+    if (server && server->isListening())
+        restoreInstanceAuthToken(instanceToken);
+}
+
 // Collect the message without blocking: the old waitForReadyRead(200) loop froze
 // the GUI thread for up to 200 ms per chunk (64 KB worth) while a same-user peer
 // took its time. Buffer on readyRead instead and deliver from the event loop.
-void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
-                              const QString &instanceToken)
+void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &backend,
+                              QWindow *win, const QString &instanceToken)
 {
     if (!c)
         return;
@@ -321,15 +340,21 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
     idle->setInterval(kInstanceMessageIdleMs);
 
     Backend *be = &backend;
-    auto deliver = [c, buf, delivered, be, win, instanceToken]() {
+    // Held weakly: a connection is the listener's child, and one closed as the
+    // listener is destroyed delivers from inside that.
+    const QPointer<QLocalServer> listener(server);
+    auto deliver = [c, buf, delivered, be, win, instanceToken, listener]() {
         if (*delivered)
             return;
         *delivered = true;
         *buf += c->readAll();
         c->deleteLater();
         QString cmd;
-        if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd))
+        if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd)) {
+            // A launch of this user's that read no token, or one not ours.
+            keepInstanceTokenStored(listener, instanceToken);
             return;
+        }
         if (runControlCommand(*be, cmd))
             freetunnel::bringWindowForward(win);
     };
@@ -364,6 +389,21 @@ void handleInstanceConnection(QLocalSocket *c, Backend &backend, QWindow *win,
         deliver();
 }
 
+// How long after the listener is wired its token is looked for once more
+// (keepInstanceTokenStored()). An older FreeTunnel that started this one, as an
+// update does, can delete it as it quits: moments after it was written, if at
+// all. FT_TEST_TOKEN_RECHECK_MS sets it in a test build.
+static int tokenRecheckMs()
+{
+#ifdef FT_ENABLE_TEST_HOOKS
+    bool ok = false;
+    const int ms = qEnvironmentVariableIntValue("FT_TEST_TOKEN_RECHECK_MS", &ok);
+    if (ok)
+        return ms;
+#endif
+    return 5000;
+}
+
 // The server listens from early in startup and is wired here, at the end of it,
 // so a second launch in between is accepted with no one to hand it to. It waits
 // in the server's queue, its peer checked as it was accepted (newInstanceServer())
@@ -376,11 +416,14 @@ void wireInstanceServer(QLocalServer *server, Backend &backend, QWindow *win,
 {
     const auto takePending = [server, &backend, win, instanceToken]() {
         while (QLocalSocket *c = server->nextPendingConnection())
-            handleInstanceConnection(c, backend, win, instanceToken);
+            handleInstanceConnection(c, server, backend, win, instanceToken);
     };
     QObject::connect(server, &QLocalServer::newConnection, server, takePending);
     backend.setInstanceServer(server);
     takePending();
+    QTimer::singleShot(tokenRecheckMs(), server, [server, instanceToken]() {
+        keepInstanceTokenStored(server, instanceToken);
+    });
 }
 
 QObject *setupDockReopen(QGuiApplication &app, QWindow *win, bool &appQuitting)

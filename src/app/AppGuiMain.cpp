@@ -16,6 +16,8 @@
 #include <QAction>
 #endif
 
+#include <memory>
+
 #include "app/Backend.h"
 #include "app/MacWindow.h"
 #if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
@@ -129,8 +131,11 @@ static QuitFilter *wireBackendLifecycle(QGuiApplication &app, Backend &backend, 
         appQuitting = true;
     });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &backend, &Backend::prepareQuit);
+    auto handedOver = std::make_shared<bool>(false);
+    QObject::connect(&backend, &Backend::instanceNameHandedOver, &app,
+                     [handedOver]() { *handedOver = true; });
     QObject::connect(&app, &QGuiApplication::aboutToQuit, &app,
-                     [listener = QPointer<QLocalServer>(server), instanceToken]() {
+                     [listener = QPointer<QLocalServer>(server), instanceToken, handedOver]() {
         // Stop listening before the token goes. Left listening until the
         // application is destroyed, it would be found by a launch in between with
         // no token left to show, which would take this for an instance it cannot
@@ -140,7 +145,11 @@ static QuitFilter *wireBackendLifecycle(QGuiApplication &app, Backend &backend, 
             releaseInstanceName(listener);
         }
         // Ours, and only ours: the self-update path leaves a successor running.
-        removeInstanceAuthToken(instanceToken);
+        // Once the name is handed to it, not even a token that compares as ours:
+        // the successor writes its own over it, and one written between the
+        // comparison and the deletion would be deleted.
+        if (!*handedOver)
+            removeInstanceAuthToken(instanceToken);
     });
     return quitFilter;
 }

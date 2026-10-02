@@ -15,6 +15,12 @@ QString instanceAuthFilePath();
 /// Create a per-session token (0600 file) for second-instance IPC auth.
 bool writeInstanceAuthToken(QString *tokenOut);
 
+// Store @p token again where a second launch reads it, unless it is what is
+// stored there already. For a running instance whose token went from the store
+// while it ran. Returns whether the stored token is @p token now; false for an
+// empty one, which is never stored.
+bool restoreInstanceAuthToken(const QString &token);
+
 // The name of this user's single-instance socket, test override included. On
 // Linux, a path in $XDG_RUNTIME_DIR when that is this user's own directory.
 QString instanceServerName();

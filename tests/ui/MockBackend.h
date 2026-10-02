@@ -341,6 +341,7 @@ signals:
     void deepLinkDisconnectConfirmationRequired();
     void configImported(const QString &name); // a config was added via file/clipboard/deep-link
     void aboutToShutdown();
+    void instanceNameHandedOver();
 
 private:
     bool m_connected = false;
