@@ -33,6 +33,17 @@ Download a build for your platform from
 | **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
 | **Linux** (portable, most distros with glibc 2.31 or newer: Ubuntu 20.04+, Debian 11+, RHEL 9, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
 
+### Android design preview
+
+The [`android/`](android/) project provides an installable preview of FreeTunnel's
+Android interface. It includes configuration management, a TCP server latency
+check, `tt://` and TrustTunnel QR-page link import, domain and app rule editors,
+and a Quick Settings tile that opens the app.
+**This preview does not establish a VPN connection or route traffic.** The Android TrustTunnel core has
+not yet been integrated; the saved split tunnelling rules are therefore inactive.
+See [the Android README](android/README.md) for the exact feature status and
+build instructions.
+
 Builds are **unsigned** (no code-signing certificates), so the OS may warn on first launch:
 
 - **macOS**: right-click the app → **Open** (or

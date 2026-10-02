@@ -40,8 +40,8 @@ ui_*.h
 *.dll
 *.a
 *.lib
-FreeTunnel
-freetunnel
+/FreeTunnel
+/freetunnel
 
 # Logs/temp
 *.log

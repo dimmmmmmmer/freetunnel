@@ -1,0 +1,23 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = uri('https://maven.pkg.github.com/TrustTunnel/TrustTunnelClient')
+            credentials {
+                username = providers.gradleProperty('gpr.user').orElse(providers.environmentVariable('GPR_USER')).getOrElse('')
+                password = providers.gradleProperty('gpr.key').orElse(providers.environmentVariable('GPR_KEY')).getOrElse('')
+            }
+        }
+    }
+}
+rootProject.name = 'FreeTunnelAndroid'
+include ':app'
+
+def trustTunnelSource = file('../../TrustTunnelClient/platform/android/lib')
+if (trustTunnelSource.isDirectory()) {
+    include ':trusttunnel'
+    project(':trusttunnel').projectDir = trustTunnelSource
+}

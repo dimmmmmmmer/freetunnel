@@ -1,0 +1,33 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+dependencies {
+    if (rootProject.findProject(':trusttunnel') != null) {
+        implementation project(':trusttunnel')
+    } else {
+        implementation 'com.adguard.trusttunnel:trusttunnel-client-android:1.1.5-rc.6'
+    }
+    implementation 'androidx.core:core-ktx:1.16.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+android {
+    namespace 'org.freetunnel.android'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'org.freetunnel.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 3
+        versionName '0.3.0'
+    }
+    buildTypes { release { minifyEnabled false } }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions { jvmTarget = '11' }
+}
