@@ -17,6 +17,10 @@ compare link at the bottom of its release notes.
   tt:// links reach the new FreeTunnel instead of doing nothing until a
   restart.** Updating from 1.2.3 is covered too. If one launch or link still
   does nothing, open it again: the next one works.
+- **Linux: a command run from outside the desktop session reaches the
+  FreeTunnel already open instead of starting a second copy.** Since 1.2.3,
+  `freetunnel freetunnel://toggle` and other launches from cron, over ssh,
+  after `su -` or by a hotkey program started outside the session opened one.
 
 ## 1.2.3
 

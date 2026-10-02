@@ -57,6 +57,7 @@ private slots:
     void aRefusalWhileOursIsRunningIsUnreachable();
     void aBusyInstanceOfOursThatCatchesUpIsHandedTheLink();
     void theRuntimeDirectoryNameIsListenedOnAndFound();
+    void aCommandFromOutsideTheSessionFindsItsInstance();
     void aStartAsksNoPipeWhetherItIsStale();
     void cleanupTestCase();
 
@@ -820,6 +821,63 @@ void TestIntegrationSingleInstance::theRuntimeDirectoryNameIsListenedOnAndFound(
     QCOMPARE(got.payload, QStringLiteral("freetunnel://toggle"));
 #else
     QSKIP("$XDG_RUNTIME_DIR is used on Linux only");
+#endif
+}
+
+// Linux: a command run from cron, over ssh, after su - or by a hotkey daemon
+// started outside the session has no $XDG_RUNTIME_DIR. It looked for its own
+// name in /tmp only, missed the FreeTunnel the desktop had started in the
+// runtime directory, and started a second one. It is handed to that one now.
+// Only the own name is tried, as above; it has to be the session's.
+void TestIntegrationSingleInstance::aCommandFromOutsideTheSessionFindsItsInstance()
+{
+#if defined(Q_OS_LINUX)
+    const QByteArray previousName = qgetenv("FT_TEST_INSTANCE_NAME");
+    const bool hadRuntime = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    const QByteArray previousRuntime = qgetenv("XDG_RUNTIME_DIR");
+    const auto putBack = qScopeGuard([&]() {
+        qunsetenv("FT_TEST_RUN_USER_DIR");
+        if (!previousName.isEmpty())
+            qputenv("FT_TEST_INSTANCE_NAME", previousName);
+        if (hadRuntime)
+            qputenv("XDG_RUNTIME_DIR", previousRuntime);
+        else
+            qunsetenv("XDG_RUNTIME_DIR");
+    });
+    // What stands in for /run/user, with this user's directory in it.
+    QTemporaryDir runUser(QDir::tempPath() + QStringLiteral("/ftru-XXXXXX"));
+    QVERIFY(runUser.isValid());
+    const QString session = runUser.filePath(QString::number(::getuid()));
+    QVERIFY(QDir().mkdir(session));
+    QVERIFY(QFile::setPermissions(session, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                   | QFileDevice::ExeOwner));
+    qunsetenv("FT_TEST_INSTANCE_NAME");
+    qputenv("FT_TEST_RUN_USER_DIR", QFile::encodeName(runUser.path()));
+
+    // The desktop's FreeTunnel, started in the session.
+    qputenv("XDG_RUNTIME_DIR", QFile::encodeName(session));
+    QString token;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&token));
+    QLocalServer server;
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    QVERIFY2(server.listen(freetunnel::instanceServerName()), qPrintable(server.errorString()));
+    wireCollector(server);
+
+    // The command, from outside it.
+    qunsetenv("XDG_RUNTIME_DIR");
+    const QString own = freetunnel::instanceServerNames().constFirst();
+    QCOMPARE(own, server.fullServerName());
+    ForwardResult sent = ForwardResult::NoInstance;
+    std::thread sender([&]() {
+        sent = freetunnel::forwardToRunningInstance({own}, QStringLiteral("freetunnel://toggle"));
+    });
+    const Received got = readOne(server);
+    sender.join();
+    QCOMPARE(sent, ForwardResult::Forwarded);
+    QVERIFY(got.got);
+    QCOMPARE(got.payload, QStringLiteral("freetunnel://toggle"));
+#else
+    QSKIP("$XDG_RUNTIME_DIR and /run/user are used on Linux only");
 #endif
 }
 

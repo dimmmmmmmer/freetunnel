@@ -166,12 +166,11 @@ QString perUserTempName()
 }
 
 #if defined(Q_OS_LINUX)
-// $XDG_RUNTIME_DIR when it is what the spec promises — a directory of this
-// user's own that no other account may enter — and a socket path in it fits;
-// empty otherwise.
-QString privateRuntimeDir()
+// @p dir when it is what $XDG_RUNTIME_DIR promises — a directory of this user's
+// own that no other account may enter — and a socket path in it fits; empty
+// otherwise.
+QString checkedRuntimeDir(const QByteArray &dir)
 {
-    const QByteArray dir = qgetenv("XDG_RUNTIME_DIR");
     struct stat st{};
     if (!dir.startsWith('/') || ::lstat(dir.constData(), &st) != 0 || !S_ISDIR(st.st_mode)
         || st.st_uid != ::getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
@@ -181,6 +180,31 @@ QString privateRuntimeDir()
     if (socketPath >= static_cast<qsizetype>(sizeof(sockaddr_un{}.sun_path)))
         return {};
     return clean;
+}
+
+// Where systemd and elogind make this user's runtime directory: what
+// $XDG_RUNTIME_DIR names in a session of theirs. FT_TEST_RUN_USER_DIR stands in
+// for /run/user in a test build.
+QByteArray sessionRuntimeDir()
+{
+    QByteArray base = QByteArrayLiteral("/run/user");
+#ifdef FT_ENABLE_TEST_HOOKS
+    if (qEnvironmentVariableIsSet("FT_TEST_RUN_USER_DIR"))
+        base = qgetenv("FT_TEST_RUN_USER_DIR");
+#endif
+    return base + '/' + QByteArray::number(::getuid());
+}
+
+// $XDG_RUNTIME_DIR, or, where it is not set, the directory it names in this
+// user's sessions; either only when it passes the same checks. A command run
+// from cron, over ssh, after su - or by a hotkey daemon started outside the
+// session has no variable, and looked only in /tmp: it missed the FreeTunnel
+// the desktop had started and started a second one beside it.
+QString privateRuntimeDir()
+{
+    if (qEnvironmentVariableIsEmpty("XDG_RUNTIME_DIR"))
+        return checkedRuntimeDir(sessionRuntimeDir());
+    return checkedRuntimeDir(qgetenv("XDG_RUNTIME_DIR"));
 }
 #endif
 
@@ -216,10 +240,12 @@ QString testInstanceNameOverride()
 // and every link of theirs started another full copy.
 //
 // On Linux it goes in $XDG_RUNTIME_DIR, which every systemd or elogind session
-// has. A name of this user's in /tmp is still one any account can create first,
-// as a socket that turns everyone away or as a link to somewhere else; this
-// directory no one else can enter. Without it, the name in /tmp is all there is.
-// The temporary directory on macOS is the user's own already.
+// has; without the variable, in the directory it would name, /run/user/<uid>,
+// while the user has a session. A name of this user's in /tmp is still one any
+// account can create first, as a socket that turns everyone away or as a link
+// to somewhere else; this directory no one else can enter. Without it, the name
+// in /tmp is all there is. The temporary directory on macOS is the user's own
+// already.
 QString instanceServerName()
 {
     const QString override = testInstanceNameOverride();
@@ -241,9 +267,9 @@ QString instanceServerName()
 // The shared name is tried for an update installed while an older FreeTunnel
 // keeps running. That one listens on the shared name, and a launch of the new
 // build that looked only for its own would find nothing and start a second copy
-// beside it. On Linux the name in /tmp comes before it, for a FreeTunnel that
-// was started where $XDG_RUNTIME_DIR was not set, as from a shell outside the
-// desktop session.
+// beside it. On Linux the name in /tmp comes before it, for a FreeTunnel started
+// with no runtime directory to use, as 1.2.3 was wherever $XDG_RUNTIME_DIR was
+// not set, such as from a shell outside the desktop session.
 QStringList instanceServerNames()
 {
     const QString own = instanceServerName();

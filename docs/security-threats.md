@@ -29,7 +29,7 @@ report a vulnerability, is in [SECURITY.md](../SECURITY.md).
 | Remote man-in-the-middle (MITM) on update | SHA256 manifest + Ed25519 signature naming its release version; at worst a withheld update, never an unsigned or older build | [Updates](#updates-and-signatures) |
 | Malicious `tt://` link | TLV parser limits; cred store separation; every import asks, answered by a click | [Deep links](#a-web-page-adds-a-config-with-a-tt-link) |
 | Web page opens `freetunnel://disconnect` or `toggle` | Asks in the window, answered by a click once the question has been up a moment, before turning the VPN off | [Deep links](#a-web-page-turns-the-vpn-off) |
-| Other local user, at the single-instance socket | A socket name of each user's own (Linux: in `$XDG_RUNTIME_DIR`), owner-only, peer checked at both ends, so the token and commands never reach another account. Not covered: on Windows, and on Linux without `$XDG_RUNTIME_DIR`, another account taking the user's socket name first, which makes later launches start further copies | [Single instance](#single-instance-channel) |
+| Other local user, at the single-instance socket | A socket name of each user's own (Linux: in `$XDG_RUNTIME_DIR` or `/run/user/<uid>`), owner-only, peer checked at both ends, so the token and commands never reach another account. Not covered: on Windows, and on Linux without a runtime directory, another account taking the user's socket name first, which makes later launches start further copies | [Single instance](#single-instance-channel) |
 | Other local user, at the helper | Loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) | [Helper](#privileged-helper-and-its-ipc), [AppImage](#appimage-elevation-on-linux) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb | [Same user](#processes-running-as-the-same-user) |
 | TOML injection | `tomlEsc()` strips control chars | [Config files](#toml-injection) |
@@ -392,26 +392,30 @@ the running instance via a local socket (`QLocalServer`).
 
   On every system the token and the command go only to a listener that passed
   these checks, so a name another account holds never receives them.
-- **Residual risk:** on Windows, and on Linux without `$XDG_RUNTIME_DIR`,
+- **Residual risk:** on Windows, and on Linux without a runtime directory,
   another account can create the user's name first; further launches and links
   then start another copy. Per system:
 
 | System | Where the socket is | Can another account take the user's name first? | If it does |
 | --- | --- | --- | --- |
 | Linux with `$XDG_RUNTIME_DIR` | `$XDG_RUNTIME_DIR` (`/run/user/<uid>`), a 0700 directory of the user's own | No, nor make a link at it | — |
-| Linux without it | `/tmp/FreeTunnelInstance-<uid>`, in the shared, sticky `/tmp` | Yes | The launch runs without the single-instance listener; every further launch and link starts another copy |
+| Linux without the variable, as from cron or ssh | `/run/user/<uid>` itself, when it passes the same checks (lstat, owner, 0700) | No, nor make a link at it | — |
+| Linux with no runtime directory | `/tmp/FreeTunnelInstance-<uid>`, in the shared, sticky `/tmp` | Yes | The launch runs without the single-instance listener; every further launch and link starts another copy |
 | macOS | The user's own temporary directory (`$TMPDIR`) | No, the shared name included | — |
 | Windows | One pipe namespace for every session | Yes: the user's SID in the name is no secret | FreeTunnel still starts; further launches and links can start another copy |
 
 #### Linux
 
 - Every systemd or elogind session has `$XDG_RUNTIME_DIR`.
-- A launch also tries `/tmp/FreeTunnelInstance-<uid>` (an instance started
-  without `$XDG_RUNTIME_DIR`) and the shared `/tmp/FreeTunnelInstance`. Another
+- A launch without the variable, such as a command run from cron or over ssh,
+  uses `/run/user/<uid>` itself when that passes the same checks (lstat, owner,
+  0700).
+- A launch also tries `/tmp/FreeTunnelInstance-<uid>` (an instance started with
+  no runtime directory) and the shared `/tmp/FreeTunnelInstance`. Another
   account can hold those, but a launch never gives way to a listener there that
   lets no one in, and one that answers fails the peer check, so all it costs is
   the time to find that out.
-- Without `$XDG_RUNTIME_DIR`, the user's own name is the one in `/tmp`, and
+- Without a runtime directory, the user's own name is the one in `/tmp`, and
   another account can create it first. The launch still starts, but cannot take
   the name (the sticky `/tmp` keeps it from renaming its socket over another
   account's file), so it runs without the single-instance listener. While the
@@ -434,8 +438,8 @@ the running instance via a local socket (`QLocalServer`).
   busy for the five seconds Qt waits for it, is no instance of ours, since
   FreeTunnel's listener keeps fifty instances of its pipe waiting for callers.
 - While the other account holds the pipe, FreeTunnel's own listener may not get
-  the name, or not every connection made to it. So, as on Linux without
-  `$XDG_RUNTIME_DIR`, further launches and links can start another copy, after
+  the name, or not every connection made to it. So, as on Linux without a
+  runtime directory, further launches and links can start another copy, after
   waiting out those five seconds when the pipe is kept busy.
 - A starting FreeTunnel does not wait on the pipe a second time to see whether
   it is stale, since a pipe goes away with its last handle.

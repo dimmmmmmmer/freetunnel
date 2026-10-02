@@ -22,7 +22,8 @@ bool writeInstanceAuthToken(QString *tokenOut);
 bool restoreInstanceAuthToken(const QString &token);
 
 // The name of this user's single-instance socket, test override included. On
-// Linux, a path in $XDG_RUNTIME_DIR when that is this user's own directory.
+// Linux, a path in $XDG_RUNTIME_DIR when that is this user's own directory, or
+// without the variable in /run/user/<uid> when that is.
 QString instanceServerName();
 
 // The names a running instance may be listening on, newest first: this user's
