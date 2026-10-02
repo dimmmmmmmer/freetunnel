@@ -1058,8 +1058,9 @@ jobs:
       # starting FreeTunnel itself, on a runner that is thrown away afterwards:
       # the taskkill exit codes the close loop relies on, a silent install into a
       # folder that is not ours, one into a new folder over an inbound firewall
-      # rule left by an earlier version, and a silent uninstall. After the upload,
-      # so a failure here still leaves the installer to download and look at.
+      # rule left by an earlier version, a silent uninstall, and an install over a
+      # FreeTunnel.exe that is slow to exit once killed. After the upload, so a
+      # failure here still leaves the installer to download and look at.
       - name: Installer smoke test (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -1111,6 +1112,155 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "silent uninstall exited $($p.ExitCode)" }
           if (Test-Path (Join-Path $app 'FreeTunnel.exe')) { throw "uninstall left FreeTunnel.exe behind" }
           if (Get-NetFirewallRule -DisplayName 'FreeTunnel' -ErrorAction SilentlyContinue) { throw "uninstall left a firewall rule behind" }
+
+          # A FreeTunnel.exe still exiting after the forced kill is waited for: the
+          # install writes nothing until it is gone. No ordinary process outlives
+          # taskkill /F for long enough to tell, so the stand-in, a copy of ping
+          # named FreeTunnel.exe, runs under the small debugger below, which holds
+          # its exit back for 2.5 s: past the one second the installer used to
+          # wait, well inside the ~5 s it waits now. Having no window, the stand-in
+          # also takes the close loop through its ~10 s of asking to the forced
+          # kill. The debugger dies with this shell, and the stand-in with it.
+          Add-Type -IgnoreWarnings -TypeDefinition @'
+          using System;
+          using System.Diagnostics;
+          using System.IO;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          using System.Threading;
+
+          public sealed class ExitHold
+          {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              public struct StartupInfo
+              {
+                  public int cb;
+                  public string lpReserved, lpDesktop, lpTitle;
+                  public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+                  public short wShowWindow, cbReserved2;
+                  public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+              }
+
+              [StructLayout(LayoutKind.Sequential)]
+              public struct ProcessInformation
+              {
+                  public IntPtr hProcess, hThread;
+                  public int dwProcessId, dwThreadId;
+              }
+
+              [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+              static extern bool CreateProcess(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit,
+                  uint flags, IntPtr env, string dir, ref StartupInfo si, out ProcessInformation pi);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              static extern bool WaitForDebugEvent(IntPtr debugEvent, uint ms);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              static extern bool ContinueDebugEvent(int pid, int tid, uint status);
+              [DllImport("kernel32.dll")]
+              static extern bool CloseHandle(IntPtr handle);
+
+              const uint DebugOnlyThisProcess = 0x2, CreateNoWindow = 0x08000000, Infinite = 0xFFFFFFFF;
+              const uint DbgContinue = 0x00010002, DbgExceptionNotHandled = 0x80010001;
+              const int ExceptionEvent = 1, CreateProcessEvent = 3, ExitProcessEvent = 5, LoadDllEvent = 6;
+              const int StatusBreakpoint = unchecked((int)0x80000003);
+
+              public volatile bool Exiting;      // the stand-in has begun to exit
+              public volatile string Error;
+              public int TaskkillWhileHeld = -1; // what the installer's check saw meanwhile
+              public bool WrittenWhileHeld;      // the install folder appeared meanwhile
+              readonly Thread thread;
+              readonly ManualResetEventSlim started = new ManualResetEventSlim();
+
+              public ExitHold(string exe, string watched, int holdMs)
+              {
+                  // A debuggee's events go to the thread that started it, so that
+                  // thread starts it and does nothing else.
+                  thread = new Thread(() => Run(exe, watched, holdMs)) { IsBackground = true };
+                  thread.Start();
+                  started.Wait();
+                  if (Error != null) throw new InvalidOperationException(Error);
+              }
+
+              public bool Join(int ms) { return thread.Join(ms); }
+
+              void Run(string exe, string watched, int holdMs)
+              {
+                  var si = new StartupInfo();
+                  si.cb = Marshal.SizeOf(typeof(StartupInfo));
+                  ProcessInformation pi;
+                  var cmd = new StringBuilder("\"" + exe + "\" -n 600 127.0.0.1");
+                  bool ok = CreateProcess(exe, cmd, IntPtr.Zero, IntPtr.Zero, false,
+                      DebugOnlyThisProcess | CreateNoWindow, IntPtr.Zero, null, ref si, out pi);
+                  if (!ok) Error = "could not start the stand-in: error " + Marshal.GetLastWin32Error();
+                  started.Set();
+                  if (!ok) return;
+                  CloseHandle(pi.hThread);
+                  CloseHandle(pi.hProcess);
+                  // The union in DEBUG_EVENT starts after three DWORDs, aligned for a pointer.
+                  int union = IntPtr.Size == 8 ? 16 : 12;
+                  IntPtr ev = Marshal.AllocHGlobal(1024);
+                  try {
+                      while (WaitForDebugEvent(ev, Infinite)) {
+                          int code = Marshal.ReadInt32(ev, 0), pid = Marshal.ReadInt32(ev, 4), tid = Marshal.ReadInt32(ev, 8);
+                          uint status = DbgContinue;
+                          if (code == CreateProcessEvent || code == LoadDllEvent) {
+                              IntPtr file = Marshal.ReadIntPtr(ev, union);
+                              if (file != IntPtr.Zero) CloseHandle(file);
+                          } else if (code == ExceptionEvent && Marshal.ReadInt32(ev, union) != StatusBreakpoint) {
+                              status = DbgExceptionNotHandled;
+                          } else if (code == ExitProcessEvent) {
+                              Exiting = true;
+                              Hold(watched, holdMs);
+                              ContinueDebugEvent(pid, tid, DbgContinue);
+                              return;
+                          }
+                          ContinueDebugEvent(pid, tid, status);
+                      }
+                      Error = "WaitForDebugEvent failed: error " + Marshal.GetLastWin32Error();
+                  } finally {
+                      Marshal.FreeHGlobal(ev);
+                  }
+              }
+
+              // The exiting stand-in stays in the process list until it is let go.
+              void Hold(string watched, int holdMs)
+              {
+                  var clock = Stopwatch.StartNew();
+                  var psi = new ProcessStartInfo("taskkill.exe", "/IM FreeTunnel.exe") {
+                      UseShellExecute = false, CreateNoWindow = true,
+                      RedirectStandardOutput = true, RedirectStandardError = true };
+                  using (var taskkill = Process.Start(psi)) {
+                      taskkill.StandardOutput.ReadToEnd();
+                      taskkill.StandardError.ReadToEnd();
+                      taskkill.WaitForExit();
+                      TaskkillWhileHeld = taskkill.ExitCode;
+                  }
+                  while (clock.ElapsedMilliseconds < holdMs && !Directory.Exists(watched)) Thread.Sleep(100);
+                  WrittenWhileHeld = Directory.Exists(watched);
+              }
+          }
+          '@
+          $standIn = Join-Path $root 'stand-in'
+          $slow = Join-Path $root 'slow'
+          $standInExe = Join-Path $standIn 'FreeTunnel.exe'
+          New-Item -ItemType Directory -Force -Path $standIn | Out-Null
+          Copy-Item (Join-Path $env:SystemRoot 'System32\PING.EXE') $standInExe
+          # Windows looks for an exe's messages under the exe's own name.
+          Get-ChildItem (Join-Path $env:SystemRoot 'System32\*\PING.EXE.mui') -ErrorAction SilentlyContinue | ForEach-Object {
+              $lang = New-Item -ItemType Directory -Force -Path (Join-Path $standIn $_.Directory.Name)
+              Copy-Item $_.FullName (Join-Path $lang.FullName 'FreeTunnel.exe.mui')
+          }
+          $hold = [ExitHold]::new($standInExe, $slow, 2500)
+          Start-Sleep -Seconds 2
+          if ($hold.Exiting) { throw "the stand-in FreeTunnel.exe exited by itself" }
+          $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$slow" -PassThru
+          $null = $p.Handle   # or ExitCode reads empty once it has exited
+          if (-not $p.WaitForExit(180000)) { throw "silent install over a FreeTunnel.exe slow to exit did not finish in 3 minutes" }
+          if (-not $hold.Join(30000)) { throw "silent install finished without closing the stand-in FreeTunnel.exe" }
+          if ($hold.Error) { throw $hold.Error }
+          if ($hold.TaskkillWhileHeld -eq 128) { throw "taskkill reported no FreeTunnel.exe while one was still exiting, so this check cannot tell anything" }
+          if ($hold.WrittenWhileHeld) { throw "silent install went on while FreeTunnel.exe was still exiting" }
+          if ($p.ExitCode -ne 0) { throw "silent install over a FreeTunnel.exe slow to exit exited $($p.ExitCode)" }
+          if (-not (Test-Path (Join-Path $slow 'FreeTunnel.exe'))) { throw "silent install over a FreeTunnel.exe slow to exit left no FreeTunnel.exe" }
           # Not taskkill's last exit code, which the runner would otherwise report.
           exit 0
 
