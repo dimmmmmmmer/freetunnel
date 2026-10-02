@@ -29,6 +29,7 @@ private slots:
     void aRunningInstancePutsItsTokenBack();
     void theSocketNameIsPerUser();
     void linuxPutsTheNameInTheRuntimeDirectory();
+    void linuxWithoutTheVariableUsesTheSessionsDirectory();
 };
 
 // XDG_RUNTIME_DIR as the test found it, put back by the guard this returns.
@@ -42,6 +43,14 @@ static auto keepRuntimeDir()
         else
             qunsetenv("XDG_RUNTIME_DIR");
     });
+}
+
+// What stands in for /run/user, where a launch without XDG_RUNTIME_DIR looks for
+// this user's runtime directory; unset again by the guard this returns.
+static auto runUserDirAt(const QString &dir)
+{
+    qputenv("FT_TEST_RUN_USER_DIR", QFile::encodeName(dir));
+    return qScopeGuard([]() { qunsetenv("FT_TEST_RUN_USER_DIR"); });
 }
 
 void TestInstanceControl::roundTripMessage()
@@ -322,6 +331,10 @@ void TestInstanceControl::theSocketNameIsPerUser()
     qunsetenv("FT_TEST_INSTANCE_NAME");
     const auto putBack = keepRuntimeDir();
     qunsetenv("XDG_RUNTIME_DIR");
+    // Nor a runtime directory of a session to use in its place.
+    const QTemporaryDir noSessions;
+    QVERIFY(noSessions.isValid());
+    const auto noRunUser = runUserDirAt(noSessions.filePath(QStringLiteral("missing")));
     const QString shared = QStringLiteral("FreeTunnelInstance");
     const QString own = freetunnel::instanceServerName();
 #if defined(Q_OS_WIN)
@@ -393,6 +406,61 @@ void TestInstanceControl::linuxPutsTheNameInTheRuntimeDirectory()
     QCOMPARE(nameWith(deep), inTemp);
 #else
     QSKIP("$XDG_RUNTIME_DIR is used on Linux only");
+#endif
+}
+
+// A command run from cron, over ssh, after su - or by a hotkey daemon started
+// outside the session has no $XDG_RUNTIME_DIR. It looked only in /tmp, missed
+// the FreeTunnel the desktop had started in the runtime directory, and started
+// a second one beside it; in 1.2.2 both used /tmp. Without the variable the
+// directory it names in a session, /run/user/<uid>, is used, by a launch and by
+// a FreeTunnel started that way alike, and only when it passes the checks the
+// variable's directory does.
+void TestInstanceControl::linuxWithoutTheVariableUsesTheSessionsDirectory()
+{
+#if defined(Q_OS_LINUX)
+    qunsetenv("FT_TEST_INSTANCE_NAME");
+    const auto putBack = keepRuntimeDir();
+    const QString shared = QStringLiteral("FreeTunnelInstance");
+    const QString inTemp = shared + QLatin1Char('-') + QString::number(::getuid());
+    QTemporaryDir runUser(QDir::tempPath() + QStringLiteral("/ftru-XXXXXX"));
+    QVERIFY(runUser.isValid());
+    const auto standIn = runUserDirAt(runUser.path());
+    const QString session = runUser.filePath(QString::number(::getuid()));
+    QVERIFY(QDir().mkdir(session));
+    const auto privateTo = [](const QString &dir, QFileDevice::Permissions more) {
+        return QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                  | QFileDevice::ExeOwner | more);
+    };
+    QVERIFY(privateTo(session, {}));
+    const QString inSession = session + QStringLiteral("/FreeTunnelInstance");
+
+    qunsetenv("XDG_RUNTIME_DIR");
+    QCOMPARE(freetunnel::instanceServerName(), inSession);
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({inSession, inTemp, shared}));
+    qputenv("XDG_RUNTIME_DIR", QByteArray()); // set, and empty, is no directory either
+    QCOMPARE(freetunnel::instanceServerName(), inSession);
+    // The name a launch from the session gets, where the variable names it.
+    qputenv("XDG_RUNTIME_DIR", QFile::encodeName(session));
+    QCOMPARE(freetunnel::instanceServerName(), inSession);
+    // The variable is not second-guessed: one that is set and fails the checks
+    // leaves the name in /tmp, as before.
+    qputenv("XDG_RUNTIME_DIR", "relative/dir");
+    QCOMPARE(freetunnel::instanceServerName(), inTemp);
+    qunsetenv("XDG_RUNTIME_DIR");
+
+    // The same checks as for the variable's directory.
+    QVERIFY(privateTo(session, QFileDevice::ReadGroup | QFileDevice::ExeGroup));
+    QCOMPARE(freetunnel::instanceServerName(), inTemp);
+    QCOMPARE(freetunnel::instanceServerNames(), QStringList({inTemp, shared}));
+    QVERIFY(privateTo(session, {}));
+    QVERIFY(QDir().rename(session, session + QStringLiteral("-real")));
+    QVERIFY(QFile::link(session + QStringLiteral("-real"), session));
+    QCOMPARE(freetunnel::instanceServerName(), inTemp); // a link to one of ours
+    QVERIFY(QFile::remove(session));
+    QCOMPARE(freetunnel::instanceServerName(), inTemp); // none at all
+#else
+    QSKIP("$XDG_RUNTIME_DIR and /run/user are used on Linux only");
 #endif
 }
 
