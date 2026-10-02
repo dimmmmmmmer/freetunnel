@@ -5,7 +5,7 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
-## Unreleased
+## 1.2.3
 
 ### Security
 
@@ -29,8 +29,9 @@ compare link at the bottom of its release notes.
   it again once you have updated. The menu entry made from an older AppImage
   hands links over as commands, and they are not asked about.
 
-  The question a tt:// link asks before it adds a server is answered the same
-  way now. A Return already held down when it came up could answer Import, and
+  The question asked before a server is added, from a tt:// link or from ⌘V or
+  Ctrl+V on the Configs page, is answered the same way now: with a click, not
+  Return. A Return already held down when it came up could answer Import, and
   add a server the page had chosen.
 - **A program running under your account could have FreeTunnel delete any file
   with administrator rights.** FreeTunnel's privileged part is handed a small
@@ -42,26 +43,26 @@ compare link at the bottom of its release notes.
   deletes nothing; FreeTunnel removes its own file itself. This applied on
   Windows, macOS and Linux. A FreeTunnel administrator prompt you did not
   expect, when you had not just connected, is one to refuse.
-- **A config file can no longer have FreeTunnel's privileged part act on files,
-  interfaces or kill-switch ports the file names.** FreeTunnel keeps the
-  settings of an imported config that it has no editor for, so that saving the
-  file loses nothing, and it passed them all to the VPN core, which runs with
+- **A config file can no longer have FreeTunnel's privileged part act on files
+  or kill-switch ports the file names.** FreeTunnel keeps the settings of an
+  imported config that it has no editor for, so that saving the file loses
+  nothing, and it passed them all to the VPN core, which runs with
   administrator rights. A few of them do more than shape the tunnel: a folder in
-  which the core deleted and wrote files, ports that Windows let through the
-  kill switch, the name of the tunnel interface, and on Linux an existing
-  interface or network namespace to use. A config from someone you do not
-  trust, or one that another program on your computer changed, could use them.
-  These settings are now ignored; routes, DNS, the server and its certificate
-  are read as before. If an imported config listed ports for the kill switch to
-  let through, they are blocked now like everything else. On Windows, where
-  such ports work, you can have them back, for example to reach this computer
-  over Remote Desktop while the kill switch is on: turn on "Let the VPN config
-  open ports" in Settings → Security. That setting is for every config at once:
+  which the core deleted and wrote files, and ports that Windows let through the
+  kill switch. A config from someone you do not trust, or one that another
+  program on your computer changed, could use them. These settings are now
+  ignored, as are those that choose the tunnel's network interface, which
+  FreeTunnel sets up itself; routes, DNS, the server and its certificate are
+  read as before. If an imported config listed ports for the kill switch to let
+  through, they are blocked now like everything else. On Windows, where such
+  ports work, you can have them back, for example to reach this computer over
+  Remote Desktop while the kill switch is on: turn on "Let the VPN config open
+  ports" in Settings → Security. That setting is for every config at once:
   while it is on, each config you connect with, one you import later included,
   decides again which ports bypass the kill switch, so turn it on only if you
-  trust every config you use. If a config named its tunnel interface, the
-  interface gets the default name instead, so a firewall rule or script that
-  looks for the old name needs the new one.
+  trust every config you use. The tunnel interface now always gets its default
+  name, so a firewall rule or script that looks for a name a config gave it
+  needs the default one.
 - **Linux: with the AppImage, another person with an account on your computer
   could have a program of theirs run with administrator rights.** To start its
   privileged part, the AppImage unpacks itself as administrator into a temporary
@@ -70,7 +71,8 @@ compare link at the bottom of its release notes.
   connected. The AppImage now unpacks into a new folder that only the
   administrator can write to, every time, and removes it afterwards. The .deb
   was not affected. If other people have accounts on your computer and you use
-  the AppImage, update.
+  the AppImage, update. The administrator prompt now names /bin/sh: that is
+  FreeTunnel unpacking its privileged part into that private folder.
 
   That covers an AppImage started the usual way. One started with
   --appimage-extract-and-run, as where FUSE is missing, is first unpacked by
@@ -132,10 +134,14 @@ compare link at the bottom of its release notes.
   Configs page, went through that VPN. They now use the network adapter that
   carries Windows' default route, as TrustTunnel's own clients do, so a server
   that can only be reached through the other VPN can't be reached from FreeTunnel.
+  The same goes for a computer with Hyper-V or WSL, where the pings could leave
+  through one of their internal adapters while connected and show every server
+  as unreachable.
 - **Linux: FreeTunnel runs on older distributions.** It was built on Ubuntu
-  22.04 and needed its C library (glibc 2.35), so neither the .deb nor the
-  AppImage started on Ubuntu 20.04, Debian 11 or RHEL 9 and its rebuilds. It is
-  built on Ubuntu 20.04 now and needs glibc 2.31.
+  22.04 and needed its C library (glibc 2.35), so the .deb did not start on
+  Ubuntu 20.04 or Debian 11, nor the AppImage there or on RHEL 9 and its
+  rebuilds. It is built on Ubuntu 20.04 now and needs glibc 2.31. After
+  installing the new .deb, quit FreeTunnel and open it again.
 - **The AppImage is called freetunnel-x86_64.AppImage**, without "linux", as
   AppImages are for Linux anyway. A saved link to freetunnel-linux-x86_64.AppImage
   no longer finds the new version; FreeTunnel's own updater still does.
@@ -144,10 +150,10 @@ compare link at the bottom of its release notes.
 
 - **Disconnecting, switching servers or turning logging off no longer puts the
   connection at risk.** The VPN core closed its log file when a session ended
-  but went on writing its messages to it, inside the privileged helper that holds
-  the tunnel and the kill switch. Whatever it logged after a disconnect or a
+  but went on writing its messages to it, inside FreeTunnel's privileged part,
+  which holds the tunnel and the kill switch. Whatever it logged after a disconnect or a
   server switch went there, and so did everything in the next session if you
-  had turned logging off in between. That could crash the helper and drop the
+  had turned logging off in between. That could crash that part and drop the
   connection. FreeTunnel now writes the core's messages itself, to a file it
   keeps open for as long as logging is on. With logging off they are now
   written nowhere; on macOS they used to go to a temporary file even then.
@@ -274,21 +280,12 @@ compare link at the bottom of its release notes.
   again from the original file.
 - **A link's client random reaches the VPN core in a form it can use.** A link
   can give the client random with a mask, as prefix/mask. FreeTunnel wrote the
-  mask under a key of its own that the VPN core never reads, so the connection
-  went out without it. It now goes to the core whole, and configs imported that
-  way before are read back whole, without needing to be opened.
-
-  The core can only use whole bytes of hex, at most 32 of them, before and after
-  the slash, and FreeTunnel took whatever a link held: a value the core could
-  not use went into the config, the connection quietly went without it, and the
-  config editor could refuse to save the config until the value was changed.
-  Such a link is now refused, with a message saying its client random is
-  malformed. A mask with nothing before the slash is dropped on import, as an
-  empty one after it already was. The config editor accepts a mask after a slash
-  and checks by the same rule, so it no longer saves an odd number of digits, or
-  more than 64. A config's share link passes its client random on as the
-  connection uses it: where the mask is one the core cannot use, the link gives
-  the part before the slash alone, as the connection does.
+  mask where the VPN core never reads it, so the connection went out without
+  it. It now goes to the core whole, and configs imported that way before are
+  read back whole, without needing to be opened. A link whose client random the
+  core cannot use (whole bytes of hex, at most 32 on each side of the slash) is
+  now refused with a message saying so, instead of being imported and
+  connecting without it, and the config editor checks by the same rule.
 - **A config that could not be saved still connects as it did.** When saving an
   edited config failed at the last step, with "Could not write config", its new
   password had already been stored, while the file on disk was still the old
@@ -330,7 +327,7 @@ compare link at the bottom of its release notes.
   install secret-tool, which FreeTunnel does not need. When a keyring is there
   and still refused the password, as when its unlock prompt was closed, the
   message now says to unlock it and try again, rather than to install one.
-- **macOS and Windows: a password that could not be saved is explained in your
+- **Windows and macOS: a password that could not be saved is explained in your
   system's terms.** When the Keychain or Windows Credential Manager refused a VPN
   password, FreeTunnel told you to install gnome-keyring or KWallet, which are
   Linux programs. It now names the store that refused. On macOS it says to allow
@@ -414,12 +411,6 @@ compare link at the bottom of its release notes.
     from the menu, or a tt:// link, could miss the new FreeTunnel and start a
     second one beside it. The new one is now the one they reach, from the update
     to this version on.
-- **Windows: the server pings on the Configs page work while connected on a
-  computer with Hyper-V or WSL.** While the VPN was up they went out of the
-  first network adapter Windows listed, which on such a computer can be one of
-  their internal adapters, with no way out, so the servers showed as
-  unreachable. They now go out of the adapter that carries Windows' default
-  route, the one the VPN itself uses.
 - **The Split page's notice about "Through VPN" with no rules follows a deleted
   config.** Deleting the config in use hands over to another one, which may use
   another profile, but the notice went on describing the deleted config until
@@ -452,7 +443,9 @@ compare link at the bottom of its release notes.
   AppImage started normally, so where /tmp does not allow running programs,
   pointing TMPDIR elsewhere no longer gets around that: use the .deb there. The
   .deb is also the one for a computer other people have accounts on (see
-  Security).
+  Security). Version 1.2.2 did not recognise such a start yet, so for this one
+  update it offers the .deb: download freetunnel-x86_64.AppImage from the
+  release page instead.
 - **Linux: FreeTunnel's memory no longer grows for as long as the VPN's
   privileged part runs.** Everything that part printed was kept in FreeTunnel's
   memory until it quit, and nothing ever read it. With logging off in Settings,
