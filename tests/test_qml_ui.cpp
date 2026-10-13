@@ -117,6 +117,8 @@ private slots:
     void aToastStaysOffTheEditorsButtons();
     void clearEmptiesTheLogEvenWithASelection();
     void aHeldLogCatchesUpWhenTheSelectionGoes();
+    void aShorterLogIsStillDrawn_data();
+    void aShorterLogIsStillDrawn();
     void theLogsPageSaysWhenLoggingIsOff();
     void theUpdateLineDoesWhatItOffers();
     void restoringDefaultRoutesAsksFirst();
@@ -2734,6 +2736,110 @@ void TestQmlUi::aHeldLogCatchesUpWhenTheSelectionGoes()
     QMetaObject::invokeMethod(view, "deselect");
     QTRY_VERIFY(shown(view).contains(QStringLiteral("arrived while selected")));
     m_backend.clearLogs();
+    delete root;
+}
+
+namespace {
+
+// How many pixel rows of an area have something drawn on them, in a frame
+// rendered the way the window renders one. Anything visibly off the background
+// counts, so the box glyphs Windows CI falls back to count as well as real ones.
+// Lines of text leave the gaps between them bare: about three rows in five are
+// drawn on, and none at all when the log is blank.
+int inkedRows(QQuickWindow &window, QQuickItem *area, int *rows)
+{
+    const QImage frame = window.grabWindow();
+    const qreal dpr = frame.devicePixelRatio();
+    const QRect r = QRectF(area->mapToScene(QPointF(0, 0)) * dpr, area->size() * dpr).toRect()
+                            .intersected(frame.rect());
+    // The log's own background, beside the text but inside its box.
+    const QColor background = frame.pixelColor(r.left() - int(6 * dpr), r.top() + r.height() / 2);
+    const auto off = [&background](const QColor &c) {
+        return qAbs(c.red() - background.red()) > 48 || qAbs(c.green() - background.green()) > 48
+               || qAbs(c.blue() - background.blue()) > 48;
+    };
+    int inked = 0;
+    for (int y = r.top(); y <= r.bottom(); ++y) {
+        for (int x = r.left(); x <= r.right(); ++x) {
+            if (off(frame.pixelColor(x, y))) {
+                ++inked;
+                break;
+            }
+        }
+    }
+    *rows = r.height();
+    return inked;
+}
+
+void appendLogLines(MockBackend &backend, int count, int length, const QString &tag)
+{
+    for (int i = 0; i < count; ++i) {
+        QString line = QStringLiteral("%1 %2 ").arg(tag).arg(i);
+        while (line.size() < length)
+            line += QStringLiteral("tunnel event ok ");
+        backend.appendLog(line.left(length));
+    }
+}
+
+} // namespace
+
+// The log went blank after FreeTunnel came back from the tray, or after a burst
+// of short lines, and stayed blank until it was scrolled or the page reopened.
+// Past 10,000 characters Qt's TextEdit builds only the lines in view, and a new
+// text that ended above the first of them left it building none (QTBUG-145449).
+// Here the log's 500 lines are long ones, drawn at its end, first as the page
+// opens and again after a refresh; then 500 short ones replace them, a text a
+// third as long. The page's first text and a refresh are both covered that way:
+// either one left to Qt's culling blanks the short log.
+void TestQmlUi::aShorterLogIsStillDrawn_data()
+{
+    QTest::addColumn<bool>("inTheTray");
+    QTest::newRow("while in view") << false;
+    QTest::newRow("while in the tray") << true;
+}
+
+void TestQmlUi::aShorterLogIsStillDrawn()
+{
+    QFETCH(bool, inTheTray);
+    m_backend.clearLogs();
+    const auto restore = qScopeGuard([this] { m_backend.clearLogs(); });
+    appendLogLines(m_backend, 500, 200, QStringLiteral("first"));
+    QObject *root = loadPage("pages/LogsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *view = root->findChild<QQuickItem *>(QStringLiteral("logView"));
+    auto *flick = root->findChild<QQuickItem *>(QStringLiteral("logFlick"));
+    QVERIFY(view && flick);
+    const auto atTheEnd = [flick] {
+        return qAbs(flick->property("contentY").toReal()
+                    - (flick->property("contentHeight").toReal() - flick->height()))
+               < 1;
+    };
+    int rows = 0;
+    for (const QString &tag : {QStringLiteral("first"), QStringLiteral("second")}) {
+        if (tag != QLatin1String("first"))
+            appendLogLines(m_backend, 500, 200, tag);
+        QTRY_VERIFY(shown(view).contains(tag + QStringLiteral(" 499 ")));
+        QTRY_VERIFY(flick->property("contentY").toReal() > 0 && atTheEnd());
+        const int inked = inkedRows(window, flick, &rows);
+        QVERIFY2(inked > rows / 3, qPrintable(QStringLiteral("the %1 long log: %2 of %3 rows drawn")
+                                                      .arg(tag).arg(inked).arg(rows)));
+    }
+    const int longLength = shown(view).size();
+
+    if (inTheTray)
+        window.hide();
+    appendLogLines(m_backend, 500, 60, QStringLiteral("short"));
+    QTRY_VERIFY(shown(view).contains(QStringLiteral("short 499 ")));
+    QVERIFY2(shown(view).size() < longLength / 2, "the new log has to be much the shorter");
+    QTRY_VERIFY(atTheEnd());
+    if (inTheTray) {
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+    }
+    const int inked = inkedRows(window, flick, &rows);
+    QVERIFY2(inked > rows / 3, qPrintable(QStringLiteral("the short log: %1 of %2 rows drawn").arg(inked).arg(rows)));
     delete root;
 }
 

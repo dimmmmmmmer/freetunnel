@@ -725,8 +725,9 @@ add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})
 target_include_directories(test_integration_backend_vpn PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+# Quick for Backend::renderWholeText, which reaches into the Logs page's TextEdit.
 target_link_libraries(test_integration_backend_vpn PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps)
 freetunnel_link_linux_secrets(test_integration_backend_vpn)
 if(WIN32)
     target_link_libraries(test_integration_backend_vpn PRIVATE shell32 advapi32)

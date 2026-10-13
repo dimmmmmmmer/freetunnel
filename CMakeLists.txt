@@ -98,6 +98,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendUpdates.cpp
     src/app/BackendSettings.cpp
     src/app/BackendLogs.cpp
+    include/app/WholeTextRendering.h
     src/app/BackendConfig.cpp
     src/app/BackendConfigCreate.cpp
     src/app/BackendConfigImport.cpp

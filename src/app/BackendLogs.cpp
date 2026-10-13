@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/Backend.h"
 
+#include "app/WholeTextRendering.h"
 #include "core/AppUiUtils.h"
 
 #include <QClipboard>
@@ -112,6 +113,10 @@ void Backend::loadLogTail() {
         else
             m_logModel.append(QString(), QStringLiteral("CORE"), lines.at(i));
     }
+}
+
+void Backend::renderWholeText(QObject *textEdit) const {
+    freetunnel::renderWholeText(textEdit);
 }
 
 void Backend::copyToClipboard(const QString &text) const {

@@ -21,6 +21,9 @@ compare link at the bottom of its release notes.
   FreeTunnel already open instead of starting a second copy.** Since 1.2.3,
   `freetunnel freetunnel://toggle` and other launches from cron, over ssh,
   after `su -` or by a hotkey program started outside the session opened one.
+- **The Logs page no longer goes blank after the window comes back from the
+  tray or many lines arrive at once.** Before, the lines came back only once
+  the log was scrolled or another page was opened.
 
 ## 1.2.3
 

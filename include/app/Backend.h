@@ -180,6 +180,9 @@ public:
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE void openLogFolder();
     Q_INVOKABLE QString logText() const; // whole log as plain text (for Copy)
+    // The Logs page calls it after each text it gives its TextEdit, which can go
+    // blank otherwise (see WholeTextRendering.h).
+    Q_INVOKABLE void renderWholeText(QObject *textEdit) const;
     Q_INVOKABLE void copyToClipboard(const QString &text) const;
     // For the certificate field: the file's text, or empty and errorOccurred()
     // saying why the file was not read.

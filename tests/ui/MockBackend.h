@@ -10,6 +10,7 @@
 #include <QVariantMap>
 
 #include "app/LogModel.h"
+#include "app/WholeTextRendering.h"
 
 // Lightweight Backend stand-in for headless QML/UI tests (no VPN core).
 class MockBackend : public QObject {
@@ -237,6 +238,8 @@ public:
     // Read once, when a page loads: a test that needs a path of its own sets it first.
     QString logPathOverride;
     Q_INVOKABLE QString logText() const { return m_logModel.toPlainText(); }
+    // The real thing, not a stand-in: what it does is what the Logs page tests check.
+    Q_INVOKABLE void renderWholeText(QObject *textEdit) const { freetunnel::renderWholeText(textEdit); }
     Q_INVOKABLE void copyToClipboard(const QString &) const {}
     // What a certificate pick reads. Empty by default, which is what the real one
     // returns for a file it refuses.

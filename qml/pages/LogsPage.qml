@@ -23,7 +23,7 @@ Item {
                             backend.clearLogs()
                             // Now, not through the refresh, which holds off while text
                             // is selected: Clear left the old log on screen.
-                            logView.text = backend.logText()
+                            logView.setLog(backend.logText())
                         } }
             Text { id: cpyTxt; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                    text: qsTr("Copy"); font.pixelSize: 13
@@ -62,6 +62,7 @@ Item {
             // thrash the layout. Trade-off: no per-level colour.
             Flickable {
                 id: logFlick
+                objectName: "logFlick"
                 anchors.fill: parent; anchors.margins: 12; clip: true
                 contentWidth: width; contentHeight: logView.implicitHeight
                 property bool autoScroll: true
@@ -74,11 +75,21 @@ Item {
                     wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
                     font.family: shell.monoFont; font.pixelSize: 11
                     color: theme.text; selectionColor: theme.accent
-                    Component.onCompleted: text = backend.logText()
+                    Component.onCompleted: setLog(backend.logText())
                     onTextChanged: Qt.callLater(logFlick.toBottom)
                     // Catch up once the selection that held the view is dropped.
                     // Nothing retried before, so the view stayed stale for good.
                     onSelectedTextChanged: if (selectedText === "" && logRefresh.behind) logRefresh.start()
+                    // Every new text goes through here. Past 10,000 characters Qt
+                    // builds only the lines in view, and a new text that ended
+                    // above the first of them left the log blank until it was
+                    // scrolled (QTBUG-145449). Drawn whole, it cannot be. After
+                    // the assignment, which turns that back on; more in
+                    // WholeTextRendering.h.
+                    function setLog(t) {
+                        text = t
+                        backend.renderWholeText(logView)
+                    }
                 }
             }
             // Coalesce model growth into at most one text rebuild per interval; hold
@@ -91,7 +102,7 @@ Item {
                     behind = logView.selectionStart !== logView.selectionEnd
                             && backend.logModel.count > 0
                     if (!behind)
-                        logView.text = backend.logText()
+                        logView.setLog(backend.logText())
                 }
             }
             Connections {
