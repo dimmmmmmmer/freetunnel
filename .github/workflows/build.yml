@@ -170,7 +170,7 @@ jobs:
       # a swallowed failure here used to resurface minutes later as a cryptic
       # NSIS/iconutil/cp error.
       - name: Use rendered bundle icons
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: bundle-icons
           path: client/assets
@@ -1300,7 +1300,7 @@ jobs:
         run: bash scripts/check-release-ci.sh "$GITHUB_SHA" tests.yml security.yml
 
       - name: Download release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
           pattern: freetunnel-*
