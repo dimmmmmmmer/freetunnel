@@ -76,7 +76,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
       - name: Render icons from logo.svg
         run: bash scripts/render-icons.sh icons-out
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bundle-icons
           path: icons-out/
@@ -1048,7 +1048,7 @@ jobs:
           ls out
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact }}
           path: out/*
