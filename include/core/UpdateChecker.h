@@ -81,6 +81,9 @@ private slots:
     void onCheckFinished(QNetworkReply *reply);
 
 private:
+    void fetchReleaseList(const QString &latestTag);
+    void onReleaseListFinished(QNetworkReply *reply);
+    void offerRelease(const QJsonObject &release, const QString &tagName);
     void fetchChecksumsThenInstaller();
     void fetchSignature();
     void fetchInstaller();

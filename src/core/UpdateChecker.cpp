@@ -60,6 +60,19 @@ bool isPlausibleTag(const QString &tag)
     return re.match(tag).hasMatch();
 }
 
+// A desktop release is tagged v and a version: v1.2.3, or v1.2.3-rc1, whose
+// suffix isVersionNewer() already orders. The same repo publishes other
+// releases under other tags (android-1.0.1, build-tools-2026-08-02), and GitHub
+// marks a new release the latest one unless told not to, so /releases/latest
+// can name one of them; build-tools-2026-08-02 was the latest for a while. Its
+// first number was compared as if it were ours, so 2026 was newer than every
+// build and an android-2.0.0 would have been too.
+bool isDesktopTag(const QString &tag)
+{
+    static const QRegularExpression re(QStringLiteral("\\A[vV][0-9]"));
+    return isPlausibleTag(tag) && re.match(tag).hasMatch();
+}
+
 #ifdef FT_ENABLE_TEST_HOOKS
 // When the update endpoint is redirected for tests, allow that same host (the
 // mock serves assets over http on loopback). The whole helper — and its call
@@ -236,6 +249,39 @@ QString replyError(const QNetworkReply *reply)
             ? UpdateChecker::tr("the server stopped responding")
             : reply->errorString();
 }
+
+QNetworkRequest apiRequest(const QString &path, const QString &currentVersion)
+{
+    QNetworkRequest req(githubApiUrl(path));
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(currentVersion));
+    req.setRawHeader("Accept", "application/vnd.github+json");
+    return req;
+}
+
+// The desktop release with the highest version in a page of the release list,
+// or an empty object when the page has none. Highest, not first: the list is
+// newest first by date, so a fix for an older line published after a higher
+// version comes before it. Drafts and pre-releases are skipped, as
+// /releases/latest skips them; drafts are listed only to a token that can push,
+// and this check sends none, so that test is only in case.
+QJsonObject newestDesktopRelease(const QJsonArray &releases)
+{
+    QJsonObject newest;
+    QString newestVersion;
+    for (const QJsonValue &val : releases) {
+        const QJsonObject release = val.toObject();
+        const QString tag = release.value("tag_name").toString();
+        if (release.value("draft").toBool() || release.value("prerelease").toBool()
+            || !isDesktopTag(tag))
+            continue;
+        const QString version = tag.mid(1);
+        if (newest.isEmpty() || isVersionNewer(newestVersion, version)) {
+            newest = release;
+            newestVersion = version;
+        }
+    }
+    return newest;
+}
 } // namespace
 
 UpdateChecker::UpdateChecker(const QString &githubRepo,
@@ -276,13 +322,8 @@ void UpdateChecker::checkNow()
     m_checkInFlight = true;
 
     // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
-    const QString url = githubApiUrl(QStringLiteral("/repos/%1/releases/latest").arg(m_githubRepo));
-
-    QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("FreeTunnel/%1").arg(m_currentVersion));
-    req.setRawHeader("Accept", "application/vnd.github+json");
-
-    QNetworkReply *reply = m_nam->get(req);
+    QNetworkReply *reply = m_nam->get(
+            apiRequest(QStringLiteral("/repos/%1/releases/latest").arg(m_githubRepo), m_currentVersion));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         onCheckFinished(reply);
     });
@@ -401,7 +442,17 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         emit noUpdateAvailable(tr("Invalid response from GitHub API"));
         return;
     }
+    if (!isDesktopTag(tagName)) {
+        fetchReleaseList(tagName);
+        return;
+    }
+    offerRelease(obj, tagName);
+}
 
+// Offer @p release when it is newer than this build. It is a desktop release by
+// now, whether /releases/latest named it or the release list gave it.
+void UpdateChecker::offerRelease(const QJsonObject &release, const QString &tagName)
+{
     // Strip leading 'v' from tag
     QString remoteVersion = tagName;
     if (remoteVersion.startsWith('v') || remoteVersion.startsWith('V')) {
@@ -411,10 +462,10 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
     m_latest = ReleaseInfo{};
     m_latest.tagName = tagName;
     m_latest.version = remoteVersion;
-    m_latest.htmlUrl = sanitizedReleasePageUrl(obj.value("html_url").toString(),
+    m_latest.htmlUrl = sanitizedReleasePageUrl(release.value("html_url").toString(),
                                                m_githubRepo, tagName);
 
-    selectReleaseAssets(obj, tagName);
+    selectReleaseAssets(release, tagName);
 
     if (isVersionNewer(m_currentVersion, remoteVersion)) {
         emit updateAvailable(m_latest);
@@ -423,6 +474,50 @@ void UpdateChecker::onCheckFinished(QNetworkReply *reply)
         // its text, and shows a line of its own instead.
         emit noUpdateAvailable(QStringLiteral("You are running the latest version (%1)").arg(m_currentVersion));
     }
+}
+
+// /releases/latest named something other than a desktop release, so look for
+// the newest desktop one in the release list. Asked only then, so the usual
+// check stays one request. The first page is enough: it holds the 30 most
+// recent releases, and the newest desktop release is off it only once 30
+// releases of other kinds have been published after it. The check then says
+// it found none rather than paging on.
+void UpdateChecker::fetchReleaseList(const QString &latestTag)
+{
+    qWarning("UpdateChecker: the latest release, %s, is not a desktop release — "
+             "taking the newest desktop release from the release list instead",
+             qPrintable(latestTag));
+    // Still the same check, which onCheckFinished() took for done: one asked for
+    // meanwhile waits for this answer.
+    m_checkInFlight = true;
+    // https://docs.github.com/en/rest/releases/releases#list-releases
+    QNetworkReply *reply = m_nam->get(apiRequest(
+            QStringLiteral("/repos/%1/releases?per_page=30").arg(m_githubRepo), m_currentVersion));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        onReleaseListFinished(reply);
+    });
+}
+
+void UpdateChecker::onReleaseListFinished(QNetworkReply *reply)
+{
+    m_checkInFlight = false;
+    reply->deleteLater();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        emit noUpdateAvailable(tr("Network error: %1").arg(replyError(reply)));
+        return;
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    if (!doc.isArray()) {
+        emit noUpdateAvailable(tr("Invalid response from GitHub API"));
+        return;
+    }
+    const QJsonObject release = newestDesktopRelease(doc.array());
+    if (release.isEmpty()) {
+        emit noUpdateAvailable(tr("No releases found"));
+        return;
+    }
+    offerRelease(release, release.value("tag_name").toString());
 }
 
 void UpdateChecker::downloadLatest()

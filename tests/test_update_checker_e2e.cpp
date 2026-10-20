@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTemporaryFile>
 #include <QScopeGuard>
@@ -58,6 +59,12 @@ private slots:
     void acceptsAssetsPublishedUnderThisReleaseTag();
     void replacesHostileHtmlUrlWithTheCanonicalReleasePage();
     void rejectsImplausibleTag();
+    void anAndroidLatestOffersTheNewestDesktopRelease();
+    void aListWithNoDesktopReleaseIsNoUpdate();
+    void theHighestDesktopReleaseInTheListIsOfferedNotTheFirst();
+    void aListThatCannotBeReadFailsTheCheck();
+    void aDesktopLatestIsTheOnlyRequest();
+    void aCheckWaitingForTheListIsStillInFlight();
     void picksThisPlatformsInstallerFromARealRelease();
     // Declared on every platform: moc does not see the compiler's own platform
     // macros under MSVC, so a slot declared only for Linux reaches the moc file
@@ -829,7 +836,244 @@ void TestUpdateCheckerE2e::rejectsImplausibleTag()
     QCOMPARE(available.count(), 0);
     QCOMPARE(none.count(), 1);
     QVERIFY(none.first().at(0).toString().contains(QStringLiteral("Invalid response")));
+    // Refused, not worked around: a tag like that is a broken response, not
+    // another kind of release for the release list to stand in for.
+    QCOMPARE(http.requestCount(QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases")), 0);
     qunsetenv("FT_GITHUB_API_BASE");
+}
+
+static const QString kLatestPath = QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases/latest");
+static const QString kListPath = QStringLiteral("/repos/dimmmmmmmer/freetunnel/releases");
+static const QString kReleasesUrl = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/");
+
+// A desktop release as GitHub lists it: this platform's installer and the
+// manifest on github.com under its own tag, so the URL checks run against
+// whichever tag the check settles on.
+static QJsonObject desktopRelease(const QString &tag)
+{
+    QJsonObject release = releaseWithAssetBase(tag, kReleasesUrl + QStringLiteral("download/") + tag,
+                                               kReleasesUrl + QStringLiteral("tag/") + tag);
+    release[QStringLiteral("draft")] = false;
+    release[QStringLiteral("prerelease")] = false;
+    return release;
+}
+
+// A release of something else from the same repo, an Android build.
+static QJsonObject otherRelease(const QString &tag)
+{
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = tag;
+    release[QStringLiteral("html_url")] = kReleasesUrl + QStringLiteral("tag/") + tag;
+    release[QStringLiteral("draft")] = false;
+    release[QStringLiteral("prerelease")] = false;
+    release[QStringLiteral("assets")] = QJsonArray{
+            assetJson(QStringLiteral("freetunnel-android.apk"),
+                      kReleasesUrl + QStringLiteral("download/") + tag
+                              + QStringLiteral("/freetunnel-android.apk"))};
+    return release;
+}
+
+static QJsonObject markedAs(QJsonObject release, const QString &flag)
+{
+    release[flag] = true;
+    return release;
+}
+
+static void serveReleaseList(MockHttpServer &http, const QJsonArray &releases, int delayMs = 0)
+{
+    MockHttpServer::Route route;
+    route.body = QJsonDocument(releases).toJson(QJsonDocument::Compact);
+    route.delayMs = delayMs;
+    http.setRoute(kListPath, route);
+}
+
+// The fallback says so, once, naming what GitHub called the latest release:
+// short of reading the API, the one sign that a release went out marked the
+// latest by mistake.
+static void expectFallbackWarning(const QString &latestTag)
+{
+    const QRegularExpression said(QStringLiteral("the latest release, %1, is not a desktop release")
+                                          .arg(QRegularExpression::escape(latestTag)));
+    QTest::ignoreMessage(QtWarningMsg, said);
+    QTest::failOnWarning(said); // a second one
+}
+
+// Android releases are published from this repo too, and GitHub marks each new
+// release the latest unless told not to. Whatever /releases/latest says, a
+// desktop install is offered only a desktop release: the newest in the list,
+// its assets checked against its own tag.
+void TestUpdateCheckerE2e::anAndroidLatestOffersTheNewestDesktopRelease()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveReleaseList(http, {otherRelease(QStringLiteral("android-1.0.1")),
+                            desktopRelease(QStringLiteral("v2.0.0")),
+                            desktopRelease(QStringLiteral("v1.5.0"))});
+    expectFallbackWarning(QStringLiteral("android-1.0.1"));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http, otherRelease(QStringLiteral("android-1.0.1")), checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    const UpdateChecker::ReleaseInfo &info = checker.latestRelease();
+    QCOMPARE(info.tagName, QStringLiteral("v2.0.0"));
+    QCOMPARE(info.version, QStringLiteral("2.0.0"));
+    const QString assetBase = kReleasesUrl + QStringLiteral("download/v2.0.0/");
+    QCOMPARE(info.installerUrl, assetBase + testInstallerAssetName());
+    QCOMPARE(info.checksumsUrl, assetBase + QStringLiteral("SHA256SUMS.txt"));
+    QCOMPARE(info.htmlUrl, kReleasesUrl + QStringLiteral("tag/v2.0.0"));
+    QCOMPARE(http.requestCount(kLatestPath), 1);
+    QCOMPARE(http.requestCount(kListPath), 1);
+    // The first page, at the size the comment on the fallback counts on.
+    QCOMPARE(http.lastQuery(kListPath), QStringLiteral("per_page=30"));
+}
+
+// Nothing in the list could be offered: another platform's release, another
+// kind whose tag merely starts with a v, a desktop pre-release, a draft, and a
+// tag no release could have. No update, and not "up to date" either: there was
+// nothing to compare this build with.
+void TestUpdateCheckerE2e::aListWithNoDesktopReleaseIsNoUpdate()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveReleaseList(http, {otherRelease(QStringLiteral("android-1.0.2")),
+                            otherRelease(QStringLiteral("vendor-patches-2026-10-01")),
+                            markedAs(desktopRelease(QStringLiteral("v3.0.0")),
+                                     QStringLiteral("prerelease")),
+                            markedAs(desktopRelease(QStringLiteral("v4.0.0")),
+                                     QStringLiteral("draft")),
+                            desktopRelease(QStringLiteral("v5.0.0/../../etc/passwd"))});
+    expectFallbackWarning(QStringLiteral("android-1.0.2"));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http, otherRelease(QStringLiteral("android-1.0.2")), checker, available, none));
+
+    QCOMPARE(available.count(), 0);
+    QCOMPARE(none.count(), 1);
+    QCOMPARE(none.at(0).at(0).toString(), QStringLiteral("No releases found"));
+    QCOMPARE(http.requestCount(kListPath), 1);
+}
+
+// The list comes newest first by date, not by version: a fix for an older line
+// published after a higher version comes before it.
+void TestUpdateCheckerE2e::theHighestDesktopReleaseInTheListIsOfferedNotTheFirst()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveReleaseList(http, {desktopRelease(QStringLiteral("v1.1.0")),
+                            otherRelease(QStringLiteral("android-9.9.9")),
+                            desktopRelease(QStringLiteral("v1.3.0")),
+                            desktopRelease(QStringLiteral("v1.2.0"))});
+    expectFallbackWarning(QStringLiteral("android-9.9.9"));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http, otherRelease(QStringLiteral("android-9.9.9")), checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    QCOMPARE(checker.latestRelease().tagName, QStringLiteral("v1.3.0"));
+    QCOMPARE(checker.latestRelease().installerUrl,
+             kReleasesUrl + QStringLiteral("download/v1.3.0/") + testInstallerAssetName());
+}
+
+// A list that cannot be read fails the check, as /releases/latest would. Taken
+// for an empty list it would say "No releases found", which is not what went
+// wrong.
+void TestUpdateCheckerE2e::aListThatCannotBeReadFailsTheCheck()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+
+    MockHttpServer::Route failed;
+    failed.status = 500;
+    MockHttpServer::Route garbled;
+    garbled.body = QByteArrayLiteral("not-json");
+    const QList<QPair<MockHttpServer::Route, QString>> cases = {
+        {failed, QStringLiteral("Network error")},
+        {garbled, QStringLiteral("Invalid response from GitHub API")},
+    };
+    for (const auto &[list, said] : cases) {
+        http.setRoute(kListPath, list);
+        expectFallbackWarning(QStringLiteral("android-1.0.1"));
+        UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+        QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+        QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+        QVERIFY(runCheck(http, otherRelease(QStringLiteral("android-1.0.1")), checker, available,
+                         none));
+        QCOMPARE(available.count(), 0);
+        QVERIFY2(none.at(0).at(0).toString().startsWith(said),
+                 qPrintable(none.at(0).at(0).toString()));
+    }
+}
+
+// The usual case stays one request: a desktop latest is taken as it is, and the
+// list, which would have offered something else, is never asked for.
+void TestUpdateCheckerE2e::aDesktopLatestIsTheOnlyRequest()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    serveReleaseList(http, {desktopRelease(QStringLiteral("v9.0.0"))});
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("is not a desktop release")));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    QVERIFY(runCheck(http, desktopRelease(QStringLiteral("v2.0.0")), checker, available, none));
+
+    QCOMPARE(available.count(), 1);
+    QCOMPARE(checker.latestRelease().tagName, QStringLiteral("v2.0.0"));
+    QCOMPARE(http.requestCount(kLatestPath), 1);
+    QCOMPARE(http.requestCount(kListPath), 0);
+}
+
+// The list is the same check's second request, so the guard against a second
+// check covers it too: one asked for while the list is out gets its answer.
+// And the check ends with that answer, or no check would ever go out again.
+void TestUpdateCheckerE2e::aCheckWaitingForTheListIsStillInFlight()
+{
+    MockHttpServer http;
+    QVERIFY(http.listen());
+    qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
+    const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
+    // Slow enough that the second check is asked for while the list is out.
+    serveReleaseList(http, {desktopRelease(QStringLiteral("v2.0.0"))}, /*delayMs=*/300);
+    MockHttpServer::Route latest;
+    latest.body = QJsonDocument(otherRelease(QStringLiteral("build-tools-2026-08-02")))
+                          .toJson(QJsonDocument::Compact);
+    http.setRoute(kLatestPath, latest);
+    expectFallbackWarning(QStringLiteral("build-tools-2026-08-02"));
+
+    UpdateChecker checker(QStringLiteral("dimmmmmmmer/freetunnel"), QStringLiteral("1.0.0"));
+    QSignalSpy available(&checker, &UpdateChecker::updateAvailable);
+    QSignalSpy none(&checker, &UpdateChecker::noUpdateAvailable);
+    checker.checkNow();
+    QTRY_COMPARE_WITH_TIMEOUT(http.requestCount(kListPath), 1, 5000);
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 0 || none.count() > 0; }, 5000));
+
+    QCOMPARE(available.count(), 1);
+    QCOMPARE(checker.latestRelease().tagName, QStringLiteral("v2.0.0"));
+    QCOMPARE(http.requestCount(kLatestPath), 1);
+
+    expectFallbackWarning(QStringLiteral("build-tools-2026-08-02"));
+    checker.checkNow();
+    QVERIFY(QTest::qWaitFor([&]() { return available.count() > 1 || none.count() > 0; }, 5000));
+    QCOMPARE(http.requestCount(kLatestPath), 2);
 }
 
 // Every other test here names its installer freetunnel-test.*, so how a real

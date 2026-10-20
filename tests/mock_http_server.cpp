@@ -46,10 +46,12 @@ void MockHttpServer::onNewConnection()
                 return;
             QString path = QString::fromUtf8(parts.at(1));
             const int query = path.indexOf(QLatin1Char('?'));
+            const QString queryText = query >= 0 ? path.mid(query + 1) : QString();
             if (query >= 0)
                 path = path.left(query);
 
             ++m_hits[path];
+            m_queries[path] = queryText;
             const Route route = m_routes.value(path);
             if (route.silent)
                 return;

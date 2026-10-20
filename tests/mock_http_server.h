@@ -34,6 +34,9 @@ public:
     // second check" from "the second check ran too" — a difference no signal or
     // state property exposes, because both look the same once they settle.
     int requestCount(const QString &path) const { return m_hits.value(path); }
+    // The query the last request for this path carried, without its '?'. Routes
+    // are matched on the path alone, so this is the only way to see it.
+    QString lastQuery(const QString &path) const { return m_queries.value(path); }
 
 private:
     void onNewConnection();
@@ -42,4 +45,5 @@ private:
     QTcpServer m_server;
     QHash<QString, Route> m_routes;
     QHash<QString, int> m_hits;
+    QHash<QString, QString> m_queries;
 };
