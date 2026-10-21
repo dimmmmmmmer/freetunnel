@@ -58,6 +58,38 @@ permissions:
   contents: read
 
 jobs:
+  # Whether this run needs the desktop builds: false only for a pull request
+  # that changes nothing but Android's files. The same job as in tests.yml,
+  # where the comment says why the checks are skipped from inside and never by
+  # on.paths; scripts/check-desktop-changes.sh has the rules. A tag is always
+  # true, so the release below is built and published as before.
+  changes:
+    name: desktop changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To list the pull request's files.
+      pull-requests: read
+    outputs:
+      # Empty off pull requests, where the steps do not run. Every desktop job
+      # treats anything but false as true.
+      desktop: ${{ steps.decide.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          sparse-checkout: /scripts/check-desktop-changes.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Only Android's files?
+        id: decide
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-desktop-changes.sh
+
   # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
   # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
   # every platform build, so the dock/taskbar/Finder icons match the in-app
@@ -66,6 +98,11 @@ jobs:
   # committed, so packaging cannot proceed without this artifact.
   icons:
     name: Render bundle icons
+    needs: changes
+    # Skipped on an Android-only change, which reports it as a success. Not
+    # when changes failed: a failed need skips a job whose `if` has no status
+    # function, and the check would then pass with nothing run.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named, not ubuntu-latest, which becomes Ubuntu 26.04 from 2026-10-19: the
     # rasterizers come from apt, and a new ImageMagick major under the same label
     # would change the icons, or the commands, with no commit to blame.
@@ -83,7 +120,15 @@ jobs:
 
   build:
     name: Build (${{ matrix.artifact }})
-    needs: icons
+    needs: [changes, icons]
+    # Not skipped whole on an Android-only change: a job's `if` is evaluated
+    # before its matrix is applied, so a skipped matrix job reports under no
+    # leg's name, and "Build (freetunnel-windows-x86_64)" would never come.
+    # Every leg starts and its steps skip instead. An icons job that failed
+    # still skips the legs, as it always has; a skipped one is the Android-only
+    # case. !cancelled() lets a failed changes job through, and the steps then
+    # run as for any doubt.
+    if: ${{ !cancelled() && (needs.icons.result == 'success' || needs.icons.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +180,11 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
+      # Every step after this one runs unless changes answered false.
+      - name: Android's files only, nothing to build
+        if: needs.changes.outputs.desktop == 'false'
+        run: echo "Only Android files changed (see the desktop changes job), so the steps below are skipped."
+
       # ubuntu:20.04 is bare. Without git, actions/checkout falls back to a REST
       # tarball with no .git, and the About footer's `git describe` quietly reads
       # "unknown". There is no sudo, curl or patch either, and those are used
@@ -142,7 +192,7 @@ jobs:
       # through sudo, which drops DEBIAN_FRONTEND, so debconf is told here, once,
       # never to prompt (tzdata would).
       - name: Prepare build container (Linux)
-        if: matrix.container
+        if: needs.changes.outputs.desktop != 'false' && matrix.container
         shell: bash
         run: |
           set -eux
@@ -160,6 +210,7 @@ jobs:
           git --version
 
       - name: Checkout client
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: client
@@ -170,16 +221,18 @@ jobs:
       # a swallowed failure here used to resurface minutes later as a cryptic
       # NSIS/iconutil/cp error.
       - name: Use rendered bundle icons
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: bundle-icons
           path: client/assets
 
       - name: Build macOS .icns with iconutil
-        if: matrix.platform == 'macos'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'macos'
         run: iconutil -c icns client/assets/icon.iconset -o client/assets/logo.icns
 
       - name: Read pinned upstream ref
+        if: needs.changes.outputs.desktop != 'false'
         id: upstream_ref
         shell: bash
         run: |
@@ -195,6 +248,7 @@ jobs:
           echo "value=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ env.UPSTREAM_REPO }}
@@ -206,6 +260,7 @@ jobs:
           fetch-tags: true
 
       - name: Inject client into upstream tree
+        if: needs.changes.outputs.desktop != 'false'
         shell: bash
         run: |
           set -eux
@@ -222,6 +277,7 @@ jobs:
           test -f upstream/requirements.txt
 
       - name: Set up Python
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           # Linux gets an exact version: a bare '3.13' would first match the
@@ -230,6 +286,7 @@ jobs:
           python-version: ${{ matrix.python || '3.13' }}
 
       - name: Apply the vendored core patches
+        if: needs.changes.outputs.desktop != 'false'
         shell: bash
         run: |
           set -eu
@@ -245,7 +302,7 @@ jobs:
 
       # ---------------------------------------------------------------- Linux
       - name: Install dependencies (Linux)
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         # The runner's own default for a step with no shell. Inside a container
         # the default is `sh -e {0}` (dash), so the Linux steps name it.
         shell: bash -e {0}
@@ -307,7 +364,7 @@ jobs:
 
       # ---------------------------------------------------------------- macOS
       - name: Install dependencies (macOS)
-        if: matrix.platform == 'macos'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'macos'
         run: |
           # Select the Xcode the matrix names, before anything compiles: conan's
           # profile detection, the core deps and the app all go through the xcrun
@@ -338,7 +395,7 @@ jobs:
 
       # -------------------------------------------------------------- Windows
       - name: Set up MSVC (Windows)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
@@ -347,6 +404,7 @@ jobs:
       # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
       # .deb bundle a modern Qt regardless of the distro.
       - name: Install Qt (aqt)
+        if: needs.changes.outputs.desktop != 'false'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VER }}
@@ -360,7 +418,7 @@ jobs:
           setup-python: ${{ matrix.platform != 'linux' }}
 
       - name: Install dependencies (Windows)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -408,7 +466,7 @@ jobs:
 
       # ------------------------------------------------------------- Caching
       - name: ccache
-        if: matrix.platform != 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'windows'
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
           # Key includes the OS the objects are built against, so deps/objects
@@ -421,6 +479,7 @@ jobs:
           key: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-ccache
 
       - name: Conan cache
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.conan2
@@ -432,7 +491,7 @@ jobs:
           restore-keys: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-
 
       - name: Patch bootstrap for Windows (run .sh via sh)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         shell: bash
         run: |
           set -eux
@@ -440,6 +499,7 @@ jobs:
             upstream/scripts/bootstrap_conan_deps.py
 
       - name: Bootstrap conan dependencies
+        if: needs.changes.outputs.desktop != 'false'
         working-directory: upstream
         shell: bash
         run: ./scripts/bootstrap_conan_deps.py
@@ -447,6 +507,7 @@ jobs:
       # Upstream needs a newer boringssl recipe revision than its pinned NLC
       # carries (see the script header).
       - name: Export patched boringssl recipe
+        if: needs.changes.outputs.desktop != 'false'
         shell: bash
         run: bash client/scripts/export-patched-boringssl.sh
 
@@ -454,6 +515,7 @@ jobs:
       # conanfile.py (it reads the pin and checks out the matching revision), so
       # the old re-export workaround for tag drift is gone.
       - name: Prepare conan profile
+        if: needs.changes.outputs.desktop != 'false'
         shell: bash
         run: |
           set -eux
@@ -464,6 +526,7 @@ jobs:
       # one does — ignore this conf; those are covered by the retry loops
       # around the configure steps below.
       - name: Harden conan downloads against 503 bursts
+        if: needs.changes.outputs.desktop != 'false'
         shell: bash
         run: |
           set -eux
@@ -489,7 +552,7 @@ jobs:
 
       # ----------------------------------------------------------- Configure
       - name: Configure (Linux)
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
           # clang-18 from llvm.sh (upstream is clang-only; gcc trips -Werror=extra)
@@ -513,7 +576,7 @@ jobs:
       # macOS configures/builds both arches in the universal step below.
 
       - name: Configure (Windows)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         shell: pwsh
         run: |
           # Retried: see the Linux configure comment (boringssl 503 bursts).
@@ -535,7 +598,7 @@ jobs:
 
       # --------------------------------------------------------------- Build
       - name: Build
-        if: matrix.platform != 'macos'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
 
       # Whether the binary came out CET-marked. -fcf-protection reaches only what
@@ -544,13 +607,14 @@ jobs:
       # libraries' included (see CMakeLists.txt). Printed rather than enforced:
       # those are built with flags this repository does not set.
       - name: Report CET marking (Linux)
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
           props="$(readelf -n build/FreeTunnel/FreeTunnel | grep -i 'x86 feature' || true)"
           echo "FreeTunnel x86 feature property: ${props:-none (not CET-marked)}"
 
       - name: Compute version
+        if: needs.changes.outputs.desktop != 'false'
         id: ver
         shell: bash
         run: |
@@ -585,7 +649,7 @@ jobs:
 
       # ------------------------------------------------------------- Package
       - name: Prepare Linux bundle
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
           set -eux
@@ -653,7 +717,7 @@ jobs:
       # /opt/freetunnel. A /usr/bin symlink + .desktop entry integrate it into
       # the launcher; the privileged VPN helper runs via pkexec (polkit).
       - name: Package .deb (Linux)
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
           set -eux
@@ -757,7 +821,7 @@ jobs:
 
       # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
       - name: Package AppImage (Linux)
-        if: matrix.platform == 'linux'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
           set -eux
@@ -788,7 +852,7 @@ jobs:
           ls -la out
 
       - name: Build & package universal (macOS)
-        if: matrix.platform == 'macos'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'macos'
         run: |
           set -eux
           common=(-S upstream -G Ninja
@@ -995,7 +1059,7 @@ jobs:
           rm -f "$RW"
 
       - name: Package (Windows)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1048,6 +1112,7 @@ jobs:
           ls out
 
       - name: Upload artifact
+        if: needs.changes.outputs.desktop != 'false'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact }}
@@ -1062,7 +1127,7 @@ jobs:
       # FreeTunnel.exe that is slow to exit once killed. After the upload, so a
       # failure here still leaves the installer to download and look at.
       - name: Installer smoke test (Windows)
-        if: matrix.platform == 'windows'
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

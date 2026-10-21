@@ -41,8 +41,56 @@ permissions:
   contents: read
 
 jobs:
+  # Whether this run needs the desktop jobs, which here is all of them. The
+  # answer is false only for a pull request that changes nothing but Android's
+  # files, which android.yml builds and tests and nothing here does. A push, a
+  # tag, a dispatch or the weekly run is true without asking anything, and so
+  # is any doubt; scripts/check-desktop-changes.sh has the rules. Build and
+  # Security have the same job.
+  #
+  # A false skips the work, never the checks. main's branch protection requires
+  # them by name, and a workflow that on.paths keeps from starting reports
+  # nothing, so the pull request would wait for it for ever. A job skipped by
+  # its `if` reports success under its own name, and that is how Coverage and
+  # ASan+UBSan skip. The unit tests cannot: a job's `if` is evaluated before its
+  # matrix is applied, so a matrix job skipped whole reports under no leg's name
+  # and "Unit tests (windows-latest)" would never come. Its legs start and skip
+  # their steps instead.
+  changes:
+    name: desktop changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To list the pull request's files.
+      pull-requests: read
+    outputs:
+      # Empty off pull requests, where the steps do not run. Every desktop job
+      # treats anything but false as true.
+      desktop: ${{ steps.decide.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          sparse-checkout: /scripts/check-desktop-changes.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Only Android's files?
+        id: decide
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-desktop-changes.sh
+
   unit:
     name: Unit tests (${{ matrix.os }})
+    needs: changes
+    # Never skipped whole, for the matrix's sake (see changes): every leg starts.
+    # The `if` is for a changes job that failed. The default, success(), would
+    # then skip this job; !cancelled() runs it, and its steps too, as for any
+    # doubt.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -51,17 +99,23 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      # Every step after this one runs unless changes answered false.
+      - name: Android's files only, nothing to test
+        if: needs.changes.outputs.desktop == 'false'
+        run: echo "Only Android files changed (see the desktop changes job), so the steps below are skipped."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.desktop != 'false'
 
       - name: Install build deps (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
             dbus-x11 gnome-keyring libxcb1-dev
 
       - name: Install Qt (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VER }}
@@ -71,7 +125,7 @@ jobs:
           cache: true
 
       - name: Install build deps (macOS)
-        if: runner.os == 'macOS'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         run: |
           brew list ninja >/dev/null 2>&1 || brew install ninja
           # Homebrew's OpenSSL is keg-only, so CMake does not find it unaided, and
@@ -85,7 +139,7 @@ jobs:
       # macOS tests ran on a Qt no release was ever built with, and a QT_VER bump
       # could not reach them.
       - name: Install Qt (macOS)
-        if: runner.os == 'macOS'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VER }}
@@ -95,13 +149,13 @@ jobs:
           cache: true
 
       - name: Set up MSVC (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
 
       - name: Install Qt (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VER }}
@@ -111,9 +165,11 @@ jobs:
           cache: true
 
       - name: Configure
+        if: needs.changes.outputs.desktop != 'false'
         run: cmake -S tests -B build-tests -G Ninja
 
       - name: Build
+        if: needs.changes.outputs.desktop != 'false'
         run: cmake --build build-tests -j
 
       # The process-lookup tests put another program on 127.0.0.2 beside a socket
@@ -121,16 +177,22 @@ jobs:
       # of the box; macOS configures only 127.0.0.1 on lo0, and without this those
       # tests would skip there, leaving macOS's reading of IPv4 addresses untested.
       - name: A second loopback address (macOS)
-        if: runner.os == 'macOS'
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
 
       - name: Test
+        if: needs.changes.outputs.desktop != 'false'
         env:
           QT_QPA_PLATFORM: offscreen
         run: bash scripts/run-ctest.sh build-tests
 
   coverage:
     name: Coverage (Linux)
+    needs: changes
+    # Skipped on an Android-only change, which reports it as a success. Not
+    # when changes failed: a failed need skips a job whose `if` has no status
+    # function, and the check would then pass with nothing run.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19, and the
     # apt packages below would move with it (lcov, cmake). The unit-test leg above
     # stays on ubuntu-latest, the required check's name: it only has to build and
@@ -205,6 +267,9 @@ jobs:
 
   sanitizers:
     name: ASan+UBSan (Linux)
+    needs: changes
+    # As at Coverage.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named for the same reason as Coverage: the compiler is the image's g++, and
     # a new major under the same label can bring findings no commit caused.
     runs-on: ubuntu-24.04

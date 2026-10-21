@@ -1048,6 +1048,9 @@ endif ()
 # The same job's check that the signature it makes verifies against the key in
 # include/core/ReleaseSigning.h (scripts/verify-release-signature.sh) is tested
 # the same way, with throwaway keys, and on Linux only for the same reasons.
+# So is the desktop CI's question whether a pull request touches anything but
+# Android's files (scripts/check-desktop-changes.sh), whose false skips the
+# work of every desktop check.
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
@@ -1055,8 +1058,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_ci_gate.sh)
+        add_test(NAME desktop_changes
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_desktop_changes.sh)
     else ()
-        message(STATUS "release_ci_gate not built: it needs bash and jq")
+        message(STATUS "release_ci_gate and desktop_changes not built: they need bash and jq")
     endif ()
     if (FT_BASH AND FT_OPENSSL_CLI)
         add_test(NAME release_signature

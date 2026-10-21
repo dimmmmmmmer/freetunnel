@@ -68,6 +68,16 @@ A branch must also be up to date with `main` before it merges (**strict**), so
 a dependabot PR that has fallen behind needs `gh pr update-branch` first. Why
 every platform is required: [Why it works this way](#why-it-works-this-way).
 
+A pull request that changes only Android's files (`android/`,
+`.github/workflows/android.yml`, `scripts/prepare-trusttunnel-android.sh`,
+`scripts/build-android-release.sh`) gets every one of these checks under the
+same name, but the desktop ones skip their work and report success or skipped.
+`pinned dependency refs` and `dependency review` run in full. A pull request
+with any other file in it, and every push, tag, dispatch and weekly run, gets
+the whole desktop CI. `scripts/check-desktop-changes.sh` decides, in the
+`desktop changes` job of each workflow, and answers "run" whenever it cannot be
+sure.
+
 ### Open a pull request
 
 1. Branch from `main`. Keep the change focused and match the existing code
@@ -243,6 +253,7 @@ the update-signature tests would skip the path every release takes.
 | --- | --- |
 | `windows_chrome` | On Windows only |
 | `release_ci_gate` | On Linux only; needs jq |
+| `desktop_changes` | On Linux only; needs jq |
 | `release_signature` | On Linux only; needs openssl |
 | `ubsan_canary` | Only with the sanitizers; it must fail |
 
@@ -265,7 +276,8 @@ What the suites cover:
 - The Backend's own units (logs, settings, config, split tunnel, updates)
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
-- The release job's CI gate and signature check
+- The release job's CI gate and signature check; the desktop CI's
+  Android-only gate
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 

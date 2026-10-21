@@ -37,8 +37,46 @@ permissions:
   contents: read
 
 jobs:
+  # Whether this run needs the desktop checks: false only for a pull request
+  # that changes nothing but Android's files. The same job as in tests.yml,
+  # where the comment says why the checks are skipped from inside and never by
+  # on.paths; scripts/check-desktop-changes.sh has the rules. "pinned dependency
+  # refs" and "dependency review" do not ask it and run on every pull request,
+  # Android's included: android.yml pins its actions as well.
+  changes:
+    name: desktop changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To list the pull request's files.
+      pull-requests: read
+    outputs:
+      # Empty off pull requests, where the steps do not run. Every desktop job
+      # treats anything but false as true.
+      desktop: ${{ steps.decide.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          sparse-checkout: /scripts/check-desktop-changes.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Only Android's files?
+        id: decide
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-desktop-changes.sh
+
   cppcheck:
     name: cppcheck
+    needs: changes
+    # Skipped on an Android-only change, which reports it as a success. Not
+    # when changes failed: a failed need skips a job whose `if` has no status
+    # function, and the check would then pass with nothing run.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named, not ubuntu-latest. That label becomes Ubuntu 26.04 from 2026-10-19,
     # and apt's cppcheck with it: a newer analyser finds new things, and main
     # would turn red with no commit to blame. Moving to a newer one is a change
@@ -108,6 +146,9 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
+    needs: changes
+    # As at cppcheck.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named, and clang-tidy by its major, for the reason given at cppcheck: on
     # 26.04 the unversioned package is a newer clang-tidy with checks of its own.
     runs-on: ubuntu-24.04
@@ -136,6 +177,9 @@ jobs:
 
   upstream-patch:
     name: upstream patch verify
+    needs: changes
+    # As at cppcheck.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -145,6 +189,9 @@ jobs:
 
   i18n:
     name: i18n catalog freshness
+    needs: changes
+    # As at cppcheck.
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     # Named, as at cppcheck, so that a new image is a change made on purpose.
     # The linguist tools themselves come from QT_VER's Qt (below), not from apt.
     runs-on: ubuntu-24.04
