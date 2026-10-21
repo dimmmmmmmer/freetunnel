@@ -61,15 +61,32 @@ engines:
   eslint-9:
     exclude_paths:
       - 'i18n/**'
+  # The Android client (android/) is checked by Android lint and its own unit and
+  # emulator tests in .github/workflows/android.yml. Here it is kept out of the
+  # size and complexity metrics, as tests are, and out of detekt and PMD, whose
+  # findings on it were documentation and size rules rather than defects. The
+  # security engines (Opengrep and the rest) still read it.
   lizard:
     exclude_paths:
       - 'i18n/**'
       - 'tests/**'
+      - 'android/**'
   metric:
     exclude_paths:
       - 'i18n/**'
       - 'tests/**'
+      - 'android/**'
   duplication:
     exclude_paths:
       - 'i18n/**'
       - 'tests/**'
+      - 'android/**'
+  detekt:
+    exclude_paths:
+      - 'android/**'
+  pmd:
+    exclude_paths:
+      - 'android/**'
+  pmd-7:
+    exclude_paths:
+      - 'android/**'
