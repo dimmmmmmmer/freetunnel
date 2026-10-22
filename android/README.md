@@ -104,7 +104,8 @@ installed apps can never be updated again. Run these from the repository root,
 in one shell, so that `KS` names the keystore throughout.
 
 1. Generate the keystore outside the repository. keytool asks for a password;
-   a PKCS12 keystore has one password, for the store and the key alike.
+   a PKCS12 keystore has one password, for the store and the key alike. The
+   file is PKCS12 whatever its extension.
 
    ```sh
    KS=~/freetunnel-android-signing/freetunnel-release.jks
@@ -116,8 +117,9 @@ in one shell, so that `KS` names the keystore throughout.
 2. Back up the keystore file and its password in two separate places, for
    example a password manager and an encrypted offline drive. Never commit
    it.
-3. Create the `android-release` environment, which only `android-*` tags may
-   deploy to. Do this before the first tag: a workflow that names an
+3. The `android-release` environment, which only `android-*` tags may deploy
+   to, has existed since 2026-10-23. These commands create it again if it is
+   ever deleted. Do that before the next tag: a workflow that names an
    environment that does not exist creates it, with no protection at all.
 
    ```sh
@@ -133,13 +135,12 @@ in one shell, so that `KS` names the keystore throughout.
 
    The policy keeps the secrets from workflows run from a branch, but not from
    a run from an `android-*` tag, which runs the workflows of the commit the
-   tag names. So only someone who may release should be able to push such a
-   tag. With one
-   maintainer that holds already; with more, add a tag ruleset for
-   `android-*`, or add yourself as a required reviewer under Settings →
-   Environments → android-release. Each release then waits for your approval
-   twice: once for the secrets check at the start, and once for the signing
-   after CI.
+   tag names. So only someone who may release can push such a tag: the
+   repository's "Release tags" ruleset lets only admins create, move or delete
+   `v*` and `android-*` tags. For a second look at every release, add a
+   required reviewer under Settings → Environments → android-release. Each
+   release then waits for that approval twice: once for the secrets check at
+   the start, and once for the signing after CI.
 4. Put the keystore and its password in the environment. `gh secret set` asks
    for each password, so neither lands in the shell history; give the same
    password twice.
@@ -165,8 +166,8 @@ in one shell, so that `KS` names the keystore throughout.
    rm "$cer"
    ```
 
-   The fourth command prints the same value another way; check that it equals
-   the file's. It is what `apksigner verify --print-certs` reports as the APK's
+   On macOS without `sha256sum`, use `shasum -a 256`. The fourth command
+   prints the same value another way; check that it equals the file's. It is what `apksigner verify --print-certs` reports as the APK's
    certificate SHA-256 digest. Export to a file rather than piping keytool's
    output: with its output piped, keytool shows the password as you type it.
 
@@ -184,6 +185,13 @@ in one shell, so that `KS` names the keystore throughout.
    git tag -a android-X.Y.Z -m "FreeTunnel for Android X.Y.Z"
    git push origin android-X.Y.Z
    ```
+
+If a release stops before publishing, nothing is out yet. A missing or wrong
+secret: fix it and use "Re-run failed jobs". Anything that needs a code change:
+merge the fix, delete the tag (only an admin can, because of the ruleset) with
+`git push origin :refs/tags/android-X.Y.Z` and `git tag -d android-X.Y.Z`, and
+tag `main` again. Once a version is published, its files never change: release
+the next version instead.
 
 Before `android-1.0.0`: the `## Unreleased` section of `android/CHANGELOG.md`
 still holds the preview's notes, partly written for reviewers ("No fork signing

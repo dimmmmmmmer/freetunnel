@@ -24,8 +24,11 @@ SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 VERSION="$(sed -nE "s/^[[:space:]]*def[[:space:]]+appVersion[[:space:]]*=[[:space:]]*'([^']*)'[[:space:]]*\$/\1/p" \
   "$ROOT/android/app/build.gradle")"
 [[ -n "$VERSION" ]] || { echo "Cannot read appVersion from android/app/build.gradle" >&2; exit 1; }
-"$ROOT/scripts/prepare-trusttunnel-android.sh"
-env -u ANDROID_KEYSTORE_PATH -u ANDROID_KEYSTORE_PASSWORD -u ANDROID_KEY_PASSWORD -u ANDROID_KEY_ALIAS \
+# Nothing but the signing below sees the signing variables: not the download
+# of the TrustTunnel runtime, not Gradle.
+NO_SIGNING=(env -u ANDROID_KEYSTORE_PATH -u ANDROID_KEYSTORE_PASSWORD -u ANDROID_KEY_PASSWORD -u ANDROID_KEY_ALIAS)
+"${NO_SIGNING[@]}" "$ROOT/scripts/prepare-trusttunnel-android.sh"
+"${NO_SIGNING[@]}" \
   "$ROOT/android/gradlew" -p "$ROOT/android" --no-daemon --max-workers=1 \
   -Dorg.gradle.jvmargs='-Xmx1024m -Dfile.encoding=UTF-8' \
   -Pkotlin.compiler.execution.strategy=in-process \

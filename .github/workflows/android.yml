@@ -2,9 +2,9 @@ name: Android
 on:
   push:
     branches: [main]
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
   pull_request:
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
   workflow_dispatch:
   # android-release.yml runs this whole workflow on the tagged commit, and signs
   # nothing until it has passed there.
@@ -49,6 +49,7 @@ jobs:
       - run: bash tests/test_android_release_tag.sh
       - run: bash tests/test_android_signer.sh
       - run: bash tests/test_android_sign_release.sh
+      - run: bash tests/test_android_release_unpublished.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
