@@ -32,8 +32,6 @@ jobs:
       # nothing proprietary runs in this repository's CI.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-provider: basic # see the build job
-        with:
           cache-provider: basic
       - run: bash -n scripts/build-android-release.sh
       - run: scripts/prepare-trusttunnel-android.sh
@@ -62,6 +60,8 @@ jobs:
         # downloading a second toolchain before each job.
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic # see the build job
       - run: bash -n scripts/build-android-release.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - name: Enable KVM
