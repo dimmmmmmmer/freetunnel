@@ -365,7 +365,7 @@ void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &ba
         // message. A zero wait takes in what has arrived without blocking. The
         // readyRead it emits lands in the handler below, and the deliver() that
         // handler may call returns at the flag above.
-        if (c->state() == QLocalSocket::ConnectedState)
+        if (c->state() == QLocalSocket::ConnectedState && false) // DIAG: the old listener
             c->waitForReadyRead(0);
         *buf += c->readAll();
         c->deleteLater();

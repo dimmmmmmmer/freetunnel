@@ -753,24 +753,14 @@ ForwardResult sendToInstance(QLocalSocket &probe, const QString &token, const QS
 // On Unix the kernel buffers the write, and it is taken at once.
 bool handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message, int budgetMs)
 {
+    // DIAG: the old launch, exactly as sendToInstance() sent before the fix.
+    Q_UNUSED(budgetMs)
     if (socket.write(message) != message.size())
         return false;
     socket.flush();
-    const QDeadlineTimer budget(budgetMs);
-    while (socket.state() == QLocalSocket::ConnectedState && socket.bytesToWrite() > 0
-           && !budget.hasExpired()) {
-        // In slices, so the budget is the whole wait, however the waits end.
-        socket.waitForBytesWritten(int(qBound(qint64(1), budget.remainingTime(), qint64(250))));
-    }
-    // Still connected, as well as nothing left to send. A write the instance
-    // refused closes the socket, and that leaves nothing to send too: Qt drops
-    // the bytes with the writer.
-    if (socket.state() != QLocalSocket::ConnectedState || socket.bytesToWrite() > 0) {
-        socket.abort();
-        return false;
-    }
-    // Nothing is left to send, so this closes at once.
+    socket.waitForBytesWritten(300);
     socket.disconnectFromServer();
+    socket.waitForDisconnected(3000);
     return true;
 }
 
