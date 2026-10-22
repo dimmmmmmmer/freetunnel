@@ -33,6 +33,11 @@ compare link at the bottom of its release notes.
   FreeTunnel already open instead of starting a second copy.** Since 1.2.3,
   `freetunnel freetunnel://toggle` and other launches from cron, over ssh,
   after `su -` or by a hotkey program started outside the session opened one.
+- **Windows: a tt:// link or freetunnel:// command no longer does nothing when
+  FreeTunnel is busy for a few seconds, for example while it starts.** The
+  launch that carries it now waits up to ten seconds for FreeTunnel to take it.
+  FreeTunnel no longer drops a message that has already arrived because a
+  timeout ran first.
 - **The Logs page no longer goes blank after the window comes back from the
   tray or many lines arrive at once.** Before, the lines came back only once
   the log was scrolled or another page was opened.
