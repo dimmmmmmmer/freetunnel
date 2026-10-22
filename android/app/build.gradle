@@ -43,21 +43,11 @@ android {
         buildConfigField 'String', 'RELEASE_SIGNING_KEY', '\"' + keyMatch.group() + '\"'
     }
     buildFeatures { buildConfig true }
-    signingConfigs {
-        release {
-            def path = System.getenv('ANDROID_KEYSTORE_PATH')
-            if (path) {
-                storeFile file(path)
-                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('ANDROID_KEY_ALIAS')
-                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
-            }
-        }
-    }
+    // Release builds are unsigned. scripts/sign-android-release.sh signs them
+    // with Build Tools alone, so Gradle and its plugins never see the keystore.
     buildTypes {
         release {
             minifyEnabled false
-            if (System.getenv('ANDROID_KEYSTORE_PATH')) signingConfig signingConfigs.release
         }
     }
     compileOptions {

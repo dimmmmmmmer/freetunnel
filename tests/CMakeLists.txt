@@ -1052,7 +1052,9 @@ endif ()
 # Android's files (scripts/check-desktop-changes.sh), whose false skips the
 # work of every desktop check. And so are the Android release's checks of its
 # tag (scripts/check-android-release-tag.sh) and of the APK's signer
-# (scripts/check-android-signer.sh), which only ever run on an android-* tag.
+# (scripts/check-android-signer.sh), and its signing script
+# (scripts/sign-android-release.sh), which run for real only on an android-*
+# tag and, with a throwaway key, in Android CI.
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
@@ -1062,8 +1064,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_tag.sh)
         add_test(NAME android_signer
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_signer.sh)
+        add_test(NAME android_sign_release
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_sign_release.sh)
     else ()
-        message(STATUS "android_release_tag and android_signer not built: they need bash")
+        message(STATUS "android_release_tag, android_signer and android_sign_release not built: they need bash")
     endif ()
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
