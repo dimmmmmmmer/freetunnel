@@ -6,20 +6,39 @@ name: Android release
 # android/app/src/main/java/org/freetunnel/android). The desktop's v* tags are
 # released by build.yml, and no other workflow runs on an android-* tag.
 #
-# Everything that can be checked from the commit alone is checked first, then
-# the whole Android CI runs on the tagged commit, and only after that does any
-# job see a signing key. The APK is built and signed in one job and published
-# from another: the job that runs Gradle, and the third-party plugins it
-# loads, holds the keystore but no token that can write to the repository,
-# and never the Ed25519 key.
+# Everything that can be checked in seconds is checked first: the tag, that
+# its commit is on main and its version not yet published, the pin, the notes,
+# and that the secrets are set. Then the whole Android CI runs on the tagged
+# commit, and only after that does any job see a signing key.
+#
+# Each job holds as little as it can:
+# - build runs Gradle, and with it the plugins and dependencies Gradle loads,
+#   with no secrets at all, and makes the APK unsigned. No job here restores a
+#   Gradle cache, so nothing an earlier run left behind goes into a release.
+# - sign holds the keystore and its passwords and runs no Gradle and none of
+#   the project's build code: only Build Tools' zipalign, apksigner and aapt2,
+#   through scripts/sign-android-release.sh. Android CI runs that script on
+#   every Android pull request with a throwaway keystore.
+# - publish holds the Ed25519 key and the only token that can write.
+#
+# The keystore secrets are in the android-release environment, which only
+# android-* tags may deploy to, so a workflow run from a branch cannot read
+# them. A run from such a tag can, and it runs the workflows of the commit
+# the tag names, so pushing an android-* tag is a release decision. Only the
+# release-secrets and sign jobs use the environment. android.yml, called below,
+# never sees them: a called workflow gets only the secrets passed to it, and
+# none are. GitHub creates an environment that a workflow names and that does
+# not exist yet, with no protection and no secrets, so it has to be set up
+# before the first tag; see Releasing in android/README.md.
 #
 # Tests and Security are not waited for, unlike for a desktop release. Neither
-# builds or analyses the Android app (Tests runs the suites of this workflow's
-# two scripts, on every pull request), and neither runs on this tag. A run of
-# theirs on the commit would have to come from a push to main, where merging
-# two pull requests in a row cancels the first one's runs, and that would stop
-# a valid release. The part of Security that is about this workflow, every
-# action pinned to a commit, runs in the first job instead.
+# builds or analyses the Android app (the suites of this workflow's scripts
+# run in Android CI, and in Tests too when a pull request is not Android-only),
+# and neither runs on this tag. A run of theirs on the commit would have to
+# come from a push to main, where merging two pull requests in a row cancels
+# the first one's runs, and that would stop a valid release. The part of
+# Security that is about this workflow, every action pinned to a commit, runs
+# in the first job instead.
 on:
   push:
     tags: ['android-*']
@@ -36,9 +55,43 @@ concurrency:
   group: android-release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # The release key's alias in the keystore. Not a secret: GitHub masks a
+  # secret's value wherever it appears in the log, and as one, every
+  # 'freetunnel' in a path, a file name or org.freetunnel.android would read
+  # '***'.
+  ANDROID_KEY_ALIAS: freetunnel
+
 jobs:
+  release-secrets:
+    name: Check the release secrets are set
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: android-release
+    steps:
+      # Only 'true' or 'false' reaches the runner, never a value. sign and
+      # publish check again, and theirs are the checks that count.
+      - name: The release secrets are set
+        env:
+          HAVE_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAVE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
+          HAVE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD != '' }}
+          HAVE_ED25519_KEY: ${{ secrets.ED25519_SIGNING_KEY != '' }}
+        run: |
+          set -eu
+          missing=""
+          [ "$HAVE_KEYSTORE" = true ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ "$HAVE_KEYSTORE_PASSWORD" = true ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ "$HAVE_KEY_PASSWORD" = true ] || missing="$missing ANDROID_KEY_PASSWORD"
+          [ "$HAVE_ED25519_KEY" = true ] || missing="$missing ED25519_SIGNING_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error title=Release secrets missing::Not set:$missing. The first three belong in the android-release environment, ED25519_SIGNING_KEY in the repository; see Releasing in android/README.md."
+            exit 1
+          fi
+          echo "The keystore, both passwords and the Ed25519 key are set."
+
   check:
-    name: Check the tag, the pin and the notes
+    name: Check the tag, the commit, the pin and the notes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -46,6 +99,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          # All of main's history, to tell whether the tagged commit is on it.
+          fetch-depth: 0
           persist-credentials: false
 
       # The tag comes in through env, never spliced into the script.
@@ -54,6 +109,53 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: bash scripts/check-android-release-tag.sh "$TAG"
+
+      # Pull requests are squash-merged, so a commit of the pull request's own
+      # branch is never on main, and tagging that branch by mistake would
+      # release a tree that is not main's.
+      - name: The tagged commit is on main
+        run: |
+          set -u
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "::error title=Tag not on main::$GITHUB_SHA is not on main. Merge the release pull request, then tag main: git switch main && git pull --ff-only, as in Releasing in android/README.md."
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error title=Cannot compare with main::git merge-base could not tell whether $GITHUB_SHA is on origin/main (exit $rc)."
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main."
+
+      # A published version's files never change: apps that installed it, and
+      # anyone who checked its SHA256SUMS, rely on that. This endpoint finds
+      # published releases only, never a draft, so a release whose earlier
+      # attempt stopped halfway is still finished by a re-run. Any answer but
+      # 404 stops the release: this check never passes on a doubt.
+      - name: The version is not published yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -u
+          gh api -i "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            > "$RUNNER_TEMP/release.http" 2> "$RUNNER_TEMP/release.err" || true
+          status=""
+          read -r _ status _ < "$RUNNER_TEMP/release.http" || true
+          status="${status%$'\r'}"
+          case "$status" in
+            404)
+              echo "No release is published for $TAG yet."
+              ;;
+            200)
+              echo "::error title=Already published::$TAG is already published, and its files never change. Release a new version instead."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Cannot tell whether $TAG is published::GitHub answered '${status:-nothing}': $(head -n 1 "$RUNNER_TEMP/release.err")"
+              exit 1
+              ;;
+          esac
 
       - name: The release certificate is pinned
         run: bash scripts/check-android-signer.sh android/release-certificate.sha256
@@ -108,7 +210,7 @@ jobs:
           echo "--- release body ---"
           cat notes.md
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-release-notes
           path: notes.md
@@ -116,50 +218,96 @@ jobs:
 
   ci:
     name: Android CI
-    needs: check
+    needs: [check, release-secrets]
     uses: ./.github/workflows/android.yml
+    with:
+      gradle-cache-disabled: true
 
   build:
-    name: Build and sign the APK
+    name: Build the unsigned APK
     needs: [check, ci]
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Gradle runs third-party code in this job, next to the keystore.
-          # It gets no token in .git/config either.
           persist-credentials: false
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '17'
       - name: Ensure Android SDK 35 packages
         # As in android.yml: the runner image's command-line tools.
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          # No cache at all in a release build, and never the proprietary one
+          # (see android.yml).
+          cache-provider: basic
+          cache-disabled: true
+      - run: scripts/prepare-trusttunnel-android.sh
+      # Unsigned: build.gradle has no signing config, and this job no secret.
+      # The ci job has run the tests and lint on this commit already.
+      - name: Build the release APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-release-unsigned
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
 
-      - name: Build and sign the release APK
+  sign:
+    name: Sign the APK
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: android-release
+    steps:
+      - name: Check out the signing scripts and the pin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /scripts/sign-android-release.sh
+            /scripts/check-android-signer.sh
+            /android/release-certificate.sha256
+          sparse-checkout-cone-mode: false
+      # apksigner is a Java program.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Ensure Android Build Tools 35.0.0
+        # The runner image's command-line tools, as in android.yml. zipalign,
+        # apksigner and aapt2 are all this job needs from the SDK.
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-release-unsigned
+          path: unsigned
+
+      - name: Sign and check the release APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           # NOTE: no -x here. Tracing would print the keystore and its passwords
           # into the job log, where only GitHub's best-effort masking stands
           # between them and anyone who can read the run.
           set -euo pipefail
           missing=""
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               missing="$missing $name"
             fi
           done
           if [ -n "$missing" ]; then
             # An APK signed with any other key could never update an installed
-            # official one, so nothing is built without the release keystore.
-            echo "::error title=Android signing secrets missing::Not set:$missing. Add them as described under Releasing in android/README.md, then re-run this job."
+            # official one, so nothing is signed without the release keystore.
+            echo "::error title=Android signing secrets missing::Not set:$missing. Add them to the android-release environment as described under Releasing in android/README.md, then re-run this job."
             exit 1
           fi
           # umask before the redirect, not chmod after: the file is created with
@@ -171,33 +319,17 @@ jobs:
             exit 1
           fi
           unset ANDROID_KEYSTORE_BASE64
-          bash scripts/build-android-release.sh
+          bash scripts/sign-android-release.sh unsigned/app-release-unsigned.apk \
+            "dist/freetunnel-android-$VERSION.apk" android/release-certificate.sha256 "$VERSION"
+          ls -la dist
 
       - name: Remove the keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release-keystore"
 
-      # build-android-release.sh checked the APK against the keystore it was
-      # given. This checks it against the certificate the repository pins, so
-      # a secret holding another keystore cannot publish a release.
-      - name: The APK is signed with the pinned certificate
-        run: |
-          bash scripts/check-android-signer.sh android/release-certificate.sha256 \
-            android/app/build/outputs/apk/release/app-release.apk
-
       # The APK only. It is what people install and what the app updates itself
-      # from. The AAB that build-android-release.sh also makes and verifies is
-      # for app stores, and this project publishes to none.
-      - name: Name the APK for the release
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-        run: |
-          set -eu
-          mkdir dist
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/freetunnel-android-$VERSION.apk"
-          ls -la dist
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      # from. An AAB is for app stores, and this project publishes to none.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-release-apk
           path: dist/
@@ -205,7 +337,7 @@ jobs:
 
   publish:
     name: Publish the release
-    needs: [check, build]
+    needs: [check, sign]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -244,7 +376,7 @@ jobs:
           shopt -s nullglob dotglob
           got=(*)
           if [ "${#got[@]}" -ne 1 ] || [ "${got[0]}" != "$apk" ]; then
-            echo "::error title=Unexpected build output::expected only $apk from the build job, got: ${got[*]}"
+            echo "::error title=Unexpected build output::expected only $apk from the sign job, got: ${got[*]}"
             exit 1
           fi
           hash="$(sha256sum "$apk" | cut -d' ' -f1)"

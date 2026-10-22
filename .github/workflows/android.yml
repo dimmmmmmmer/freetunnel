@@ -2,13 +2,18 @@ name: Android
 on:
   push:
     branches: [main]
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
   pull_request:
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
   workflow_dispatch:
   # android-release.yml runs this whole workflow on the tagged commit, and signs
   # nothing until it has passed there.
   workflow_call:
+    inputs:
+      gradle-cache-disabled:
+        description: Restore and save no Gradle cache, as for a release
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -36,7 +41,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
+          cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
       - run: bash -n scripts/build-android-release.sh
+      # The release workflow's scripts run for real only on an android-* tag,
+      # and Tests skips a pull request that changes only Android's files. So
+      # their suites run here as well, against this commit's build.gradle.
+      - run: bash tests/test_android_release_tag.sh
+      - run: bash tests/test_android_signer.sh
+      - run: bash tests/test_android_sign_release.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
@@ -65,6 +77,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic # see the build job
+          cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
       - run: bash -n scripts/build-android-release.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - name: Enable KVM
@@ -88,3 +101,55 @@ jobs:
         with:
           name: android-device-results
           path: android/app/build/reports/androidTests/
+  release-signing:
+    name: Release signing, with a throwaway key
+    # What android-release.yml's build and sign jobs do, with real Build
+    # Tools and everything but the release keystore: Gradle builds the APK
+    # unsigned, and scripts/sign-android-release.sh signs it with a keystore
+    # made for this run and checks it against that keystore's pin. So the
+    # release path has run on every Android pull request before any tag.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Ensure Android SDK 35 packages
+        # Ubuntu 24.04 already supplies command-line tools. Reuse them rather than
+        # downloading a second toolchain before each job.
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic # see the build job
+          cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
+      - run: scripts/prepare-trusttunnel-android.sh
+      - name: Build the release APK, unsigned
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
+      - name: Sign it with a throwaway keystore
+        run: |
+          set -euo pipefail
+          # Made the way android/README.md makes the release keystore: PKCS12,
+          # alias freetunnel, RSA 4096, one password for the store and the key.
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/throwaway.p12"
+          ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+          export ANDROID_KEYSTORE_PASSWORD
+          export ANDROID_KEY_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          keytool -genkeypair -storetype PKCS12 -keystore "$ANDROID_KEYSTORE_PATH" \
+            -alias freetunnel -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname 'CN=FreeTunnel throwaway, O=FreeTunnel' \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD
+          # Its pin, made as the README makes the real one.
+          cert="$RUNNER_TEMP/throwaway.cer"
+          keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias freetunnel \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -file "$cert"
+          pin="$RUNNER_TEMP/throwaway-certificate.sha256"
+          sha256sum "$cert" | cut -d' ' -f1 > "$pin"
+          version="$(sed -nE "s/^[[:space:]]*def[[:space:]]+appVersion[[:space:]]*=[[:space:]]*'([^']*)'[[:space:]]*\$/\1/p" \
+            android/app/build.gradle)"
+          bash scripts/sign-android-release.sh android/app/build/outputs/apk/release/app-release-unsigned.apk \
+            "$RUNNER_TEMP/signed/freetunnel-android-$version.apk" "$pin" "$version"

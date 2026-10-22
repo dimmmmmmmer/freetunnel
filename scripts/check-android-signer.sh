@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Check an Android release APK against the signing certificate the repository
 # pins in android/release-certificate.sha256. Run by
-# .github/workflows/android-release.yml: once with the pin alone, before the
-# CI, and once more with the signed APK, before it is published.
+# .github/workflows/android-release.yml with the pin alone, before the CI, and
+# by scripts/sign-android-release.sh, before and after it signs.
 #
 # Android installs an update only when it is signed with the same key as the
 # installed app, so the first official release fixes the key for good. The
 # keystore lives in a GitHub secret, and nothing else says which keystore that
 # is: a secret replaced by mistake would sign and publish without complaint,
-# and every app installed from earlier releases could never update to it.
-# scripts/build-android-release.sh checks the APK against the keystore it was
-# given; this checks it against the certificate the repository names.
+# and every app installed from earlier releases could never update to it. So
+# the release checks the APK against the certificate the repository names. A
+# local build (scripts/build-android-release.sh) pins its keystore's own.
 #
 # The pin is one line: the SHA-256 of the certificate's DER bytes, in lowercase
 # hex without colons. That is the value apksigner prints as "certificate
@@ -71,6 +71,6 @@ if [[ "$count" -ne 1 ]] || ! [[ "$digests" =~ $digest_re ]]; then
 fi
 actual="$(tr 'A-F' 'a-f' <<<"${BASH_REMATCH[1]}")"
 if [[ "$actual" != "$pin" ]]; then
-  fail "APK signed with another key" "$apk is signed by the certificate $actual, and $pin_file pins $pin. Installed apps would refuse it as an update. If the ANDROID_KEYSTORE_BASE64 secret holds the wrong keystore, put the release keystore back in it and re-run the build. Change the pin to match only if no release signed with the pinned key was ever published."
+  fail "APK signed with another key" "$apk is signed by the certificate $actual, and $pin_file pins $pin. Installed apps would refuse it as an update. If the ANDROID_KEYSTORE_BASE64 secret holds the wrong keystore, put the release keystore back in it and re-run the release. Change the pin to match only if no release signed with the pinned key was ever published."
 fi
 echo "$apk is signed by the pinned release certificate $pin."
