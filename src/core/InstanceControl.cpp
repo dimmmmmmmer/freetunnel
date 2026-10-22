@@ -3,6 +3,7 @@
 
 #include "core/CredentialStore.h"
 
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFile>
 #include <QLocalServer>
@@ -727,24 +728,51 @@ ForwardResult sendToInstance(QLocalSocket &probe, const QString &token, const QS
     letPipeServerTakeForeground(reinterpret_cast<HANDLE>(probe.socketDescriptor()));
 #endif
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
-    const QByteArray msg = formatInstanceMessage(token, payload);
-    if (probe.write(msg) != msg.size())
-        return ForwardResult::Unreachable;
-    probe.flush();
-    probe.waitForBytesWritten(300);
-    probe.disconnectFromServer();
-    // Wait for the close to finish. On Windows the named-pipe write is completed
-    // asynchronously, so waitForBytesWritten() above can return with the payload
-    // still queued; disconnectFromServer() then only *starts* the close, and this
-    // process exits immediately afterwards (runGuiApplication returns 0), taking
-    // the unsent bytes with it. Short commands got through and a tt:// deep link —
-    // the longest thing this channel carries, and the one where losing it means a
-    // link the user clicked does nothing at all — did not.
-    probe.waitForDisconnected(3000);
-    return ForwardResult::Forwarded;
+    // Not taken means the command is lost, and this launch is not the instance
+    // either: one of ours is running. It must not start beside it.
+    return handOverInstanceMessage(probe, formatInstanceMessage(token, payload))
+            ? ForwardResult::Forwarded
+            : ForwardResult::Unreachable;
 }
 
 } // namespace
+
+// On Windows a QLocalServer's pipe has no buffer: Qt creates it with none, so
+// that a writer closing early cannot lose what it wrote. A write therefore
+// completes only once the running instance has read it. The instance reads from
+// its event loop, which is not always free: it may still be starting up, or busy
+// with something else. Until then the bytes wait here, in this process, and a
+// launch that exits first takes them with it.
+//
+// This waited 300 ms for the write and three seconds for the close, then
+// reported the command as handed over either way, and the launch exited. An
+// instance that took longer never got it, and a link the user clicked did
+// nothing. So the wait now lasts until the bytes are actually taken, within a
+// budget, and the answer says whether they were.
+//
+// On Unix the kernel buffers the write, and it is taken at once.
+bool handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message, int budgetMs)
+{
+    if (socket.write(message) != message.size())
+        return false;
+    socket.flush();
+    const QDeadlineTimer budget(budgetMs);
+    while (socket.state() == QLocalSocket::ConnectedState && socket.bytesToWrite() > 0
+           && !budget.hasExpired()) {
+        // In slices, so the budget is the whole wait, however the waits end.
+        socket.waitForBytesWritten(int(qBound(qint64(1), budget.remainingTime(), qint64(250))));
+    }
+    // Still connected, as well as nothing left to send. A write the instance
+    // refused closes the socket, and that leaves nothing to send too: Qt drops
+    // the bytes with the writer.
+    if (socket.state() != QLocalSocket::ConnectedState || socket.bytesToWrite() > 0) {
+        socket.abort();
+        return false;
+    }
+    // Nothing is left to send, so this closes at once.
+    socket.disconnectFromServer();
+    return true;
+}
 
 // "Could not hand it over" and "there is nothing to hand it to" used to be one
 // answer, false, and the caller started a full instance on either. With an

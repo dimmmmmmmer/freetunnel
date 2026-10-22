@@ -20,7 +20,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QThread>
 #include <QTranslator>
+
+#include <atomic>
+#include <memory>
 
 #include "app/AppStartup.h"
 #include "app/Backend.h"
@@ -55,6 +59,9 @@ private slots:
     void aMessageSplitAcrossChunksStillArrives();
     void wireInstanceServerIgnoresWrongToken();
     void wireInstanceServerSurvivesASlowFirstChunk();
+    void aMessageSurvivesAStallInTheTurnThatAcceptsIt();
+    void aLaunchWaitsForABusyInstanceToTakeItsMessage();
+    void aLaunchSaysWhenItsMessageWasNotTaken();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
     void aLinkSentWhileStartingIsHandled();
     void aSecondLaunchNeverStartsBesideALiveInstance();
@@ -86,6 +93,12 @@ void TestAppStartup::initTestCase()
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir);
     saveAppSettings(AppSettings{});
     saveStoredConfigs({});
+    // Every Backend checks for updates 1.2 s after it is made, and with nothing
+    // set that is a real HTTPS request to api.github.com. Part of it runs on
+    // this thread: the proxy lookup and the TLS setup, which can take seconds on
+    // a fresh CI machine. Here it goes to a port nothing listens on, over plain
+    // HTTP, and fails at once. A background check fails silently.
+    qputenv("FT_GITHUB_API_BASE", "http://127.0.0.1:9");
 }
 
 void TestAppStartup::controlArgFromArgv()
@@ -340,37 +353,71 @@ static void waitOutInstanceDelivery()
     QTest::qWait(3000); // 12x the listener's 250 ms idle delay
 }
 
+// One write of a second launch, after a pause of its own.
+struct TimedChunk {
+    int pauseMs;
+    QByteArray bytes;
+};
+
+// The second launch's side of the handshake, on a thread of its own, as in a
+// second process: connect to @p socketName, then pause before each chunk and
+// write it. Each chunk is taken by the listener before the next. The last one
+// goes through handOverInstanceMessage(), exactly as a launch sends, which also
+// closes. Meanwhile this thread turns its event loop, as a running FreeTunnel
+// does, and that is where the listener accepts and reads. True when every chunk
+// was taken.
+static bool sendFromAnotherThread(const QString &socketName, const QList<TimedChunk> &chunks,
+                                  int budgetMs = freetunnel::kInstanceHandOverMs)
+{
+    std::atomic<bool> taken{false};
+    std::unique_ptr<QThread> sender(QThread::create([&socketName, &chunks, budgetMs, &taken] {
+        QLocalSocket client;
+        client.connectToServer(socketName);
+        if (!client.waitForConnected(2000))
+            return;
+        for (qsizetype i = 0; i < chunks.size(); ++i) {
+            QThread::msleep(static_cast<unsigned long>(chunks.at(i).pauseMs));
+            const QByteArray &bytes = chunks.at(i).bytes;
+            if (i + 1 == chunks.size()) {
+                taken = freetunnel::handOverInstanceMessage(client, bytes, budgetMs);
+                return;
+            }
+            if (client.write(bytes) != bytes.size())
+                return;
+            client.flush();
+            while (client.state() == QLocalSocket::ConnectedState && client.bytesToWrite() > 0) {
+                if (!client.waitForBytesWritten(budgetMs))
+                    return;
+            }
+        }
+    }));
+    sender->start();
+    // Every wait on the sending side has a limit of its own, so this ends.
+    const bool finished = QTest::qWaitFor([&sender] { return sender->isFinished(); }, 30000);
+    sender->wait(); // a QThread destroyed while it runs takes the process down
+    return finished && taken;
+}
+
+// Send one message the way a second launch does (sendFromAnotherThread()).
+//
+// This used to send from this very thread, and that was not what a launch
+// does. On Windows a QLocalServer's pipe has no buffer, so a write completes
+// only once the listener has read it, and the listener reads from this thread's
+// event loop. That loop did not turn until the sender's waitForBytesWritten()
+// and waitForDisconnected() had both run out: seven seconds for every message.
+// Everything that came due meanwhile then ran in one turn with the accept. That
+// is the turn in which the listener's deadline could fire before the bytes it
+// had read were counted, and a message was lost now and then
+// (aMessageSurvivesAStallInTheTurnThatAcceptsIt).
+//
+// No fixed wait afterwards. Delivery is deliberately deferred by the listener
+// (kInstanceMessageIdleMs, 250 ms) and then has to cross the event loop, so how
+// long it takes depends on how loaded the machine is. Callers expecting
+// something to arrive use QTRY_*; callers expecting silence wait out the delay
+// explicitly with waitOutInstanceDelivery().
 void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteArray &msg)
 {
-    QLocalSocket client;
-    client.connectToServer(socketName);
-    QVERIFY(client.waitForConnected(2000));
-    QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
-    // Send it exactly the way forwardToRunningInstance() does, and for the same
-    // reason: on Windows a QLocalSocket is a named pipe whose write is completed
-    // asynchronously, so it is still queued here — waitForBytesWritten() does not
-    // drive it and its answer means nothing, which is why the production code
-    // ignores the result too. disconnectFromServer() is the part that matters: it
-    // flushes what is pending and closes, and the listener's deliver path is
-    // driven by that disconnect. Letting the socket die with the scope instead
-    // dropped the write on Windows and delivered nothing.
-    client.flush();
-    client.waitForBytesWritten(2000);
-    client.disconnectFromServer();
-    // And wait for the close to complete. disconnectFromServer() only *starts* it
-    // when bytes are still queued — which on Windows they are, the write having
-    // been completed asynchronously — so returning here would let the socket be
-    // destroyed with data still pending, and that data is simply dropped. Short
-    // payloads survived it and a deep link, the longest thing this channel
-    // carries, did not.
-    client.waitForDisconnected(5000);
-    // No fixed wait here. Delivery is deliberately deferred by the listener
-    // (kInstanceMessageIdleMs, 250 ms) and then has to cross the event loop, so
-    // how long it takes depends on how loaded the machine is — a hardcoded second
-    // was enough on this developer box and not always enough on a Windows runner.
-    // Callers expecting something to arrive use QTRY_*; callers expecting silence
-    // wait out the delay explicitly with waitOutInstanceDelivery().
-    QTest::qWait(50);
+    QVERIFY2(sendFromAnotherThread(socketName, {{0, msg}}), "the listener never took the message");
 }
 
 // The entry point was the one file no test compiled, and both macOS defects found
@@ -410,6 +457,15 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
     });
 
     freetunnel::GuiStartup startup;
+    // The listener is parented to the application, so it outlives this test
+    // unless it is deleted here. Left behind, it went on listening with whatever
+    // it had accepted and the deadlines armed for it, and its handlers hold the
+    // Backend and window this test destroys. Deleted before them: this guard is
+    // declared after startup.
+    const auto dropListener = qScopeGuard([&startup] {
+        delete startup.server;
+        startup.server = nullptr;
+    });
     char arg0[] = "freetunnel";
     char *argv[] = {arg0, nullptr};
     int argc = 1;
@@ -467,6 +523,11 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
     startup.backend->quitApplication();
     QCOMPARE(shutdown.count(), 1);
     QVERIFY(startup.backend->applicationClosingDown());
+    // quitApplication() also queues the application's exit, and that is not this
+    // test's to leave behind. Run in the next test, it emitted aboutToQuit, which
+    // the application does once, and from then on every event loop entered in
+    // this binary returned at once, nested ones and QSignalSpy::wait() included.
+    QCoreApplication::removePostedEvents(qApp, QEvent::MetaCall);
 #endif
 }
 
@@ -664,22 +725,145 @@ void TestAppStartup::wireInstanceServerSurvivesASlowFirstChunk()
     freetunnel::wireInstanceServer(&server, backend, nullptr, QStringLiteral("tok"));
 
     QSignalSpy spy(&backend, &Backend::errorOccurred);
-    QLocalSocket client;
-    client.connectToServer(name);
-    QVERIFY(client.waitForConnected(2000));
-
-    QTest::qWait(400); // > kInstanceMessageIdleMs (250 ms), < the 3 s deadline
-
     const QByteArray msg = freetunnel::formatInstanceMessage(
             QStringLiteral("tok"), QStringLiteral("freetunnel://connect"));
-    QCOMPARE(client.write(msg), static_cast<qint64>(msg.size()));
-    client.flush();
-    client.waitForBytesWritten(2000);
-    client.disconnectFromServer();
-    client.waitForDisconnected(5000);
+    // Connected, then quiet for longer than kInstanceMessageIdleMs (250 ms) and
+    // less than the three-second deadline.
+    QVERIFY(sendFromAnotherThread(name, {{400, msg}}));
 
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
     QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
+}
+
+// A listener wired as at startup, on a name of this test's own, with the
+// Backend that runs what it is sent.
+struct WiredListener {
+    Backend backend;
+    std::unique_ptr<QLocalServer> server{freetunnel::newInstanceServer(nullptr)};
+    QString name;
+};
+
+static bool wireListener(WiredListener &w, const QString &name)
+{
+    w.name = name;
+    QLocalServer::removeServer(name);
+    w.server->setSocketOptions(QLocalServer::UserAccessOption);
+    if (!w.server->listen(name))
+        return false;
+    freetunnel::wireInstanceServer(w.server.get(), w.backend, nullptr, QStringLiteral("tok"));
+    return true;
+}
+
+// The listener's three-second deadline is for a peer that says nothing, and it
+// fired for one that had said everything. On Windows the pipe reader takes the
+// peer's bytes off the pipe as the connection is accepted, but they are counted
+// only once an event posted for the next turn of the event loop runs. When
+// something slow ran in the same turn after the accept, the deadline came due
+// first, found nothing to read and dropped the whole message. The Windows CI
+// runners lost a forwarded tt:// link that way now and then. Here the slow
+// thing is made to run in exactly that turn.
+void TestAppStartup::aMessageSurvivesAStallInTheTurnThatAcceptsIt()
+{
+    WiredListener w;
+    QVERIFY(wireListener(w, instanceSocketName(QStringLiteral("stall"))));
+    QSignalSpy spy(&w.backend, &Backend::errorOccurred);
+
+    std::atomic<bool> taken{false};
+    std::unique_ptr<QThread> sender(QThread::create([&w, &taken] {
+        QLocalSocket client;
+        client.connectToServer(w.name);
+        if (client.waitForConnected(2000)) {
+            taken = freetunnel::handOverInstanceMessage(
+                    client, freetunnel::formatInstanceMessage(
+                                    QStringLiteral("tok"), QStringLiteral("freetunnel://connect")));
+        }
+    }));
+    sender->start();
+    const auto joinSender = qScopeGuard([&sender] { sender->wait(); });
+
+    // The connection arrives while this thread turns no event loop, so its
+    // accept waits in the queue. The stall is queued behind it. Both run in the
+    // next turn: the accept, which reads the message and arms the deadline, and
+    // then the stall, which runs past the deadline.
+    QThread::msleep(300);
+    QMetaObject::invokeMethod(qApp, [] { QThread::msleep(3500); }, Qt::QueuedConnection);
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 15000);
+    QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
+    QVERIFY(QTest::qWaitFor([&sender] { return sender->isFinished(); }, 15000));
+    QVERIFY(taken);
+}
+
+// A second launch waits for the running instance to take what it sends. On
+// Windows a write is taken only when the instance reads it, and the instance
+// reads from its event loop. A launch used to give up after about three seconds,
+// say the command had been handed over, and exit, and the bytes went with it. A
+// link clicked while FreeTunnel was starting, or busy for a moment, did nothing.
+// Here the instance is busy for longer than that.
+void TestAppStartup::aLaunchWaitsForABusyInstanceToTakeItsMessage()
+{
+    WiredListener w;
+    QVERIFY(wireListener(w, instanceSocketName(QStringLiteral("busy"))));
+    QSignalSpy spy(&w.backend, &Backend::errorOccurred);
+
+    std::atomic<bool> taken{false};
+    std::unique_ptr<QThread> sender(QThread::create([&w, &taken] {
+        QLocalSocket client;
+        client.connectToServer(w.name);
+        if (client.waitForConnected(2000)) {
+            taken = freetunnel::handOverInstanceMessage(
+                    client, freetunnel::formatInstanceMessage(
+                                    QStringLiteral("tok"), QStringLiteral("freetunnel://connect")));
+        }
+    }));
+    sender->start();
+    const auto joinSender = qScopeGuard([&sender] { sender->wait(); });
+
+    QThread::msleep(4500); // busy: no turn of the event loop at all
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+    QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
+    QVERIFY(QTest::qWaitFor([&sender] { return sender->isFinished(); }, 15000));
+    QVERIFY2(taken, "the launch gave up on an instance that took its message");
+}
+
+// And when the instance is busy for longer than a launch waits, the launch says
+// the message was not taken. It used to report it handed over and exit, and
+// the bytes it still held went with it. Unreachable keeps it from starting a
+// second copy beside the instance, and says what happened.
+void TestAppStartup::aLaunchSaysWhenItsMessageWasNotTaken()
+{
+    WiredListener w;
+    QVERIFY(wireListener(w, instanceSocketName(QStringLiteral("nottaken"))));
+    QSignalSpy spy(&w.backend, &Backend::errorOccurred);
+
+    std::atomic<bool> taken{false};
+    std::unique_ptr<QThread> sender(QThread::create([&w, &taken] {
+        QLocalSocket client;
+        client.connectToServer(w.name);
+        if (client.waitForConnected(2000)) {
+            taken = freetunnel::handOverInstanceMessage(
+                    client,
+                    freetunnel::formatInstanceMessage(QStringLiteral("tok"),
+                                                      QStringLiteral("freetunnel://connect")),
+                    1000);
+        }
+    }));
+    sender->start();
+    const auto joinSender = qScopeGuard([&sender] { sender->wait(); });
+
+    QThread::msleep(2500); // busy for longer than this launch's 1 s budget
+    QVERIFY(QTest::qWaitFor([&sender] { return sender->isFinished(); }, 15000));
+#ifdef Q_OS_WIN
+    // The bytes never left the launch, so the instance has nothing to run.
+    QVERIFY2(!taken, "a message the instance never read was reported as taken");
+    waitOutInstanceDelivery();
+    QCOMPARE(spy.count(), 0);
+#else
+    // The kernel buffers the write, so it is taken at once and arrives.
+    QVERIFY(taken);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
+#endif
 }
 
 // A control message is not framed by length, so the listener has to decide when it
@@ -710,20 +894,8 @@ void TestAppStartup::aMessageSplitAcrossChunksStillArrives()
     QVERIFY(cut > 0 && cut < msg.size());
 
     QSignalSpy spy(&backend, &Backend::errorOccurred);
-    QLocalSocket client;
-    client.connectToServer(name);
-    QVERIFY(client.waitForConnected(2000));
-
-    QCOMPARE(client.write(msg.left(cut)), static_cast<qint64>(cut));
-    client.flush();
-    client.waitForBytesWritten(2000);
-    QTest::qWait(80); // a real gap, comfortably under the idle interval
-
-    QCOMPARE(client.write(msg.mid(cut)), static_cast<qint64>(msg.size() - cut));
-    client.flush();
-    client.waitForBytesWritten(2000);
-    client.disconnectFromServer();
-    client.waitForDisconnected(5000);
+    // A real gap between the halves, comfortably under the idle interval.
+    QVERIFY(sendFromAnotherThread(name, {{0, msg.left(cut)}, {80, msg.mid(cut)}}));
 
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
     QCOMPARE(spy.at(0).at(0).toString(), Backend::tr("Select a config first"));
@@ -948,6 +1120,10 @@ void TestAppStartup::aLaunchWhileQuittingFindsNoInstance()
     QObject successor;
 
     freetunnel::GuiStartup startup;
+    const auto dropListener = qScopeGuard([&startup] { // see guiWiringBuildsTheAppInAKnownOrder
+        delete startup.server;
+        startup.server = nullptr;
+    });
     char arg0[] = "freetunnel";
     char *argv[] = {arg0, nullptr};
     int argc = 1;
@@ -1002,10 +1178,13 @@ void TestAppStartup::aTokenDeletedAsTheInstanceStartsIsPutBack()
         QLocalServer::removeServer(name);
     });
     freetunnel::GuiStartup startup;
+    const auto dropListener = qScopeGuard([&startup] { // see guiWiringBuildsTheAppInAKnownOrder
+        delete startup.server;
+        startup.server = nullptr;
+    });
     char arg0[] = "freetunnel";
     char *argv[] = {arg0, nullptr};
     QVERIFY(!freetunnel::wireGuiApplication(*qApp, 1, argv, &startup).has_value());
-    const auto stopListening = qScopeGuard([&startup] { startup.server->close(); });
     QString token;
     QVERIFY(freetunnel::readInstanceAuthToken(&token));
 
@@ -1068,6 +1247,10 @@ void TestAppStartup::aQuitAfterHandingTheNameOverLeavesTheToken()
         QLocalServer::removeServer(name);
     });
     freetunnel::GuiStartup startup;
+    const auto dropListener = qScopeGuard([&startup] { // see guiWiringBuildsTheAppInAKnownOrder
+        delete startup.server;
+        startup.server = nullptr;
+    });
     char arg0[] = "freetunnel";
     char *argv[] = {arg0, nullptr};
     QVERIFY(!freetunnel::wireGuiApplication(*qApp, 1, argv, &startup).has_value());
