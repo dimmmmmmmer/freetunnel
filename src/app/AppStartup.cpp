@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/AppStartup.h"
 
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QGuiApplication>
@@ -230,10 +231,12 @@ constexpr char kPeerIsSameUser[] = "freetunnelPeerIsSameUser";
 //
 // Asked any later, the question can have no answer left. The listener is up from
 // early in startup and wired only at its end, and a second launch connects,
-// writes and is gone within microseconds. A connection accepted in between had
-// seen its peer leave, and let go of its descriptor, by the time it was handed
-// on: the check had nothing to ask and refused it, and the link the user clicked
-// while FreeTunnel was starting was lost.
+// writes and is gone as soon as what it wrote is taken: within microseconds on
+// Unix, once the listener has read it on Windows (handOverInstanceMessage()). A
+// connection accepted in between had seen its peer leave, and let go of its
+// descriptor, by the time it was handed on: the check had nothing to ask and
+// refused it, and the link the user clicked while FreeTunnel was starting was
+// lost.
 class InstanceServer : public QLocalServer {
 public:
     using QLocalServer::QLocalServer;
@@ -270,19 +273,22 @@ static bool peerIsSameUser(QLocalSocket *c)
 // control message indistinguishable from one that was never sent: no error, no
 // log line, nothing for the user or for whoever has to work out why a tt:// link
 // did nothing.
-static bool authorizeInstanceMessage(const QByteArray &buf, QLocalSocket *c,
+static bool authorizeInstanceMessage(const QByteArray &buf, QLocalSocket *c, qint64 waitedMs,
                                      const QString &instanceToken, QString *cmdOut)
 {
     QString recvToken;
     if (!parseInstanceMessage(buf, &recvToken, cmdOut)) {
-        // Sizes and state only — the token itself must never reach a log.
+        // Sizes, state and timing only — the token itself must never reach a log.
         // bytesAvailable() separates "the peer sent nothing" from "bytes were
         // sitting unread when we gave up", which are different bugs and cannot be
-        // told apart afterwards.
+        // told apart afterwards. The time says which way delivery came: about
+        // 250 ms after the last bytes, at the three-second deadline, or at the
+        // peer's close. A deadline that ran late shows as well.
         qWarning("single-instance: dropping an unparseable message (%lld bytes read, "
-                 "%lld still readable, socket state %d)",
+                 "%lld still readable, socket state %d, %lld ms after it was handed over)",
                  static_cast<long long>(buf.size()),
-                 static_cast<long long>(c->bytesAvailable()), static_cast<int>(c->state()));
+                 static_cast<long long>(c->bytesAvailable()), static_cast<int>(c->state()),
+                 static_cast<long long>(waitedMs));
         return false;
     }
     if (instanceToken.isEmpty()) {
@@ -343,14 +349,28 @@ void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &ba
     // Held weakly: a connection is the listener's child, and one closed as the
     // listener is destroyed delivers from inside that.
     const QPointer<QLocalServer> listener(server);
-    auto deliver = [c, buf, delivered, be, win, instanceToken, listener]() {
+    QElapsedTimer handedOver;
+    handedOver.start();
+    auto deliver = [c, buf, delivered, be, win, instanceToken, listener, handedOver]() {
         if (*delivered)
             return;
         *delivered = true;
+        // What has arrived can still be uncounted here. On Windows the pipe
+        // reader takes the peer's bytes off the pipe as the connection is
+        // accepted, and announces them with an event posted for the next turn of
+        // the event loop. Until that event runs, readAll() and bytesAvailable()
+        // see nothing. A timer that came due in the same turn runs first: the
+        // deadline below, whenever something slow ran in that turn after the
+        // accept. Judged then, a whole tt:// link was dropped as an empty
+        // message. A zero wait takes in what has arrived without blocking. The
+        // readyRead it emits lands in the handler below, and the deliver() that
+        // handler may call returns at the flag above.
+        if (c->state() == QLocalSocket::ConnectedState)
+            c->waitForReadyRead(0);
         *buf += c->readAll();
         c->deleteLater();
         QString cmd;
-        if (!authorizeInstanceMessage(*buf, c, instanceToken, &cmd)) {
+        if (!authorizeInstanceMessage(*buf, c, handedOver.elapsed(), instanceToken, &cmd)) {
             // A launch of this user's that read no token, or one not ours.
             keepInstanceTokenStored(listener, instanceToken);
             return;
