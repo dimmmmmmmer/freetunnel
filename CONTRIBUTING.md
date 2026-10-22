@@ -258,6 +258,7 @@ the update-signature tests would skip the path every release takes.
 | `android_release_tag` | On Linux only |
 | `android_signer` | On Linux only |
 | `android_sign_release` | On Linux only |
+| `android_release_unpublished` | On Linux only |
 | `ubsan_canary` | Only with the sanitizers; it must fail |
 
 What the suites cover:
@@ -280,8 +281,8 @@ What the suites cover:
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
 - The release job's CI gate and signature check; the desktop CI's
-  Android-only gate; the Android release's tag and signer checks and its
-  signing script
+  Android-only gate; the Android release's tag, signer and already-published
+  checks and its signing script
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 

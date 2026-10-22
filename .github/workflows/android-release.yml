@@ -127,35 +127,13 @@ jobs:
           fi
           echo "$GITHUB_SHA is on main."
 
-      # A published version's files never change: apps that installed it, and
-      # anyone who checked its SHA256SUMS, rely on that. This endpoint finds
-      # published releases only, never a draft, so a release whose earlier
-      # attempt stopped halfway is still finished by a re-run. Any answer but
-      # 404 stops the release: this check never passes on a doubt.
+      # A published version's files never change. Checked here to fail fast,
+      # and again right before publishing (see the publish job).
       - name: The version is not published yet
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: |
-          set -u
-          gh api -i "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
-            > "$RUNNER_TEMP/release.http" 2> "$RUNNER_TEMP/release.err" || true
-          status=""
-          read -r _ status _ < "$RUNNER_TEMP/release.http" || true
-          status="${status%$'\r'}"
-          case "$status" in
-            404)
-              echo "No release is published for $TAG yet."
-              ;;
-            200)
-              echo "::error title=Already published::$TAG is already published, and its files never change. Release a new version instead."
-              exit 1
-              ;;
-            *)
-              echo "::error title=Cannot tell whether $TAG is published::GitHub answered '${status:-nothing}': $(head -n 1 "$RUNNER_TEMP/release.err")"
-              exit 1
-              ;;
-          esac
+        run: bash scripts/check-android-release-unpublished.sh "$TAG"
 
       - name: The release certificate is pinned
         run: bash scripts/check-android-signer.sh android/release-certificate.sha256
@@ -343,12 +321,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check out the signature check
+      - name: Check out the signature check and the published check
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           sparse-checkout: |
             /scripts/verify-release-signature.sh
+            /scripts/check-android-release-unpublished.sh
             /include/core/ReleaseSigning.h
           sparse-checkout-cone-mode: false
 
@@ -416,6 +395,15 @@ jobs:
         run: |
           bash scripts/verify-release-signature.sh include/core/ReleaseSigning.h \
             dist/SHA256SUMS-android.txt dist/SHA256SUMS-android.txt.sig
+
+      # Again, right before publishing. "Re-run job" on build, sign or this job
+      # runs it and what follows it, never the check job, and the action below
+      # replaces the files of a release that is already published.
+      - name: The version is still not published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/check-android-release-unpublished.sh "$TAG"
 
       # Never GitHub's "latest": the desktop updater asks /releases/latest
       # first, and that must stay a desktop release. The value must be the

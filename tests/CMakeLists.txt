@@ -1066,8 +1066,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_signer.sh)
         add_test(NAME android_sign_release
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_sign_release.sh)
+        add_test(NAME android_release_unpublished
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_unpublished.sh)
     else ()
-        message(STATUS "android_release_tag, android_signer and android_sign_release not built: they need bash")
+        message(STATUS "android_release_tag, android_signer, android_sign_release and android_release_unpublished not built: they need bash")
     endif ()
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
