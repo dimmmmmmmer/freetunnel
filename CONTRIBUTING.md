@@ -255,6 +255,8 @@ the update-signature tests would skip the path every release takes.
 | `release_ci_gate` | On Linux only; needs jq |
 | `desktop_changes` | On Linux only; needs jq |
 | `release_signature` | On Linux only; needs openssl |
+| `android_release_tag` | On Linux only |
+| `android_signer` | On Linux only |
 | `ubsan_canary` | Only with the sanitizers; it must fail |
 
 What the suites cover:
@@ -277,7 +279,7 @@ What the suites cover:
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
 - The release job's CI gate and signature check; the desktop CI's
-  Android-only gate
+  Android-only gate; the Android release's tag and signer checks
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 
@@ -498,6 +500,11 @@ A `cppcheck.cfg` in the repo root does nothing: cppcheck has no such
 auto-loaded config file. (One used to sit here claiming otherwise.)
 
 ## Releasing
+
+Android is a separate channel: `android-X.Y.Z` tags, published by
+`.github/workflows/android-release.yml` and never marked latest (see
+[Releasing in android/README.md](android/README.md#releasing)). This section is
+the desktop's `v*` release.
 
 ### Release procedure
 

@@ -82,6 +82,79 @@ and verifies their signatures. Never commit keystores or credentials. The offici
 project supplies its own signing identity; compatibility with fork-signed builds
 is not required. Android itself enforces signing identity on installed updates.
 
+## Releasing
+
+Official releases are tagged `android-X.Y.Z` and published by
+[android-release.yml](../.github/workflows/android-release.yml). They are never
+marked GitHub's latest release, which stays the desktop app's.
+
+### One-time setup
+
+The release keystore is the app's identity: Android installs an update only if
+it is signed with the same key. If the keystore or its password is lost,
+installed apps can never be updated again.
+
+1. Generate the keystore outside the repository. keytool asks for a password;
+   a PKCS12 keystore has one password, for the store and the key alike.
+
+   ```sh
+   keytool -genkeypair -storetype PKCS12 -keystore freetunnel-release.p12 \
+     -alias freetunnel -keyalg RSA -keysize 4096 -validity 10000 \
+     -dname "CN=FreeTunnel"
+   ```
+
+2. Back up `freetunnel-release.p12` and its password in two separate places,
+   for example a password manager and an encrypted offline drive. Never commit
+   it.
+3. Add the four secrets. `gh secret set` asks for each value, so none of them
+   lands in the shell history:
+
+   ```sh
+   base64 -w0 freetunnel-release.p12 | gh secret set ANDROID_KEYSTORE_BASE64 --repo dimmmmmmmer/freetunnel
+   gh secret set ANDROID_KEYSTORE_PASSWORD --repo dimmmmmmmer/freetunnel
+   gh secret set ANDROID_KEY_ALIAS --repo dimmmmmmmer/freetunnel     # freetunnel
+   gh secret set ANDROID_KEY_PASSWORD --repo dimmmmmmmer/freetunnel  # the same password
+   ```
+
+   The manifest is signed with `ED25519_SIGNING_KEY`, the desktop's, which is
+   set already.
+4. Pin the certificate in `android/release-certificate.sha256` and commit that
+   file in a pull request. A release whose APK is signed by any other
+   certificate stops before publishing.
+
+   ```sh
+   keytool -exportcert -keystore freetunnel-release.p12 -alias freetunnel -file release.cer
+   sha256sum release.cer | cut -d' ' -f1 > android/release-certificate.sha256
+   keytool -printcert -file release.cer | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d : | tr A-F a-f
+   rm release.cer
+   ```
+
+   The third command prints the same value another way; check that it equals
+   the file's. It is what `apksigner verify --print-certs` reports as the APK's
+   certificate SHA-256 digest. Export to a file rather than piping keytool:
+   with its output piped, keytool shows the password as you type it.
+
+### Each release
+
+1. In a pull request, bump `appVersion` in `android/app/build.gradle` (X at
+   least 1, Y and Z at most 99), and rename `## Unreleased` in
+   `android/CHANGELOG.md` to `## X.Y.Z`. That section becomes the release
+   notes, so write it for users.
+2. Merge it once CI is green.
+3. Tag the merged commit on `main` and push the tag:
+
+   ```sh
+   git tag -a android-X.Y.Z -m "FreeTunnel for Android X.Y.Z"
+   git push origin android-X.Y.Z
+   ```
+
+The workflow checks the tag, the pin and the notes, runs the whole Android CI
+on the tagged commit, then builds and signs the APK and checks its signer
+against the pin. It writes `SHA256SUMS-android.txt`, signs it, checks that
+signature against `include/core/ReleaseSigning.h`, and publishes
+**FreeTunnel for Android X.Y.Z**. If any step fails or a secret is missing,
+nothing is published.
+
 ## Device checks
 
 The automated device suite is currently validated on **API 35** (arm64 locally,
@@ -147,6 +220,6 @@ asks for the unknown-app-source permission where needed and requires installatio
 confirmation, then enforces APK signer compatibility. Any failed verification
 refuses installation. Network failures and cancellation can be retried in Settings.
 
-Official release creation, project signing secrets and the rule that Android tags
-must **never** be marked GitHub's `latest` are owned by the original repository's
-release CI after merge. This client does not publish releases or configure secrets.
+Releases are published by the repository's release workflow, which never marks
+an Android release GitHub's `latest`; see [Releasing](#releasing). This client
+does not publish releases or configure secrets.

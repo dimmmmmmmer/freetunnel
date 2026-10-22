@@ -1050,11 +1050,21 @@ endif ()
 # the same way, with throwaway keys, and on Linux only for the same reasons.
 # So is the desktop CI's question whether a pull request touches anything but
 # Android's files (scripts/check-desktop-changes.sh), whose false skips the
-# work of every desktop check.
+# work of every desktop check. And so are the Android release's checks of its
+# tag (scripts/check-android-release-tag.sh) and of the APK's signer
+# (scripts/check-android-signer.sh), which only ever run on an android-* tag.
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
     find_program(FT_OPENSSL_CLI openssl)
+    if (FT_BASH)
+        add_test(NAME android_release_tag
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_tag.sh)
+        add_test(NAME android_signer
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_signer.sh)
+    else ()
+        message(STATUS "android_release_tag and android_signer not built: they need bash")
+    endif ()
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_ci_gate.sh)

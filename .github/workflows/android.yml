@@ -6,6 +6,9 @@ on:
   pull_request:
     paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', '.github/workflows/android.yml']
   workflow_dispatch:
+  # android-release.yml runs this whole workflow on the tagged commit, and signs
+  # nothing until it has passed there.
+  workflow_call:
 permissions:
   contents: read
 concurrency:
