@@ -26,7 +26,15 @@ jobs:
         # Ubuntu 24.04 already supplies command-line tools. Reuse them rather than
         # downloading a second toolchain before each job.
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+      # From v6 the default cache ('enhanced') is gradle-actions-caching, a
+      # closed-source component under the Gradle Terms of Use. 'basic' is the
+      # MIT implementation on the GitHub Actions cache: fewer optimisations, and
+      # nothing proprietary runs in this repository's CI.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic # see the build job
+        with:
+          cache-provider: basic
       - run: bash -n scripts/build-android-release.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
