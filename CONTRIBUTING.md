@@ -255,6 +255,10 @@ the update-signature tests would skip the path every release takes.
 | `release_ci_gate` | On Linux only; needs jq |
 | `desktop_changes` | On Linux only; needs jq |
 | `release_signature` | On Linux only; needs openssl |
+| `android_release_tag` | On Linux only |
+| `android_signer` | On Linux only |
+| `android_sign_release` | On Linux only |
+| `android_release_unpublished` | On Linux only |
 | `ubsan_canary` | Only with the sanitizers; it must fail |
 
 What the suites cover:
@@ -277,7 +281,8 @@ What the suites cover:
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
 - The release job's CI gate and signature check; the desktop CI's
-  Android-only gate
+  Android-only gate; the Android release's tag, signer and already-published
+  checks and its signing script
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 
@@ -499,6 +504,11 @@ auto-loaded config file. (One used to sit here claiming otherwise.)
 
 ## Releasing
 
+Android is a separate channel: `android-X.Y.Z` tags, published by
+`.github/workflows/android-release.yml` and never marked latest (see
+[Releasing in android/README.md](android/README.md#releasing)). This section is
+the desktop's `v*` release.
+
 ### Release procedure
 
 1. **Open a release PR**, titled with the bare version (e.g. `1.2.3`). In it:
@@ -590,6 +600,10 @@ To rotate keys:
    (`kReleaseSigningPublicKeyPem`).
 3. Update the `ED25519_SIGNING_KEY` repository secret to the matching private
    PEM.
+
+Rotating it also strands installed Android apps: they check
+`SHA256SUMS-android.txt` against the key built into them, so they refuse every
+update until a build with the new header is installed by hand.
 
 **Never commit the private key.**
 

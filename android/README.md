@@ -63,10 +63,13 @@ preparation and every build:
 Gradle 8.11.1 wrapper and distribution checksums are pinned too.
 
 Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (debug signing).
-Without signing variables, release builds produce an unsigned APK. For a signed
-release, supply `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
-`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` through the environment or CI
-secrets, then run:
+Gradle builds release APKs unsigned, and never sees a keystore:
+`scripts/sign-android-release.sh` signs them with Build Tools 35.0.0 alone
+(`apksigner`, with `zipalign` and `aapt2` to check the result), in CI and
+locally. For a signed release APK on your own machine, supply
+`ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_PASSWORD`
+(and `ANDROID_KEY_ALIAS` if the key is not `freetunnel`) through the
+environment, then run:
 
 ```sh
 scripts/build-android-release.sh
@@ -77,10 +80,134 @@ The version is set once, as `appVersion` in `android/app/build.gradle`
 releases are tagged `android-X.Y.Z`, and the tag must equal `appVersion`. The
 preview is `0.9.0`.
 
-The script checks the required variables, runs release tests/lint, builds APK/AAB
-and verifies their signatures. Never commit keystores or credentials. The official
-project supplies its own signing identity; compatibility with fork-signed builds
-is not required. Android itself enforces signing identity on installed updates.
+The script checks the required variables, runs the release tests and lint with
+Gradle's environment cleared of them, builds the APK unsigned, and signs it
+through `sign-android-release.sh`, which checks its alignment, package, version
+and signature and that it is signed with the keystore's own certificate. The
+signed APK is `android/app/build/outputs/apk/release/app-release.apk`. No AAB
+is built: the project publishes to no app store. Never commit keystores or
+credentials. The official project supplies its own signing identity;
+compatibility with fork-signed builds is not required. Android itself enforces
+signing identity on installed updates.
+
+## Releasing
+
+Official releases are tagged `android-X.Y.Z` and published by
+[android-release.yml](../.github/workflows/android-release.yml). They are never
+marked GitHub's latest release, which stays the desktop app's.
+
+### One-time setup
+
+The release keystore is the app's identity: Android installs an update only if
+it is signed with the same key. If the keystore or its password is lost,
+installed apps can never be updated again. Run these from the repository root,
+in one shell, so that `KS` names the keystore throughout.
+
+1. Generate the keystore outside the repository. keytool asks for a password;
+   a PKCS12 keystore has one password, for the store and the key alike. The
+   file is PKCS12 whatever its extension.
+
+   ```sh
+   KS=~/freetunnel-android-signing/freetunnel-release.jks
+   mkdir -p -m 700 "$(dirname "$KS")"
+   keytool -genkeypair -storetype PKCS12 -keystore "$KS" -alias freetunnel \
+     -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=FreeTunnel, O=FreeTunnel'
+   ```
+
+2. Back up the keystore file and its password in two separate places, for
+   example a password manager and an encrypted offline drive. Never commit
+   it.
+3. The `android-release` environment, which only `android-*` tags may deploy
+   to, has existed since 2026-10-23. These commands create it again if it is
+   ever deleted. Do that before the next tag: a workflow that names an
+   environment that does not exist creates it, with no protection at all.
+
+   ```sh
+   echo '{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}' |
+     gh api -X PUT repos/dimmmmmmmer/freetunnel/environments/android-release --input -
+   gh api -X POST repos/dimmmmmmmer/freetunnel/environments/android-release/deployment-branch-policies \
+     -f name='android-*' -f type=tag
+   gh api repos/dimmmmmmmer/freetunnel/environments/android-release/deployment-branch-policies \
+     --jq '.branch_policies[] | .name + " " + .type'
+   ```
+
+   The last command must print `android-* tag` and nothing else.
+
+   The policy keeps the secrets from workflows run from a branch, but not from
+   a run from an `android-*` tag, which runs the workflows of the commit the
+   tag names. So only someone who may release can push such a tag: the
+   repository's "Release tags" ruleset lets only admins create, move or delete
+   `v*` and `android-*` tags. For a second look at every release, add a
+   required reviewer under Settings → Environments → android-release. Each
+   release then waits for that approval twice: once for the secrets check at
+   the start, and once for the signing after CI.
+4. Put the keystore and its password in the environment. `gh secret set` asks
+   for each password, so neither lands in the shell history; give the same
+   password twice.
+
+   ```sh
+   base64 < "$KS" | tr -d '\n' | gh secret set ANDROID_KEYSTORE_BASE64 --env android-release -R dimmmmmmmer/freetunnel
+   gh secret set ANDROID_KEYSTORE_PASSWORD --env android-release -R dimmmmmmmer/freetunnel
+   gh secret set ANDROID_KEY_PASSWORD --env android-release -R dimmmmmmmer/freetunnel
+   ```
+
+   The key's alias, `freetunnel`, is set in the workflow, not as a secret. The
+   manifest is signed with `ED25519_SIGNING_KEY`, the desktop's repository
+   secret, which is set already.
+5. Pin the certificate in `android/release-certificate.sha256` and commit that
+   file in a pull request. A release whose APK is signed by any other
+   certificate stops before publishing.
+
+   ```sh
+   cer="$(mktemp)"
+   keytool -exportcert -keystore "$KS" -alias freetunnel -file "$cer"
+   sha256sum "$cer" | cut -d' ' -f1 > android/release-certificate.sha256
+   keytool -printcert -file "$cer" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d : | tr A-F a-f
+   rm "$cer"
+   ```
+
+   On macOS without `sha256sum`, use `shasum -a 256`. The fourth command
+   prints the same value another way; check that it equals the file's. It is what `apksigner verify --print-certs` reports as the APK's
+   certificate SHA-256 digest. Export to a file rather than piping keytool's
+   output: with its output piped, keytool shows the password as you type it.
+
+### Each release
+
+1. In a pull request, bump `appVersion` in `android/app/build.gradle` (X at
+   least 1, Y and Z at most 99), and give `android/CHANGELOG.md` a
+   `## X.Y.Z` section that says what changed, for users: it becomes the
+   release notes, down to the next heading.
+2. Merge it once CI is green.
+3. Tag the merged commit on an up-to-date `main` and push the tag:
+
+   ```sh
+   git switch main && git pull --ff-only
+   git tag -a android-X.Y.Z -m "FreeTunnel for Android X.Y.Z"
+   git push origin android-X.Y.Z
+   ```
+
+If a release stops before publishing, nothing is out yet. A missing or wrong
+secret: fix it and use "Re-run failed jobs". Anything that needs a code change:
+merge the fix, delete the tag (only an admin can, because of the ruleset) with
+`git push origin :refs/tags/android-X.Y.Z` and `git tag -d android-X.Y.Z`, and
+tag `main` again. Once a version is published, its files never change: release
+the next version instead.
+
+Before `android-1.0.0`: the `## Unreleased` section of `android/CHANGELOG.md`
+still holds the preview's notes, partly written for reviewers ("No fork signing
+identity or stable-release claim is part of this PR"), and a stray ` preview`
+line left from a split heading. Everything from `## 1.0.0` down to the next
+heading is published, so rewrite all of it in the 1.0.0 release pull request.
+
+The workflow checks the tag, that its commit is on `main`, that the version is
+not published yet, the pin, the notes and that the secrets are set. It runs the
+whole Android CI on the tagged commit, builds the APK unsigned, then signs it
+in a job that runs only Build Tools, and checks its alignment, package, version
+and signer against the pin. It writes `SHA256SUMS-android.txt`, signs it,
+checks that signature against `include/core/ReleaseSigning.h`, and publishes
+**FreeTunnel for Android X.Y.Z**. If any step fails or a secret is missing,
+nothing is published. A version that is published already is never published
+again: release a new one.
 
 ## Device checks
 
@@ -147,6 +274,6 @@ asks for the unknown-app-source permission where needed and requires installatio
 confirmation, then enforces APK signer compatibility. Any failed verification
 refuses installation. Network failures and cancellation can be retried in Settings.
 
-Official release creation, project signing secrets and the rule that Android tags
-must **never** be marked GitHub's `latest` are owned by the original repository's
-release CI after merge. This client does not publish releases or configure secrets.
+Releases are published by the repository's release workflow, which never marks
+an Android release GitHub's `latest`; see [Releasing](#releasing). This client
+does not publish releases or configure secrets.
