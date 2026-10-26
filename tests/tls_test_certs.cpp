@@ -37,6 +37,19 @@ basicConstraints = critical, CA:FALSE
 extendedKeyUsage = serverAuth
 subjectKeyIdentifier = hash
 subjectAltName = DNS:other.test
+
+# For `openssl ca`, which sets the dates a certificate is valid between in every
+# OpenSSL 3: before 3.4, `req` and `x509` only count days from now.
+[dated]
+database = index.txt
+serial = serial
+new_certs_dir = .
+default_md = sha256
+policy = dated_policy
+unique_subject = no
+
+[dated_policy]
+commonName = supplied
 )";
 
 class Maker {
@@ -93,6 +106,26 @@ public:
                        error);
     }
 
+    // A new RSA-2048 key, and a server certificate for vpn.test that it signs
+    // itself, valid from `start` to `end` (YYYYMMDDHHMMSSZ).
+    bool makeDated(const QString &name, const QString &start, const QString &end, QString *error) const
+    {
+        const QString config = path(QStringLiteral("openssl.cnf"));
+        return run({QStringLiteral("req"), QStringLiteral("-new"), QStringLiteral("-newkey"), QStringLiteral("rsa:2048"),
+                    QStringLiteral("-nodes"), QStringLiteral("-keyout"), path(name + QStringLiteral(".key")),
+                    QStringLiteral("-subj"), QStringLiteral("/CN=vpn.test"), QStringLiteral("-config"), config,
+                    QStringLiteral("-out"), path(name + QStringLiteral(".csr"))},
+                   error)
+                && run({QStringLiteral("ca"), QStringLiteral("-batch"), QStringLiteral("-selfsign"),
+                        QStringLiteral("-notext"), QStringLiteral("-name"), QStringLiteral("dated"),
+                        QStringLiteral("-config"), config, QStringLiteral("-keyfile"),
+                        path(name + QStringLiteral(".key")), QStringLiteral("-in"), path(name + QStringLiteral(".csr")),
+                        QStringLiteral("-startdate"), start, QStringLiteral("-enddate"), end,
+                        QStringLiteral("-extensions"), QStringLiteral("server"), QStringLiteral("-out"),
+                        path(name + QStringLiteral(".crt"))},
+                       error);
+    }
+
     bool load(const QString &name, TlsTestIdentity *out, QString *error) const
     {
         QFile certificate(path(name + QStringLiteral(".crt")));
@@ -131,6 +164,15 @@ bool makeTlsTestCerts(const QString &openssl, TlsTestCerts *out, QString *error)
         return false;
     }
     config.close();
+    // What `openssl ca` keeps of the certificates it makes: none yet.
+    QFile database(dir.filePath(QStringLiteral("index.txt")));
+    QFile serial(dir.filePath(QStringLiteral("serial")));
+    if (!database.open(QIODevice::WriteOnly) || !serial.open(QIODevice::WriteOnly) || serial.write("01\n") != 3) {
+        *error = QStringLiteral("cannot write openssl ca's database");
+        return false;
+    }
+    database.close();
+    serial.close();
 
     const Maker maker(openssl, dir);
     const QString vpn = QStringLiteral("/CN=vpn.test");
@@ -142,9 +184,15 @@ bool makeTlsTestCerts(const QString &openssl, TlsTestCerts *out, QString *error)
             && maker.make(QStringLiteral("otherkey"), vpn, server, QString(), error)
             && maker.make(QStringLiteral("othername"), QStringLiteral("/CN=other.test"), QStringLiteral("other"),
                           QString(), error)
+            && maker.makeDated(QStringLiteral("expired"), QStringLiteral("20200101000000Z"),
+                               QStringLiteral("20200131000000Z"), error)
+            && maker.makeDated(QStringLiteral("notyetvalid"), QStringLiteral("20990101000000Z"),
+                               QStringLiteral("20990131000000Z"), error)
             && maker.load(QStringLiteral("ca"), &out->ca, error)
             && maker.load(QStringLiteral("casigned"), &out->caSigned, error)
             && maker.load(QStringLiteral("selfsigned"), &out->selfSigned, error)
             && maker.load(QStringLiteral("otherkey"), &out->otherKey, error)
-            && maker.load(QStringLiteral("othername"), &out->otherName, error);
+            && maker.load(QStringLiteral("othername"), &out->otherName, error)
+            && maker.load(QStringLiteral("expired"), &out->expired, error)
+            && maker.load(QStringLiteral("notyetvalid"), &out->notYetValid, error);
 }

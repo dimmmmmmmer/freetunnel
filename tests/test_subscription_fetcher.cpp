@@ -123,6 +123,7 @@ private slots:
     void aPinnedRequestNeedsTheConfigsHostnameAndACertificate();
     void aPinnedRequestConnectsToTheFirstAddress_data();
     void aPinnedRequestConnectsToTheFirstAddress();
+    void anUnreadablePinIsBadPinNotTheSystemsCas_data();
     void anUnreadablePinIsBadPinNotTheSystemsCas();
 
     // Trust.
@@ -134,6 +135,8 @@ private slots:
     void pinningOnlyTheCaIsNotEnough();
     void aCaTheSystemTrustsDoesNotStandInForThePin();
     void aPinnedCertificateForAnotherNameIsRefused();
+    void aPinnedCertificateOutOfDateIsRefused_data();
+    void aPinnedCertificateOutOfDateIsRefused();
     void withoutAPinASelfSignedCertificateIsRefused();
     void withoutAPinTheSystemsCasDecide();
     void skipVerificationNeverWeakensAFetch();
@@ -332,16 +335,39 @@ void TestSubscriptionFetcher::aPinnedRequestConnectsToTheFirstAddress()
     QCOMPARE(request.connectPort, port);
 }
 
+void TestSubscriptionFetcher::anUnreadablePinIsBadPinNotTheSystemsCas_data()
+{
+    QTest::addColumn<QByteArray>("unreadable");
+    QTest::addColumn<bool>("thenACertificate");
+    // 00 00 00, which certificatesDer() does not keep.
+    QTest::newRow("not a certificate") << QByteArray(3, '\0') << false;
+    // A certificate's outer shape, which certificatesDer() keeps and Qt cannot read.
+    const QByteArray shape = QByteArray::fromHex("300b3002050030020500030100");
+    QTest::newRow("a certificate's shape") << shape << false;
+    QTest::newRow("a certificate's shape, then a certificate") << shape << true;
+}
+
 void TestSubscriptionFetcher::anUnreadablePinIsBadPinNotTheSystemsCas()
 {
+    QFETCH(QByteArray, unreadable);
+    QFETCH(bool, thenACertificate);
     TlsTestServer server;
     QVERIFY(listen(server, m_certs->selfSigned));
     server.setRoute("/sub", json());
-    const SubscriptionFetchRequest request =
-            pinned(server.port(), QStringLiteral("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"));
+    QString pem = QStringLiteral("-----BEGIN CERTIFICATE-----\n") + QString::fromLatin1(unreadable.toBase64())
+            + QStringLiteral("\n-----END CERTIFICATE-----\n");
+    if (thenACertificate)
+        pem += pemOf({&m_certs->selfSigned});
+    const SubscriptionFetchRequest request = pinned(server.port(), pem);
     QVERIFY(request.pinned);
-    QVERIFY(request.pins.isEmpty());
     const std::optional<SubscriptionFetchResult> result = fetch(request);
+    if (thenACertificate) {
+        QCOMPARE(request.pins.size(), 1);
+        QVERIFY(request.pins.constFirst() == m_certs->selfSigned.certificate);
+        QVERIFY_FETCH(result, SubscriptionFetchError::None);
+        return;
+    }
+    QVERIFY(request.pins.isEmpty());
     QVERIFY_FETCH(result, SubscriptionFetchError::BadPin);
     QCOMPARE(server.connections(), 0);
 }
@@ -464,6 +490,28 @@ void TestSubscriptionFetcher::aPinnedCertificateForAnotherNameIsRefused()
     QVERIFY(listen(server, m_certs->otherName));
     server.setRoute("/sub", json());
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->otherName})));
+    QVERIFY_FETCH(result, SubscriptionFetchError::CertificateUntrusted);
+    QCOMPARE(server.requests().size(), 0);
+}
+
+void TestSubscriptionFetcher::aPinnedCertificateOutOfDateIsRefused_data()
+{
+    QTest::addColumn<bool>("expired");
+    QTest::newRow("expired") << true;
+    QTest::newRow("not yet valid") << false;
+}
+
+// A pin vouches for the certificate, never for a time it is not valid at, on
+// every backend: Secure Transport calls such a certificate only untrusted, as it
+// does a pinned one that is in date.
+void TestSubscriptionFetcher::aPinnedCertificateOutOfDateIsRefused()
+{
+    QFETCH(bool, expired);
+    const TlsTestIdentity &identity = expired ? m_certs->expired : m_certs->notYetValid;
+    TlsTestServer server;
+    QVERIFY(listen(server, identity));
+    server.setRoute("/sub", json());
+    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&identity})));
     QVERIFY_FETCH(result, SubscriptionFetchError::CertificateUntrusted);
     QCOMPARE(server.requests().size(), 0);
 }

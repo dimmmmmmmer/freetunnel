@@ -2,6 +2,7 @@
 #include "core/SubscriptionFetcher.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -83,12 +84,13 @@ bool firstAddress(const QString &addresses, QString *host, int *port)
     return true;
 }
 
-// The errors that only say no CA the backend knows vouches for the certificate.
-// A pin vouches for it instead. Schannel and Secure Transport do not use a
-// configuration's CA list at all, so a pinned self-signed certificate arrives
-// with one of these on every backend but OpenSSL, and OpenSSL reports them for a
-// pinned certificate that a CA signed. Nothing else is ever ignored: not a name
-// that does not match, not an expired certificate.
+// The errors that only say no CA the backend trusts vouches for the
+// certificate. A pin vouches for it instead. Every backend takes the pins as its
+// only CAs, and still reports one of these for some pinned certificates:
+// schannel for a self-signed one and for one a CA signed, Secure Transport for a
+// self-signed one, OpenSSL for one a CA signed. Nothing else is ever ignored:
+// not a name that does not match, not a certificate out of date. Secure
+// Transport reports that as untrusted too, so isPinned() checks the dates.
 bool isChainTrustError(const QSslError &error)
 {
     switch (error.error()) {
@@ -381,11 +383,15 @@ void SubscriptionFetcher::watch(QNetworkReply *reply)
     connect(reply, &QNetworkReply::finished, this, [this, reply]() { onFinished(reply); });
 }
 
+// The server's own certificate is one of the pins, and valid now: Secure
+// Transport calls one out of date only untrusted, which a pin would answer.
 bool SubscriptionFetcher::isPinned(const QSslCertificate &peer) const
 {
     const QByteArray der = peer.toDer();
-    return !der.isEmpty() && std::any_of(m_request.pins.cbegin(), m_request.pins.cend(),
-                                         [&der](const QSslCertificate &pin) { return pin.toDer() == der; });
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    return !der.isEmpty() && peer.effectiveDate() <= now && now <= peer.expiryDate()
+            && std::any_of(m_request.pins.cbegin(), m_request.pins.cend(),
+                           [&der](const QSslCertificate &pin) { return pin.toDer() == der; });
 }
 
 // Without pins, the system's CAs decide and nothing is ignored. With them, the

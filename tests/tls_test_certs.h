@@ -5,7 +5,8 @@
 // the tree holds no private key. RSA-2048 throughout: under schannel a debug Qt
 // asserts on an EC key in server mode, and Secure Transport cannot import one
 // for a server. Each server certificate names vpn.test and 127.0.0.1 (but
-// otherName) and is for TLS servers, valid for 30 days, as macOS asks of one.
+// otherName) and is for TLS servers, valid for 30 days, as macOS asks of one:
+// from now, but for expired and notYetValid.
 
 #include <QByteArray>
 #include <QSslCertificate>
@@ -19,11 +20,13 @@ struct TlsTestIdentity {
 };
 
 struct TlsTestCerts {
-    TlsTestIdentity ca;         // a CA, which signs caSigned
-    TlsTestIdentity caSigned;   // vpn.test, signed by ca
-    TlsTestIdentity selfSigned; // vpn.test, self-signed, as an endpoint's often is
-    TlsTestIdentity otherKey;   // the same names as selfSigned, with another key
-    TlsTestIdentity otherName;  // other.test only, self-signed
+    TlsTestIdentity ca;          // a CA, which signs caSigned
+    TlsTestIdentity caSigned;    // vpn.test, signed by ca
+    TlsTestIdentity selfSigned;  // vpn.test, self-signed, as an endpoint's often is
+    TlsTestIdentity otherKey;    // the same names as selfSigned, with another key
+    TlsTestIdentity otherName;   // other.test only, self-signed
+    TlsTestIdentity expired;     // as selfSigned, but valid only in January 2020
+    TlsTestIdentity notYetValid; // as selfSigned, but valid only from January 2099
 };
 
 // Makes them with the openssl command at `openssl`, in a temporary directory that
