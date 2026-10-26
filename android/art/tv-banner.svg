@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180">
+  <!-- Android TV launcher banner, rendered into res/drawable-xhdpi/banner.png by
+       scripts/render-android-tv-banner.sh. Opaque, on the app's dark background,
+       and with square corners: launchers round them themselves. The mark is
+       assets/logo.svg's, 104 px square, and the name is the same in every
+       language, so one banner does. -->
+  <rect width="320" height="180" fill="#181818"/>
+  <g transform="translate(14 38) scale(1.04)">
+    <path d="M12 86 L12 46 A38 38 0 0 1 88 46 L88 86 Z" fill="#d0d0d0"/>
+    <path d="M24 86 L24 50 A26 26 0 0 1 76 50 L76 86 Z" fill="#a3a3a3"/>
+    <path d="M36 86 L36 55 A14 14 0 0 1 64 55 L64 86 Z" fill="#757575"/>
+    <path d="M46 86 L46 60 A4 4 0 0 1 54 60 L54 86 Z" fill="#454545"/>
+  </g>
+  <text x="114" y="100" font-family="DejaVu Sans" font-weight="700" font-size="28" fill="#eaeaea">FreeTunnel</text>
+</svg>

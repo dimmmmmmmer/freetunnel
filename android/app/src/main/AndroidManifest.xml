@@ -5,13 +5,25 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <!-- Android TV. Neither is required, so phones and TVs install the same APK. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- The app picker also lists apps that only TVs launch. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <!-- Settings shows Always-on only where Android has this screen. -->
+        <intent>
+            <action android:name="android.settings.VPN_SETTINGS" />
+        </intent>
     </queries>
-    <application android:theme="@style/AppTheme" android:label="@string/app_name" android:icon="@drawable/logo" android:allowBackup="false" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
+    <application android:theme="@style/AppTheme" android:label="@string/app_name" android:icon="@drawable/logo" android:banner="@drawable/banner" android:allowBackup="false" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
         <!-- Translucent: it only forwards the installer's result and closes, so nothing flashes. -->
         <activity android:name=".InstallResultActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity android:name=".VpnPermissionActivity" android:exported="false" android:excludeFromRecents="true" />
@@ -19,6 +31,10 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
