@@ -374,6 +374,9 @@ void SubscriptionFetcher::sendRequest()
     m_handshakeDone = false;
     m_result.httpStatus = 0;
     m_reply = m_nam->get(request);
+    // Qt stops reading from the server once this much is unread, so it holds no
+    // more of a body than the fetch does.
+    m_reply->setReadBufferSize(kMaxSubscriptionBodyBytes + 1);
     watch(m_reply);
 }
 
