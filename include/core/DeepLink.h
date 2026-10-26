@@ -33,7 +33,7 @@ inline constexpr int kMaxSubscriptionUrlBytes = 2048;
 enum class UpstreamProtocol { Http2 = 1, Http3 = 2 };
 
 struct DeepLinkConfig {
-    int version = 0;
+    int version = 0;                                   // 0x00, the newest of them if several
     QString hostname;                                  // 0x01 (required)
     QStringList addresses;                             // 0x02 (>=1 required), "host:port"
     QString customSni;                                 // 0x03

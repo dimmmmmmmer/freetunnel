@@ -624,6 +624,10 @@
         <source>malformed client_random_auth_key value</source>
         <translation>повреждено значение client_random_auth_key</translation>
     </message>
+    <message>
+        <source>malformed version value</source>
+        <translation>повреждено значение версии</translation>
+    </message>
 </context>
 <context>
     <name>HomePage</name>

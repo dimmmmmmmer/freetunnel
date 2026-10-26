@@ -24,6 +24,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_settings = loadAppSettings();
     resolveSquirrelUpdaterRules();
     reloadConfigs();
+    freetunnel::sweepStoredSubscriptionAddresses(m_paths);
     if (!m_settings.last_config_path.isEmpty() && m_paths.contains(m_settings.last_config_path)) {
         m_activePath = m_settings.last_config_path;
     } else if (!m_paths.isEmpty()) {

@@ -646,6 +646,29 @@ void sweepLegacyPlaintextStorage()
     sweepStaleMaterializedConfigs();
 }
 
+// A config imported by 1.2.3 or earlier can hold a TrustTunnel 1.3 subscription
+// address, VPN password and all: those versions kept every table and key they did
+// not know as the file had it, and migrateConfigPassword() moved the password out
+// and left the address in. The import leaves it out now, but nothing rewrites a
+// config whose password is already stored until it is edited, so it is taken out
+// here. Only from the copies in the app's own folder, and not through a link: a
+// config kept elsewhere is the user's own file, which TrustTunnel's own client may
+// still read the address from.
+void sweepStoredSubscriptionAddresses(const QStringList &configPaths)
+{
+    const QString ownDir =
+            QFileInfo(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).absoluteFilePath();
+    for (const QString &path : configPaths) {
+        const QFileInfo info(path);
+        if (info.absolutePath() != ownDir || info.isSymLink())
+            continue;
+        bool removed = false;
+        const QString kept = withoutSubscription(readConfigText(info.absoluteFilePath()), &removed);
+        if (removed)
+            writeConfigText(info.absoluteFilePath(), kept);
+    }
+}
+
 
 
 // ---- public entry points -------------------------------------------------

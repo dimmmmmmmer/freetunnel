@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <limits>
 
 namespace freetunnel {
@@ -203,19 +204,6 @@ bool applyDeepLinkStringTlv(quint64 tag, const QByteArray &value, DeepLinkConfig
     }
 }
 
-bool applyDeepLinkVersionTlv(const QByteArray &value, DeepLinkConfig &cfg)
-{
-    int p = 0;
-    quint64 v = 0;
-    readVarint(value, p, v);
-    // Held at the int's largest rather than cut to its low bits: a version of
-    // 2^32 + 1, cut, is 1, and a link far newer than this client was taken for
-    // one it reads.
-    cfg.version = v > static_cast<quint64>(std::numeric_limits<int>::max())
-            ? std::numeric_limits<int>::max() : static_cast<int>(v);
-    return true;
-}
-
 bool applyDeepLinkBoolTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg)
 {
     const bool flag = value.isEmpty() ? false : (value.at(0) != 0);
@@ -230,7 +218,7 @@ bool applyDeepLinkBoolTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &
 bool applyDeepLinkScalarTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg)
 {
     switch (tag) {
-    case 0x00: return applyDeepLinkVersionTlv(value, cfg);
+    case 0x00: return true; // read before any field, by readDeepLinkVersion()
     case 0x04:
     case 0x07:
     case 0x0A: return applyDeepLinkBoolTlv(tag, value, cfg);
@@ -377,19 +365,34 @@ bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &c
 // 3 link whose subscription address was no longer https:// would have been called
 // broken. Only damage to the records themselves comes first, since without them
 // there is no finding the version.
-bool readDeepLinkVersion(const QByteArray &payload, int *version, QString *error)
+//
+// Every version record counts, as in TrustTunnel's own decoder, which refuses a
+// link if any of them is too new: the newest is the link's version. When only the
+// last one counted, a link saying 3 and then 2 was read here as version 2, and
+// refused by TrustTunnel's clients. A record whose value is not a whole varint
+// is damage, as it is there too; read as version 0, it let a link of any version
+// through.
+bool readDeepLinkVersion(const QByteArray &payload, quint64 *version, QString *error)
 {
-    DeepLinkConfig declared;
+    quint64 newest = 0;
     int pos = 0;
     while (pos < payload.size()) {
         quint64 tag = 0;
         QByteArray value;
         if (!readDeepLinkTlv(payload, &pos, &tag, &value, error))
             return false;
-        if (tag == 0x00)
-            applyDeepLinkVersionTlv(value, declared); // the last one wins, as for every tag
+        if (tag != 0x00)
+            continue;
+        int p = 0;
+        quint64 declared = 0;
+        if (!readVarint(value, p, declared)) {
+            if (error)
+                *error = QCoreApplication::translate("DeepLink", "malformed version value");
+            return false;
+        }
+        newest = std::max(newest, declared);
     }
-    *version = declared.version;
+    *version = newest;
     return true;
 }
 
@@ -400,15 +403,19 @@ bool deepLinkHasRequiredFields(const DeepLinkConfig &cfg, const DeepLinkFieldFla
 
 std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, QString *error)
 {
-    int version = 0;
+    quint64 version = 0;
     if (!readDeepLinkVersion(payload, &version, error))
         return std::nullopt;
-    if (version > kDeepLinkMaxVersion) {
+    // Compared as the varint it is, up to 62 bits. Cut to an int's low bits, a
+    // version of 2^32 + 1 is 1, and a link far newer than this client was taken
+    // for one it reads.
+    if (version > static_cast<quint64>(kDeepLinkMaxVersion)) {
         if (error)
             *error = QCoreApplication::translate("DeepLink", "unsupported deep link version %1").arg(version);
         return std::nullopt;
     }
     DeepLinkConfig cfg;
+    cfg.version = static_cast<int>(version);
     DeepLinkFieldFlags flags;
     int pos = 0;
     while (pos < payload.size()) {
@@ -499,8 +506,11 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
 
 bool deepLinkHasStaticServer(const DeepLinkConfig &cfg)
 {
-    return !cfg.hostname.isEmpty() && !cfg.addresses.isEmpty() && !cfg.username.isEmpty()
-            && !cfg.password.isEmpty();
+    // An address record can be empty as well, and an empty one is no more an
+    // address to connect to than an empty hostname is a host.
+    const bool anAddress = std::any_of(cfg.addresses.cbegin(), cfg.addresses.cend(),
+                                       [](const QString &address) { return !address.isEmpty(); });
+    return !cfg.hostname.isEmpty() && anAddress && !cfg.username.isEmpty() && !cfg.password.isEmpty();
 }
 
 QString encodeDeepLink(const DeepLinkConfig &cfg) {

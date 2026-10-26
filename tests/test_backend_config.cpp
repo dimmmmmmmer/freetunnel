@@ -64,6 +64,7 @@ private slots:
     void anEditKeepsPostQuantumOff();
     void aProxyListenerIsNotKeptBesideTheTunnel();
     void renamingAConfigKeptElsewhereLeavesTheOriginal();
+    void aStoredSubscriptionAddressIsTakenOutAtStart();
     void aFailedCommitPutsThePreviousPasswordBack();
     void aFailedEditSaveKeepsTheStoredPassword();
     void aRefusedCertificateFileIsExplained();
@@ -999,6 +1000,70 @@ void TestBackendConfig::renamingAConfigKeptElsewhereLeavesTheOriginal()
              QStringLiteral("hunter2"));
     QVERIFY2(QFileInfo::exists(original), "renaming the config deleted the user's own file");
     QCOMPARE(readAll(original).toUtf8(), body);
+}
+
+// FreeTunnel 1.2.3 and earlier kept every table they did not know as the file
+// had it, so a TrustTunnel 1.3 config imported then still holds its subscription
+// address, VPN password and all, once its password has moved to the credential
+// store. Nothing rewrites such a config until it is edited; the next start takes
+// the address out, and nothing else. A config kept elsewhere is the user's own,
+// which TrustTunnel's own client may read the address from, and is left alone.
+void TestBackendConfig::aStoredSubscriptionAddressIsTakenOutAtStart()
+{
+    const QByteArray body("# my work server\n"
+                          "subscription_url = \"https://alice:s3cret@vpn.example.org/subscription\"\n"
+                          "[endpoint]\n"
+                          "hostname = \"vpn.example.org\"\n"
+                          "addresses = [\"198.51.100.7:443\"]\n"
+                          "username = \"alice\"\n"
+                          "password = \"\"\n"
+                          "\n"
+                          "[endpoint.subscription]\n"
+                          "url = \"https://alice:s3cret@vpn.example.org/subscription\"\n"
+                          "\n"
+                          "[listener.tun]\n"
+                          "mtu_size = 1500\n");
+    const auto write = [&body](const QString &path) {
+        QFile out(path);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        QCOMPARE(out.write(body), body.size());
+    };
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString stored = QDir(dir).filePath(QStringLiteral("work.toml"));
+    write(stored);
+    QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    const QString theirs = QDir(elsewhere.path()).filePath(QStringLiteral("theirs.toml"));
+    write(theirs);
+    QStringList configs{stored, theirs};
+#if !defined(Q_OS_WIN)
+    // Nor through a link to it in the app's own folder.
+    const QString linked = QDir(dir).filePath(QStringLiteral("linked.toml"));
+    QVERIFY(QFile::link(theirs, linked));
+    const auto unlink = qScopeGuard([&linked] { QFile::remove(linked); });
+    configs << linked;
+#endif
+    saveStoredConfigs(configs);
+
+    Backend backend;
+    QCOMPARE(backend.configs().size(), configs.size());
+    const QString after = readAll(stored);
+    QVERIFY2(!after.contains(QStringLiteral("s3cret")), qPrintable(after));
+    QVERIFY2(!after.contains(QStringLiteral("subscription")), qPrintable(after));
+    QCOMPARE(after, QStringLiteral("# my work server\n"
+                                   "[endpoint]\n"
+                                   "hostname = \"vpn.example.org\"\n"
+                                   "addresses = [\"198.51.100.7:443\"]\n"
+                                   "username = \"alice\"\n"
+                                   "password = \"\"\n"
+                                   "\n"
+                                   "[listener.tun]\n"
+                                   "mtu_size = 1500\n"));
+    assertOwnerOnly(stored);
+    QCOMPARE(readAll(theirs).toUtf8(), body);
+#if !defined(Q_OS_WIN)
+    QVERIFY(QFileInfo(linked).isSymLink());
+#endif
 }
 
 // The editor keeps its certificate field when a pick reads nothing, so the

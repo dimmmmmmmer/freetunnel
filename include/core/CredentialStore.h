@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 namespace freetunnel {
 
@@ -46,5 +47,9 @@ void sweepStaleMaterializedConfigs();
 // more: a legacy per-config password file moves into the store when loadPassword()
 // next reads it, and the legacy instance-auth file is InstanceControl's to sweep.
 void sweepLegacyPlaintextStorage();
+// Takes the TrustTunnel 1.3 subscription address out of each of these configs that
+// still holds one (see withoutSubscription), when the config is a copy in the
+// app's own folder. Called at startup, with the stored configs.
+void sweepStoredSubscriptionAddresses(const QStringList &configPaths);
 
 } // namespace freetunnel

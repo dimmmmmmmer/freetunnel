@@ -181,7 +181,7 @@ FreeTunnel does not support subscriptions yet. What the import does:
 | The link carries | Result |
 | --- | --- |
 | The address alone, or with only part of a server (a "subscription-only" link) | Refused: "Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive." |
-| The address and a whole server: hostname, address, username and password, none empty | The server is imported as the link has it. The question says the server won't update itself, and the address is not kept |
+| The address and a whole server: a hostname, at least one address, a username and a password, none of them empty | The server is imported as the link has it. The question says the server won't update itself, and the address is not kept |
 
 The address is not written anywhere, neither to the config nor to the
 credential store, and it is never logged.
@@ -213,6 +213,13 @@ not. The TrustTunnel core FreeTunnel uses cannot do that yet.
   refuse a version 2 link.
 - The version is read before any field, so a link of a newer version is
   refused for its version, not for a field that version may spell differently.
+- Every version record counts, as in TrustTunnel's own decoder. A link with
+  more than one is read as the newest of them, and refused if that is 3 or
+  later.
+- A version record whose value is not a whole varint, such as an empty one,
+  fails the import as damaged. It is not read as version 0.
+- Tags from `0x10` on are ignored in version 2 as in version 1: TrustTunnel's
+  next tag will be one of them.
 
 ## Validation rules
 
@@ -221,7 +228,8 @@ Import fails when:
 - the URI is not `tt://…`;
 - the base64url payload is invalid or empty;
 - the TLV stream is truncated, or a length overflows the payload;
-- `version > 2`;
+- a version record's value is not a varint, or any version record is above
+  `2`;
 - the link has no subscription address, and the hostname, the username or the
   password is missing, or there is no address;
 - the DNS upstream list is malformed;
@@ -237,6 +245,9 @@ These links are well formed, and refused with a reason of their own:
   ([tag `0x0E`](#subscription-address-tag-0x0e));
 - a non-empty client random auth key
   ([tag `0x0F`](#client-random-auth-key-tag-0x0f)).
+
+A link that is both is refused for its auth key: a subscription would hand out
+the same server, which this version cannot connect to either.
 
 Unknown tags are not an error: they are ignored.
 
@@ -283,7 +294,10 @@ A TrustTunnel 1.3 config imported from a file is handled the same way:
   `[endpoint.subscription]` table, is left out of the copy FreeTunnel stores, and
   the notice after the import says so. The file you picked is not changed.
 - A stored config that holds one already, as one imported by 1.2.3 or earlier
-  can, loses it the next time FreeTunnel rewrites the config.
+  can, loses it the next time FreeTunnel starts, and nothing else in it
+  changes. That is only for the copies in FreeTunnel's own folder: a config kept
+  elsewhere is your own file, which TrustTunnel's client may read the address
+  from, and keeps it until FreeTunnel next rewrites that file.
 
 ## FreeTunnel control links (separate)
 
@@ -478,7 +492,7 @@ That is tag `0x0D`, length 16, then two entries: length 7 and `8.8.8.8`, length
 | --- | --- |
 | Round-trip encode/decode, injection stripping and edge cases | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp` |
 | Version 2 links: what is read, refused and not kept | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp` |
-| TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp` |
+| TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp` |
 | Control link parser and the link mark | `tests/test_control.cpp` |
 | `--url-handler`, macOS link events and forwarding | `tests/test_app_startup.cpp` |
 | The socket a launch forwards over | `tests/test_instance_control.cpp`, `tests/test_integration_single_instance.cpp` |
