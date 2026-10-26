@@ -7,6 +7,7 @@
 #include "core/ConfigToml.h"
 #include "core/DeepLink.h"
 #include "deeplink_v2_vectors.h"
+#include "endpoint_export_vectors.h"
 
 using namespace freetunnel;
 
@@ -37,6 +38,14 @@ private slots:
     // A certificate keeps only its certificates.
     void aLinkCarryingAKeyImportsTheCertificateAlone();
     void aLinkWhoseCertificateHoldsNoCertificateIsDamaged();
+
+    // The TOML file an endpoint exports.
+    void anEndpointExportImportsAsTheLinkWithItsServerDoes();
+    void anEndpointExportIsNamedByItsFileWhenItHasNoName();
+    void anEndpointExportLeavesItsSubscriptionAddressOut();
+    void anEndpointExportKeepsOnlyItsCertificates();
+    void anEndpointExportIsRefusedAsALinkIs();
+    void anEndpointExportsLinkGivesTheSameConfig();
 };
 
 // A link with a whole server and the given certificate field (tag 0x08).
@@ -336,6 +345,265 @@ void TestConfigImport::aLinkWhoseCertificateHoldsNoCertificateIsDamaged() {
     QVERIFY(!prepareDeepLinkImport(subscriptionOnly, &err, &why).has_value());
     QCOMPARE(why, LinkRefusal::SubscriptionOnly);
     QCOMPARE(err, subscriptionOnlyRefusal());
+}
+
+// ---- the endpoint's export ----------------------------------------------------
+
+// The server endpoint_export::text() names, as a link carries it.
+static DeepLinkConfig serverOfTheExport()
+{
+    DeepLinkConfig c;
+    c.hostname = QStringLiteral("vpn.example.com");
+    c.addresses = {QStringLiteral("203.0.113.5:443"), QStringLiteral("[2001:db8::5]:443")};
+    c.username = QStringLiteral("alice");
+    c.password = QStringLiteral("s3cret");
+    c.clientRandomPrefix = QStringLiteral("aabbcc/ff00ff");
+    c.upstreamProtocol = UpstreamProtocol::Http3;
+    c.antiDpi = true;
+    c.name = QStringLiteral("Work VPN");
+    c.dnsUpstreams = {QStringLiteral("1.1.1.1"), QStringLiteral("tls://dns.example.com")};
+    c.certificate = certs::derOf(certs::kLeafPem);
+    return c;
+}
+
+static std::optional<PreparedImport> importExport(const endpoint_export::Fields &f,
+                                                  const QString &fileName = QStringLiteral("exported"),
+                                                  QString *err = nullptr, LinkRefusal *why = nullptr)
+{
+    return prepareEndpointExportImport(endpoint_export::text(f), fileName, err, why);
+}
+
+// The export becomes the config the link with its server gives, and the link it
+// is answered with is that link.
+void TestConfigImport::anEndpointExportImportsAsTheLinkWithItsServerDoes() {
+    endpoint_export::Fields f;
+    f.subscriptionUrl.clear();
+    QString err;
+    LinkRefusal why = LinkRefusal::NeedsNewerCore; // anything but what it will say
+    auto out = importExport(f, QStringLiteral("exported"), &err, &why);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(why, LinkRefusal::Damaged); // set even on success, so it is never stale
+    QVERIFY(out->fromFile);
+    QCOMPARE(out->fileName, QStringLiteral("Work VPN.toml"));
+    QVERIFY(!out->skipVerification);
+    QVERIFY(!out->subscriptionNotKept);
+    QVERIFY(!out->certificateExtraIgnored);
+
+    DeepLinkConfig c = serverOfTheExport();
+    const QString link = encodeDeepLink(c);
+    auto fromLink = prepareDeepLinkImport(link, &err);
+    QVERIFY2(fromLink.has_value(), qPrintable(err));
+    QCOMPARE(out->tomlContent, fromLink->tomlContent);
+    QCOMPARE(out->link, link);
+    // A link is answered with itself, as it came.
+    QVERIFY(!fromLink->fromFile);
+    QCOMPARE(fromLink->link, link);
+    QCOMPARE(prepareDeepLinkImport(QStringLiteral(" ") + link)->link, QStringLiteral(" ") + link);
+
+    // And every flag the other way.
+    f.hasIpv6 = false;
+    f.skipVerification = true;
+    f.antiDpi = false;
+    f.customSni = QStringLiteral("cdn.example.org");
+    f.upstreamProtocol = QStringLiteral("http2");
+    c.hasIpv6 = false;
+    c.skipVerification = true;
+    c.antiDpi = false;
+    c.customSni = QStringLiteral("cdn.example.org");
+    c.upstreamProtocol = UpstreamProtocol::Http2;
+    out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY(out->skipVerification);
+    fromLink = prepareDeepLinkImport(encodeDeepLink(c), &err);
+    QVERIFY2(fromLink.has_value(), qPrintable(err));
+    QCOMPARE(out->tomlContent, fromLink->tomlContent);
+    QCOMPARE(out->link, encodeDeepLink(c));
+
+    // An empty address is no address, and is not carried over.
+    f.addresses = QStringLiteral("\"\", \"203.0.113.5:443\", \" \"");
+    c.addresses = {QStringLiteral("203.0.113.5:443")};
+    out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(out->link, encodeDeepLink(c));
+}
+
+// The endpoint writes `name = ""` unless the server was given a name, and the
+// config is then named after the file, as any config file is.
+void TestConfigImport::anEndpointExportIsNamedByItsFileWhenItHasNoName() {
+    endpoint_export::Fields f;
+    QCOMPARE(importExport(f, QStringLiteral("branch-office"))->fileName, QStringLiteral("Work VPN.toml"));
+    for (const QString &none : {QString(), QStringLiteral("   ")}) {
+        f.name = none;
+        const auto out = importExport(f, QStringLiteral(" branch-office "));
+        QVERIFY(out.has_value());
+        QCOMPARE(out->fileName, QStringLiteral("branch-office.toml"));
+        QCOMPARE(parseDeepLink(out->link)->name, QStringLiteral("branch-office"));
+    }
+    // With no file name either, the hostname, as a link without a name has.
+    QCOMPARE(importExport(f, QString())->fileName, QStringLiteral("vpn.example.com.toml"));
+}
+
+// The address holds the VPN password in plain text: it is in neither the config
+// nor the link the question is answered with, and the import says so.
+void TestConfigImport::anEndpointExportLeavesItsSubscriptionAddressOut() {
+    QString err;
+    const auto out = importExport(endpoint_export::Fields(), QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY(out->subscriptionNotKept);
+    QVERIFY2(!out->tomlContent.contains(QStringLiteral("subscription")), qPrintable(out->tomlContent));
+    QVERIFY2(!out->tomlContent.contains(QStringLiteral("s3cret@")), qPrintable(out->tomlContent));
+    QVERIFY2(out->tomlContent.contains(QStringLiteral("password = \"s3cret\"")), qPrintable(out->tomlContent));
+    const auto decoded = parseDeepLink(out->link, &err);
+    QVERIFY2(decoded.has_value(), qPrintable(err));
+    QCOMPARE(decoded->version, 1);
+    QVERIFY(decoded->subscriptionUrl.isEmpty());
+    QCOMPARE(out->link, encodeDeepLink(serverOfTheExport()));
+}
+
+// The endpoint pastes in the file its certificate came from, and that file can
+// hold the server's private key beside it. Only the certificates go on, into the
+// config and the link, and the import says something was left out.
+void TestConfigImport::anEndpointExportKeepsOnlyItsCertificates() {
+    using endpoint_export::multiline;
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    endpoint_export::Fields f;
+    f.certificate = multiline(certs::kBagAttributes + certs::keyPem() + certs::kBagAttributes + certs::kLeafPem);
+    QString err;
+    auto out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY(out->certificateExtraIgnored);
+    QCOMPARE(out->tomlContent.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QVERIFY2(!out->tomlContent.contains(certs::keyLabel()), qPrintable(out->tomlContent));
+    QCOMPARE(certificatesDer(parseConfigToml(out->tomlContent).certificate), leaf);
+    QCOMPARE(parseDeepLink(out->link)->certificate, leaf);
+
+    // A chain and nothing else, in either spelling, is kept whole and said
+    // nothing about.
+    for (const QString &value : {multiline(certs::kChainPem), endpoint_export::singleLineCrlf(certs::kChainPem)}) {
+        f.certificate = value;
+        out = importExport(f, QStringLiteral("exported"), &err);
+        QVERIFY2(out.has_value(), qPrintable(err));
+        QVERIFY(!out->certificateExtraIgnored);
+        QCOMPARE(certificatesDer(parseConfigToml(out->tomlContent).certificate), leaf + certs::derOf(certs::kCaPem));
+    }
+    // A server whose certificate the system trusts is exported with none, and
+    // pinned with none; so is one that is blank.
+    for (const QString &none : {QStringLiteral("\"\""), QStringLiteral("\" \\n \"")}) {
+        f.certificate = none;
+        out = importExport(f, QStringLiteral("exported"), &err);
+        QVERIFY2(out.has_value(), qPrintable(err));
+        QVERIFY(!out->certificateExtraIgnored);
+        QVERIFY2(out->tomlContent.contains(QStringLiteral("certificate = \"\"\n")), qPrintable(out->tomlContent));
+        QVERIFY(parseDeepLink(out->link)->certificate.isEmpty());
+    }
+}
+
+// Each refusal a link meets, with the link's message, in the link's order, and
+// one of a config file's own: a server it does not name.
+void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
+    struct Case {
+        const char *what;
+        endpoint_export::Fields fields;
+        LinkRefusal why;
+        QString message;
+    };
+    const QString keyOnly = endpoint_export::multiline(certs::keyPem());
+    QList<Case> cases;
+    endpoint_export::Fields f;
+    f.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    cases.append({"an auth key", f, LinkRefusal::NeedsNewerCore, newerCoreRefusal()});
+    f.certificate = keyOnly;
+    cases.append({"an auth key before a key alone", f, LinkRefusal::NeedsNewerCore, newerCoreRefusal()});
+    f = endpoint_export::Fields();
+    f.password.clear();
+    cases.append({"a subscription and no password", f, LinkRefusal::SubscriptionOnly, subscriptionOnlyRefusal()});
+    f.certificate = keyOnly;
+    cases.append({"a subscription before a key alone", f, LinkRefusal::SubscriptionOnly,
+                  subscriptionOnlyRefusal()});
+    f = endpoint_export::Fields();
+    f.addresses.clear();
+    cases.append({"a subscription and no address", f, LinkRefusal::SubscriptionOnly, subscriptionOnlyRefusal()});
+    f.subscriptionUrl.clear();
+    cases.append({"no address", f, LinkRefusal::Damaged, QStringLiteral("missing address or credentials")});
+    f = endpoint_export::Fields();
+    f.subscriptionUrl.clear();
+    f.username = QStringLiteral(" ");
+    cases.append({"no username", f, LinkRefusal::Damaged, QStringLiteral("missing address or credentials")});
+    f = endpoint_export::Fields();
+    f.clientRandomPrefix = QStringLiteral("abc");
+    cases.append({"an odd client random", f, LinkRefusal::Damaged, QStringLiteral("malformed client_random value")});
+    f = endpoint_export::Fields();
+    f.certificate = keyOnly;
+    cases.append({"a key alone", f, LinkRefusal::Damaged, QStringLiteral("malformed certificate")});
+    f.certificate = endpoint_export::multiline(QStringLiteral("not a certificate\n"));
+    cases.append({"text alone", f, LinkRefusal::Damaged, QStringLiteral("malformed certificate")});
+    for (const Case &c : cases) {
+        QString err;
+        LinkRefusal why = c.why == LinkRefusal::Damaged ? LinkRefusal::NeedsNewerCore : LinkRefusal::Damaged;
+        QVERIFY2(!importExport(c.fields, QStringLiteral("exported"), &err, &why).has_value(), c.what);
+        QVERIFY2(why == c.why, c.what);
+        QVERIFY2(err == c.message, qPrintable(QString::fromLatin1(c.what) + QStringLiteral(": ") + err));
+        QVERIFY2(!err.contains(QStringLiteral("s3cret")) && !err.contains(QStringLiteral("aabbccdd")), c.what);
+    }
+
+    // What is not an export at all names no server it can read.
+    QString err;
+    LinkRefusal why = LinkRefusal::NeedsNewerCore;
+    QVERIFY(!prepareEndpointExportImport(QStringLiteral("[endpoint]\n") + endpoint_export::text(),
+                                         QStringLiteral("exported"), &err, &why)
+                     .has_value());
+    QCOMPARE(why, LinkRefusal::Damaged);
+    QCOMPARE(err, QStringLiteral("missing address or credentials"));
+
+    // A client random the core reads as it is repaired, as a link's is; and a
+    // file without a password is imported, as any config file is.
+    f = endpoint_export::Fields();
+    f.clientRandomPrefix = QStringLiteral("aabb/");
+    auto out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY2(out->tomlContent.contains(QStringLiteral("client_random = \"aabb\"\n")), qPrintable(out->tomlContent));
+    f = endpoint_export::Fields();
+    f.subscriptionUrl.clear();
+    f.password.clear();
+    out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+}
+
+// The link a file's question is answered with makes the same config again, under
+// the same name, in every case the file has.
+void TestConfigImport::anEndpointExportsLinkGivesTheSameConfig() {
+    QList<endpoint_export::Fields> variants{endpoint_export::Fields()};
+    endpoint_export::Fields f;
+    f.name.clear();
+    variants << f;
+    f = endpoint_export::Fields();
+    f.name = QString(60, QChar(0x0416)); // cut to the limit, and found under its whole name
+    variants << f;
+    f = endpoint_export::Fields();
+    f.certificate = endpoint_export::multiline(certs::keyPem() + certs::kChainPem);
+    f.skipVerification = true;
+    f.hasIpv6 = false;
+    f.customSni = QStringLiteral("cdn.example.org");
+    f.upstreamProtocol = QStringLiteral("http2");
+    f.clientRandomPrefix = QStringLiteral("aabb/");
+    f.dnsUpstreams.clear();
+    f.subscriptionUrl.clear();
+    variants << f;
+    for (const endpoint_export::Fields &variant : variants) {
+        QString err;
+        const auto out = importExport(variant, QStringLiteral("round-trip"), &err);
+        QVERIFY2(out.has_value(), qPrintable(err));
+        const auto again = prepareDeepLinkImport(out->link, &err);
+        QVERIFY2(again.has_value(), qPrintable(err));
+        QCOMPARE(again->fileName, out->fileName);
+        QCOMPARE(again->unclippedFileName, out->unclippedFileName);
+        QCOMPARE(again->legacyFileName, out->legacyFileName);
+        QCOMPARE(again->tomlContent, out->tomlContent);
+        QCOMPARE(again->skipVerification, out->skipVerification);
+        // The link carries neither what was left out nor the address.
+        QVERIFY(!again->certificateExtraIgnored);
+        QVERIFY(!again->subscriptionNotKept);
+    }
 }
 
 QTEST_MAIN(TestConfigImport)

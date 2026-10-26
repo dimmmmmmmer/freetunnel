@@ -27,18 +27,35 @@ struct PreparedImport {
     // The link's certificate field held something besides certificates, such as
     // a private key, which was left out (certificateExtraIgnoredNote).
     bool certificateExtraIgnored = false;
+    // It came from a file, an endpoint's export, rather than a link, and the
+    // question before the import says so.
+    bool fromFile = false;
+    // What confirmDeepLinkImport() is handed once the user says yes, and makes
+    // this same config from again: the link itself, or for a file, the link it
+    // was turned into.
+    QString link;
 };
 
 // Why prepareDeepLinkImport() gave nothing back. A damaged link's message is the
-// parser's, a fragment the caller puts after "Link error:". The others are about
-// a link that is fine but asks for what this version does not have yet, and their
-// message is a whole sentence, said as it is.
+// parser's, a fragment the caller puts after "Link error:" (for a file, after
+// "Not a valid TrustTunnel config:"). The others are about a link that is fine
+// but asks for what this version does not have yet, and their message is a whole
+// sentence, said as it is.
 enum class LinkRefusal { Damaged, SubscriptionOnly, NeedsNewerCore };
 
 // Decode an official `tt://` deep link into a ready-to-write TOML config and a
 // sanitized file name. Returns nullopt and sets *error (and *refusal) on failure.
 std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString *error = nullptr,
                                                     LinkRefusal *refusal = nullptr);
+
+// The same for the TOML file a TrustTunnel endpoint exports (parseEndpointExport):
+// read into the config a link with that server gives, by the same rules, with
+// fromFile set and the link the file was turned into, which never carries a
+// subscription address or an auth key. The endpoint writes `name = ""` unless it
+// was given a name, and then fallbackName, the file's, names the config.
+std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, const QString &fallbackName,
+                                                          QString *error = nullptr,
+                                                          LinkRefusal *refusal = nullptr);
 
 // What an import says, in the user's language, when a link or a file asks for
 // what this version does not have yet. One wording for both, so a server is
