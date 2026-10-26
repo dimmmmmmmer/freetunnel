@@ -268,13 +268,24 @@ process is absent; lockdown also blocks apps excluded from the VPN.
 While the guard holds, FreeTunnel keeps reconnecting by itself, with the desktop's
 timing: 1 s, doubling to 30 s, ±20 %, without end. Each attempt starts a new core
 on the retained TUN, with the settings that TUN was built from. A network that
-appears brings the next attempt forward to 1 s later. The delays don't run while
-the phone sleeps, and nothing wakes it. The app, the tile and the notification keep
-showing that traffic is blocked until the connection is back. One alert,
-"Connection lost — traffic is blocked", appears per episode, with Reconnect and
-Disconnect, and the home screen offers Reconnect too. The log records each reason
-once per episode. An explicit Reconnect builds a new TUN from the current settings
-and hands traffic over to it.
+appears starts the delays again at 1 s: the next attempt comes 1 s later, or 1 s
+after the attempt in progress fails. The delays don't run while the phone sleeps,
+and nothing wakes it. The app, the tile and the notification keep showing that
+traffic is blocked until the connection is back. One alert, "Connection lost —
+traffic is blocked", appears per episode, with Reconnect and Disconnect, and the
+home screen offers Reconnect too. The log records each reason, and the reconnect,
+once per episode. A connection that drops within 10 s of reconnecting by itself
+continues the episode: the delay keeps growing and the alert comes back silently.
+Opening the app clears an alert left by a process that was killed while blocked.
+An explicit Reconnect builds a new TUN from the current settings and hands traffic
+over to it.
+
+Each attempt also repeats two costs of the pinned TrustTunnel 1.1.7 core that
+used to come once per explicit start. The core resolves a hostname given in
+`addresses` as it starts, for up to 15 s, on the service's single worker, so a
+Disconnect, Reconnect or settings change made during that lookup waits for it to
+end. And each start keeps a copy of the configuration, a few KB, in native memory
+until the process ends.
 
 Native configuration checks run on a worker through a private isolated service.
 Each validation process exits after unbinding, so checks cannot change the active
