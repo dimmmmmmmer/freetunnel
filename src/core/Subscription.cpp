@@ -53,9 +53,50 @@ bool hasNoControl(const QString &s)
     return std::none_of(s.cbegin(), s.cend(), [](QChar c) { return c.category() == QChar::Other_Control; });
 }
 
+// Whether Qt takes `s` as the host of a URL, and nothing more: a name, an IDN or
+// an IP address, with no label longer than DNS allows, and nothing a URL reads as
+// a path, a userinfo or a port, such as "/", "@" or ":443". No substitute for
+// isWireText(): Qt drops a zero-width space or a soft hyphen before it checks.
+bool isUrlHost(const QString &s)
+{
+    QUrl url;
+    url.setHost(s, QUrl::StrictMode);
+    return url.isValid() && !url.host().isEmpty();
+}
+
+// The name the core sends as the SNI and checks the certificate against, and the
+// one the user is asked about when it changes, so "vpn.example.com/x" or
+// "vpn.example.com@x", which read like the old name, is refused. Qt also takes a
+// whole "[v6]" for a host, which a hostname is never written as.
 bool isHostname(const QString &s)
 {
-    return !s.isEmpty() && s.size() <= kMaxHostnameLength && isWireText(s);
+    return !s.isEmpty() && s.size() <= kMaxHostnameLength && isWireText(s) && !s.startsWith(QLatin1Char('['))
+            && isUrlHost(s);
+}
+
+bool isPortDigits(const QString &s)
+{
+    const auto isDigit = [](QChar c) { return c >= QLatin1Char('0') && c <= QLatin1Char('9'); };
+    return !s.isEmpty() && std::all_of(s.cbegin(), s.cend(), isDigit);
+}
+
+// "host:port" or "[v6]:port", as the core resolves an address: an IPv6 address
+// only in brackets, a name or an IPv4 address with no colon of its own, and a
+// port in digits alone. The editor's rule, which this adds to, also takes
+// "[1.2.3.4:443", "2001:db8::1:443" (an IPv6 address with no port, to the core)
+// and "a/b:443", which the core cannot connect to, and "1.2.3.4:+443", which no
+// endpoint writes. A refresh that took one would replace an address that works.
+bool isHostAndPort(const QString &s)
+{
+    const qsizetype colon = s.lastIndexOf(QLatin1Char(':'));
+    if (colon < 0 || !isPortDigits(s.mid(colon + 1)))
+        return false;
+    const QString host = s.left(colon);
+    if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']'))) {
+        const QString v6 = host.mid(1, host.size() - 2);
+        return v6.contains(QLatin1Char(':')) && isUrlHost(v6);
+    }
+    return !host.contains(QLatin1Char(':')) && isUrlHost(host);
 }
 
 // No comma: a config keeps its addresses as one comma-separated list, and the
@@ -63,7 +104,7 @@ bool isHostname(const QString &s)
 bool isAddress(const QString &s)
 {
     return s.size() <= kMaxAddressLength && !s.contains(QLatin1Char(',')) && isWireText(s)
-            && isValidEndpointAddress(s);
+            && isValidEndpointAddress(s) && isHostAndPort(s);
 }
 
 bool isCredential(const QString &s)
@@ -431,7 +472,10 @@ std::optional<SubscriptionUrl> parseSubscriptionUrl(const QString &url)
     if (url.toUtf8().size() > kMaxSubscriptionUrlBytes || !url.isValidUtf16() || !isWireText(url))
         return std::nullopt;
     const QUrl parsed(url, QUrl::StrictMode);
-    if (!parsed.isValid() || parsed.scheme() != QLatin1String("https") || parsed.host().isEmpty())
+    // Port 0 is no port a server listens on: refused here, it is a bad address,
+    // not a fetch that fails and is tried again.
+    if (!parsed.isValid() || parsed.scheme() != QLatin1String("https") || parsed.host().isEmpty()
+            || parsed.port() == 0)
         return std::nullopt;
     const std::optional<QString> user =
             userInfoPart(parsed.userName(QUrl::FullyDecoded), parsed.userName(QUrl::FullyEncoded));
@@ -452,8 +496,16 @@ std::optional<SubscriptionUrl> parseSubscriptionUrl(const QString &url)
 // Built from the parts that may be shown, never by taking out the ones that may
 // not, so nothing new in a URL can slip through. The default port is left out:
 // an address with it and one without are the same server.
+//
+// Only a valid URL with a host has an origin. Without a host, Qt has read
+// whatever came first as the scheme and the rest as the path, so
+// "alice:s3cret@host/s", an address pasted without its "https://", has the user
+// for its scheme and the password in its path. An invalid one keeps what Qt
+// could make of it, which is not to be relied on. Nothing of either is shown.
 QString redactUrl(const QUrl &url, RedactKeep keep)
 {
+    if (!url.isValid() || url.host().isEmpty())
+        return QString();
     QUrl origin;
     origin.setScheme(url.scheme());
     origin.setHost(url.host());
@@ -465,9 +517,14 @@ QString redactUrl(const QUrl &url, RedactKeep keep)
     return out;
 }
 
+// A hint of zero or less is no hint: a server may mean "never" or "unset" by it,
+// and neither is a reason to fetch every hour, which would show the real
+// hostname on the wire 24 times a day.
 qint64 subscriptionRefreshInterval(std::optional<qint64> hintSeconds)
 {
-    return hintSeconds ? std::clamp(*hintSeconds, kMinRefreshSeconds, kMaxRefreshSeconds) : kDefaultRefreshSeconds;
+    if (!hintSeconds || *hintSeconds <= 0)
+        return kDefaultRefreshSeconds;
+    return std::clamp(*hintSeconds, kMinRefreshSeconds, kMaxRefreshSeconds);
 }
 
 // Nothing yet: endpoint 1.3 sends no hint, and no field or header is defined for

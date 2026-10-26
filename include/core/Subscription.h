@@ -125,14 +125,16 @@ struct SubscriptionUrl {
     QByteArray authorization; // "Basic ..." for the userinfo; empty when there is none
     // Which subscription this is, whatever its password: the SHA-256, in hex, of
     // the origin, the path, a newline and the user. The same subscription sent
-    // again with a new password matches the config it made.
+    // again with a new password matches the config it made. The query is left
+    // out as the password is: where a server puts a token there, a new token is
+    // the same subscription too.
     QString identity;
 };
 
 // A subscription address, split into what a fetch needs, or nullopt when it is not
-// one: not https, no host, longer than kMaxSubscriptionUrlBytes, or with a space,
-// a control or a format character in it. The userinfo is the server's Basic
-// credentials, percent-decoded.
+// one: not https, no host, port 0, longer than kMaxSubscriptionUrlBytes, or with a
+// space, a control or a format character in it. The userinfo is the server's
+// Basic credentials, percent-decoded.
 std::optional<SubscriptionUrl> parseSubscriptionUrl(const QString &url);
 
 enum class RedactKeep {
@@ -142,12 +144,14 @@ enum class RedactKeep {
 
 // An address with nothing secret in it: never the userinfo, the query or the
 // fragment, and the host in ACE form. A path may hold a token on another
-// provider's server, so only the consent details show it.
+// provider's server, so only the consent details show it. Empty for a URL that Qt
+// calls invalid, or that has no host, such as one pasted without its "https://",
+// where Qt reads the user as the scheme and the password as part of the path.
 QString redactUrl(const QUrl &url, RedactKeep keep = RedactKeep::Origin);
 
 // How long to wait between refreshes, in seconds: the operator's hint, clamped to
-// one hour to seven days, or a day without one. Jitter and backoff are added to
-// it, never taken from it.
+// one hour to seven days, or a day without one. A hint of zero or less counts as
+// none. Jitter and backoff are added to it, never taken from it.
 qint64 subscriptionRefreshInterval(std::optional<qint64> hintSeconds);
 
 // The operator's refresh hint, in seconds, from a document or the reply's

@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 
 #include "certificate_vectors.h"
 #include "core/ConfigToml.h"
@@ -43,6 +44,8 @@ private slots:
     void theBodyHasALimit();
     void anAddressIsOneHostAndPort_data();
     void anAddressIsOneHostAndPort();
+    void aHostnameIsOneHost_data();
+    void aHostnameIsOneHost();
     void noStringHoldsAControlCharacter_data();
     void noStringHoldsAControlCharacter();
     void theClientRandomIsTakenAsTheCoreReadsIt();
@@ -352,8 +355,16 @@ void TestSubscription::eachLimitHoldsAtItsEdge_data()
     QTest::addColumn<QJsonValue>("atLimit");
     QTest::addColumn<QJsonValue>("pastIt");
     const auto text = [](int n, char c = 'a') { return QJsonValue(QString(n, QLatin1Char(c))); };
-    const auto host = [](int n) { return QJsonValue(QString(n - 4, QLatin1Char('h')) + QStringLiteral(".org")); };
-    const auto address = [](int n) { return QJsonValue(QString(n - 4, QLatin1Char('h')) + QStringLiteral(":443")); };
+    // A name n long in labels of 63, the most DNS allows in one, so that only
+    // the length is past a limit.
+    const auto name = [](int n) {
+        QString s;
+        for (int i = 0; i < n; ++i)
+            s += i % 64 == 63 ? QLatin1Char('.') : QLatin1Char('h');
+        return s;
+    };
+    const auto host = [&name](int n) { return QJsonValue(name(n)); };
+    const auto address = [&name](int n) { return QJsonValue(name(n - 4) + QStringLiteral(":443")); };
     const auto servers = [](int n) {
         QJsonArray list;
         for (int i = 0; i < n; ++i)
@@ -414,6 +425,24 @@ void TestSubscription::anAddressIsOneHostAndPort_data()
     QTest::newRow("a space in front") << QStringLiteral(" 1.2.3.4:443") << false;
     QTest::newRow("a space behind") << QStringLiteral("1.2.3.4:443 ") << false;
     QTest::newRow("a space inside") << QStringLiteral("1.2.3.4 :443") << false;
+    QTest::newRow("an IDN") << QStringLiteral("\u043F\u0440\u0438\u043C\u0435\u0440.\u0440\u0444:443") << true;
+    QTest::newRow("an underscore") << QStringLiteral("my_vpn.example.com:443") << true;
+    QTest::newRow("ipv4 in ipv6") << QStringLiteral("[::ffff:1.2.3.4]:443") << true;
+    QTest::newRow("a leading zero in the port") << QStringLiteral("1.2.3.4:0443") << true;
+    // What the editor's rule takes, and the core cannot connect to or no endpoint
+    // writes.
+    QTest::newRow("a bracket left open") << QStringLiteral("[203.0.113.5:443") << false;
+    QTest::newRow("a bracket never opened") << QStringLiteral("203.0.113.5]:443") << false;
+    QTest::newRow("ipv6 without brackets") << QStringLiteral("2001:db8::1:443") << false;
+    QTest::newRow("ipv4 in brackets") << QStringLiteral("[1.2.3.4]:443") << false;
+    QTest::newRow("a name in brackets") << QStringLiteral("[vpn.example.com]:443") << false;
+    QTest::newRow("no ipv6 in the brackets") << QStringLiteral("[2001:db8::g]:443") << false;
+    QTest::newRow("something after the brackets") << QStringLiteral("[::1]x:443") << false;
+    QTest::newRow("a slash") << QStringLiteral("evil/x:443") << false;
+    QTest::newRow("an at sign") << QStringLiteral("alice@1.2.3.4:443") << false;
+    QTest::newRow("a plus sign in the port") << QStringLiteral("1.2.3.4:+443") << false;
+    QTest::newRow("two ports") << QStringLiteral("1.2.3.4:80:443") << false;
+    QTest::newRow("a label of 64") << QString(64, QLatin1Char('h')) + QStringLiteral(".org:443") << false;
 }
 
 void TestSubscription::anAddressIsOneHostAndPort()
@@ -425,6 +454,43 @@ void TestSubscription::anAddressIsOneHostAndPort()
         QCOMPARE(parsed(body).address, address);
     else
         QVERIFY(refusedFor(body, SubscriptionDocError::Invalid, QStringLiteral("address")));
+}
+
+// The name the core sends as the SNI, and the one the user is asked about when it
+// changes, so nothing in it may read as more than a name.
+void TestSubscription::aHostnameIsOneHost_data()
+{
+    QTest::addColumn<QString>("hostname");
+    QTest::addColumn<bool>("taken");
+    QTest::newRow("a name") << QStringLiteral("vpn.example.com") << true;
+    QTest::newRow("in other letter case") << QStringLiteral("VPN.Example.COM") << true;
+    QTest::newRow("an IDN") << QStringLiteral("\u043F\u0440\u0438\u043C\u0435\u0440.\u0440\u0444") << true;
+    QTest::newRow("in ACE form") << QStringLiteral("xn--e1afmkfd.xn--p1ai") << true;
+    QTest::newRow("an underscore") << QStringLiteral("my_vpn.example.com") << true;
+    QTest::newRow("a dot at the end") << QStringLiteral("vpn.example.com.") << true;
+    QTest::newRow("ipv4") << QStringLiteral("1.2.3.4") << true;
+    QTest::newRow("ipv6") << QStringLiteral("2001:db8::1") << true;
+    QTest::newRow("a path") << QStringLiteral("vpn.example.com/evil") << false;
+    QTest::newRow("a userinfo") << QStringLiteral("vpn.example.com@evil.example") << false;
+    QTest::newRow("a userinfo in front") << QStringLiteral("alice@vpn.example.com") << false;
+    QTest::newRow("a port") << QStringLiteral("vpn.example.com:443") << false;
+    QTest::newRow("a query") << QStringLiteral("vpn.example.com?x") << false;
+    QTest::newRow("an escape") << QStringLiteral("vpn.ex%41mple.com") << false;
+    QTest::newRow("ipv6 in brackets") << QStringLiteral("[2001:db8::1]") << false;
+    QTest::newRow("an empty label") << QStringLiteral("vpn..example.com") << false;
+    QTest::newRow("a label of 64") << QString(64, QLatin1Char('h')) + QStringLiteral(".org") << false;
+    QTest::newRow("a noncharacter") << QStringLiteral("vpn.example.com") + QChar(0xFFFF) << false;
+}
+
+void TestSubscription::aHostnameIsOneHost()
+{
+    QFETCH(QString, hostname);
+    QFETCH(bool, taken);
+    const QByteArray body = withField(sub::kMinimal, QStringLiteral("hostname"), hostname);
+    if (taken)
+        QCOMPARE(parsed(body).hostname, hostname);
+    else
+        QVERIFY(refusedFor(body, SubscriptionDocError::Invalid, QStringLiteral("hostname")));
 }
 
 void TestSubscription::noStringHoldsAControlCharacter_data()
@@ -451,6 +517,10 @@ void TestSubscription::noStringHoldsAControlCharacter_data()
         if (key == QLatin1String("hostname") || key == QLatin1String("custom_sni")) {
             QTest::addRow("%s, a zero-width space", field.first) << key << QJsonValue(field.second.arg(QChar(0x200B)));
             QTest::addRow("%s, a byte order mark", field.first) << key << QJsonValue(field.second.arg(QChar(0xFEFF)));
+            // Outside the BMP, written as two surrogates, which are no format
+            // characters on their own.
+            QTest::addRow("%s, a language tag", field.first)
+                    << key << QJsonValue(field.second.arg(QString::fromUcs4(U"\U000E0001")));
             QTest::addRow("%s, a space", field.first) << key << QJsonValue(field.second.arg(QStringLiteral(" ")));
         }
         if (key != QLatin1String("username") && key != QLatin1String("password"))
@@ -675,6 +745,8 @@ void TestSubscription::aRefreshOverwritesWhatTheSubscriptionOwns()
     current.certificate = certs::kLeafPem;
     current.customSni = QStringLiteral("old.example.org");
     current.clientRandom = QStringLiteral("0011");
+    // A file not yet moved to the credential store still has its password.
+    current.password = QStringLiteral("old-inline");
     SubscriptionDocument doc = parsed(sub::kFull);
     doc.hostname = QStringLiteral("new.example.com");
     doc.address = QStringLiteral("5.6.7.8:8443");
@@ -693,6 +765,10 @@ void TestSubscription::aRefreshOverwritesWhatTheSubscriptionOwns()
     QCOMPARE(applied.config.clientRandom, QStringLiteral("aabbcc/ff00ff"));
     QVERIFY(applied.hostnameChanged);
     QCOMPARE(applied.changes.size(), 7);
+    // The new password goes to the credential store, and the old one is not
+    // written back to the file beside it.
+    QVERIFY(applied.config.password.isEmpty());
+    QVERIFY(!buildConfigToml(applied.config).contains(QStringLiteral("old-inline")));
 }
 
 // As TrustTunnel's own client does: the document has one address, and it is the
@@ -879,7 +955,7 @@ void TestSubscription::theSameHostnameInOtherLettersIsTheSameServer()
     // "ПРИМЕР.рф", escaped so that no compiler reads the source in another
     // code page.
     QVERIFY(!changed(QStringLiteral("xn--e1afmkfd.xn--p1ai"),
-                     QStringLiteral("ПРИМЕР.рф")));
+                     QStringLiteral("\u041F\u0420\u0418\u041C\u0415\u0420.\u0440\u0444")));
     QVERIFY(changed(QStringLiteral("xn--e1afmkfd.xn--p1ai"), QStringLiteral("other.example.com")));
     // A name that has no ACE form, such as an IPv6 address, is compared in lower
     // case all the same.
@@ -906,9 +982,13 @@ void TestSubscription::aSubscriptionAddressMustBeHttps_data()
     QTest::newRow("a newline") << QStringLiteral("https://vpn.example.com/subscription\n") << false;
     QTest::newRow("a control character") << QStringLiteral("https://vpn.example.com/\x01") << false;
     QTest::newRow("a zero-width space") << QStringLiteral("https://vpn.example.com/sub\u200Bscription") << false;
+    QTest::newRow("a format character outside the BMP")
+            << QStringLiteral("https://vpn.example.com/sub") + QString::fromUcs4(U"\U000E0001") << false;
     QTest::newRow("half a surrogate pair")
             << QStringLiteral("https://vpn.example.com/") + QChar(0xD800) << false;
     QTest::newRow("a bad escape") << QStringLiteral("https://vpn.example.com/%zz") << false;
+    QTest::newRow("port 0") << QStringLiteral("https://vpn.example.com:0/subscription") << false;
+    QTest::newRow("port 1") << QStringLiteral("https://vpn.example.com:1/subscription") << true;
     QTest::newRow("empty") << QString() << false;
 }
 
@@ -951,6 +1031,8 @@ void TestSubscription::theUserinfoBecomesABasicHeader()
     QCOMPARE(header(QStringLiteral("https://\u043F:\u0440@vpn.example.com/s")), QByteArray("Basic 0L860YA="));
     // "alice:"
     QCOMPARE(header(QStringLiteral("https://alice@vpn.example.com/s")), QByteArray("Basic YWxpY2U6"));
+    // ":pw": a token sent as the password alone.
+    QCOMPARE(header(QStringLiteral("https://:pw@vpn.example.com/s")), QByteArray("Basic OnB3"));
     QCOMPARE(header(QStringLiteral("https://vpn.example.com/subscription")), QByteArray());
 }
 
@@ -1001,6 +1083,11 @@ void TestSubscription::theIdentityIsTheSubscriptionNotThePassword()
     QVERIFY(identity(QStringLiteral("https://alice:s3cret@vpn.example.com/Subscription")) != one);
     QCOMPARE(identity(QStringLiteral("https://alice:s3cret@vpn.example.com")),
              identity(QStringLiteral("https://alice:s3cret@vpn.example.com/")));
+    // The query is left out as the password is, for a token kept there: a new
+    // one is the same subscription.
+    QCOMPARE(identity(QStringLiteral("https://alice:s3cret@vpn.example.com/subscription?token=A")), one);
+    QCOMPARE(identity(QStringLiteral("https://vpn.example.com/subscription?token=A")),
+             identity(QStringLiteral("https://vpn.example.com/subscription?token=B")));
 }
 
 void TestSubscription::redactUrlKeepsNothingSecret()
@@ -1024,6 +1111,24 @@ void TestSubscription::redactUrlKeepsNothingSecret()
     // A redirect may point elsewhere, and is logged the same way.
     QCOMPARE(redactUrl(QUrl(QStringLiteral("http://u:p@vpn.example.com:443/s"))),
              QStringLiteral("http://vpn.example.com:443"));
+    // With no "//", Qt reads the user as the scheme and the rest as the path,
+    // and calls the URL valid; with nothing after the "//", all of it is the
+    // path. With no host there is no origin, and nothing is shown.
+    for (const QString &noHost : {QStringLiteral("alice:s3cret@vpn.example.com/subscription"),
+                                  QStringLiteral("https:alice:s3cret@vpn.example.com/s"),
+                                  QStringLiteral("https:///alice:s3cret@x")}) {
+        const QUrl url(noHost);
+        QVERIFY(url.host().isEmpty());
+        QCOMPARE(redactUrl(url), QString());
+        QCOMPARE(redactUrl(url, RedactKeep::OriginAndPath), QString());
+    }
+    QVERIFY(QUrl(QStringLiteral("alice:s3cret@vpn.example.com/subscription")).isValid());
+    // Nor of one Qt calls invalid, which may still have a host: its parts are
+    // what Qt could make of it, not what it holds.
+    const QUrl badPort(QStringLiteral("https://alice:s3cret@vpn.example.com:99999/s"));
+    QVERIFY(!badPort.isValid() && !badPort.host().isEmpty());
+    QCOMPARE(redactUrl(badPort), QString());
+    QCOMPARE(redactUrl(badPort, RedactKeep::OriginAndPath), QString());
 }
 
 void TestSubscription::theRefreshIntervalIsClamped()
@@ -1031,8 +1136,10 @@ void TestSubscription::theRefreshIntervalIsClamped()
     const qint64 hour = 3600;
     QCOMPARE(subscriptionRefreshInterval(std::nullopt), 24 * hour);
     QCOMPARE(subscriptionRefreshInterval(hour / 2), hour);
-    QCOMPARE(subscriptionRefreshInterval(0), hour);
-    QCOMPARE(subscriptionRefreshInterval(-5), hour);
+    // Zero or less is no hint: a server may mean "never" or "unset" by it.
+    QCOMPARE(subscriptionRefreshInterval(0), 24 * hour);
+    QCOMPARE(subscriptionRefreshInterval(-5), 24 * hour);
+    QCOMPARE(subscriptionRefreshInterval(1), hour);
     QCOMPARE(subscriptionRefreshInterval(hour), hour);
     QCOMPARE(subscriptionRefreshInterval(6 * hour), 6 * hour);
     QCOMPARE(subscriptionRefreshInterval(7 * 24 * hour), 7 * 24 * hour);
@@ -1102,6 +1209,23 @@ static bool isNoWireName(const QString &s)
            });
 }
 
+// A hostname with nothing a URL reads as a path, a userinfo, a query, a fragment,
+// an escape or a port: a colon only in an IPv6 address.
+static bool isNoHostname(const QString &s)
+{
+    static const QRegularExpression urlSyntax(QStringLiteral("[/@?#%\\[\\]]"));
+    static const QRegularExpression ipv6(QStringLiteral("^[0-9A-Fa-f:.]+$"));
+    return s.contains(urlSyntax) || (s.contains(QLatin1Char(':')) && !ipv6.match(s).hasMatch());
+}
+
+// An address the core can split: an IPv6 address in brackets, or a host with no
+// colon, bracket or URL syntax in it, then a colon and a port in digits.
+static bool isNoHostAndPort(const QString &s)
+{
+    static const QRegularExpression shape(QStringLiteral("^(\\[[0-9A-Fa-f:.]+\\]|[^\\[\\]:/@?#%]+):[0-9]+$"));
+    return !shape.match(s).hasMatch();
+}
+
 // What tomlEsc() would drop.
 static bool hasC0OrDel(const QString &s)
 {
@@ -1110,14 +1234,16 @@ static bool hasC0OrDel(const QString &s)
 }
 
 // What every document that parses has to be, whatever came in: nothing past a
-// limit, no control character in what reaches the config, an address the editor
-// would take, and certificates alone.
+// limit, no control character in what reaches the config, a hostname that is one
+// host, an address the editor would take and the core can split, and
+// certificates alone.
 static QString brokenRule(const SubscriptionDocument &doc)
 {
-    if (doc.hostname.isEmpty() || doc.hostname.size() > 253 || isNoWireName(doc.hostname))
+    if (doc.hostname.isEmpty() || doc.hostname.size() > 253 || isNoWireName(doc.hostname)
+            || isNoHostname(doc.hostname))
         return QStringLiteral("hostname");
     if (doc.address.size() > 300 || doc.address.contains(QLatin1Char(',')) || isNoWireName(doc.address)
-            || !isValidEndpointAddress(doc.address))
+            || !isValidEndpointAddress(doc.address) || isNoHostAndPort(doc.address))
         return QStringLiteral("address");
     for (const QString &credential : {doc.username, doc.password}) {
         if (credential.isEmpty() || credential.size() > 1024 || hasC0OrDel(credential))
@@ -1184,8 +1310,8 @@ void TestSubscription::randomFieldValuesNeverBreakTheRules()
                            QStringLiteral("skip_verification"), QStringLiteral("certificate"),
                            QStringLiteral("custom_sni"), QStringLiteral("client_random_prefix"), QStringLiteral("name"),
                            QStringLiteral("dns_upstreams"), QStringLiteral("client_random_auth_key")};
-    const QString alphabet = QStringLiteral("aZ09.:,;/[] -_\t\n") + QChar(0) + QChar(0x7F) + QChar(0x85) + QChar(0x200B)
-            + QChar(0xD800) + QChar(0x0416);
+    const QString alphabet = QStringLiteral("aZ09.:,;/[]@+ -_\t\n") + QChar(0) + QChar(0x7F) + QChar(0x85)
+            + QChar(0x200B) + QChar(0xD800) + QChar(0x0416);
     QRandomGenerator rng(fuzzSeed("randomFieldValuesNeverBreakTheRules", 20261027u));
     const auto randomText = [&] {
         QString s;
