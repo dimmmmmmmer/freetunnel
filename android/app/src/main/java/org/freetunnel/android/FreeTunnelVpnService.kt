@@ -42,8 +42,9 @@ class FreeTunnelVpnService : VpnService() {
         // Its own id, so this alert and "settings were not applied" are posted
         // and cancelled independently.
         private const val BLOCKED_ID = 49
-        // A session shorter than this keeps the longer retry delay, so a server
-        // that accepts and then drops at once can't cause a 1 s reconnect loop.
+        // A session that an automatic attempt started and that ends sooner than
+        // this carries its episode on, so a server that accepts and then drops
+        // at once can't cause a 1 s reconnect loop or an alert every 30 s.
         private const val SHORT_SESSION_MS = 10_000L
         // Gives a network that just appeared a moment to settle before an attempt.
         private const val NETWORK_SETTLE_MS = 1_000L
@@ -61,6 +62,12 @@ class FreeTunnelVpnService : VpnService() {
         // The same request as the notification's Reconnect: with no config it
         // reconnects the profile in use.
         @JvmStatic fun reconnect(context: Context) { send(context, ACTION_START) }
+        // A process killed while blocked leaves its alert behind, and only the
+        // service's next onCreate would clear it. The state lives in this
+        // process, so anything but 6 means no episode is running.
+        @JvmStatic fun clearStaleAlert(context: Context) {
+            if (currentState != 6) context.getSystemService(NotificationManager::class.java).cancel(BLOCKED_ID)
+        }
         /** Sent by PackageReplacedReceiver, in the new version, when the VPN was on at Install. */
         const val ACTION_RESUME = "org.freetunnel.android.RESUME_VPN"
         /** Preference: the versionCode being installed while the VPN was on. */
@@ -86,9 +93,10 @@ class FreeTunnelVpnService : VpnService() {
     private var activePlan: RoutingConfig.Plan? = null
     private var blocked = false
     private var backoff = ReconnectBackoff() // A var so a device test can swap in a longer one.
-    private var connectedAt = 0L
+    private var connectedAt = 0L // When the current session began.
     private var attempts = 0
     private val loggedReasons = HashSet<String>()
+    private var loggedRecovery = false
     private var retrySeq = 0L
     private var availability: ConnectivityManager.NetworkCallback? = null
     // Its time stops in deep sleep, so a sleeping phone is never woken to retry.
@@ -187,6 +195,8 @@ class FreeTunnelVpnService : VpnService() {
         NativeConfigValidator.validate(this, plan.toml)
         val parsed = RoutingConfig.validate(plan.toml)
         val config = VpnServiceConfig.parseToml(plan.toml) ?: error("Invalid adapter configuration")
+        // Loading Android's CA store can fail, so it happens before the handover.
+        val verifier = CertificateVerificator()
         if (destroyed || startId != latestStartId || epoch != permissionEpoch) return
         val newTun = createTun(config, parsed.getBoolean("endpoint.has_ipv6") ?: false, plan)
         establishedThisRequest = true
@@ -198,14 +208,13 @@ class FreeTunnelVpnService : VpnService() {
         keepBlocked = parsed.getBoolean("killswitch_enabled") ?: true
         activeSource = plan.toml
         check(!destroyed && epoch == permissionEpoch) { "VPN start cancelled" }
-        startCore(plan, newTun)
+        startCore(plan, newTun, verifier)
         getSystemService(NotificationManager::class.java).cancel(FAILURE_ID)
         logEvent("TrustTunnel: starting connection")
     }
 
     /** Starts a core on a duplicate of [tun], the retained TUN built from [plan]. */
-    private fun startCore(plan: RoutingConfig.Plan, tun: ParcelFileDescriptor) {
-        val verifier = CertificateVerificator()
+    private fun startCore(plan: RoutingConfig.Plan, tun: ParcelFileDescriptor, verifier: CertificateVerificator = CertificateVerificator()) {
         val token = generation + 1
         val listener = object : VpnClientListener {
             override fun protectSocket(socket: Int) = protect(socket)
@@ -276,6 +285,7 @@ class FreeTunnelVpnService : VpnService() {
     }
 
     private fun stopClient() {
+        // retryBlocked() would drop a stale attempt anyway; this frees it early.
         cancelRetry()
         generation++
         collector?.stopNotifying()
@@ -290,6 +300,7 @@ class FreeTunnelVpnService : VpnService() {
         retainedTun = null
         activePlan = null
         blocked = false
+        attempts = 0
         activeSource = null
         getSystemService(NotificationManager::class.java).cancel(BLOCKED_ID)
         if (publish) publishState(0)
@@ -303,13 +314,21 @@ class FreeTunnelVpnService : VpnService() {
             // connects or the user reconnects or disconnects.
             if (!blocked) {
                 blocked = true
-                attempts = 0
-                loggedReasons.clear()
-                if (SystemClock.elapsedRealtime() - connectedAt >= SHORT_SESSION_MS) backoff.reset()
+                // attempts > 0: the session that just ended began with an
+                // automatic reconnect. If it was short, the episode goes on: the
+                // delay keeps growing, nothing is logged twice and the alert
+                // comes back silently.
+                val continued = attempts > 0 && SystemClock.elapsedRealtime() - connectedAt < SHORT_SESSION_MS
+                if (!continued) {
+                    attempts = 0
+                    loggedReasons.clear()
+                    loggedRecovery = false
+                    backoff.reset()
+                }
                 publishState(6)
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
                     notification(getString(R.string.vpn_traffic_blocked)))
-                showBlocked(reason)
+                showBlocked(reason, silent = continued)
             }
             // Once per reason and episode: retries every 30 s would otherwise
             // push everything else out of the 200-line log.
@@ -324,11 +343,14 @@ class FreeTunnelVpnService : VpnService() {
     }
 
     private fun recovered() {
-        connectedAt = SystemClock.elapsedRealtime()
+        // A session begins here, not when the core recovers by itself from 3, 4
+        // or 5. currentState still holds the state before this 2.
+        if (blocked || currentState !in 2..5) connectedAt = SystemClock.elapsedRealtime()
         if (!blocked) return
         blocked = false
         getSystemService(NotificationManager::class.java).cancel(BLOCKED_ID)
-        logEvent("Reconnected automatically, attempt $attempts")
+        if (!loggedRecovery) logEvent("Reconnected automatically, attempt $attempts")
+        loggedRecovery = true
     }
 
     // The delay waits on the main looper and then hops to the worker, which
@@ -361,12 +383,13 @@ class FreeTunnelVpnService : VpnService() {
         }
     }
 
-    // A live core already hears about networks from the collector. Only a
-    // blocked episode between attempts needs this, and it retries sooner.
+    // A live core already hears about networks from the collector. In a blocked
+    // episode a network also starts the delays again at 1 s, and between
+    // attempts it brings the next one forward.
     private fun networkAvailable() {
-        if (destroyed || !blocked || client != null) return
+        if (destroyed || !blocked) return
         backoff.reset()
-        scheduleRetry(NETWORK_SETTLE_MS)
+        if (client == null) scheduleRetry(NETWORK_SETTLE_MS)
     }
 
     override fun onRevoke() {
@@ -416,14 +439,14 @@ class FreeTunnelVpnService : VpnService() {
                 .setContentIntent(openApp()).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build())
     }
 
-    // Posted once per blocked episode. Its actions are the ongoing
-    // notification's own PendingIntents.
-    private fun showBlocked(reason: String) {
+    // Posted once per blocked episode, silently when it carries one on. Its
+    // actions are the ongoing notification's own PendingIntents.
+    private fun showBlocked(reason: String, silent: Boolean) {
         getSystemService(NotificationManager::class.java).notify(BLOCKED_ID,
             NotificationCompat.Builder(this, FAILURE_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(getString(R.string.vpn_blocked_title)).setContentText(reason)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.vpn_blocked_details, reason)))
-                .setContentIntent(openApp()).setAutoCancel(true).setOnlyAlertOnce(true)
+                .setContentIntent(openApp()).setAutoCancel(true).setOnlyAlertOnce(true).setSilent(silent)
                 .setCategory(NotificationCompat.CATEGORY_ERROR).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .addAction(0, getString(R.string.vpn_reconnect), serviceAction(ACTION_START, 1))
                 .addAction(0, getString(R.string.text_disconnect_vpn), serviceAction(ACTION_STOP, 2)).build())

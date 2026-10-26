@@ -195,8 +195,31 @@ class VpnDeviceTest {
     private fun alert(id: Int) = context.getSystemService(android.app.NotificationManager::class.java)
         .activeNotifications.firstOrNull { it.id == id }
     private fun tunName() = network()?.let { context.getSystemService(ConnectivityManager::class.java).getLinkProperties(it)?.interfaceName }
-    private fun useBackoff(backoff: ReconnectBackoff) = FreeTunnelVpnService::class.java.getDeclaredField("backoff")
-        .apply { isAccessible = true }.set(serviceOwner(), backoff)
+    private fun serviceField(name: String) = FreeTunnelVpnService::class.java.getDeclaredField(name).apply { isAccessible = true }
+    private fun useBackoff(backoff: ReconnectBackoff) = serviceField("backoff").set(serviceOwner(), backoff)
+    // About 10 min to the next attempt, and 1 s again once reset.
+    private fun grownBackoff() = ReconnectBackoff(1_000, 600_000).apply { repeat(10) { next() } }
+    // Returns once the service's worker has run everything queued so far.
+    private fun awaitWorker() {
+        (serviceField("worker").get(serviceOwner()) as java.util.concurrent.ExecutorService)
+            .submit {}.get(30, java.util.concurrent.TimeUnit.SECONDS)
+    }
+    // Waits for the client of the next attempt, about 1 s away for an automatic one.
+    private fun nextClient(after: com.adguard.trusttunnel.VpnClient, timeoutMs: Long = 10_000): com.adguard.trusttunnel.VpnClient {
+        var next: com.adguard.trusttunnel.VpnClient? = null
+        eventually(timeoutMs) { next = nativeClient(); next != null && next !== after }
+        return next!!
+    }
+    // Tells the service, as Android would, that a network besides the VPN appeared.
+    private fun networkAppears() {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val underlying = cm.allNetworks.firstOrNull { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == false }
+        assertNotNull("The emulator needs a network besides the VPN", underlying)
+        (serviceField("availability").get(serviceOwner()) as ConnectivityManager.NetworkCallback).onAvailable(underlying!!)
+    }
+    private val log get() = java.io.File(context.filesDir, "freetunnel.log")
+    private fun logged(text: String) = if (log.exists()) log.readLines().count { text in it } else 0
+    private val lostReason get() = context.getString(R.string.text_connection_to_the_server_was_lost)
     // Runs block against a local server that accepts and never answers, so the
     // real core hangs in its TLS handshake instead of failing at once.
     private fun withSink(block: (config: String) -> Unit) {
@@ -231,6 +254,20 @@ class VpnDeviceTest {
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         return states to receiver
     }
+    // Starts with logging on, loses the connection and lets the first automatic
+    // attempt connect. Returns that attempt's client.
+    private fun reconnectAutomatically(config: String): com.adguard.trusttunnel.VpnClient {
+        prefs.edit().putBoolean("logging", true).commit()
+        log.delete()
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        val first = nativeClient()!!
+        first.onStateChanged(0)
+        val attempt = nextClient(first)
+        attempt.onStateChanged(2)
+        eventually { FreeTunnelVpnService.state(context) == 2 && alert(49) == null }
+        return attempt
+    }
 
     @Test fun fatalNativeDisconnectRetainsGuardAndExplicitStopReleasesIt() {
         FreeTunnelVpnService.start(context, source)
@@ -251,7 +288,8 @@ class VpnDeviceTest {
         FreeTunnelVpnService.stop(context)
         eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
         eventually { alert(49) == null && serviceOwner() == null }
-        // Longer than the first retry delay: no attempt may outlive a stop.
+        // Past the first retry delay, the TUN and the service are still gone:
+        // nothing starts them again after a stop.
         SystemClock.sleep(1_500)
         assertNull(network())
         assertNull(serviceOwner())
@@ -259,7 +297,7 @@ class VpnDeviceTest {
 
     @Test fun fatalDisconnectReconnectsAutomaticallyOnTheKeptTun() = withSink { config ->
         prefs.edit().putBoolean("logging", true).commit()
-        val log = java.io.File(context.filesDir, "freetunnel.log").apply { delete() }
+        log.delete()
         FreeTunnelVpnService.start(context, config)
         eventually { network() != null && tunName() != null && nativeClient() != null }
         val tun = network()
@@ -270,28 +308,109 @@ class VpnDeviceTest {
             val gaps = tunGaps {
                 first.onStateChanged(0)
                 eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
-                val blocked = alert(49)!!.notification
-                assertEquals("freetunnel_vpn_failure", blocked.channelId)
-                assertEquals(2, blocked.actions.size)
-                val reason = context.getString(R.string.text_connection_to_the_server_was_lost)
-                eventually { log.exists() && log.readLines().takeLast(5).any { reason in it } }
+                val blocked = alert(49)!!
+                assertEquals("freetunnel_vpn_failure", blocked.notification.channelId)
+                assertEquals(2, blocked.notification.actions.size)
+                assertEquals("The first alert of an episode alerts", android.app.Notification.GROUP_ALERT_ALL,
+                    blocked.notification.groupAlertBehavior)
+                eventually { logged(lostReason) == 1 }
                 // The first delay is about 1 s.
-                eventually(10_000) { nativeClient().let { it != null && it !== first } }
-                val second = nativeClient()!!
+                val second = nextClient(first)
+                // Neither the attempt nor the core's own Connecting may show.
+                second.onStateChanged(1)
+                awaitWorker()
+                assertEquals("The blocked state must hold through the attempt", 6, FreeTunnelVpnService.state(context))
                 assertEquals(tun, network())
                 assertEquals("The attempt must reuse the kept TUN, not establish one", name, tunName())
-                // A late broadcast of the first Connecting may come before the 6.
-                val blockedStates = states.toList().dropWhile { it != 6 }
-                assertTrue("The blocked state must hold through the attempt: $states",
-                    blockedStates.isNotEmpty() && blockedStates.all { it == 6 })
-                second.onStateChanged(2)
+                // Lets every broadcast sent so far arrive before counting them.
+                SystemClock.sleep(500)
+                val broadcasts = states.size
+                // A failed attempt leads to the next, about 2 s later, with no
+                // second alert, log line or broadcast.
+                second.onStateChanged(0)
+                val third = nextClient(second)
+                awaitWorker()
+                assertEquals(6, FreeTunnelVpnService.state(context))
+                assertEquals(name, tunName())
+                assertEquals("The alert is posted once per episode", blocked.postTime, alert(49)!!.postTime)
+                assertEquals("The reason is logged once per episode", 1, logged(lostReason))
+                SystemClock.sleep(500)
+                assertEquals("Attempts must not broadcast: $states", broadcasts, states.size)
+                third.onStateChanged(2)
                 eventually { FreeTunnelVpnService.state(context) == 2 && alert(49) == null }
+                eventually { logged("Reconnected automatically") == 1 }
             }
-            assertEquals("The TUN must stay up through the attempt", 0, gaps)
+            assertEquals("The TUN must stay up through the attempts", 0, gaps)
             assertEquals(name, tunName())
             assertFalse(states.contains(0))
         } finally {
             context.unregisterReceiver(receiver)
+            log.delete()
+        }
+    }
+
+    @Test fun aDropSoonAfterAnAutomaticReconnectCarriesTheEpisodeOn() = withSink { config ->
+        try {
+            val attempt = reconnectAutomatically(config)
+            // A reset would bring the next delay back to 1 s.
+            useBackoff(grownBackoff())
+            // Within 10 s of reconnecting, as from a server that accepts and then drops.
+            attempt.onStateChanged(0)
+            eventually { FreeTunnelVpnService.state(context) == 6 }
+            // What NotificationCompat's setSilent sets on a notification outside a group.
+            eventually(10_000) { alert(49)?.notification?.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY }
+            awaitWorker()
+            assertEquals("The reason is not logged again", 1, logged(lostReason))
+            SystemClock.sleep(3_000)
+            assertNull("The delay must keep growing, not start again at 1 s", nativeClient())
+            // A network still brings an attempt forward. Its reconnect isn't logged again.
+            networkAppears()
+            nextClient(attempt).onStateChanged(2)
+            eventually { FreeTunnelVpnService.state(context) == 2 && alert(49) == null }
+            awaitWorker()
+            assertEquals("The reconnect is logged once per episode", 1, logged("Reconnected automatically"))
+        } finally {
+            log.delete()
+        }
+    }
+
+    @Test fun aLongSessionEndsTheEpisodeEvenAfterTheCoreRecoveredByItself() = withSink { config ->
+        try {
+            val attempt = reconnectAutomatically(config)
+            // As if this session began a minute ago. Then the core recovers by
+            // itself and soon loses the connection.
+            serviceField("connectedAt").setLong(serviceOwner(), SystemClock.elapsedRealtime() - 60_000)
+            attempt.onStateChanged(4)
+            attempt.onStateChanged(2)
+            attempt.onStateChanged(0)
+            eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
+            awaitWorker()
+            assertEquals("A new episode logs its reason again", 2, logged(lostReason))
+            assertEquals("A new episode alerts again", android.app.Notification.GROUP_ALERT_ALL,
+                alert(49)!!.notification.groupAlertBehavior)
+        } finally {
+            log.delete()
+        }
+    }
+
+    @Test fun anExplicitReconnectStartsTheNextEpisodeAfresh() = withSink { config ->
+        try {
+            val attempt = reconnectAutomatically(config)
+            useBackoff(grownBackoff())
+            FreeTunnelVpnService.reconnect(context)
+            // A full start, through the validation process and a new TUN.
+            val explicit = nextClient(attempt, 40_000)
+            explicit.onStateChanged(2)
+            // Within 10 s, but this session didn't begin with an automatic reconnect.
+            explicit.onStateChanged(0)
+            eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
+            awaitWorker()
+            assertEquals("A new episode logs its reason again", 2, logged(lostReason))
+            assertEquals("A new episode alerts again", android.app.Notification.GROUP_ALERT_ALL,
+                alert(49)!!.notification.groupAlertBehavior)
+            // And its delays start again at 1 s.
+            nextClient(explicit)
+        } finally {
             log.delete()
         }
     }
@@ -301,21 +420,39 @@ class VpnDeviceTest {
         eventually { network() != null && tunName() != null && nativeClient() != null }
         val tun = network()
         val name = tunName()
+        val first = nativeClient()!!
         useBackoff(ReconnectBackoff(600_000, 600_000))
-        nativeClient()!!.onStateChanged(0)
+        first.onStateChanged(0)
         eventually { FreeTunnelVpnService.state(context) == 6 && nativeClient() == null }
         SystemClock.sleep(2_000)
         assertNull("The next attempt waits out the long backoff", nativeClient())
-        val cm = context.getSystemService(ConnectivityManager::class.java)
-        val underlying = cm.allNetworks.firstOrNull { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == false }
-        assertNotNull("The emulator needs a network besides the VPN", underlying)
-        val availability = FreeTunnelVpnService::class.java.getDeclaredField("availability").apply { isAccessible = true }
-            .get(serviceOwner()) as ConnectivityManager.NetworkCallback
-        availability.onAvailable(underlying!!)
-        eventually(10_000) { nativeClient() != null }
+        networkAppears()
+        val attempt = nextClient(first)
         assertEquals(6, FreeTunnelVpnService.state(context))
         assertEquals(tun, network())
         assertEquals(name, tunName())
+        // A network that appears during an attempt starts the delays again at
+        // 1 s, so the attempt after a failed one comes about 1 s later.
+        useBackoff(grownBackoff())
+        networkAppears()
+        attempt.onStateChanged(0)
+        nextClient(attempt)
+        assertEquals(6, FreeTunnelVpnService.state(context))
+    }
+
+    @Test fun openingTheAppClearsTheAlertOfAKilledProcess() {
+        // What a process killed while blocked leaves behind: alert 49 and no service.
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        manager.createNotificationChannel(android.app.NotificationChannel("stale-alert-test", "Test", android.app.NotificationManager.IMPORTANCE_LOW))
+        manager.notify(49, android.app.Notification.Builder(context, "stale-alert-test").setSmallIcon(android.R.drawable.ic_dialog_alert).build())
+        eventually { alert(49) != null }
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        try {
+            eventually(10_000) { alert(49) == null }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+            manager.deleteNotificationChannel("stale-alert-test")
+        }
     }
 
     @Test fun blockedHomeScreenOffersReconnect() = withSink { config ->
@@ -324,7 +461,7 @@ class VpnDeviceTest {
         // Only the button may start the next connection here.
         useBackoff(ReconnectBackoff(600_000, 600_000))
         nativeClient()!!.onStateChanged(0)
-        eventually { FreeTunnelVpnService.state(context) == 6 }
+        eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
         val name = tunName()
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         fun reconnectButton(): android.widget.Button? {
@@ -335,6 +472,9 @@ class VpnDeviceTest {
         val (states, receiver) = recordStates()
         try {
             instrumentation.waitForIdleSync()
+            // Long enough for a cancel from onResume to take effect.
+            SystemClock.sleep(500)
+            assertNotNull("Opening the app must keep the alert of a live episode", alert(49))
             val button = reconnectButton()
             assertNotNull("State 6 must offer Reconnect on the home screen", button)
             assertEquals(context.getString(R.string.vpn_reconnect), button!!.text.toString())

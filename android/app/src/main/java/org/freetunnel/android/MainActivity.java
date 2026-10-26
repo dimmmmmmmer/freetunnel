@@ -118,6 +118,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        FreeTunnelVpnService.clearStaleAlert(this);
         if (!receiverRegistered) {
             IntentFilter filter = new IntentFilter(FreeTunnelVpnService.ACTION_STATE);
             ContextCompat.registerReceiver(this, vpnReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
