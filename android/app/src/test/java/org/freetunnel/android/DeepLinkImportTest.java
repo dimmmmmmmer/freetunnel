@@ -9,7 +9,6 @@ import static org.freetunnel.android.CertificateVectors.PKCS8_DER;
 import static org.freetunnel.android.CertificateVectors.SEC1_DER;
 import static org.freetunnel.android.CertificateVectors.concat;
 import static org.freetunnel.android.CertificateVectors.hex;
-import static org.freetunnel.android.CertificateVectors.keyLabel;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -531,9 +530,22 @@ public final class DeepLinkImportTest {
         }
     }
 
+    // The certificate's value as toToml() writes it: a multi-line string, or "" for none.
+    private static String certificateIn(String toml) {
+        String open = "certificate = \"\"\"\n";
+        int start = toml.indexOf(open);
+        if (start < 0) {
+            assertTrue(toml, toml.contains("certificate = \"\"\n"));
+            return "";
+        }
+        start += open.length();
+        return toml.substring(start, toml.indexOf("\"\"\"", start));
+    }
+
     // Like the desktop's seeded mutation loop: damaged links, version 1 and 2 alike,
     // must fail with a message and never crash. A fixed seed repeats the inputs.
     @Test public void damagedLinksFailWithAMessage() {
+        String pkcs8 = Base64.getEncoder().encodeToString(PKCS8_DER);
         byte[][] seeds = {example(), Base64.getUrlDecoder().decode(V2_PLAIN.substring(6)),
                 Base64.getUrlDecoder().decode(V2_FULL.substring(6)),
                 Base64.getUrlDecoder().decode(V2_SELF_SIGNED.substring(6)),
@@ -555,7 +567,14 @@ public final class DeepLinkImportTest {
                     }
                 }
                 if (bytes.length == 0) continue;
-                try { assertFalse(DeepLinkImport.parse(link(bytes)).toml.contains(keyLabel())); }
+                // What is kept reads back as certificates alone, and never as the key
+                // one seed has beside its certificate. The label shows nothing here:
+                // every block is written as a CERTIFICATE, whatever it holds.
+                try {
+                    String pem = certificateIn(DeepLinkImport.parse(link(bytes)).toml);
+                    assertFalse(pem, Certificates.fromPem(pem).dropped);
+                    assertFalse(pem, pem.contains(pkcs8));
+                }
                 catch (DeepLinkImport.ParseException expected) { assertTrue(expected.messageResource != 0); }
             }
         }

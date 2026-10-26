@@ -109,10 +109,11 @@ public final class CertificatesTest {
         String oneLine = CA_PEM.replace("\n", "");
         String legacy = pemBlock("X509 CERTIFICATE", CA_DER);
         // White space between blocks is what the desktop's QString::trimmed() takes
-        // out: no-break and other Unicode spaces and separators too.
+        // out: no-break and other Unicode spaces and separators too, here the
+        // no-break space, NEL, the line separator and the ideographic space.
         for (String pem : new String[]{CA_PEM, CHAIN_PEM, crlf, wrapped(CA_DER, 76), oneLine, legacy,
                 "\n\n" + CA_PEM + " \n", "", " \r\n\t\u000b\f", pemBlock("X509 CERTIFICATE", LEAF_DER) + CA_PEM,
-                LEAF_PEM + " \u0085 　" + CA_PEM}) {
+                LEAF_PEM + "\u00a0\u0085\u2028\u3000" + CA_PEM, pemBlock("CERTIFICATE", certShaped(4))}) {
             Certificates.Kept kept = Certificates.fromPem(pem);
             assertFalse(pem, kept.dropped);
             assertEquals(pem, kept.pem);
@@ -132,6 +133,7 @@ public final class CertificatesTest {
         String mismatched = LEAF_PEM.replace("END CERTIFICATE", "END X509 CERTIFICATE");
         String lower = CA_PEM.replace("CERTIFICATE", "certificate");
         String crlfLeaf = LEAF_PEM.replace("\n", "\r\n");
+        String strayCharacter = pemBlock("CERTIFICATE", certShaped(4)).replace("\n-----END", "A\n-----END");
         String[][] rows = {
             // The certificates of what holds more, in order, and nothing else.
             {"a certificate and its key", LEAF_PEM + keyPem(), LEAF_PEM},
@@ -147,6 +149,10 @@ public final class CertificatesTest {
                 "-----BEGIN CERTIFICATE-----\n" + keyPem() + "-----END CERTIFICATE-----\n" + CA_PEM, CA_PEM},
             // Decoded leniently, the stray padding would be skipped and the certificate there.
             {"base64 that is not", padded + CA_PEM, CA_PEM},
+            // One character too many after a body that needs no padding (15 bytes):
+            // not whole base64 either, and OpenSSL will not read such a block. Qt's
+            // decoder would drop the character and go on.
+            {"a stray base64 character", strayCharacter + CA_PEM, CA_PEM},
             {"an END of another label", mismatched + CA_PEM, CA_PEM},
             {"no END", CA_PEM + LEAF_PEM.substring(0, LEAF_PEM.indexOf("-----END")), CA_PEM},
             {"a label in lower case", lower, ""},
