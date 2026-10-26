@@ -164,7 +164,8 @@ in one shell, so that `KS` names the keystore throughout.
    secret, which is set already.
 5. Pin the certificate in `android/release-certificate.sha256` and commit that
    file in a pull request. A release whose APK is signed by any other
-   certificate stops before publishing.
+   certificate stops before publishing. The app compiles the same pin in, and
+   updates itself only when it is signed with that certificate.
 
    ```sh
    cer="$(mktemp)"
@@ -227,8 +228,16 @@ suite. Run on a dedicated emulator:
 ./android/gradlew -p android :app:installDebug :app:installDebugAndroidTest
 adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
 adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
-./android/gradlew -p android :app:connectedDebugAndroidTest
+adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
+./android/gradlew -p android :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner \
+    verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk |
+    sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
 ```
+
+The `debugCertificate` argument is apksigner's reading of the debug APK's
+signer. `UpdateDeviceTest` checks the app's own reading against it, and fails
+without it.
 
 [Android CI](../.github/workflows/android.yml) runs JVM tests, lint, builds and
 emulator tests without lint baselines. Device tests exercise the real JNI adapter,
@@ -260,12 +269,20 @@ preparation and a notice appears on the routing screen. New rules remain strict.
 
 ### Authenticated Android updates
 
-Settings offers **Check for updates**. Optional launch checks are disabled by
-default and can be turned off independently. The client reads the original
-repository's paginated Releases API, accepts only stable `android-X.Y.Z` tags newer
-than its installed version, and pins all three asset URLs to that repository and
-tag. Desktop tags, drafts, prereleases, foreign URLs and incomplete assets are
-ignored. The desktop updater's `/releases/latest` endpoint is never used.
+Only the official build updates itself. The build compiles in the pin from
+`android/release-certificate.sha256`: without the file it has no pin, and a
+malformed pin fails the build. The app checks once that it is signed by exactly
+one certificate, the pinned one. Any other build (debug, CI, a fork, the 0.9.0
+preview) says in Settings that it doesn't come from the official channel and
+never checks or downloads, since Android would refuse its update anyway.
+
+Settings offers **Check for updates**. The check on launch is off by default and
+can be turned on in Settings; it never runs while a verified update waits to be
+installed. The client reads the original repository's paginated Releases API,
+accepts only stable `android-X.Y.Z` tags newer than its installed version, and
+pins all three asset URLs to that repository and tag. Desktop tags, drafts,
+prereleases, foreign URLs and incomplete assets are ignored. The desktop
+updater's `/releases/latest` endpoint is never used.
 
 An Android release must provide `freetunnel-android-X.Y.Z.apk`,
 `SHA256SUMS-android.txt`, and the raw 64-byte Ed25519 signature
@@ -275,12 +292,32 @@ is taken at build time from `include/core/ReleaseSigning.h`; no private signing
 key is shipped. Verification uses Bouncy Castle's lightweight Ed25519 implementation
 on all supported Android versions, including API 26.
 
-Downloads stay in the app's private cache. Signature, version binding, APK hash,
-package name, APK version and increasing version code are checked before enabling
-Install. The hash is rechecked before writing a PackageInstaller session. Android
-asks for the unknown-app-source permission where needed and requires installation
-confirmation, then enforces APK signer compatibility. Any failed verification
-refuses installation. Network failures and cancellation can be retried in Settings.
+Downloads stay in the app's private cache and can be cancelled. As a backstop,
+a transfer stops after 60 minutes for the APK and 2 for the other requests; the
+500 MB size limit stays, since a release's limits stay with its users.
+Signature, version binding, APK hash, package name, APK version, increasing
+version code and the APK's signer, which must be the pinned certificate, are
+checked before enabling Install. The APK is hashed again as it is written into
+the PackageInstaller session, and nothing is committed if the bytes differ.
+Android asks for the unknown-app-source permission where needed (where a TV or
+OEM build has no such screen, a message says where the setting is) and requires
+installation confirmation, then enforces APK signer compatibility.
+
+Installing replaces the running app, and Android stops the VPN with it. If the
+VPN is on, the app warns first, then reconnects by itself once the new version
+starts, unless the VPN was disconnected or its permission revoked in between.
+Android's own Always-on start, and this reconnect, only start a VPN that isn't
+running, so a connection is never started twice; turning Always-on on while
+connected therefore doesn't reconnect. The downloaded APK is deleted after the
+update.
+
+Cancelling Android's install dialog keeps the verified APK, and **Install
+update** works again without a new download. If the dialog was lost, for
+example after switching apps, **Install update** starts the installation over.
+A failure says whether the network, GitHub's rate limit, the security check or
+Android's installer stopped it. GitHub limits unauthenticated checks per public
+address. FreeTunnel's own traffic bypasses its VPN, so the limit is shared with
+everyone on the same Wi-Fi or mobile network address.
 
 Releases are published by the repository's release workflow, which never marks
 an Android release GitHub's `latest`; see [Releasing](#releasing). This client

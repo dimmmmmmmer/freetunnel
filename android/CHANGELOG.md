@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Only the official build updates itself. A build that isn't signed with the release certificate says it doesn't come from the official channel and never checks for updates, and a downloaded update must be signed with that same certificate.
+- Installing an update while the VPN is on asks first, because Android turns the VPN off while it replaces the app. FreeTunnel then reconnects by itself after the update, unless you disconnected in the meantime. Android's Always-on start no longer restarts a connection that is already running.
+- Cancelling Android's install dialog keeps the verified download, so Install update works again without downloading it again, and if the dialog got lost, Install update starts over. The downloaded file is deleted after the update.
+- A download can be cancelled, and a failed update says whether the network, GitHub's rate limit, the security check or Android's installer stopped it. The update status names the version, and Settings keeps its scroll position when you come back to the app.
 - Import links from TrustTunnel endpoint 1.3. It marks every link as format version 2, and the app refused all of them as an unsupported version.
 - Subscriptions are not supported yet. A link or TOML file with only a subscription is refused and says so. From one that also has the server's settings, those settings are imported and the confirmation says the server won't update itself. The subscription address, which holds the VPN password, is not kept; the rest of a TOML file is kept as written. This includes TOML pasted into the editor, and a subscription address saved by an earlier version is no longer passed to the TrustTunnel core.
 - Refuse links and TOML files, the editor's included, for servers that need a TrustTunnel auth key, with a message saying a newer TrustTunnel core is needed, instead of failing to connect without a reason.
