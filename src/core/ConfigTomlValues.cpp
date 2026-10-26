@@ -2,8 +2,9 @@
 // The config values that more than the writer has to read the same way: an
 // address, a client random as the core takes it, whether the core can use one as
 // it is written, and the servers in a DNS list. The editor, link import and
-// subscriptions check with these, and buildConfigToml() writes through them. Split out of ConfigToml.cpp, which had
-// grown past the point where one file could be read end to end.
+// subscriptions check with these, and buildConfigToml() writes through them.
+// Split out of ConfigToml.cpp, which had grown past the point where one file
+// could be read end to end.
 //
 // And a certificate: which DER elements and PEM blocks are certificates, so the
 // link, the file import, the editor and the share link all keep the same ones.

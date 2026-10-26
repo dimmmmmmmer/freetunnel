@@ -239,11 +239,20 @@ bool readSettings(const DocumentReader &in, SubscriptionDocument *doc)
     return in.optional("upstream_protocol", isUpstreamProtocol, &doc->upstreamProtocol);
 }
 
+// certificatesDer() gives whole certificates, one after another, so every step
+// lands on the next one. Should it ever give less, the count stops there rather
+// than read from -1, the DER reader's "not one".
 int certificateCount(const QByteArray &der)
 {
     int count = 0;
-    for (int pos = 0; pos < der.size(); pos = derElementEnd(der, pos))
+    int pos = 0;
+    while (pos < der.size()) {
+        const int end = derElementEnd(der, pos);
+        if (end <= pos)
+            break;
         ++count;
+        pos = end;
+    }
     return count;
 }
 

@@ -751,12 +751,13 @@ void TestBackendConfig::theEditorChecksEveryAddress()
     f[QStringLiteral("addresses")] = QStringLiteral("198.51.100.7:443, [2001:db8::1]:8443");
     QVERIFY(backend.createConfig(f));
     for (const QString &bad : {QStringLiteral("198.51.100.7"), QStringLiteral("198.51.100.7:443, 198.51.100.8"),
-                               QStringLiteral(":443"), QStringLiteral("198.51.100.7:0, 198.51.100.8:443")}) {
+                               QStringLiteral(":443"), QStringLiteral("198.51.100.7:443, :443"),
+                               QStringLiteral("198.51.100.7:0, 198.51.100.8:443")}) {
         f[QStringLiteral("name")] = QStringLiteral("Bad");
         f[QStringLiteral("addresses")] = bad;
         QVERIFY2(!backend.createConfig(f), qPrintable(bad));
     }
-    QCOMPARE(errors.count(), 4);
+    QCOMPARE(errors.count(), 5);
     QCOMPARE(errors.last().at(0).toString(), QStringLiteral("Address must be host:port, e.g. 1.2.3.4:443"));
     QCOMPARE(backend.configs(), QStringList{QStringLiteral("Two")});
 }

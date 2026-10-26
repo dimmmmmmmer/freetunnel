@@ -87,10 +87,10 @@ std::optional<EndpointExport> parseEndpointExport(const QString &toml);
 // does not use one, so empty is the ordinary case and means no key.
 QString endpointClientRandomAuthKey(const QString &toml);
 
-// Whether one entry of an address list names a host and a port: "host:port" or
-// "[v6]:port", the port from 1 to 65535. The config editor checks each entry of
-// its list with this, and a subscription its one address, so both take the same
-// addresses.
+// Whether one entry of an address list names a host and a port, as "host:port"
+// and "[v6]:port" do: something before its last colon once it is trimmed, and a
+// port from 1 to 65535 after it. The config editor checks each entry of its list
+// with this, and a subscription its one address, so both take the same addresses.
 bool isValidEndpointAddress(const QString &address);
 
 // A client random as the core reads it, from the one `client_random` key:

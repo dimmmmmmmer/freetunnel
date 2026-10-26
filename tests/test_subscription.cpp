@@ -46,6 +46,7 @@ private slots:
     void noStringHoldsAControlCharacter_data();
     void noStringHoldsAControlCharacter();
     void theClientRandomIsTakenAsTheCoreReadsIt();
+    void anEmptySniOrNameIsTaken();
     void aDnsEntryIsOneServer();
     void unknownFieldsAreIgnored();
     void aBodyThatIsNotOneObjectIsInvalid_data();
@@ -220,7 +221,8 @@ void TestSubscription::readsTheFullDocument()
     QCOMPARE(doc.clientRandomPrefix, QStringLiteral("aabbcc/ff00ff"));
     QCOMPARE(doc.name, std::optional<QString>(QStringLiteral("Example")));
     QCOMPARE(doc.dnsUpstreams,
-             std::optional<QStringList>(QStringList{QStringLiteral("1.1.1.1"), QStringLiteral("tls://dns.example.com")}));
+             std::optional<QStringList>(
+                     QStringList{QStringLiteral("1.1.1.1"), QStringLiteral("tls://dns.example.com")}));
 }
 
 void TestSubscription::readsASelfSignedDocument()
@@ -297,8 +299,9 @@ void TestSubscription::aNewerDocumentIsNeverCalledDamaged()
     const QByteArray damaged = withField(withField(sub::kMinimal, QStringLiteral("version"), 2),
                                          QStringLiteral("hostname"), QJsonValue(42));
     QVERIFY(refusedFor(damaged, SubscriptionDocError::UnsupportedVersion, QStringLiteral("version")));
-    QVERIFY(refusedFor(withField(withField(sub::kMinimal, QStringLiteral("version"), 3), QStringLiteral("skip_verification"), true),
-                       SubscriptionDocError::UnsupportedVersion, QStringLiteral("version")));
+    const QByteArray skipping = withField(withField(sub::kMinimal, QStringLiteral("version"), 3),
+                                          QStringLiteral("skip_verification"), true);
+    QVERIFY(refusedFor(skipping, SubscriptionDocError::UnsupportedVersion, QStringLiteral("version")));
 }
 
 void TestSubscription::theProtocolIsHttp2OrHttp3()
@@ -456,7 +459,8 @@ void TestSubscription::noStringHoldsAControlCharacter_data()
     for (const auto &character : characters) {
         QTest::addRow("dns_upstreams, %s", character.first)
                 << QStringLiteral("dns_upstreams")
-                << QJsonValue(QJsonArray{QStringLiteral("1.1.1.1"), QStringLiteral("tls://dns.ex%1ample.com").arg(character.second)});
+                << QJsonValue(QJsonArray{QStringLiteral("1.1.1.1"),
+                                         QStringLiteral("tls://dns.ex%1ample.com").arg(character.second)});
     }
 }
 
@@ -470,12 +474,26 @@ void TestSubscription::noStringHoldsAControlCharacter()
 void TestSubscription::theClientRandomIsTakenAsTheCoreReadsIt()
 {
     const QString key = QStringLiteral("client_random_prefix");
-    QCOMPARE(parsed(withField(sub::kMinimal, key, QStringLiteral("aabb//"))).clientRandomPrefix, QStringLiteral("aabb"));
+    QCOMPARE(parsed(withField(sub::kMinimal, key, QStringLiteral("aabb//"))).clientRandomPrefix,
+             QStringLiteral("aabb"));
     QCOMPARE(parsed(withField(sub::kMinimal, key, QStringLiteral("/ff"))).clientRandomPrefix, QString());
     QCOMPARE(parsed(withField(sub::kMinimal, key, QString())).clientRandomPrefix, QString());
     for (const QString &bad : {QStringLiteral("abc"), QStringLiteral("xyz"), QStringLiteral("aa/fff"),
                                QStringLiteral("aa/bb/cc"), QString(66, QLatin1Char('a'))})
         QVERIFY2(refusedFor(withField(sub::kMinimal, key, bad), SubscriptionDocError::Invalid, key), qPrintable(bad));
+}
+
+// An operator who sets one of these to nothing has the endpoint serve "", which
+// TrustTunnel's own client reads as no SNI. Neither is damage: an empty SNI is
+// none, and an empty name is no name.
+void TestSubscription::anEmptySniOrNameIsTaken()
+{
+    const auto noSni = parse(withField(sub::kFull, QStringLiteral("custom_sni"), QString()));
+    QVERIFY(noSni.has_value());
+    QVERIFY(noSni->customSni.isEmpty());
+    const auto noName = parse(withField(sub::kFull, QStringLiteral("name"), QString()));
+    QVERIFY(noName.has_value());
+    QCOMPARE(noName->name, std::optional<QString>(QString()));
 }
 
 // The editor keeps the list as one string, its servers separated by commas,
@@ -484,7 +502,8 @@ void TestSubscription::theClientRandomIsTakenAsTheCoreReadsIt()
 void TestSubscription::aDnsEntryIsOneServer()
 {
     const QString key = QStringLiteral("dns_upstreams");
-    QCOMPARE(parsed(withField(sub::kMinimal, key, QJsonArray())).dnsUpstreams, std::optional<QStringList>(QStringList()));
+    QCOMPARE(parsed(withField(sub::kMinimal, key, QJsonArray())).dnsUpstreams,
+             std::optional<QStringList>(QStringList()));
     for (const QString &bad : {QStringLiteral("1.1.1.1,8.8.8.8"), QStringLiteral("1.1.1.1 8.8.8.8"),
                                QStringLiteral("1.1.1.1;8.8.8.8"), QString(), QStringLiteral(" 1.1.1.1")})
         QVERIFY2(refusedFor(withField(sub::kMinimal, key, QJsonArray{bad}), SubscriptionDocError::Invalid, key),
@@ -499,8 +518,8 @@ void TestSubscription::unknownFieldsAreIgnored()
     QJsonObject object = objectOf(sub::kFull);
     object.insert(QStringLiteral("tls_profile"), QStringLiteral("chrome"));
     object.insert(QStringLiteral("addresses"), QJsonArray{QStringLiteral("not checked")});
-    object.insert(QStringLiteral("future"),
-                  QJsonObject{{QStringLiteral("nested"), QJsonArray{1, QJsonObject{{QStringLiteral("a"), QJsonValue()}}}}});
+    const QJsonArray nested{1, QJsonObject{{QStringLiteral("a"), QJsonValue()}}};
+    object.insert(QStringLiteral("future"), QJsonObject{{QStringLiteral("nested"), nested}});
     const SubscriptionDocument doc = parsed(jsonOf(object));
     QCOMPARE(doc.address, QStringLiteral("1.2.3.4:443"));
     QCOMPARE(doc.name, std::optional<QString>(QStringLiteral("Example")));
@@ -567,7 +586,8 @@ void TestSubscription::aKeyBesideTheCertificateIsLeftOut()
     QVERIFY(!doc.certificatePem.contains(QStringLiteral("PRIVATE")));
 
     // In front of it, and in any of a key's spellings, too.
-    for (const QString &kind : {QString(), QStringLiteral("RSA "), QStringLiteral("EC "), QStringLiteral("ENCRYPTED ")}) {
+    for (const QString &kind :
+         {QString(), QStringLiteral("RSA "), QStringLiteral("EC "), QStringLiteral("ENCRYPTED ")}) {
         const QString pem = certs::pemBlock(certs::keyLabel(kind), certs::kPkcs8Der) + certs::kLeafPem;
         const SubscriptionDocument keyFirst = parsed(withField(sub::kMinimal, QStringLiteral("certificate"), pem));
         QCOMPARE(keyFirst.certificatePem, certs::kLeafPem);
@@ -581,11 +601,14 @@ void TestSubscription::aFieldWithNoCertificateIsInvalid_data()
     QTest::newRow("a key alone") << certs::keyPem();
     // One whole SEQUENCE, which a key is as well: the rule every path keeps
     // certificates by looks at a certificate's shape, and so does this one.
-    QTest::newRow("a key under the certificate label") << certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der);
+    QTest::newRow("a key under the certificate label")
+            << certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der);
     QTest::newRow("an RSA key under the certificate label")
             << certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs1Der);
-    QTest::newRow("another label") << certs::pemBlock(QStringLiteral("TRUSTED CERTIFICATE"), certs::derOf(certs::kCaPem));
-    QTest::newRow("base64 that is not") << QStringLiteral("-----BEGIN CERTIFICATE-----\nMIIB!xjCC\n-----END CERTIFICATE-----\n");
+    QTest::newRow("another label")
+            << certs::pemBlock(QStringLiteral("TRUSTED CERTIFICATE"), certs::derOf(certs::kCaPem));
+    QTest::newRow("base64 that is not")
+            << QStringLiteral("-----BEGIN CERTIFICATE-----\nMIIB!xjCC\n-----END CERTIFICATE-----\n");
     QTest::newRow("no BEGIN line") << certs::kCaPem.mid(certs::kCaPem.indexOf(QLatin1Char('\n')) + 1);
     QTest::newRow("text") << QStringLiteral("not a certificate");
     QTest::newRow("white space") << QStringLiteral(" \n ");
@@ -659,7 +682,8 @@ void TestSubscription::aRefreshOverwritesWhatTheSubscriptionOwns()
     doc.password = QStringLiteral("hunter2");
     doc.certificatePem = certs::kCaPem;
 
-    const SubscriptionApplied applied = applySubscription(current, QStringLiteral("old"), doc, SubscriptionApplyMode::Refresh);
+    const SubscriptionApplied applied =
+            applySubscription(current, QStringLiteral("old"), doc, SubscriptionApplyMode::Refresh);
     QCOMPARE(applied.config.hostname, QStringLiteral("new.example.com"));
     QCOMPARE(applied.config.addresses, QStringLiteral("5.6.7.8:8443"));
     QCOMPARE(applied.config.username, QStringLiteral("bob"));
@@ -779,7 +803,8 @@ void TestSubscription::anUnchangedReplyChangesNothing()
     const QByteArray body = withField(withField(sub::kFull, QStringLiteral("certificate"), certificate),
                                       QStringLiteral("client_random_prefix"), QStringLiteral("aabbcc/ff00ff//"));
     const SubscriptionDocument doc = parsed(body);
-    const SubscriptionApplied created = applySubscription(ConfigToml(), QString(), doc, SubscriptionApplyMode::Creation);
+    const SubscriptionApplied created =
+            applySubscription(ConfigToml(), QString(), doc, SubscriptionApplyMode::Creation);
     const ConfigToml stored = parseConfigToml(buildConfigToml(created.config));
     const SubscriptionApplied again = applySubscription(stored, created.password, doc, SubscriptionApplyMode::Refresh);
     QVERIFY2(again.changes.isEmpty(), qPrintable(buildConfigToml(again.config)));
@@ -806,9 +831,11 @@ void TestSubscription::theCredentialsAndCertificateChangeWithoutValues()
     doc.password = QStringLiteral("hunter2");
     doc.customSni = QStringLiteral("example.org");
     doc.clientRandomPrefix = QStringLiteral("aabb");
-    const SubscriptionApplied applied = applySubscription(current, QStringLiteral("s3cret"), doc, SubscriptionApplyMode::Refresh);
+    const SubscriptionApplied applied =
+            applySubscription(current, QStringLiteral("s3cret"), doc, SubscriptionApplyMode::Refresh);
     QCOMPARE(applied.changes.size(), 5);
-    for (const SubscriptionField field : {SubscriptionField::Username, SubscriptionField::Password, SubscriptionField::Certificate}) {
+    for (const SubscriptionField field :
+         {SubscriptionField::Username, SubscriptionField::Password, SubscriptionField::Certificate}) {
         const SubscriptionChange *change = changeOf(applied, field);
         QVERIFY(change);
         QVERIFY(change->oldValue.isEmpty());
@@ -823,7 +850,8 @@ void TestSubscription::theCredentialsAndCertificateChangeWithoutValues()
 
     // The password alone, the change a rotation makes.
     const SubscriptionApplied rotated =
-            applySubscription(storedConfig(), QStringLiteral("old"), parsed(sub::kMinimal), SubscriptionApplyMode::Refresh);
+            applySubscription(storedConfig(), QStringLiteral("old"), parsed(sub::kMinimal),
+                              SubscriptionApplyMode::Refresh);
     QCOMPARE(rotated.changes.size(), 1);
     QCOMPARE(rotated.changes.first().field, SubscriptionField::Password);
     QVERIFY(rotated.changes.first().oldValue.isEmpty() && rotated.changes.first().newValue.isEmpty());
@@ -841,13 +869,22 @@ void TestSubscription::theSameHostnameInOtherLettersIsTheSameServer()
     QCOMPARE(recased.changes.size(), 1);
     QCOMPARE(recased.changes.first().field, SubscriptionField::Hostname);
 
-    current.hostname = QStringLiteral("xn--e1afmkfd.xn--p1ai");
-    SubscriptionDocument idn = parsed(sub::kMinimal);
-    idn.hostname = QStringLiteral("ПРИМЕР.рф"); // ПРИМЕР.рф
-    QVERIFY(!applySubscription(current, QStringLiteral("s3cret"), idn, SubscriptionApplyMode::Refresh).hostnameChanged);
-
-    idn.hostname = QStringLiteral("other.example.com");
-    QVERIFY(applySubscription(current, QStringLiteral("s3cret"), idn, SubscriptionApplyMode::Refresh).hostnameChanged);
+    const auto changed = [](const QString &before, const QString &after) {
+        ConfigToml stored = storedConfig();
+        stored.hostname = before;
+        SubscriptionDocument doc = parsed(sub::kMinimal);
+        doc.hostname = after;
+        return applySubscription(stored, QStringLiteral("s3cret"), doc, SubscriptionApplyMode::Refresh).hostnameChanged;
+    };
+    // "ПРИМЕР.рф", escaped so that no compiler reads the source in another
+    // code page.
+    QVERIFY(!changed(QStringLiteral("xn--e1afmkfd.xn--p1ai"),
+                     QStringLiteral("ПРИМЕР.рф")));
+    QVERIFY(changed(QStringLiteral("xn--e1afmkfd.xn--p1ai"), QStringLiteral("other.example.com")));
+    // A name that has no ACE form, such as an IPv6 address, is compared in lower
+    // case all the same.
+    QVERIFY(!changed(QStringLiteral("2001:DB8::1"), QStringLiteral("2001:db8::1")));
+    QVERIFY(changed(QStringLiteral("2001:DB8::1"), QStringLiteral("2001:db8::2")));
 }
 
 void TestSubscription::aSubscriptionAddressMustBeHttps_data()
@@ -954,9 +991,8 @@ void TestSubscription::theIdentityIsTheSubscriptionNotThePassword()
     };
     const QString one = identity(QStringLiteral("https://alice:s3cret@vpn.example.com/subscription"));
     // The origin, the path, a newline and the user, hashed.
-    QCOMPARE(one, QString::fromLatin1(
-                          QCryptographicHash::hash("https://vpn.example.com/subscription\nalice", QCryptographicHash::Sha256)
-                                  .toHex()));
+    const QByteArray hashed = "https://vpn.example.com/subscription\nalice";
+    QCOMPARE(one, QString::fromLatin1(QCryptographicHash::hash(hashed, QCryptographicHash::Sha256).toHex()));
     QCOMPARE(identity(QStringLiteral("https://alice:rotated@vpn.example.com/subscription")), one);
     QCOMPARE(identity(QStringLiteral("https://alice:s3cret@VPN.Example.com:443/subscription#x")), one);
     QVERIFY(identity(QStringLiteral("https://bob:s3cret@vpn.example.com/subscription")) != one);
@@ -979,12 +1015,15 @@ void TestSubscription::redactUrlKeepsNothingSecret()
                                       QStringLiteral("k3y"), QStringLiteral("frag"), QStringLiteral("?")})
             QVERIFY2(!shown.contains(secret), qPrintable(shown));
     }
-    QCOMPARE(redactUrl(QUrl(QStringLiteral("https://u:p@[2001:db8::1]:8443/s"))), QStringLiteral("https://[2001:db8::1]:8443"));
+    QCOMPARE(redactUrl(QUrl(QStringLiteral("https://u:p@[2001:db8::1]:8443/s"))),
+             QStringLiteral("https://[2001:db8::1]:8443"));
     QCOMPARE(redactUrl(QUrl(QStringLiteral("https://\u043F\u0440\u0438\u043C\u0435\u0440.\u0440\u0444/s"))),
              QStringLiteral("https://xn--e1afmkfd.xn--p1ai"));
-    QCOMPARE(redactUrl(QUrl(QStringLiteral("https://VPN.Example.com:443/s"))), QStringLiteral("https://vpn.example.com"));
+    QCOMPARE(redactUrl(QUrl(QStringLiteral("https://VPN.Example.com:443/s"))),
+             QStringLiteral("https://vpn.example.com"));
     // A redirect may point elsewhere, and is logged the same way.
-    QCOMPARE(redactUrl(QUrl(QStringLiteral("http://u:p@vpn.example.com:443/s"))), QStringLiteral("http://vpn.example.com:443"));
+    QCOMPARE(redactUrl(QUrl(QStringLiteral("http://u:p@vpn.example.com:443/s"))),
+             QStringLiteral("http://vpn.example.com:443"));
 }
 
 void TestSubscription::theRefreshIntervalIsClamped()
@@ -1022,6 +1061,9 @@ void TestSubscription::theAddressRuleTheEditorShares_data()
     QTest::newRow("no port") << QStringLiteral("1.2.3.4") << false;
     QTest::newRow("an empty port") << QStringLiteral("1.2.3.4:") << false;
     QTest::newRow("no host") << QStringLiteral(":443") << false;
+    // The editor's list is split at its commas alone, so "a:443, :443" has this
+    // entry, and a space is no host once trimmed.
+    QTest::newRow("a space for a host") << QStringLiteral(" :443") << false;
     QTest::newRow("port 0") << QStringLiteral("1.2.3.4:0") << false;
     QTest::newRow("port 65536") << QStringLiteral("1.2.3.4:65536") << false;
     QTest::newRow("a port that is no number") << QStringLiteral("1.2.3.4:x") << false;
@@ -1124,7 +1166,8 @@ void TestSubscription::mutatedDocumentsNeverBreakTheRules()
             continue;
         ++taken;
         const QString broken = brokenRule(*doc);
-        QVERIFY2(broken.isEmpty(), qPrintable(broken + QStringLiteral(": ") + QString::fromLatin1(body.toPercentEncoding(" {}\":,[]"))));
+        const QString shown = QString::fromLatin1(body.toPercentEncoding(" {}\":,[]"));
+        QVERIFY2(broken.isEmpty(), qPrintable(broken + QStringLiteral(": ") + shown));
     }
     // Most single changes to a document leave one it takes, so a loop that took
     // none would be testing nothing.
