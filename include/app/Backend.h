@@ -377,6 +377,8 @@ private:
     bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
                                 bool replaceExisting);
     QString deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const;
+    void askToImport(const freetunnel::PreparedImport &prepared); // the question before a link or export is added
+    bool importEndpointExport(const QString &content, const QString &fileName); // a file the endpoint exported
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
     // Install a verified Linux download: replace the running .AppImage and
     // restart, or explain why the user has to finish the job themselves.

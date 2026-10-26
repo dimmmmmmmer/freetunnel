@@ -201,8 +201,13 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
     const QString content = QString::fromUtf8(vf.readAll());
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(content);
     if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
+        // The endpoint's own export has no [endpoint]: its keys are at the top,
+        // to be pasted under one. It is imported as a link is, so its text is
+        // handed back to be asked about (importEndpointExport) rather than refused.
         if (errOut)
-            *errOut = QStringLiteral("invalid");
+            *errOut = freetunnel::parseEndpointExport(content) ? QStringLiteral("export") : QStringLiteral("invalid");
+        if (contentOut)
+            *contentOut = content;
         return false;
     }
     // A server that checks the auth key turns this core away at the TLS

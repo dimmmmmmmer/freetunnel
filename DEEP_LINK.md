@@ -22,6 +22,7 @@ from a script or a Stream Deck, or working on the code that reads them.
   - [Versions](#versions)
 - [Validation rules](#validation-rules)
 - [How a link becomes a config](#how-a-link-becomes-a-config)
+  - [The endpoint's TOML export](#the-endpoints-toml-export)
 - [FreeTunnel control links (separate)](#freetunnel-control-links-separate)
   - [Commands](#commands)
   - [Run as a command, or opened as a link](#run-as-a-command-or-opened-as-a-link)
@@ -340,6 +341,37 @@ config arrives: from a file, from the config editor, or as a link (see
 - A share link and a TOML export carry the certificates alone, wherever the
   config is kept.
 
+### The endpoint's TOML export
+
+A TrustTunnel endpoint exports a client's config as a link or, with
+`--format toml`, as a TOML file. That file has no `[endpoint]` table: the
+server's keys are at the top, meant to be pasted under one. FreeTunnel imports
+it from file as it would the link with the same server.
+
+- **How it is told from a config.** Only a file whose `[endpoint]` names no
+  server is looked at. It is an export when it has no table at all, no dotted
+  key and no inline table, and sets `hostname`, `addresses`, `username` and
+  `password` at the top. A config in any spelling of `[endpoint]` is never read
+  as an export. A file with the server's keys at the top and a table besides is
+  neither, and is refused as before.
+- **What its keys become.** Each is read as the same key under `[endpoint]` is
+  (see the table above), and `client_random_prefix` as `client_random`.
+  Anything else in the file is left out, as a link's unknown tags are.
+- **The name.** `name` names the config. The endpoint writes `name = ""` for a
+  server it was given no name for, and then the file's name is used.
+- **The link's rules.** A non-empty `client_random_auth_key`, and a
+  subscription address without a whole server, are refused with the link's
+  messages. `subscription_url` is left out, and the question says so. The
+  certificate keeps only its certificates (see
+  [tag `0x08`](#certificate-tag-0x08)). A client random the core cannot use, a
+  certificate with no certificate in it, and no address or username without a
+  subscription address all refuse the import ("Not a valid TrustTunnel
+  config: …").
+- **It asks first,** as a link does: "Add a VPN server from this file?", with
+  the server it names, and Replace / Add copy when a config has its name
+  already. Nothing is added until you say yes, and the file you picked is not
+  changed.
+
 ## FreeTunnel control links (separate)
 
 Application control uses a different scheme, `freetunnel://`, which is not TLV.
@@ -535,6 +567,7 @@ That is tag `0x0D`, length 16, then two entries: length 7 and `8.8.8.8`, length
 | Version 2 links: what is read, refused and not kept | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp` |
 | TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp` |
 | Certificates: what is kept, from a link, a file, the editor and at start, and what a share link or export carries | `tests/test_configtoml.cpp`, `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp`, with the shared vectors in `tests/certificate_vectors.h` |
+| The endpoint's TOML export: how it is told from a config, what it becomes and what is asked | `tests/test_configtoml.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp`, with the shared text in `tests/endpoint_export_vectors.h` |
 | Control link parser and the link mark | `tests/test_control.cpp` |
 | `--url-handler`, macOS link events and forwarding | `tests/test_app_startup.cpp` |
 | The socket a launch forwards over | `tests/test_instance_control.cpp`, `tests/test_integration_single_instance.cpp` |

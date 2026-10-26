@@ -24,7 +24,8 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
 QString passwordNotStoredMessage(bool storeIsThere);
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target);
 // *errOut: "read"|"invalid"|"authkey" (a client_random_auth_key, see newerCoreRefusal)|
-// "certificate" (an [endpoint] certificate with no certificate in it, see certificatesOnly).
+// "certificate" (an [endpoint] certificate with no certificate in it, see certificatesOnly)|
+// "export" (the TOML file an endpoint exports, see parseEndpointExport; *contentOut is set).
 bool readValidatedImportContent(const QString &path, QString *contentOut, QString *errOut);
 bool copyImportIntoAppConfigDir(const QString &content, const QString &sourcePath, QString *targetOut);
 

@@ -385,6 +385,14 @@
         <source>Not a valid TrustTunnel config: %1</source>
         <translation>Это не похоже на конфиг TrustTunnel: %1</translation>
     </message>
+    <message>
+        <source>Add a VPN server from this file?</source>
+        <translation>Добавить VPN-сервер из этого файла?</translation>
+    </message>
+    <message>
+        <source>This file turns off server certificate verification.</source>
+        <translation>Этот файл отключает проверку сертификата сервера.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -403,6 +411,10 @@
     <message>
         <source>Extra data in the certificate was ignored.</source>
         <translation>Лишние данные в сертификате проигнорированы.</translation>
+    </message>
+    <message>
+        <source>missing address or credentials</source>
+        <translation>нет адреса или данных входа</translation>
     </message>
 </context>
 <context>

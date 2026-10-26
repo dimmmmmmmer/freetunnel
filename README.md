@@ -127,7 +127,9 @@ To quit, choose **Quit** in the tray menu (or press ⌘Q on macOS).
 - **A `tt://` link** opened from a browser or another app imports too.
 
 For a link, pasted or opened, FreeTunnel names the server the link would add and
-asks before adding it.
+asks before adding it. It asks the same way for the file a TrustTunnel endpoint
+exports with `--format toml`, imported from file (see
+[DEEP_LINK.md](DEEP_LINK.md#the-endpoints-toml-export)).
 
 Passwords stay in the OS credential store: Keychain on macOS, Credential Manager
 on Windows, libsecret on Linux.

@@ -93,6 +93,8 @@ bool Backend::importFile(const QString &path)
     QString content;
     QString importErr;
     if (!freetunnel::backend_config::readValidatedImportContent(p, &content, &importErr)) {
+        if (importErr == QLatin1String("export"))
+            return importEndpointExport(content, QFileInfo(p).completeBaseName());
         if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
         else if (importErr == QLatin1String("authkey"))
@@ -228,6 +230,53 @@ static QString linkRefusedMessage(const QString &err, freetunnel::LinkRefusal wh
     return why == freetunnel::LinkRefusal::Damaged ? Backend::tr("Link error: %1").arg(err) : err;
 }
 
+// The question before a link or an endpoint's export is added, and the link the
+// answer is given with (PreparedImport::link). Split out of importDeepLink().
+void Backend::askToImport(const freetunnel::PreparedImport &prepared)
+{
+    const QString collision = deepLinkCollisionPath(prepared);
+    const QString existingName = collision.isEmpty() ? QString() : nameForPath(collision);
+
+    // Say what is actually happening and nothing else. A collision replaces the
+    // generic question rather than stacking on top of it — the buttons already
+    // read Replace / Add copy — and the certificate line is a technical fact the
+    // user cannot see any other way, so it is the one warning worth keeping.
+    QStringList lines;
+    if (existingName.isEmpty()) {
+        lines << (prepared.fromFile ? tr("Add a VPN server from this file?") : tr("Add a VPN server from this link?"));
+    } else {
+        lines << tr("“%1” already exists. Replace it, or add this as a separate config?")
+                         .arg(existingName);
+    }
+    // The server, not just the name. The name comes from the link and is the one
+    // thing an attacker fully controls, so a decision made on the name alone can
+    // be made on a lie; the hostname is what the config will actually connect to.
+    const freetunnel::ConfigToml incoming = freetunnel::parseConfigToml(prepared.tomlContent);
+    if (!incoming.hostname.isEmpty())
+        lines << tr("Server: %1").arg(incoming.hostname);
+    // A name in one alphabet is ordinary; a name in two is how "Wоrk" with a
+    // Cyrillic о is made to read like a config the user already has. Sanitizing it
+    // away is not possible — Cyrillic names are legitimate here — so say it.
+    if (freetunnel::nameMixesScripts(QFileInfo(prepared.fileName).completeBaseName()))
+        lines << tr("This name mixes letters from different alphabets.");
+    if (prepared.skipVerification) {
+        lines << (prepared.fromFile ? tr("This file turns off server certificate verification.")
+                                    : tr("This link turns off server certificate verification."));
+    }
+    // A subscription link that also carries its server. What is added is that
+    // server as the link has it today, and a subscription is what a user expects
+    // to keep it up to date.
+    if (prepared.subscriptionNotKept)
+        lines << freetunnel::subscriptionNotKeptNote();
+    // The link's certificate came with something else, such as a private key,
+    // which the config will not have.
+    if (prepared.certificateExtraIgnored)
+        lines << freetunnel::certificateExtraIgnoredNote();
+    const QString message = lines.join(QLatin1Char('\n'));
+
+    emit deepLinkImportConfirmationRequired(message, prepared.link, existingName);
+}
+
 bool Backend::importDeepLink(const QString &link)
 {
     QString err;
@@ -243,45 +292,26 @@ bool Backend::importDeepLink(const QString &link)
     // after would route everything through the link author's server. Confirmation
     // is therefore mandatory for ALL links, not only the ones that also turn off
     // certificate verification.
-    const QString collision = deepLinkCollisionPath(*prepared);
-    const QString existingName = collision.isEmpty() ? QString() : nameForPath(collision);
+    askToImport(*prepared);
+    return false;
+}
 
-    // Say what is actually happening and nothing else. A collision replaces the
-    // generic question rather than stacking on top of it — the buttons already
-    // read Replace / Add copy — and the certificate line is a technical fact the
-    // user cannot see any other way, so it is the one warning worth keeping.
-    QStringList lines;
-    if (existingName.isEmpty()) {
-        lines << tr("Add a VPN server from this link?");
-    } else {
-        lines << tr("“%1” already exists. Replace it, or add this as a separate config?")
-                         .arg(existingName);
+// The TOML file a TrustTunnel endpoint exports. It is read as the link with the
+// same server is, and asked about the same way before anything is added, which a
+// link's answer then does (confirmDeepLinkImport): whoever sent the file chose
+// the server, as whoever sends a link does, and its name can clash with a config
+// the user has. fileName names it when the export does not.
+bool Backend::importEndpointExport(const QString &content, const QString &fileName)
+{
+    QString err;
+    freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
+    const auto prepared = freetunnel::prepareEndpointExportImport(content, fileName, &err, &why);
+    if (!prepared) {
+        emit errorOccurred(why == freetunnel::LinkRefusal::Damaged ? tr("Not a valid TrustTunnel config: %1").arg(err)
+                                                                  : err);
+        return false;
     }
-    // The server, not just the name. The name comes from the link and is the one
-    // thing an attacker fully controls, so a decision made on the name alone can
-    // be made on a lie; the hostname is what the config will actually connect to.
-    const freetunnel::ConfigToml incoming = freetunnel::parseConfigToml(prepared->tomlContent);
-    if (!incoming.hostname.isEmpty())
-        lines << tr("Server: %1").arg(incoming.hostname);
-    // A name in one alphabet is ordinary; a name in two is how "Wоrk" with a
-    // Cyrillic о is made to read like a config the user already has. Sanitizing it
-    // away is not possible — Cyrillic names are legitimate here — so say it.
-    if (freetunnel::nameMixesScripts(QFileInfo(prepared->fileName).completeBaseName()))
-        lines << tr("This name mixes letters from different alphabets.");
-    if (prepared->skipVerification)
-        lines << tr("This link turns off server certificate verification.");
-    // A subscription link that also carries its server. What is added is that
-    // server as the link has it today, and a subscription is what a user expects
-    // to keep it up to date.
-    if (prepared->subscriptionNotKept)
-        lines << freetunnel::subscriptionNotKeptNote();
-    // The link's certificate came with something else, such as a private key,
-    // which the config will not have.
-    if (prepared->certificateExtraIgnored)
-        lines << freetunnel::certificateExtraIgnoredNote();
-    const QString message = lines.join(QLatin1Char('\n'));
-
-    emit deepLinkImportConfirmationRequired(message, link, existingName);
+    askToImport(*prepared);
     return false;
 }
 

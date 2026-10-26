@@ -19,6 +19,7 @@
 #include "core/DeepLink.h"
 #include "certificate_vectors.h"
 #include "deeplink_v2_vectors.h"
+#include "endpoint_export_vectors.h"
 
 class TestBackendDeepLinkImport : public QObject {
     Q_OBJECT
@@ -60,6 +61,16 @@ private slots:
     void importFileRefusesACertificateThatHoldsNoCertificate();
     void importFileTakesABlankCertificate();
     void importFileKeepsAChainInOneBlock();
+
+    // The TOML file an endpoint exports.
+    void importFileAsksBeforeAddingAnEndpointExport();
+    void anEndpointExportWithTheNameOfAConfigOffersReplace();
+    void anEndpointExportWithoutANameIsNamedAfterItsFile();
+    void anEndpointExportThatSkipsCertificateChecksSaysSo();
+    void importFileRefusesAnEndpointExportThatNeedsAnAuthKey();
+    void importFileRefusesAnEndpointExportThatIsOnlyASubscription();
+    void importFileRefusesAnEndpointExportWithAMalformedClientRandom();
+    void importFileRefusesAnEndpointExportWithoutAServer();
     void cleanupTestCase();
 };
 
@@ -949,6 +960,204 @@ void TestBackendDeepLinkImport::importFileKeepsAChainInOneBlock()
     const QString onDisk = readConfigText(pathOfImported(imported));
     QCOMPARE(freetunnel::parseConfigToml(onDisk).certificate, oneBlock.trimmed());
     QCOMPARE(freetunnel::certificatesDer(freetunnel::parseConfigToml(onDisk).certificate), chain);
+    QFile::remove(path);
+}
+
+// ---- the endpoint's export ----------------------------------------------------
+
+static QString writeExport(const QString &fileName, const endpoint_export::Fields &f)
+{
+    return writeTempConfig(fileName, endpoint_export::text(f).toUtf8());
+}
+
+// The TOML file a TrustTunnel endpoint exports has no [endpoint], and was refused
+// as "Not a valid TrustTunnel config". It is asked about as a link is, with the
+// file's words, since whoever sent it chose the server; nothing is added until
+// the user says yes, and then the config is the one the link with its server
+// gives. The subscription address and the key beside the certificate are left
+// out, and the question says both.
+void TestBackendDeepLinkImport::importFileAsksBeforeAddingAnEndpointExport()
+{
+    endpoint_export::Fields f;
+    f.certificate = endpoint_export::multiline(certs::kLeafPem + certs::keyPem());
+    const QString path = writeExport(QStringLiteral("endpoint-export.toml"), f);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(failed.count(), 0);
+    QCOMPARE(imported.count(), 0);
+    QCOMPARE(backend.configs().size(), before);
+    QCOMPARE(confirmSpy.count(), 1);
+    const QString question = confirmSpy.last().at(0).toString();
+    const QStringList lines = question.split(QLatin1Char('\n'));
+    QCOMPARE(lines.first(), QStringLiteral("Add a VPN server from this file?"));
+    QVERIFY2(lines.contains(QStringLiteral("Server: vpn.example.com")), qPrintable(question));
+    QVERIFY2(lines.contains(freetunnel::subscriptionNotKeptNote()), qPrintable(question));
+    QVERIFY2(lines.contains(freetunnel::certificateExtraIgnoredNote()), qPrintable(question));
+    QVERIFY2(!question.contains(QStringLiteral("link")), qPrintable(question));
+    QVERIFY(confirmSpy.last().at(2).toString().isEmpty()); // no config of that name yet
+
+    // Answered with a link, as a link's question is.
+    const QString link = confirmSpy.last().at(1).toString();
+    QVERIFY2(link.startsWith(QStringLiteral("tt://?")), qPrintable(link));
+    QVERIFY(backend.confirmDeepLinkImport(link));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(failed.count(), 0);
+    QCOMPARE(imported.last().at(0).toString(), QStringLiteral("Work VPN"));
+    const QString stored = pathOfImported(imported);
+    const QString onDisk = readConfigText(stored);
+    QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"vpn.example.com\"")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("subscription")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("s3cret")), qPrintable(onDisk));
+    QCOMPARE(freetunnel::certificatesDer(freetunnel::parseConfigToml(onDisk).certificate),
+             certs::derOf(certs::kLeafPem));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(stored)),
+             QStringLiteral("s3cret"));
+    // And the file the user picked is theirs, untouched.
+    QCOMPARE(readConfigText(path), endpoint_export::text(f));
+    QFile::remove(path);
+}
+
+// The export names its config, and the name can be one the user has already:
+// the question offers to replace it, as a link's does.
+void TestBackendDeepLinkImport::anEndpointExportWithTheNameOfAConfigOffersReplace()
+{
+    endpoint_export::Fields f;
+    f.name = QStringLiteral("Export Replace");
+    f.hostname = QStringLiteral("replace.example.com");
+    const QString path = writeExport(QStringLiteral("replace-me.toml"), f);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 1);
+    QVERIFY(backend.confirmDeepLinkImport(confirmSpy.last().at(1).toString()));
+    const int afterFirst = backend.configs().size();
+
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 2);
+    QCOMPARE(confirmSpy.last().at(2).toString(), QStringLiteral("Export Replace"));
+    const QString question = confirmSpy.last().at(0).toString();
+    QVERIFY2(question.startsWith(QStringLiteral("“Export Replace” already exists.")), qPrintable(question));
+    QVERIFY2(!question.contains(QStringLiteral("Add a VPN server")), qPrintable(question));
+    QVERIFY(backend.confirmDeepLinkImport(confirmSpy.last().at(1).toString(), /*replaceExisting=*/true));
+    QCOMPARE(backend.configs().size(), afterFirst);
+    QFile::remove(path);
+}
+
+// The endpoint writes `name = ""` for a server it was given no name for, and the
+// config is then named after the file, as any other config file is.
+void TestBackendDeepLinkImport::anEndpointExportWithoutANameIsNamedAfterItsFile()
+{
+    endpoint_export::Fields f;
+    f.name.clear();
+    f.hostname = QStringLiteral("unnamed.example.com");
+    const QString path = writeExport(QStringLiteral("branch-office.toml"), f);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 1);
+    QVERIFY(backend.confirmDeepLinkImport(confirmSpy.last().at(1).toString()));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(imported.last().at(0).toString(), QStringLiteral("branch-office"));
+    QFile::remove(path);
+}
+
+void TestBackendDeepLinkImport::anEndpointExportThatSkipsCertificateChecksSaysSo()
+{
+    endpoint_export::Fields f;
+    f.name = QStringLiteral("Unchecked export");
+    f.skipVerification = true;
+    f.subscriptionUrl.clear();
+    const QString path = writeExport(QStringLiteral("unchecked-export.toml"), f);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 1);
+    const QStringList lines = confirmSpy.last().at(0).toString().split(QLatin1Char('\n'));
+    QVERIFY2(lines.contains(QStringLiteral("This file turns off server certificate verification.")),
+             qPrintable(lines.join('|')));
+    QVERIFY2(!lines.contains(freetunnel::subscriptionNotKeptNote()), qPrintable(lines.join('|')));
+    QVERIFY2(!lines.contains(freetunnel::certificateExtraIgnoredNote()), qPrintable(lines.join('|')));
+    QFile::remove(path);
+}
+
+// What importFile() says about an export it refuses, having asked nothing and
+// added nothing; empty when it did either.
+static QString refusalOf(const QString &fileName, const endpoint_export::Fields &f)
+{
+    const QString path = writeExport(fileName, f);
+    if (path.isEmpty())
+        return QString();
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    const bool added = backend.importFile(path);
+    QFile::remove(path);
+    if (added || confirmSpy.count() != 0 || failed.count() != 1 || backend.configs().size() != before)
+        return QString();
+    return failed.last().at(0).toString();
+}
+
+// The refusals a link meets, each with its own sentence.
+void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportThatNeedsAnAuthKey()
+{
+    endpoint_export::Fields f;
+    f.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    QCOMPARE(refusalOf(QStringLiteral("export-auth-key.toml"), f), freetunnel::newerCoreRefusal());
+}
+
+void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportThatIsOnlyASubscription()
+{
+    endpoint_export::Fields f;
+    f.password.clear();
+    QCOMPARE(refusalOf(QStringLiteral("export-subscription-only.toml"), f), freetunnel::subscriptionOnlyRefusal());
+}
+
+// Damage is said to be about the config, as a link's is said to be about the
+// link.
+void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportWithAMalformedClientRandom()
+{
+    endpoint_export::Fields f;
+    f.clientRandomPrefix = QStringLiteral("abc");
+    QCOMPARE(refusalOf(QStringLiteral("export-client-random.toml"), f),
+             QStringLiteral("Not a valid TrustTunnel config: malformed client_random value"));
+}
+
+void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportWithoutAServer()
+{
+    endpoint_export::Fields f;
+    f.addresses.clear();
+    f.subscriptionUrl.clear();
+    QCOMPARE(refusalOf(QStringLiteral("export-no-address.toml"), f),
+             QStringLiteral("Not a valid TrustTunnel config: missing address or credentials"));
+
+    // The server's keys at the top with a table besides is no export, nor a
+    // config the core can read, and is refused as before.
+    const QString path = writeTempConfig(QStringLiteral("export-and-a-table.toml"),
+                                         (endpoint_export::text() + QStringLiteral("\n[listener.tun]\n")).toUtf8());
+    QVERIFY(!path.isEmpty());
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(),
+             QStringLiteral("Not a valid TrustTunnel config (missing address or credentials)"));
     QFile::remove(path);
 }
 

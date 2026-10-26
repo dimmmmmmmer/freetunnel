@@ -9,6 +9,12 @@ compare link at the bottom of its release notes.
 
 ### Added
 
+- **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
+  exports.** That file (`--format toml`) has the server's keys but no
+  `[endpoint]` table, and was refused as not a valid config. FreeTunnel now
+  asks before adding it, as it does for a tt:// link. The config takes the
+  name the file gives, or the file's own name, and leaves the subscription
+  address out.
 - **Android preview: check for official Android updates in Settings.** Downloads
   require a signed manifest naming the offered version and a matching APK hash.
   Android asks before installation. Optional launch checks can be disabled.
