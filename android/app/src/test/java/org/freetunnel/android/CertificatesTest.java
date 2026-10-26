@@ -62,6 +62,8 @@ public final class CertificatesTest {
         assertTrue(isCertificate(CA_DER));
         assertTrue(isCertificate(LEAF_DER));
         assertTrue(isCertificate(hex("300b3002050030020500030100"))); // the smallest shape
+        // Only the BIT STRING has to hold something; the two SEQUENCEs are the shape.
+        assertTrue(isCertificate(hex("300730003000030100")));
         assertTrue(isCertificate(certShaped(200)));                    // one length byte
         assertTrue(isCertificate(certShaped(300)));                    // two length bytes
         // Four length bytes, as long as the length fits.
@@ -93,6 +95,7 @@ public final class CertificatesTest {
             {"a field after the BIT STRING", hex("300d30020500300205000301000500")},
             {"the fields out of order", hex("300b0301003002050030020500")},
             {"a field past the end", hex("300b3002050030020500030200")},
+            {"a field past its SEQUENCE", hex("300a3002050030020500030100")},
             {"a tag in the high form", hex("300c30020500300205001f030100")},
             // How lengths are read.
             {"an outer length short of its fields", hex("30053002050030020500030100")},
@@ -160,6 +163,9 @@ public final class CertificatesTest {
                 "-----BEGIN CERTIFICATE-----\n" + keyPem() + "-----END CERTIFICATE-----\n" + CA_PEM, CA_PEM},
             // Decoded leniently, the stray padding would be skipped and the certificate there.
             {"base64 that is not", padded + CA_PEM, CA_PEM},
+            // Padding and one '=' more: not base64 to the desktop or to OpenSSL. A
+            // decoder that skips what follows the padding would read it whole.
+            {"one '=' after the padding", LEAF_PEM.replace("g==\n-----END", "g===\n-----END") + CA_PEM, CA_PEM},
             // One character too many after a body that needs no padding (15 bytes):
             // not whole base64 either, and OpenSSL will not read such a block. Qt's
             // decoder would drop the character and go on.
@@ -168,6 +174,7 @@ public final class CertificatesTest {
             {"no END", CA_PEM + LEAF_PEM.substring(0, LEAF_PEM.indexOf("-----END")), CA_PEM},
             {"a label in lower case", lower, ""},
             {"text after the certificate", CA_PEM + "see the README\n", CA_PEM},
+            {"a character after the END line", CA_PEM.substring(0, CA_PEM.length() - 1) + "x", CA_PEM},
             {"text alone", "see the README", ""},
             // And nothing at all when there is no certificate.
             {"a key alone", keyPem(), ""},
