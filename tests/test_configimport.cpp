@@ -46,6 +46,7 @@ private slots:
     void anEndpointExportKeepsOnlyItsCertificates();
     void anEndpointExportIsRefusedAsALinkIs();
     void anEndpointExportsLinkGivesTheSameConfig();
+    void everyExportAskedAboutCanBeAnswered();
 };
 
 // A link with a whole server and the given certificate field (tag 0x08).
@@ -525,6 +526,14 @@ void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
     cases.append({"a subscription and no address", f, LinkRefusal::SubscriptionOnly, subscriptionOnlyRefusal()});
     f.subscriptionUrl.clear();
     cases.append({"no address", f, LinkRefusal::Damaged, QStringLiteral("missing address or credentials")});
+    // Empty entries are no addresses either. The link the question is answered
+    // with leaves them out, so a server named by them alone would be asked about
+    // and then refused once the user said yes.
+    f.addresses = QStringLiteral("\"\", \" \"");
+    cases.append({"empty addresses only", f, LinkRefusal::Damaged, QStringLiteral("missing address or credentials")});
+    f.subscriptionUrl = endpoint_export::Fields().subscriptionUrl;
+    cases.append({"a subscription and empty addresses only", f, LinkRefusal::SubscriptionOnly,
+                  subscriptionOnlyRefusal()});
     f = endpoint_export::Fields();
     f.subscriptionUrl.clear();
     f.username = QStringLiteral(" ");
@@ -589,6 +598,14 @@ void TestConfigImport::anEndpointExportsLinkGivesTheSameConfig() {
     f.dnsUpstreams.clear();
     f.subscriptionUrl.clear();
     variants << f;
+    // What a config file may leave out, as this one does, and an empty address
+    // beside a real one.
+    f = endpoint_export::Fields();
+    f.subscriptionUrl.clear();
+    f.password.clear();
+    f.hostname.clear();
+    f.addresses = QStringLiteral("\"\", \"203.0.113.5:443\"");
+    variants << f;
     for (const endpoint_export::Fields &variant : variants) {
         QString err;
         const auto out = importExport(variant, QStringLiteral("round-trip"), &err);
@@ -604,6 +621,65 @@ void TestConfigImport::anEndpointExportsLinkGivesTheSameConfig() {
         QVERIFY(!again->certificateExtraIgnored);
         QVERIFY(!again->subscriptionNotKept);
     }
+}
+
+// Whatever an export holds, one the user is asked about is one the answer can
+// add: the link the question carries makes the same config, and one that would
+// be refused is refused before anyone is asked. Every combination of the fields
+// that decide whether it is refused, each empty, blank or wrong.
+void TestConfigImport::everyExportAskedAboutCanBeAnswered() {
+    using endpoint_export::multiline;
+    const QStringList hostnames{QStringLiteral("vpn.example.com"), QString()};
+    const QStringList addresses{endpoint_export::Fields().addresses, QString(), QStringLiteral("\"\""),
+                                QStringLiteral("\"\", \" \""), QStringLiteral("\" 203.0.113.5:443 \"")};
+    const QStringList usernames{QStringLiteral("alice"), QString(), QStringLiteral(" ")};
+    const QStringList passwords{QStringLiteral("s3cret"), QString()};
+    const QStringList subscriptions{endpoint_export::Fields().subscriptionUrl, QString()};
+    const QStringList clientRandoms{QStringLiteral("aabbcc/ff00ff"), QStringLiteral("aabb/"), QStringLiteral("abc")};
+    const QStringList certificates{multiline(certs::kLeafPem), QStringLiteral("\"\""), multiline(certs::keyPem()),
+                                   multiline(certs::keyPem() + certs::kLeafPem)};
+    const QList<const QStringList *> choices{&hostnames, &addresses, &usernames, &passwords,
+                                             &subscriptions, &clientRandoms, &certificates};
+    qsizetype combinations = 1;
+    for (const QStringList *choice : choices)
+        combinations *= choice->size();
+    int asked = 0;
+    int refused = 0;
+    for (qsizetype i = 0; i < combinations; ++i) {
+        // The i-th combination, one digit per field.
+        QStringList pick;
+        qsizetype rest = i;
+        for (const QStringList *choice : choices) {
+            pick << choice->at(rest % choice->size());
+            rest /= choice->size();
+        }
+        endpoint_export::Fields f;
+        f.hostname = pick.at(0);
+        f.addresses = pick.at(1);
+        f.username = pick.at(2);
+        f.password = pick.at(3);
+        f.subscriptionUrl = pick.at(4);
+        f.clientRandomPrefix = pick.at(5);
+        f.certificate = pick.at(6);
+        const QString text = endpoint_export::text(f);
+        QString err;
+        const auto out = prepareEndpointExportImport(text, QStringLiteral("file"), &err);
+        if (!out) {
+            QVERIFY2(!err.isEmpty(), qPrintable(text));
+            ++refused;
+            continue;
+        }
+        ++asked;
+        const auto again = prepareDeepLinkImport(out->link, &err);
+        QVERIFY2(again.has_value(), qPrintable(err + QStringLiteral("\n") + text));
+        QVERIFY2(again->tomlContent == out->tomlContent, qPrintable(text));
+        QVERIFY2(again->fileName == out->fileName, qPrintable(text));
+        QVERIFY2(!out->tomlContent.contains(certs::keyLabel()), qPrintable(text));
+        QVERIFY2(!out->tomlContent.contains(QStringLiteral("s3cret@")), qPrintable(text));
+    }
+    // Both kinds are among them, so neither half of the check is empty.
+    QVERIFY(asked > 0);
+    QVERIFY(refused > 0);
 }
 
 QTEST_MAIN(TestConfigImport)

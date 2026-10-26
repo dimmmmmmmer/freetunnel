@@ -139,11 +139,13 @@ DeepLinkConfig serverOfExport(const EndpointExport &exported, const QString &fal
 
 // Whether the export names a server to connect to, as any config file has to: an
 // address and a username. One with a subscription address may leave them to the
-// subscription, and is refused for that instead (prepareServer).
-bool namesAServer(const EndpointExport &exported)
+// subscription, and is refused for that instead (prepareServer). Judged on the
+// server as the link carries it, with empty addresses left out: `addresses =
+// [""]` names none, and the link made from it would be refused only after the
+// user had said yes to it.
+bool namesAServer(const DeepLinkConfig &cfg, bool subscription)
 {
-    return exported.subscription
-            || (!exported.config.addresses.trimmed().isEmpty() && !exported.config.username.trimmed().isEmpty());
+    return subscription || (!cfg.addresses.isEmpty() && !cfg.username.trimmed().isEmpty());
 }
 
 } // namespace
@@ -173,11 +175,11 @@ std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, c
     if (refusal)
         *refusal = LinkRefusal::Damaged;
     const std::optional<EndpointExport> exported = parseEndpointExport(toml);
-    if (!exported || !namesAServer(*exported))
+    DeepLinkConfig cfg = exported ? serverOfExport(*exported, fallbackName) : DeepLinkConfig();
+    if (!exported || !namesAServer(cfg, exported->subscription))
         return refuse(LinkRefusal::Damaged,
                       QCoreApplication::translate("ConfigImport", "missing address or credentials"), error,
                       refusal);
-    DeepLinkConfig cfg = serverOfExport(*exported, fallbackName);
     if (!isValidClientRandom(clientRandomForCore(cfg.clientRandomPrefix)))
         return refuse(LinkRefusal::Damaged,
                       QCoreApplication::translate("DeepLink", "malformed client_random value"), error, refusal);

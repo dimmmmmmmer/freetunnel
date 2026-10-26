@@ -1144,6 +1144,11 @@ void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportWithoutAServer(
     f.subscriptionUrl.clear();
     QCOMPARE(refusalOf(QStringLiteral("export-no-address.toml"), f),
              QStringLiteral("Not a valid TrustTunnel config: missing address or credentials"));
+    // Refused before the question, not after it: an empty address is no address,
+    // and the link the answer would have been given with has none.
+    f.addresses = QStringLiteral("\"\", \" \"");
+    QCOMPARE(refusalOf(QStringLiteral("export-empty-addresses.toml"), f),
+             QStringLiteral("Not a valid TrustTunnel config: missing address or credentials"));
 
     // The server's keys at the top with a table besides is no export, nor a
     // config the core can read, and is refused as before.
