@@ -405,6 +405,16 @@ target_include_directories(test_configimport PRIVATE ../include ../include/core)
 target_link_libraries(test_configimport PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME configimport COMMAND test_configimport -o ${CMAKE_CURRENT_BINARY_DIR}/report-configimport.txt,txt)
 
+add_executable(test_subscription
+    test_subscription.cpp
+    ../src/core/Subscription.cpp
+    ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlValues.cpp
+)
+target_include_directories(test_subscription PRIVATE ../include ../include/core)
+target_link_libraries(test_subscription PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME subscription COMMAND test_subscription -o ${CMAKE_CURRENT_BINARY_DIR}/report-subscription.txt,txt)
+
 add_executable(test_appsettings
     test_appsettings.cpp
     ../src/core/AppSettings.cpp

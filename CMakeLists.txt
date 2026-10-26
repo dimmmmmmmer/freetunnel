@@ -123,6 +123,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/DeepLink.h
     src/core/ConfigImport.cpp
     include/core/ConfigImport.h
+    src/core/Subscription.cpp
+    include/core/Subscription.h
     src/core/AppImagePath.cpp
     src/core/ConfigPaths.cpp
     include/core/ConfigPaths.h
