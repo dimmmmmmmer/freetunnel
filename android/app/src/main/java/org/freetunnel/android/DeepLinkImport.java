@@ -57,7 +57,9 @@ final class DeepLinkImport {
         String displayName = "";
         final List<String> dnsUpstreams = new ArrayList<>();
         String subscriptionUrl;
-        String authKey = "";
+        // The key from tag 0x0F, empty when the link has none. Not a secret
+        // baked in: Semgrep takes any "key" given a literal for one.
+        String authKey = ""; // nosemgrep: codacy.java.security.hard-coded-password
     }
 
     private DeepLinkImport() { }

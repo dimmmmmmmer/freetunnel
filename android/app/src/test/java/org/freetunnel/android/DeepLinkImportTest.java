@@ -117,9 +117,10 @@ public final class DeepLinkImportTest {
             "tt://?AAECDjFodHRwczovL2FsaWNlOnMzY3JldEB2cG4uZXhhbXBsZS5jb20vc3Vic2NyaXB0aW9u";
     private static final String V3 = "tt://?AAEDDiRodHRwczovL3Zwbi5leGFtcGxlLmNvbS9zdWJzY3JpcHRpb24";
     private static final String V2_HTTP_SUBSCRIPTION = "tt://?AAECDiNodHRwOi8vdnBuLmV4YW1wbGUuY29tL3N1YnNjcmlwdGlvbg";
-    private static final String V2_AUTH_KEY =
+    // Test links, not credentials: Semgrep takes any "key" given a literal for one.
+    private static final String V2_AUTH_KEY = // nosemgrep: codacy.java.security.hard-coded-password
             "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQzDwhhYWJiY2NkZA";
-    private static final String V2_EMPTY_AUTH_KEY =
+    private static final String V2_EMPTY_AUTH_KEY = // nosemgrep: codacy.java.security.hard-coded-password
             "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQzDwA";
 
     private static void staticServer(ByteArrayOutputStream out) {
