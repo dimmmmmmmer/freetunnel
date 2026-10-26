@@ -75,6 +75,15 @@ TlsTestServer::Response redirect(int code, const QByteArray &location)
     return status(code, {{"Location", location}});
 }
 
+// A redirect whose few bytes of body take most of a second to arrive.
+TlsTestServer::Response slowRedirect(const QByteArray &location)
+{
+    TlsTestServer::Response response = redirect(302, location);
+    response.body = "xxxxxx";
+    response.trickleMs = 100;
+    return response;
+}
+
 QString pemOf(std::initializer_list<const TlsTestIdentity *> identities)
 {
     QByteArray pem;
@@ -167,6 +176,7 @@ private slots:
 
     // Failures, and what is never done.
     void aTrickleHitsTheDeadline();
+    void theDeadlineCoversRedirects();
     void aHandshakeTheServerEndsIsRefusedByServer_data();
     void aHandshakeTheServerEndsIsRefusedByServer();
     void aServerThatHangsUpIsANetworkError();
@@ -909,25 +919,68 @@ void TestSubscriptionFetcher::aTrickleHitsTheDeadline()
     QCOMPARE(server.requests().size(), 1);
 }
 
+// The deadline is for the whole fetch, not for each request in it: three
+// redirects, each well inside it, use it up before the document is asked for.
+void TestSubscriptionFetcher::theDeadlineCoversRedirects()
+{
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    server.setRoute("/t1", slowRedirect("/t2"));
+    server.setRoute("/t2", slowRedirect("/t3"));
+    server.setRoute("/t3", slowRedirect("/sub"));
+    server.setRoute("/sub", json());
+    qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "1500");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const std::optional<SubscriptionFetchResult> result =
+            fetch(pinned(server.port(), pemOf({&m_certs->selfSigned}), QStringLiteral("/t1")));
+    QVERIFY_FETCH(result, SubscriptionFetchError::Timeout);
+    QVERIFY2(elapsed.elapsed() >= 1400 && elapsed.elapsed() < 6000, qPrintable(QString::number(elapsed.elapsed())));
+    for (const TlsTestServer::Request &request : server.requests())
+        QVERIFY2(request.target != "/sub", qPrintable(QString::number(server.requests().size())));
+}
+
 void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer_data()
 {
     QTest::addColumn<TlsTestServer::Refusal>("refusal");
-    QTest::newRow("closed") << TlsTestServer::Refusal::Close;
-    QTest::newRow("an alert") << TlsTestServer::Refusal::Alert;
+    QTest::addColumn<bool>("afterARedirect");
+    QTest::newRow("closed") << TlsTestServer::Refusal::Close << false;
+    QTest::newRow("an alert") << TlsTestServer::Refusal::Alert << false;
+    // Every reply closes its connection, so a redirect is followed on a new one,
+    // with a handshake of its own.
+    QTest::newRow("closed, after a redirect") << TlsTestServer::Refusal::Close << true;
+    QTest::newRow("an alert, after a redirect") << TlsTestServer::Refusal::Alert << true;
 }
 
 // As an endpoint whose rules deny the client: the connection ends during the
 // TLS handshake, with no certificate to blame. How each backend reports that
-// is its own, and is what this records.
+// is its own, and is what this records. No reply came on that connection, so
+// there is no status, whatever the one before it answered.
 void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer()
 {
     QFETCH(TlsTestServer::Refusal, refusal);
+    QFETCH(bool, afterARedirect);
     TlsTestServer server;
     QVERIFY(listen(server, m_certs->selfSigned));
-    server.setRefusal(refusal);
-    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    server.setRoute("/start", slowRedirect("/sub"));
+    std::optional<SubscriptionFetchResult> result;
+    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
+    connect(&fetcher, &SubscriptionFetcher::finished, this,
+            [&result](const SubscriptionFetchResult &r) { result = r; });
+    if (!afterARedirect)
+        server.setRefusal(refusal);
+    fetcher.start(pinned(server.port(), pemOf({&m_certs->selfSigned}),
+                         afterARedirect ? QStringLiteral("/start") : QStringLiteral("/sub")));
+    // Once the redirect is asked for, while its body is still coming.
+    if (afterARedirect) {
+        QTRY_COMPARE(server.requests().size(), 1);
+        server.setRefusal(refusal);
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 30000);
     QVERIFY_FETCH(result, SubscriptionFetchError::RefusedByServer);
-    QCOMPARE(server.serverNames().value(0), QStringLiteral("vpn.test"));
+    QCOMPARE(result->httpStatus, 0);
+    QCOMPARE(server.requests().size(), afterARedirect ? 1 : 0);
+    QCOMPARE(server.serverNames().value(afterARedirect ? 1 : 0), QStringLiteral("vpn.test"));
 }
 
 // After the handshake it is the network's, whatever Qt tries again.

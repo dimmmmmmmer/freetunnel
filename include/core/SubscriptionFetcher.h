@@ -47,7 +47,7 @@ enum class SubscriptionFetchError {
 
 struct SubscriptionFetchResult {
     SubscriptionFetchError error = SubscriptionFetchError::None;
-    int httpStatus = 0; // of the last reply; 0 when none came
+    int httpStatus = 0; // of the last request's reply; 0 when it got none
     std::optional<SubscriptionDocument> document;
     SubscriptionParseError documentError; // for Document
     std::optional<qint64> hint;           // the operator's refresh hint (subscriptionRefreshHint)

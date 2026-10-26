@@ -336,6 +336,8 @@ void SubscriptionFetcher::stop()
 // which Qt would cache and offer again to whatever a redirect leads to. Nothing
 // is taken from or kept in a cache or a cookie jar. Accept-Encoding: identity,
 // or Qt would ask for a compressed body and inflate it past the cap unseen.
+// Each request starts with no handshake seen and no status of its own: a
+// redirect is followed on a new connection when the server closed the last one.
 void SubscriptionFetcher::sendRequest()
 {
     QUrl target = m_url;
@@ -369,6 +371,8 @@ void SubscriptionFetcher::sendRequest()
     request.setSslConfiguration(tls);
 
     m_body.clear();
+    m_handshakeDone = false;
+    m_result.httpStatus = 0;
     m_reply = m_nam->get(request);
     watch(m_reply);
 }
