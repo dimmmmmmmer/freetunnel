@@ -1491,6 +1491,8 @@ void TestConfigToml::anEndpointExportIsNeverAClientConfig_data()
     noBlock.certificate = QStringLiteral("\"\"");
     QTest::newRow("the keys only inside a block")
             << QStringLiteral("note = '''\n") + endpoint_export::text(noBlock) + QStringLiteral("'''\n");
+    QTest::newRow("the keys only inside a basic block")
+            << QStringLiteral("note = \"\"\"\n") + endpoint_export::text(noBlock) + QStringLiteral("\"\"\"\n");
 }
 
 void TestConfigToml::anEndpointExportIsNeverAClientConfig()
