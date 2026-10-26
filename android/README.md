@@ -292,7 +292,9 @@ is taken at build time from `include/core/ReleaseSigning.h`; no private signing
 key is shipped. Verification uses Bouncy Castle's lightweight Ed25519 implementation
 on all supported Android versions, including API 26.
 
-Downloads stay in the app's private cache and can be cancelled. As a backstop,
+Downloads stay in the app's private cache and can be cancelled; a stalled
+download stops within its 30-second read timeout and offers **Download update**
+again. As a backstop,
 a transfer stops after 60 minutes for the APK and 2 for the other requests; the
 500 MB size limit stays, since a release's limits stay with its users.
 Signature, version binding, APK hash, package name, APK version, increasing

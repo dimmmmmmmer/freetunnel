@@ -5,6 +5,7 @@ import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.io.IOException
 import java.math.BigInteger
 import java.net.URI
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
@@ -87,7 +88,13 @@ object UpdatePolicy {
         verifier.update(bytes, 0, bytes.size)
         require(verifier.verifySignature(signature)) { "Invalid update signature" }
         // Strict UTF-8 and version binding are checked on the exact signed bytes.
-        val text = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        // The decoder's error is an IOException, which classify() would blame on
+        // the network, so it becomes a refusal like the others here.
+        val text = try {
+            StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        } catch (_: CharacterCodingException) {
+            throw IllegalArgumentException("Manifest is not UTF-8")
+        }
         val lines = text.lines()
         require(lines.firstOrNull() == "#version=${release.version}") { "Manifest version does not match the release" }
         require(lines.count { it.startsWith("#version=") } == 1) { "Ambiguous manifest version" }

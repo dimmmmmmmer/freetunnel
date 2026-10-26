@@ -67,6 +67,11 @@ class UpdatePolicyTest {
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  other.apk\n") }
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  ${release.filename}\n$hash  ${release.filename}\n") }
     }
+    @Test fun signedManifestThatIsNotUtf8FailsVerificationNotTheNetwork() {
+        val bytes = "#version=1.2.0\n$hash  ${release.filename}\n".toByteArray() + byteArrayOf(0xff.toByte(), 10)
+        val error = assertThrows(IllegalArgumentException::class.java) { UpdatePolicy.verifyManifest(release, bytes, sign(bytes), rawKey) }
+        assertEquals(UpdatePolicy.Failure.VERIFICATION, UpdatePolicy.classify(error, UpdatePolicy.Failure.VERIFICATION))
+    }
     @Test fun offersFirstOfficialReleaseToPreview() {
         assertEquals("1.0.0", UpdatePolicy.select(listOf(candidate("android-1.0.0")), "0.9.0")!!.version)
     }

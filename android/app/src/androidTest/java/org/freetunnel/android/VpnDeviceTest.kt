@@ -353,6 +353,20 @@ class VpnDeviceTest {
         eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
         assertFalse(prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
     }
+    // Sends one start and returns once the service's worker has handled it. Two
+    // starts sent together would test nothing: the second supersedes the first
+    // before the first reaches its "already running" check.
+    private fun handled(send: () -> Unit) {
+        val owner = serviceOwner()!!
+        val latest = FreeTunnelVpnService::class.java.getDeclaredField("latestStartId").apply { isAccessible = true }
+        val before = latest.getInt(owner)
+        send()
+        eventually { latest.getInt(owner) > before }
+        // onStartCommand queues its task just after recording the start.
+        instrumentation.waitForIdleSync()
+        (FreeTunnelVpnService::class.java.getDeclaredField("worker").apply { isAccessible = true }.get(owner)
+            as java.util.concurrent.ExecutorService).submit {}.get(30, java.util.concurrent.TimeUnit.SECONDS)
+    }
     @Test fun resumeAndAlwaysOnStartLeaveRunningClientAlone() {
         val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
         val sockets = ConcurrentLinkedQueue<Socket>()
@@ -361,11 +375,11 @@ class VpnDeviceTest {
             FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "127.0.0.1:${sink.localPort}"))
             eventually { network() != null && nativeClient() != null }
             val running = nativeClient()
-            FreeTunnelVpnService.resume(context)
+            handled { FreeTunnelVpnService.resume(context) }
+            assertSame("The reconnect after an update must not restart a running VPN", running, nativeClient())
             // What Android sends for Always-on: the VpnService action, no extras.
-            context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java))
-            SystemClock.sleep(2_000)
-            assertSame("A start for a running VPN must not restart it", running, nativeClient())
+            handled { context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java)) }
+            assertSame("An Always-on start must not restart a running VPN", running, nativeClient())
             assertNotNull(network())
         } finally {
             FreeTunnelVpnService.stop(context)

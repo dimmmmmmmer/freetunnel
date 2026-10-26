@@ -5,13 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.SystemClock
+import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.TextView
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.TimeUnit
 
 class UpdateDeviceTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
@@ -41,6 +46,7 @@ class UpdateDeviceTest {
         field("verifiedFile", null); field("expectedDigest", null); field("state", AndroidUpdater.State.IDLE)
         field("sessionId", -1); field("committed", false); field("failure", null); field("verifiedVersionCode", 0L)
         field("officialBuild", null); field("certificatePin", BuildConfig.RELEASE_CERTIFICATE_SHA256)
+        field("release", null); field("cancelled", false)
         vpnState(0)
         prefs.edit().remove(FreeTunnelVpnService.RESUME_AFTER_UPDATE).commit()
         activity?.let { instrumentation.runOnMainSync { it.finish() } }
@@ -61,8 +67,10 @@ class UpdateDeviceTest {
     private fun openApp() {
         activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
     }
+    private fun androidsDialogShown() =
+        instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.contains("packageinstaller") == true
     private fun cancelAndroidsDialog() {
-        eventually { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.contains("packageinstaller") == true }
+        eventually { androidsDialogShown() }
         val root = instrumentation.uiAutomation.rootInActiveWindow!!
         val cancel = (root.findAccessibilityNodeInfosByText("Cancel") + root.findAccessibilityNodeInfosByText("CANCEL") +
                 root.findAccessibilityNodeInfosByText("Отмена") + root.findAccessibilityNodeInfosByText("ОТМЕНА")).firstOrNull()
@@ -70,21 +78,50 @@ class UpdateDeviceTest {
         assertTrue(cancel!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
     }
     private fun emptySession(): Int = installer.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
+    // Waits until everything already queued on the updater's worker has run.
+    private fun drainWorker() { (value("worker") as ExecutorService).submit {}.get(30, TimeUnit.SECONDS) }
 
     @Test fun installCallbackIsPrivateAndAndroidAsksBeforeReplacingApp() {
         assertFalse(context.packageManager.getActivityInfo(ComponentName(context, InstallResultActivity::class.java), 0).exported)
         assertTrue("Grant REQUEST_INSTALL_PACKAGES appop before device tests", context.packageManager.canRequestPackageInstalls())
         readyToInstall()
+        // A real target version and a marker from an earlier attempt: with the VPN
+        // off now, Install must remove the marker rather than write its own.
+        field("verifiedVersionCode", 4242L)
+        prefs.edit().putLong(FreeTunnelVpnService.RESUME_AFTER_UPDATE, 4242L).commit()
         openApp()
         instrumentation.runOnMainSync { AndroidUpdater.install(activity!!) }
+        // Checked before Cancel, which removes the marker in any case.
+        eventually { androidsDialogShown() }
+        assertFalse("The VPN was off, so nothing reconnects", prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
         cancelAndroidsDialog()
         // Cancel keeps the verified APK, so Install works again without a download.
         eventually { AndroidUpdater.state == AndroidUpdater.State.READY }
         assertTrue(copy!!.isFile)
         eventually { installer.mySessions.isEmpty() }
-        assertFalse("The VPN was off, so nothing reconnects", prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
+        assertFalse(prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
         @Suppress("DEPRECATION")
         assertEquals(BuildConfig.VERSION_NAME, context.packageManager.getPackageInfo(context.packageName, 0).versionName)
+    }
+
+    @Test fun installRefusesBytesThatNoLongerMatch() {
+        readyToInstall()
+        // What the cache holds no longer hashes to what the download verified.
+        field("expectedDigest", ByteArray(32))
+        field("verifiedVersionCode", 4242L)
+        vpnState(2)
+        openApp()
+        instrumentation.runOnMainSync { AndroidUpdater.install(activity!!) }
+        var dialog = false
+        eventually {
+            dialog = dialog || androidsDialogShown()
+            AndroidUpdater.state == AndroidUpdater.State.ERROR
+        }
+        assertEquals(UpdatePolicy.Failure.VERIFICATION, AndroidUpdater.failure)
+        assertFalse("A copy that fails the check is deleted", copy!!.exists())
+        eventually { installer.mySessions.isEmpty() }
+        assertFalse("Nothing is installed, so nothing reconnects", prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
+        assertFalse("Nothing reaches Android's installer", dialog || androidsDialogShown())
     }
 
     @Test fun vpnOnAtInstallWritesAndCancelClearsResumeMarker() {
@@ -132,6 +169,67 @@ class UpdateDeviceTest {
         } finally {
             prefs.edit().remove("check_updates_on_launch").commit()
         }
+    }
+
+    @Test fun launchCheckKeepsAReadyUpdate() {
+        // Official, so that only the READY rule can stop the check.
+        field("officialBuild", null); field("certificatePin", debugCertificate())
+        readyToInstall()
+        AndroidUpdater.check(context)
+        assertEquals(AndroidUpdater.State.READY, AndroidUpdater.state)
+        drainWorker()
+        assertTrue("The verified APK is kept for Install", copy!!.isFile)
+    }
+
+    // Shows Settings and returns its update action, or null when it has none.
+    private fun settingsUpdateAction(): TextView? {
+        instrumentation.runOnMainSync {
+            MainActivity::class.java.getDeclaredField("page").apply { isAccessible = true }.setInt(activity, 3)
+            MainActivity::class.java.getDeclaredMethod("render").apply { isAccessible = true }.invoke(activity)
+        }
+        return MainActivity::class.java.getDeclaredField("updateAction").apply { isAccessible = true }.get(activity) as TextView?
+    }
+    private fun shows(text: String): Boolean {
+        val found = ArrayList<View>()
+        instrumentation.runOnMainSync { activity!!.window.decorView.findViewsWithText(found, text, View.FIND_VIEWS_WITH_TEXT) }
+        return found.isNotEmpty()
+    }
+
+    @Test fun settingsOffersUpdatesOnlyInTheOfficialBuild() {
+        openApp()
+        field("officialBuild", null)
+        assertNull("A debug build has no update action", settingsUpdateAction())
+        assertTrue(shows(context.getString(R.string.update_unofficial)))
+        assertFalse(shows(context.getString(R.string.update_on_launch)))
+        field("officialBuild", null); field("certificatePin", debugCertificate())
+        val action = settingsUpdateAction()
+        assertNotNull("The official build has an update action", action)
+        assertEquals(context.getString(R.string.update_check), action!!.text.toString())
+        assertTrue(shows(context.getString(R.string.update_on_launch)))
+        assertFalse(shows(context.getString(R.string.update_unofficial)))
+    }
+
+    @Test fun cancelReturnsToAvailableWhateverEndsTheDownload() {
+        // A cancel that lands while a read is blocked ends the download with
+        // that read's timeout, not with Cancelled. Here the queued download is
+        // cancelled before it runs and then fails on an untrusted address,
+        // without any network access.
+        openApp()
+        field("officialBuild", true)
+        field("release", UpdatePolicy.Release("99.0.0", "https://example.invalid/update.apk",
+            "https://example.invalid/SHA256SUMS-android.txt", "https://example.invalid/SHA256SUMS-android.txt.sig"))
+        val gate = CountDownLatch(1)
+        (value("worker") as ExecutorService).execute { gate.await() }
+        try {
+            instrumentation.runOnMainSync { AndroidUpdater.download(activity!!) }
+            assertEquals(AndroidUpdater.State.DOWNLOADING, AndroidUpdater.state)
+            AndroidUpdater.cancel()
+        } finally {
+            gate.countDown()
+        }
+        drainWorker()
+        assertEquals(AndroidUpdater.State.AVAILABLE, AndroidUpdater.state)
+        assertNull(AndroidUpdater.failure)
     }
 
     @Test fun lostInstallerResultReturnsToReady() {

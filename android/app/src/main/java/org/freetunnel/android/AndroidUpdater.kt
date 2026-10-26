@@ -195,12 +195,14 @@ object AndroidUpdater {
                 publish(State.READY)
             }.onFailure {
                 output?.delete(); verifiedFile = null; expectedDigest = null
-                if (it is Cancelled) publish(State.AVAILABLE) else failed(it, UpdatePolicy.Failure.VERIFICATION)
+                // A cancel that lands while a read is blocked, as in a stalled
+                // download, ends with that read's timeout instead of Cancelled.
+                if (it is Cancelled || cancelled) publish(State.AVAILABLE) else failed(it, UpdatePolicy.Failure.VERIFICATION)
             }
         }
     }
 
-    /** Stops a download at its next chunk; the release stays available. */
+    /** Stops a download at its next chunk, or when a blocked read times out; the release stays available. */
     fun cancel() { if (state == State.DOWNLOADING) cancelled = true }
 
     private fun stopIfOverdue(deadline: Long) {
