@@ -2,16 +2,36 @@ package org.freetunnel.android
 
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import java.io.IOException
 import java.math.BigInteger
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Base64
 
 /** Pure policy shared by discovery, download verification and installation. */
 object UpdatePolicy {
     const val REPOSITORY = "dimmmmmmmer/freetunnel"
     private val versionPattern = Regex("[0-9]{1,20}\\.[0-9]{1,20}\\.[0-9]{1,20}")
     private val pinPattern = Regex("[0-9a-f]{64}")
+
+    /** Why an update stopped, which decides what Settings tells the user. */
+    enum class Failure { NETWORK, RATE_LIMITED, VERIFICATION, INSTALLER }
+    /** A refusal whose kind is already known where it is thrown. */
+    class Refused(val failure: Failure, message: String) : Exception(message)
+
+    /**
+     * A Refused keeps its kind. Before the install step any other I/O error is
+     * the network's (a lost connection, a timeout, an HTTP error); everything
+     * else is the step's own kind.
+     */
+    fun classify(error: Throwable, otherwise: Failure): Failure =
+        (error as? Refused)?.failure ?: if (otherwise != Failure.INSTALLER && error is IOException) Failure.NETWORK else otherwise
+
+    // GitHub's primary limit answers 403 with X-RateLimit-Remaining: 0, its
+    // secondary limits 403 or 429 with Retry-After. Other 403s are not limits.
+    fun rateLimited(status: Int, remaining: String?, retryAfter: String?): Boolean =
+        status == 429 || (status == 403 && (remaining == "0" || retryAfter != null))
 
     /**
      * The rule of scripts/check-android-signer.sh: exactly one signer, whose
@@ -22,6 +42,13 @@ object UpdatePolicy {
         pinPattern.matches(pin) && certificates.size == 1 && hex(MessageDigest.getInstance("SHA-256").digest(certificates[0])) == pin
 
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+
+    /** The raw Ed25519 key inside the base64 SubjectPublicKeyInfo that ReleaseSigning.h holds. */
+    fun rawPublicKey(spki: String): ByteArray {
+        val decoded = Base64.getDecoder().decode(spki)
+        require(decoded.size == 44) { "Invalid release verification key" }
+        return decoded.copyOfRange(12, 44)
+    }
     data class Candidate(val tag: String, val draft: Boolean, val prerelease: Boolean, val assets: Map<String, String>)
     data class Release(val version: String, val apk: String, val manifest: String, val signature: String) {
         val tag get() = "android-$version"

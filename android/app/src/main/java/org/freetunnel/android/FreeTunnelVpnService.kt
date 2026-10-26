@@ -43,8 +43,14 @@ class FreeTunnelVpnService : VpnService() {
             val intent = Intent(context, FreeTunnelVpnService::class.java).setAction(ACTION_START).putExtra(EXTRA_CONFIG, source)
             context.startForegroundService(intent)
         }
-        @JvmStatic fun stop(context: Context) {
-            context.startForegroundService(Intent(context, FreeTunnelVpnService::class.java).setAction(ACTION_STOP))
+        @JvmStatic fun stop(context: Context) { send(context, ACTION_STOP) }
+        /** Sent by PackageReplacedReceiver, in the new version, when the VPN was on at Install. */
+        const val ACTION_RESUME = "org.freetunnel.android.RESUME_VPN"
+        /** Preference: the versionCode being installed while the VPN was on. */
+        const val RESUME_AFTER_UPDATE = "update_resume_vpn"
+        @JvmStatic fun resume(context: Context) { send(context, ACTION_RESUME) }
+        private fun send(context: Context, action: String) {
+            context.startForegroundService(Intent(context, FreeTunnelVpnService::class.java).setAction(action))
         }
     }
 
@@ -83,6 +89,8 @@ class FreeTunnelVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
+        // A disconnect also cancels the reconnect planned for after an update.
+        if (intent?.action == ACTION_STOP) prefs.edit { remove(RESUME_AFTER_UPDATE) }
         // A new start may arrive after stopForeground but before onDestroy.
         // onCreate is not called again in that window; acknowledge every FGS start.
         startForeground(NOTIFICATION_ID, notification(stateText()))
@@ -95,6 +103,18 @@ class FreeTunnelVpnService : VpnService() {
                 stopSelfResult(startId)
                 return@execute
             }
+            // Android's Always-on start, which AOSP may send a second time while
+            // the first is still setting up, and the reconnect after an update
+            // only start a VPN that is not running, so neither cuts a working
+            // connection. A client that is connecting or recovering counts as
+            // running. A TUN the kill switch keeps after a failure has no client,
+            // so these starts still reconnect it.
+            val resuming = intent?.action == ACTION_RESUME
+            if ((resuming || intent?.action == VpnService.SERVICE_INTERFACE) && client != null) {
+                logEvent("VPN already running or reconnecting; start ignored")
+                return@execute
+            }
+            if (resuming) logEvent("Reconnecting after update")
             startForeground(NOTIFICATION_ID, notification(stateText()))
             val previous = client
             establishedThisRequest = false
@@ -242,6 +262,7 @@ class FreeTunnelVpnService : VpnService() {
 
     override fun onRevoke() {
         permissionEpoch++
+        prefs.edit { remove(RESUME_AFTER_UPDATE) }
         publishState(0)
         showFailure(getString(R.string.text_vpn_permission_was_revoked))
         val revokedId = latestStartId

@@ -14,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -304,6 +305,82 @@ class VpnDeviceTest {
             FreeTunnelVpnService.stop(context)
             sink.close(); accepting.join(500); sockets.forEach { it.close() }
         }
+    }
+    // The saved profile, with the reconnect marker an Install with the VPN on
+    // leaves behind, and an APK in the download folder.
+    private fun afterUpdate(address: String, marker: Long): File {
+        val config = source.replace("192.0.2.1:443", address).replace("1350", "1200")
+        val json = org.json.JSONArray().put(org.json.JSONObject().put("name", "Update test").put("toml", config)).toString()
+        assertTrue(ConfigStore.write(prefs, json))
+        prefs.edit().putLong(FreeTunnelVpnService.RESUME_AFTER_UPDATE, marker).commit()
+        return File(context.cacheDir, "updates").apply { mkdirs() }.resolve("verified-test.apk").apply { writeText("APK") }
+    }
+    @Test fun resumeAfterUpdateReconnectsSavedProfile() {
+        assertNull(VpnService.prepare(context))
+        val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val sockets = ConcurrentLinkedQueue<Socket>()
+        val accepting = thread(isDaemon = true) { runCatching { while (!sink.isClosed) sockets.add(sink.accept()) } }
+        try {
+            val download = afterUpdate("127.0.0.1:${sink.localPort}", BuildConfig.VERSION_CODE.toLong())
+            PackageReplacedReceiver().onReceive(context, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1200 } == true }
+            assertFalse(prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
+            assertFalse(download.exists())
+            assertTrue(download.parentFile!!.listFiles().isNullOrEmpty())
+        } finally {
+            FreeTunnelVpnService.stop(context)
+            sink.close(); accepting.join(500); sockets.forEach { it.close() }
+        }
+    }
+    @Test fun staleResumeMarkerIsDropped() {
+        assertNull(VpnService.prepare(context))
+        // Names another version: an update that failed, or one installed later.
+        // A start would show as a TUN even though nothing answers at this address.
+        val download = afterUpdate("192.0.2.1:443", BuildConfig.VERSION_CODE.toLong() + 1)
+        PackageReplacedReceiver().onReceive(context, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
+        SystemClock.sleep(2_000)
+        assertNull(network())
+        assertNull(serviceOwner())
+        assertFalse(prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
+        assertFalse(download.exists())
+    }
+    @Test fun disconnectForgetsResumeMarker() {
+        FreeTunnelVpnService.start(context, source)
+        eventually { network() != null && nativeClient() != null }
+        prefs.edit().putLong(FreeTunnelVpnService.RESUME_AFTER_UPDATE, BuildConfig.VERSION_CODE.toLong()).commit()
+        FreeTunnelVpnService.stop(context)
+        eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
+        assertFalse(prefs.contains(FreeTunnelVpnService.RESUME_AFTER_UPDATE))
+    }
+    @Test fun resumeAndAlwaysOnStartLeaveRunningClientAlone() {
+        val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val sockets = ConcurrentLinkedQueue<Socket>()
+        val accepting = thread(isDaemon = true) { runCatching { while (!sink.isClosed) sockets.add(sink.accept()) } }
+        try {
+            FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "127.0.0.1:${sink.localPort}"))
+            eventually { network() != null && nativeClient() != null }
+            val running = nativeClient()
+            FreeTunnelVpnService.resume(context)
+            // What Android sends for Always-on: the VpnService action, no extras.
+            context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java))
+            SystemClock.sleep(2_000)
+            assertSame("A start for a running VPN must not restart it", running, nativeClient())
+            assertNotNull(network())
+        } finally {
+            FreeTunnelVpnService.stop(context)
+            sink.close(); accepting.join(500); sockets.forEach { it.close() }
+        }
+    }
+    @Test fun alwaysOnStartStillReconnectsATunKeptBlocked() {
+        FreeTunnelVpnService.start(context, source)
+        eventually { network() != null && nativeClient() != null }
+        nativeClient()!!.onStateChanged(0)
+        eventually { FreeTunnelVpnService.state(context) == 6 && nativeClient() == null }
+        // The kill switch keeps the TUN but no client, so this start reconnects.
+        context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java))
+        eventually { nativeClient() != null }
+        assertNotNull(network())
     }
     @Test fun malformedConfigCannotLeaveATunOrConnectedState() {
         FreeTunnelVpnService.start(context, source + "\ninvalid TOML")

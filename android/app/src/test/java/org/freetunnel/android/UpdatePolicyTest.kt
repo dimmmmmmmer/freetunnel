@@ -3,9 +3,12 @@ package org.freetunnel.android
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.Signature
+import java.util.Base64
 
 class UpdatePolicyTest {
     private fun candidate(tag: String, draft: Boolean = false, prerelease: Boolean = false): UpdatePolicy.Candidate {
@@ -64,6 +67,9 @@ class UpdatePolicyTest {
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  other.apk\n") }
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  ${release.filename}\n$hash  ${release.filename}\n") }
     }
+    @Test fun offersFirstOfficialReleaseToPreview() {
+        assertEquals("1.0.0", UpdatePolicy.select(listOf(candidate("android-1.0.0")), "0.9.0")!!.version)
+    }
     @Test fun signedByRequiresExactlyOnePinnedCertificate() {
         val certificate = "a DER certificate".toByteArray()
         val pin = MessageDigest.getInstance("SHA-256").digest(certificate).joinToString("") { "%02x".format(it) }
@@ -83,5 +89,38 @@ class UpdatePolicyTest {
         val pin = File("../release-certificate.sha256").readText().trimEnd('\n')
         assertTrue(pin, Regex("[0-9a-f]{64}").matches(pin))
         assertEquals(pin, BuildConfig.RELEASE_CERTIFICATE_SHA256)
+    }
+    @Test fun rawPublicKeyIsTheKeyInsideTheReleaseKeysEncoding() {
+        assertArrayEquals(rawKey, UpdatePolicy.rawPublicKey(Base64.getEncoder().encodeToString(pair.public.encoded)))
+        assertEquals(32, UpdatePolicy.rawPublicKey(BuildConfig.RELEASE_SIGNING_KEY).size)
+        assertThrows(IllegalArgumentException::class.java) {
+            UpdatePolicy.rawPublicKey(Base64.getEncoder().encodeToString(pair.public.encoded.copyOf(43)))
+        }
+    }
+    @Test fun rateLimitDetection() {
+        assertTrue(UpdatePolicy.rateLimited(429, null, null))
+        assertTrue(UpdatePolicy.rateLimited(403, "0", null))
+        assertTrue(UpdatePolicy.rateLimited(403, "12", "60"))
+        assertFalse(UpdatePolicy.rateLimited(403, "12", null))
+        assertFalse(UpdatePolicy.rateLimited(403, null, null))
+        assertFalse(UpdatePolicy.rateLimited(200, "0", "60"))
+        assertFalse(UpdatePolicy.rateLimited(404, "0", null))
+    }
+    @Test fun failuresAreClassifiedByKindAndStep() {
+        val limited = UpdatePolicy.Refused(UpdatePolicy.Failure.RATE_LIMITED, "HTTP 403")
+        val mismatch = UpdatePolicy.Refused(UpdatePolicy.Failure.VERIFICATION, "APK checksum mismatch")
+        for (step in UpdatePolicy.Failure.values()) {
+            assertEquals(UpdatePolicy.Failure.RATE_LIMITED, UpdatePolicy.classify(limited, step))
+            assertEquals(UpdatePolicy.Failure.VERIFICATION, UpdatePolicy.classify(mismatch, step))
+        }
+        for (error in listOf(IOException("HTTP 500"), SocketTimeoutException("slow"))) {
+            assertEquals(UpdatePolicy.Failure.NETWORK, UpdatePolicy.classify(error, UpdatePolicy.Failure.NETWORK))
+            assertEquals(UpdatePolicy.Failure.NETWORK, UpdatePolicy.classify(error, UpdatePolicy.Failure.VERIFICATION))
+            assertEquals(UpdatePolicy.Failure.INSTALLER, UpdatePolicy.classify(error, UpdatePolicy.Failure.INSTALLER))
+        }
+        assertEquals(UpdatePolicy.Failure.VERIFICATION,
+            UpdatePolicy.classify(IllegalArgumentException("Invalid update signature"), UpdatePolicy.Failure.VERIFICATION))
+        assertEquals(UpdatePolicy.Failure.INSTALLER,
+            UpdatePolicy.classify(IllegalStateException("Session failed"), UpdatePolicy.Failure.INSTALLER))
     }
 }

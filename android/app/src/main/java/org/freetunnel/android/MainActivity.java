@@ -104,7 +104,7 @@ public final class MainActivity extends Activity {
         vpnState = FreeTunnelVpnService.state(this);
         loadConfigs();
         render();
-        if (state == null && prefs.getBoolean("check_updates_on_launch", false)) AndroidUpdater.INSTANCE.check();
+        if (state == null && prefs.getBoolean("check_updates_on_launch", false)) AndroidUpdater.INSTANCE.check(this);
         if (state == null) handleIncomingIntent(getIntent());
         if (state == null && prefs.getBoolean("auto_connect", false) && vpnState == 0
                 && !configs.isEmpty() && !Intent.ACTION_VIEW.equals(getIntent().getAction())) {
@@ -123,8 +123,11 @@ public final class MainActivity extends Activity {
             receiverRegistered = true;
         }
         AndroidUpdater.INSTANCE.observe(() -> { if (page == 3) refreshUpdateControls(); });
+        AndroidUpdater.INSTANCE.recoverInstall(this);
         vpnState = FreeTunnelVpnService.state(this);
-        if (page == 0 || page == 3) render();
+        // Settings is only refreshed, not rebuilt, so it keeps its scroll position.
+        if (page == 0) render();
+        else if (page == 3) refreshUpdateControls();
     }
 
     @Override protected void onPause() {
@@ -751,45 +754,74 @@ public final class MainActivity extends Activity {
         section(body, getString(R.string.text_log));
         addSwitch(body, getString(R.string.text_enable_logging), "", "logging", true);
         section(body, getString(R.string.update_title));
-        addSwitch(body, getString(R.string.update_on_launch), "", "check_updates_on_launch", false);
-        updateStatus = label("", 12, dim(), false);
-        body.addView(updateStatus, lp(-1, -2));
-        updateAction = label("", 14, accent(), false);
-        updateAction.setOnClickListener(v -> {
-            AndroidUpdater.State update = AndroidUpdater.INSTANCE.getState();
-            if (update == AndroidUpdater.State.AVAILABLE) AndroidUpdater.INSTANCE.download(this);
-            else if (update == AndroidUpdater.State.READY) AndroidUpdater.INSTANCE.install(this);
-            else AndroidUpdater.INSTANCE.check();
-        });
-        body.addView(updateAction, lp(-1, 48));
-        refreshUpdateControls();
+        if (!AndroidUpdater.INSTANCE.official(this)) {
+            // Android would refuse an update signed with another key than this build's.
+            updateStatus = null; updateAction = null;
+            body.addView(label(getString(R.string.update_unofficial), 12, dim(), false), lp(-1, -2));
+        } else {
+            addSwitch(body, getString(R.string.update_on_launch), "", "check_updates_on_launch", false);
+            updateStatus = label("", 12, dim(), false);
+            body.addView(updateStatus, lp(-1, -2));
+            updateAction = label("", 14, accent(), false);
+            updateAction.setOnClickListener(v -> {
+                AndroidUpdater.State update = AndroidUpdater.INSTANCE.getState();
+                if (update == AndroidUpdater.State.AVAILABLE) AndroidUpdater.INSTANCE.download(this);
+                else if (update == AndroidUpdater.State.DOWNLOADING) AndroidUpdater.INSTANCE.cancel();
+                else if (update == AndroidUpdater.State.READY || update == AndroidUpdater.State.INSTALLING) installUpdate();
+                else AndroidUpdater.INSTANCE.check(this);
+            });
+            body.addView(updateAction, lp(-1, 48));
+            refreshUpdateControls();
+        }
         section(body, getString(R.string.text_about));
         body.addView(label(getString(R.string.text_freetunnel_for_android), 14, textColor(), false), lp(-1, 42));
         body.addView(label(getString(R.string.text_version) + BuildConfig.VERSION_NAME, 12, dim(), false), lp(-1, 28));
     }
+    // Installing replaces the app, and Android stops the VPN with it, so say so
+    // first. Without the install permission, install() opens its settings screen.
+    private void installUpdate() {
+        vpnState = FreeTunnelVpnService.state(this);
+        if (getPackageManager().canRequestPackageInstalls() && isVpnActive()) {
+            new AlertDialog.Builder(this).setTitle(getString(R.string.update_install))
+                    .setMessage(getString(R.string.update_disconnect_warning))
+                    .setNegativeButton(getString(R.string.text_cancel), null)
+                    .setPositiveButton(getString(R.string.update_install), (d, w) -> AndroidUpdater.INSTANCE.install(this)).show();
+        } else {
+            AndroidUpdater.INSTANCE.install(this);
+        }
+    }
     private void refreshUpdateControls() {
         if (updateStatus == null || updateAction == null) return;
         AndroidUpdater.State update = AndroidUpdater.INSTANCE.getState();
-        int status;
-        switch (update) {
-            case CHECKING: status = R.string.update_checking; break;
-            case CURRENT: status = R.string.update_current; break;
-            case AVAILABLE: status = R.string.update_available; break;
-            case DOWNLOADING: status = R.string.update_downloading; break;
-            case READY: status = R.string.update_ready; break;
-            case INSTALLING: status = R.string.update_installing; break;
-            case ERROR: status = R.string.update_error; break;
-            default: status = R.string.update_hint;
-        }
-        String updateText = getString(status);
         UpdatePolicy.Release release = AndroidUpdater.INSTANCE.getRelease();
-        if (release != null) updateText += " " + release.getVersion();
-        if (update == AndroidUpdater.State.DOWNLOADING) updateText += " · " + AndroidUpdater.INSTANCE.getProgress() + "%";
-        updateStatus.setText(updateText);
-        updateAction.setText(getString(update == AndroidUpdater.State.AVAILABLE ? R.string.update_download :
-                update == AndroidUpdater.State.READY ? R.string.update_install : R.string.update_check));
-        updateAction.setEnabled(update != AndroidUpdater.State.CHECKING && update != AndroidUpdater.State.DOWNLOADING
-                && update != AndroidUpdater.State.INSTALLING);
+        String version = release != null ? release.getVersion() : "";
+        // Once Android has the session, Install update starts over if its dialog was lost.
+        boolean reinstall = update == AndroidUpdater.State.INSTALLING && AndroidUpdater.INSTANCE.getCommitted();
+        String text;
+        switch (update) {
+            case CHECKING: text = getString(R.string.update_checking); break;
+            case CURRENT: text = getString(R.string.update_current); break;
+            case AVAILABLE: text = getString(R.string.update_available, version); break;
+            case DOWNLOADING: text = getString(R.string.update_downloading, version, AndroidUpdater.INSTANCE.getProgress()); break;
+            case READY: text = getString(R.string.update_ready, version); break;
+            case INSTALLING: text = getString(R.string.update_installing); break;
+            case ERROR: text = getString(updateFailureText(AndroidUpdater.INSTANCE.getFailure())); break;
+            default: text = getString(R.string.update_hint);
+        }
+        updateStatus.setText(text);
+        int action = R.string.update_check;
+        if (update == AndroidUpdater.State.AVAILABLE) action = R.string.update_download;
+        else if (update == AndroidUpdater.State.DOWNLOADING) action = R.string.update_cancel;
+        else if (update == AndroidUpdater.State.READY || reinstall) action = R.string.update_install;
+        updateAction.setText(getString(action));
+        updateAction.setEnabled(update != AndroidUpdater.State.CHECKING
+                && (update != AndroidUpdater.State.INSTALLING || reinstall));
+    }
+    private static int updateFailureText(UpdatePolicy.Failure failure) {
+        if (failure == UpdatePolicy.Failure.RATE_LIMITED) return R.string.update_error_rate_limited;
+        if (failure == UpdatePolicy.Failure.VERIFICATION) return R.string.update_error_verification;
+        if (failure == UpdatePolicy.Failure.INSTALLER) return R.string.update_error_installer;
+        return R.string.update_error_network;
     }
     private void separator(LinearLayout parent) {
         View line = new View(this); line.setBackgroundColor(dark ? Color.parseColor("#2e2e2e") : Color.parseColor("#d0d0d0"));

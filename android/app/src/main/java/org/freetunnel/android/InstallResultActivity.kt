@@ -9,20 +9,20 @@ import android.os.Bundle
 class InstallResultActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val session = intent.getIntExtra(AndroidUpdater.EXTRA_SESSION, -1)
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            @Suppress("DEPRECATION")
-            val confirmation = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-            if (confirmation == null) {
-                AndroidUpdater.installationFinished(false)
-            } else if (savedInstanceState == null) {
-                runCatching { startActivity(confirmation) }.onFailure { AndroidUpdater.installationFinished(false) }
+            if (savedInstanceState == null) {
+                @Suppress("DEPRECATION")
+                val confirmation = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (confirmation == null || runCatching { startActivity(confirmation) }.isFailure) {
+                    AndroidUpdater.confirmationFailed(this, session)
+                }
             }
-            finish()
         } else {
-            AndroidUpdater.installationFinished(status == PackageInstaller.STATUS_SUCCESS)
-            finish()
+            AndroidUpdater.installationFinished(this, session, status)
         }
+        finish()
     }
 
 }

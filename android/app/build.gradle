@@ -7,7 +7,8 @@ plugins {
 // tagged android-X.Y.Z, and the tag must equal this, as the desktop's v-tags must
 // equal project(VERSION). versionCode follows from it, X*10000 + Y*100 + Z, so it
 // always grows with the version. The preview is 0.9.0, below the first official
-// android-1.0.0, so that an update check offers that release to preview installs.
+// android-1.0.0. Preview and CI builds are not signed with the release key, so
+// they are not offered updates: Android would refuse to install them anyway.
 def appVersion = '0.9.0'
 def appVersionCode = appVersion.tokenize('.').collect { it as int }.with { it[0] * 10000 + it[1] * 100 + it[2] }
 

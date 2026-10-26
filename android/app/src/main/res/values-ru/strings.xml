@@ -139,9 +139,16 @@
     <string name="update_hint">Только официальные Android-релизы. Установка требует подтверждения Android.</string>
     <string name="update_checking">Проверка официальных релизов…</string>
     <string name="update_current">Нового официального Android-релиза нет.</string>
-    <string name="update_available">Доступно обновление:</string>
-    <string name="update_downloading">Загрузка и проверка:</string>
-    <string name="update_ready">Обновление проверено. Если Android запросит, разрешите установку из FreeTunnel, затем нажмите «Установить» ещё раз.</string>
-    <string name="update_installing">Ожидание подтверждения установки Android…</string>
-    <string name="update_error">Обновление не выполнено или отменено. Установка отклонена. Проверьте сеть и повторите попытку.</string>
+    <string name="update_available">Доступна версия %1$s.</string>
+    <string name="update_downloading">Загрузка и проверка %1$s: %2$d%%</string>
+    <string name="update_ready">Версия %1$s проверена. Если Android попросит, разрешите установку из FreeTunnel, затем снова нажмите «Установить обновление».</string>
+    <string name="update_installing">Ожидание подтверждения установки Android… Если окно установки закрылось, нажмите «Установить обновление».</string>
+    <string name="update_cancel">Отменить загрузку</string>
+    <string name="update_error_network">Не удалось связаться с GitHub, или загрузка прервалась. Проверьте сеть и повторите попытку.</string>
+    <string name="update_error_rate_limited">GitHub временно ограничил проверки обновлений. Ограничение общее для всех с тем же интернет-адресом, например в той же сети Wi-Fi или мобильной сети. Повторите позже.</string>
+    <string name="update_error_verification">Обновление не прошло проверку безопасности и удалено; ничего не установлено.</string>
+    <string name="update_error_installer">Android не установил обновление. Повторите попытку.</string>
+    <string name="update_unofficial">Эта сборка не из официального канала, поэтому не обновляется сама. Чтобы получать обновления, установите официальный релиз с GitHub.</string>
+    <string name="update_disconnect_warning">Установка заменяет FreeTunnel, поэтому VPN и kill switch выключены, пока FreeTunnel не переподключится после обновления. До этого приложения выходят в сеть без VPN, если Android не блокирует соединения без VPN.</string>
+    <string name="update_allow_installs">Разрешите FreeTunnel устанавливать приложения в настройках Android (на некоторых телевизорах: «Безопасность и ограничения» › «Неизвестные источники»), затем снова нажмите «Установить обновление».</string>
 </resources>

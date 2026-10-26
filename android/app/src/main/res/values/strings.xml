@@ -139,9 +139,16 @@
     <string name="update_hint">Official Android releases only. Installation requires Android confirmation.</string>
     <string name="update_checking">Checking official releases…</string>
     <string name="update_current">No newer official Android release is available.</string>
-    <string name="update_available">Update available:</string>
-    <string name="update_downloading">Downloading and verifying:</string>
-    <string name="update_ready">Verified update ready. Allow installs from FreeTunnel if Android asks, then tap Install again.</string>
-    <string name="update_installing">Waiting for Android installation confirmation…</string>
-    <string name="update_error">Update failed or was cancelled. Installation was refused. Check your connection and try again.</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_downloading">Downloading and verifying %1$s: %2$d%%</string>
+    <string name="update_ready">Version %1$s is verified. If Android asks, allow installs from FreeTunnel, then tap Install update again.</string>
+    <string name="update_installing">Waiting for Android installation confirmation… If its window closed, tap Install update.</string>
+    <string name="update_cancel">Cancel download</string>
+    <string name="update_error_network">Couldn’t reach GitHub, or the download was interrupted. Check your connection and try again.</string>
+    <string name="update_error_rate_limited">GitHub is limiting update checks for now. The limit is shared by everyone on the same internet address, such as the same Wi-Fi or mobile network. Try again later.</string>
+    <string name="update_error_verification">The update failed the security check and was deleted; nothing was installed.</string>
+    <string name="update_error_installer">Android didn’t install the update. Try again.</string>
+    <string name="update_unofficial">This build doesn’t come from the official channel, so it doesn’t update itself. Install an official release from GitHub to get updates.</string>
+    <string name="update_disconnect_warning">Installing replaces FreeTunnel, so the VPN and its kill switch are off until FreeTunnel reconnects after the update. Until then apps go online without the VPN, unless Android blocks connections without VPN.</string>
+    <string name="update_allow_installs">Allow FreeTunnel to install apps in Android’s settings (on some TVs: Security &amp; restrictions › Unknown sources), then tap Install update again.</string>
 </resources>
