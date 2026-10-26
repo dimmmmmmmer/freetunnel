@@ -156,4 +156,7 @@
     <string name="update_unofficial">This build doesn’t come from the official channel, so it doesn’t update itself. Install an official release from GitHub to get updates.</string>
     <string name="update_disconnect_warning">Installing replaces FreeTunnel, so the VPN and its kill switch are off until FreeTunnel reconnects after the update. Until then apps go online without the VPN, unless Android blocks connections without VPN.</string>
     <string name="update_allow_installs">Allow FreeTunnel to install apps in Android’s settings (on some TVs: Security &amp; restrictions › Unknown sources), then tap Install update again.</string>
+    <string name="text_no_file_picker">This device has no file picker. Paste a link from the clipboard, or create the configuration manually.</string>
+    <string name="text_vpn_consent_unavailable">This device has no Android screen for allowing VPN connections, so FreeTunnel can’t connect.</string>
+    <string name="text_no_always_on_here">This device has no Always-on VPN, so the kill switch protects only while FreeTunnel runs.</string>
 </resources>

@@ -2,6 +2,7 @@ package org.freetunnel.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -11,12 +12,15 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.net.VpnService;
 import android.os.Bundle;
@@ -26,6 +30,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
@@ -57,6 +62,8 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Android adaptation of the FreeTunnel desktop interface. */
 public final class MainActivity extends Activity {
@@ -74,6 +81,11 @@ public final class MainActivity extends Activity {
     private int page;
     private boolean dark = true;
     private LinearLayout root;
+    // render() rebuilds every view. On a remote, the focused control's key and the
+    // page's scroll position are carried over the rebuild (see restoreFocus).
+    private ScrollView pageScroll;
+    private int renderedPage = -1;
+    private int renderGeneration;
     private int vpnState;
     private String pendingConfig;
     private boolean receiverRegistered;
@@ -206,33 +218,136 @@ public final class MainActivity extends Activity {
         b.setPadding(dp(12), 0, dp(12), 0);
         return b;
     }
+    // Android TV, Google TV and Fire TV: driven by a remote, seen from across the room.
+    private boolean isTv() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION;
+    }
+    // A remote moves a focus that touch never shows. This makes the view a stop for it,
+    // with a ring that shows where it is, and a key that names it across render(),
+    // which rebuilds every view. The ring is a foreground, so backgrounds stay as they
+    // are. A phone shows it only without touch, such as with a keyboard. Text fields
+    // get none there: a tap focuses them, so it would show on every tap, and their
+    // cursor already shows where the focus is.
+    private <T extends View> T focus(T view, String key) {
+        view.setFocusable(true);
+        view.setTag(key);
+        if (isTv() || !view.isFocusableInTouchMode())
+            view.setForeground(focusRing(dark ? Color.WHITE : Color.parseColor("#1b1b1b"), dark ? 0x1AFFFFFF : 0x14000000));
+        return view;
+    }
+    private StateListDrawable focusRing(int stroke, int fill) {
+        GradientDrawable ring = shape(fill, 10);
+        ring.setStroke(dp(2), stroke);
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_focused}, ring);
+        states.addState(new int[]{}, new ColorDrawable(Color.TRANSPARENT));
+        return states;
+    }
+    // Dialogs stay dark in both themes (see dialogTextColor), so what is in them gets
+    // the dark theme's white ring.
+    private void dialogFocus(View view) { view.setForeground(focusRing(Color.WHITE, 0x1AFFFFFF)); }
+    // Every dialog is shown through here, so that its buttons get a ring.
+    private void show(AlertDialog.Builder builder) { show(builder.create()); }
+    private void show(AlertDialog dialog) {
+        dialog.show();
+        for (int which : new int[]{AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL}) {
+            Button button = dialog.getButton(which);
+            if (button != null) dialogFocus(button);
+        }
+    }
+    // TVs often leave out screens that phones have, such as the file picker or the VPN
+    // consent dialog, and starting one that is missing throws. False when it is missing.
+    private boolean startForResult(Intent intent, int request) {
+        try { startActivityForResult(intent, request); return true; }
+        catch (ActivityNotFoundException e) { return false; }
+    }
 
     private void render() {
+        View focused = getCurrentFocus();
+        String focusKey = focused != null && focused.getTag() instanceof String ? (String) focused.getTag() : null;
+        int scrollY = pageScroll != null && renderedPage == page ? pageScroll.getScrollY() : 0;
+        int generation = ++renderGeneration;
         getWindow().setStatusBarColor(bg()); getWindow().setNavigationBarColor(bg());
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         root = column(); root.setBackgroundColor(bg());
+        // A TV may crop the edges of the picture (overscan), so content keeps clear of them.
+        int sides = isTv() ? dp(48) : 0;
+        int ends = isTv() ? dp(27) : 0;
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                root.setPadding(0, bars.top, 0, bars.bottom);
+                root.setPadding(sides, bars.top + ends, sides, bars.bottom + ends);
             } else {
-                root.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+                root.setPadding(sides, insets.getSystemWindowInsetTop() + ends, sides, insets.getSystemWindowInsetBottom() + ends);
             }
             return insets;
         });
         setContentView(root);
         nav();
-        if (page == 0) { home(); return; }
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
-        scroll.setVerticalScrollBarEnabled(false);
-        LinearLayout body = column(); body.setPadding(dp(18), dp(8), dp(18), dp(26)); scroll.addView(body);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        switch (page) {
-            case 1: configs(body); break;
-            case 2: split(body); break;
-            case 3: settings(body); break;
-            default: logs(body); break;
+        pageScroll = null;
+        if (page == 0) home();
+        else {
+            ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
+            scroll.setVerticalScrollBarEnabled(false);
+            // On a TV the cards would otherwise stretch across the whole screen.
+            int side = isTv() ? Math.max(dp(18), (getResources().getDisplayMetrics().widthPixels - 2 * sides - dp(640)) / 2) : dp(18);
+            LinearLayout body = column(); body.setPadding(side, dp(8), side, dp(26)); scroll.addView(body);
+            root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            pageScroll = scroll;
+            switch (page) {
+                case 1: configs(body); break;
+                case 2: split(body); break;
+                case 3: settings(body); break;
+                default: logs(body); break;
+            }
         }
+        renderedPage = page;
+        restoreFocus(generation, focusKey, scrollY);
+    }
+
+    // Puts a remote's focus back on the control that had it before render(), and the
+    // page back where it was scrolled to. A phone in touch mode shows no focus and is
+    // left as it was. This runs once the new views are laid out, because a ScrollView
+    // cannot scroll before that, and only for the latest render(), as ping results
+    // can render several times in one frame.
+    private void restoreFocus(int generation, String key, int scrollY) {
+        View decor = getWindow().getDecorView();
+        if (decor.isInTouchMode()) return;
+        ScrollView scroll = pageScroll;
+        decor.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                decor.getViewTreeObserver().removeOnPreDrawListener(this);
+                if (generation != renderGeneration || decor.isInTouchMode()) return true;
+                if (scroll != null) scroll.scrollTo(0, scrollY);
+                View target = focusTarget(key);
+                if (target != null) target.requestFocus();
+                return true;
+            }
+        });
+    }
+    private static final Pattern NUMBERED_KEY = Pattern.compile("([a-z]+):(\\d{1,5})(:[a-z]+)?");
+    // The control with this key. When it is gone, such as after a deletion, the nearest
+    // one before it: config:2:edit, then config:1:edit and config:0:edit. Otherwise the
+    // page's own: Reconnect while traffic is blocked, else Connect, on Home, and the
+    // page's tab elsewhere.
+    private View focusTarget(String key) {
+        View found = key == null ? null : root.findViewWithTag(key);
+        Matcher numbered = NUMBERED_KEY.matcher(key == null ? "" : key);
+        if (found == null && numbered.matches()) {
+            String rest = numbered.group(3) == null ? "" : numbered.group(3);
+            for (int n = Integer.parseInt(numbered.group(2)) - 1; n >= 0 && found == null; n--)
+                found = root.findViewWithTag(numbered.group(1) + ":" + n + rest);
+        }
+        if (found == null && page == 0) found = root.findViewWithTag("home:reconnect");
+        if (found == null) found = root.findViewWithTag(page == 0 ? "home:toggle" : "tab:" + page);
+        return found;
+    }
+    // Without tabs to tap, Back on a TV goes to Home first, and leaves the app from there.
+    // Still delivered at targetSdk 35; targetSdk 36 needs an OnBackInvokedCallback.
+    @SuppressWarnings("deprecation")
+    @Override public void onBackPressed() {
+        if (isTv() && page != 0) { page = 0; render(); return; }
+        super.onBackPressed();
     }
 
     private void nav() {
@@ -251,7 +366,7 @@ public final class MainActivity extends Activity {
             if (i > 0) itemLp.leftMargin = dp(8);
             bar.addView(item, itemLp);
             item.setContentDescription(tabNames[i]);
-            item.setOnClickListener(v -> { page = next; render(); });
+            focus(item, "tab:" + i).setOnClickListener(v -> { page = next; render(); });
         }
         root.addView(bar, lp(-1, 56));
     }
@@ -263,12 +378,13 @@ public final class MainActivity extends Activity {
         ImageView logo = new ImageView(this); logo.setImageResource(R.drawable.logo); logo.setAlpha(0.5f);
         hero.addView(logo, lp(132, 132));
         logo.setContentDescription(isVpnActive() ? getString(R.string.text_disconnect_freetunnel) : getString(R.string.text_connect_freetunnel));
-        logo.setOnClickListener(v -> connect());
+        // On a TV it would be one more stop on the way down to the same Connect.
+        if (!isTv()) focus(logo, "home:logo").setOnClickListener(v -> connect());
         gap(hero, 22);
         String name = configs.isEmpty() ? getString(R.string.text_add_configuration) : configs.get(Math.min(activeIndex, configs.size() - 1)).name + "  ▾";
         TextView selected = label(name, 15, textColor(), true); selected.setGravity(Gravity.CENTER);
         hero.addView(selected, lp(-1, 28));
-        selected.setOnClickListener(v -> {
+        focus(selected, "home:config").setOnClickListener(v -> {
             page = 1; render(); if (configs.isEmpty()) addMenu();
         });
         TextView status = label(connectionCaption(), 13, vpnState == 2 ? success() : dim(), false);
@@ -277,9 +393,8 @@ public final class MainActivity extends Activity {
         if (vpnState == 6) {
             // The service retries on its own; this reconnects now. It is also the
             // way in on Android TV, which has no tile and makes notification
-            // actions hard to reach. The tag is a stable key across re-renders.
-            Button reconnect = button(getString(R.string.vpn_reconnect), true);
-            reconnect.setTag("home:reconnect");
+            // actions hard to reach, so a remote lands on it first (focusTarget).
+            Button reconnect = focus(button(getString(R.string.vpn_reconnect), true), "home:reconnect");
             reconnect.setOnClickListener(v -> {
                 FreeTunnelVpnService.reconnect(this);
                 toast(getString(R.string.text_recovering_connection));
@@ -287,7 +402,7 @@ public final class MainActivity extends Activity {
             hero.addView(reconnect, lp(178, 44));
             gap(hero, 10);
         }
-        Button toggle = button(isVpnActive() ? getString(R.string.text_disconnect) : getString(R.string.text_connect), isVpnActive() && vpnState != 6);
+        Button toggle = focus(button(isVpnActive() ? getString(R.string.text_disconnect) : getString(R.string.text_connect), isVpnActive() && vpnState != 6), "home:toggle");
         toggle.setContentDescription(isVpnActive() ? getString(R.string.text_disconnect_vpn) : getString(R.string.text_connect_vpn));
         toggle.setOnClickListener(v -> connect());
         hero.addView(toggle, lp(178, 44));
@@ -308,8 +423,11 @@ public final class MainActivity extends Activity {
         validateAsync(config.toml, () -> {
             pendingConfig = config.toml;
             Intent prepare = VpnService.prepare(this);
-            if (prepare != null) startActivityForResult(prepare, PREPARE_VPN);
-            else startVpnWithPendingConfig();
+            if (prepare == null) startVpnWithPendingConfig();
+            else if (!startForResult(prepare, PREPARE_VPN)) {
+                pendingConfig = null;
+                toast(getString(R.string.text_vpn_consent_unavailable));
+            }
         }, () -> {});
     }
 
@@ -396,15 +514,15 @@ public final class MainActivity extends Activity {
     private void configs(LinearLayout body) {
         LinearLayout header = row(); header.setGravity(Gravity.CENTER);
         FrameLayout add = configHeaderButton(R.drawable.ic_add, getString(R.string.text_add_configuration));
-        add.setOnClickListener(v -> addMenu()); header.addView(add, lp(40, 32));
+        focus(add, "configs:add").setOnClickListener(v -> addMenu()); header.addView(add, lp(40, 32));
         gapHorizontal(header, 12);
         FrameLayout ping = configHeaderButton(R.drawable.ic_ping, getString(R.string.text_check_server_tcp_latency));
-        ping.setOnClickListener(v -> pingConfigs()); header.addView(ping, lp(40, 32));
+        focus(ping, "configs:ping").setOnClickListener(v -> pingConfigs()); header.addView(ping, lp(40, 32));
         body.addView(header, lp(-1, 44));
         if (configs.isEmpty()) {
             body.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
             TextView hint = label(getString(R.string.text_add_configuration), 15, textColor(), true); hint.setGravity(Gravity.CENTER);
-            hint.setOnClickListener(v -> addMenu()); body.addView(hint, lp(-1, 40));
+            focus(hint, "configs:hint").setOnClickListener(v -> addMenu()); body.addView(hint, lp(-1, 40));
             body.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
         }
         for (int i = 0; i < configs.size(); i++) {
@@ -419,11 +537,11 @@ public final class MainActivity extends Activity {
             if (pingText != null) meta.addView(label(pingText, 12, dim(), false), lp(-2, 25));
             c.addView(meta, lp(-1, 25));
             LinearLayout actions = row();
-            Button select = button(getString(R.string.text_select), false); select.setOnClickListener(v -> { activeIndex = index; saveConfigs(); applyCurrentRules(); render(); });
+            Button select = focus(button(getString(R.string.text_select), false), "config:" + i + ":select"); select.setOnClickListener(v -> { activeIndex = index; saveConfigs(); applyCurrentRules(); render(); });
             actions.addView(select, new LinearLayout.LayoutParams(0, dp(38), 1)); gapHorizontal(actions, 8);
-            Button edit = button(getString(R.string.text_edit), false); edit.setOnClickListener(v -> editConfig(index));
+            Button edit = focus(button(getString(R.string.text_edit), false), "config:" + i + ":edit"); edit.setOnClickListener(v -> editConfig(index));
             actions.addView(edit, new LinearLayout.LayoutParams(0, dp(38), 1)); gapHorizontal(actions, 8);
-            Button remove = button("✕", false); remove.setOnClickListener(v -> confirmRemove(index));
+            Button remove = focus(button("✕", false), "config:" + i + ":remove"); remove.setOnClickListener(v -> confirmRemove(index));
             actions.addView(remove, lp(42, 38)); c.addView(actions, lp(-1, 38));
             body.addView(c, lp(-1, -2));
         }
@@ -476,12 +594,10 @@ public final class MainActivity extends Activity {
     }
     private void addMenu() {
         if (storageFailed) { toast(getString(R.string.text_storage_is_unavailable_saved_data_has_been_preserved)); return; }
-        new AlertDialog.Builder(this).setTitle(getString(R.string.text_add_configuration))
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_add_configuration))
                 .setItems(new String[]{getString(R.string.text_import_toml_file), getString(R.string.text_paste_from_clipboard), getString(R.string.text_create_manually)}, (d, which) -> {
-                    if (which == 0) {
-                        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
-                        startActivityForResult(pick, PICK_CONFIG);
-                    } else if (which == 1) {
+                    if (which == 0) pickFile();
+                    else if (which == 1) {
                         ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                         ClipData clip = cm.getPrimaryClip();
                         if (clip == null || clip.getItemCount() == 0) { toast(getString(R.string.text_clipboard_is_empty)); return; }
@@ -490,7 +606,15 @@ public final class MainActivity extends Activity {
                         if (DeepLinkImport.looksLikeLink(text)) importDeepLink(text);
                         else importToml(getString(R.string.text_from_clipboard), text);
                     } else editConfig(-1);
-                }).show();
+                }));
+    }
+    // Many TVs have no document picker. Some have one for GET_CONTENT only, which
+    // onActivityResult reads the same way.
+    private void pickFile() {
+        for (String action : new String[]{Intent.ACTION_OPEN_DOCUMENT, Intent.ACTION_GET_CONTENT}) {
+            if (startForResult(new Intent(action).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), PICK_CONFIG)) return;
+        }
+        toast(getString(R.string.text_no_file_picker));
     }
     private void importDeepLink(String link) {
         final DeepLinkImport.Imported imported;
@@ -513,8 +637,8 @@ public final class MainActivity extends Activity {
     private void refuseImport(int messageResource) {
         if (messageResource == R.string.text_subscription_links_are_not_supported_yet
                 || messageResource == R.string.text_this_server_needs_a_newer_trusttunnel_core)
-            new AlertDialog.Builder(this).setTitle(getString(R.string.text_import_trusttunnel))
-                    .setMessage(getString(messageResource)).setPositiveButton(getString(R.string.text_ok), null).show();
+            show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_import_trusttunnel))
+                    .setMessage(getString(messageResource)).setPositiveButton(getString(R.string.text_ok), null));
         else toast(getString(messageResource));
     }
     // What an import left out, a line for each, each line starting with a line break.
@@ -540,12 +664,12 @@ public final class MainActivity extends Activity {
                 .filter(script -> script != Character.UnicodeScript.COMMON && script != Character.UnicodeScript.INHERITED
                         && script != Character.UnicodeScript.UNKNOWN).distinct().count() > 1)
             message += getString(R.string.text_nthe_name_mixes_similar_characters_from_different_al);
-        new AlertDialog.Builder(this).setTitle(getString(R.string.text_import_trusttunnel)).setMessage(message)
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_import_trusttunnel)).setMessage(message)
                 .setNegativeButton(getString(R.string.text_cancel), null).setPositiveButton(getString(R.string.text_add), (dialog, which) -> {
                     configs.add(new Config(name, source));
                     if (configs.size() == 1) activeIndex = 0;
                     saveConfigs(); page = 1; render();
-                }).show();
+                }));
     }
     private static String stripBom(String toml) {
         return toml.startsWith("\uFEFF") ? toml.substring(1) : toml;
@@ -568,6 +692,7 @@ public final class MainActivity extends Activity {
                 | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         raw.setTransformationMethod(PasswordTransformationMethod.getInstance());
         CheckBox show = new CheckBox(this); show.setText(getString(R.string.text_show_toml_and_password)); show.setTextColor(dialogTextColor());
+        dialogFocus(show);
         show.setOnCheckedChangeListener((b, checked) -> raw.setTransformationMethod(checked ? null : PasswordTransformationMethod.getInstance()));
         form.addView(show, lp(-1, 48));
         if (index >= 0) { name.setText(configs.get(index).name); raw.setText(configs.get(index).toml); }
@@ -580,7 +705,7 @@ public final class MainActivity extends Activity {
             validationRequest++;
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         });
-        editor.show();
+        show(editor);
         editor.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         editor.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     String n = name.getText().toString().trim();
@@ -602,21 +727,21 @@ public final class MainActivity extends Activity {
                         }
                         saveConfigs(); editor.dismiss(); applyCurrentRules(); render();
                         String notes = importNotes(checked).trim();
-                        if (!notes.isEmpty()) new AlertDialog.Builder(this).setMessage(notes)
-                                .setPositiveButton(getString(R.string.text_ok), null).show();
+                        if (!notes.isEmpty()) show(new AlertDialog.Builder(this).setMessage(notes)
+                                .setPositiveButton(getString(R.string.text_ok), null));
                     }, () -> editor.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
                 });
     }
     private void confirmRemove(int index) {
         if (storageFailed) return;
-        new AlertDialog.Builder(this).setTitle(getString(R.string.text_delete_configuration)).setMessage(configs.get(index).name)
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_delete_configuration)).setMessage(configs.get(index).name)
                 .setNegativeButton(getString(R.string.text_cancel), null).setPositiveButton(getString(R.string.text_delete), (d, w) -> {
                     boolean activeRemoved = index == activeIndex;
                     configs.remove(index);
                     if (index < activeIndex) activeIndex--;
                     activeIndex = Math.max(0, Math.min(activeIndex, configs.size() - 1));
                     saveConfigs(); if (activeRemoved) applyCurrentRules(); render();
-                }).show();
+                }));
     }
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -647,7 +772,7 @@ public final class MainActivity extends Activity {
         LinearLayout enabled = row();
         enabled.addView(label(getString(R.string.text_split_tunnelling), 14, textColor(), false),
                 new LinearLayout.LayoutParams(0, dp(42), 1));
-        Switch splitSwitch = new Switch(this); splitSwitch.setChecked(prefs.getBoolean("split_enabled", false));
+        Switch splitSwitch = focus(new Switch(this), "split:enabled"); splitSwitch.setChecked(prefs.getBoolean("split_enabled", false));
         styleSwitch(splitSwitch);
         splitSwitch.setOnCheckedChangeListener((v, checked) -> {
             prefs.edit().putBoolean("split_enabled", checked).apply();
@@ -659,10 +784,10 @@ public final class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(0, dp(42), 1));
         TextView modeValue = label(through ? getString(R.string.text_through_vpn) : getString(R.string.text_bypass_vpn), 14, dim(), false);
         mode.addView(modeValue, lp(-2, 42));
-        mode.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle(getString(R.string.text_mode))
+        focus(mode, "split:mode").setOnClickListener(v -> show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_mode))
                 .setItems(new String[]{getString(R.string.text_bypass_vpn_61), getString(R.string.text_through_vpn_62)}, (dialog, which) -> {
                     prefs.edit().putBoolean("through", which == 1).apply(); applyCurrentRules(); render();
-                }).show());
+                })));
         body.addView(mode, lp(-1, 42));
         TextView explanation = label(getString(R.string.text_for_through_vpn_choose_applications_or_addresses_sel), 12, dim(), false);
         body.addView(explanation, lp(-1, 66));
@@ -682,20 +807,22 @@ public final class MainActivity extends Activity {
         domainHeader.addView(label(through ? getString(R.string.text_rules_through_vpn) : getString(R.string.text_rules_bypass_vpn), 11, faint(), true),
                 new LinearLayout.LayoutParams(0, dp(29), 1));
         TextView clearDomains = label(getString(R.string.text_clear), 12, accent(), false);
-        clearDomains.setOnClickListener(v -> { prefs.edit().remove("domains").apply(); applyCurrentRules(); render(); });
+        focus(clearDomains, "domains:clear").setOnClickListener(v -> { prefs.edit().remove("domains").apply(); applyCurrentRules(); render(); });
         domainHeader.addView(clearDomains, lp(-2, 29)); body.addView(domainHeader, lp(-1, 29));
         Set<String> rules = new HashSet<>(prefs.getStringSet("domains", Collections.emptySet()));
         LinearLayout domains = column();
-        for (String rule : sorted(rules)) {
+        List<String> shownRules = sorted(rules);
+        for (int i = 0; i < shownRules.size(); i++) {
+            String rule = shownRules.get(i);
             LinearLayout r = row(); TextView text = label(rule, 14, textColor(), false);
             r.setBackground(shape(surface(), 13)); r.setPadding(dp(11), 0, dp(4), 0);
             r.addView(text, new LinearLayout.LayoutParams(0, dp(28), 1));
-            TextView del = label("✕", 16, dim(), false); del.setGravity(Gravity.CENTER); r.addView(del, lp(28, 28));
+            TextView del = focus(label("✕", 16, dim(), false), "domain:" + i); del.setGravity(Gravity.CENTER); r.addView(del, lp(28, 28));
             del.setOnClickListener(v -> { rules.remove(rule); prefs.edit().putStringSet("domains", rules).apply(); applyCurrentRules(); render(); });
             domains.addView(r, lp(-1, 28)); gap(domains, 6);
         }
         body.addView(domains, lp(-1, -2));
-        EditText domainInput = new EditText(this); domainInput.setSingleLine(true); domainInput.setTextSize(13);
+        EditText domainInput = focus(new EditText(this), "domains:input"); domainInput.setSingleLine(true); domainInput.setTextSize(13);
         domainInput.setTextColor(textColor()); domainInput.setHintTextColor(faint());
         domainInput.setHint(getString(R.string.text_domains_or_ips_space_comma));
         domainInput.setPadding(dp(12), 0, dp(12), 0);
@@ -709,11 +836,12 @@ public final class MainActivity extends Activity {
         appHeader.addView(label(through ? getString(R.string.text_applications_through_vpn) : getString(R.string.text_applications_bypass_vpn), 11, faint(), true),
                 new LinearLayout.LayoutParams(0, dp(29), 1));
         TextView chooseLink = label(getString(R.string.text_choose), 12, accent(), false);
-        chooseLink.setOnClickListener(v -> appPicker());
+        focus(chooseLink, "apps:choose").setOnClickListener(v -> appPicker());
         appHeader.addView(chooseLink, lp(-2, 29)); body.addView(appHeader, lp(-1, 29));
         LinearLayout apps = column();
         Set<String> selected = prefs.getStringSet("apps", Collections.emptySet());
         PackageManager pm = getPackageManager();
+        int appRows = 0;
         for (String pkg : sorted(selected)) {
             try {
                 android.content.pm.ApplicationInfo appInfo = pm.getApplicationInfo(pkg, 0);
@@ -723,7 +851,7 @@ public final class MainActivity extends Activity {
                 appRow.addView(appIcon, lp(20, 20)); gapHorizontal(appRow, 8);
                 appRow.addView(label(appInfo.loadLabel(pm).toString(), 13, textColor(), false),
                         new LinearLayout.LayoutParams(0, dp(28), 1));
-                TextView remove = label("✕", 16, dim(), false); remove.setGravity(Gravity.CENTER);
+                TextView remove = focus(label("✕", 16, dim(), false), "app:" + appRows++); remove.setGravity(Gravity.CENTER);
                 remove.setOnClickListener(v -> {
                     Set<String> next = new HashSet<>(prefs.getStringSet("apps", Collections.emptySet()));
                     next.remove(pkg); prefs.edit().putStringSet("apps", next).apply(); applyCurrentRules(); render();
@@ -734,7 +862,7 @@ public final class MainActivity extends Activity {
         body.addView(apps, lp(-1, -2));
         TextView addApp = label(getString(R.string.text_choose_installed_applications), 13, faint(), false);
         addApp.setPadding(dp(12), 0, dp(12), 0); addApp.setBackground(shape(input(), 8));
-        addApp.setOnClickListener(v -> appPicker()); body.addView(addApp, lp(-1, 36));
+        focus(addApp, "apps:add").setOnClickListener(v -> appPicker()); body.addView(addApp, lp(-1, 36));
     }
     private void addDomains(String inputText) {
         Set<String> rules = new HashSet<>(prefs.getStringSet("domains", Collections.emptySet()));
@@ -747,7 +875,9 @@ public final class MainActivity extends Activity {
     private void appPicker() {
         PackageManager pm = getPackageManager();
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> found = pm.queryIntentActivities(launcher, 0);
+        List<ResolveInfo> found = new ArrayList<>(pm.queryIntentActivities(launcher, 0));
+        // Apps made for TVs may have a TV launcher entry only. "seen" drops those with both.
+        found.addAll(pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0));
         found.sort((a, b) -> String.CASE_INSENSITIVE_ORDER.compare(a.loadLabel(pm).toString(), b.loadLabel(pm).toString()));
         Set<String> chosen = new HashSet<>(prefs.getStringSet("apps", Collections.emptySet()));
         LinearLayout list = column(); list.setPadding(dp(16), 0, dp(16), 0);
@@ -757,15 +887,15 @@ public final class MainActivity extends Activity {
             if (pkg.equals(getPackageName()) || !seen.add(pkg)) continue;
             CheckBox box = new CheckBox(this); box.setText(app.loadLabel(pm)); box.setTextColor(dialogTextColor());
             box.setButtonTintList(android.content.res.ColorStateList.valueOf(dialogSuccess()));
-            box.setChecked(chosen.contains(pkg)); box.setPadding(dp(4), dp(6), dp(4), dp(6));
+            box.setChecked(chosen.contains(pkg)); box.setPadding(dp(4), dp(6), dp(4), dp(6)); dialogFocus(box);
             box.setOnCheckedChangeListener((b, checked) -> { if (checked) chosen.add(pkg); else chosen.remove(pkg); });
             list.addView(box, lp(-1, 52));
         }
         ScrollView scroll = new ScrollView(this); scroll.addView(list);
-        new AlertDialog.Builder(this).setTitle(getString(R.string.text_choose_applications)).setView(scroll)
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_choose_applications)).setView(scroll)
                 .setNegativeButton(getString(R.string.text_cancel), null).setPositiveButton(getString(R.string.text_done), (d, w) -> {
                     prefs.edit().putStringSet("apps", chosen).apply(); applyCurrentRules(); render();
-                }).show();
+                }));
     }
 
     private void settings(LinearLayout body) {
@@ -773,26 +903,33 @@ public final class MainActivity extends Activity {
         LinearLayout appearance = row();
         appearance.addView(label(getString(R.string.text_theme), 14, textColor(), false), new LinearLayout.LayoutParams(0, dp(42), 1));
         appearance.addView(label(dark ? getString(R.string.text_dark) : getString(R.string.text_light), 14, dim(), false), lp(-2, 42));
-        appearance.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle(getString(R.string.text_theme))
+        focus(appearance, "settings:theme").setOnClickListener(v -> show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_theme))
                 .setItems(new String[]{getString(R.string.text_light_78), getString(R.string.text_dark_79)}, (d, which) -> {
                     dark = which == 1; prefs.edit().putBoolean("dark", dark).apply(); render();
-                }).show());
+                })));
         body.addView(appearance, lp(-1, 42)); separator(body);
         addSwitch(body, getString(R.string.text_connect_on_launch), "", "auto_connect", false);
         section(body, getString(R.string.text_security));
         addSwitch(body, "Kill switch", getString(R.string.text_blocks_traffic_while_reconnecting), "killswitch", true);
-        LinearLayout systemVpn = row();
-        systemVpn.addView(label(getString(R.string.text_android_vpn_settings), 14, textColor(), false),
-                new LinearLayout.LayoutParams(0, dp(48), 1));
-        systemVpn.addView(label(getString(R.string.text_open), 13, accent(), false), lp(-2, 48));
-        systemVpn.setOnClickListener(v -> {
-            try { startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)); }
-            catch (Exception e) { toast(getString(R.string.text_vpn_settings_are_unavailable)); }
-        });
-        body.addView(systemVpn, lp(-1, 48));
-        body.addView(label(getString(R.string.text_enable_always_on_vpn_and_block_connections_without_v),
-                12, dim(), false), lp(-1, 46));
-        body.addView(label(getString(R.string.lockdown_app_warning), 12, dim(), false), lp(-1, -2));
+        // Most TVs have no Always-on VPN, and no screen for it. The manifest's queries
+        // keep package visibility from hiding the screen on a phone.
+        if (getPackageManager().resolveActivity(new Intent(Settings.ACTION_VPN_SETTINGS), 0) != null) {
+            LinearLayout systemVpn = row();
+            systemVpn.addView(label(getString(R.string.text_android_vpn_settings), 14, textColor(), false),
+                    new LinearLayout.LayoutParams(0, dp(48), 1));
+            systemVpn.addView(label(getString(R.string.text_open), 13, accent(), false), lp(-2, 48));
+            // Some TVs have only a stub for it, which can still fail to open.
+            focus(systemVpn, "settings:vpn").setOnClickListener(v -> {
+                try { startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)); }
+                catch (Exception e) { toast(getString(R.string.text_vpn_settings_are_unavailable)); }
+            });
+            body.addView(systemVpn, lp(-1, 48));
+            body.addView(label(getString(R.string.text_enable_always_on_vpn_and_block_connections_without_v),
+                    12, dim(), false), lp(-1, 46));
+            body.addView(label(getString(R.string.lockdown_app_warning), 12, dim(), false), lp(-1, -2));
+        } else {
+            body.addView(label(getString(R.string.text_no_always_on_here), 12, dim(), false), lp(-1, -2));
+        }
         section(body, getString(R.string.text_log));
         addSwitch(body, getString(R.string.text_enable_logging), "", "logging", true);
         section(body, getString(R.string.update_title));
@@ -804,7 +941,7 @@ public final class MainActivity extends Activity {
             addSwitch(body, getString(R.string.update_on_launch), "", "check_updates_on_launch", false);
             updateStatus = label("", 12, dim(), false);
             body.addView(updateStatus, lp(-1, -2));
-            updateAction = label("", 14, accent(), false);
+            updateAction = focus(label("", 14, accent(), false), "settings:update");
             updateAction.setOnClickListener(v -> {
                 AndroidUpdater.State update = AndroidUpdater.INSTANCE.getState();
                 if (update == AndroidUpdater.State.AVAILABLE) AndroidUpdater.INSTANCE.download(this);
@@ -824,10 +961,10 @@ public final class MainActivity extends Activity {
     private void installUpdate() {
         vpnState = FreeTunnelVpnService.state(this);
         if (getPackageManager().canRequestPackageInstalls() && isVpnActive()) {
-            new AlertDialog.Builder(this).setTitle(getString(R.string.update_install))
+            show(new AlertDialog.Builder(this).setTitle(getString(R.string.update_install))
                     .setMessage(getString(R.string.update_disconnect_warning))
                     .setNegativeButton(getString(R.string.text_cancel), null)
-                    .setPositiveButton(getString(R.string.update_install), (d, w) -> AndroidUpdater.INSTANCE.install(this)).show();
+                    .setPositiveButton(getString(R.string.update_install), (d, w) -> AndroidUpdater.INSTANCE.install(this)));
         } else {
             AndroidUpdater.INSTANCE.install(this);
         }
@@ -874,7 +1011,7 @@ public final class MainActivity extends Activity {
         copy.addView(label(title, 14, textColor(), false), lp(-1, 23));
         if (!subtitle.isEmpty()) copy.addView(label(subtitle, 12, dim(), false), lp(-1, 22));
         r.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        Switch sw = new Switch(this); sw.setChecked(prefs.getBoolean(key, initial));
+        Switch sw = focus(new Switch(this), "switch:" + key); sw.setChecked(prefs.getBoolean(key, initial));
         styleSwitch(sw);
         sw.setOnCheckedChangeListener((v, enabled) -> {
             prefs.edit().putBoolean(key, enabled).apply();
@@ -892,9 +1029,9 @@ public final class MainActivity extends Activity {
     }
     private void logs(LinearLayout body) {
         LinearLayout actions = row();
-        TextView clear = label(getString(R.string.text_clear), 13, accent(), false);
+        TextView clear = focus(label(getString(R.string.text_clear), 13, accent(), false), "log:clear");
         actions.addView(clear, new LinearLayout.LayoutParams(0, dp(34), 1));
-        TextView copy = label(getString(R.string.text_copy), 13, accent(), false); actions.addView(copy, lp(-2, 34));
+        TextView copy = focus(label(getString(R.string.text_copy), 13, accent(), false), "log:copy"); actions.addView(copy, lp(-2, 34));
         clear.setOnClickListener(v -> {
             try { new java.io.File(getFilesDir(), "freetunnel.log").delete(); } catch (Exception ignored) { }
             render();
@@ -919,7 +1056,9 @@ public final class MainActivity extends Activity {
         TextView placeholder = label(logText, 12, logFile.exists() ? dim() : faint(), false);
         placeholder.setGravity(Gravity.TOP | Gravity.START);
         placeholder.setPadding(dp(12), dp(12), dp(12), dp(12));
-        placeholder.setTextIsSelectable(true);
+        // On a TV, selectable text would take the remote's arrows as cursor moves. Without
+        // it, Down from Clear or Copy scrolls through the log.
+        placeholder.setTextIsSelectable(!isTv());
         panel.addView(placeholder, new FrameLayout.LayoutParams(-1, -1));
         body.addView(panel, new LinearLayout.LayoutParams(-1, 0, 1));
     }
@@ -942,9 +1081,9 @@ public final class MainActivity extends Activity {
         activeIndex = Math.max(0, Math.min(activeIndex, configs.size() - 1));
     }
     private void rootStorageWarning() {
-        new AlertDialog.Builder(this).setTitle(getString(R.string.text_configurations_are_unavailable))
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_configurations_are_unavailable))
                 .setMessage(getString(R.string.text_android_could_not_read_storage_saved_data_is_unchang))
-                .setPositiveButton(getString(R.string.text_ok), null).show();
+                .setPositiveButton(getString(R.string.text_ok), null));
     }
     private void saveConfigs() {
         validationRequest++;

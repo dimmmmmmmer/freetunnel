@@ -68,7 +68,10 @@ public final class QuickTileService extends TileService {
         return state >= 1 && state <= 6;
     }
 
+    // Called on every VPN state change. Android TV has no Quick Settings, and a TV
+    // build that refuses the request must not take the app down with it.
     public static void refresh(Context context) {
-        TileService.requestListeningState(context, new ComponentName(context, QuickTileService.class));
+        try { TileService.requestListeningState(context, new ComponentName(context, QuickTileService.class)); }
+        catch (RuntimeException ignored) { }
     }
 }

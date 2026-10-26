@@ -1,9 +1,11 @@
 package org.freetunnel.android
 
+import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
@@ -69,11 +71,19 @@ class UpdateDeviceTest {
     }
     private fun androidsDialogShown() =
         instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.contains("packageinstaller") == true
+    private val isTv get() =
+        (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
     private fun cancelAndroidsDialog() {
         eventually { androidsDialogShown() }
         val root = instrumentation.uiAutomation.rootInActiveWindow!!
         val cancel = (root.findAccessibilityNodeInfosByText("Cancel") + root.findAccessibilityNodeInfosByText("CANCEL") +
                 root.findAccessibilityNodeInfosByText("Отмена") + root.findAccessibilityNodeInfosByText("ОТМЕНА")).firstOrNull()
+        // Android TV's installer may word or lay out its dialog differently. Back
+        // cancels it just the same: the installer refuses the session as it closes.
+        if (cancel == null && isTv) {
+            assertTrue(instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
+            return
+        }
         assertNotNull("Android must offer cancellation", cancel)
         assertTrue(cancel!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
     }

@@ -156,4 +156,7 @@
     <string name="update_unofficial">Эта сборка не из официального канала, поэтому не обновляется сама. Чтобы получать обновления, установите официальный релиз с GitHub.</string>
     <string name="update_disconnect_warning">Установка заменяет FreeTunnel, поэтому VPN и kill switch выключены, пока FreeTunnel не переподключится после обновления. До этого приложения выходят в сеть без VPN, если Android не блокирует соединения без VPN.</string>
     <string name="update_allow_installs">Разрешите FreeTunnel устанавливать приложения в настройках Android (на некоторых телевизорах: «Безопасность и ограничения» › «Неизвестные источники»), затем снова нажмите «Установить обновление».</string>
+    <string name="text_no_file_picker">На этом устройстве нет выбора файлов. Вставьте ссылку из буфера или создайте конфигурацию вручную.</string>
+    <string name="text_vpn_consent_unavailable">На этом устройстве нет экрана Android для разрешения VPN-подключений, поэтому FreeTunnel не может подключиться.</string>
+    <string name="text_no_always_on_here">На этом устройстве нет постоянного VPN, поэтому kill switch защищает, только пока FreeTunnel работает.</string>
 </resources>
