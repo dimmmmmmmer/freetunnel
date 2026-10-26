@@ -265,6 +265,17 @@ destruction releases the guard. Per-app exclusions and configured bypass routes
 remain outside its scope. Use Android lockdown for protection while this app's
 process is absent; lockdown also blocks apps excluded from the VPN.
 
+While the guard holds, FreeTunnel keeps reconnecting by itself, with the desktop's
+timing: 1 s, doubling to 30 s, ±20 %, without end. Each attempt starts a new core
+on the retained TUN, with the settings that TUN was built from. A network that
+appears brings the next attempt forward to 1 s later. The delays don't run while
+the phone sleeps, and nothing wakes it. The app, the tile and the notification keep
+showing that traffic is blocked until the connection is back. One alert,
+"Connection lost — traffic is blocked", appears per episode, with Reconnect and
+Disconnect, and the home screen offers Reconnect too. The log records each reason
+once per episode. An explicit Reconnect builds a new TUN from the current settings
+and hands traffic over to it.
+
 Native configuration checks run on a worker through a private isolated service.
 Each validation process exits after unbinding, so checks cannot change the active
 VPN's process-global native options or retain the adapter's temporary native copy

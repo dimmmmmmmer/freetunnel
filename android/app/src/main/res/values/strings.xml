@@ -126,8 +126,10 @@
     <string name="invalid_routing_rule">"Invalid domain, IP or subnet. Check the entered rules."</string>
     <string name="vpn_failure_details">"%1$s. Traffic is unprotected unless Android blocks connections without VPN."</string>
     <string name="app_name">"FreeTunnel"</string>
-    <string name="vpn_traffic_blocked">Connection failed — VPN traffic is blocked</string>
+    <string name="vpn_traffic_blocked">Connection lost — traffic blocked, reconnecting…</string>
     <string name="vpn_reconnect">Reconnect</string>
+    <string name="vpn_blocked_title">Connection lost — traffic is blocked</string>
+    <string name="vpn_blocked_details">%1$s. The kill switch blocks traffic outside the VPN while FreeTunnel reconnects. Disconnect to use the network without VPN.</string>
     <string name="validating_config">Checking configuration…</string>
     <string name="config_validation_error">Configuration rejected: %1$s</string>
     <string name="legacy_rules_removed">Unsupported rules from an older preview were removed. Review your routing rules.</string>

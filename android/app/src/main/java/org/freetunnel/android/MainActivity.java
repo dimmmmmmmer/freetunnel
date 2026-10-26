@@ -273,7 +273,20 @@ public final class MainActivity extends Activity {
         TextView status = label(connectionCaption(), 13, vpnState == 2 ? success() : dim(), false);
         status.setGravity(Gravity.CENTER);
         hero.addView(status, lp(-1, 30));
-        Button toggle = button(isVpnActive() ? getString(R.string.text_disconnect) : getString(R.string.text_connect), isVpnActive());
+        if (vpnState == 6) {
+            // The service retries on its own; this reconnects now. It is also the
+            // way in on Android TV, which has no tile and makes notification
+            // actions hard to reach. The tag is a stable key across re-renders.
+            Button reconnect = button(getString(R.string.vpn_reconnect), true);
+            reconnect.setTag("home:reconnect");
+            reconnect.setOnClickListener(v -> {
+                FreeTunnelVpnService.reconnect(this);
+                toast(getString(R.string.text_recovering_connection));
+            });
+            hero.addView(reconnect, lp(178, 44));
+            gap(hero, 10);
+        }
+        Button toggle = button(isVpnActive() ? getString(R.string.text_disconnect) : getString(R.string.text_connect), isVpnActive() && vpnState != 6);
         toggle.setContentDescription(isVpnActive() ? getString(R.string.text_disconnect_vpn) : getString(R.string.text_connect_vpn));
         toggle.setOnClickListener(v -> connect());
         hero.addView(toggle, lp(178, 44));

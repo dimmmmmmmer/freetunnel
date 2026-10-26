@@ -126,8 +126,10 @@
     <string name="invalid_routing_rule">"Некорректный домен, IP или подсеть. Проверьте введённые правила."</string>
     <string name="vpn_failure_details">"%1$s. Трафик идёт без VPN, если системная блокировка без VPN выключена."</string>
     <string name="app_name">"FreeTunnel"</string>
-    <string name="vpn_traffic_blocked">Ошибка соединения — трафик VPN заблокирован</string>
+    <string name="vpn_traffic_blocked">Соединение потеряно — трафик заблокирован, переподключение…</string>
     <string name="vpn_reconnect">Переподключить</string>
+    <string name="vpn_blocked_title">Соединение потеряно — трафик заблокирован</string>
+    <string name="vpn_blocked_details">%1$s. Пока FreeTunnel переподключается, kill switch блокирует трафик вне VPN. Отключите VPN, чтобы пользоваться сетью без него.</string>
     <string name="validating_config">Проверка конфигурации…</string>
     <string name="config_validation_error">Конфигурация отклонена: %1$s</string>
     <string name="legacy_rules_removed">Удалены неподдерживаемые правила старой превью-версии. Проверьте маршрутизацию.</string>

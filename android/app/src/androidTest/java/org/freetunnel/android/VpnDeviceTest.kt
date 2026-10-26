@@ -48,8 +48,8 @@ class VpnDeviceTest {
     private fun network() = context.getSystemService(ConnectivityManager::class.java).let { cm ->
         cm.allNetworks.firstOrNull { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
     }
-    private fun eventually(condition: () -> Boolean) {
-        val deadline = SystemClock.elapsedRealtime() + 40_000
+    private fun eventually(timeoutMs: Long = 40_000, condition: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
             if (condition()) return
             SystemClock.sleep(50)
@@ -57,7 +57,7 @@ class VpnDeviceTest {
         assertTrue("Condition did not become true", condition())
     }
     @Before fun setup() {
-        context.getSystemService(android.app.NotificationManager::class.java).cancel(48)
+        context.getSystemService(android.app.NotificationManager::class.java).run { cancel(48); cancel(49) }
         oldPreferences = prefs.all
         prefs.edit().clear().putBoolean("logging", false).commit()
     }
@@ -192,6 +192,46 @@ class VpnDeviceTest {
             as? com.adguard.trusttunnel.VpnClient
     }
 
+    private fun alert(id: Int) = context.getSystemService(android.app.NotificationManager::class.java)
+        .activeNotifications.firstOrNull { it.id == id }
+    private fun tunName() = network()?.let { context.getSystemService(ConnectivityManager::class.java).getLinkProperties(it)?.interfaceName }
+    private fun useBackoff(backoff: ReconnectBackoff) = FreeTunnelVpnService::class.java.getDeclaredField("backoff")
+        .apply { isAccessible = true }.set(serviceOwner(), backoff)
+    // Runs block against a local server that accepts and never answers, so the
+    // real core hangs in its TLS handshake instead of failing at once.
+    private fun withSink(block: (config: String) -> Unit) {
+        assertNull("Grant ACTIVATE_VPN before running device tests", VpnService.prepare(context))
+        val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val sockets = ConcurrentLinkedQueue<Socket>()
+        val accepting = thread(isDaemon = true) { runCatching { while (!sink.isClosed) sockets.add(sink.accept()) } }
+        try {
+            block(source.replace("192.0.2.1:443", "127.0.0.1:${sink.localPort}"))
+        } finally {
+            FreeTunnelVpnService.stop(context)
+            sink.close(); accepting.join(500); sockets.forEach { it.close() }
+        }
+    }
+    // Runs block while sampling network() every 20 ms, and returns how often
+    // there was no VPN network.
+    private fun tunGaps(block: () -> Unit): Int {
+        val gaps = java.util.concurrent.atomic.AtomicInteger()
+        val sampling = java.util.concurrent.atomic.AtomicBoolean(true)
+        val sampler = thread(isDaemon = true) {
+            while (sampling.get()) { if (network() == null) gaps.incrementAndGet(); SystemClock.sleep(20) }
+        }
+        try { block() } finally { sampling.set(false); sampler.join() }
+        return gaps.get()
+    }
+    private fun recordStates(): Pair<ConcurrentLinkedQueue<Int>, android.content.BroadcastReceiver> {
+        val states = ConcurrentLinkedQueue<Int>()
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) { states.add(FreeTunnelVpnService.state(context)) }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter(FreeTunnelVpnService.ACTION_STATE),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        return states to receiver
+    }
+
     @Test fun fatalNativeDisconnectRetainsGuardAndExplicitStopReleasesIt() {
         FreeTunnelVpnService.start(context, source)
         eventually { network() != null && nativeClient() != null }
@@ -200,6 +240,7 @@ class VpnDeviceTest {
         active.onStateChanged(0)
         eventually { FreeTunnelVpnService.state(context) == 6 }
         assertNotNull(network())
+        eventually { alert(49) != null }
         val notification = context.getSystemService(android.app.NotificationManager::class.java)
             .activeNotifications.first { it.id == 47 }.notification
         assertEquals(2, notification.actions.size)
@@ -209,6 +250,108 @@ class VpnDeviceTest {
         assertNotNull("Rejected settings must retain the blocking guard", network())
         FreeTunnelVpnService.stop(context)
         eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
+        eventually { alert(49) == null && serviceOwner() == null }
+        // Longer than the first retry delay: no attempt may outlive a stop.
+        SystemClock.sleep(1_500)
+        assertNull(network())
+        assertNull(serviceOwner())
+    }
+
+    @Test fun fatalDisconnectReconnectsAutomaticallyOnTheKeptTun() = withSink { config ->
+        prefs.edit().putBoolean("logging", true).commit()
+        val log = java.io.File(context.filesDir, "freetunnel.log").apply { delete() }
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && tunName() != null && nativeClient() != null }
+        val tun = network()
+        val name = tunName()
+        val first = nativeClient()!!
+        val (states, receiver) = recordStates()
+        try {
+            val gaps = tunGaps {
+                first.onStateChanged(0)
+                eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
+                val blocked = alert(49)!!.notification
+                assertEquals("freetunnel_vpn_failure", blocked.channelId)
+                assertEquals(2, blocked.actions.size)
+                val reason = context.getString(R.string.text_connection_to_the_server_was_lost)
+                eventually { log.exists() && log.readLines().takeLast(5).any { reason in it } }
+                // The first delay is about 1 s.
+                eventually(10_000) { nativeClient().let { it != null && it !== first } }
+                val second = nativeClient()!!
+                assertEquals(tun, network())
+                assertEquals("The attempt must reuse the kept TUN, not establish one", name, tunName())
+                // A late broadcast of the first Connecting may come before the 6.
+                val blockedStates = states.toList().dropWhile { it != 6 }
+                assertTrue("The blocked state must hold through the attempt: $states",
+                    blockedStates.isNotEmpty() && blockedStates.all { it == 6 })
+                second.onStateChanged(2)
+                eventually { FreeTunnelVpnService.state(context) == 2 && alert(49) == null }
+            }
+            assertEquals("The TUN must stay up through the attempt", 0, gaps)
+            assertEquals(name, tunName())
+            assertFalse(states.contains(0))
+        } finally {
+            context.unregisterReceiver(receiver)
+            log.delete()
+        }
+    }
+
+    @Test fun networkAppearingRetriesWithoutWaitingOutTheBackoff() = withSink { config ->
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && tunName() != null && nativeClient() != null }
+        val tun = network()
+        val name = tunName()
+        useBackoff(ReconnectBackoff(600_000, 600_000))
+        nativeClient()!!.onStateChanged(0)
+        eventually { FreeTunnelVpnService.state(context) == 6 && nativeClient() == null }
+        SystemClock.sleep(2_000)
+        assertNull("The next attempt waits out the long backoff", nativeClient())
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val underlying = cm.allNetworks.firstOrNull { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == false }
+        assertNotNull("The emulator needs a network besides the VPN", underlying)
+        val availability = FreeTunnelVpnService::class.java.getDeclaredField("availability").apply { isAccessible = true }
+            .get(serviceOwner()) as ConnectivityManager.NetworkCallback
+        availability.onAvailable(underlying!!)
+        eventually(10_000) { nativeClient() != null }
+        assertEquals(6, FreeTunnelVpnService.state(context))
+        assertEquals(tun, network())
+        assertEquals(name, tunName())
+    }
+
+    @Test fun blockedHomeScreenOffersReconnect() = withSink { config ->
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && tunName() != null && nativeClient() != null }
+        // Only the button may start the next connection here.
+        useBackoff(ReconnectBackoff(600_000, 600_000))
+        nativeClient()!!.onStateChanged(0)
+        eventually { FreeTunnelVpnService.state(context) == 6 }
+        val name = tunName()
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        fun reconnectButton(): android.widget.Button? {
+            var found: android.widget.Button? = null
+            instrumentation.runOnMainSync { found = activity.window.decorView.findViewWithTag("home:reconnect") }
+            return found
+        }
+        val (states, receiver) = recordStates()
+        try {
+            instrumentation.waitForIdleSync()
+            val button = reconnectButton()
+            assertNotNull("State 6 must offer Reconnect on the home screen", button)
+            assertEquals(context.getString(R.string.vpn_reconnect), button!!.text.toString())
+            val gaps = tunGaps {
+                instrumentation.runOnMainSync { assertTrue(button.performClick()) }
+                // An explicit Reconnect establishes a new TUN. Android hands the
+                // same VPN network over to it, so the interface is what changes.
+                eventually { tunName().let { it != null && it != name } }
+                eventually { reconnectButton() == null }
+            }
+            assertEquals("The explicit Reconnect must hand over without a gap", 0, gaps)
+            assertNotEquals(0, FreeTunnelVpnService.state(context))
+            assertFalse("Reconnect must never publish disconnected", states.contains(0))
+        } finally {
+            context.unregisterReceiver(receiver)
+            instrumentation.runOnMainSync { activity.finish() }
+        }
     }
 
     @Test fun fatalNativeDisconnectWithoutKillSwitchReleasesTun() {
