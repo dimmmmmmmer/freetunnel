@@ -790,6 +790,68 @@ QString endpointClientRandomAuthKey(const QString &toml)
 
 namespace {
 
+// Whether a line sets a key of another table without its header: dotted, as
+// `endpoint.hostname = ...`, or as an inline table, `endpoint = { ... }`.
+bool setsAKeyOfATable(const QString &line)
+{
+    const QString key = keyOf(line);
+    if (key.isEmpty())
+        return false;
+    return keyParts(key).size() > 1
+            || line.mid(line.indexOf(QLatin1Char('=')) + 1).trimmed().startsWith(QLatin1Char('{'));
+}
+
+// The endpoint's export, as parseEndpointExport() tells one: no table, no key of
+// one, and a server's four keys at the top. A line inside a value that runs on is
+// stepped over, so a certificate's text cannot pass for a key.
+bool isEndpointExport(const QString &toml)
+{
+    if (splitTomlTables(toml).size() != 1)
+        return false;
+    OpenValue open;
+    const QStringList lines = toml.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (!open.open() && setsAKeyOfATable(line))
+            return false;
+        advanceOpenValue(open, line);
+    }
+    for (const char *key : {"hostname", "addresses", "username", "password"}) {
+        if (valueStart(toml, key) < 0)
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+// Read from under [endpoint], where the endpoint means its keys to go, so each is
+// read as a client config's is, in every spelling, and the subscription address
+// is left out as it is from any config.
+std::optional<EndpointExport> parseEndpointExport(const QString &toml)
+{
+    if (!isEndpointExport(toml))
+        return std::nullopt;
+    EndpointExport out;
+    const QString wrapped = withoutSubscription(QStringLiteral("[endpoint]\n") + toml, &out.subscription);
+    out.config = parseConfigToml(wrapped);
+    const QString body = tableBody(splitTomlTables(wrapped), QStringLiteral("endpoint"));
+    // The endpoint's name for the client random. A file written by hand may use
+    // the client's own, which parseConfigToml() has read already.
+    const QString prefix = readString(body, "client_random_prefix");
+    if (!prefix.trimmed().isEmpty())
+        out.config.clientRandom = prefix;
+    out.name = readString(body, "name").trimmed();
+    out.clientRandomAuthKey = readString(body, "client_random_auth_key").trimmed();
+    // What the export holds besides the server is not carried over, as a link's
+    // unknown tags are not: the export is imported as the link with the same
+    // server would be. With no table in it, all of that is under [endpoint] now,
+    // the export's own keys among it.
+    out.config.extraEndpointKeys.clear();
+    return out;
+}
+
+namespace {
+
 // What withCertificatesOnly() writes for each line, as withoutSubscription()
 // reads them. Every [endpoint] certificate is read whole, however many lines its
 // value runs to, and written back with only its certificates, or as it was when

@@ -9,6 +9,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <optional>
+
 namespace freetunnel {
 
 struct ConfigToml {
@@ -59,6 +61,26 @@ ConfigToml parseConfigToml(const QString &toml);
 // in plain text, and FreeTunnel cannot use it yet. *removed says whether there was
 // one; the text comes back as it was when there was not.
 QString withoutSubscription(const QString &toml, bool *removed = nullptr);
+
+// What the TOML file a TrustTunnel endpoint exports for a client holds. The
+// endpoint writes the server's keys at the top, with no [endpoint] table, and
+// means the text to be pasted under one; it adds `name`, `client_random_prefix`
+// (the client random, which a client config calls `client_random`),
+// `client_random_auth_key` and `subscription_url`.
+struct EndpointExport {
+    ConfigToml config;           // the server, as read from under [endpoint]; no extra keys
+    QString name;                // trimmed; the endpoint writes "" when it has none
+    QString clientRandomAuthKey; // trimmed; "" is no key
+    bool subscription = false;   // it had a subscription address, which is not kept
+};
+
+// The export the text is, or nothing when it is not one. It is one only when it
+// has no table at all, no dotted key and no inline table, and sets hostname,
+// addresses, username and password at the top. The core reads its server from
+// [endpoint] alone, and every way of writing one - a header, a quoted header,
+// dotted keys, an inline table - fails this, so no client config is taken for
+// an export.
+std::optional<EndpointExport> parseEndpointExport(const QString &toml);
 
 // The client_random_auth_key the config's [endpoint] sets, trimmed, or empty when
 // it sets none. The endpoint's export always writes the key, as "" when its server

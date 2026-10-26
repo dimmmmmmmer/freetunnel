@@ -4,6 +4,7 @@
 
 #include "certificate_vectors.h"
 #include "core/ConfigToml.h"
+#include "endpoint_export_vectors.h"
 
 using namespace freetunnel;
 
@@ -59,6 +60,13 @@ private slots:
     void withCertificatesOnlyReadsEverySpelling();
     void withCertificatesOnlyLeavesACleanConfigAsItWas();
     void randomCertificatesKeepTheRules();
+
+    // The TOML file an endpoint exports.
+    void anEndpointExportIsRead();
+    void anEndpointExportIsReadInEverySpelling();
+    void anEndpointExportIsNeverAClientConfig_data();
+    void anEndpointExportIsNeverAClientConfig();
+    void randomTextIsNeverAnExportWithAServer();
 };
 
 // A config as TrustTunnel's endpoint exports it from 1.3.0 on, pasted under
@@ -1357,6 +1365,174 @@ void TestConfigToml::randomCertificatesKeepTheRules()
         QVERIFY(end == -1 || (content >= 2 && content <= end && end <= der.size()));
         if (freetunnel::isCertificateDer(der))
             QCOMPARE(end, der.size());
+    }
+}
+
+// ---- the endpoint's export ----------------------------------------------------
+
+// The export with the one-line key `key` taken out.
+static QString exportWithout(const char *key)
+{
+    QStringList lines = endpoint_export::text().split(QLatin1Char('\n'));
+    const QString start = QLatin1String(key) + QStringLiteral(" = ");
+    lines.removeIf([&](const QString &line) { return line.startsWith(start); });
+    return lines.join(QLatin1Char('\n'));
+}
+
+// Every key the export writes, read as the same key under [endpoint] is, and the
+// three a client config does not have: the name, the auth key and whether there
+// was a subscription address, which is not kept.
+void TestConfigToml::anEndpointExportIsRead()
+{
+    const auto exported = parseEndpointExport(endpoint_export::text());
+    QVERIFY(exported.has_value());
+    const ConfigToml &c = exported->config;
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.addresses, QStringLiteral("203.0.113.5:443, [2001:db8::5]:443"));
+    QCOMPARE(c.customSni, QString());
+    QVERIFY(c.allowIpv6);
+    QCOMPARE(c.username, QStringLiteral("alice"));
+    QCOMPARE(c.password, QStringLiteral("s3cret"));
+    QCOMPARE(c.clientRandom, QStringLiteral("aabbcc/ff00ff"));
+    QVERIFY(!c.skipVerification);
+    QCOMPARE(c.certificate, certs::kLeafPem.trimmed());
+    QCOMPARE(c.protocol, QStringLiteral("http3"));
+    QVERIFY(c.antiDpi);
+    QCOMPARE(c.dns, QStringLiteral("1.1.1.1, tls://dns.example.com"));
+    QCOMPARE(exported->name, QStringLiteral("Work VPN"));
+    QVERIFY(exported->clientRandomAuthKey.isEmpty());
+    QVERIFY(exported->subscription);
+    // Nothing besides the server is carried over: the export's own keys, the
+    // name among them, are not keys of a client config.
+    QVERIFY2(c.extraEndpointKeys.isEmpty(), qPrintable(c.extraEndpointKeys));
+    QVERIFY(c.extraRootKeys.isEmpty() && c.extraSections.isEmpty() && c.tunSection.isEmpty());
+
+    // The other value of each.
+    endpoint_export::Fields f;
+    f.hasIpv6 = false;
+    f.skipVerification = true;
+    f.antiDpi = false;
+    f.customSni = QStringLiteral("cdn.example.org");
+    f.upstreamProtocol = QStringLiteral("http2");
+    f.subscriptionUrl.clear();
+    f.name = QStringLiteral("  Branch office ");
+    f.clientRandomAuthKey = QStringLiteral(" aabbccdd ");
+    const auto other = parseEndpointExport(endpoint_export::text(f));
+    QVERIFY(other.has_value());
+    QVERIFY(!other->config.allowIpv6);
+    QVERIFY(other->config.skipVerification);
+    QVERIFY(!other->config.antiDpi);
+    QCOMPARE(other->config.customSni, QStringLiteral("cdn.example.org"));
+    QCOMPARE(other->config.protocol, QStringLiteral("http2"));
+    QVERIFY(!other->subscription);
+    QCOMPARE(other->name, QStringLiteral("Branch office"));
+    QCOMPARE(other->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+}
+
+// A file written by hand may spell a key otherwise, and the certificate has two
+// spellings of its own: toml_edit writes a PEM read with CRLF line endings as one
+// line, with the line breaks escaped.
+void TestConfigToml::anEndpointExportIsReadInEverySpelling()
+{
+    endpoint_export::Fields f;
+    f.certificate = endpoint_export::singleLineCrlf(certs::kChainPem);
+    auto exported = parseEndpointExport(endpoint_export::text(f));
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.certificate, certs::kChainPem);
+    QCOMPARE(freetunnel::certificatesOnly(exported->config.certificate), certs::kChainPem);
+
+    // The client's own name for the client random, when the export's is empty;
+    // the export's when it has one.
+    f = endpoint_export::Fields();
+    f.clientRandomPrefix.clear();
+    exported = parseEndpointExport(endpoint_export::text(f) + QStringLiteral("client_random = \"ddee\"\n"));
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.clientRandom, QStringLiteral("ddee"));
+    exported = parseEndpointExport(endpoint_export::text() + QStringLiteral("client_random = \"ddee\"\n"));
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.clientRandom, QStringLiteral("aabbcc/ff00ff"));
+
+    // Text inside a value that runs on is not a key, however it reads, nor a
+    // table: here, a dotted key, an inline table and a header in a block.
+    const QString note = QStringLiteral("note = '''\nendpoint.hostname = \"elsewhere\"\n"
+                                        "endpoint = { hostname = \"elsewhere\" }\n[endpoint]\n'''\n");
+    exported = parseEndpointExport(note + endpoint_export::text());
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
+
+    // Quoted keys are the same keys, and CRLF line endings are line endings.
+    QString quoted = endpoint_export::text();
+    quoted.replace(QStringLiteral("\nusername = "), QStringLiteral("\n\"username\" = "));
+    quoted.replace(QLatin1Char('\n'), QStringLiteral("\r\n"));
+    exported = parseEndpointExport(quoted);
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.username, QStringLiteral("alice"));
+    QCOMPARE(exported->name, QStringLiteral("Work VPN"));
+}
+
+// The core reads its server from [endpoint] alone, and every way of writing one
+// stops a text from being an export, even beside a whole export's keys. So does
+// a server key missing, and keys that are only text inside a value.
+void TestConfigToml::anEndpointExportIsNeverAClientConfig_data()
+{
+    QTest::addColumn<QString>("toml");
+    const QString flat = endpoint_export::text();
+    QTest::newRow("[endpoint] above the keys") << QStringLiteral("[endpoint]\n") + flat;
+    QTest::newRow("[\"endpoint\"] above the keys") << QStringLiteral("[\"endpoint\"]\n") + flat;
+    QTest::newRow("[endpoint] with a comment") << QStringLiteral("[endpoint] # main server\n") + flat;
+    QTest::newRow("a table after the keys") << flat + QStringLiteral("\n[listener.tun]\nmtu_size = 1280\n");
+    QTest::newRow("a dotted endpoint key")
+            << flat + QStringLiteral("endpoint.hostname = \"elsewhere.example.com\"\n");
+    QTest::newRow("an inline endpoint table")
+            << flat + QStringLiteral("endpoint = { hostname = \"elsewhere.example.com\" }\n");
+    for (const char *key : {"hostname", "addresses", "username", "password"})
+        QTest::addRow("%s missing", key) << exportWithout(key);
+    endpoint_export::Fields noBlock;
+    noBlock.certificate = QStringLiteral("\"\"");
+    QTest::newRow("the keys only inside a block")
+            << QStringLiteral("note = '''\n") + endpoint_export::text(noBlock) + QStringLiteral("'''\n");
+}
+
+void TestConfigToml::anEndpointExportIsNeverAClientConfig()
+{
+    QFETCH(QString, toml);
+    QVERIFY(parseEndpointExport(endpoint_export::text()).has_value()); // the rows are one change each
+    QVERIFY2(!parseEndpointExport(toml).has_value(), qPrintable(toml));
+}
+
+// Pieces of exports and of client configs, in any order: whatever is read as an
+// export has no server in [endpoint] for the core to read instead, and nothing
+// crashes.
+void TestConfigToml::randomTextIsNeverAnExportWithAServer()
+{
+    bool fromEnv = false;
+    const quint32 env = qEnvironmentVariable("FT_FUZZ_SEED").toUInt(&fromEnv);
+    const quint32 seed = fromEnv ? env : 20261026u;
+    qInfo("randomTextIsNeverAnExportWithAServer: seed %u (FT_FUZZ_SEED=%u repeats it)", seed, seed);
+    QRandomGenerator rng(seed);
+    const QStringList pieces{QStringLiteral("hostname = \"h\"\n"),
+                             QStringLiteral("addresses = [\"1.2.3.4:443\"]\n"),
+                             QStringLiteral("username = \"u\"\n"),
+                             QStringLiteral("password = \"p\"\n"),
+                             QStringLiteral("[endpoint]\n"),
+                             QStringLiteral("[ \"endpoint\" ] # c\n"),
+                             QStringLiteral("[listener.tun]\n"),
+                             QStringLiteral("endpoint.hostname = \"e\"\n"),
+                             QStringLiteral("endpoint = { hostname = \"e\" }\n"),
+                             QStringLiteral("certificate = \"\"\"\n"),
+                             QStringLiteral("\"\"\"\n"),
+                             QStringLiteral("'''\n"),
+                             QStringLiteral("subscription_url = \"https://u:p@h/s\"\n"),
+                             QStringLiteral("# comment\n"),
+                             QStringLiteral("\r\n")};
+    for (int i = 0; i < 3000; ++i) {
+        QString toml;
+        const int count = rng.bounded(1, 12);
+        for (int j = 0; j < count; ++j)
+            toml += pieces.at(rng.bounded(static_cast<int>(pieces.size())));
+        const auto exported = parseEndpointExport(toml);
+        if (exported)
+            QVERIFY2(parseConfigToml(toml).addresses.isEmpty(), qPrintable(toml));
     }
 }
 
