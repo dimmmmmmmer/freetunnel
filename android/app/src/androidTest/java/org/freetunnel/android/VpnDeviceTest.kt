@@ -333,6 +333,8 @@ class VpnDeviceTest {
                     info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN != 0)
                 assertTrue("The TOML must not be copied into a full-screen keyboard",
                     info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
+                assertTrue("The keyboard must be asked not to learn from the TOML",
+                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
             }
         }
     }

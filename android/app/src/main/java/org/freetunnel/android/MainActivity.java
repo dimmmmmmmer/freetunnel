@@ -535,8 +535,10 @@ public final class MainActivity extends Activity {
         raw.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         // In landscape a keyboard can fill the screen with its own copy of the text. Ask it
         // not to go full screen, and not to copy the text if it does anyway: the copy has no
-        // password mask and is outside FLAG_SECURE.
-        raw.setImeOptions(raw.getImeOptions() | EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        // password mask and is outside FLAG_SECURE. Keyboards see ordinary text here, not a
+        // password field, so also ask them not to learn from it: the TOML holds the password.
+        raw.setImeOptions(raw.getImeOptions() | EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         raw.setTransformationMethod(PasswordTransformationMethod.getInstance());
         CheckBox show = new CheckBox(this); show.setText(getString(R.string.text_show_toml_and_password)); show.setTextColor(dialogTextColor());
         show.setOnCheckedChangeListener((b, checked) -> raw.setTransformationMethod(checked ? null : PasswordTransformationMethod.getInstance()));
