@@ -58,6 +58,7 @@ private slots:
     void renamingOnlyTheLetterCaseRenames();
     void readAccessorsRejectOutOfRangeIndexes();
     void theEditorTakesAClientRandomWithAMask();
+    void theEditorChecksEveryAddress();
     void pingsAreResetForEveryConfig();
     void theConnectConfigIsBuiltOffTheGuiThread();
     void anEditSavesTheConfigItOpenedEvenIfTheListMoved();
@@ -738,6 +739,26 @@ void TestBackendConfig::theEditorTakesAClientRandomWithAMask()
     QCOMPARE(errors.last().at(0).toString(),
              QStringLiteral("Client random must be hexadecimal in whole bytes (an even number of "
                             "digits, at most 64), optionally followed by /mask"));
+}
+
+// Every entry of the list, by the rule a subscription's address is checked by
+// (isValidEndpointAddress), and not the first one alone.
+void TestBackendConfig::theEditorChecksEveryAddress()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVariantMap f = form(QStringLiteral("Two"), QStringLiteral("pw"));
+    f[QStringLiteral("addresses")] = QStringLiteral("198.51.100.7:443, [2001:db8::1]:8443");
+    QVERIFY(backend.createConfig(f));
+    for (const QString &bad : {QStringLiteral("198.51.100.7"), QStringLiteral("198.51.100.7:443, 198.51.100.8"),
+                               QStringLiteral(":443"), QStringLiteral("198.51.100.7:0, 198.51.100.8:443")}) {
+        f[QStringLiteral("name")] = QStringLiteral("Bad");
+        f[QStringLiteral("addresses")] = bad;
+        QVERIFY2(!backend.createConfig(f), qPrintable(bad));
+    }
+    QCOMPARE(errors.count(), 4);
+    QCOMPARE(errors.last().at(0).toString(), QStringLiteral("Address must be host:port, e.g. 1.2.3.4:443"));
+    QCOMPARE(backend.configs(), QStringList{QStringLiteral("Two")});
 }
 
 QTEST_MAIN(TestBackendConfig)

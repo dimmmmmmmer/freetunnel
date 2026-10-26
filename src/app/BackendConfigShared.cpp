@@ -23,13 +23,8 @@ namespace freetunnel::backend_config {
 bool validateAddressList(const QString &addresses)
 {
     const QStringList addrs = addresses.split(QLatin1Char(','), Qt::SkipEmptyParts);
-    return std::all_of(addrs.cbegin(), addrs.cend(), [](const QString &raw) {
-        const QString a = raw.trimmed();
-        const int colon = a.lastIndexOf(QLatin1Char(':'));
-        bool portOk = false;
-        const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
-        return colon > 0 && portOk && port >= 1 && port <= 65535;
-    });
+    return std::all_of(addrs.cbegin(), addrs.cend(),
+                       [](const QString &raw) { return freetunnel::isValidEndpointAddress(raw); });
 }
 
 bool validateDnsList(const QString &dns)

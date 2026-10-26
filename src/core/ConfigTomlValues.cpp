@@ -1,8 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
-// The config values that more than the writer has to read the same way: a client
-// random as the core takes it, whether the core can use one as it is written, and
-// the servers in a DNS list. The editor and link import check with these, and
-// buildConfigToml() writes through them. Split out of ConfigToml.cpp, which had
+// The config values that more than the writer has to read the same way: an
+// address, a client random as the core takes it, whether the core can use one as
+// it is written, and the servers in a DNS list. The editor, link import and
+// subscriptions check with these, and buildConfigToml() writes through them. Split out of ConfigToml.cpp, which had
 // grown past the point where one file could be read end to end.
 //
 // And a certificate: which DER elements and PEM blocks are certificates, so the
@@ -13,6 +13,16 @@
 #include <QStringList>
 
 namespace freetunnel {
+
+// Moved here from the editor's validateAddressList(), unchanged.
+bool isValidEndpointAddress(const QString &address)
+{
+    const QString a = address.trimmed();
+    const int colon = a.lastIndexOf(QLatin1Char(':'));
+    bool portOk = false;
+    const int port = colon >= 0 ? a.mid(colon + 1).toInt(&portOk) : 0;
+    return colon > 0 && portOk && port >= 1 && port <= 65535;
+}
 
 QString clientRandomForCore(const QString &value) {
     QString v = value.trimmed();
