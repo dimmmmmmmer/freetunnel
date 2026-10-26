@@ -11,8 +11,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 svg=$root/android/art/tv-banner.svg
 out=${1:-$root/android/app/src/main/res/drawable-xhdpi/banner.png}
 
-# Without the font, librsvg falls back to another one without a word.
-if ! fc-list ':family=DejaVu Sans:style=Bold' | grep -q .; then
+# Without the font, librsvg falls back to another one without a word. The face
+# fontconfig picks is checked, not just a match: DejaVu Sans Condensed Bold also
+# lists DejaVu Sans as its family, and would give a narrower wordmark.
+if ! fc-match -f '%{file}' 'DejaVu Sans:bold' | grep -q '/DejaVuSans-Bold\.ttf$'; then
   echo "DejaVu Sans Bold is not installed" >&2
   exit 1
 fi
