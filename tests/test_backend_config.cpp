@@ -1111,6 +1111,10 @@ void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
     // of it.
     const QString keyOnly = QDir(dir).filePath(QStringLiteral("key-only.toml"));
     write(keyOnly, config(block(certs::keyPem())));
+    // A subscription address as well, which goes with the key.
+    const QString both = QDir(dir).filePath(QStringLiteral("both.toml"));
+    write(both, config(QStringLiteral("subscription_url = \"https://alice:s3cret@vpn.example.org/subscription\"\n")
+                       + block(certs::kLeafPem + certs::keyPem())));
     // A chain in one block, as 1.1.9 and earlier wrote a link's: nothing but
     // certificates, so nothing to take out.
     const QString oneBlock = QDir(dir).filePath(QStringLiteral("one-block.toml"));
@@ -1121,7 +1125,7 @@ void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
     QVERIFY(elsewhere.isValid());
     const QString theirs = QDir(elsewhere.path()).filePath(QStringLiteral("theirs.toml"));
     write(theirs, body);
-    QStringList configs{stored, keyOnly, oneBlock, theirs};
+    QStringList configs{stored, keyOnly, both, oneBlock, theirs};
 #if !defined(Q_OS_WIN)
     const QString linked = QDir(dir).filePath(QStringLiteral("linked.toml"));
     QVERIFY(QFile::link(theirs, linked));
@@ -1134,6 +1138,7 @@ void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
     QCOMPARE(backend.configs().size(), configs.size());
     QCOMPARE(readAll(stored).toUtf8(), config(block(certs::kLeafPem)));
     QCOMPARE(readAll(keyOnly).toUtf8(), config(QStringLiteral("certificate = \"\"\n")));
+    QCOMPARE(readAll(both).toUtf8(), config(block(certs::kLeafPem)));
     QCOMPARE(readAll(oneBlock).toUtf8(), chainInOneBlock);
     assertOwnerOnly(stored);
     QCOMPARE(readAll(theirs).toUtf8(), body);

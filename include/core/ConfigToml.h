@@ -115,9 +115,10 @@ QString certificatesOnly(const QString &pem, bool *dropped = nullptr);
 QByteArray certificatesDer(const QString &pem, bool *dropped = nullptr);
 
 // The text with only the certificates left in its [endpoint] certificate (see
-// certificatesOnly), and nothing else changed: the key's lines are replaced, and
-// every other line stays as the file had it, comments included. *trimmed says
-// whether anything was left out; the text comes back as it was when nothing was.
+// certificatesOnly), each one should the file set it twice, and nothing else
+// changed: the key's lines are replaced, and every other line stays as the file
+// had it, comments included. *trimmed says whether anything was left out; the
+// text comes back as it was when nothing was.
 QString withCertificatesOnly(const QString &toml, bool *trimmed = nullptr);
 
 } // namespace freetunnel

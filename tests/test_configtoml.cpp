@@ -1017,6 +1017,8 @@ void TestConfigToml::isCertificateDer_data()
     QTest::newRow("a certificate authority") << ca << true;
     QTest::newRow("a server certificate") << certs::derOf(certs::kLeafPem) << true;
     QTest::newRow("the smallest shape") << QByteArray::fromHex("300b3002050030020500030100") << true;
+    // Only the BIT STRING has to hold something; the two SEQUENCEs are the shape.
+    QTest::newRow("the shape, empty SEQUENCEs") << QByteArray::fromHex("300730003000030100") << true;
     QTest::newRow("the shape, one length byte") << certs::certShaped(200) << true;
     QTest::newRow("the shape, two length bytes") << certs::certShaped(300) << true;
     // What the link tests stood in for a certificate with before: a SEQUENCE
@@ -1120,6 +1122,7 @@ void TestConfigToml::certificatesOnly_data()
     lower.replace(QLatin1String("CERTIFICATE"), QLatin1String("certificate"));
     QTest::newRow("a label in lower case") << lower << QString() << true;
     QTest::newRow("text after the certificate") << kCaPem + QStringLiteral("see the README\n") << kCaPem << true;
+    QTest::newRow("a character after the END line") << kCaPem.chopped(1) + QStringLiteral("x") << kCaPem << true;
     QTest::newRow("text alone") << QStringLiteral("see the README") << QString() << true;
 
     // And nothing at all when there is no certificate.
@@ -1209,6 +1212,28 @@ void TestConfigToml::withCertificatesOnlyChangesOnlyTheCertificate()
             + QStringLiteral("\"\"\"\nusername = \"u\"");
     QCOMPARE(withCertificatesOnly(keyOnly, &trimmed),
              QStringLiteral("[endpoint]\nhostname = \"h\"\ncertificate = \"\"\nusername = \"u\""));
+    QVERIFY(trimmed);
+
+    // Every certificate the file sets, each with its own, and not only the one
+    // read: the core refuses a file that sets it twice, or that has two
+    // [endpoint] tables, but the copy kept here would still hold the key.
+    const auto value = [](const QString &pem) {
+        return QStringLiteral("certificate = \"\"\"\n") + pem + QStringLiteral("\"\"\"\n");
+    };
+    const QString head = QStringLiteral("[endpoint]\nhostname = \"h\"\n");
+    const QString tail = QStringLiteral("username = \"u\"\n");
+    for (const QString &between : {QString(), QStringLiteral("\n[endpoint]\n")}) {
+        const QString secondKeyed = head + value(kLeafPem) + between + value(kCaPem + keyPem()) + tail;
+        QCOMPARE(withCertificatesOnly(secondKeyed, &trimmed), head + value(kLeafPem) + between + value(kCaPem) + tail);
+        QVERIFY(trimmed);
+        const QString firstKeyed = head + value(kLeafPem + keyPem()) + between + value(kCaPem) + tail;
+        QCOMPARE(withCertificatesOnly(firstKeyed, &trimmed), head + value(kLeafPem) + between + value(kCaPem) + tail);
+        QVERIFY(trimmed);
+    }
+    // One still open where the file ends is not lost, any line of it.
+    const QString unclosed = QStringLiteral("certificate = '''\n") + kCaPem;
+    QCOMPARE(withCertificatesOnly(head + value(kLeafPem + keyPem()) + unclosed, &trimmed),
+             head + value(kLeafPem) + unclosed);
     QVERIFY(trimmed);
 }
 

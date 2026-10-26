@@ -58,6 +58,7 @@ private slots:
     void aLinkWithNoCertificateInItsCertificateIsALinkError();
     void importFileDropsAKeyFromTheCertificate();
     void importFileRefusesACertificateThatHoldsNoCertificate();
+    void importFileTakesABlankCertificate();
     void importFileKeepsAChainInOneBlock();
     void cleanupTestCase();
 };
@@ -819,10 +820,12 @@ void TestBackendDeepLinkImport::aLinkWithNoCertificateInItsCertificateIsALinkErr
 // The certificate of a file that pins its server with a combined file: the key
 // goes, and nothing else in the file changes. With a password in the file, which
 // the import then moves to the credential store and rewrites the file for; and
-// without, where the file is written as it came, but for the certificate.
+// without, where the file is written as it came, but for the certificate. And
+// with a subscription address beside it, as an endpoint's export pasted under
+// [endpoint] has, which goes too, and both are said.
 void TestBackendDeepLinkImport::importFileDropsAKeyFromTheCertificate()
 {
-    const auto body = [](bool password) {
+    const auto body = [](bool password, bool subscription) {
         QByteArray b("# from the server's admin\n"
                      "[endpoint]\n"
                      "hostname = \"keyed-file.fixture.invalid\"\n"
@@ -830,6 +833,8 @@ void TestBackendDeepLinkImport::importFileDropsAKeyFromTheCertificate()
                      "username = \"u\"\n");
         if (password)
             b.append("password = \"p\"\n");
+        if (subscription)
+            b.append("subscription_url = \"https://u:s3cret@keyed-file.fixture.invalid/subscription\"\n");
         b.append("certificate = \"\"\"\n");
         b.append((certs::kLeafPem + certs::keyPem()).toLatin1());
         b.append("\"\"\"\n"
@@ -838,34 +843,43 @@ void TestBackendDeepLinkImport::importFileDropsAKeyFromTheCertificate()
                  "port = 1080\n");
         return b;
     };
-    for (const bool password : {true, false}) {
-        const QString name = password ? QStringLiteral("keyed-with-password") : QStringLiteral("keyed-without-password");
-        const QString path = writeTempConfig(name + QStringLiteral(".toml"), body(password));
-        QVERIFY(!path.isEmpty());
+    for (const bool subscription : {false, true}) {
+        for (const bool password : {true, false}) {
+            const QString name = QStringLiteral("keyed-%1-%2")
+                                         .arg(password ? QStringLiteral("with-password") : QStringLiteral("without"),
+                                              subscription ? QStringLiteral("sub") : QStringLiteral("nosub"));
+            const QString path = writeTempConfig(name + QStringLiteral(".toml"), body(password, subscription));
+            QVERIFY(!path.isEmpty());
 
-        Backend backend;
-        QSignalSpy imported(&backend, &Backend::configImported);
-        QSignalSpy notices(&backend, &Backend::errorOccurred);
-        QVERIFY(backend.importFile(path));
-        QCOMPARE(imported.count(), 1);
-        QCOMPARE(notices.count(), 1);
-        QCOMPARE(notices.last().at(0).toString(),
-                 QStringLiteral("Config added: %1. ").arg(imported.last().at(0).toString())
-                         + freetunnel::certificateExtraIgnoredNote());
+            Backend backend;
+            QSignalSpy imported(&backend, &Backend::configImported);
+            QSignalSpy notices(&backend, &Backend::errorOccurred);
+            QVERIFY(backend.importFile(path));
+            QCOMPARE(imported.count(), 1);
+            QCOMPARE(notices.count(), 1);
+            // Both said, in the order a link's question says them.
+            QString notes = freetunnel::certificateExtraIgnoredNote();
+            if (subscription)
+                notes.prepend(freetunnel::subscriptionNotKeptNote() + QLatin1Char(' '));
+            QCOMPARE(notices.last().at(0).toString(),
+                     QStringLiteral("Config added: %1. ").arg(imported.last().at(0).toString()) + notes);
 
-        const QString onDisk = readConfigText(pathOfImported(imported));
-        QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
-        QCOMPARE(freetunnel::parseConfigToml(onDisk).certificate, certs::kLeafPem.trimmed());
-        // What else the file had is still there.
-        QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"keyed-file.fixture.invalid\"")), qPrintable(onDisk));
-        QVERIFY2(onDisk.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(onDisk));
-        QVERIFY2(onDisk.contains(QStringLiteral("[provider]")), qPrintable(onDisk));
-        // Written as it came, comment and all, when there was no password to move.
-        if (!password)
-            QVERIFY2(onDisk.startsWith(QStringLiteral("# from the server's admin\n")), qPrintable(onDisk));
-        // And the file the user picked is theirs, untouched.
-        QCOMPARE(readConfigText(path).toUtf8(), body(password));
-        QFile::remove(path);
+            const QString onDisk = readConfigText(pathOfImported(imported));
+            QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
+            QVERIFY2(!onDisk.contains(QStringLiteral("s3cret@")), qPrintable(onDisk));
+            QCOMPARE(freetunnel::parseConfigToml(onDisk).certificate, certs::kLeafPem.trimmed());
+            // What else the file had is still there.
+            QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"keyed-file.fixture.invalid\"")),
+                     qPrintable(onDisk));
+            QVERIFY2(onDisk.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(onDisk));
+            QVERIFY2(onDisk.contains(QStringLiteral("[provider]")), qPrintable(onDisk));
+            // Written as it came, comment and all, when there was no password to move.
+            if (!password)
+                QVERIFY2(onDisk.startsWith(QStringLiteral("# from the server's admin\n")), qPrintable(onDisk));
+            // And the file the user picked is theirs, untouched.
+            QCOMPARE(readConfigText(path).toUtf8(), body(password, subscription));
+            QFile::remove(path);
+        }
     }
 }
 
@@ -890,6 +904,26 @@ void TestBackendDeepLinkImport::importFileRefusesACertificateThatHoldsNoCertific
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QVERIFY(!QFileInfo::exists(QDir(base).filePath(QStringLiteral("key-only.toml"))));
     QFile::remove(path);
+}
+
+// A certificate that is blank pins nothing, as an empty one does, and is no
+// reason to refuse the file, nor anything to say.
+void TestBackendDeepLinkImport::importFileTakesABlankCertificate()
+{
+    const QList<QByteArray> blanks{"certificate = \" \"\n", "certificate = \"\"\"\n\n\n\"\"\"\n",
+                                   "certificate = '\t'\n"};
+    for (qsizetype i = 0; i < blanks.size(); ++i) {
+        const QString path =
+                writeTempConfig(QStringLiteral("blank-certificate-%1.toml").arg(i), validImportBody() + blanks.at(i));
+        QVERIFY(!path.isEmpty());
+        Backend backend;
+        QSignalSpy imported(&backend, &Backend::configImported);
+        QSignalSpy notices(&backend, &Backend::errorOccurred);
+        QVERIFY2(backend.importFile(path), blanks.at(i).constData());
+        QCOMPARE(imported.count(), 1);
+        QCOMPARE(notices.count(), 0);
+        QFile::remove(path);
+    }
 }
 
 // FreeTunnel 1.1.9 and earlier wrote a link's chain into one block, and so did

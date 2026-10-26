@@ -326,6 +326,16 @@ void TestConfigImport::aLinkWhoseCertificateHoldsNoCertificateIsDamaged() {
         QCOMPARE(why, LinkRefusal::Damaged);
         QCOMPARE(err, QStringLiteral("malformed certificate"));
     }
+
+    // A subscription with no server is refused for that first, whatever its
+    // certificate holds: there is no config to pin.
+    QString err;
+    LinkRefusal why = LinkRefusal::Damaged;
+    const QString subscriptionOnly = v2::linkFromRecords(
+            {{0x00, QByteArray(1, 2)}, {0x0E, v2::kSubscription.toUtf8()}, {0x08, certs::kPkcs8Der}});
+    QVERIFY(!prepareDeepLinkImport(subscriptionOnly, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::SubscriptionOnly);
+    QCOMPARE(err, subscriptionOnlyRefusal());
 }
 
 QTEST_MAIN(TestConfigImport)
