@@ -934,10 +934,6 @@
         <translation>Включить логирование</translation>
     </message>
     <message>
-        <source>app and VPN core share one log file</source>
-        <translation>приложение и VPN-ядро пишут в один файл</translation>
-    </message>
-    <message>
         <source>Verbose logs</source>
         <translation>Подробные логи</translation>
     </message>
@@ -960,10 +956,6 @@
     <message>
         <source>Replace</source>
         <translation>Заменить</translation>
-    </message>
-    <message>
-        <source>for every config, in addition to the routes the config excludes itself (by default, local networks and multicast)</source>
-        <translation>для всех конфигураций, в дополнение к маршрутам, которые исключает сама конфигурация (по умолчанию — локальные сети и мультикаст)</translation>
     </message>
     <message>
         <source>block traffic if the VPN drops</source>

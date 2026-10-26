@@ -122,7 +122,6 @@ private slots:
     void theLogsPageSaysWhenLoggingIsOff();
     void theUpdateLineDoesWhatItOffers();
     void restoringDefaultRoutesAsksFirst();
-    void theExcludedRoutesSayTheyAddToTheConfigsOwn();
     void theKillSwitchPortsSwitchIsBoundToItsSetting();
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
@@ -2934,26 +2933,6 @@ void TestQmlUi::restoringDefaultRoutesAsksFirst()
     QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(restore));
     QCOMPARE(m_backend.routeRestores, before);
     QVERIFY2(!m_shell.lastConfirm.isEmpty(), "Restore defaults asks before replacing the list");
-    delete root;
-}
-
-// The routes listed in Settings are added to the ones a config excludes itself,
-// never in their place, so emptying the list leaves the local networks outside
-// the tunnel all the same. The page showed the list as if it were the whole set.
-void TestQmlUi::theExcludedRoutesSayTheyAddToTheConfigsOwn()
-{
-    const QStringList routes = m_backend.excludedRoutes();
-    m_backend.setExcludedRoutes({});
-    const auto restoreRoutes = qScopeGuard([&] { m_backend.setExcludedRoutes(routes); });
-    QObject *root = loadPage("pages/SettingsPage.qml");
-    QVERIFY(root);
-    QQuickWindow window;
-    QVERIFY(showInWindow(root, window, 400, 1400));
-    auto *note = root->findChild<QQuickItem *>(QStringLiteral("excludedRoutesNote"));
-    QVERIFY(note);
-    QVERIFY2(note->isVisible(), "said with the list empty, which is when it matters");
-    QVERIFY2(note->property("text").toString().contains(QStringLiteral("in addition to")),
-             qPrintable(note->property("text").toString()));
     delete root;
 }
 
