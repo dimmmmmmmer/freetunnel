@@ -768,6 +768,43 @@ if(OpenSSL_FOUND)
 endif()
 add_test(NAME update_checker_e2e COMMAND test_update_checker_e2e -o ${CMAKE_CURRENT_BINARY_DIR}/report-update_checker_e2e.txt,txt)
 
+# The subscription fetcher against a TLS server of its own, once for each of Qt's
+# TLS backends, as FT_TEST_TLS_BACKEND picks it: they differ in what they make of
+# a pinned certificate, and the Windows runner's Qt picks OpenSSL by itself
+# while Windows users get schannel. One this system lacks is skipped, but never
+# the one its users get. The certificates are made by the openssl command when
+# the test runs, so no key is in the tree; HINTS find the OpenSSL found above
+# (Homebrew's, not macOS's LibreSSL; on Windows its own, not Git's).
+find_program(FT_TEST_OPENSSL_CLI openssl HINTS "$ENV{OPENSSL_ROOT_DIR}/bin" "${OPENSSL_INCLUDE_DIR}/../bin")
+if(NOT FT_TEST_OPENSSL_CLI AND (APPLE OR WIN32 OR DEFINED ENV{CI}))
+    message(FATAL_ERROR "test_subscription_fetcher needs the openssl command to make its certificates")
+endif()
+if(FT_TEST_OPENSSL_CLI)
+    add_executable(test_subscription_fetcher
+        test_subscription_fetcher.cpp
+        tls_test_certs.cpp
+        tls_test_certs.h
+        tls_test_server.cpp
+        tls_test_server.h
+        ../src/core/SubscriptionFetcher.cpp
+        ../include/core/SubscriptionFetcher.h
+        ../src/core/Subscription.cpp
+        ../src/core/ConfigToml.cpp
+        ../src/core/ConfigTomlValues.cpp
+    )
+    target_include_directories(test_subscription_fetcher PRIVATE . ../include ../include/core)
+    target_compile_definitions(test_subscription_fetcher PRIVATE FT_TEST_OPENSSL_CLI="${FT_TEST_OPENSSL_CLI}")
+    target_link_libraries(test_subscription_fetcher PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+    foreach(_ft_backend openssl schannel securetransport)
+        add_test(NAME subscription_fetcher_${_ft_backend} COMMAND test_subscription_fetcher
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/report-subscription_fetcher_${_ft_backend}.txt,txt)
+        set_tests_properties(subscription_fetcher_${_ft_backend} PROPERTIES
+            ENVIRONMENT "FT_TEST_TLS_BACKEND=${_ft_backend}")
+    endforeach()
+else()
+    message(STATUS "subscription_fetcher not built: it needs the openssl command")
+endif()
+
 # QtTrustTunnelClient state machine against the mock core in tests/mock_core —
 # connect/disconnect/config-switch/reconnect behavior without the native VPN
 # core. The mock include dir must come FIRST so "vpn/vpn.h", "net/*.h" and

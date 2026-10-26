@@ -125,6 +125,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     include/core/ConfigImport.h
     src/core/Subscription.cpp
     include/core/Subscription.h
+    src/core/SubscriptionFetcher.cpp
+    include/core/SubscriptionFetcher.h
     src/core/AppImagePath.cpp
     src/core/ConfigPaths.cpp
     include/core/ConfigPaths.h

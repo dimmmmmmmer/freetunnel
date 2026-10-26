@@ -1098,6 +1098,49 @@
     </message>
 </context>
 <context>
+    <name>SubscriptionFetcher</name>
+    <message>
+        <source>The subscription address is not valid</source>
+        <translation>Адрес подписки некорректен</translation>
+    </message>
+    <message>
+        <source>The config&apos;s certificate can&apos;t be read; ask your provider for a new link</source>
+        <translation>Не удаётся прочитать сертификат конфига; попросите у провайдера новую ссылку</translation>
+    </message>
+    <message>
+        <source>Couldn&apos;t update (offline?)</source>
+        <translation>Не удалось обновить (нет сети?)</translation>
+    </message>
+    <message>
+        <source>The server refused the connection</source>
+        <translation>Сервер отклонил подключение</translation>
+    </message>
+    <message>
+        <source>Certificate not trusted; ask your provider for a new link</source>
+        <translation>Сертификату нет доверия; попросите у провайдера новую ссылку</translation>
+    </message>
+    <message>
+        <source>Access denied; import a new link from your provider</source>
+        <translation>Доступ запрещён; импортируйте новую ссылку от провайдера</translation>
+    </message>
+    <message>
+        <source>This server doesn&apos;t offer updates now</source>
+        <translation>Этот сервер сейчас не предлагает обновлений</translation>
+    </message>
+    <message>
+        <source>The server sent an invalid update</source>
+        <translation>Сервер прислал некорректное обновление</translation>
+    </message>
+    <message>
+        <source>Update FreeTunnel to read this subscription</source>
+        <translation>Обновите FreeTunnel, чтобы прочитать эту подписку</translation>
+    </message>
+    <message>
+        <source>This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses</source>
+        <translation>Этой подписке нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel</translation>
+    </message>
+</context>
+<context>
     <name>UpdateChecker</name>
     <message>
         <source>Could not create the update download directory</source>
