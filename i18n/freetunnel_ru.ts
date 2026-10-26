@@ -377,6 +377,14 @@
         <source>Config added: %1.</source>
         <translation>Конфиг добавлен: %1.</translation>
     </message>
+    <message>
+        <source>The certificate must be in PEM format, as one or more BEGIN CERTIFICATE blocks</source>
+        <translation>Сертификат должен быть в формате PEM: один или несколько блоков BEGIN CERTIFICATE</translation>
+    </message>
+    <message>
+        <source>Not a valid TrustTunnel config: %1</source>
+        <translation>Это не похоже на конфиг TrustTunnel: %1</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -391,6 +399,10 @@
     <message>
         <source>Subscriptions aren&apos;t supported yet: this server won&apos;t update itself, and its subscription address isn&apos;t saved.</source>
         <translation>Подписки пока не поддерживаются: этот сервер не будет обновляться сам, а адрес подписки не сохраняется.</translation>
+    </message>
+    <message>
+        <source>Extra data in the certificate was ignored.</source>
+        <translation>Лишние данные в сертификате пропущены.</translation>
     </message>
 </context>
 <context>
@@ -627,6 +639,10 @@
     <message>
         <source>malformed version value</source>
         <translation>повреждено значение версии</translation>
+    </message>
+    <message>
+        <source>malformed certificate</source>
+        <translation>повреждён сертификат</translation>
     </message>
 </context>
 <context>

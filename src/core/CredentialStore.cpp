@@ -654,6 +654,11 @@ void sweepLegacyPlaintextStorage()
 // here. Only from the copies in the app's own folder, and not through a link: a
 // config kept elsewhere is the user's own file, which TrustTunnel's own client may
 // still read the address from.
+//
+// The same goes for whatever such a config holds beside its certificates, such as
+// a private key pasted in with them: the import keeps only the certificates now
+// (withCertificatesOnly), and the rest is taken out here, by the same rules. A
+// certificate with none left is emptied, which is what the core makes of it.
 void sweepStoredSubscriptionAddresses(const QStringList &configPaths)
 {
     const QString ownDir =
@@ -663,8 +668,10 @@ void sweepStoredSubscriptionAddresses(const QStringList &configPaths)
         if (info.absolutePath() != ownDir || info.isSymLink())
             continue;
         bool removed = false;
-        const QString kept = withoutSubscription(readConfigText(info.absoluteFilePath()), &removed);
-        if (removed)
+        bool trimmed = false;
+        const QString kept = withCertificatesOnly(
+                withoutSubscription(readConfigText(info.absoluteFilePath()), &removed), &trimmed);
+        if (removed || trimmed)
             writeConfigText(info.absoluteFilePath(), kept);
     }
 }

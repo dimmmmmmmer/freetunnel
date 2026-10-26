@@ -41,7 +41,7 @@ struct DeepLinkConfig {
     QString username;                                  // 0x05 (required)
     QString password;                                  // 0x06 (required)
     bool skipVerification = false;                     // 0x07 (default false)
-    QByteArray certificate;                            // 0x08 concatenated DER
+    QByteArray certificate;                            // 0x08 concatenated DER, as the link has it
     UpstreamProtocol upstreamProtocol = UpstreamProtocol::Http2; // 0x09
     bool antiDpi = false;                              // 0x0A (default false)
     QString clientRandomPrefix;                        // 0x0B "prefix[/mask]" (hex)
@@ -67,12 +67,21 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error =
 // with a subscription address; one without has to carry all four to parse.
 bool deepLinkHasStaticServer(const DeepLinkConfig &cfg);
 
+// The certificates among the DER elements of a certificate field (tag 0x08), one
+// after another (see isCertificateDer). *dropped says whether anything else was
+// there: an element of another kind, such as a private key, or bytes that are
+// not elements at all. parseDeepLink() keeps the field as the link has it, and
+// refuses only bytes that are not elements; the rest is what this leaves out.
+QByteArray deepLinkCertificates(const QByteArray &der, bool *dropped = nullptr);
+
 // Encode a config back into a `tt://?...` deep link (for QR export / round-trip).
 // It is always version kDeepLinkWriteVersion, and never carries tag 0x0E or 0x0F.
+// Its tag 0x08 holds the certificates alone (deepLinkCertificates).
 QString encodeDeepLink(const DeepLinkConfig &cfg);
 
 // Render the config as TrustTunnel client TOML so the normal import path can
-// consume it. Mirrors the schema produced by the create-config form.
+// consume it. Mirrors the schema produced by the create-config form. The
+// certificate holds the certificates alone, one PEM block each.
 QString deepLinkConfigToToml(const DeepLinkConfig &cfg);
 
 } // namespace freetunnel

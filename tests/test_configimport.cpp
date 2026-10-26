@@ -3,6 +3,8 @@
 
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
+#include "certificate_vectors.h"
+#include "core/ConfigToml.h"
 #include "core/DeepLink.h"
 #include "deeplink_v2_vectors.h"
 
@@ -31,7 +33,18 @@ private slots:
     void importsASelfSignedSubscriptionLink();
     void importsALinkWithTagsItDoesNotKnow();
     void aTwoVersionLinkIsRefusedForTheNewer();
+
+    // A certificate keeps only its certificates.
+    void aLinkCarryingAKeyImportsTheCertificateAlone();
+    void aLinkWhoseCertificateHoldsNoCertificateIsDamaged();
 };
+
+// A link with a whole server and the given certificate field (tag 0x08).
+static QString linkWithCertificate(const QByteArray &certificate)
+{
+    return v2::linkFromRecords({{0x00, QByteArray(1, 1)}, {0x01, "vpn.fixture.invalid"},
+                                {0x02, "1.2.3.4:443"}, {0x05, "u"}, {0x06, "p"}, {0x08, certificate}});
+}
 
 static QString makeLink(const QString &name = QString()) {
     DeepLinkConfig c;
@@ -252,6 +265,7 @@ void TestConfigImport::importsASelfSignedSubscriptionLink() {
     QVERIFY2(out.has_value(), qPrintable(err));
     QVERIFY(out->subscriptionNotKept);
     QVERIFY(!out->skipVerification);
+    QVERIFY(!out->certificateExtraIgnored);
     QVERIFY2(out->tomlContent.contains(QStringLiteral("-----BEGIN CERTIFICATE-----")),
              qPrintable(out->tomlContent));
     QVERIFY2(!out->tomlContent.contains(QStringLiteral("subscription")), qPrintable(out->tomlContent));
@@ -273,6 +287,45 @@ void TestConfigImport::aTwoVersionLinkIsRefusedForTheNewer() {
     QVERIFY(!prepareDeepLinkImport(v2::kTwoVersions, &err, &why).has_value());
     QCOMPARE(why, LinkRefusal::Damaged);
     QCOMPARE(err, QStringLiteral("unsupported deep link version 3"));
+}
+
+// A certificate field with a key beside the certificate, as a link made by hand
+// from a server's combined file can have: the config gets the certificate, and
+// the import says something was left out.
+void TestConfigImport::aLinkCarryingAKeyImportsTheCertificateAlone() {
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    QString err;
+    const auto out = prepareDeepLinkImport(linkWithCertificate(certs::kPkcs8Der + leaf), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY(out->certificateExtraIgnored);
+    QCOMPARE(out->tomlContent.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QVERIFY2(!out->tomlContent.contains(certs::keyLabel()), qPrintable(out->tomlContent));
+    QVERIFY2(!out->tomlContent.contains(QString::fromLatin1(certs::kPkcs8Der.toBase64())),
+             qPrintable(out->tomlContent));
+    QCOMPARE(certificatesDer(parseConfigToml(out->tomlContent).certificate), leaf);
+
+    // A certificate and its chain, with nothing else, is said nothing about.
+    const auto chain = prepareDeepLinkImport(linkWithCertificate(leaf + certs::derOf(certs::kCaPem)), &err);
+    QVERIFY2(chain.has_value(), qPrintable(err));
+    QVERIFY(!chain->certificateExtraIgnored);
+    QCOMPARE(chain->tomlContent.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 2);
+    // Nor is a link without one.
+    const auto plain = prepareDeepLinkImport(makeLink(), &err);
+    QVERIFY2(plain.has_value(), qPrintable(err));
+    QVERIFY(!plain->certificateExtraIgnored);
+}
+
+// The link meant to pin its server, and holds no certificate to pin it with:
+// a key alone, or bytes that are not DER at all. Imported without the pin, a
+// self-signed server would fail later, at the handshake, with nothing to say why.
+void TestConfigImport::aLinkWhoseCertificateHoldsNoCertificateIsDamaged() {
+    for (const QByteArray &field : {certs::kPkcs8Der, QByteArray::fromHex("3003020101"), QByteArray("junk")}) {
+        QString err;
+        LinkRefusal why = LinkRefusal::SubscriptionOnly;
+        QVERIFY(!prepareDeepLinkImport(linkWithCertificate(field), &err, &why).has_value());
+        QCOMPARE(why, LinkRefusal::Damaged);
+        QCOMPARE(err, QStringLiteral("malformed certificate"));
+    }
 }
 
 QTEST_MAIN(TestConfigImport)

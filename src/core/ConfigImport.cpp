@@ -34,6 +34,11 @@ QString subscriptionNotKeptNote()
                                        "itself, and its subscription address isn't saved.");
 }
 
+QString certificateExtraIgnoredNote()
+{
+    return QCoreApplication::translate("ConfigImport", "Extra data in the certificate was ignored.");
+}
+
 static std::nullopt_t refuse(LinkRefusal why, const QString &message, QString *error,
                              LinkRefusal *refusal)
 {
@@ -62,6 +67,15 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
     // its server as well imports that server, without the address (below).
     if (!cfg->subscriptionUrl.isEmpty() && !deepLinkHasStaticServer(*cfg))
         return refuse(LinkRefusal::SubscriptionOnly, subscriptionOnlyRefusal(), error, refusal);
+    // The certificates alone go into the config (deepLinkConfigToToml). A link
+    // whose certificate field holds none at all meant to pin the server all the
+    // same, and without a pin a self-signed server would fail later, at the
+    // handshake, with nothing to say why; so it is refused as damaged, as the
+    // parser refuses bytes that do not split into elements.
+    bool certificateExtra = false;
+    if (!cfg->certificate.isEmpty() && deepLinkCertificates(cfg->certificate, &certificateExtra).isEmpty())
+        return refuse(LinkRefusal::Damaged, QCoreApplication::translate("DeepLink", "malformed certificate"),
+                      error, refusal);
     QString name = cfg->name.trimmed();
     if (name.isEmpty()) {
         name = cfg->hostname.trimmed();
@@ -80,6 +94,7 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
     out.tomlContent = deepLinkConfigToToml(*cfg);
     out.skipVerification = cfg->skipVerification;
     out.subscriptionNotKept = !cfg->subscriptionUrl.isEmpty();
+    out.certificateExtraIgnored = certificateExtra;
     return out;
 }
 

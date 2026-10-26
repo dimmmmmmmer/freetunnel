@@ -38,13 +38,18 @@ inline const QString kFull = QStringLiteral(
 
 // What the endpoint exports for a server whose certificate the system does not
 // trust, which is every self-signed one, with subscriptions on: the certificate
-// goes in the link (0x08, as DER), just before the address. A one-element DER
-// sequence stands in for the certificate; the link carries the bytes as they are.
+// goes in the link (0x08, as DER), just before the address. The smallest DER with
+// a certificate's outer shape stands in for one: SEQUENCE { SEQUENCE { NULL },
+// SEQUENCE { NULL }, BIT STRING 00 } (see isCertificateDer). It used to be a
+// SEQUENCE holding an INTEGER, which a private key's DER looks like as much as a
+// certificate's, and the import keeps certificates alone. Android's link tests
+// are to carry this same link, so a change here goes there too.
 // 00 01 02 | 01 vpn.example.com | 05 alice | 06 s3cret | 02 1.2.3.4:443
-// | 08 05 30 03 02 01 01 | 0e 31 kSubscription
+// | 08 0d 30 0b 30 02 05 00 30 02 05 00 03 01 00 | 0e 31 kSubscription
+inline const QByteArray kSelfSignedCertificate = QByteArray::fromHex("300b3002050030020500030100");
 inline const QString kSelfSigned = QStringLiteral(
-        "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzM2NyZXQCCzEuMi4zLjQ6NDQzCAUwAwIBAQ4xaHR0cHM6Ly9hbGljZT"
-        "pzM2NyZXRAdnBuLmV4YW1wbGUuY29tL3N1YnNjcmlwdGlvbg");
+        "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzM2NyZXQCCzEuMi4zLjQ6NDQzCA0wCzACBQAwAgUAAwEADjFodHRwczov"
+        "L2FsaWNlOnMzY3JldEB2cG4uZXhhbXBsZS5jb20vc3Vic2NyaXB0aW9u");
 
 // --subscription-only: tags 0x00 and 0x0E and nothing else, the payload the
 // endpoint's test_encode_tlv_payload_subscription_only pins.

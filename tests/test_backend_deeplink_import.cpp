@@ -14,8 +14,10 @@
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
+#include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+#include "certificate_vectors.h"
 #include "deeplink_v2_vectors.h"
 
 class TestBackendDeepLinkImport : public QObject {
@@ -50,6 +52,12 @@ private slots:
     void importFileRefusesAServerThatNeedsAnAuthKey();
     void importFileTakesAnEmptyAuthKey();
     void importFileLeavesTheSubscriptionOut();
+
+    // A certificate keeps only its certificates.
+    void aLinkWithAKeyInItsCertificateSaysSoInTheQuestion();
+    void aLinkWithNoCertificateInItsCertificateIsALinkError();
+    void importFileDropsAKeyFromTheCertificate();
+    void importFileRefusesACertificateThatHoldsNoCertificate();
     void cleanupTestCase();
 };
 
@@ -752,6 +760,134 @@ void TestBackendDeepLinkImport::importFileLeavesTheSubscriptionOut()
              QStringLiteral("Config added: %1. It turns off server certificate verification. ")
                              .arg(imported.last().at(0).toString())
                      + freetunnel::subscriptionNotKeptNote());
+    QFile::remove(path);
+}
+
+// A link with a whole server and the given certificate field (tag 0x08).
+static QString linkWithCertificate(const QByteArray &certificate)
+{
+    return v2::linkFromRecords({{0x00, QByteArray(1, 1)}, {0x01, "keyed.fixture.invalid"},
+                                {0x02, "203.0.113.30:443"}, {0x05, "u"}, {0x06, "p"},
+                                {0x0C, "Keyed"}, {0x08, certificate}});
+}
+
+// A link whose certificate has a key beside it says, before anything is added,
+// that something was left out; what is added has the certificate alone.
+void TestBackendDeepLinkImport::aLinkWithAKeyInItsCertificateSaysSoInTheQuestion()
+{
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    const QString link = linkWithCertificate(leaf + certs::kPkcs8Der);
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importDeepLink(link));
+    QCOMPARE(confirmSpy.count(), 1);
+    const QStringList lines = confirmSpy.last().at(0).toString().split(QLatin1Char('\n'));
+    QVERIFY2(lines.contains(freetunnel::certificateExtraIgnoredNote()), qPrintable(lines.join('|')));
+    QVERIFY2(lines.contains(QStringLiteral("Server: keyed.fixture.invalid")), qPrintable(lines.join('|')));
+
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(link));
+    QCOMPARE(imported.count(), 1);
+    const QString onDisk = readConfigText(pathOfImported(imported));
+    QCOMPARE(onDisk.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
+    QCOMPARE(freetunnel::certificatesDer(freetunnel::parseConfigToml(onDisk).certificate), leaf);
+
+    // A link with the certificate alone is told nothing about it.
+    QVERIFY(!backend.importDeepLink(linkWithCertificate(leaf)));
+    QVERIFY2(!confirmSpy.last().at(0).toString().contains(freetunnel::certificateExtraIgnoredNote()),
+             qPrintable(confirmSpy.last().at(0).toString()));
+}
+
+// Nothing to pin with: refused before anything is asked, as a damaged link is.
+void TestBackendDeepLinkImport::aLinkWithNoCertificateInItsCertificateIsALinkError()
+{
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importDeepLink(linkWithCertificate(certs::kPkcs8Der)));
+    QCOMPARE(confirmSpy.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("Link error: malformed certificate"));
+    QVERIFY(!backend.confirmDeepLinkImport(linkWithCertificate(certs::kPkcs8Der)));
+    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("Link error: malformed certificate"));
+    QCOMPARE(backend.configs().size(), before);
+}
+
+// The certificate of a file that pins its server with a combined file: the key
+// goes, and nothing else in the file changes. With a password in the file, which
+// the import then moves to the credential store and rewrites the file for; and
+// without, where the file is written as it came, but for the certificate.
+void TestBackendDeepLinkImport::importFileDropsAKeyFromTheCertificate()
+{
+    const auto body = [](bool password) {
+        QByteArray b("# from the server's admin\n"
+                     "[endpoint]\n"
+                     "hostname = \"keyed-file.fixture.invalid\"\n"
+                     "addresses = [\"203.0.113.31:443\"]\n"
+                     "username = \"u\"\n");
+        if (password)
+            b.append("password = \"p\"\n");
+        b.append("certificate = \"\"\"\n");
+        b.append((certs::kLeafPem + certs::keyPem()).toLatin1());
+        b.append("\"\"\"\n"
+                 "provider_tag = \"gold\"\n"
+                 "\n[provider]\n"
+                 "port = 1080\n");
+        return b;
+    };
+    for (const bool password : {true, false}) {
+        const QString name = password ? QStringLiteral("keyed-with-password") : QStringLiteral("keyed-without-password");
+        const QString path = writeTempConfig(name + QStringLiteral(".toml"), body(password));
+        QVERIFY(!path.isEmpty());
+
+        Backend backend;
+        QSignalSpy imported(&backend, &Backend::configImported);
+        QSignalSpy notices(&backend, &Backend::errorOccurred);
+        QVERIFY(backend.importFile(path));
+        QCOMPARE(imported.count(), 1);
+        QCOMPARE(notices.count(), 1);
+        QCOMPARE(notices.last().at(0).toString(),
+                 QStringLiteral("Config added: %1. ").arg(imported.last().at(0).toString())
+                         + freetunnel::certificateExtraIgnoredNote());
+
+        const QString onDisk = readConfigText(pathOfImported(imported));
+        QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
+        QCOMPARE(freetunnel::parseConfigToml(onDisk).certificate, certs::kLeafPem.trimmed());
+        // What else the file had is still there.
+        QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"keyed-file.fixture.invalid\"")), qPrintable(onDisk));
+        QVERIFY2(onDisk.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(onDisk));
+        QVERIFY2(onDisk.contains(QStringLiteral("[provider]")), qPrintable(onDisk));
+        // Written as it came, comment and all, when there was no password to move.
+        if (!password)
+            QVERIFY2(onDisk.startsWith(QStringLiteral("# from the server's admin\n")), qPrintable(onDisk));
+        // And the file the user picked is theirs, untouched.
+        QCOMPARE(readConfigText(path).toUtf8(), body(password));
+        QFile::remove(path);
+    }
+}
+
+// A file whose certificate is a key alone, or anything else that holds no
+// certificate, meant to pin its server and cannot. It is refused, as a link is.
+void TestBackendDeepLinkImport::importFileRefusesACertificateThatHoldsNoCertificate()
+{
+    QByteArray body = validImportBody();
+    body.append("certificate = \"\"\"\n");
+    body.append(certs::keyPem().toLatin1());
+    body.append("\"\"\"\n");
+    const QString path = writeTempConfig(QStringLiteral("key-only.toml"), body);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("Not a valid TrustTunnel config: malformed certificate"));
+    QCOMPARE(backend.configs().size(), before);
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QVERIFY(!QFileInfo::exists(QDir(base).filePath(QStringLiteral("key-only.toml"))));
     QFile::remove(path);
 }
 

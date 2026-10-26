@@ -27,6 +27,8 @@
 
 #include "app/Backend.h"
 #include "app/BackendConfigShared.h"
+#include "certificate_vectors.h"
+#include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
@@ -65,6 +67,11 @@ private slots:
     void aProxyListenerIsNotKeptBesideTheTunnel();
     void renamingAConfigKeptElsewhereLeavesTheOriginal();
     void aStoredSubscriptionAddressIsTakenOutAtStart();
+    void aStoredKeyIsTakenOutAtStart();
+    void theEditorSavesOnlyTheCertificates();
+    void theEditorRefusesACertificateWithNoCertificate();
+    void aShareLinkNeverCarriesAKey();
+    void aTomlExportNeverCarriesAKey();
     void aFailedCommitPutsThePreviousPasswordBack();
     void aFailedEditSaveKeepsTheStoredPassword();
     void aRefusedCertificateFileIsExplained();
@@ -1064,6 +1071,168 @@ void TestBackendConfig::aStoredSubscriptionAddressIsTakenOutAtStart()
 #if !defined(Q_OS_WIN)
     QVERIFY(QFileInfo(linked).isSymLink());
 #endif
+}
+
+// Before the import kept only the certificates, a certificate pasted or imported
+// with its private key beside it was stored as it came, and went out with every
+// link and export made from the config. The next start takes the key out, by the
+// sweep's rules: from the copies in the app's own folder alone, never through a
+// link, and nothing else in the file changes.
+void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
+{
+    const auto config = [](const QString &certificate) {
+        return (QStringLiteral("# my work server\n"
+                               "[endpoint]\n"
+                               "hostname = \"vpn.example.org\"\n"
+                               "addresses = [\"198.51.100.7:443\"]\n"
+                               "username = \"alice\"\n"
+                               "password = \"\"\n")
+                + certificate
+                + QStringLiteral("custom_sni = \"\"\n"
+                                 "\n"
+                                 "[listener.tun]\n"
+                                 "mtu_size = 1500\n"))
+                .toUtf8();
+    };
+    const auto block = [](const QString &pem) {
+        return QStringLiteral("certificate = \"\"\"\n") + pem + QStringLiteral("\"\"\"\n");
+    };
+    const QByteArray body = config(block(certs::kLeafPem + certs::keyPem()));
+    const auto write = [](const QString &path, const QByteArray &bytes) {
+        QFile out(path);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        QCOMPARE(out.write(bytes), bytes.size());
+    };
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString stored = QDir(dir).filePath(QStringLiteral("work.toml"));
+    write(stored, body);
+    // A key alone, with no certificate to keep: no certificate, as the core made
+    // of it.
+    const QString keyOnly = QDir(dir).filePath(QStringLiteral("key-only.toml"));
+    write(keyOnly, config(block(certs::keyPem())));
+    QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    const QString theirs = QDir(elsewhere.path()).filePath(QStringLiteral("theirs.toml"));
+    write(theirs, body);
+    QStringList configs{stored, keyOnly, theirs};
+#if !defined(Q_OS_WIN)
+    const QString linked = QDir(dir).filePath(QStringLiteral("linked.toml"));
+    QVERIFY(QFile::link(theirs, linked));
+    const auto unlink = qScopeGuard([&linked] { QFile::remove(linked); });
+    configs << linked;
+#endif
+    saveStoredConfigs(configs);
+
+    Backend backend;
+    QCOMPARE(backend.configs().size(), configs.size());
+    QCOMPARE(readAll(stored).toUtf8(), config(block(certs::kLeafPem)));
+    QCOMPARE(readAll(keyOnly).toUtf8(), config(QStringLiteral("certificate = \"\"\n")));
+    assertOwnerOnly(stored);
+    QCOMPARE(readAll(theirs).toUtf8(), body);
+#if !defined(Q_OS_WIN)
+    QVERIFY(QFileInfo(linked).isSymLink());
+#endif
+}
+
+// A file that combines the certificate with its private key is pasted into the
+// editor as readily as the certificate alone. The key is not saved, and the
+// editor says so once the config is.
+void TestBackendConfig::theEditorSavesOnlyTheCertificates()
+{
+    Backend backend;
+    QSignalSpy notices(&backend, &Backend::errorOccurred);
+    QVariantMap f = form(QStringLiteral("Pinned"), QStringLiteral("hunter2"));
+    f[QStringLiteral("certificate")] = certs::kBagAttributes + certs::kLeafPem + certs::keyPem();
+    QVERIFY(backend.createConfig(f));
+    QCOMPARE(notices.count(), 1);
+    QCOMPARE(notices.last().at(0).toString(), freetunnel::certificateExtraIgnoredNote());
+    const QString onDisk = readAll(pathFor(backend, 0));
+    QVERIFY2(!onDisk.contains(certs::keyLabel()), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("Bag Attributes")), qPrintable(onDisk));
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("certificate")).toString(), certs::kLeafPem.trimmed());
+
+    // Certificates alone are saved as they are, with nothing to say.
+    QVariantMap chain = editorForm(backend, 0);
+    chain[QStringLiteral("certificate")] = certs::kChainPem;
+    QVERIFY(backend.createConfig(chain));
+    QCOMPARE(notices.count(), 1);
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("certificate")).toString(), certs::kChainPem.trimmed());
+}
+
+// A certificate field with no certificate in it is refused, and says what a
+// certificate looks like: saved as no certificate, the pin the user meant to set
+// would be quietly gone. An empty field is no certificate, as before.
+void TestBackendConfig::theEditorRefusesACertificateWithNoCertificate()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    const QStringList refused{certs::keyPem(), QStringLiteral("TEST"),
+                              certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der)};
+    for (const QString &certificate : refused) {
+        QVariantMap f = form(QStringLiteral("Refused"), QStringLiteral("hunter2"));
+        f[QStringLiteral("certificate")] = certificate;
+        QVERIFY(!backend.createConfig(f));
+        QCOMPARE(errors.last().at(0).toString(),
+                 QStringLiteral("The certificate must be in PEM format, as one or more BEGIN CERTIFICATE blocks"));
+    }
+    QCOMPARE(errors.count(), refused.size());
+    QVERIFY(backend.configs().isEmpty());
+
+    QVariantMap blank = form(QStringLiteral("Unpinned"), QStringLiteral("hunter2"));
+    blank[QStringLiteral("certificate")] = QStringLiteral(" \n");
+    QVERIFY(backend.createConfig(blank));
+    QCOMPARE(errors.count(), refused.size());
+}
+
+// Written past the editor, the way a config kept outside the app's folder, which
+// is never cleaned at start, can still be: a key under the certificate label, and
+// a key block of its own, beside the certificate.
+static void putAKeyInTheCertificate(const QString &path)
+{
+    QFile in(path);
+    QVERIFY(in.open(QIODevice::ReadOnly));
+    QString text = QString::fromUtf8(in.readAll());
+    in.close();
+    const QString certificate = certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der) + certs::kLeafPem
+            + certs::keyPem();
+    QVERIFY(text.contains(QStringLiteral("certificate = \"\"\n")));
+    text.replace(QStringLiteral("certificate = \"\"\n"),
+                 QStringLiteral("certificate = \"\"\"\n") + certificate + QStringLiteral("\"\"\"\n"));
+    QFile out(path);
+    QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    out.write(text.toUtf8());
+}
+
+// A link is made to be handed on: it carries the certificate alone.
+void TestBackendConfig::aShareLinkNeverCarriesAKey()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
+    putAKeyInTheCertificate(pathFor(backend, 0));
+
+    QString err;
+    const auto dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->certificate, certs::derOf(certs::kLeafPem));
+    QCOMPARE(dl->password, QStringLiteral("hunter2"));
+}
+
+// So is an export.
+void TestBackendConfig::aTomlExportNeverCarriesAKey()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
+    putAKeyInTheCertificate(pathFor(backend, 0));
+
+    const QString dest = QDir(m_home.path()).filePath(QStringLiteral("exported.toml"));
+    QFile::remove(dest);
+    QVERIFY(backend.exportConfigToml(0, dest));
+    const QString exported = readAll(dest);
+    QFile::remove(dest);
+    QVERIFY2(!exported.contains(certs::keyLabel()), qPrintable(exported));
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(exported);
+    QCOMPARE(c.certificate, certs::kLeafPem.trimmed());
+    QCOMPARE(c.password, QStringLiteral("hunter2"));
 }
 
 // The editor keeps its certificate field when a pick reads nothing, so the

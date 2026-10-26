@@ -2,6 +2,7 @@
 #include "app/Backend.h"
 
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -58,6 +59,28 @@ bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bo
     return true;
 }
 
+// A link says these in its question, before anything is added. A file the user
+// picked is added at once, and said nothing: this notice takes the place of the
+// "Config added" one. Empty when there is nothing to say. Split out of
+// importFile().
+static QString importedFileNotice(const QString &name, bool skipVerification, bool subscriptionRemoved,
+                                  bool certificateTrimmed)
+{
+    QString notice;
+    if (skipVerification)
+        notice = Backend::tr("Config added: %1. It turns off server certificate verification.").arg(name);
+    QStringList notes;
+    if (subscriptionRemoved)
+        notes << freetunnel::subscriptionNotKeptNote();
+    if (certificateTrimmed)
+        notes << freetunnel::certificateExtraIgnoredNote();
+    if (notes.isEmpty())
+        return notice;
+    if (notice.isEmpty())
+        notice = Backend::tr("Config added: %1.").arg(name);
+    return notice + QLatin1Char(' ') + notes.join(QLatin1Char(' '));
+}
+
 bool Backend::importFile(const QString &path)
 {
     QString p = path;
@@ -74,6 +97,9 @@ bool Backend::importFile(const QString &path)
             emit errorOccurred(tr("Could not read the file"));
         else if (importErr == QLatin1String("authkey"))
             emit errorOccurred(freetunnel::newerCoreRefusal());
+        else if (importErr == QLatin1String("certificate"))
+            emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
+                                       .arg(QCoreApplication::translate("DeepLink", "malformed certificate")));
         else
             emit errorOccurred(tr("Not a valid TrustTunnel config (missing address or credentials)"));
         return false;
@@ -83,6 +109,12 @@ bool Backend::importFile(const QString &path)
     // credential store: kept, the address would stay on disk as the file had it.
     bool subscriptionRemoved = false;
     content = freetunnel::withoutSubscription(content, &subscriptionRemoved);
+    // And the certificate keeps only its certificates. A file that combines the
+    // certificate with its private key is as easy to pick as the certificate
+    // alone, and the key would be stored, then shared with every link and export
+    // made from the config. Only those lines change.
+    bool certificateTrimmed = false;
+    content = freetunnel::withCertificatesOnly(content, &certificateTrimmed);
     QString target;
     if (!freetunnel::backend_config::copyImportIntoAppConfigDir(content, p, &target)) {
         emit errorOccurred(tr("Could not write config"));
@@ -90,19 +122,9 @@ bool Backend::importFile(const QString &path)
     }
     if (!finalizeImportedConfig(target, m_activePath.isEmpty()))
         return false;
-    // A link says these in its question, before anything is added. A file the
-    // user picked is added at once, and said nothing: this notice takes the place
-    // of the "Config added" one.
-    QString notice;
-    if (freetunnel::parseConfigToml(content).skipVerification) {
-        notice = tr("Config added: %1. It turns off server certificate verification.")
-                         .arg(nameForPath(target));
-    }
-    if (subscriptionRemoved) {
-        if (notice.isEmpty())
-            notice = tr("Config added: %1.").arg(nameForPath(target));
-        notice += QLatin1Char(' ') + freetunnel::subscriptionNotKeptNote();
-    }
+    const bool skipVerification = freetunnel::parseConfigToml(content).skipVerification;
+    const QString notice =
+            importedFileNotice(nameForPath(target), skipVerification, subscriptionRemoved, certificateTrimmed);
     if (!notice.isEmpty())
         emit errorOccurred(notice);
     return true;
@@ -253,6 +275,10 @@ bool Backend::importDeepLink(const QString &link)
     // to keep it up to date.
     if (prepared->subscriptionNotKept)
         lines << freetunnel::subscriptionNotKeptNote();
+    // The link's certificate came with something else, such as a private key,
+    // which the config will not have.
+    if (prepared->certificateExtraIgnored)
+        lines << freetunnel::certificateExtraIgnoredNote();
     const QString message = lines.join(QLatin1Char('\n'));
 
     emit deepLinkImportConfirmationRequired(message, link, existingName);

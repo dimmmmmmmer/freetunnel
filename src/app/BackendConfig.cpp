@@ -36,22 +36,6 @@ QString firstAddress(const QString &path)
     return m.hasMatch() ? m.captured(1) : QString();
 }
 
-QByteArray pemCertsToDer(const QString &pem)
-{
-    QByteArray der;
-    static const QRegularExpression block(
-            QStringLiteral("-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----"),
-            QRegularExpression::DotMatchesEverythingOption);
-    static const QRegularExpression ws(QStringLiteral("\\s"));
-    auto it = block.globalMatch(pem);
-    while (it.hasNext()) {
-        QString b64 = it.next().captured(1);
-        b64.remove(ws);
-        der += QByteArray::fromBase64(b64.toLatin1());
-    }
-    return der;
-}
-
 } // namespace
 
 void Backend::markConfigPingFailed(int index)
@@ -238,7 +222,10 @@ QString Backend::configDeepLink(int index) const
             freetunnel::CredentialStore::keyForConfigPath(path));
     if (dl.password.isEmpty())
         dl.password = c.password;
-    dl.certificate = pemCertsToDer(c.certificate);
+    // The certificates alone, as the import keeps them. A config kept outside the
+    // app's folder is never cleaned at start, and can still hold a private key
+    // beside its certificate; a link is made to be handed on.
+    dl.certificate = freetunnel::certificatesDer(c.certificate);
     dl.upstreamProtocol = c.protocol == QLatin1String("http3")
             ? freetunnel::UpstreamProtocol::Http3 : freetunnel::UpstreamProtocol::Http2;
     dl.clientRandomPrefix = c.clientRandom;
@@ -264,6 +251,9 @@ bool Backend::exportConfigToml(int index, const QString &fileUrl) const
             ? QUrl(fileUrl).toLocalFile() : fileUrl;
     if (dest.isEmpty())
         return false;
+    // The certificates alone, as for the link above: an export is made to be
+    // handed on too.
+    c.certificate = freetunnel::certificatesOnly(c.certificate);
     // The export carries the password in cleartext into a user-chosen directory
     // (~/Downloads and friends): writeConfigFile makes it owner-only before the
     // first byte lands, instead of chmod'ing a world-readable file afterwards.

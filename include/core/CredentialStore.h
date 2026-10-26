@@ -48,7 +48,8 @@ void sweepStaleMaterializedConfigs();
 // next reads it, and the legacy instance-auth file is InstanceControl's to sweep.
 void sweepLegacyPlaintextStorage();
 // Takes the TrustTunnel 1.3 subscription address out of each of these configs that
-// still holds one (see withoutSubscription), when the config is a copy in the
+// still holds one (see withoutSubscription), and whatever is not a certificate out
+// of its certificate (see withCertificatesOnly), when the config is a copy in the
 // app's own folder. Called at startup, with the stored configs.
 void sweepStoredSubscriptionAddresses(const QStringList &configPaths);
 

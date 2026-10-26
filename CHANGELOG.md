@@ -19,6 +19,12 @@ compare link at the bottom of its release notes.
   which holds the VPN password, is no longer kept in plain text.** Importing
   the config file leaves it out of the copy FreeTunnel stores. A config
   imported by 1.2.3 or earlier loses it the next time FreeTunnel starts.
+- **Windows, macOS and Linux: a config's certificate keeps only its
+  certificates.** Anything else pasted or imported with them, such as a private
+  key, is ignored: it is never stored or shared, and the import or the editor
+  says so. This applies to tt:// links, config files and the config editor; a
+  stored config loses it the next time FreeTunnel starts. A certificate with no
+  certificate in it is refused, and so is a link whose certificate is damaged.
 
 ### Fixed
 

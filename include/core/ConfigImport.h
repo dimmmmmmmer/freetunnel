@@ -24,6 +24,9 @@ struct PreparedImport {
     // The link also had a subscription address, which was left out: the config is
     // the link's own server, and does not update itself (subscriptionNotKeptNote).
     bool subscriptionNotKept = false;
+    // The link's certificate field held something besides certificates, such as
+    // a private key, which was left out (certificateExtraIgnoredNote).
+    bool certificateExtraIgnored = false;
 };
 
 // Why prepareDeepLinkImport() gave nothing back. A damaged link's message is the
@@ -48,5 +51,8 @@ QString subscriptionOnlyRefusal();
 QString newerCoreRefusal();
 // A config imported without the subscription address it came with.
 QString subscriptionNotKeptNote();
+// A config whose certificate came with something else beside it, such as a
+// private key, which was left out (see certificatesOnly).
+QString certificateExtraIgnoredNote();
 
 } // namespace freetunnel

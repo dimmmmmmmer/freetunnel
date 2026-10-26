@@ -2,6 +2,7 @@
 #include <QtTest>
 #include <QRandomGenerator>
 
+#include "certificate_vectors.h"
 #include "core/ConfigToml.h"
 #include "core/DeepLink.h"
 #include "deeplink_v2_vectors.h"
@@ -28,6 +29,11 @@ private slots:
     void rejectsATlvLengthPastTheEndOfThePayload();
     void acceptsTrustTunnelQrFragment();
     void aCertificateChainSurvivesTheLink();
+    void deepLinkCertificatesSaysWhatItDropped_data();
+    void deepLinkCertificatesSaysWhatItDropped();
+    void encodeDeepLinkWritesOnlyCertificates();
+    void aLinkWithAKeyInTag8KeepsTheCertificate();
+    void randomCertificateFieldsKeepOnlyCertificates();
     void aMaskedClientRandomReachesTheConfigWhole();
     void aClientRandomTheCoreCannotUseIsRefused();
     void aShareLinkKeepsThePrefixTheCoreUses();
@@ -545,35 +551,24 @@ void TestDeepLink::aShareLinkKeepsThePrefixTheCoreUses()
 
 QTEST_MAIN(TestDeepLink)
 // Tag 0x08 is a chain — the header says so, DEEP_LINK.md says so, and the export
-// side means it: pemCertsToDer() concatenates the DER of every PEM block it
+// side means it: certificatesDer() concatenates the DER of every certificate it
 // finds. The import side wrapped the whole blob in one BEGIN/END pair, so a
 // config pinning a leaf and its intermediate came back through its OWN share
 // link as a single block that is not a certificate at all. Nothing caught it
 // because no test here ever set a certificate.
 void TestDeepLink::aCertificateChainSurvivesTheLink()
 {
-    // ASN.1 SEQUENCEs rather than real certificates: what broke is the framing,
-    // and framing is what this checks. One short-form length, one long.
-    auto sequence = [](int n) {
-        QByteArray out;
-        out += char(0x30);
-        if (n < 0x80) {
-            out += char(n);
-        } else {
-            out += char(0x82);
-            out += char((n >> 8) & 0xFF);
-            out += char(n & 0xFF);
-        }
-        return out + QByteArray(n, 'A');
-    };
-
+    // The outer shape of a certificate rather than real ones: what broke is the
+    // framing, and framing is what this checks. One short-form length, one long.
+    // These were bare SEQUENCEs of filler before, which a link keeps no longer:
+    // a private key is a SEQUENCE as well.
     freetunnel::DeepLinkConfig cfg;
     cfg.version = freetunnel::kDeepLinkMaxVersion;
     cfg.hostname = QStringLiteral("vpn.example.org");
     cfg.addresses = {QStringLiteral("1.2.3.4:443")};
     cfg.username = QStringLiteral("u");
     cfg.password = QStringLiteral("p");
-    cfg.certificate = sequence(300) + sequence(120);
+    cfg.certificate = certs::certShaped(300) + certs::certShaped(100);
 
     QString err;
     const auto back = freetunnel::parseDeepLink(freetunnel::encodeDeepLink(cfg), &err);
@@ -586,18 +581,133 @@ void TestDeepLink::aCertificateChainSurvivesTheLink()
 
     // A single certificate still comes out as exactly one block.
     freetunnel::DeepLinkConfig one = cfg;
-    one.certificate = sequence(64);
+    one.certificate = certs::certShaped(64);
     QCOMPARE(freetunnel::deepLinkConfigToToml(one)
                      .count(QStringLiteral("-----BEGIN CERTIFICATE-----")),
              1);
 
-    // And a blob that is not a sequence of elements is still emitted rather than
-    // dropped: no worse than before, and losing it silently would be worse.
+    // A blob that is not a sequence of elements used to be emitted whole, as one
+    // "certificate". A link that carries one is refused as damaged now, as
+    // TrustTunnel's own decoder refuses it, and nothing of it reaches a config.
+    const QString junkLink = v2::linkFromRecords({{0x01, "vpn.example.org"}, {0x02, "1.2.3.4:443"},
+                                                  {0x05, "u"}, {0x06, "p"}, {0x08, "not der at all"}});
+    QVERIFY(!freetunnel::parseDeepLink(junkLink, &err).has_value());
+    QCOMPARE(err, QStringLiteral("malformed certificate"));
     freetunnel::DeepLinkConfig junk = cfg;
     junk.certificate = QByteArray("not der at all");
-    QCOMPARE(freetunnel::deepLinkConfigToToml(junk)
-                     .count(QStringLiteral("-----BEGIN CERTIFICATE-----")),
-             1);
+    const QString junkToml = freetunnel::deepLinkConfigToToml(junk);
+    QVERIFY2(!junkToml.contains(QStringLiteral("BEGIN")), qPrintable(junkToml));
+    QVERIFY2(junkToml.contains(QStringLiteral("certificate = \"\"\n")), qPrintable(junkToml));
+    // Nor does a certificate with damage after it take the damage along.
+    junk.certificate = certs::certShaped(64) + QByteArray("\x30\x05", 2);
+    QCOMPARE(freetunnel::deepLinkConfigToToml(junk).count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+}
+
+// The certificates of a certificate field, and what else was there.
+void TestDeepLink::deepLinkCertificatesSaysWhatItDropped_data()
+{
+    QTest::addColumn<QByteArray>("field");
+    QTest::addColumn<QByteArray>("kept");
+    QTest::addColumn<bool>("dropped");
+    const QByteArray ca = certs::derOf(certs::kCaPem);
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    QTest::newRow("nothing") << QByteArray() << QByteArray() << false;
+    QTest::newRow("a certificate") << ca << ca << false;
+    QTest::newRow("a chain") << leaf + ca << leaf + ca << false;
+    QTest::newRow("a certificate and its key") << leaf + certs::kPkcs8Der << leaf << true;
+    QTest::newRow("a key inside a chain") << leaf + certs::kSec1Der + ca << leaf + ca << true;
+    QTest::newRow("a key alone") << certs::kPkcs8Der << QByteArray() << true;
+    QTest::newRow("a SEQUENCE of an INTEGER") << QByteArray::fromHex("3003020101") << QByteArray() << true;
+    QTest::newRow("bytes after a certificate") << ca + QByteArray("junk") << ca << true;
+    QTest::newRow("not DER at all") << QByteArray("junk") << QByteArray() << true;
+}
+
+void TestDeepLink::deepLinkCertificatesSaysWhatItDropped()
+{
+    QFETCH(QByteArray, field);
+    QFETCH(QByteArray, kept);
+    QFETCH(bool, dropped);
+    bool lost = !dropped;
+    QCOMPARE(deepLinkCertificates(field, &lost), kept);
+    QCOMPARE(lost, dropped);
+    QCOMPARE(deepLinkCertificates(kept, &lost), kept);
+    QVERIFY(!lost);
+}
+
+// No caller of encodeDeepLink() can put a key into a link: the config it is given
+// may hold one beside its certificate, and the link carries the certificate alone.
+void TestDeepLink::encodeDeepLinkWritesOnlyCertificates()
+{
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    DeepLinkConfig in;
+    in.hostname = QStringLiteral("vpn.fixture.invalid");
+    in.addresses = {QStringLiteral("1.2.3.4:443")};
+    in.username = QStringLiteral("u");
+    in.password = QStringLiteral("p");
+    in.certificate = certs::kPkcs8Der + leaf + certs::kEncryptedPkcs8Der;
+    QString err;
+    // The parser keeps tag 0x08 as the link has it, so this is what the link holds.
+    auto back = parseDeepLink(encodeDeepLink(in), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->certificate, leaf);
+
+    // Nothing but a key: no tag 0x08 at all.
+    in.certificate = certs::kPkcs8Der;
+    const QString keyOnly = encodeDeepLink(in);
+    QVERIFY(!tagsOf(keyOnly).contains(0x08));
+    back = parseDeepLink(keyOnly, &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QVERIFY(back->certificate.isEmpty());
+}
+
+// A link someone made by hand, with a key beside the certificate in tag 0x08. It
+// is read as it is, and the config it becomes has the certificate alone.
+void TestDeepLink::aLinkWithAKeyInTag8KeepsTheCertificate()
+{
+    const QByteArray leaf = certs::derOf(certs::kLeafPem);
+    const QString link = v2::linkFromRecords({{0x00, QByteArray(1, 1)}, {0x01, "vpn.fixture.invalid"},
+                                              {0x02, "1.2.3.4:443"}, {0x05, "u"}, {0x06, "p"},
+                                              {0x08, leaf + certs::kPkcs8Der}});
+    QString err;
+    const auto cfg = parseDeepLink(link, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->certificate, leaf + certs::kPkcs8Der);
+    bool dropped = false;
+    QCOMPARE(deepLinkCertificates(cfg->certificate, &dropped), leaf);
+    QVERIFY(dropped);
+    const QString toml = deepLinkConfigToToml(*cfg);
+    QCOMPARE(toml.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QVERIFY2(!toml.contains(certs::keyLabel()), qPrintable(toml));
+    QVERIFY2(!toml.contains(QString::fromLatin1(certs::kPkcs8Der.toBase64())), qPrintable(toml));
+    QCOMPARE(parseConfigToml(toml).certificate.trimmed(), certs::kLeafPem.trimmed());
+}
+
+// Random bytes as a certificate field: nothing crashes, only certificates are
+// kept, and what is kept is kept as it is.
+void TestDeepLink::randomCertificateFieldsKeepOnlyCertificates()
+{
+    QRandomGenerator rng(fuzzSeed("randomCertificateFieldsKeepOnlyCertificates", 20261026u));
+    const QList<QByteArray> pieces{certs::derOf(certs::kCaPem), certs::kPkcs8Der, certs::kSec1Der,
+                                   certs::certShaped(3), QByteArray::fromHex("3003020101")};
+    for (int i = 0; i < 3000; ++i) {
+        QByteArray field;
+        const int count = rng.bounded(0, 4);
+        for (int j = 0; j < count; ++j)
+            field += pieces.at(rng.bounded(static_cast<int>(pieces.size())));
+        if (!field.isEmpty() && rng.bounded(2) == 0)
+            field[rng.bounded(static_cast<int>(field.size()))] = static_cast<char>(rng.generate() & 0xFF);
+        if (rng.bounded(4) == 0)
+            field += static_cast<char>(rng.generate() & 0xFF);
+        bool dropped = false;
+        const QByteArray kept = deepLinkCertificates(field, &dropped);
+        QVERIFY(dropped || kept == field);
+        bool again = true;
+        QVERIFY(deepLinkCertificates(kept, &again) == kept && !again);
+        DeepLinkConfig cfg;
+        cfg.certificate = field;
+        const QString toml = deepLinkConfigToToml(cfg);
+        QVERIFY(certificatesDer(parseConfigToml(toml).certificate) == kept);
+    }
 }
 
 // Every link TrustTunnel's endpoint exports from 1.3.0 on is version 2, the ones
@@ -877,11 +987,12 @@ void TestDeepLink::readsASelfSignedVersion2Link()
     const auto cfg = parseDeepLink(v2::kSelfSigned, &err);
     QVERIFY2(cfg.has_value(), qPrintable(err));
     QCOMPARE(cfg->version, 2);
-    QCOMPARE(cfg->certificate, QByteArray::fromHex("3003020101"));
+    QCOMPARE(cfg->certificate, v2::kSelfSignedCertificate);
     QCOMPARE(cfg->subscriptionUrl, v2::kSubscription);
     QVERIFY(deepLinkHasStaticServer(*cfg));
     const QString toml = deepLinkConfigToToml(*cfg);
-    QVERIFY2(toml.contains(QStringLiteral("-----BEGIN CERTIFICATE-----")), qPrintable(toml));
+    QCOMPARE(toml.count(QStringLiteral("-----BEGIN CERTIFICATE-----")), 1);
+    QCOMPARE(certificatesDer(parseConfigToml(toml).certificate), v2::kSelfSignedCertificate);
     QVERIFY2(!toml.contains(QStringLiteral("subscription")), qPrintable(toml));
 }
 

@@ -12,6 +12,7 @@ from a script or a Stream Deck, or working on the code that reads them.
   - [URI format](#uri-format)
   - [TLV records](#tlv-records)
   - [Field tags](#field-tags)
+  - [Certificate (tag `0x08`)](#certificate-tag-0x08)
   - [Upstream protocol (tag `0x09`)](#upstream-protocol-tag-0x09)
   - [Client random (tag `0x0B`)](#client-random-tag-0x0b)
   - [Display name (tag `0x0C`)](#display-name-tag-0x0c)
@@ -86,7 +87,7 @@ another. Each record:
 | `0x05` | Username | UTF-8 string | **yes** \* | — | |
 | `0x06` | Password | UTF-8 string | **yes** \* | — | Kept in the OS credential store, see [How a link becomes a config](#how-a-link-becomes-a-config) |
 | `0x07` | Skip verification | 1 byte bool | no | `false` | |
-| `0x08` | Certificate | concatenated DER | no | empty | A chain: each certificate's DER follows the last |
+| `0x08` | Certificate | concatenated DER | no | empty | A chain: each certificate's DER follows the last. Only certificates are kept, see [rules](#certificate-tag-0x08) |
 | `0x09` | Upstream protocol | varint | no | `1` (HTTP/2) | See [values](#upstream-protocol-tag-0x09) |
 | `0x0A` | Anti-DPI | 1 byte bool | no | `false` | |
 | `0x0B` | Client random prefix | UTF-8 `prefix[/mask]` hex | no | empty | See [rules](#client-random-tag-0x0b) |
@@ -97,6 +98,22 @@ another. Each record:
 
 \* Unless the link has a subscription address (tag `0x0E`), as the format
 allows from version 2 on.
+
+### Certificate (tag `0x08`)
+
+The DER of one or more certificates, one after another: the server's own
+certificate, then any that signed it.
+
+- The value has to split into whole DER elements. One that does not fails the
+  import as damaged ("malformed certificate"), as in TrustTunnel's own decoder.
+- Only the elements with the outer shape of an X.509 certificate are kept:
+  `SEQUENCE { SEQUENCE, SEQUENCE, BIT STRING }`. Anything else, such as a
+  private key, is left out of the config, and the question before the import
+  says "Extra data in the certificate was ignored."
+- A value with no certificate in it at all fails the import as damaged. The
+  link meant to pin its server, and without the pin, a server with a
+  self-signed certificate would fail later, at the handshake.
+- A config's share link carries its certificates and nothing else.
 
 ### Upstream protocol (tag `0x09`)
 
@@ -232,6 +249,8 @@ Import fails when:
   `2`;
 - the link has no subscription address, and the hostname, the username or the
   password is missing, or there is no address;
+- the certificate does not split into whole DER elements, or holds no
+  certificate (see [tag `0x08`](#certificate-tag-0x08));
 - the DNS upstream list is malformed;
 - the client random is not `prefix[/mask]` in whole bytes of hex (see
   [tag `0x0B`](#client-random-tag-0x0b));
@@ -277,7 +296,7 @@ except `dns_upstreams`, which is at the top level.
 | `0x05` | Username | `username` |
 | `0x06` | Password | `password`, which the import then moves to the OS credential store |
 | `0x07` | Skip verification | `skip_verification` |
-| `0x08` | Certificate | `certificate`, as PEM: one `BEGIN CERTIFICATE` block per certificate |
+| `0x08` | Certificate | `certificate`, as PEM: one `BEGIN CERTIFICATE` block per certificate, and nothing else |
 | `0x09` | Upstream protocol | `upstream_protocol`: `"http2"` or `"http3"` |
 | `0x0A` | Anti-DPI | `anti_dpi` |
 | `0x0B` | Client random | `client_random`, whole, as `prefix[/mask]` |
@@ -298,6 +317,26 @@ A TrustTunnel 1.3 config imported from a file is handled the same way:
   changes. That is only for the copies in FreeTunnel's own folder: a config kept
   elsewhere is your own file, which TrustTunnel's client may read the address
   from, and keeps it until FreeTunnel next rewrites that file.
+
+A config's `certificate` keeps its certificates and nothing else, however the
+config arrives: from a file, from the config editor, or as a link (see
+[tag `0x08`](#certificate-tag-0x08)).
+
+- A block is kept when it is labelled `CERTIFICATE` (or `X509 CERTIFICATE`,
+  which OpenSSL reads as well) and decodes to a certificate. A private key,
+  any other block, a damaged block and text between the blocks are left out.
+- From a file, only the `certificate` lines of the copy FreeTunnel stores
+  change, and the notice after the import says "Extra data in the certificate
+  was ignored." The file you picked is not changed. The editor says the same
+  once it has saved.
+- A `certificate` with no certificate in it at all refuses the import ("Not a
+  valid TrustTunnel config: malformed certificate"), and the editor refuses to
+  save it.
+- A stored config that holds anything else in its certificate loses it the next
+  time FreeTunnel starts, by the same rules as the subscription address above.
+  With no certificate left, its `certificate` is emptied.
+- A share link and a TOML export carry the certificates alone, wherever the
+  config is kept.
 
 ## FreeTunnel control links (separate)
 
@@ -493,6 +532,7 @@ That is tag `0x0D`, length 16, then two entries: length 7 and `8.8.8.8`, length
 | Round-trip encode/decode, injection stripping and edge cases | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp` |
 | Version 2 links: what is read, refused and not kept | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp` |
 | TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp` |
+| Certificates: what is kept, from a link, a file, the editor and at start, and what a share link or export carries | `tests/test_configtoml.cpp`, `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp`, with the shared vectors in `tests/certificate_vectors.h` |
 | Control link parser and the link mark | `tests/test_control.cpp` |
 | `--url-handler`, macOS link events and forwarding | `tests/test_app_startup.cpp` |
 | The socket a launch forwards over | `tests/test_instance_control.cpp`, `tests/test_integration_single_instance.cpp` |

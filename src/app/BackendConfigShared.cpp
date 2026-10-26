@@ -213,6 +213,14 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
             *errOut = QStringLiteral("authkey");
         return false;
     }
+    // A certificate with no certificate in it is refused, as a link's is: the
+    // file meant to pin the server, and imported without the pin, a self-signed
+    // server would fail at the handshake with nothing to say why.
+    if (!c.certificate.trimmed().isEmpty() && freetunnel::certificatesDer(c.certificate).isEmpty()) {
+        if (errOut)
+            *errOut = QStringLiteral("certificate");
+        return false;
+    }
     if (contentOut)
         *contentOut = content;
     return true;

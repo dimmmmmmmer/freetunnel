@@ -68,6 +68,9 @@ struct ParsedCreateConfig {
     freetunnel::ConfigToml ct;
     QString password;
     QString safeName;
+    // What was pasted as the certificate had something else in it, which is not
+    // saved (see keepOnlyTheCertificates).
+    bool certificateTrimmed = false;
 };
 
 bool validateCreateOptionalFields(const freetunnel::ConfigToml &ct, QString *err)
@@ -118,6 +121,25 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.dns = f.value(QStringLiteral("dns")).toString();
     out->ct.customSni = f.value(QStringLiteral("customSni")).toString();
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
+}
+
+// Only the certificates of what was pasted into the certificate field. A file
+// that combines the certificate with its private key is as easy to paste whole
+// as the certificate alone, and the key would be saved, then shared with every
+// link and export made from the config. A field that holds no certificate at all
+// is refused rather than saved as none, which would quietly drop the pin.
+bool keepOnlyTheCertificates(ParsedCreateConfig *out, QString *err)
+{
+    if (out->ct.certificate.isEmpty())
+        return true;
+    const QString kept = freetunnel::certificatesOnly(out->ct.certificate, &out->certificateTrimmed);
+    if (kept.trimmed().isEmpty()) {
+        if (err)
+            *err = QStringLiteral("bad_certificate");
+        return false;
+    }
+    out->ct.certificate = kept;
+    return true;
 }
 
 // The form owns the fields it shows, and nothing else. The file's own
@@ -205,7 +227,7 @@ bool parseCreateConfigFields(const QVariantMap &f, ParsedCreateConfig *out, QStr
     if (!assignRequiredCreateFields(f, out, err))
         return false;
     assignOptionalCreateFields(f, out);
-    if (!validateCreateOptionalFields(out->ct, err))
+    if (!validateCreateOptionalFields(out->ct, err) || !keepOnlyTheCertificates(out, err))
         return false;
     return finalizeParsedCreateConfig(f, out);
 }
@@ -223,6 +245,9 @@ void Backend::emitCreateConfigError(const QString &parseErr)
     else if (parseErr == QLatin1String("bad_client_random"))
         emit errorOccurred(tr("Client random must be hexadecimal in whole bytes (an even number of "
                               "digits, at most 64), optionally followed by /mask"));
+    else if (parseErr == QLatin1String("bad_certificate"))
+        emit errorOccurred(tr("The certificate must be in PEM format, as one or more BEGIN CERTIFICATE "
+                              "blocks"));
     else if (parseErr == QLatin1String("name_too_long"))
         emit errorOccurred(tr("The name is too long: %1 characters at most")
                                    .arg(freetunnel::kMaxConfigNameLength));
@@ -303,6 +328,10 @@ bool Backend::createConfig(const QVariantMap &f)
     ctx.editProfile = edit.profile;
     ctx.editingSnapshot = edit.active;
     ctx.editIndex = editIndex;
+    // Said once the config is on disk, as a file import says it. The certificate
+    // field would otherwise reopen without what was left out of it, unexplained.
+    if (parsed.certificateTrimmed)
+        emit errorOccurred(freetunnel::certificateExtraIgnoredNote());
     return finalizeCreatedConfig(ctx);
 }
 

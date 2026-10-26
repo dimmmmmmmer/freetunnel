@@ -129,28 +129,43 @@ QString onePemBlock(const QByteArray &der)
             + QStringLiteral("-----END CERTIFICATE-----\n");
 }
 
-// The inverse of the export side, which concatenates the DER of every PEM block
-// it finds (pemCertsToDer in BackendConfig.cpp) — tag 0x08 is a chain, and the
-// header and DEEP_LINK.md both say so.
+// The DER elements of a link's certificate field (tag 0x08), one after another,
+// as TrustTunnel's der_to_pem splits it (derElementEnd, in ConfigTomlValues.cpp).
+// *whole says whether the bytes split into them with nothing left over; the
+// elements before whatever is not one come back either way.
+QList<QByteArray> derElements(const QByteArray &der, bool *whole)
+{
+    QList<QByteArray> out;
+    int pos = 0;
+    while (pos < der.size()) {
+        const int end = derElementEnd(der, pos);
+        if (end <= pos) {
+            *whole = false;
+            return out;
+        }
+        out << der.mid(pos, end - pos);
+        pos = end;
+    }
+    *whole = true;
+    return out;
+}
+
+// The inverse of the export side, which concatenates the DER of every certificate
+// it finds (certificatesDer) — tag 0x08 is a chain, and the header and
+// DEEP_LINK.md both say so.
 //
 // This used to base64 the whole blob into a single BEGIN/END pair, so a config
 // pinning a leaf and its intermediate came back through its own share link as
 // one block that is not a certificate at all: the export split the chain
-// correctly and the import had no way to put it back. A blob that does not parse
-// as a sequence of elements is emitted whole, exactly as before, because that is
-// no worse than the old behaviour and the alternative is discarding it.
+// correctly and the import had no way to put it back. Only certificates are
+// written (deepLinkCertificates). An element of another kind, such as a private
+// key, has no place in a config, and neither have bytes that are not elements at
+// all, which were once emitted whole as one "certificate".
 QString derToPem(const QByteArray &der) {
-    if (der.isEmpty())
-        return QString();
     QString out;
-    int pos = 0;
-    while (pos < der.size()) {
-        const int end = derElementEnd(der, pos);
-        if (end <= pos)
-            return out.isEmpty() ? onePemBlock(der) : out + onePemBlock(der.mid(pos));
-        out += onePemBlock(der.mid(pos, end - pos));
-        pos = end;
-    }
+    bool whole = false;
+    for (const QByteArray &certificate : derElements(deepLinkCertificates(der), &whole))
+        out += onePemBlock(certificate);
     return out;
 }
 
@@ -196,7 +211,6 @@ bool applyDeepLinkScalarTlv(quint64 tag, const QByteArray &value, DeepLinkConfig
     case 0x04:
     case 0x07:
     case 0x0A: return applyDeepLinkBoolTlv(tag, value, cfg);
-    case 0x08: cfg.certificate = value; return true;
     case 0x09: {
         int p = 0;
         quint64 v = 1;
@@ -221,6 +235,24 @@ bool applyDeepLinkClientRandomTlv(const QByteArray &value, DeepLinkConfig &cfg, 
         return true;
     if (error)
         *error = QCoreApplication::translate("DeepLink", "malformed client_random value");
+    return false;
+}
+
+// The certificates (tag 0x08): DER elements, one after another. Bytes that do not
+// split into whole elements are damage, as TrustTunnel's der_to_pem and the
+// Android client take them; here they used to be wrapped, whatever they were, in
+// one BEGIN CERTIFICATE block. Which of the elements are certificates is for the
+// import to say (deepLinkCertificates), so the value is kept as the link has it.
+bool applyDeepLinkCertificateTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
+{
+    bool whole = false;
+    derElements(value, &whole);
+    if (whole) {
+        cfg.certificate = value;
+        return true;
+    }
+    if (error)
+        *error = QCoreApplication::translate("DeepLink", "malformed certificate");
     return false;
 }
 
@@ -276,6 +308,8 @@ bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
         return true;
     if (applyDeepLinkScalarTlv(tag, value, cfg))
         return true;
+    if (tag == 0x08)
+        return applyDeepLinkCertificateTlv(value, cfg, error);
     if (tag == 0x0B)
         return applyDeepLinkClientRandomTlv(value, cfg, error);
     if (tag == 0x0D) {
@@ -434,13 +468,17 @@ QString clientRandomForLink(const QString &value)
     return isValidClientRandom(prefix) ? prefix : QString();
 }
 
+// The certificates alone, whatever the config holds: a link is made to be handed
+// on, and an element of another kind, such as a private key, is not for whoever
+// it is handed to.
 void writeOptionalDeepLinkMetaTlvs(QByteArray &p, const DeepLinkConfig &cfg)
 {
     const QString clientRandom = clientRandomForLink(cfg.clientRandomPrefix);
+    const QByteArray certificates = deepLinkCertificates(cfg.certificate);
     if (!cfg.customSni.isEmpty())
         writeTlv(p, 0x03, cfg.customSni.toUtf8());
-    if (!cfg.certificate.isEmpty())
-        writeTlv(p, 0x08, cfg.certificate);
+    if (!certificates.isEmpty())
+        writeTlv(p, 0x08, certificates);
     if (cfg.upstreamProtocol != UpstreamProtocol::Http2)
         writeTlv(p, 0x09, varintBytes(static_cast<quint64>(cfg.upstreamProtocol)));
     if (!clientRandom.isEmpty())
@@ -487,6 +525,22 @@ bool deepLinkHasStaticServer(const DeepLinkConfig &cfg)
     return !cfg.hostname.isEmpty() && anAddress && !cfg.username.isEmpty() && !cfg.password.isEmpty();
 }
 
+QByteArray deepLinkCertificates(const QByteArray &der, bool *dropped)
+{
+    QByteArray out;
+    bool whole = false;
+    bool lost = false;
+    for (const QByteArray &element : derElements(der, &whole)) {
+        if (isCertificateDer(element))
+            out += element;
+        else
+            lost = true;
+    }
+    if (dropped)
+        *dropped = lost || !whole;
+    return out;
+}
+
 QString encodeDeepLink(const DeepLinkConfig &cfg) {
     QByteArray p;
     // kDeepLinkWriteVersion, not the newest this client reads (see DeepLink.h).
@@ -529,8 +583,9 @@ static QString endpointTomlSection(const DeepLinkConfig &cfg)
     t += QStringLiteral("upstream_protocol = \"%1\"\n")
                  .arg(cfg.upstreamProtocol == UpstreamProtocol::Http3 ? "http3" : "http2");
     t += QStringLiteral("anti_dpi = %1\n").arg(cfg.antiDpi ? "true" : "false");
-    if (!cfg.certificate.isEmpty())
-        t += QStringLiteral("certificate = \"\"\"\n%1\"\"\"\n").arg(derToPem(cfg.certificate));
+    const QString pem = derToPem(cfg.certificate);
+    if (!pem.isEmpty())
+        t += QStringLiteral("certificate = \"\"\"\n%1\"\"\"\n").arg(pem);
     else
         t += QStringLiteral("certificate = \"\"\n");
     return t;
