@@ -450,8 +450,12 @@ void SubscriptionFetcher::cancel(QNetworkReply *reply, bool *flag)
     reply->abort();
 }
 
+// The reply may outlive the fetch for a while, and Qt can still pass on what
+// its connection does, such as a handshake that ends after the abort: that is no
+// longer this fetch's, so nothing of it is heard.
 void SubscriptionFetcher::onFinished(QNetworkReply *reply)
 {
+    reply->disconnect(this);
     m_reply = nullptr;
     reply->deleteLater();
     // What readyRead had not taken yet. A reply this fetch aborted is closed.

@@ -9,12 +9,16 @@
 #include <QtTest>
 
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QNetworkInterface>
 #include <QNetworkProxy>
+#include <QNetworkReply>
+#include <QPointer>
 #include <QScopeGuard>
 #include <QSslConfiguration>
 #include <QSslSocket>
 #include <QTcpServer>
+#include <QTimer>
 
 #include <algorithm>
 #include <initializer_list>
@@ -185,6 +189,7 @@ private slots:
     void anApplicationProxyIsNotUsed();
     void aResultNeverComesFromInsideStart();
     void anAbortedFetchNeverFinishes();
+    void aFetchThatEndedHearsNothingMoreFromItsReply();
     void everyOutcomeHasACodeAPolicyAndWords();
 
 private:
@@ -1146,6 +1151,68 @@ void TestSubscriptionFetcher::anAbortedFetchNeverFinishes()
     QCOMPARE(error, SubscriptionFetchError::None);
     QTest::qWait(300);
     QCOMPARE(results, 1);
+}
+
+// A fetch that has ended hears nothing more from its reply, which may still be
+// there, and still be told of a handshake, while another fetch runs: here a
+// nested event loop holds the reply's deletion back, as one opened from the
+// handler of finished() would.
+void TestSubscriptionFetcher::aFetchThatEndedHearsNothingMoreFromItsReply()
+{
+    TlsTestServer first;
+    QVERIFY(listen(first, m_certs->selfSigned));
+    TlsTestServer::Response tooLarge = json(QByteArray(int(kMaxSubscriptionBodyBytes) + 1, ' '));
+    tooLarge.holdBody = true;
+    first.setRoute("/sub", tooLarge);
+    TlsTestServer second;
+    QVERIFY(listen(second, m_certs->otherKey));
+    second.setRoute("/sub", json());
+
+    QList<SubscriptionFetchResult> results;
+    bool replayed = false;
+    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
+    fetcher.start(pinned(first.port(), pemOf({&m_certs->selfSigned})));
+    const QPointer<QNetworkReply> old = fetcher.findChild<QNetworkReply *>();
+    QVERIFY(old);
+    QEventLoop outer;
+    connect(&fetcher, &SubscriptionFetcher::finished, this, [&](const SubscriptionFetchResult &r) {
+        results.append(r);
+        if (results.size() != 1)
+            return;
+        // The next fetch, then everything the first one's reply could still
+        // say. Its certificate is not the next fetch's pin, and its length is
+        // over the cap: heard, either would end the next fetch.
+        fetcher.start(pinned(second.port(), pemOf({&m_certs->otherKey})));
+        if (old) {
+            replayed = true;
+            emit old->encrypted();
+            emit old->sslErrors({QSslError(QSslError::HostNameMismatch)});
+            emit old->metaDataChanged();
+            emit old->readyRead();
+        }
+    });
+    // Connected after the fetcher's own handler, so it runs once that has ended
+    // the fetch and put the reply up for deletion.
+    connect(old.data(), &QNetworkReply::finished, this, [&]() {
+        QEventLoop nested;
+        connect(&fetcher, &SubscriptionFetcher::finished, &nested, [&nested, &results]() {
+            if (results.size() == 2)
+                nested.quit();
+        });
+        QTimer::singleShot(30000, &nested, &QEventLoop::quit);
+        nested.exec();
+        outer.quit();
+    });
+    QTimer::singleShot(30000, &outer, &QEventLoop::quit);
+    // In a loop of its own, as the app runs in one: deletions put off outside
+    // any loop are made by the first nested one.
+    outer.exec();
+
+    QVERIFY2(replayed, "the first reply was gone before the next fetch started");
+    QCOMPARE(results.size(), 2);
+    QCOMPARE(results.at(0).error, SubscriptionFetchError::TooLarge);
+    QVERIFY2(results.at(1).error == SubscriptionFetchError::None,
+             qPrintable(subscriptionFetchCode(results.at(1).error, results.at(1).documentError.kind)));
 }
 
 // Every outcome has a row: a code, a policy, and words for the user, but
