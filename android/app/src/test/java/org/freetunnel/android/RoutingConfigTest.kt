@@ -320,13 +320,18 @@ class RoutingConfigTest {
     }
     @Test fun aCertificateWithNoCertificateIsRefused() {
         for (pem in listOf(key, CertificateVectors.pemBlock("CERTIFICATE", CertificateVectors.PKCS8_DER),
+            CertificateVectors.pemBlock("CERTIFICATE", CertificateVectors.concat(CertificateVectors.LEAF_DER, CertificateVectors.PKCS8_DER)),
             "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0FGRQ==\n-----END CERTIFICATE-----\n", "certificate line\n")) {
             val refused = assertThrows(RoutingConfig.ImportRefused::class.java) { RoutingConfig.cleanImport(withCertificate(pem)) }
             assertEquals(R.string.text_the_configuration_contains_an_invalid_certificate, refused.messageResource)
         }
-        // An empty one pins nothing, and it is kept as written, as a clean one is.
+        // An empty one pins nothing, and it is kept as written, as a clean one is. So
+        // is a chain in one block, as the desktop's FreeTunnel 1.1.9 and earlier wrote
+        // a link's: it holds nothing but certificates, and the editor saves it again
+        // unchanged.
         for (pem in listOf("", "\n", CertificateVectors.CA_PEM, CertificateVectors.CHAIN_PEM,
-            CertificateVectors.pemBlock("X509 CERTIFICATE", CertificateVectors.CA_DER))) {
+            CertificateVectors.pemBlock("X509 CERTIFICATE", CertificateVectors.CA_DER),
+            CertificateVectors.pemBlock("CERTIFICATE", CertificateVectors.CHAIN_DER))) {
             val text = withCertificate(pem)
             val imported = RoutingConfig.cleanImport(text)
             assertEquals(text, imported.toml)

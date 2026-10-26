@@ -108,12 +108,16 @@ public final class CertificatesTest {
         String crlf = CHAIN_PEM.replace("\n", "\r\n");
         String oneLine = CA_PEM.replace("\n", "");
         String legacy = pemBlock("X509 CERTIFICATE", CA_DER);
+        // The desktop's FreeTunnel 1.1.9 and earlier wrote a link's chain as one
+        // block, of which OpenSSL reads the first certificate. It holds nothing but
+        // certificates.
+        String oneBlock = pemBlock("CERTIFICATE", CHAIN_DER);
         // White space between blocks is what the desktop's QString::trimmed() takes
         // out: no-break and other Unicode spaces and separators too, here the
         // no-break space, NEL, the line separator and the ideographic space.
         for (String pem : new String[]{CA_PEM, CHAIN_PEM, crlf, wrapped(CA_DER, 76), oneLine, legacy,
                 "\n\n" + CA_PEM + " \n", "", " \r\n\t\u000b\f", pemBlock("X509 CERTIFICATE", LEAF_DER) + CA_PEM,
-                LEAF_PEM + "\u00a0\u0085\u2028\u3000" + CA_PEM, pemBlock("CERTIFICATE", certShaped(4))}) {
+                LEAF_PEM + "\u00a0\u0085\u2028\u3000" + CA_PEM, pemBlock("CERTIFICATE", certShaped(4)), oneBlock}) {
             Certificates.Kept kept = Certificates.fromPem(pem);
             assertFalse(pem, kept.dropped);
             assertEquals(pem, kept.pem);
@@ -125,6 +129,7 @@ public final class CertificatesTest {
         assertArrayEquals(CA_DER, Certificates.fromPem(legacy).der);
         assertArrayEquals(CHAIN_DER, Certificates.fromPem(CHAIN_PEM).der);
         assertArrayEquals(CHAIN_DER, Certificates.fromPem(crlf).der);
+        assertArrayEquals(CHAIN_DER, Certificates.fromPem(oneBlock).der);
         assertEquals(0, Certificates.fromPem("").der.length);
     }
 
@@ -145,6 +150,12 @@ public final class CertificatesTest {
             {"an encrypted key", pemBlock(keyLabel("ENCRYPTED "), ENCRYPTED_PKCS8_DER) + CA_PEM, CA_PEM},
             {"a certificate request", pemBlock("CERTIFICATE REQUEST", certShaped(4)) + CA_PEM, CA_PEM},
             {"a key labelled as a certificate", pemBlock("CERTIFICATE", PKCS8_DER) + CA_PEM, CA_PEM},
+            // One block of more than one element is kept only when each is a
+            // certificate and nothing is left over.
+            {"a key after a certificate in one block", pemBlock("CERTIFICATE", concat(LEAF_DER, PKCS8_DER)) + CA_PEM, CA_PEM},
+            {"a key before a certificate in one block", pemBlock("CERTIFICATE", concat(PKCS8_DER, LEAF_DER)) + CA_PEM, CA_PEM},
+            {"a byte after a chain in one block", pemBlock("CERTIFICATE", concat(CHAIN_DER, hex("00"))) + CA_PEM, CA_PEM},
+            {"an empty block", pemBlock("CERTIFICATE", new byte[0]) + CA_PEM, CA_PEM},
             {"a key inside a certificate block",
                 "-----BEGIN CERTIFICATE-----\n" + keyPem() + "-----END CERTIFICATE-----\n" + CA_PEM, CA_PEM},
             // Decoded leniently, the stray padding would be skipped and the certificate there.
@@ -260,7 +271,8 @@ public final class CertificatesTest {
             }
         }
         String alphabet = "-=+/ \n\rABEGINCERTIFKYZ0189az";
-        for (String seed : new String[]{LEAF_PEM + keyPem(), CHAIN_PEM, BAG_ATTRIBUTES + CHAIN_PEM.replace("\n", "\r\n")}) {
+        for (String seed : new String[]{LEAF_PEM + keyPem(), CHAIN_PEM, BAG_ATTRIBUTES + CHAIN_PEM.replace("\n", "\r\n"),
+                pemBlock("CERTIFICATE", CHAIN_DER), pemBlock("CERTIFICATE", concat(LEAF_DER, PKCS8_DER))}) {
             for (int round = 0; round < 2000; round++) {
                 StringBuilder text = new StringBuilder(seed);
                 int edits = 1 + random.nextInt(4);

@@ -77,10 +77,11 @@ final class Certificates {
     /**
      * The certificate blocks of PEM text, as they were written. A block is kept when
      * its label is CERTIFICATE, or X509 CERTIFICATE, which OpenSSL reads as well, and
-     * its body is strict base64 of one certificate. Anything else is dropped: other
-     * labels, broken blocks and text between blocks. With nothing dropped, the text
-     * comes back as it was; otherwise the kept blocks, each ending a line, or
-     * nothing when none is left.
+     * its body is strict base64 of one or more certificates, one after another, as
+     * the desktop's FreeTunnel 1.1.9 and earlier wrote a link's chain. Anything else
+     * is dropped: other labels, broken blocks and text between blocks. With nothing
+     * dropped, the text comes back as it was; otherwise the kept blocks, each ending
+     * a line, or nothing when none is left.
      */
     static Kept fromPem(String text) {
         ByteArrayOutputStream der = new ByteArrayOutputStream();
@@ -110,13 +111,31 @@ final class Certificates {
         return true;
     }
 
-    // The DER of a block that holds one certificate, or null.
+    // The DER of a block that holds certificates and nothing else, or null.
     private static byte[] certificate(String label, String body) {
         if (!label.equals("CERTIFICATE") && !label.equals("X509 CERTIFICATE")) return null;
         byte[] der;
         try { der = Base64.getDecoder().decode(SPACE.matcher(body).replaceAll("")); }
         catch (IllegalArgumentException e) { return null; }
-        return isCertificate(der, 0, der.length) ? der : null;
+        return backToBack(der) ? der : null;
+    }
+
+    // Whether the bytes are one or more certificates, one after another, and nothing
+    // else, as the desktop's certificatesBackToBack reads a block. The desktop's
+    // FreeTunnel 1.1.9 and earlier put a link's whole chain into one block, and its
+    // TOML export writes that block as it was stored. OpenSSL, which the core reads
+    // it with, takes the first certificate of such a block as the pin. Read as one
+    // certificate, the block held none: a file exported from such a config was
+    // refused, and so was every editor save of a config imported from one. An empty
+    // block holds no certificate at all.
+    private static boolean backToBack(byte[] der) {
+        int pos = 0;
+        while (pos < der.length) {
+            int[] item = element(der, pos, der.length, 0x30);
+            if (item == null || !isCertificate(der, pos, item[1])) return false;
+            pos = item[1];
+        }
+        return pos > 0;
     }
 
     private static String block(byte[] der) {
