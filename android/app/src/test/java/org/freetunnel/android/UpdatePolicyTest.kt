@@ -95,6 +95,28 @@ class UpdatePolicyTest {
         assertTrue(pin, Regex("[0-9a-f]{64}").matches(pin))
         assertEquals(pin, BuildConfig.RELEASE_CERTIFICATE_SHA256)
     }
+    // The real release key against a signature openssl made, not one this test
+    // made. The v1.2.3 desktop manifest and its .sig were signed the way the
+    // Android release job signs SHA256SUMS-android.txt (openssl pkeyutl -rawin).
+    // That manifest names no APK, so a good signature gets past the check and
+    // stops at the missing entry: that is the proof the signature verified.
+    @Test fun theReleaseKeyVerifiesASignatureOpensslMade() {
+        fun resource(name: String) =
+            UpdatePolicyTest::class.java.getResourceAsStream("/release-v1.2.3/$name")!!.use { it.readBytes() }
+        val manifest = resource("SHA256SUMS.txt")
+        val signature = resource("SHA256SUMS.txt.sig")
+        val key = UpdatePolicy.rawPublicKey(BuildConfig.RELEASE_SIGNING_KEY)
+        val desktop = UpdatePolicy.Release("1.2.3", "apk", "manifest", "signature")
+        val passed = assertThrows(IllegalArgumentException::class.java) {
+            UpdatePolicy.verifyManifest(desktop, manifest, signature, key)
+        }
+        assertEquals("Missing or ambiguous APK checksum", passed.message)
+        val changed = manifest.copyOf().also { it[it.size - 2] = (it[it.size - 2] + 1).toByte() }
+        val refused = assertThrows(IllegalArgumentException::class.java) {
+            UpdatePolicy.verifyManifest(desktop, changed, signature, key)
+        }
+        assertEquals("Invalid update signature", refused.message)
+    }
     @Test fun rawPublicKeyIsTheKeyInsideTheReleaseKeysEncoding() {
         assertArrayEquals(rawKey, UpdatePolicy.rawPublicKey(Base64.getEncoder().encodeToString(pair.public.encoded)))
         assertEquals(32, UpdatePolicy.rawPublicKey(BuildConfig.RELEASE_SIGNING_KEY).size)

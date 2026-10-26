@@ -1,0 +1,5 @@
+#version=1.2.3
+cd049cd9732fb6844b20e6d4e1b79ae9d61daef85b529f1dadc031b66518a743  freetunnel-linux-x86_64.deb
+8d243cfb8720b6dc967025a14e412f02a0073ba750b52cefb52742f1cfab9b2e  freetunnel-macos-universal.dmg
+f00463bec5d4549fc67ef1c0d9e4501a87b38b6e6c27277d868bd55cbe48b4f0  freetunnel-windows-x86_64-Setup.exe
+85018699c1c8d1991c8889db175d5195552f8eb5cd726e1910304399ba048a44  freetunnel-x86_64.AppImage
