@@ -30,7 +30,8 @@ final class DeepLinkImport {
 
     static final class Imported {
         // A link's name, or its hostname when it has none. An export's name, or
-        // empty when it has none, so that it can be named after its file.
+        // empty when it has none, so that the caller names it as it names any
+        // other TOML file: after the file, or as pasted from the clipboard.
         final String name;
         final String toml;
         // The link also named a subscription. Only its static settings are imported:
@@ -111,7 +112,10 @@ final class DeepLinkImport {
     static Imported fromEndpointExport(TomlTable root) throws ParseException {
         // As in any TOML file: the endpoint writes an empty key into every export,
         // and only that is no key. Anything else is refused, blank or not a string,
-        // since no core would read it as none.
+        // since no core would read it as none. The desktop is more lenient here: it
+        // trims the key and reads one that is not a string as none. The endpoint
+        // writes only an empty key or a hex one, so the two differ only on a file
+        // edited by hand, and Android keeps one rule for every TOML file it imports.
         Object auth = root.get("client_random_auth_key");
         if (auth != null && !"".equals(auth)) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
         Fields fields = new Fields();
