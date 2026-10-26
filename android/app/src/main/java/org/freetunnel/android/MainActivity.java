@@ -351,7 +351,8 @@ public final class MainActivity extends Activity {
         }, () -> {});
     }
 
-    // A config that passed: the text to save, and what was left out of it.
+    // A config that passed: the text to save, what was left out of it, and the name
+    // it gives its server, if it gives one.
     private interface Checked { void accept(RoutingConfig.Import checked); }
 
     private void validateAsync(String source, Runnable accepted, Runnable rejected) {
@@ -501,8 +502,11 @@ public final class MainActivity extends Activity {
         validateAsync(imported.toml, false, checked -> showImportConfirmation(imported.name,
                 new RoutingConfig.Import(checked.getToml(), imported.subscriptionNotKept, imported.certificateIgnored)), () -> {});
     }
+    // Named after where the text came from, unless it is an endpoint's export that
+    // names its server.
     private void importToml(String name, String toml) {
-        validateAsync(stripBom(toml), true, checked -> showImportConfirmation(name, checked), () -> {});
+        validateAsync(stripBom(toml), true, checked -> showImportConfirmation(
+                checked.getName() != null ? checked.getName() : name, checked), () -> {});
     }
     // These two refusals are about what this version cannot do yet, and say what to
     // do instead. That is more than the two lines a toast shows, so they get a dialog.
@@ -586,7 +590,8 @@ public final class MainActivity extends Activity {
                     // Checked as an import: the hint asks for a whole TrustTunnel file, and
                     // one pasted here, or saved by an earlier version, can carry a
                     // subscription address, an auth key or a private key with its
-                    // certificate just as an imported one can.
+                    // certificate just as an imported one can. An endpoint's export is
+                    // turned into a whole file, and the name stays the one typed here.
                     validateAsync(t, true, checked -> {
                         if (!editor.isShowing()) return;
                         if (editing == null) configs.add(new Config(n, checked.getToml()));

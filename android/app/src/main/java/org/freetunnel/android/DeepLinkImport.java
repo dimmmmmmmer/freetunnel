@@ -1,5 +1,8 @@
 package org.freetunnel.android;
 
+import org.tomlj.TomlArray;
+import org.tomlj.TomlTable;
+
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -9,7 +12,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
-/** Decodes TrustTunnel's version 0-2 QUIC-varint TLV share links. */
+/**
+ * Decodes TrustTunnel's version 0-2 QUIC-varint TLV share links, and reads the TOML
+ * file a TrustTunnel endpoint exports by the same rules.
+ */
 final class DeepLinkImport {
     private static final int MAX_LINK_CHARS = 131072;
     private static final int MAX_PAYLOAD_BYTES = 65536;
@@ -23,6 +29,8 @@ final class DeepLinkImport {
     static final int MAX_SUBSCRIPTION_URL_BYTES = 2048;
 
     static final class Imported {
+        // A link's name, or its hostname when it has none. An export's name, or
+        // empty when it has none, so that it can be named after its file.
         final String name;
         final String toml;
         // The link also named a subscription. Only its static settings are imported:
@@ -54,6 +62,9 @@ final class DeepLinkImport {
         String password;
         boolean skipVerification;
         byte[] certificate = new byte[0];
+        // Set when the certificate came as PEM text, as in an endpoint's export, and
+        // something in it that is not a certificate was left out as it was read.
+        boolean certificateDropped;
         long protocol = 1;
         boolean antiDpi;
         String clientRandom = "";
@@ -85,13 +96,53 @@ final class DeepLinkImport {
 
         if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         Fields fields = decode(bytes);
-        return finish(fields, fields.subscriptionUrl != null);
+        return finish(fields, fields.subscriptionUrl != null, true);
     }
 
-    // What a link goes through once decoded, in the desktop's order: the auth key,
-    // then the server's own settings, then whether the certificate holds any
-    // certificate. Damage to the certificate was refused while decoding.
-    private static Imported finish(Fields fields, boolean subscription) throws ParseException {
+    /**
+     * The TOML file a TrustTunnel endpoint exports, as RoutingConfig recognises it:
+     * the keys of [endpoint] at the top with no table, and the server's name,
+     * client_random_prefix, client_random_auth_key and subscription address beside
+     * them. It is read into the fields a link carries and goes the link's way from
+     * there, so it gives the configuration a link with the same settings gives, and
+     * is refused for the same reasons. Keys a link has no field for are left out, as
+     * a link's unknown tags are, and a value of the wrong type counts as missing.
+     */
+    static Imported fromEndpointExport(TomlTable root) throws ParseException {
+        // As in any TOML file: the endpoint writes an empty key into every export,
+        // and only that is no key. Anything else is refused, blank or not a string,
+        // since no core would read it as none.
+        Object auth = root.get("client_random_auth_key");
+        if (auth != null && !"".equals(auth)) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
+        Fields fields = new Fields();
+        fields.hostname = string(root, "hostname");
+        fields.addresses.addAll(strings(root, "addresses"));
+        fields.customSni = string(root, "custom_sni");
+        fields.hasIpv6 = flag(root, "has_ipv6", true);
+        fields.username = string(root, "username");
+        fields.password = string(root, "password");
+        fields.skipVerification = flag(root, "skip_verification", false);
+        // As the desktop writes it: http3 or else http2.
+        fields.protocol = "http3".equals(root.get("upstream_protocol")) ? 2 : 1;
+        fields.antiDpi = flag(root, "anti_dpi", false);
+        // The endpoint calls it client_random_prefix. client_random, the client's own
+        // name for it, is read when that is empty, as the desktop does.
+        String prefix = string(root, "client_random_prefix");
+        fields.clientRandom = prefix.isEmpty() ? string(root, "client_random") : prefix;
+        fields.displayName = string(root, "name");
+        fields.dnsUpstreams.addAll(strings(root, "dns_upstreams"));
+        // PEM here, where a link has DER. The configuration is written from the DER
+        // of its certificates, as a link's is, so both give the same text.
+        Certificates.Kept certificate = Certificates.fromPem(string(root, "certificate"));
+        fields.certificate = certificate.der;
+        fields.certificateDropped = certificate.dropped;
+        return finish(fields, root.get("subscription_url") != null, false);
+    }
+
+    // What a link or an export goes through once read, in the desktop's order: the
+    // auth key, then the server's own settings, then whether the certificate holds
+    // any certificate. Damage to a link's certificate was refused while decoding.
+    private static Imported finish(Fields fields, boolean subscription, boolean link) throws ParseException {
         // An empty key is how a server without one is exported. A real key needs
         // TrustTunnel 1.3: core 1.1.7 would ignore it, and the server would then
         // refuse every connection without saying why.
@@ -99,21 +150,52 @@ final class DeepLinkImport {
         String hostname = fields.hostname == null ? "" : clean(fields.hostname).trim();
         if (hostname.isEmpty() || fields.addresses.isEmpty()
                 || fields.username == null || fields.username.isEmpty()
-                || fields.password == null || fields.password.isEmpty())
+                || fields.password == null || fields.password.isEmpty()) {
             // With a subscription the static fields are optional, and a link without
             // them can only work once the subscription is fetched.
-            throw new ParseException(subscription ? R.string.text_subscription_links_are_not_supported_yet
-                    : R.string.text_the_link_is_missing_required_server_settings);
+            if (subscription) throw new ParseException(R.string.text_subscription_links_are_not_supported_yet);
+            // An export without them is a TOML file that is only incomplete, and
+            // validation says what is missing, as it does for any other.
+            if (link) throw new ParseException(R.string.text_the_link_is_missing_required_server_settings);
+        }
         // Only the certificates are kept, so nothing else from the file the server's
         // certificate came from is stored. A certificate with none in it is refused:
-        // the link meant to pin one, and the connection would only fail later.
+        // the link or file meant to pin one, and the connection would only fail later.
         Certificates.Kept certificate = Certificates.fromDer(fields.certificate);
-        if (certificate.dropped && certificate.der.length == 0)
-            throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
+        boolean dropped = certificate.dropped || fields.certificateDropped;
+        if (dropped && certificate.der.length == 0)
+            throw new ParseException(link ? R.string.text_the_link_contains_an_invalid_certificate
+                    : R.string.text_the_configuration_contains_an_invalid_certificate);
         String name = clean(fields.displayName).trim();
-        if (name.isEmpty()) name = hostname;
+        if (name.isEmpty() && link) name = hostname;
         if (name.length() > 80) name = name.substring(0, 80);
-        return new Imported(name, toToml(fields, certificate.pem), subscription, certificate.dropped);
+        return new Imported(name, toToml(fields, certificate.pem), subscription, dropped);
+    }
+
+    // A string at the top of an export, or "" when it is missing or not a string.
+    private static String string(TomlTable root, String key) {
+        Object value = root.get(key);
+        return value instanceof String ? (String) value : "";
+    }
+
+    // The strings of an array at the top of an export, trimmed and without empty
+    // ones, as the desktop reads a list; items of another type are skipped.
+    private static List<String> strings(TomlTable root, String key) {
+        List<String> out = new ArrayList<>();
+        Object value = root.get(key);
+        if (!(value instanceof TomlArray)) return out;
+        TomlArray array = (TomlArray) value;
+        for (int i = 0; i < array.size(); i++) {
+            Object item = array.get(i);
+            String text = item instanceof String ? ((String) item).trim() : "";
+            if (!text.isEmpty()) out.add(text);
+        }
+        return out;
+    }
+
+    private static boolean flag(TomlTable root, String key, boolean otherwise) {
+        Object value = root.get(key);
+        return value instanceof Boolean ? (Boolean) value : otherwise;
     }
 
     // TrustTunnel requires https://. The address is not used or shown in this

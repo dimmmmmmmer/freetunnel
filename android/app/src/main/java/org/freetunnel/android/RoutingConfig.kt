@@ -95,10 +95,11 @@ object RoutingConfig {
 
     /**
      * An imported file as it will be saved, whether a subscription was dropped from
-     * it, and whether its certificate held more than certificates, which were kept alone.
+     * it, whether its certificate held more than certificates, which were kept alone,
+     * and the name it gives its server, if it gives one.
      */
     data class Import @JvmOverloads constructor(val toml: String, val subscriptionNotKept: Boolean,
-                                                val certificateIgnored: Boolean = false)
+                                                val certificateIgnored: Boolean = false, val name: String? = null)
 
     /** A file refused for a reason the user can act on; the message is shown as it is. */
     class ImportRefused(@JvmField val messageResource: Int) : IllegalArgumentException("Import refused")
@@ -153,18 +154,39 @@ object RoutingConfig {
         return kept.takeIf { it.dropped }
     }
 
+    // The TOML file a TrustTunnel endpoint exports: the keys of [endpoint] at the top
+    // with no table at all, which upstream means to be pasted under an [endpoint]
+    // header. Taken strictly, so that no client config is read as one: the core
+    // reads its server from [endpoint] alone, and every spelling of that, a header,
+    // a dotted key or an inline table, puts a table at the top. Null for any other
+    // file, which is left to validate().
+    private fun endpointExport(root: TomlTable): Import? {
+        fun table(value: Any?) =
+            value is TomlTable || (value is TomlArray && (0 until value.size()).any { value.get(it) is TomlTable })
+        if (root.get(listOf("endpoint")) != null || root.keySet().any { table(root.get(listOf(it))) }) return null
+        if (listOf("hostname", "username", "password").any { root.get(listOf(it)) !is String } ||
+            root.get(listOf("addresses")) !is TomlArray) return null
+        val imported = try {
+            DeepLinkImport.fromEndpointExport(root)
+        } catch (refused: DeepLinkImport.ParseException) {
+            throw ImportRefused(refused.messageResource)
+        }
+        return Import(imported.toml, imported.subscriptionNotKept, imported.certificateIgnored, imported.name.ifEmpty { null })
+    }
+
     /**
      * Checks an imported TOML file before it is confirmed. A file is kept as it was
      * written unless it names a subscription or its certificate holds more than
      * certificates; then only the subscription and whatever is not a certificate
-     * are taken out of it, and everything else stays as written.
+     * are taken out of it, and everything else stays as written. An endpoint's
+     * export is turned into the configuration a link with its settings gives.
      */
     @JvmStatic fun cleanImport(source: String): Import {
         // Anything unreadable is left to validate(), which says what is wrong.
         if (source.length > 1_048_576) return Import(source, false)
         val parsed = Toml.parse(source)
         if (parsed.hasErrors()) return Import(source, false)
-        val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return Import(source, false)
+        val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return endpointExport(parsed) ?: Import(source, false)
         // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
         // then refuses every connection without saying why. The endpoint writes an
         // empty one into every export, so only a key with something in it is refused.

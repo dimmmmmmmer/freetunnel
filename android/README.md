@@ -22,7 +22,10 @@ compatibility contract.
   the certificates are kept: other PEM data, such as a private key, is left
   out and the import says so. A whole chain in one block, as the desktop's
   FreeTunnel 1.1.9 and earlier wrote one, is kept as it is. A certificate
-  with no certificate in it is refused.
+  with no certificate in it is refused. The TOML file a TrustTunnel endpoint
+  exports, with the server's settings at the top and no `[endpoint]` table,
+  is imported as a link with the same settings would be, and named after its
+  `name`, or else the file.
 - TOML, Android adapter and native configuration checks before saving.
   The editor hides credentials by default and prevents screen capture.
 - AES-GCM encrypted profiles with Android Keystore. Read failures preserve
