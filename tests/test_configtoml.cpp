@@ -772,6 +772,10 @@ void TestConfigToml::anEscapedQuoteDoesNotCloseABlock()
     QVERIFY2(rebuilt.contains(QStringLiteral("note = \"\"\"quoted \\\"\"\"\nusername = \"not-a-key\"\n\"\"\"\n")),
              qPrintable(rebuilt));
     QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+
+    // A block whose only close is escaped never closes, and is not a value.
+    const QString unclosed = QStringLiteral("[endpoint]\npassword = \"\"\"abc\\\"\"\"\n");
+    QVERIFY2(parseConfigToml(unclosed).password.isEmpty(), qPrintable(parseConfigToml(unclosed).password));
 }
 
 // TrustTunnel's own template puts dns_upstreams in [endpoint], and the core takes
