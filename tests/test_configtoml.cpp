@@ -22,6 +22,7 @@ private slots:
     void aQuotedTableNameIsTheSameTable();
     void aValueInTripleQuotesIsRead();
     void aCertificatesTextIsNotReadAsKeys();
+    void anEscapedQuoteDoesNotCloseABlock();
     void theDnsListIsReadWhereTheCoreReadsIt();
     void postQuantumStaysOffWhenTheConfigTurnsItOff();
     void aClientRandomGoesToTheCoreInAFormItTakes();
@@ -740,6 +741,37 @@ void TestConfigToml::aCertificatesTextIsNotReadAsKeys()
     QVERIFY(!c.skipVerification);
     QVERIFY2(c.password.isEmpty(), qPrintable(c.password));
     QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+}
+
+// Inside """ ... """ a backslash escapes what follows it, so \" is a quote of the
+// text and \""" does not close the block. Taken for the close, it ended the block
+// a line early: the text after it was read as keys, here a username, and the
+// next """ opened a block TOML has closed, which hid the keys after it. Inside
+// ''' a backslash is only a backslash, and ''' after one closes the block.
+void TestConfigToml::anEscapedQuoteDoesNotCloseABlock()
+{
+    const QString src = QStringLiteral(
+            "[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "note = \"\"\"quoted \\\"\"\"\n"
+            "username = \"not-a-key\"\n"
+            "\"\"\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "password = \"\"\"a\\\"\"\"b\"\"\"\n"
+            "custom_sni = '''sni\\'''\n"
+            "anti_dpi = true\n");
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.username, QStringLiteral("u"));
+    QCOMPARE(c.addresses, QStringLiteral("1.2.3.4:443"));
+    QCOMPARE(c.password, QStringLiteral("a\"\"\"b"));
+    QCOMPARE(c.customSni, QStringLiteral("sni\\"));
+    QVERIFY(c.antiDpi);
+    // The block is carried over whole, as the key it belongs to.
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(rebuilt.contains(QStringLiteral("note = \"\"\"quoted \\\"\"\"\nusername = \"not-a-key\"\n\"\"\"\n")),
+             qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
 }
 
 // TrustTunnel's own template puts dns_upstreams in [endpoint], and the core takes
@@ -1499,6 +1531,14 @@ void TestConfigToml::anEndpointExportIsNeverAClientConfig_data()
             << QStringLiteral("note = '''\n") + endpoint_export::text(noBlock) + QStringLiteral("'''\n");
     QTest::newRow("the keys only inside a basic block")
             << QStringLiteral("note = \"\"\"\n") + endpoint_export::text(noBlock) + QStringLiteral("\"\"\"\n");
+    // \" is a quote inside a basic block, so \""" does not close it. Read as the
+    // close, the next """ opened a block that TOML has closed, and the [endpoint]
+    // the core reads was hidden inside it.
+    QTest::newRow("[endpoint] after an escaped quote in a block")
+            << flat
+                    + QStringLiteral("x = \"\"\"abc\\\"\"\"\ny = \"\"\"\n[endpoint]\nhostname = \"real.example\"\n"
+                                     "addresses = [\"6.6.6.6:443\"]\nusername = \"e\"\npassword = \"e\"\n"
+                                     "# \"\"\"\n");
 }
 
 void TestConfigToml::anEndpointExportIsNeverAClientConfig()

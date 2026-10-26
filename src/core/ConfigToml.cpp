@@ -100,17 +100,31 @@ int endOfQuoted(const QString &line, int i)
 }
 
 // Inside a multi-line string already: step to just past its closing delimiter,
-// or to the end of the line when it does not close here.
-int endOfOpenMultiline(OpenValue *v, const QString &line, int i)
+// or to the end of the text when it does not close in it.
+//
+// A basic block has escapes, as a one-line basic string does: \" is a quote of
+// its text, so \""" does not close it. Taken for the close, the block ended
+// early, and the next """ opened one that TOML says is closed, hiding whatever
+// came after it - an [endpoint] header among the rest. Inside ''' a backslash is
+// only a backslash.
+int endOfOpenMultiline(OpenValue *v, const QString &text, int i)
 {
     const QLatin1String fence =
             v->basic ? QLatin1String("\"\"\"") : QLatin1String("'''");
-    const int end = line.indexOf(fence, i);
-    if (end < 0)
-        return line.size(); // all of what is left belongs to the string
-    v->basic = false;
-    v->literal = false;
-    return end + 3;
+    const int n = text.size();
+    while (i < n) {
+        if (v->basic && text.at(i) == QLatin1Char('\\')) {
+            i += 2;
+            continue;
+        }
+        if (QStringView(text).mid(i).startsWith(fence)) {
+            v->basic = false;
+            v->literal = false;
+            return i + 3;
+        }
+        ++i;
+    }
+    return n; // all of what is left belongs to the string
 }
 
 void countBracket(OpenValue *v, QChar c)
@@ -591,15 +605,24 @@ QRegularExpressionMatch matchValue(const QString &body, const char *key, const Q
 // straight before the closing quotes, which this editor writes there.
 std::optional<QString> readBlock(const QString &table, const char *key)
 {
-    static const QRegularExpression basicBlock(
-            QStringLiteral("\\s*\"\"\"\\n?(.*?)\\n?\"\"\""),
-            QRegularExpression::DotMatchesEverythingOption);
-    const auto bm = matchValue(table, key, basicBlock);
-    // Same unescaping as the quoted fields: buildConfigToml() escapes quotes and
-    // backslashes in the block, and a PEM (which has neither) still round trips
-    // byte for byte.
-    if (bm.hasMatch())
-        return unescapeBasic(bm.captured(1));
+    static const QRegularExpression basicOpen(QStringLiteral("\\s*\"\"\"\\n?"));
+    const auto bm = matchValue(table, key, basicOpen);
+    // It closes where every other reader here says it does (endOfOpenMultiline),
+    // past any \". Same unescaping as the quoted fields: buildConfigToml()
+    // escapes quotes and backslashes in the block, and a PEM (which has neither)
+    // still round trips byte for byte.
+    if (bm.hasMatch()) {
+        OpenValue open;
+        open.basic = true;
+        const int start = bm.capturedEnd();
+        const int end = endOfOpenMultiline(&open, table, start);
+        if (!open.basic) {
+            QString text = table.mid(start, end - 3 - start);
+            if (text.endsWith(QLatin1Char('\n')))
+                text.chop(1);
+            return unescapeBasic(text);
+        }
+    }
     static const QRegularExpression literalBlock(
             QStringLiteral("\\s*'''\\n?(.*?)\\n?'''"),
             QRegularExpression::DotMatchesEverythingOption);

@@ -69,6 +69,9 @@ compare link at the bottom of its release notes.
 - **The Logs page no longer goes blank after the window comes back from the
   tray or many lines arrive at once.** Before, the lines came back only once
   the log was scrolled or another page was opened.
+- **Windows, macOS and Linux: a config file whose multi-line text has an
+  escaped quote (`\"`) in it is read correctly.** Before, `\"""` was taken for
+  the end of the text, and the settings after it could be misread or missed.
 
 ## 1.2.3
 
