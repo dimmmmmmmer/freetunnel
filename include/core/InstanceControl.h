@@ -75,11 +75,21 @@ bool localSocketPeerIsSameUser(QLocalSocket *socket, SocketEnd end);
 /// How long a launch waits for a running instance to take its message.
 constexpr int kInstanceHandOverMs = 10000;
 
+/// What became of a message a launch wrote to a running instance.
+enum class HandOver {
+    Taken,    ///< the instance has it
+    NotTaken, ///< still not read when the budget ran out; the rest is dropped
+    Refused,  ///< the instance closed the connection without reading it all
+};
+
 /// Write @p message to the instance @p socket is connected to, wait until the
-/// instance has taken it, and close. False when it was not taken within
-/// @p budgetMs. The bytes were then thrown away, so the command is lost.
-bool handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message,
-                             int budgetMs = kInstanceHandOverMs);
+/// instance has taken it, and close.
+///
+/// On Unix the kernel holds what fits in the socket buffer, so it is taken at
+/// once. A longer message can reach the instance cut short when it is not
+/// taken. The instance then finds a broken command and acts on nothing.
+HandOver handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message,
+                                 int budgetMs = kInstanceHandOverMs);
 
 /// What became of a command a launch tried to hand to a running instance.
 enum class ForwardResult {

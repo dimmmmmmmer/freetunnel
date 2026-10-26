@@ -9,6 +9,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QPointer>
+#include <QScopeGuard>
 #include <QQmlApplicationEngine>
 #include <QTimer>
 #include <QTranslator>
@@ -345,16 +346,24 @@ void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &ba
     idle->setSingleShot(true);
     idle->setInterval(kInstanceMessageIdleMs);
 
-    Backend *be = &backend;
-    // Held weakly: a connection is the listener's child, and one closed as the
-    // listener is destroyed delivers from inside that.
+    // All three held weakly: a connection is the listener's child, and one
+    // closed as the listener is destroyed delivers from inside that, by which
+    // time the Backend and the window can be gone (GuiStartup goes before the
+    // application that owns the listener).
+    const QPointer<Backend> be(&backend);
+    const QPointer<QWindow> window(win);
     const QPointer<QLocalServer> listener(server);
     QElapsedTimer handedOver;
     handedOver.start();
-    auto deliver = [c, buf, delivered, be, win, instanceToken, listener, handedOver]() {
+    auto deliver = [c, buf, delivered, be, window, instanceToken, listener, handedOver]() {
         if (*delivered)
             return;
         *delivered = true;
+        // Deleted once this returns, not before. The token's store and the
+        // command can both turn a nested event loop, and this can be running
+        // inside the socket's own disconnected(): deleted in that loop, the
+        // socket was freed under the call that emitted it.
+        const auto release = qScopeGuard([c] { c->deleteLater(); });
         // What has arrived can still be uncounted here. On Windows the pipe
         // reader takes the peer's bytes off the pipe as the connection is
         // accepted, and announces them with an event posted for the next turn of
@@ -368,15 +377,14 @@ void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &ba
         if (c->state() == QLocalSocket::ConnectedState)
             c->waitForReadyRead(0);
         *buf += c->readAll();
-        c->deleteLater();
         QString cmd;
         if (!authorizeInstanceMessage(*buf, c, handedOver.elapsed(), instanceToken, &cmd)) {
             // A launch of this user's that read no token, or one not ours.
             keepInstanceTokenStored(listener, instanceToken);
             return;
         }
-        if (runControlCommand(*be, cmd))
-            freetunnel::bringWindowForward(win);
+        if (be && runControlCommand(*be, cmd))
+            freetunnel::bringWindowForward(window);
     };
 
     QObject::connect(idle, &QTimer::timeout, c, deliver);

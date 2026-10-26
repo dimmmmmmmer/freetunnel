@@ -36,8 +36,10 @@ compare link at the bottom of its release notes.
 - **Windows: a tt:// link or freetunnel:// command no longer does nothing when
   FreeTunnel is busy for a few seconds, for example while it starts.** The
   launch that carries it now waits up to ten seconds for FreeTunnel to take it.
-  FreeTunnel no longer drops a message that has already arrived because a
-  timeout ran first.
+  If FreeTunnel does not take it in that time, the launch closes without acting
+  on it: open the link again. A link opened just as FreeTunnel quits now starts
+  FreeTunnel again. FreeTunnel no longer drops a message that has already
+  arrived because a timeout ran first.
 - **The Logs page no longer goes blank after the window comes back from the
   tray or many lines arrive at once.** Before, the lines came back only once
   the log was scrolled or another page was opened.

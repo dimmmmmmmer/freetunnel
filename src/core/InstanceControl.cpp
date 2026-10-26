@@ -722,17 +722,13 @@ std::optional<ForwardResult> connectToInstance(QLocalSocket &probe, const QStrin
     return std::nullopt;
 }
 
-ForwardResult sendToInstance(QLocalSocket &probe, const QString &token, const QString &controlArg)
+HandOver sendToInstance(QLocalSocket &probe, const QString &token, const QString &controlArg)
 {
 #if defined(Q_OS_WIN)
     letPipeServerTakeForeground(reinterpret_cast<HANDLE>(probe.socketDescriptor()));
 #endif
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
-    // Not taken means the command is lost, and this launch is not the instance
-    // either: one of ours is running. It must not start beside it.
-    return handOverInstanceMessage(probe, formatInstanceMessage(token, payload))
-            ? ForwardResult::Forwarded
-            : ForwardResult::Unreachable;
+    return handOverInstanceMessage(probe, formatInstanceMessage(token, payload));
 }
 
 } // namespace
@@ -750,11 +746,14 @@ ForwardResult sendToInstance(QLocalSocket &probe, const QString &token, const QS
 // nothing. So the wait now lasts until the bytes are actually taken, within a
 // budget, and the answer says whether they were.
 //
-// On Unix the kernel buffers the write, and it is taken at once.
-bool handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message, int budgetMs)
+// On Unix the kernel buffers the write, so a message that fits the socket
+// buffer is taken at once. A longer one waits for the instance to read the rest.
+HandOver handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message, int budgetMs)
 {
-    if (socket.write(message) != message.size())
-        return false;
+    if (socket.write(message) != message.size()) {
+        socket.abort();
+        return HandOver::Refused;
+    }
     socket.flush();
     const QDeadlineTimer budget(budgetMs);
     while (socket.state() == QLocalSocket::ConnectedState && socket.bytesToWrite() > 0
@@ -762,16 +761,20 @@ bool handOverInstanceMessage(QLocalSocket &socket, const QByteArray &message, in
         // In slices, so the budget is the whole wait, however the waits end.
         socket.waitForBytesWritten(int(qBound(qint64(1), budget.remainingTime(), qint64(250))));
     }
-    // Still connected, as well as nothing left to send. A write the instance
-    // refused closes the socket, and that leaves nothing to send too: Qt drops
-    // the bytes with the writer.
-    if (socket.state() != QLocalSocket::ConnectedState || socket.bytesToWrite() > 0) {
+    // Taken only while still connected. A write the instance refused closes the
+    // socket, and that leaves nothing to send as well: Qt drops the bytes with
+    // the writer.
+    if (socket.state() != QLocalSocket::ConnectedState) {
         socket.abort();
-        return false;
+        return HandOver::Refused;
+    }
+    if (socket.bytesToWrite() > 0) {
+        socket.abort();
+        return HandOver::NotTaken;
     }
     // Nothing is left to send, so this closes at once.
     socket.disconnectFromServer();
-    return true;
+    return HandOver::Taken;
 }
 
 // "Could not hand it over" and "there is nothing to hand it to" used to be one
@@ -800,7 +803,25 @@ ForwardResult forwardToRunningInstance(const QStringList &socketNames, const QSt
         // that is still no reason to start a second copy beside it.
         if (!haveToken)
             return ForwardResult::Unreachable;
-        return sendToInstance(probe, token, controlArg);
+        HandOver sent = sendToInstance(probe, token, controlArg);
+        if (sent == HandOver::Refused) {
+            // Closed without being read, most likely by an instance that is
+            // quitting: FreeTunnel closes its listener as it quits, the
+            // connections it has not accepted yet with it. So ask again, once.
+            // A name that is gone now means no instance, and this launch is to
+            // be it. One still there is told again.
+            QLocalSocket again;
+            if (const std::optional<ForwardResult> failed =
+                        connectToInstance(again, socketNames.at(i), ownName)) {
+                if (*failed == ForwardResult::NoInstance)
+                    continue;
+                return *failed;
+            }
+            sent = sendToInstance(again, token, controlArg);
+        }
+        // Not taken means the command is lost, and this launch is not the
+        // instance either: one of ours is running. It must not start beside it.
+        return sent == HandOver::Taken ? ForwardResult::Forwarded : ForwardResult::Unreachable;
     }
     return ForwardResult::NoInstance;
 }
