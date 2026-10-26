@@ -4,6 +4,9 @@
 // the servers in a DNS list. The editor and link import check with these, and
 // buildConfigToml() writes through them. Split out of ConfigToml.cpp, which had
 // grown past the point where one file could be read end to end.
+//
+// And a certificate: which DER elements and PEM blocks are certificates, so the
+// link, the file import, the editor and the share link all keep the same ones.
 #include "ConfigToml.h"
 
 #include <QRegularExpression>
@@ -59,6 +62,99 @@ int derElementEnd(const QByteArray &der, int pos, unsigned char tag, int *conten
     if (contentStart)
         *contentStart = pos + header;
     return static_cast<int>(end);
+}
+
+// Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue },
+// RFC 5280 section 4.1. Nothing inside the three is read: the shape alone is what
+// no key has. A PKCS#8 key is SEQUENCE { INTEGER, SEQUENCE, OCTET STRING }, and a
+// PKCS#1 or SEC1 key starts with an INTEGER too.
+bool isCertificateDer(const QByteArray &der)
+{
+    static constexpr unsigned char kFields[] = {0x30, 0x30, 0x03};
+    int at = 0;
+    if (derElementEnd(der, 0, 0x30, &at) != der.size())
+        return false;
+    for (const unsigned char tag : kFields) {
+        int content = 0;
+        const int end = derElementEnd(der, at, tag, &content);
+        // A BIT STRING holds at least the byte that counts its unused bits.
+        if (end < 0 || (tag == 0x03 && end == content))
+            return false;
+        at = end;
+    }
+    return at == der.size();
+}
+
+namespace {
+
+// The DER of one PEM block, or nothing when the block is not a certificate. The
+// body has to be strict base64 once its line breaks are out: decoded leniently,
+// what is not base64 is skipped, and a damaged block could still pass.
+QByteArray certificateBlockDer(const QString &label, QString body)
+{
+    if (label != QLatin1String("CERTIFICATE") && label != QLatin1String("X509 CERTIFICATE"))
+        return QByteArray();
+    static const QRegularExpression space(QStringLiteral("\\s"));
+    body.remove(space);
+    const QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(
+            body.toLatin1(), QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
+    return decoded && isCertificateDer(decoded.decoded) ? decoded.decoded : QByteArray();
+}
+
+struct PemCertificates {
+    QStringList blocks; // as written
+    QByteArray der;     // theirs, one after another
+    bool dropped = false;
+};
+
+// Every block whose END names the label its BEGIN does. A body holds nothing but
+// base64 and white space, so a block with another BEGIN inside it is not one:
+// the inner block is read on its own, and the text around it is outside them.
+PemCertificates readPemCertificates(const QString &pem)
+{
+    static const QRegularExpression block(
+            QStringLiteral("-----BEGIN ([A-Z0-9 ]+)-----([A-Za-z0-9+/=\\s]*)-----END \\1-----"));
+    PemCertificates out;
+    qsizetype last = 0;
+    auto it = block.globalMatch(pem);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        const QByteArray der = certificateBlockDer(m.captured(1), m.captured(2));
+        if (der.isEmpty()) {
+            out.dropped = true;
+        } else {
+            out.blocks << m.captured(0);
+            out.der += der;
+        }
+        // Text between the blocks, such as the "Bag Attributes" an export of a
+        // PKCS#12 file writes, is no certificate either.
+        if (!QStringView(pem).mid(last, m.capturedStart() - last).trimmed().isEmpty())
+            out.dropped = true;
+        last = m.capturedEnd();
+    }
+    if (!QStringView(pem).mid(last).trimmed().isEmpty())
+        out.dropped = true;
+    return out;
+}
+
+} // namespace
+
+QString certificatesOnly(const QString &pem, bool *dropped)
+{
+    const PemCertificates found = readPemCertificates(pem);
+    if (dropped)
+        *dropped = found.dropped;
+    if (!found.dropped)
+        return pem;
+    return found.blocks.isEmpty() ? QString() : found.blocks.join(QLatin1Char('\n')) + QLatin1Char('\n');
+}
+
+QByteArray certificatesDer(const QString &pem, bool *dropped)
+{
+    const PemCertificates found = readPemCertificates(pem);
+    if (dropped)
+        *dropped = found.dropped;
+    return found.der;
 }
 
 } // namespace freetunnel

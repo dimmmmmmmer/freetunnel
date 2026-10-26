@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include <QtTest>
+#include <QRandomGenerator>
 
+#include "certificate_vectors.h"
 #include "core/ConfigToml.h"
 
 using namespace freetunnel;
@@ -45,6 +47,18 @@ private slots:
     void aConfigWithoutASubscriptionComesBackAsItWas();
     void aRewriteNeverPutsASubscriptionBack();
     void theAuthKeyIsReadFromTheEndpoint();
+
+    // A certificate keeps only its certificates.
+    void derElementEndReadsOneElementOfTheTagAsked();
+    void isCertificateDer_data();
+    void isCertificateDer();
+    void certificatesOnly_data();
+    void certificatesOnly();
+    void certificatesDerMatchesTheKeptBlocks();
+    void withCertificatesOnlyChangesOnlyTheCertificate();
+    void withCertificatesOnlyReadsEverySpelling();
+    void withCertificatesOnlyLeavesACleanConfigAsItWas();
+    void randomCertificatesKeepTheRules();
 };
 
 // A config as TrustTunnel's endpoint exports it from 1.3.0 on, pasted under
@@ -952,6 +966,353 @@ void TestConfigToml::theAuthKeyIsReadFromTheEndpoint()
     QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[provider]\nclient_random_auth_key = \"aabb\"\n"
                                                        "[endpoint]\nhostname = \"h\"\n"))
                     .isEmpty());
+}
+
+// ---- certificates -------------------------------------------------------------
+
+// The one DER reader: a link's certificates are split with it, and the
+// certificate check reads the fields inside one with it, by their tags.
+void TestConfigToml::derElementEndReadsOneElementOfTheTagAsked()
+{
+    const QByteArray bitString = QByteArray::fromHex("030100");
+    QCOMPARE(derElementEnd(bitString, 0, 0x03), 3);
+    QCOMPARE(derElementEnd(bitString, 0), -1); // a SEQUENCE unless told otherwise
+    int content = -1;
+    QCOMPARE(derElementEnd(QByteArray::fromHex("3003020101"), 0, 0x30, &content), 5);
+    QCOMPARE(content, 2);
+    // A length of one byte past the count byte, and of two; and the element after.
+    const QByteArray one = certs::derElement(0x30, QByteArray(200, 'A'));
+    QCOMPARE(derElementEnd(one, 0, 0x30, &content), 203);
+    QCOMPARE(content, 3);
+    const QByteArray two = certs::derElement(0x30, QByteArray(300, 'A')) + bitString;
+    QCOMPARE(derElementEnd(two, 0, 0x30, &content), 304);
+    QCOMPARE(content, 4);
+    QCOMPARE(derElementEnd(two, 304, 0x03, &content), 307);
+    QCOMPARE(content, 306);
+    QCOMPARE(derElementEnd(two, 306, 0x03), -1);
+
+    // Nothing that is not a whole element, and the content start left alone.
+    const QList<QByteArray> broken{
+            QByteArray(),
+            QByteArray::fromHex("30"),
+            QByteArray::fromHex("3001"),                   // the content is missing
+            QByteArray::fromHex("308005000000"),           // indefinite, which DER forbids
+            QByteArray::fromHex("3085000000000105"),       // five length bytes
+            QByteArray::fromHex("308201"),                 // the length cut short
+            QByteArray::fromHex("30847fffffff00"),         // far past the end
+            QByteArray::fromHex("3082010041") + QByteArray(254, 'A'), // one byte short
+    };
+    for (const QByteArray &bytes : broken) {
+        content = -1;
+        QCOMPARE(derElementEnd(bytes, 0, 0x30, &content), -1);
+        QCOMPARE(content, -1);
+    }
+}
+
+void TestConfigToml::isCertificateDer_data()
+{
+    QTest::addColumn<QByteArray>("der");
+    QTest::addColumn<bool>("certificate");
+    const QByteArray ca = certs::derOf(certs::kCaPem);
+    QTest::newRow("a certificate authority") << ca << true;
+    QTest::newRow("a server certificate") << certs::derOf(certs::kLeafPem) << true;
+    QTest::newRow("the smallest shape") << QByteArray::fromHex("300b3002050030020500030100") << true;
+    QTest::newRow("the shape, one length byte") << certs::certShaped(200) << true;
+    QTest::newRow("the shape, two length bytes") << certs::certShaped(300) << true;
+    // What the link tests stood in for a certificate with before: a SEQUENCE
+    // holding an INTEGER, which is how a key starts.
+    QTest::newRow("a SEQUENCE of an INTEGER") << QByteArray::fromHex("3003020101") << false;
+    QTest::newRow("a PKCS#8 key") << certs::kPkcs8Der << false;
+    QTest::newRow("a PKCS#1 key") << certs::kPkcs1Der << false;
+    QTest::newRow("a SEC1 key") << certs::kSec1Der << false;
+    QTest::newRow("an encrypted PKCS#8 key") << certs::kEncryptedPkcs8Der << false;
+    QTest::newRow("a byte after it") << ca + '\0' << false;
+    QTest::newRow("two certificates") << ca + certs::derOf(certs::kLeafPem) << false;
+    QTest::newRow("cut short") << ca.chopped(1) << false;
+    QTest::newRow("nothing") << QByteArray() << false;
+    QTest::newRow("a SET") << QByteArray::fromHex("310b3002050030020500030100") << false;
+    QTest::newRow("an indefinite length") << QByteArray::fromHex("308030020500300205000301000000") << false;
+    QTest::newRow("an empty BIT STRING") << QByteArray::fromHex("300a30020500300205000300") << false;
+    QTest::newRow("no BIT STRING") << QByteArray::fromHex("30083002050030020500") << false;
+    QTest::newRow("a field after the BIT STRING") << QByteArray::fromHex("300d30020500300205000301000500") << false;
+    QTest::newRow("the fields out of order") << QByteArray::fromHex("300b0301003002050030020500") << false;
+    QTest::newRow("a field past the end") << QByteArray::fromHex("300b3002050030020500030200") << false;
+    QTest::newRow("a field past its SEQUENCE") << QByteArray::fromHex("300a3002050030020500030100") << false;
+    QTest::newRow("a tag in the high form") << QByteArray::fromHex("300c30020500300205001f030100") << false;
+}
+
+void TestConfigToml::isCertificateDer()
+{
+    QFETCH(QByteArray, der);
+    QFETCH(bool, certificate);
+    QCOMPARE(freetunnel::isCertificateDer(der), certificate);
+}
+
+void TestConfigToml::certificatesOnly_data()
+{
+    using namespace certs;
+    QTest::addColumn<QString>("pem");
+    QTest::addColumn<QString>("kept");
+    QTest::addColumn<bool>("dropped");
+    const auto wrapped = [](const QByteArray &der, int columns) {
+        const QByteArray b64 = der.toBase64();
+        QString out = QStringLiteral("-----BEGIN CERTIFICATE-----\n");
+        for (qsizetype i = 0; i < b64.size(); i += columns)
+            out += QString::fromLatin1(b64.mid(i, columns)) + QLatin1Char('\n');
+        return out + QStringLiteral("-----END CERTIFICATE-----\n");
+    };
+
+    // Nothing to leave out: the text comes back exactly as it was.
+    QString crlf = kChainPem;
+    crlf.replace(QLatin1String("\n"), QLatin1String("\r\n"));
+    QString oneLine = kCaPem;
+    oneLine.remove(QLatin1Char('\n'));
+    const QString legacy = pemBlock(QStringLiteral("X509 CERTIFICATE"), derOf(kCaPem));
+    QTest::newRow("a certificate") << kCaPem << kCaPem << false;
+    QTest::newRow("a chain") << kChainPem << kChainPem << false;
+    QTest::newRow("CRLF") << crlf << crlf << false;
+    QTest::newRow("76 columns") << wrapped(derOf(kCaPem), 76) << wrapped(derOf(kCaPem), 76) << false;
+    QTest::newRow("on one line") << oneLine << oneLine << false;
+    QTest::newRow("X509 CERTIFICATE, which OpenSSL reads") << legacy << legacy << false;
+    QTest::newRow("blank lines around") << QStringLiteral("\n\n") + kCaPem + QStringLiteral(" \n")
+                                        << QStringLiteral("\n\n") + kCaPem + QStringLiteral(" \n") << false;
+    QTest::newRow("empty") << QString() << QString() << false;
+
+    // The certificates of what holds more, in order, and nothing else.
+    QTest::newRow("a certificate and its key") << kLeafPem + keyPem() << kLeafPem << true;
+    QTest::newRow("the key first") << keyPem() + kLeafPem << kLeafPem << true;
+    QTest::newRow("a key inside a chain") << kLeafPem + keyPem() + kCaPem << kChainPem << true;
+    QTest::newRow("an export of a PKCS#12 file")
+            << kBagAttributes + kLeafPem + kBagAttributes + keyPem() << kLeafPem << true;
+    QTest::newRow("an RSA key") << pemBlock(keyLabel(QStringLiteral("RSA ")), kPkcs1Der) + kCaPem << kCaPem << true;
+    QTest::newRow("an EC key") << pemBlock(keyLabel(QStringLiteral("EC ")), kSec1Der) + kCaPem << kCaPem << true;
+    QTest::newRow("an encrypted key")
+            << pemBlock(keyLabel(QStringLiteral("ENCRYPTED ")), kEncryptedPkcs8Der) + kCaPem << kCaPem << true;
+    QTest::newRow("a certificate request")
+            << pemBlock(QStringLiteral("CERTIFICATE REQUEST"), certShaped(4)) + kCaPem << kCaPem << true;
+    QTest::newRow("a key labelled as a certificate")
+            << pemBlock(QStringLiteral("CERTIFICATE"), kPkcs8Der) + kCaPem << kCaPem << true;
+    QTest::newRow("a key inside a certificate block")
+            << QStringLiteral("-----BEGIN CERTIFICATE-----\n") + keyPem()
+                       + QStringLiteral("-----END CERTIFICATE-----\n") + kCaPem
+            << kCaPem << true;
+    // Decoded leniently, the stray padding is skipped and the certificate is there.
+    QString padded = kLeafPem;
+    padded.replace(QLatin1String("MIIB1z"), QLatin1String("MIIB=1z"));
+    QTest::newRow("base64 that is not") << padded + kCaPem << kCaPem << true;
+    QString mismatched = kLeafPem;
+    mismatched.replace(QLatin1String("END CERTIFICATE"), QLatin1String("END X509 CERTIFICATE"));
+    QTest::newRow("an END of another label") << mismatched + kCaPem << kCaPem << true;
+    QTest::newRow("no END") << kCaPem + kLeafPem.left(kLeafPem.indexOf(QLatin1String("-----END")))
+                            << kCaPem << true;
+    QString lower = kCaPem;
+    lower.replace(QLatin1String("CERTIFICATE"), QLatin1String("certificate"));
+    QTest::newRow("a label in lower case") << lower << QString() << true;
+    QTest::newRow("text after the certificate") << kCaPem + QStringLiteral("see the README\n") << kCaPem << true;
+    QTest::newRow("text alone") << QStringLiteral("see the README") << QString() << true;
+
+    // And nothing at all when there is no certificate.
+    QTest::newRow("a key alone") << keyPem() << QString() << true;
+    QTest::newRow("a trusted certificate")
+            << pemBlock(QStringLiteral("TRUSTED CERTIFICATE"), derOf(kCaPem)) << QString() << true;
+}
+
+void TestConfigToml::certificatesOnly()
+{
+    QFETCH(QString, pem);
+    QFETCH(QString, kept);
+    QFETCH(bool, dropped);
+    bool lost = !dropped;
+    const QString out = freetunnel::certificatesOnly(pem, &lost);
+    QCOMPARE(out, kept);
+    QCOMPARE(lost, dropped);
+    // Whatever went in, no key comes out, and what comes out stays as it is.
+    QVERIFY2(!out.contains(certs::keyLabel()), qPrintable(out));
+    QCOMPARE(freetunnel::certificatesOnly(out, &lost), out);
+    QVERIFY(!lost);
+    // The DER is the kept blocks', and says the same about what was left out.
+    QCOMPARE(certificatesDer(pem, &lost), certificatesDer(out));
+    QCOMPARE(lost, dropped);
+}
+
+void TestConfigToml::certificatesDerMatchesTheKeptBlocks()
+{
+    using namespace certs;
+    const QByteArray chain = derOf(kLeafPem) + derOf(kCaPem);
+    bool dropped = true;
+    QCOMPARE(certificatesDer(kChainPem, &dropped), chain);
+    QVERIFY(!dropped);
+    QCOMPARE(certificatesDer(kLeafPem + keyPem() + kCaPem, &dropped), chain);
+    QVERIFY(dropped);
+    QVERIFY(certificatesDer(keyPem(), &dropped).isEmpty());
+    QVERIFY(dropped);
+    QVERIFY(certificatesDer(QString(), &dropped).isEmpty());
+    QVERIFY(!dropped);
+    QCOMPARE(certificatesDer(kCaPem), derOf(kCaPem));
+
+    // Strict base64. Decoded leniently, as derOf() does, a stray padding
+    // character is skipped and the certificate comes out whole; it is a damaged
+    // block all the same.
+    QString padded = kLeafPem;
+    padded.replace(QLatin1String("MIIB1z"), QLatin1String("MIIB=1z"));
+    QCOMPARE(derOf(padded), derOf(kLeafPem));
+    QVERIFY(certificatesDer(padded, &dropped).isEmpty());
+    QVERIFY(dropped);
+}
+
+// The certificate's lines and nothing else: a config is often a file the user
+// wrote, and the import stores it as written.
+void TestConfigToml::withCertificatesOnlyChangesOnlyTheCertificate()
+{
+    using namespace certs;
+    const QString rest = QStringLiteral("custom_sni = \"x\" # after it\n"
+                                        "\n[listener.tun]\n"
+                                        "mtu_size = 1280\n");
+    const QString top = QStringLiteral("# my server\n"
+                                       "loglevel = \"info\"\n"
+                                       "\n[provider]\n"
+                                       "certificate = \"\"\"\n")
+            + keyPem()
+            + QStringLiteral("\"\"\"\n"
+                             "\n[\"endpoint\"]  # the server\n"
+                             "hostname = \"vpn.fixture.invalid\"\n"
+                             "note = \"\"\"\n"
+                             "certificate = \"not this one\"\n"
+                             "\"\"\"\n");
+    const QString before = top + QStringLiteral("certificate = \"\"\"\n") + kBagAttributes + kLeafPem + keyPem()
+            + QStringLiteral("\"\"\"\n") + rest;
+    bool trimmed = false;
+    const QString after = withCertificatesOnly(before, &trimmed);
+    QVERIFY(trimmed);
+    // [provider]'s certificate is not the core's, and stays as it was.
+    QCOMPARE(after, top + QStringLiteral("certificate = \"\"\"\n") + kLeafPem + QStringLiteral("\"\"\"\n") + rest);
+    QCOMPARE(parseConfigToml(after).certificate, kLeafPem.trimmed());
+    QCOMPARE(withCertificatesOnly(after, &trimmed), after);
+    QVERIFY(!trimmed);
+
+    // Nothing left: no certificate, as the core makes of one with none in it.
+    const QString keyOnly = QStringLiteral("[endpoint]\nhostname = \"h\"\ncertificate = \"\"\"\n") + keyPem()
+            + QStringLiteral("\"\"\"\nusername = \"u\"");
+    QCOMPARE(withCertificatesOnly(keyOnly, &trimmed),
+             QStringLiteral("[endpoint]\nhostname = \"h\"\ncertificate = \"\"\nusername = \"u\""));
+    QVERIFY(trimmed);
+}
+
+// Every spelling readString() reads.
+void TestConfigToml::withCertificatesOnlyReadsEverySpelling()
+{
+    using namespace certs;
+    const QString combined = kLeafPem + keyPem();
+    QString escaped = combined;
+    escaped.replace(QLatin1String("\n"), QLatin1String("\\n"));
+    QString escapedCrlf = combined;
+    escapedCrlf.replace(QLatin1String("\n"), QLatin1String("\\r\\n"));
+    QString oneLine = combined;
+    oneLine.remove(QLatin1Char('\n'));
+    QString oneLineLeaf = kLeafPem;
+    oneLineLeaf.remove(QLatin1Char('\n'));
+    const QList<QPair<QString, QString>> spellings{
+            {QStringLiteral("certificate = \"\"\"\n") + combined + QStringLiteral("\"\"\""), kLeafPem},
+            {QStringLiteral("certificate = '''\n") + combined + QStringLiteral("'''"), kLeafPem},
+            {QStringLiteral("certificate = \"") + escaped + QStringLiteral("\""), kLeafPem},
+            {QStringLiteral("certificate = \"") + escapedCrlf + QStringLiteral("\""), kLeafPem},
+            {QStringLiteral("  \"certificate\" = '") + oneLine + QStringLiteral("' # pasted"), oneLineLeaf},
+    };
+    for (const auto &[value, leaf] : spellings) {
+        const QString toml = QStringLiteral("[endpoint]\nhostname = \"h\"\n") + value
+                + QStringLiteral("\nusername = \"u\"\n");
+        bool trimmed = false;
+        const QString out = withCertificatesOnly(toml, &trimmed);
+        QVERIFY2(trimmed, qPrintable(value));
+        QCOMPARE(out, QStringLiteral("[endpoint]\nhostname = \"h\"\ncertificate = \"\"\"\n") + leaf.trimmed()
+                              + QStringLiteral("\n\"\"\"\nusername = \"u\"\n"));
+    }
+}
+
+// Byte for byte, line endings and a missing final newline included: the import
+// and the start of the app run every config through this, and most have nothing
+// to leave out.
+void TestConfigToml::withCertificatesOnlyLeavesACleanConfigAsItWas()
+{
+    using namespace certs;
+    QString crlfChain = kChainPem;
+    crlfChain.replace(QLatin1String("\n"), QLatin1String("\r\n"));
+    const QStringList clean{
+            QStringLiteral("[endpoint]\r\nhostname = \"h\"\r\ncertificate = \"\"\"\r\n") + crlfChain
+                    + QStringLiteral("\"\"\"\r\n"),
+            QStringLiteral("[endpoint]\ncertificate = \"\"\"\n") + kChainPem + QStringLiteral("\"\"\""),
+            QStringLiteral("[endpoint]\ncertificate = \"\"\n"),
+            QStringLiteral("[endpoint]\nhostname = \"h\"\n"),
+            QString(),
+            QStringLiteral("# only a comment\n"),
+            // A key outside [endpoint], or text inside another value, is not the
+            // certificate the core reads.
+            QStringLiteral("[provider]\ncertificate = \"\"\"\n") + keyPem()
+                    + QStringLiteral("\"\"\"\n[endpoint]\nnote = '''\ncertificate = \"x\"\n'''\n"),
+    };
+    for (const QString &in : clean) {
+        bool trimmed = true;
+        QCOMPARE(withCertificatesOnly(in, &trimmed), in);
+        QVERIFY2(!trimmed, qPrintable(in));
+    }
+}
+
+// Pieces of what a certificate field holds, in any order and now and then
+// damaged: no key comes out, what comes out stays as it is, and every element
+// of the DER is a certificate. Random bytes as DER are read no further than
+// they go.
+void TestConfigToml::randomCertificatesKeepTheRules()
+{
+    using namespace certs;
+    bool fromEnv = false;
+    const quint32 env = qEnvironmentVariable("FT_FUZZ_SEED").toUInt(&fromEnv);
+    const quint32 seed = fromEnv ? env : 20261026u;
+    qInfo("randomCertificatesKeepTheRules: seed %u (FT_FUZZ_SEED=%u repeats it)", seed, seed);
+    QRandomGenerator rng(seed);
+    const QStringList pieces{kCaPem,
+                             kLeafPem,
+                             keyPem(),
+                             kBagAttributes,
+                             pemBlock(keyLabel(QStringLiteral("RSA ")), kPkcs1Der),
+                             pemBlock(QStringLiteral("CERTIFICATE"), kSec1Der),
+                             QStringLiteral("-----BEGIN CERTIFICATE-----\n"),
+                             QStringLiteral("-----END CERTIFICATE-----\n"),
+                             QStringLiteral("\r\n"),
+                             QStringLiteral(" "),
+                             QStringLiteral("text")};
+    for (int i = 0; i < 3000; ++i) {
+        QString pem;
+        const int count = rng.bounded(1, 6);
+        for (int j = 0; j < count; ++j)
+            pem += pieces.at(rng.bounded(static_cast<int>(pieces.size())));
+        if (rng.bounded(3) == 0)
+            pem[rng.bounded(static_cast<int>(pem.size()))] = QChar(static_cast<char16_t>(rng.bounded(0x20, 0x7F)));
+        bool dropped = false;
+        const QString out = freetunnel::certificatesOnly(pem, &dropped);
+        QVERIFY2(!out.contains(keyLabel()), qPrintable(pem));
+        QVERIFY2(dropped || out == pem, qPrintable(pem));
+        bool again = true;
+        QVERIFY2(freetunnel::certificatesOnly(out, &again) == out && !again, qPrintable(pem));
+        const QByteArray der = certificatesDer(pem);
+        QVERIFY2(der == certificatesDer(out), qPrintable(pem));
+        for (int pos = 0; pos < der.size();) {
+            const int end = derElementEnd(der, pos);
+            QVERIFY2(end > pos && freetunnel::isCertificateDer(der.mid(pos, end - pos)), qPrintable(pem));
+            pos = end;
+        }
+    }
+    for (int i = 0; i < 3000; ++i) {
+        QByteArray der(rng.bounded(0, 48), '\0');
+        for (char &byte : der)
+            byte = static_cast<char>(rng.generate() & 0xFF);
+        if (!der.isEmpty() && rng.bounded(2) == 0)
+            der[0] = 0x30; // a SEQUENCE far more often than by chance
+        int content = -1;
+        const int end = derElementEnd(der, 0, 0x30, &content);
+        QVERIFY(end == -1 || (content >= 2 && content <= end && end <= der.size()));
+        if (freetunnel::isCertificateDer(der))
+            QCOMPARE(end, der.size());
+    }
 }
 
 QTEST_MAIN(TestConfigToml)
