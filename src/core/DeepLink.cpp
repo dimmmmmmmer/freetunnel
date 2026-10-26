@@ -129,32 +129,6 @@ QString onePemBlock(const QByteArray &der)
             + QStringLiteral("-----END CERTIFICATE-----\n");
 }
 
-// Where the DER element starting at `pos` ends, or -1 when the bytes there are
-// not one. A certificate is an ASN.1 SEQUENCE: the tag 0x30, then a length that
-// is either one short byte or a count byte followed by that many big-endian
-// length bytes.
-int derElementEnd(const QByteArray &der, int pos)
-{
-    if (pos + 2 > der.size() || static_cast<unsigned char>(der.at(pos)) != 0x30)
-        return -1;
-    const auto first = static_cast<unsigned char>(der.at(pos + 1));
-    int header = 2;
-    qint64 length = first;
-    if ((first & 0x80) != 0) {
-        const int count = first & 0x7F;
-        // Zero is the indefinite form, which DER forbids; more than four bytes
-        // is a certificate larger than this has any business accepting.
-        if (count == 0 || count > 4 || pos + 2 + count > der.size())
-            return -1;
-        length = 0;
-        for (int i = 0; i < count; ++i)
-            length = (length << 8) | static_cast<unsigned char>(der.at(pos + 2 + i));
-        header = 2 + count;
-    }
-    const qint64 end = static_cast<qint64>(pos) + header + length;
-    return end > der.size() ? -1 : static_cast<int>(end);
-}
-
 // The inverse of the export side, which concatenates the DER of every PEM block
 // it finds (pemCertsToDer in BackendConfig.cpp) — tag 0x08 is a chain, and the
 // header and DEEP_LINK.md both say so.

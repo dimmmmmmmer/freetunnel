@@ -33,4 +33,32 @@ QStringList splitDnsList(const QString &dns) {
     return dns.split(separators, Qt::SkipEmptyParts);
 }
 
+// Moved here from DeepLink.cpp, which splits a link's certificates with it, so
+// the link and the certificate check below read DER the one way.
+int derElementEnd(const QByteArray &der, int pos, unsigned char tag, int *contentStart)
+{
+    if (pos + 2 > der.size() || static_cast<unsigned char>(der.at(pos)) != tag)
+        return -1;
+    const auto first = static_cast<unsigned char>(der.at(pos + 1));
+    int header = 2;
+    qint64 length = first;
+    if ((first & 0x80) != 0) {
+        const int count = first & 0x7F;
+        // Zero is the indefinite form, which DER forbids; more than four bytes
+        // is a certificate larger than this has any business accepting.
+        if (count == 0 || count > 4 || pos + 2 + count > der.size())
+            return -1;
+        length = 0;
+        for (int i = 0; i < count; ++i)
+            length = (length << 8) | static_cast<unsigned char>(der.at(pos + 2 + i));
+        header = 2 + count;
+    }
+    const qint64 end = static_cast<qint64>(pos) + header + length;
+    if (end > der.size())
+        return -1;
+    if (contentStart)
+        *contentStart = pos + header;
+    return static_cast<int>(end);
+}
+
 } // namespace freetunnel

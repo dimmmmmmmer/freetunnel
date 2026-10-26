@@ -5,6 +5,7 @@
 // create/edit round-trip can be unit-tested without the VPN core. addresses and
 // dns are comma-separated strings (as entered in the form).
 
+#include <QByteArray>
 #include <QString>
 #include <QStringList>
 
@@ -84,5 +85,12 @@ bool isValidClientRandom(const QString &value);
 // check and went to the core as one server, which core 1.1.5 refused to connect
 // with and 1.1.7 takes, leaving the tunnel up with no DNS.
 QStringList splitDnsList(const QString &dns);
+
+// Where the DER element starting at `pos` ends, or -1 when the bytes there are
+// not one with that tag: a single tag byte, then a length that is either one
+// short byte or a count byte followed by that many big-endian length bytes, at
+// most four. *contentStart, when given, is where its content begins. A link's
+// certificates (tag 0x08) are SEQUENCEs, 0x30, one after another.
+int derElementEnd(const QByteArray &der, int pos, unsigned char tag = 0x30, int *contentStart = nullptr);
 
 } // namespace freetunnel
