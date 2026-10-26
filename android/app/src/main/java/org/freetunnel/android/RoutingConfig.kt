@@ -110,10 +110,30 @@ object RoutingConfig {
         return current.get(listOf(path.last()))
     }
 
+    // A server that can be connected to without its subscription: the four settings
+    // a link has to carry, none of them empty, as DeepLinkImport reads them.
+    private fun hasStaticServer(endpoint: TomlTable): Boolean {
+        fun text(name: String) = endpoint.get(listOf(name)) as? String
+        val addresses = endpoint.get(listOf("addresses")) as? TomlArray
+        return !text("hostname").isNullOrBlank() && !text("username").isNullOrEmpty() &&
+            !text("password").isNullOrEmpty() && addresses != null && !addresses.isEmpty
+    }
+
+    // Whether `b` holds exactly what `a` does, apart from the keys at a path in `drop`.
+    private fun same(a: Any?, b: Any?, path: List<String> = emptyList(), drop: Set<List<String>> = emptySet()): Boolean =
+        when {
+            a is TomlTable && b is TomlTable -> {
+                val kept = a.keySet().filter { (path + it) !in drop }
+                kept.toSet() == b.keySet() && kept.all { same(a.get(listOf(it)), b.get(listOf(it)), path + it, drop) }
+            }
+            a is TomlArray && b is TomlArray -> a.size() == b.size() && (0 until a.size()).all { same(a.get(it), b.get(it)) }
+            else -> a == b
+        }
+
     /**
      * Checks an imported TOML file before it is confirmed. A file is kept as it was
-     * written unless it names a subscription; then it is written out again without
-     * one, which keeps every other key and table but not comments or layout.
+     * written unless it names a subscription; then only the subscription is taken
+     * out of it, and everything else stays as written.
      */
     @JvmStatic fun cleanImport(source: String): Import {
         // Anything unreadable is left to validate(), which says what is wrong.
@@ -124,9 +144,22 @@ object RoutingConfig {
         // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
         // then refuses every connection without saying why. The endpoint writes an
         // empty one into every export, so only a key with something in it is refused.
+        // Anything else that is there, blank or not a string, is refused too: no core
+        // would read it as no key.
         val authKey = endpoint.get(listOf("client_random_auth_key"))
         if (authKey != null && authKey != "") throw ImportRefused(R.string.text_this_server_needs_a_newer_trusttunnel_core)
         if (subscriptionKeys.none { lookup(parsed, it) != null }) return Import(source, false)
+        // With a subscription the server's own settings are optional, as in a link,
+        // and a file without them could only work once the subscription is fetched.
+        if (!hasStaticServer(endpoint)) throw ImportRefused(R.string.text_subscription_links_are_not_supported_yet)
+        // Line by line first, which keeps comments, layout and certificates as they
+        // were. A spelling that misses, such as an inline [endpoint] table, shows up
+        // when the result is compared with the file as parsed. Such a file is written
+        // out again without the subscription: every value stays, its layout does not.
+        val lines: String? = TomlLines.without(source, subscriptionKeys)
+        val kept = lines?.let { Toml.parse(it) }
+        if (lines != null && kept != null && !kept.hasErrors() && same(parsed, kept, emptyList(), subscriptionKeys))
+            return Import(lines, true)
         val root = linkedMapOf<String, Any>()
         parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
         return Import(document(root, subscriptionKeys), true)
@@ -184,7 +217,9 @@ object RoutingConfig {
         root["killswitch_enabled"] = killSwitch
         // ktoml 0.7.0 cannot reliably decode escaped strings in inline tables.
         // Keep configuration tables as ordinary headers and scalar assignments.
-        val result = document(root)
+        // A config saved by an earlier version can still hold a subscription address;
+        // the core does nothing with it, so it is not handed the password in it.
+        val result = document(root, subscriptionKeys)
         validate(result)
         return Plan(result, selectedApps, allowApps, warning)
     }

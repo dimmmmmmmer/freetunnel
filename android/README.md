@@ -12,10 +12,13 @@ compatibility contract.
 - Confirmed import of TOML, `tt://` and TrustTunnel QR-page links. Import only
   adds a profile; it never starts VPN or replaces another profile implicitly.
   Links of format versions 0 to 2 are read; TrustTunnel 1.3 writes version 2.
-  Subscriptions are not followed yet: a subscription-only link is refused, and
-  from other links and files only the server's own settings are imported,
-  without the subscription address. Servers that need an auth key are refused
-  until the app moves to TrustTunnel core 1.3.
+  Subscriptions are not followed yet: a link or file with only a subscription
+  is refused, and from other links and files only the server's own settings
+  are imported. The subscription address is not kept; the rest of a file is
+  kept as written. Servers that need an auth key are refused until the app
+  moves to TrustTunnel core 1.3. The rules for each version 2 field are the
+  desktop's, in [DEEP_LINK.md](../DEEP_LINK.md); for TOML, only an empty
+  `client_random_auth_key` counts as no key.
 - TOML, Android adapter and native configuration checks before saving.
   The editor hides credentials by default and prevents screen capture.
 - AES-GCM encrypted profiles with Android Keystore. Read failures preserve

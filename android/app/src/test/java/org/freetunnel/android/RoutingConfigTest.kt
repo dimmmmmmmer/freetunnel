@@ -180,6 +180,8 @@ class RoutingConfigTest {
         assertEquals(topLevel, RoutingConfig.cleanImport(topLevel).toml)
     }
     @Test fun aRealAuthKeyIsRefusedWithItsOwnMessage() {
+        // Only the empty string is no key. TrustTunnel's client reads the key as a
+        // string, untrimmed, so a blank one or one of another type is not read as none.
         for (value in listOf("\"aabbccdd\"", "\" \"", "'00'", "5", "[\"aa\"]")) {
             val refused = assertThrows(RoutingConfig.ImportRefused::class.java) {
                 RoutingConfig.cleanImport(withEndpointKey("client_random_auth_key = $value"))
@@ -192,6 +194,11 @@ class RoutingConfigTest {
             RoutingConfig.cleanImport("subscription_url = \"https://a:b@vpn.example.com/s\"\n" +
                 withEndpointKey("client_random_auth_key = \"aabbccdd\""))
         }
+        // A dotted key at the top sets the same [endpoint] key.
+        val dotted = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport("endpoint.hostname = \"vpn.example.com\"\nendpoint.client_random_auth_key = \"aabbccdd\"\n")
+        }
+        assertEquals(R.string.text_this_server_needs_a_newer_trusttunnel_core, dotted.messageResource)
     }
     @Test fun subscriptionAddressesAreDroppedBeforeSaving() {
         val url = "https://alice:s3cret@vpn.example.com/subscription"
@@ -207,6 +214,8 @@ class RoutingConfigTest {
             assertFalse(Toml.parse(text).hasErrors())
             val imported = RoutingConfig.cleanImport(text)
             assertTrue(imported.subscriptionNotKept)
+            // Only the subscription is taken out: the rest is the file as written.
+            assertEquals(source, imported.toml)
             assertFalse(imported.toml.contains("subscription"))
             assertFalse(imported.toml.contains("s3cret"))
             val parsed = Toml.parse(imported.toml)
@@ -223,6 +232,7 @@ class RoutingConfigTest {
             "\n[extra]\nsubscription = \"not the endpoint's\"\n[[servers]]\nname = 'one'\n"
         val imported = RoutingConfig.cleanImport(text)
         assertTrue(imported.subscriptionNotKept)
+        assertEquals(text.substringAfter('\n'), imported.toml)
         val parsed = Toml.parse(imported.toml)
         val original = Toml.parse(text)
         assertFalse(parsed.hasErrors())
@@ -236,6 +246,68 @@ class RoutingConfigTest {
         assertEquals("not the endpoint's", parsed.getString("extra.subscription"))
         assertEquals("one", parsed.getArray("servers")!!.getTable(0).getString("name"))
         assertEquals(listOf("intranet.example"), parsed.getArray("exclusions")!!.toList())
+    }
+    @Test fun commentsAndMultilineCertificatesStayAsWritten() {
+        val kept = withEndpointKey("# The server's own certificate\ncertificate = \"\"\"\n-----BEGIN CERTIFICATE-----\n" +
+            "MIIBszCCAVmgAwIBAgIUQ0FGRQ==\n-----END CERTIFICATE-----\n\"\"\"\n# Last comment")
+        val text = kept.replace("# Last comment", "# Last comment\nsubscription_url = \"https://a:b@vpn.example.com/s\"")
+        val imported = RoutingConfig.cleanImport(text)
+        assertTrue(imported.subscriptionNotKept)
+        assertEquals(kept, imported.toml)
+    }
+    @Test fun aSubscriptionTheLinesMissIsStillTakenOut() {
+        val url = "https://alice:s3cret@vpn.example.com/subscription"
+        val tun = "\n# Gone with the rewrite\n[listener.tun]\nincluded_routes = [\"0.0.0.0/0\"]\n" +
+            "excluded_routes = [\"192.168.0.0/16\"]\nmtu_size = 1350\n"
+        // In an inline [endpoint] table, and behind a quoted key with an escape.
+        for (text in listOf(
+            "endpoint = { hostname = \"vpn.example.com\", addresses = [\"192.0.2.1:443\"], username = \"u\", " +
+                "password = \"p\", subscription_url = \"$url\" }$tun",
+            withEndpointKey("\"subscription\\u005furl\" = \"$url\""),
+        )) {
+            assertFalse(Toml.parse(text).hasErrors())
+            val imported = RoutingConfig.cleanImport(text)
+            assertTrue(imported.subscriptionNotKept)
+            assertFalse(imported.toml.contains("subscription"))
+            assertFalse(imported.toml.contains("s3cret"))
+            val parsed = Toml.parse(imported.toml)
+            assertFalse(parsed.hasErrors())
+            assertEquals("vpn.example.com", parsed.getString("endpoint.hostname"))
+            assertEquals(1350L, parsed.getLong("listener.tun.mtu_size"))
+        }
+    }
+    @Test fun aFileWithOnlyASubscriptionIsRefusedWithItsOwnMessage() {
+        val url = "https://alice:s3cret@vpn.example.com/subscription"
+        val table = "[endpoint.subscription]\nurl = \"$url\"\n[listener.tun]"
+        for (text in listOf(
+            source.replace("[listener.tun]", table).replace("hostname = \"vpn.example.com\"", "hostname = \"\""),
+            source.replace("[listener.tun]", table).replace("addresses = [\"192.0.2.1:443\"]", "addresses = []"),
+            source.replace("username = \"test\"\n", "").replace("[listener.tun]", table),
+            "subscription_url = \"$url\"\n" + source.replace("password = 'secret \" slash\\end'\n", "password = \"\"\n"),
+        )) {
+            assertFalse(Toml.parse(text).hasErrors())
+            val refused = assertThrows(RoutingConfig.ImportRefused::class.java) { RoutingConfig.cleanImport(text) }
+            assertEquals(R.string.text_subscription_links_are_not_supported_yet, refused.messageResource)
+        }
+        // Without a subscription such a file is only incomplete, and validation says so.
+        val incomplete = source.replace("hostname = \"vpn.example.com\"", "hostname = \"\"")
+        assertEquals(incomplete, RoutingConfig.cleanImport(incomplete).toml)
+        // A real auth key is what is said first, as for a link.
+        val both = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport(source.replace("[listener.tun]", table)
+                .replace("hostname = \"vpn.example.com\"", "hostname = \"\"\nclient_random_auth_key = \"aa\""))
+        }
+        assertEquals(R.string.text_this_server_needs_a_newer_trusttunnel_core, both.messageResource)
+    }
+    @Test fun aSubscriptionSavedByAnEarlierVersionNeverReachesTheCore() {
+        val url = "https://alice:s3cret@vpn.example.com/subscription"
+        for (text in listOf("subscription_url = \"$url\"\n$source", withEndpointKey("subscription_url = \"$url\""),
+            source.replace("[listener.tun]", "[endpoint.subscription]\nurl = \"$url\"\n[listener.tun]"))) {
+            val result = plan(enabled = false, text = text).toml
+            assertFalse(result.contains("subscription"))
+            assertFalse(result.contains("s3cret"))
+            assertEquals("vpn.example.com", Toml.parse(result).getString("endpoint.hostname"))
+        }
     }
     @Test fun unreadableFilesAreLeftForValidation() {
         for (text in listOf("not toml [", "subscription_url = \"https://a:b@x/s\"\n", "endpoint = 5\nsubscription_url = \"x\"")) {

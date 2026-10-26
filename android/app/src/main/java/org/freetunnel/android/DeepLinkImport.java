@@ -17,8 +17,9 @@ final class DeepLinkImport {
     // a version 2 field, so stopping at 1 refused all of them. This app never writes
     // links; the desktop's share links stay at version 1, which older readers accept.
     static final long MAX_READ_VERSION = 2;
-    // A subscription address is a short https URL. Keep this equal to the desktop's
-    // cap, so that both apps refuse the same links.
+    // A subscription address is a short https URL. This and the rest of the rule
+    // for one are the desktop's (DEEP_LINK.md, tag 0x0E), so that both apps refuse
+    // the same links.
     static final int MAX_SUBSCRIPTION_URL_BYTES = 2048;
 
     static final class Imported {
@@ -42,7 +43,6 @@ final class DeepLinkImport {
     }
 
     private static final class Fields {
-        long version;
         String hostname;
         final List<String> addresses = new ArrayList<>();
         String customSni = "";
@@ -78,18 +78,13 @@ final class DeepLinkImport {
         if (bytes.length == 0 || bytes.length > MAX_PAYLOAD_BYTES)
             throw new ParseException(R.string.text_unsupported_link_size);
 
+        if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         Fields fields = decode(bytes);
-        if (fields.version > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         boolean subscription = fields.subscriptionUrl != null;
-        if (subscription && !isValidSubscriptionUrl(fields.subscriptionUrl))
-            throw new ParseException(R.string.text_the_link_contains_an_invalid_subscription_address);
         // An empty key is how a server without one is exported. A real key needs
         // TrustTunnel 1.3: core 1.1.7 would ignore it, and the server would then
         // refuse every connection without saying why.
-        if (!fields.authKey.isEmpty()) {
-            if (!isHex(fields.authKey)) throw new ParseException(R.string.text_the_link_is_damaged);
-            throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
-        }
+        if (!fields.authKey.isEmpty()) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
         String hostname = fields.hostname == null ? "" : clean(fields.hostname).trim();
         if (hostname.isEmpty() || fields.addresses.isEmpty()
                 || fields.username == null || fields.username.isEmpty()
@@ -106,16 +101,35 @@ final class DeepLinkImport {
 
     // TrustTunnel requires https://. The address is not used or shown in this
     // version, but a link that carries a malformed one is refused, not half-read.
+    // Every copy of a repeated tag is checked, so a good last one cannot carry a
+    // bad first one past the check.
+    private static String subscriptionUrl(String url) throws ParseException {
+        if (!isValidSubscriptionUrl(url))
+            throw new ParseException(R.string.text_the_link_contains_an_invalid_subscription_address);
+        return url;
+    }
+
     private static boolean isValidSubscriptionUrl(String url) {
         if (!url.startsWith("https://")) return false;
         if (url.getBytes(StandardCharsets.UTF_8).length > MAX_SUBSCRIPTION_URL_BYTES) return false;
         // Control characters include tab and line breaks; space characters include
         // no-break and other Unicode spaces. Together they cover all whitespace.
-        for (int i = 0; i < url.length(); i++) {
-            char c = url.charAt(i);
-            if (Character.isISOControl(c) || Character.isSpaceChar(c)) return false;
+        // Format characters are invisible ones such as U+200B and U+202E. By code
+        // point, so one outside the BMP is not let through as two surrogates.
+        for (int i = 0; i < url.length(); ) {
+            int c = url.codePointAt(i);
+            if (Character.isISOControl(c) || Character.isSpaceChar(c) || Character.getType(c) == Character.FORMAT)
+                return false;
+            i += Character.charCount(c);
         }
         return true;
+    }
+
+    // Whole bytes of hex, checked in every copy as TrustTunnel's own decoder does.
+    // Empty is valid and means no key.
+    private static String authKey(String key) throws ParseException {
+        if (!isHex(key)) throw new ParseException(R.string.text_the_link_is_damaged);
+        return key;
     }
 
     // Character.digit() would also accept other scripts' digits.
@@ -161,17 +175,38 @@ final class DeepLinkImport {
         return null;
     }
 
+    // Reads a record's length, leaving pos at its value, and returns where it ends.
+    private static int recordEnd(byte[] bytes, int[] pos) throws ParseException {
+        long length = readVarint(bytes, pos, bytes.length);
+        if (length > bytes.length - pos[0]) throw new ParseException(R.string.text_the_link_is_damaged);
+        return pos[0] + (int) length;
+    }
+
+    // The version a payload declares, read before any field: a newer format may
+    // mean something else by a field, so a link in one is refused as newer, not as
+    // damaged by what that field holds. Only damage to the records themselves
+    // comes first. The last version record wins, as the desktop reads it.
+    private static long declaredVersion(byte[] bytes) throws ParseException {
+        long version = 0;
+        int[] pos = {0};
+        while (pos[0] < bytes.length) {
+            long tag = readVarint(bytes, pos, bytes.length);
+            int end = recordEnd(bytes, pos);
+            if (tag == 0) version = scalar(bytes, pos, end);
+            pos[0] = end;
+        }
+        return version;
+    }
+
     private static Fields decode(byte[] bytes) throws ParseException {
         Fields fields = new Fields();
         int[] pos = {0};
         while (pos[0] < bytes.length) {
             long tag = readVarint(bytes, pos, bytes.length);
-            long length = readVarint(bytes, pos, bytes.length);
-            if (length > bytes.length - pos[0]) throw new ParseException(R.string.text_the_link_is_damaged);
-            int end = pos[0] + (int) length;
+            int end = recordEnd(bytes, pos);
             if (tag > 15) { pos[0] = end; continue; }
             switch ((int) tag) {
-                case 0: fields.version = scalar(bytes, pos, end); break;
+                case 0: break; // Read and checked by declaredVersion().
                 case 1: fields.hostname = utf8(bytes, pos[0], end); break;
                 case 2: fields.addresses.add(utf8(bytes, pos[0], end)); break;
                 case 3: fields.customSni = utf8(bytes, pos[0], end); break;
@@ -186,8 +221,8 @@ final class DeepLinkImport {
                 case 12: fields.displayName = utf8(bytes, pos[0], end); break;
                 case 13: decodeDns(bytes, pos[0], end, fields.dnsUpstreams); break;
                 // Read in any version, as TrustTunnel's own decoder does.
-                case 14: fields.subscriptionUrl = utf8(bytes, pos[0], end); break;
-                case 15: fields.authKey = utf8(bytes, pos[0], end); break;
+                case 14: fields.subscriptionUrl = subscriptionUrl(utf8(bytes, pos[0], end)); break;
+                case 15: fields.authKey = authKey(utf8(bytes, pos[0], end)); break;
                 default: break; // Ignore future fields, as the official decoder does.
             }
             pos[0] = end;

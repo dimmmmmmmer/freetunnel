@@ -116,9 +116,9 @@
     <string name="text_the_link_contains_invalid_text">"Некорректный текст в ссылке"</string>
     <string name="text_the_link_contains_an_invalid_certificate">"Некорректный сертификат в ссылке"</string>
     <string name="text_the_link_contains_an_invalid_subscription_address">"Некорректный адрес подписки в ссылке"</string>
-    <string name="text_subscription_links_are_not_supported_yet">"Ссылки на подписку пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки."</string>
-    <string name="text_this_server_needs_a_newer_trusttunnel_core">"Этому серверу нужно более новое ядро TrustTunnel, чем в этой версии FreeTunnel."</string>
-    <string name="text_nsubscriptions_are_not_supported_yet_the_server_wont">"\nПодписки пока не поддерживаются: сервер не будет обновляться сам, а адрес подписки не сохраняется."</string>
+    <string name="text_subscription_links_are_not_supported_yet">"Ссылки-подписки пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки."</string>
+    <string name="text_this_server_needs_a_newer_trusttunnel_core">"Этому серверу нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel."</string>
+    <string name="text_nsubscriptions_are_not_supported_yet_the_server_wont">"\nПодписки пока не поддерживаются: этот сервер не будет обновляться сам, а адрес подписки не сохраняется."</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Выбраны и приложения, и адреса. Для защиты всего выбранного включён полный VPN. Для выборочного режима оставьте один тип правил."</string>
     <string name="text_no_through_vpn_rules_full_vpn_is_enabled">"Нет правил «Через VPN»: включён полный VPN."</string>
     <string name="invalid_routing_rule">"Некорректный домен, IP или подсеть. Проверьте введённые правила."</string>
