@@ -402,7 +402,7 @@
     </message>
     <message>
         <source>Extra data in the certificate was ignored.</source>
-        <translation>Лишние данные в сертификате пропущены.</translation>
+        <translation>Лишние данные в сертификате проигнорированы.</translation>
     </message>
 </context>
 <context>
