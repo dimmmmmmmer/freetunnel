@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Android TV: FreeTunnel appears on the TV launcher with a banner, and works with a remote. The arrows reach every control, in dialogs too, and a ring shows which one has the focus. When a page updates, the focus and the scroll position stay where they were. Home opens on Connect, or on Reconnect while traffic is blocked, and Back goes to Home first. Pages keep clear of the screen's edges, and the app picker lists apps made only for TVs. Where a TV has no file picker, no screen for allowing VPN connections or no Always-on VPN, the app says so instead of closing or offering it.
 - Only the official build updates itself. A build that isn't signed with the release certificate says it doesn't come from the official channel and never checks for updates, and a downloaded update must be signed with that same certificate.
 - Installing an update while the VPN is on asks first, because Android turns the VPN off while it replaces the app. FreeTunnel then reconnects by itself after the update, unless you disconnected in the meantime. Android's Always-on start no longer restarts a connection that is already running.
 - Cancelling Android's install dialog keeps the verified download, so Install update works again without downloading it again, and if the dialog got lost, Install update starts over. The downloaded file is deleted after the update.

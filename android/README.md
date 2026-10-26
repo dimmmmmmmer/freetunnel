@@ -67,6 +67,34 @@ Destination `/0` rules and whole-family bypass exclusions are rejected; default
 routes remain valid in `included_routes`. Domains support IDN and whitespace,
 commas or semicolons as separators.
 
+## Android TV
+
+The same APK installs on Android TV and Google TV, sideloaded, and shows on
+the TV launcher with its banner. It works with a remote:
+
+- The arrows reach every control, and a ring shows which one has the focus,
+  in dialogs too. When a page updates, such as on a ping result or a change of
+  connection state, the focus and the scroll position stay where they were.
+- Home opens on Connect, or on Reconnect while the kill switch blocks traffic.
+  Back goes to Home first, and leaves the app from there.
+- Pages keep clear of the screen's edges, which some TVs crop, and the log is
+  not selectable, so the arrows scroll through it.
+- The split-tunnelling app picker also lists apps made only for TVs.
+
+Most TVs have no Always-on VPN, no Quick Settings tile and no notification
+shade. Where Android has no VPN settings screen, Settings says that the kill
+switch then protects only while FreeTunnel runs. Where a TV has no file picker,
+or no screen for allowing VPN connections, the app says so instead of closing.
+A configuration gets onto a TV through the file picker where there is one, or
+through Create manually, typed or pasted with a phone's keyboard, for example
+the Google TV app's.
+
+The banner is [art/tv-banner.svg](art/tv-banner.svg), rendered into
+`app/src/main/res/drawable-xhdpi/banner.png` by
+[scripts/render-android-tv-banner.sh](../scripts/render-android-tv-banner.sh).
+Its font comes from fontconfig, so the PNG is committed: after changing the
+SVG, run the script and commit both.
+
 ## Build and signing
 
 Requires JDK 17, Android SDK 35, Build Tools 35.0.0, Bash, curl and Python 3.
@@ -233,8 +261,8 @@ again: release a new one.
 ## Device checks
 
 The automated device suite is currently validated on **API 35** (arm64 locally,
-x86_64 in CI); older supported Android versions have not been validated by this
-suite. Run on a dedicated emulator:
+x86_64 in CI) and on **Android TV API 34** (x86 in CI); older supported Android
+versions have not been validated by this suite. Run on a dedicated emulator:
 
 ```sh
 ./android/gradlew -p android :app:installDebug :app:installDebugAndroidTest
@@ -248,12 +276,16 @@ adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
 ```
 
 The `debugCertificate` argument is apksigner's reading of the debug APK's
-signer. `UpdateDeviceTest` checks the app's own reading against it, and fails
-without it.
+signer. `UpdateDeviceTest` checks the app's own reading against it, and
+`TvDeviceTest` pins it so that Settings shows its update action as in an
+official build. Both fail without it.
 
 [Android CI](../.github/workflows/android.yml) runs JVM tests, lint, builds and
-emulator tests without lint baselines. Device tests exercise the real JNI adapter,
-TUN replacement/failure cleanup, encrypted storage and exported-entry boundaries.
+emulator tests without lint baselines, the emulator tests on a phone and on an
+Android TV image. `tests/test_android_tv_manifest.sh` checks what TV launchers
+read from the built APK, including what the TrustTunnel AAR's manifest adds.
+Device tests exercise the real JNI adapter, TUN replacement/failure cleanup,
+encrypted storage and exported-entry boundaries.
 Their lifecycle TCP sink is not a working tunnel endpoint. Historical manual
 acceptance used an API-35 emulator, `adb reverse` to a local macOS TrustTunnel
 endpoint and TCP/HTTP2 only: [QA.md](QA.md). It does not establish physical-device,
