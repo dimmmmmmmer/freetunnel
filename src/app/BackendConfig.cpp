@@ -227,7 +227,7 @@ QString Backend::configDeepLink(int index) const
         return QString();
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
     freetunnel::DeepLinkConfig dl;
-    dl.version = freetunnel::kDeepLinkMaxVersion;
+    dl.version = freetunnel::kDeepLinkWriteVersion;
     dl.hostname = c.hostname;
     for (const QString &a : c.addresses.split(QLatin1Char(','), Qt::SkipEmptyParts))
         dl.addresses << a.trimmed();

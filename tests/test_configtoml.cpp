@@ -37,7 +37,42 @@ private slots:
     void multiLineValuesTheEditorDoesNotOwnSurviveARoundTrip();
     void literalStringsAndMultiLineArraysAreRead();
     void aCertificateIsReadInEverySpelling();
+
+    // TrustTunnel 1.3 configs.
+    void theSubscriptionTableIsLeftOut();
+    void aSubscriptionUrlKeyIsLeftOutWhereverTheExportPutsIt();
+    void aSubscriptionSpelledAsAKeyIsLeftOut();
+    void aConfigWithoutASubscriptionComesBackAsItWas();
+    void aRewriteNeverPutsASubscriptionBack();
+    void theAuthKeyIsReadFromTheEndpoint();
 };
+
+// A config as TrustTunnel's endpoint exports it from 1.3.0 on, pasted under
+// [endpoint] the way the app's own files are laid out, with a subscription in each
+// of the places one turns up.
+static QString configWithSubscriptions()
+{
+    return QStringLiteral(
+            "# Exported by the endpoint\n"
+            "loglevel = \"info\"\n"
+            "subscription_url = \"https://alice:s3cret@vpn.example.com/subscription\"\n"
+            "provider_quirk = 42\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"alice\"\n"
+            "password = \"s3cret\"\n"
+            "client_random_auth_key = \"\"\n"
+            "subscription_url = \"https://alice:s3cret@vpn.example.com/subscription\"\n"
+            "provider_tag = \"gold\"\n"
+            "\n[endpoint.subscription]\n"
+            "# kept up to date by the client\n"
+            "url = \"https://alice:s3cret@vpn.example.com/subscription\"\n"
+            "\n[listener.tun]\n"
+            "mtu_size = 1280\n"
+            "\n[provider]\n"
+            "port = 1080\n");
+}
 
 void TestConfigToml::roundTrip() {
     ConfigToml in;
@@ -772,6 +807,151 @@ void TestConfigToml::aClientRandomGoesToTheCoreInAFormItTakes()
                                QStringLiteral(" aa"), QString(66, QLatin1Char('f')),
                                QStringLiteral("aa/") + QString(66, QLatin1Char('0'))})
         QVERIFY2(!isValidClientRandom(bad), qPrintable(bad));
+}
+
+// TrustTunnel's client keeps the subscription address in [endpoint.subscription].
+// It holds the VPN password in plain text, and every key of an unknown table used
+// to be kept as written, so the password stayed on disk after the import had
+// moved the other copy of it to the credential store.
+void TestConfigToml::theSubscriptionTableIsLeftOut()
+{
+    bool removed = false;
+    const QString out = withoutSubscription(configWithSubscriptions(), &removed);
+    QVERIFY(removed);
+    QVERIFY2(!out.contains(QStringLiteral("subscription")), qPrintable(out));
+    QVERIFY2(!out.contains(QStringLiteral("https://alice")), qPrintable(out));
+    QVERIFY2(!out.contains(QStringLiteral("kept up to date by the client")), qPrintable(out));
+
+    // Everything else exactly as it was, comments and unknown keys included.
+    QCOMPARE(out, QStringLiteral("# Exported by the endpoint\n"
+                                 "loglevel = \"info\"\n"
+                                 "provider_quirk = 42\n"
+                                 "\n[endpoint]\n"
+                                 "hostname = \"vpn.example.com\"\n"
+                                 "addresses = [\"1.2.3.4:443\"]\n"
+                                 "username = \"alice\"\n"
+                                 "password = \"s3cret\"\n"
+                                 "client_random_auth_key = \"\"\n"
+                                 "provider_tag = \"gold\"\n"
+                                 "\n[listener.tun]\n"
+                                 "mtu_size = 1280\n"
+                                 "\n[provider]\n"
+                                 "port = 1080\n"));
+
+    // A table inside it, an array of them, a quoted name: all the same table.
+    for (const QString &header : {QStringLiteral("[endpoint.subscription.extra]"),
+                                  QStringLiteral("[[endpoint.subscription]]"),
+                                  QStringLiteral("[\"endpoint\".'subscription'] # the client's")}) {
+        const QString in = QStringLiteral("[endpoint]\nhostname = \"h\"\n") + header
+                + QStringLiteral("\nurl = \"https://u:p@h/s\"\n[provider]\nport = 1\n");
+        const QString stripped = withoutSubscription(in, &removed);
+        QVERIFY2(removed, qPrintable(header));
+        QCOMPARE(stripped, QStringLiteral("[endpoint]\nhostname = \"h\"\n[provider]\nport = 1\n"));
+    }
+    // A table of that name somewhere else is someone else's.
+    const QString other = QStringLiteral("[provider.subscription]\nurl = \"x\"\n");
+    QCOMPARE(withoutSubscription(other, &removed), other);
+    QVERIFY(!removed);
+}
+
+// The endpoint's export writes subscription_url beside the server's other keys,
+// at the top of its file; pasted into a client config, that is under [endpoint].
+// A value over several lines goes whole, and a key of another table is left alone.
+void TestConfigToml::aSubscriptionUrlKeyIsLeftOutWhereverTheExportPutsIt()
+{
+    bool removed = false;
+    QCOMPARE(withoutSubscription(QStringLiteral("subscription_url = \"https://u:p@h/s\"\nloglevel = \"info\"\n"),
+                                 &removed),
+             QStringLiteral("loglevel = \"info\"\n"));
+    QVERIFY(removed);
+    QCOMPARE(withoutSubscription(QStringLiteral("[endpoint]\n  \"subscription_url\" = 'https://u:p@h/s' # x\n"
+                                                "hostname = \"h\"\n"),
+                                 &removed),
+             QStringLiteral("[endpoint]\nhostname = \"h\"\n"));
+    QVERIFY(removed);
+    QCOMPARE(withoutSubscription(QStringLiteral("[endpoint]\nsubscription_url = \"\"\"\n"
+                                                "https://u:p@h/s\n\"\"\"\nhostname = \"h\"\n"),
+                                 &removed),
+             QStringLiteral("[endpoint]\nhostname = \"h\"\n"));
+    QVERIFY(removed);
+
+    const QString elsewhere = QStringLiteral("[provider]\nsubscription_url = \"https://u:p@h/s\"\n");
+    QCOMPARE(withoutSubscription(elsewhere, &removed), elsewhere);
+    QVERIFY(!removed);
+    // A certificate's text is a value, however much it looks like a key.
+    const QString inCertificate = QStringLiteral("[endpoint]\ncertificate = \"\"\"\n"
+                                                 "subscription_url = \"https://u:p@h/s\"\n\"\"\"\n");
+    QCOMPARE(withoutSubscription(inCertificate, &removed), inCertificate);
+    QVERIFY(!removed);
+}
+
+// TOML lets a table be written as a key just as well: inline, or dotted.
+void TestConfigToml::aSubscriptionSpelledAsAKeyIsLeftOut()
+{
+    bool removed = false;
+    for (const QString &line : {QStringLiteral("subscription = { url = \"https://u:p@h/s\" }"),
+                                QStringLiteral("subscription.url = \"https://u:p@h/s\""),
+                                QStringLiteral("\"subscription\" . url = \"https://u:p@h/s\"")}) {
+        QCOMPARE(withoutSubscription(QStringLiteral("[endpoint]\n") + line + QStringLiteral("\nhostname = \"h\"\n"),
+                                     &removed),
+                 QStringLiteral("[endpoint]\nhostname = \"h\"\n"));
+        QVERIFY2(removed, qPrintable(line));
+    }
+    QCOMPARE(withoutSubscription(QStringLiteral("endpoint.subscription.url = \"https://u:p@h/s\"\nx = 1\n"),
+                                 &removed),
+             QStringLiteral("x = 1\n"));
+    QVERIFY(removed);
+}
+
+// Byte for byte, line endings and a missing final newline included: the import
+// strips every file it is given, and most have nothing to strip.
+void TestConfigToml::aConfigWithoutASubscriptionComesBackAsItWas()
+{
+    bool removed = true;
+    for (const QString &in : {QStringLiteral("[endpoint]\r\nhostname = \"h\"\r\n"),
+                              QStringLiteral("[endpoint]\nhostname = \"h\""), QString(),
+                              QStringLiteral("\n\n# only a comment\n")}) {
+        QCOMPARE(withoutSubscription(in, &removed), in);
+        QVERIFY(!removed);
+    }
+}
+
+// A config imported by 1.2.3 or earlier can hold a subscription already. Every
+// rewrite goes through parseConfigToml(), so the next one leaves it out, and
+// everything else unknown is still carried over as before.
+void TestConfigToml::aRewriteNeverPutsASubscriptionBack()
+{
+    const ConfigToml parsed = parseConfigToml(configWithSubscriptions());
+    QCOMPARE(parsed.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(parsed.password, QStringLiteral("s3cret"));
+    const QString rebuilt = buildConfigToml(parsed);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("subscription")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("https://alice")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("provider_quirk = 42")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("[provider]\nport = 1080")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("mtu_size = 1280")), qPrintable(rebuilt));
+    // The empty auth key the export writes is a key this editor does not know,
+    // and is carried over as written, as such keys always were.
+    QVERIFY2(rebuilt.contains(QStringLiteral("client_random_auth_key = \"\"\n")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// The endpoint's export always writes client_random_auth_key, as "" for a server
+// without one; only a key with something in it is one.
+void TestConfigToml::theAuthKeyIsReadFromTheEndpoint()
+{
+    QVERIFY(endpointClientRandomAuthKey(configWithSubscriptions()).isEmpty());
+    QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[endpoint]\nhostname = \"h\"\n")).isEmpty());
+    QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[endpoint]\nclient_random_auth_key = \"  \"\n")).isEmpty());
+    QCOMPARE(endpointClientRandomAuthKey(QStringLiteral("[endpoint]\nclient_random_auth_key = \"aabbccdd\"\n")),
+             QStringLiteral("aabbccdd"));
+    QCOMPARE(endpointClientRandomAuthKey(QStringLiteral("[endpoint]\n  'client_random_auth_key' = 'aabb' # k\n")),
+             QStringLiteral("aabb"));
+    // From [endpoint], where the core reads it, and nowhere else.
+    QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[provider]\nclient_random_auth_key = \"aabb\"\n"
+                                                       "[endpoint]\nhostname = \"h\"\n"))
+                    .isEmpty());
 }
 
 QTEST_MAIN(TestConfigToml)

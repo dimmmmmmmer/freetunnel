@@ -347,7 +347,98 @@ const QStringList &knownRootKeys()
     return k;
 }
 
+// The parts of a dotted key, each as the core names it: `subscription.url` and
+// `"subscription".url` are both subscription, url.
+QStringList keyParts(const QString &key)
+{
+    QStringList parts;
+    for (const QString &part : key.split(QLatin1Char('.')))
+        parts << unquotedKey(part.trimmed());
+    return parts;
+}
+
+// Whether a key, in the table it is in, sets a subscription address. As
+// subscription_url: at the top, where the endpoint's export writes it, or in
+// [endpoint], where it lands once that export is pasted under one. Or as the
+// client's subscription table spelled as a key, which TOML allows just as well:
+// `subscription = { url = ... }` or `subscription.url = ...` in [endpoint], and
+// `endpoint.subscription.url = ...` at the top.
+bool isSubscriptionKey(const QString &table, const QString &key)
+{
+    QStringList parts = keyParts(key);
+    if (table.isEmpty()) {
+        if (parts.first() == QLatin1String("subscription_url"))
+            return true;
+        if (parts.size() < 2 || parts.first() != QLatin1String("endpoint"))
+            return false;
+        parts.removeFirst();
+    } else if (table != QLatin1String("endpoint")) {
+        return false;
+    }
+    return parts.first() == QLatin1String("subscription")
+            || parts.first() == QLatin1String("subscription_url");
+}
+
+// Whether a table is the client's [endpoint.subscription], or a table inside it.
+// An array of them, [[endpoint.subscription]], is named "[endpoint.subscription]"
+// by isTableHeader(), and counts as well.
+bool isSubscriptionTable(QString name)
+{
+    if (name.startsWith(QLatin1Char('[')) && name.endsWith(QLatin1Char(']')))
+        name = tableName(name.mid(1, name.size() - 2).trimmed());
+    return name == QLatin1String("endpoint.subscription")
+            || name.startsWith(QLatin1String("endpoint.subscription."));
+}
+
 } // namespace
+
+// Line by line, as splitTomlTables() reads tables, so everything else stays
+// exactly as the file had it, comments included. A key that goes takes the rest
+// of its value with it, however many lines that runs to.
+QString withoutSubscription(const QString &toml, bool *removed)
+{
+    const bool finalNewline = toml.endsWith(QLatin1Char('\n'));
+    QStringList lines = toml.split(QLatin1Char('\n'));
+    if (finalNewline)
+        lines.removeLast();
+    QStringList kept;
+    QString table;
+    bool dropTable = false;
+    bool dropKey = false;
+    bool any = false;
+    OpenValue open;
+    for (const QString &line : lines) {
+        if (open.open()) {
+            if (!dropTable && !dropKey)
+                kept << line;
+            advanceOpenValue(open, line);
+            continue;
+        }
+        QString name;
+        if (isTableHeader(line, &name)) {
+            table = name;
+            dropTable = isSubscriptionTable(name);
+            dropKey = false;
+            any = any || dropTable;
+            if (!dropTable)
+                kept << line;
+            continue;
+        }
+        dropKey = !dropTable && isSubscriptionKey(table, keyOf(line));
+        any = any || dropKey;
+        if (!dropTable && !dropKey)
+            kept << line;
+        advanceOpenValue(open, line);
+    }
+    if (removed)
+        *removed = any;
+    if (!any)
+        return toml;
+    QString out = kept.join(QLatin1Char('\n'));
+    if (finalNewline && !out.isEmpty())
+        out += QLatin1Char('\n');
+    return out;
+}
 
 QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     QString t;
@@ -646,9 +737,14 @@ QString readClientRandom(const QString &endpoint)
 } // namespace
 
 // Each key from the table the core reads it from (see valueStart).
+//
+// Without a subscription address. The import leaves it out before a file is
+// stored; this is for a config that holds one anyway, as one imported by 1.2.3 or
+// earlier can. Carried over, it would be written back on every rewrite, VPN
+// password and all, and the core this app runs does nothing with it.
 ConfigToml parseConfigToml(const QString &toml) {
     ConfigToml c;
-    const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
+    const QList<QPair<QString, QString>> tables = splitTomlTables(withoutSubscription(toml));
     const QString root = tableBody(tables, QString());
     const QString endpoint = tableBody(tables, QStringLiteral("endpoint"));
     c.hostname = readString(endpoint, "hostname");
@@ -671,5 +767,14 @@ ConfigToml parseConfigToml(const QString &toml) {
 
     carryOverUnknownTables(tables, c);
     return c;
+}
+
+// From [endpoint] alone, where the core reads its keys (see valueStart). The key
+// is not a field of ConfigToml: an empty one is carried over as written, like any
+// key this editor does not know, and a config with a real one is not imported.
+QString endpointClientRandomAuthKey(const QString &toml)
+{
+    const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
+    return readString(tableBody(tables, QStringLiteral("endpoint")), "client_random_auth_key").trimmed();
 }
 } // namespace freetunnel

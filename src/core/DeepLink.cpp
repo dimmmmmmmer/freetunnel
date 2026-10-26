@@ -179,6 +179,11 @@ QString derToPem(const QByteArray &der) {
     return out;
 }
 
+bool isAsciiHexDigit(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
 struct DeepLinkFieldFlags {
     bool hostname = false;
     bool user = false;
@@ -203,7 +208,11 @@ bool applyDeepLinkVersionTlv(const QByteArray &value, DeepLinkConfig &cfg)
     int p = 0;
     quint64 v = 0;
     readVarint(value, p, v);
-    cfg.version = static_cast<int>(v);
+    // Held at the int's largest rather than cut to its low bits: a version of
+    // 2^32 + 1, cut, is 1, and a link far newer than this client was taken for
+    // one it reads.
+    cfg.version = v > static_cast<quint64>(std::numeric_limits<int>::max())
+            ? std::numeric_limits<int>::max() : static_cast<int>(v);
     return true;
 }
 
@@ -253,6 +262,51 @@ bool applyDeepLinkClientRandomTlv(const QByteArray &value, DeepLinkConfig &cfg, 
     return false;
 }
 
+// The subscription address (tag 0x0E, version 2). The format asks for https://
+// and nothing more; the rest is what no address holds. A control character or a
+// space is not part of one, nor is a byte that is not UTF-8, and nothing a server
+// hands out runs past kMaxSubscriptionUrlBytes. The address carries the VPN
+// password in plain text, so the error says what is wrong and never quotes it.
+bool applyDeepLinkSubscriptionTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
+{
+    const QString url = QString::fromUtf8(value);
+    bool ok = value.size() <= kMaxSubscriptionUrlBytes && value.startsWith("https://")
+            && url.toUtf8() == value; // fromUtf8() quietly replaces what is not UTF-8
+    // By code point, so a format character outside the BMP is not let through as
+    // a pair of surrogates.
+    for (const char32_t c : url.toUcs4()) {
+        const QChar::Category category = QChar::category(c);
+        if (QChar::isSpace(c) || category == QChar::Other_Control || category == QChar::Other_Format)
+            ok = false;
+    }
+    if (ok) {
+        cfg.subscriptionUrl = url;
+        return true;
+    }
+    if (error)
+        *error = QCoreApplication::translate("DeepLink", "subscription_url is not a valid https:// address");
+    return false;
+}
+
+// The client random auth key (tag 0x0F, version 2): whole bytes of hex, as
+// TrustTunnel's own decoder takes it. Empty is no key at all, which is what the
+// endpoint means by one; whether a key can be used is for the import to say.
+bool applyDeepLinkAuthKeyTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
+{
+    bool ok = value.size() % 2 == 0;
+    for (const char c : value) {
+        if (!isAsciiHexDigit(c))
+            ok = false;
+    }
+    if (ok) {
+        cfg.clientRandomAuthKey = QString::fromLatin1(value);
+        return true;
+    }
+    if (error)
+        *error = QCoreApplication::translate("DeepLink", "malformed client_random_auth_key value");
+    return false;
+}
+
 bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
                       DeepLinkFieldFlags &flags, QString *error)
 {
@@ -269,6 +323,10 @@ bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
             *error = QCoreApplication::translate("DeepLink", "malformed dns_upstreams list");
         return ok;
     }
+    if (tag == 0x0E)
+        return applyDeepLinkSubscriptionTlv(value, cfg, error);
+    if (tag == 0x0F)
+        return applyDeepLinkAuthKeyTlv(value, cfg, error);
     return true;
 }
 
@@ -284,12 +342,12 @@ QString normalizeDeepLinkBody(QString s)
     return {};
 }
 
-bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &cfg,
-                          DeepLinkFieldFlags &flags, QString *error)
+// One record: its tag and its value, with *pos moved past it.
+bool readDeepLinkTlv(const QByteArray &payload, int *pos, quint64 *tag, QByteArray *value,
+                     QString *error)
 {
-    quint64 tag = 0;
     quint64 len = 0;
-    if (!readVarint(payload, *pos, tag) || !readVarint(payload, *pos, len)) {
+    if (!readVarint(payload, *pos, *tag) || !readVarint(payload, *pos, len)) {
         if (error)
             *error = QCoreApplication::translate("DeepLink", "truncated TLV header");
         return false;
@@ -299,9 +357,40 @@ bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &c
             *error = QCoreApplication::translate("DeepLink", "TLV length exceeds payload");
         return false;
     }
-    const QByteArray value = payload.mid(*pos, static_cast<int>(len));
+    *value = payload.mid(*pos, static_cast<int>(len));
     *pos += static_cast<int>(len);
-    return applyDeepLinkTlv(tag, value, cfg, flags, error);
+    return true;
+}
+
+bool readDeepLinkTlvEntry(const QByteArray &payload, int *pos, DeepLinkConfig &cfg,
+                          DeepLinkFieldFlags &flags, QString *error)
+{
+    quint64 tag = 0;
+    QByteArray value;
+    return readDeepLinkTlv(payload, pos, &tag, &value, error)
+            && applyDeepLinkTlv(tag, value, cfg, flags, error);
+}
+
+// The version a payload declares, read before any of its fields. A newer format
+// may mean something else by a field, so a link in one has to be refused as newer
+// rather than as damaged by whatever that field holds: read in one pass, a version
+// 3 link whose subscription address was no longer https:// would have been called
+// broken. Only damage to the records themselves comes first, since without them
+// there is no finding the version.
+bool readDeepLinkVersion(const QByteArray &payload, int *version, QString *error)
+{
+    DeepLinkConfig declared;
+    int pos = 0;
+    while (pos < payload.size()) {
+        quint64 tag = 0;
+        QByteArray value;
+        if (!readDeepLinkTlv(payload, &pos, &tag, &value, error))
+            return false;
+        if (tag == 0x00)
+            applyDeepLinkVersionTlv(value, declared); // the last one wins, as for every tag
+    }
+    *version = declared.version;
+    return true;
 }
 
 bool deepLinkHasRequiredFields(const DeepLinkConfig &cfg, const DeepLinkFieldFlags &flags)
@@ -311,6 +400,14 @@ bool deepLinkHasRequiredFields(const DeepLinkConfig &cfg, const DeepLinkFieldFla
 
 std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, QString *error)
 {
+    int version = 0;
+    if (!readDeepLinkVersion(payload, &version, error))
+        return std::nullopt;
+    if (version > kDeepLinkMaxVersion) {
+        if (error)
+            *error = QCoreApplication::translate("DeepLink", "unsupported deep link version %1").arg(version);
+        return std::nullopt;
+    }
     DeepLinkConfig cfg;
     DeepLinkFieldFlags flags;
     int pos = 0;
@@ -318,12 +415,10 @@ std::optional<DeepLinkConfig> decodeDeepLinkPayload(const QByteArray &payload, Q
         if (!readDeepLinkTlvEntry(payload, &pos, cfg, flags, error))
             return std::nullopt;
     }
-    if (cfg.version > kDeepLinkMaxVersion) {
-        if (error)
-            *error = QCoreApplication::translate("DeepLink", "unsupported deep link version %1").arg(cfg.version);
-        return std::nullopt;
-    }
-    if (!deepLinkHasRequiredFields(cfg, flags)) {
+    // With a subscription address every other field is optional (DEEP_LINK.md,
+    // version 2): the server is meant to come from the subscription. Whether such
+    // a link can be imported is the import's question (deepLinkHasStaticServer).
+    if (!deepLinkHasRequiredFields(cfg, flags) && cfg.subscriptionUrl.isEmpty()) {
         if (error)
             *error = QCoreApplication::translate("DeepLink", "deep link missing required fields "
                                                              "(hostname, address, username, password)");
@@ -402,9 +497,17 @@ std::optional<DeepLinkConfig> parseDeepLink(const QString &uri, QString *error) 
     return decodeDeepLinkPayload(payload, error);
 }
 
+bool deepLinkHasStaticServer(const DeepLinkConfig &cfg)
+{
+    return !cfg.hostname.isEmpty() && !cfg.addresses.isEmpty() && !cfg.username.isEmpty()
+            && !cfg.password.isEmpty();
+}
+
 QString encodeDeepLink(const DeepLinkConfig &cfg) {
     QByteArray p;
-    writeTlv(p, 0x00, varintBytes(kDeepLinkMaxVersion));
+    // kDeepLinkWriteVersion, not the newest this client reads (see DeepLink.h).
+    // Leaving subscriptionUrl and clientRandomAuthKey out is what keeps that true.
+    writeTlv(p, 0x00, varintBytes(kDeepLinkWriteVersion));
     writeTlv(p, 0x01, cfg.hostname.toUtf8());
     for (const QString &addr : cfg.addresses)
         writeTlv(p, 0x02, addr.toUtf8());

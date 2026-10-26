@@ -4,6 +4,7 @@
 
 #include "core/ConfigToml.h"
 #include "core/DeepLink.h"
+#include "deeplink_v2_vectors.h"
 
 using namespace freetunnel;
 
@@ -30,7 +31,70 @@ private slots:
     void aMaskedClientRandomReachesTheConfigWhole();
     void aClientRandomTheCoreCannotUseIsRefused();
     void aShareLinkKeepsThePrefixTheCoreUses();
+
+    // Version 2: TrustTunnel endpoint 1.3.0 and later.
+    void readsAVersion2LinkWithoutTheNewTags();
+    void readsAFullVersion2Link();
+    void readsASubscriptionOnlyLink();
+    void aSubscriptionAddressMustBeHttps();
+    void aSubscriptionAddressHoldsNoControlCharactersOrSpaces();
+    void anEmptyAuthKeyIsNoKey();
+    void theVersionIsReadBeforeTheFields();
+    void aHugeVersionIsNotCutDownToOneThisClientReads();
+    void version1LinksReadAsBefore();
+    void ourOwnLinksStayVersion1();
+    void theTomlNeverHoldsTheVersion2Fields();
 };
+
+// A link made of the given records, each tag and length one varint byte or two.
+static QString linkFromRecords(const QList<QPair<char, QByteArray>> &records)
+{
+    QByteArray p;
+    for (const auto &[tag, v] : records) {
+        p.append(tag);
+        if (v.size() > 63) // a two-byte varint length
+            p.append(static_cast<char>(0x40 | (v.size() >> 8)));
+        p.append(static_cast<char>(v.size() & 0xFF));
+        p.append(v);
+    }
+    return QStringLiteral("tt://?")
+            + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
+                                             | QByteArray::OmitTrailingEquals));
+}
+
+// A version 2 link with the required fields and the given subscription address.
+static QString linkWithSubscription(const QByteArray &url)
+{
+    return linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
+                            {0x02, "1.2.3.4:443"}, {0x05, "alice"}, {0x06, "s3cret"},
+                            {0x0E, url}});
+}
+
+// The tags of a link's records, in order, for what a link carries rather than
+// what the parser makes of it.
+static QList<quint64> tagsOf(const QString &uri)
+{
+    const QByteArray p = QByteArray::fromBase64(uri.mid(QStringLiteral("tt://?").size()).toLatin1(),
+                                                QByteArray::Base64UrlEncoding);
+    QList<quint64> tags;
+    int pos = 0;
+    while (pos + 1 < p.size()) {
+        // Every tag and length our encoder writes for these is under 16384.
+        auto varint = [&]() -> quint64 {
+            const auto first = static_cast<quint8>(p.at(pos));
+            if ((first >> 6) == 0) {
+                ++pos;
+                return first;
+            }
+            const quint64 v = (quint64(first & 0x3F) << 8) | static_cast<quint8>(p.at(pos + 1));
+            pos += 2;
+            return v;
+        };
+        tags << varint();
+        pos += static_cast<int>(varint());
+    }
+    return tags;
+}
 
 // A link with the required fields and the given client random, byte for byte as
 // a link from elsewhere could carry it: encodeDeepLink() only writes good ones.
@@ -107,14 +171,17 @@ void TestDeepLink::rejectsMissingRequired() {
 }
 
 void TestDeepLink::rejectsFutureVersion() {
-    // Hand-craft a payload that declares version 99 plus all required fields.
+    // Hand-craft a payload that declares the version after the newest this client
+    // reads, plus all required fields. It was 2 until TrustTunnel 1.3.0 made 2
+    // the version of every link it writes.
     QByteArray p;
     auto tlv = [&](char tag, const QByteArray &v) {
         p.append(tag);
         p.append(static_cast<char>(v.size()));
         p.append(v);
     };
-    tlv(0x00, QByteArray(1, 2)); // version = 2 (> kDeepLinkMaxVersion); fits one varint byte
+    QCOMPARE(kDeepLinkMaxVersion, 2);
+    tlv(0x00, QByteArray(1, 3)); // version = 3 (> kDeepLinkMaxVersion); fits one varint byte
     tlv(0x01, "h");
     tlv(0x02, "1.2.3.4:443");
     tlv(0x05, "u");
@@ -125,6 +192,19 @@ void TestDeepLink::rejectsFutureVersion() {
     QString err;
     QVERIFY(!parseDeepLink(uri, &err).has_value());
     QVERIFY(err.contains("version"));
+    QCOMPARE(err, QStringLiteral("unsupported deep link version 3"));
+
+    // The endpoint's own version 3 vector, which is otherwise a good link.
+    QVERIFY(!parseDeepLink(v2::kVersion3, &err).has_value());
+    QCOMPARE(err, QStringLiteral("unsupported deep link version 3"));
+
+    // And the same payload one version down is read.
+    p[2] = 2;
+    QVERIFY2(parseDeepLink("tt://?" + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
+                                                                      | QByteArray::OmitTrailingEquals)),
+                           &err)
+                     .has_value(),
+             qPrintable(err));
 }
 
 void TestDeepLink::ignoresUnknownTags() {
@@ -269,12 +349,15 @@ void TestDeepLink::mutatesValidLinksSafely()
     in.addresses = {QStringLiteral("1.2.3.4:443")};
     in.username = QStringLiteral("user");
     in.password = QStringLiteral("pass");
-    const QString valid = encodeDeepLink(in);
-    const QString payload = valid.mid(QStringLiteral("tt://?").size());
+    // Our own link, and version 2 links as TrustTunnel 1.3 writes them: the tags
+    // it added go through the parser's new paths, which a version 1 seed never
+    // reaches.
+    const QStringList seeds{encodeDeepLink(in), v2::kFull, v2::kSubscriptionOnly, v2::kAuthKey};
 
     QRandomGenerator seeded(fuzzSeed("mutatesValidLinksSafely", 20250612u));
     auto *rng = &seeded;
-    for (int i = 0; i < 500; ++i) {
+    for (int i = 0; i < 500 * seeds.size(); ++i) {
+        const QString payload = seeds.at(i % seeds.size()).mid(QStringLiteral("tt://?").size());
         QByteArray mutated = payload.toLatin1();
         const int n = rng->bounded(1, 8);
         for (int j = 0; j < n; ++j) {
@@ -524,6 +607,263 @@ void TestDeepLink::aCertificateChainSurvivesTheLink()
     QCOMPARE(freetunnel::deepLinkConfigToToml(junk)
                      .count(QStringLiteral("-----BEGIN CERTIFICATE-----")),
              1);
+}
+
+// Every link TrustTunnel's endpoint exports from 1.3.0 on is version 2, the ones
+// with nothing new in them too, and every one was refused as "unsupported deep
+// link version 2".
+void TestDeepLink::readsAVersion2LinkWithoutTheNewTags()
+{
+    QString err;
+    const auto cfg = parseDeepLink(v2::kPlain, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->version, 2);
+    QCOMPARE(cfg->hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(cfg->addresses, QStringList{QStringLiteral("1.2.3.4:443")});
+    QCOMPARE(cfg->username, QStringLiteral("alice"));
+    QCOMPARE(cfg->password, QStringLiteral("secret"));
+    QVERIFY(cfg->subscriptionUrl.isEmpty());
+    QVERIFY(cfg->clientRandomAuthKey.isEmpty());
+    QVERIFY(deepLinkHasStaticServer(*cfg));
+}
+
+void TestDeepLink::readsAFullVersion2Link()
+{
+    QString err;
+    const auto cfg = parseDeepLink(v2::kFull, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->version, 2);
+    QCOMPARE(cfg->hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(cfg->addresses, (QStringList{QStringLiteral("1.2.3.4:443"), QStringLiteral("[2001:db8::1]:443")}));
+    QCOMPARE(cfg->username, QStringLiteral("alice"));
+    QCOMPARE(cfg->password, QStringLiteral("s3cret"));
+    QCOMPARE(cfg->clientRandomPrefix, QStringLiteral("aabbcc/ff00ff"));
+    QCOMPARE(cfg->customSni, QStringLiteral("example.org"));
+    QCOMPARE(cfg->hasIpv6, false);
+    QCOMPARE(cfg->antiDpi, true);
+    QVERIFY(cfg->upstreamProtocol == UpstreamProtocol::Http3);
+    QCOMPARE(cfg->name, QStringLiteral("Example"));
+    QCOMPARE(cfg->dnsUpstreams, (QStringList{QStringLiteral("1.1.1.1"), QStringLiteral("tls://dns.example.com")}));
+    QCOMPARE(cfg->subscriptionUrl, v2::kSubscription);
+    QVERIFY(deepLinkHasStaticServer(*cfg));
+}
+
+// The format lets a link with a subscription address leave out every other
+// field. It parses; that it names no server is for the import to act on.
+void TestDeepLink::readsASubscriptionOnlyLink()
+{
+    QString err;
+    const auto cfg = parseDeepLink(v2::kSubscriptionOnly, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->subscriptionUrl, v2::kSubscription);
+    QVERIFY(cfg->hostname.isEmpty());
+    QVERIFY(cfg->addresses.isEmpty());
+    QVERIFY(!deepLinkHasStaticServer(*cfg));
+
+    // A server only half there is no server either: TrustTunnel's decoder takes an
+    // empty field as a missing one.
+    const auto half = parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
+                                                     {0x02, "1.2.3.4:443"}, {0x05, "alice"}, {0x06, ""},
+                                                     {0x0E, v2::kSubscription.toUtf8()}}),
+                                    &err);
+    QVERIFY2(half.has_value(), qPrintable(err));
+    QVERIFY(!deepLinkHasStaticServer(*half));
+
+    // Without the address the required fields are required, as in version 1.
+    QVERIFY(!parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"}}), &err)
+                     .has_value());
+    QVERIFY2(err.contains(QStringLiteral("required")), qPrintable(err));
+}
+
+// The format's one rule for the address, and the one that matters: it is fetched
+// with the VPN password in it.
+void TestDeepLink::aSubscriptionAddressMustBeHttps()
+{
+    QString err;
+    QVERIFY(!parseDeepLink(v2::kHttpSubscription, &err).has_value());
+    QCOMPARE(err, QStringLiteral("subscription_url is not a valid https:// address"));
+
+    // With a whole server beside it, too: the link is refused, not half read.
+    for (const QByteArray &bad : {QByteArray("http://alice:s3cret@vpn.example.com/subscription"),
+                                  QByteArray("HTTPS://alice:s3cret@vpn.example.com/subscription"),
+                                  QByteArray("ftp://vpn.example.com/s3cret"), QByteArray("vpn.example.com"),
+                                  QByteArray("")}) {
+        QVERIFY2(!parseDeepLink(linkWithSubscription(bad), &err).has_value(), bad.constData());
+        QVERIFY2(err.contains(QStringLiteral("https://")), qPrintable(err));
+        // The address holds the password: no error repeats it.
+        QVERIFY2(!err.contains(QStringLiteral("s3cret")), qPrintable(err));
+    }
+}
+
+void TestDeepLink::aSubscriptionAddressHoldsNoControlCharactersOrSpaces()
+{
+    const QByteArray base("https://alice:s3cret@vpn.example.com/subscription");
+    // Each is refused wherever it sits; the middle is as good a place as any.
+    const QList<QByteArray> inserted{
+            QByteArray("\n"),         QByteArray("\r"),          QByteArray("\t"),
+            QByteArray(" "),          QByteArray(1, '\0'),       QByteArray("\x7f"),
+            QByteArray("\xc2\x85"),   // U+0085, a C1 control
+            QByteArray("\xc2\xa0"),   // U+00A0, a no-break space
+            QByteArray("\xe2\x80\xa8"), // U+2028, a line separator
+            QByteArray("\xe2\x80\x8b"), // U+200B, a zero-width space (a format character)
+            QByteArray("\xe2\x80\xae"), // U+202E, right-to-left override
+            QByteArray("\xf3\xa0\x80\x81"), // U+E0001, a format character outside the BMP
+            QByteArray("\xff"),       // not UTF-8 at all
+    };
+    QString err;
+    for (const QByteArray &bad : inserted) {
+        const QByteArray url = base.left(20) + bad + base.mid(20);
+        QVERIFY2(!parseDeepLink(linkWithSubscription(url), &err).has_value(), bad.toHex().constData());
+        QCOMPARE(err, QStringLiteral("subscription_url is not a valid https:// address"));
+    }
+
+    // A letter outside ASCII is not one of them.
+    QVERIFY2(parseDeepLink(linkWithSubscription(base + "/\xd0\xbf\xd1\x83\xd1\x82\xd1\x8c"), &err).has_value(),
+             qPrintable(err));
+
+    // At most kMaxSubscriptionUrlBytes, counted in bytes.
+    const QByteArray longest = base + "?" + QByteArray(kMaxSubscriptionUrlBytes - base.size() - 1, 'a');
+    QCOMPARE(longest.size(), kMaxSubscriptionUrlBytes);
+    QVERIFY2(parseDeepLink(linkWithSubscription(longest), &err).has_value(), qPrintable(err));
+    QVERIFY(!parseDeepLink(linkWithSubscription(longest + "a"), &err).has_value());
+    QCOMPARE(err, QStringLiteral("subscription_url is not a valid https:// address"));
+}
+
+// The endpoint writes an auth key only when there is one; a link that has the
+// tag empty is a link without a key. Anything else has to be whole bytes of hex,
+// as TrustTunnel's own decoder takes it.
+void TestDeepLink::anEmptyAuthKeyIsNoKey()
+{
+    QString err;
+    auto cfg = parseDeepLink(v2::kEmptyAuthKey, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QVERIFY(cfg->clientRandomAuthKey.isEmpty());
+
+    cfg = parseDeepLink(v2::kAuthKey, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    cfg = parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
+                                         {0x05, "u"}, {0x06, "p"}, {0x0F, "AABBccdd"}}),
+                        &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+
+    for (const QByteArray &bad : {QByteArray("abc"), QByteArray("zz"), QByteArray("aa bb"), QByteArray(" aabb")}) {
+        QVERIFY2(!parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
+                                                 {0x05, "u"}, {0x06, "p"}, {0x0F, bad}}),
+                                &err)
+                          .has_value(),
+                 bad.constData());
+        QCOMPARE(err, QStringLiteral("malformed client_random_auth_key value"));
+    }
+}
+
+// A newer format is free to mean something else by a field, so a link in one is
+// refused for its version, whatever its fields hold and wherever the version
+// sits among them. Read in one pass, a version 3 link with an http:// address
+// was refused as having a bad address.
+void TestDeepLink::theVersionIsReadBeforeTheFields()
+{
+    QString err;
+    QVERIFY(!parseDeepLink(linkFromRecords({{0x0E, "http://vpn.example.com/subscription"},
+                                            {0x0B, "not hex"},
+                                            {0x00, QByteArray(1, 3)}}),
+                           &err)
+                     .has_value());
+    QCOMPARE(err, QStringLiteral("unsupported deep link version 3"));
+
+    // Damage to the records themselves still comes first: there is no reading a
+    // version out of them.
+    QVERIFY(!parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 3)}}) + QStringLiteral("AQ"), &err)
+                     .has_value());
+    QVERIFY2(!err.contains(QStringLiteral("version")), qPrintable(err));
+}
+
+// The version is a varint of up to 62 bits, and an int holds 31. Cut to its low
+// bits, 2^32 + 1 read as 1, and a link of a format this client has never heard
+// of was read as one of its own.
+void TestDeepLink::aHugeVersionIsNotCutDownToOneThisClientReads()
+{
+    // An 8-byte varint: 0xC0, then the low 56 bits of 0x0000000100000001.
+    const QByteArray huge = QByteArray::fromHex("c000000100000001");
+    QCOMPARE(huge.size(), 8);
+    QString err;
+    QVERIFY(!parseDeepLink(linkFromRecords({{0x00, huge}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
+                                            {0x05, "u"}, {0x06, "p"}}),
+                           &err)
+                     .has_value());
+    QVERIFY2(err.contains(QStringLiteral("version")), qPrintable(err));
+}
+
+// The example in DEEP_LINK.md, which every FreeTunnel share link looks like.
+void TestDeepLink::version1LinksReadAsBefore()
+{
+    QString err;
+    const auto cfg = parseDeepLink(QStringLiteral("tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20CEDIwMy4wLjExMy4xMDo0ND"
+                                                  "MFBWFsaWNlBgZzZWNyZXQMB0V4YW1wbGU"),
+                                   &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    QCOMPARE(cfg->version, 1);
+    QCOMPARE(cfg->hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(cfg->addresses, QStringList{QStringLiteral("203.0.113.10:443")});
+    QCOMPARE(cfg->username, QStringLiteral("alice"));
+    QCOMPARE(cfg->password, QStringLiteral("secret"));
+    QCOMPARE(cfg->name, QStringLiteral("Example"));
+    QVERIFY(cfg->subscriptionUrl.isEmpty());
+    QVERIFY(cfg->clientRandomAuthKey.isEmpty());
+
+    // A version 1 link still has to carry its server: the subscription is what
+    // excuses the fields, not the version number.
+    QVERIFY(!parseDeepLink(linkFromRecords({{0x00, QByteArray(1, 1)}, {0x01, "vpn.example.com"}}), &err)
+                     .has_value());
+}
+
+// Version 2 adds only tags our links never carry, and FreeTunnel 1.2.3 and
+// earlier, like TrustTunnel's clients up to 1.1.11, refuse a version 2 link
+// outright. So a share link stays version 1, whatever the config it came from
+// was imported from.
+void TestDeepLink::ourOwnLinksStayVersion1()
+{
+    QCOMPARE(kDeepLinkWriteVersion, 1);
+    QVERIFY(kDeepLinkWriteVersion < kDeepLinkMaxVersion);
+
+    QString err;
+    auto cfg = parseDeepLink(v2::kFull, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    cfg->clientRandomAuthKey = QStringLiteral("aabbccdd");
+    cfg->version = kDeepLinkMaxVersion; // what the struct says is not what is written
+    const QString ours = encodeDeepLink(*cfg);
+
+    const QByteArray payload = QByteArray::fromBase64(ours.mid(QStringLiteral("tt://?").size()).toLatin1(),
+                                                      QByteArray::Base64UrlEncoding);
+    QCOMPARE(payload.left(3), QByteArray("\x00\x01\x01", 3)); // tag 0, length 1, version 1
+    const QList<quint64> tags = tagsOf(ours);
+    QVERIFY2(!tags.contains(0x0E) && !tags.contains(0x0F), qPrintable(ours));
+
+    // And it is the same server.
+    const auto back = parseDeepLink(ours, &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->version, 1);
+    QCOMPARE(back->hostname, cfg->hostname);
+    QCOMPARE(back->addresses, cfg->addresses);
+    QCOMPARE(back->password, cfg->password);
+    QVERIFY(back->subscriptionUrl.isEmpty());
+    QVERIFY(back->clientRandomAuthKey.isEmpty());
+}
+
+// The subscription address carries the VPN password in plain text; what a link
+// becomes on disk never holds it, nor an auth key the core would not use.
+void TestDeepLink::theTomlNeverHoldsTheVersion2Fields()
+{
+    QString err;
+    auto cfg = parseDeepLink(v2::kFull, &err);
+    QVERIFY2(cfg.has_value(), qPrintable(err));
+    cfg->clientRandomAuthKey = QStringLiteral("aabbccdd");
+    const QString toml = deepLinkConfigToToml(*cfg);
+    QVERIFY2(!toml.contains(QStringLiteral("subscription")), qPrintable(toml));
+    QVERIFY2(!toml.contains(QStringLiteral("https://alice")), qPrintable(toml));
+    QVERIFY2(!toml.contains(QStringLiteral("auth_key")) && !toml.contains(QStringLiteral("aabbccdd")),
+             qPrintable(toml));
+    QVERIFY2(toml.contains(QStringLiteral("hostname = \"vpn.example.com\"")), qPrintable(toml));
 }
 
 #include "test_deeplink.moc"

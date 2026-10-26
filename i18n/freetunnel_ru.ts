@@ -373,6 +373,25 @@
         <source>No network connection. FreeTunnel will connect as soon as there is one.</source>
         <translation>Нет подключения к сети. FreeTunnel подключится, как только оно появится.</translation>
     </message>
+    <message>
+        <source>Config added: %1.</source>
+        <translation>Конфиг добавлен: %1.</translation>
+    </message>
+</context>
+<context>
+    <name>ConfigImport</name>
+    <message>
+        <source>Subscription links aren&apos;t supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive.</source>
+        <translation>Ссылки-подписки пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки.</translation>
+    </message>
+    <message>
+        <source>This server needs a newer TrustTunnel core than this version of FreeTunnel uses.</source>
+        <translation>Этому серверу нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel.</translation>
+    </message>
+    <message>
+        <source>Subscriptions aren&apos;t supported yet: this server won&apos;t update itself, and its subscription address isn&apos;t saved.</source>
+        <translation>Подписки пока не поддерживаются: этот сервер не будет обновляться сам, а адрес подписки не сохраняется.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigsPage</name>
@@ -596,6 +615,14 @@
     <message>
         <source>malformed client_random value</source>
         <translation>повреждено значение client_random</translation>
+    </message>
+    <message>
+        <source>subscription_url is not a valid https:// address</source>
+        <translation>subscription_url — некорректный адрес https://</translation>
+    </message>
+    <message>
+        <source>malformed client_random_auth_key value</source>
+        <translation>повреждено значение client_random_auth_key</translation>
     </message>
 </context>
 <context>

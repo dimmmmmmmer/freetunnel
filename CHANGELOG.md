@@ -21,6 +21,15 @@ compare link at the bottom of its release notes.
   cancelling an edit no longer applies it later. Unsupported old routing rules
   are removed with a notice instead of preventing connections.
 
+- **tt:// links from TrustTunnel 1.3 servers are no longer refused as an
+  unsupported version.**
+  - Subscriptions aren't supported yet. A subscription link that also carries
+    its server adds that server, which won't update itself; one without is
+    refused, and says so.
+  - A server that needs a client random auth key is refused, link or file: it
+    needs a newer TrustTunnel core than this version uses.
+  - A config file's subscription address, which holds the VPN password, is not
+    kept in the copy FreeTunnel stores.
 - **Windows: installing no longer stops on "Error opening file for writing",
   and uninstalling no longer leaves files behind, when FreeTunnel is slow to
   close.** After closing it by force at ten seconds, both now wait up to about

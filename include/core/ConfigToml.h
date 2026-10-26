@@ -46,8 +46,23 @@ struct ConfigToml {
 // Render a ConfigToml to the client TOML format.
 QString buildConfigToml(const ConfigToml &c, const QString &logLevel = QStringLiteral("info"));
 
-// Parse a client TOML back into a ConfigToml (endpoint fields only).
+// Parse a client TOML back into a ConfigToml (endpoint fields only). A
+// subscription address is not carried over (see withoutSubscription), so no
+// rewrite of a config puts one back on disk.
 ConfigToml parseConfigToml(const QString &toml);
+
+// The text without the subscription address a TrustTunnel 1.3 config can carry,
+// and nothing else changed: the endpoint's export writes it as `subscription_url`
+// at the top, which lands in [endpoint] once pasted under it, and TrustTunnel's
+// client as an [endpoint.subscription] table. The address holds the VPN password
+// in plain text, and FreeTunnel cannot use it yet. *removed says whether there was
+// one; the text comes back as it was when there was not.
+QString withoutSubscription(const QString &toml, bool *removed = nullptr);
+
+// The client_random_auth_key the config's [endpoint] sets, trimmed, or empty when
+// it sets none. The endpoint's export always writes the key, as "" when its server
+// does not use one, so empty is the ordinary case and means no key.
+QString endpointClientRandomAuthKey(const QString &toml);
 
 // A client random as the core reads it, from the one `client_random` key:
 // "prefix" or "prefix/mask", in hex. The core splits at the slash itself and has

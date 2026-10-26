@@ -72,10 +72,17 @@ bool Backend::importFile(const QString &path)
     if (!freetunnel::backend_config::readValidatedImportContent(p, &content, &importErr)) {
         if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
+        else if (importErr == QLatin1String("authkey"))
+            emit errorOccurred(freetunnel::newerCoreRefusal());
         else
             emit errorOccurred(tr("Not a valid TrustTunnel config (missing address or credentials)"));
         return false;
     }
+    // Out before the copy is written. The address holds the VPN password in plain
+    // text, and finalizeImportedConfig() moves only the password itself to the
+    // credential store: kept, the address would stay on disk as the file had it.
+    bool subscriptionRemoved = false;
+    content = freetunnel::withoutSubscription(content, &subscriptionRemoved);
     QString target;
     if (!freetunnel::backend_config::copyImportIntoAppConfigDir(content, p, &target)) {
         emit errorOccurred(tr("Could not write config"));
@@ -83,13 +90,21 @@ bool Backend::importFile(const QString &path)
     }
     if (!finalizeImportedConfig(target, m_activePath.isEmpty()))
         return false;
-    // A link that turns certificate checks off says so in its question, before
-    // anything is added. A file the user picked is added at once, and said
-    // nothing: this notice takes the place of the "Config added" one.
+    // A link says these in its question, before anything is added. A file the
+    // user picked is added at once, and said nothing: this notice takes the place
+    // of the "Config added" one.
+    QString notice;
     if (freetunnel::parseConfigToml(content).skipVerification) {
-        emit errorOccurred(tr("Config added: %1. It turns off server certificate verification.")
-                                   .arg(nameForPath(target)));
+        notice = tr("Config added: %1. It turns off server certificate verification.")
+                         .arg(nameForPath(target));
     }
+    if (subscriptionRemoved) {
+        if (notice.isEmpty())
+            notice = tr("Config added: %1.").arg(nameForPath(target));
+        notice += QLatin1Char(' ') + freetunnel::subscriptionNotKeptNote();
+    }
+    if (!notice.isEmpty())
+        emit errorOccurred(notice);
     return true;
 }
 
@@ -183,12 +198,21 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
     return true;
 }
 
+// What to say about a link prepareDeepLinkImport() refused. The parser's words
+// are a fragment, "truncated TLV header", and need saying what they are about. A
+// link this version cannot use yet is not broken, and its message is a sentence.
+static QString linkRefusedMessage(const QString &err, freetunnel::LinkRefusal why)
+{
+    return why == freetunnel::LinkRefusal::Damaged ? Backend::tr("Link error: %1").arg(err) : err;
+}
+
 bool Backend::importDeepLink(const QString &link)
 {
     QString err;
-    auto prepared = freetunnel::prepareDeepLinkImport(link, &err);
+    freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
+    auto prepared = freetunnel::prepareDeepLinkImport(link, &err, &why);
     if (!prepared) {
-        emit errorOccurred(tr("Link error: %1").arg(err));
+        emit errorOccurred(linkRefusedMessage(err, why));
         return false;
     }
     // Every deep link is attacker-reachable: a web page can invoke the scheme
@@ -224,6 +248,11 @@ bool Backend::importDeepLink(const QString &link)
         lines << tr("This name mixes letters from different alphabets.");
     if (prepared->skipVerification)
         lines << tr("This link turns off server certificate verification.");
+    // A subscription link that also carries its server. What is added is that
+    // server as the link has it today, and a subscription is what a user expects
+    // to keep it up to date.
+    if (prepared->subscriptionNotKept)
+        lines << freetunnel::subscriptionNotKeptNote();
     const QString message = lines.join(QLatin1Char('\n'));
 
     emit deepLinkImportConfirmationRequired(message, link, existingName);
@@ -233,9 +262,10 @@ bool Backend::importDeepLink(const QString &link)
 bool Backend::confirmDeepLinkImport(const QString &link, bool replaceExisting)
 {
     QString err;
-    auto prepared = freetunnel::prepareDeepLinkImport(link, &err);
+    freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
+    auto prepared = freetunnel::prepareDeepLinkImport(link, &err, &why);
     if (!prepared) {
-        emit errorOccurred(tr("Link error: %1").arg(err));
+        emit errorOccurred(linkRefusedMessage(err, why));
         return false;
     }
     return importPreparedDeepLink(*prepared, replaceExisting);

@@ -16,6 +16,9 @@ from a script or a Stream Deck, or working on the code that reads them.
   - [Client random (tag `0x0B`)](#client-random-tag-0x0b)
   - [Display name (tag `0x0C`)](#display-name-tag-0x0c)
   - [DNS upstream list (tag `0x0D`)](#dns-upstream-list-tag-0x0d)
+  - [Subscription address (tag `0x0E`)](#subscription-address-tag-0x0e)
+  - [Client random auth key (tag `0x0F`)](#client-random-auth-key-tag-0x0f)
+  - [Versions](#versions)
 - [Validation rules](#validation-rules)
 - [How a link becomes a config](#how-a-link-becomes-a-config)
 - [FreeTunnel control links (separate)](#freetunnel-control-links-separate)
@@ -68,19 +71,20 @@ another. Each record:
 - Both tag and length are **QUIC variable-length integers** (RFC 9000 §16), not
   fixed-width fields.
 - Unknown tags are ignored, for forward compatibility.
-- The maximum supported format version is **1** (`kDeepLinkMaxVersion`).
+- FreeTunnel reads format versions up to **2** (`kDeepLinkMaxVersion`) and
+  writes version **1** (`kDeepLinkWriteVersion`); see [Versions](#versions).
 
 ### Field tags
 
 | Tag | Field | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `0x00` | Version | varint | no | `0` | At most `1` is accepted |
-| `0x01` | Hostname | UTF-8 string | **yes** | — | |
-| `0x02` | Address | UTF-8 string `host:port` | **yes** (≥1) | — | One record per address |
+| `0x00` | Version | varint | no | `0` | At most `2` is accepted |
+| `0x01` | Hostname | UTF-8 string | **yes** \* | — | |
+| `0x02` | Address | UTF-8 string `host:port` | **yes** \* (≥1) | — | One record per address |
 | `0x03` | Custom SNI | UTF-8 string | no | empty | |
 | `0x04` | Allow IPv6 | 1 byte bool | no | `true` | |
-| `0x05` | Username | UTF-8 string | **yes** | — | |
-| `0x06` | Password | UTF-8 string | **yes** | — | Kept in the OS credential store, see [How a link becomes a config](#how-a-link-becomes-a-config) |
+| `0x05` | Username | UTF-8 string | **yes** \* | — | |
+| `0x06` | Password | UTF-8 string | **yes** \* | — | Kept in the OS credential store, see [How a link becomes a config](#how-a-link-becomes-a-config) |
 | `0x07` | Skip verification | 1 byte bool | no | `false` | |
 | `0x08` | Certificate | concatenated DER | no | empty | A chain: each certificate's DER follows the last |
 | `0x09` | Upstream protocol | varint | no | `1` (HTTP/2) | See [values](#upstream-protocol-tag-0x09) |
@@ -88,6 +92,11 @@ another. Each record:
 | `0x0B` | Client random prefix | UTF-8 `prefix[/mask]` hex | no | empty | See [rules](#client-random-tag-0x0b) |
 | `0x0C` | Display name | UTF-8 string | no | empty | See [naming](#display-name-tag-0x0c) |
 | `0x0D` | DNS upstreams | string list | no | empty | See [encoding](#dns-upstream-list-tag-0x0d) |
+| `0x0E` | Subscription address | UTF-8 string, `https://` | no | — | Version 2. Not kept, see [rules](#subscription-address-tag-0x0e) |
+| `0x0F` | Client random auth key | UTF-8 hex | no | empty | Version 2. A link with one is refused, see [rules](#client-random-auth-key-tag-0x0f) |
+
+\* Unless the link has a subscription address (tag `0x0E`), as the format
+allows from version 2 on.
 
 ### Upstream protocol (tag `0x09`)
 
@@ -152,6 +161,59 @@ The value is a concatenation of entries. Each entry is a `varint length`
 followed by that many UTF-8 bytes. The example
 [A DNS upstream list](#a-dns-upstream-list) shows the bytes of one.
 
+### Subscription address (tag `0x0E`)
+
+TrustTunnel 1.3 adds subscriptions: an `https://` address the client fetches
+to learn the server's current settings. The address carries the VPN username
+and password in its userinfo (`https://user:pass@host/…`).
+
+A value is accepted when it:
+
+- starts with `https://`, in lower case, as the format requires;
+- is at most 2048 bytes (`kMaxSubscriptionUrlBytes`);
+- is UTF-8 with no control characters, spaces or other whitespace, and no
+  invisible format characters such as U+200B or U+202E.
+
+Any other value fails the import. The error never quotes the address.
+
+FreeTunnel does not support subscriptions yet. What the import does:
+
+| The link carries | Result |
+| --- | --- |
+| The address alone, or with only part of a server (a "subscription-only" link) | Refused: "Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive." |
+| The address and a whole server: hostname, address, username and password, none empty | The server is imported as the link has it. The question says the server won't update itself, and the address is not kept |
+
+The address is not written anywhere, neither to the config nor to the
+credential store, and it is never logged.
+
+### Client random auth key (tag `0x0F`)
+
+A UTF-8 string of whole bytes in hex. The client derives its TLS client random
+from this key, and a server with an auth-key rule turns away a client that does
+not. The TrustTunnel core FreeTunnel uses cannot do that yet.
+
+- An empty value means the server has no key, and the link imports as usual.
+- Any other value, if it is valid hex, is refused: "This server needs a newer
+  TrustTunnel core than this version of FreeTunnel uses."
+- A value that is not whole bytes of hex fails the import as damaged.
+
+### Versions
+
+| Version | What it added | FreeTunnel |
+| --- | --- | --- |
+| `0` | No version tag | Read |
+| `1` | Tags `0x00`, `0x0C` and `0x0D` | Read and written |
+| `2` | Tags `0x0E` and `0x0F`; the other fields become optional when `0x0E` is there | Read |
+| `3` and later | — | Refused: "unsupported deep link version" |
+
+- TrustTunnel's endpoint writes version 2 on every link from 1.3.0 on, even a
+  link without either new tag.
+- FreeTunnel's own share links stay version 1. They never carry the new tags,
+  and FreeTunnel 1.2.3 and earlier, like TrustTunnel's clients up to 1.1.11,
+  refuse a version 2 link.
+- The version is read before any field, so a link of a newer version is
+  refused for its version, not for a field that version may spell differently.
+
 ## Validation rules
 
 Import fails when:
@@ -159,12 +221,22 @@ Import fails when:
 - the URI is not `tt://…`;
 - the base64url payload is invalid or empty;
 - the TLV stream is truncated, or a length overflows the payload;
-- `version > 1`;
-- the hostname, the username or the password is missing, or there is no
-  address;
+- `version > 2`;
+- the link has no subscription address, and the hostname, the username or the
+  password is missing, or there is no address;
 - the DNS upstream list is malformed;
 - the client random is not `prefix[/mask]` in whole bytes of hex (see
-  [tag `0x0B`](#client-random-tag-0x0b)).
+  [tag `0x0B`](#client-random-tag-0x0b));
+- the subscription address is not one FreeTunnel accepts (see
+  [tag `0x0E`](#subscription-address-tag-0x0e));
+- the client random auth key is not whole bytes of hex.
+
+These links are well formed, and refused with a reason of their own:
+
+- a subscription address without a whole server
+  ([tag `0x0E`](#subscription-address-tag-0x0e));
+- a non-empty client random auth key
+  ([tag `0x0F`](#client-random-auth-key-tag-0x0f)).
 
 Unknown tags are not an error: they are ignored.
 
@@ -200,6 +272,18 @@ except `dns_upstreams`, which is at the top level.
 | `0x0B` | Client random | `client_random`, whole, as `prefix[/mask]` |
 | `0x0C` | Display name | Not a key: the config's name and file name |
 | `0x0D` | DNS upstreams | `dns_upstreams` |
+| `0x0E` | Subscription address | Not written, anywhere |
+| `0x0F` | Client random auth key | Not written: a link with one is not imported |
+
+A TrustTunnel 1.3 config imported from a file is handled the same way:
+
+- An empty `client_random_auth_key`, which the endpoint's export always writes,
+  is kept as it is. A non-empty one refuses the import with the message above.
+- A subscription address, as `subscription_url` or as an
+  `[endpoint.subscription]` table, is left out of the copy FreeTunnel stores, and
+  the notice after the import says so. The file you picked is not changed.
+- A stored config that holds one already, as one imported by 1.2.3 or earlier
+  can, loses it the next time FreeTunnel rewrites the config.
 
 ## FreeTunnel control links (separate)
 
@@ -344,6 +428,39 @@ The same payload in a share link:
 https://trusttunnel.org/qr.html#tt=AAEBAQ92cG4uZXhhbXBsZS5jb20CEDIwMy4wLjExMy4xMDo0NDMFBWFsaWNlBgZzZWNyZXQMB0V4YW1wbGU
 ```
 
+### A version 2 link
+
+A link as TrustTunnel's endpoint 1.3 exports it for a server without
+subscriptions or an auth key: version 2, then the required fields in the
+endpoint's order.
+
+```text
+tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz
+```
+
+| Tag | Length | Value | Field |
+| --- | --- | --- | --- |
+| `00` | `01` | `02` | Version 2 |
+| `01` | `0f` | `vpn.example.com` | Hostname |
+| `05` | `05` | `alice` | Username |
+| `06` | `06` | `secret` | Password |
+| `02` | `0b` | `1.2.3.4:443` | Address |
+
+A subscription-only link, which FreeTunnel refuses for now, is two records:
+version 2, then tag `0x0E` with the address.
+
+```text
+tt://?AAECDjFodHRwczovL2FsaWNlOnMzY3JldEB2cG4uZXhhbXBsZS5jb20vc3Vic2NyaXB0aW9u
+```
+
+| Tag | Length | Value | Field |
+| --- | --- | --- | --- |
+| `00` | `01` | `02` | Version 2 |
+| `0e` | `31` | `https://alice:s3cret@vpn.example.com/subscription` | Subscription address |
+
+These and the other version 2 links the tests use are in
+`tests/deeplink_v2_vectors.h`, with their bytes.
+
 ### A DNS upstream list
 
 A tag `0x0D` record holding `8.8.8.8` and `1.1.1.1`, in hex:
@@ -360,6 +477,8 @@ That is tag `0x0D`, length 16, then two entries: length 7 and `8.8.8.8`, length
 | What | Where |
 | --- | --- |
 | Round-trip encode/decode, injection stripping and edge cases | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp` |
+| Version 2 links: what is read, refused and not kept | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp` |
+| TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp` |
 | Control link parser and the link mark | `tests/test_control.cpp` |
 | `--url-handler`, macOS link events and forwarding | `tests/test_app_startup.cpp` |
 | The socket a launch forwards over | `tests/test_instance_control.cpp`, `tests/test_integration_single_instance.cpp` |

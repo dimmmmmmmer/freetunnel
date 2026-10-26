@@ -16,6 +16,7 @@
 #include "core/ConfigStore.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+#include "deeplink_v2_vectors.h"
 
 class TestBackendDeepLinkImport : public QObject {
     Q_OBJECT
@@ -39,6 +40,16 @@ private slots:
     void importFileLeavesTheOriginalAlone();
     void importFileSaysWhenTheConfigSkipsCertificateChecks();
     void clipboardImportNeedsALink();
+
+    // TrustTunnel 1.3: version 2 links and the configs its endpoint exports.
+    void aVersion2LinkFromTheEndpointImports();
+    void aSubscriptionLinkSaysItsServerWontUpdateItself();
+    void aSubscriptionOnlyLinkIsRefusedWithItsReason();
+    void aServerThatNeedsAnAuthKeyIsRefusedWithItsReason();
+    void aLinkTooNewIsStillALinkError();
+    void importFileRefusesAServerThatNeedsAnAuthKey();
+    void importFileTakesAnEmptyAuthKey();
+    void importFileLeavesTheSubscriptionOut();
     void cleanupTestCase();
 };
 
@@ -525,6 +536,223 @@ void TestBackendDeepLinkImport::aLinkSentAgainFindsTheConfigItNamedWhole()
     QFile other(clipped);
     QVERIFY(other.open(QIODevice::ReadOnly));
     QCOMPARE(other.readAll(), otherBody);
+}
+
+// ---- TrustTunnel 1.3 ----------------------------------------------------------
+
+static QString readConfigText(const QString &path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+}
+
+// The config an import just added, by the name configImported gave it.
+static QString pathOfImported(const QSignalSpy &imported)
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    return QDir(base).filePath(imported.last().at(0).toString() + QStringLiteral(".toml"));
+}
+
+// Every link the endpoint exports from 1.3.0 on is version 2, and every one was
+// refused with "unsupported deep link version 2".
+void TestBackendDeepLinkImport::aVersion2LinkFromTheEndpointImports()
+{
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importDeepLink(v2::kPlain));
+    QCOMPARE(failed.count(), 0);
+    QCOMPARE(confirmSpy.count(), 1);
+    const QString question = confirmSpy.last().at(0).toString();
+    QVERIFY2(question.contains(QStringLiteral("Server: vpn.example.com")), qPrintable(question));
+    // Nothing about subscriptions for a link without one.
+    QVERIFY2(!question.contains(freetunnel::subscriptionNotKeptNote()), qPrintable(question));
+
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(v2::kPlain));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(failed.count(), 0);
+}
+
+// A link with its server and a subscription address imports the server, and the
+// question says, in one line, that it will not follow the subscription. The
+// address, VPN password and all, is not written anywhere.
+void TestBackendDeepLinkImport::aSubscriptionLinkSaysItsServerWontUpdateItself()
+{
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QVERIFY(!backend.importDeepLink(v2::kFull));
+    QCOMPARE(confirmSpy.count(), 1);
+    const QStringList lines = confirmSpy.last().at(0).toString().split(QLatin1Char('\n'));
+    QVERIFY2(lines.contains(freetunnel::subscriptionNotKeptNote()), qPrintable(lines.join('|')));
+    QVERIFY2(lines.contains(QStringLiteral("Server: vpn.example.com")), qPrintable(lines.join('|')));
+    QVERIFY2(!lines.join('\n').contains(QStringLiteral("https://")), qPrintable(lines.join('|')));
+
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(v2::kFull));
+    QCOMPARE(imported.count(), 1);
+    const QString path = pathOfImported(imported);
+    const QString onDisk = readConfigText(path);
+    QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"vpn.example.com\"")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("subscription")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("s3cret")), qPrintable(onDisk)); // in the address and the password
+    // Nor in the credential store, which holds the password alone.
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path)),
+             QStringLiteral("s3cret"));
+}
+
+// A subscription-only link names no server until the subscription is fetched,
+// which this version cannot do. It is refused, by name, before anything is asked;
+// the reason is a sentence of its own, not a "Link error:" about a broken link.
+void TestBackendDeepLinkImport::aSubscriptionOnlyLinkIsRefusedWithItsReason()
+{
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importDeepLink(v2::kSubscriptionOnly));
+    QCOMPARE(confirmSpy.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::subscriptionOnlyRefusal());
+
+    // The confirm step re-reads the link and refuses it the same way.
+    QVERIFY(!backend.confirmDeepLinkImport(v2::kSubscriptionOnly));
+    QCOMPARE(failed.count(), 2);
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::subscriptionOnlyRefusal());
+    QCOMPARE(backend.configs().size(), before);
+}
+
+void TestBackendDeepLinkImport::aServerThatNeedsAnAuthKeyIsRefusedWithItsReason()
+{
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importDeepLink(v2::kAuthKey));
+    QCOMPARE(confirmSpy.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
+    QVERIFY(!backend.confirmDeepLinkImport(v2::kAuthKey));
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
+    QCOMPARE(backend.configs().size(), before);
+}
+
+// A version this client does not read is still said to be a link problem.
+void TestBackendDeepLinkImport::aLinkTooNewIsStillALinkError()
+{
+    Backend backend;
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importDeepLink(v2::kVersion3));
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("Link error: unsupported deep link version 3"));
+}
+
+// A config file for a server that checks the auth key would import and then fail
+// every connect, turned away at the handshake with nothing to say why.
+void TestBackendDeepLinkImport::importFileRefusesAServerThatNeedsAnAuthKey()
+{
+    QByteArray body = validImportBody();
+    body.append("client_random_auth_key = \"aabbccdd\"\n");
+    const QString path = writeTempConfig(QStringLiteral("auth-key.toml"), body);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
+    QCOMPARE(backend.configs().size(), before);
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QVERIFY(!QFileInfo::exists(QDir(base).filePath(QStringLiteral("auth-key.toml"))));
+    QFile::remove(path);
+}
+
+// The endpoint's export always writes the key, empty for a server without one.
+void TestBackendDeepLinkImport::importFileTakesAnEmptyAuthKey()
+{
+    QByteArray body = validImportBody();
+    body.append("client_random_auth_key = \"\"\n");
+    const QString path = writeTempConfig(QStringLiteral("empty-auth-key.toml"), body);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.importFile(path));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(failed.count(), 0);
+    // Kept as written, like any key this app does not know.
+    const QString onDisk = readConfigText(pathOfImported(imported));
+    QVERIFY2(onDisk.contains(QStringLiteral("client_random_auth_key = \"\"")), qPrintable(onDisk));
+    QFile::remove(path);
+}
+
+// A TrustTunnel 1.3 config can carry its subscription address in two places, and
+// the address holds the VPN password in plain text. The import moved the password
+// itself to the credential store and kept the address on disk as written. It is
+// left out of the copy now, and the notice that replaces "Config added" says so.
+void TestBackendDeepLinkImport::importFileLeavesTheSubscriptionOut()
+{
+    const auto body = [](bool password, bool skipVerification) {
+        QByteArray b("subscription_url = \"https://alice:s3cret@sub.example.com/subscription\"\n"
+                     "\n[endpoint]\n"
+                     "hostname = \"sub.example.com\"\n"
+                     "addresses = [\"203.0.113.20:443\"]\n"
+                     "username = \"alice\"\n");
+        if (password)
+            b.append("password = \"s3cret\"\n");
+        if (skipVerification)
+            b.append("skip_verification = true\n");
+        b.append("provider_tag = \"gold\"\n"
+                 "\n[endpoint.subscription]\n"
+                 "url = \"https://alice:s3cret@sub.example.com/subscription\"\n"
+                 "\n[provider]\n"
+                 "port = 1080\n");
+        return b;
+    };
+    // With a password, which the import then moves to the credential store and
+    // rewrites the file for; and without, where the file is written as it came.
+    for (const bool password : {true, false}) {
+        const QString name = password ? QStringLiteral("sub-with-password") : QStringLiteral("sub-without-password");
+        const QString path = writeTempConfig(name + QStringLiteral(".toml"), body(password, false));
+        QVERIFY(!path.isEmpty());
+
+        Backend backend;
+        QSignalSpy imported(&backend, &Backend::configImported);
+        QSignalSpy notices(&backend, &Backend::errorOccurred);
+        QVERIFY(backend.importFile(path));
+        QCOMPARE(imported.count(), 1);
+        const QString added = imported.last().at(0).toString();
+        QCOMPARE(notices.count(), 1);
+        QCOMPARE(notices.last().at(0).toString(),
+                 QStringLiteral("Config added: %1. ").arg(added) + freetunnel::subscriptionNotKeptNote());
+
+        const QString onDisk = readConfigText(pathOfImported(imported));
+        QVERIFY2(!onDisk.contains(QStringLiteral("subscription")), qPrintable(onDisk));
+        QVERIFY2(!onDisk.contains(QStringLiteral("s3cret")), qPrintable(onDisk));
+        // What else the file had is still there.
+        QVERIFY2(onDisk.contains(QStringLiteral("hostname = \"sub.example.com\"")), qPrintable(onDisk));
+        QVERIFY2(onDisk.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(onDisk));
+        QVERIFY2(onDisk.contains(QStringLiteral("[provider]")), qPrintable(onDisk));
+        // And the file the user picked is theirs, untouched.
+        QCOMPARE(readConfigText(path).toUtf8(), body(password, false));
+        QFile::remove(path);
+    }
+
+    // With certificate checks off as well: one notice, saying both.
+    const QString path = writeTempConfig(QStringLiteral("sub-unchecked.toml"), body(true, true));
+    QVERIFY(!path.isEmpty());
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QSignalSpy notices(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.importFile(path));
+    QCOMPARE(notices.count(), 1);
+    QCOMPARE(notices.last().at(0).toString(),
+             QStringLiteral("Config added: %1. It turns off server certificate verification. ")
+                             .arg(imported.last().at(0).toString())
+                     + freetunnel::subscriptionNotKeptNote());
+    QFile::remove(path);
 }
 
 QTEST_MAIN(TestBackendDeepLinkImport)

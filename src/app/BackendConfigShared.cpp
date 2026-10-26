@@ -205,6 +205,14 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
             *errOut = QStringLiteral("invalid");
         return false;
     }
+    // A server that checks the auth key turns this core away at the TLS
+    // handshake. Imported, the config would fail every connect with nothing to
+    // say why; the empty key the endpoint's export always writes is no key.
+    if (!freetunnel::endpointClientRandomAuthKey(content).isEmpty()) {
+        if (errOut)
+            *errOut = QStringLiteral("authkey");
+        return false;
+    }
     if (contentOut)
         *contentOut = content;
     return true;

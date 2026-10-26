@@ -4,6 +4,7 @@
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/DeepLink.h"
+#include "deeplink_v2_vectors.h"
 
 using namespace freetunnel;
 
@@ -17,6 +18,13 @@ private slots:
     void fileNameSanitized();
     void aLongNameIsCutToTheLimit();
     void rejectsInvalidLink();
+
+    // Version 2: TrustTunnel endpoint 1.3.0 and later.
+    void importsAVersion2Link();
+    void importsTheServerOfASubscriptionLinkWithoutTheAddress();
+    void refusesASubscriptionOnlyLink();
+    void refusesAServerThatNeedsAnAuthKey();
+    void aDamagedLinkIsSaidToBeDamaged();
 };
 
 static QString makeLink(const QString &name = QString()) {
@@ -82,6 +90,87 @@ void TestConfigImport::rejectsInvalidLink() {
     QString err;
     QVERIFY(!prepareDeepLinkImport("https://nope", &err).has_value());
     QVERIFY(!err.isEmpty());
+}
+
+void TestConfigImport::importsAVersion2Link() {
+    QString err;
+    LinkRefusal why = LinkRefusal::NeedsNewerCore; // anything but what it will say
+    const auto out = prepareDeepLinkImport(v2::kPlain, &err, &why);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(why, LinkRefusal::Damaged); // set even on success, so it is never stale
+    QCOMPARE(out->fileName, QStringLiteral("vpn.example.com.toml"));
+    QVERIFY(out->tomlContent.contains(QStringLiteral("hostname = \"vpn.example.com\"")));
+    QVERIFY(!out->subscriptionNotKept);
+
+    // An empty auth key is no key.
+    QVERIFY(prepareDeepLinkImport(v2::kEmptyAuthKey, &err).has_value());
+}
+
+// A link with its server and a subscription address imports the server. The
+// address holds the VPN password in plain text and FreeTunnel cannot follow it
+// yet, so it is not kept, and the import says so (subscriptionNotKept).
+void TestConfigImport::importsTheServerOfASubscriptionLinkWithoutTheAddress() {
+    QString err;
+    const auto out = prepareDeepLinkImport(v2::kFull, &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QVERIFY(out->subscriptionNotKept);
+    QCOMPARE(out->fileName, QStringLiteral("Example.toml"));
+    QVERIFY(out->tomlContent.contains(QStringLiteral("hostname = \"vpn.example.com\"")));
+    QVERIFY2(!out->tomlContent.contains(QStringLiteral("subscription")), qPrintable(out->tomlContent));
+    QVERIFY2(!out->tomlContent.contains(QStringLiteral("https://alice")), qPrintable(out->tomlContent));
+}
+
+void TestConfigImport::refusesASubscriptionOnlyLink() {
+    QString err;
+    LinkRefusal why = LinkRefusal::Damaged;
+    QVERIFY(!prepareDeepLinkImport(v2::kSubscriptionOnly, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::SubscriptionOnly);
+    QCOMPARE(err, subscriptionOnlyRefusal());
+    QVERIFY2(err.contains(QStringLiteral("Subscription links aren't supported yet")), qPrintable(err));
+    QVERIFY2(!err.contains(QStringLiteral("s3cret")) && !err.contains(QStringLiteral("example.com")),
+             qPrintable(err));
+
+    // A subscription link whose server is only half there falls back on nothing
+    // either: here, the credentials are empty.
+    DeepLinkConfig half;
+    half.hostname = QStringLiteral("vpn.example.com");
+    half.addresses = {QStringLiteral("1.2.3.4:443")};
+    QByteArray p = QByteArray::fromBase64(encodeDeepLink(half).mid(6).toLatin1(),
+                                          QByteArray::Base64UrlEncoding);
+    p += char(0x0E);
+    p += char(v2::kSubscription.size());
+    p += v2::kSubscription.toUtf8();
+    const QString link = QStringLiteral("tt://?")
+            + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+    QVERIFY(!prepareDeepLinkImport(link, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::SubscriptionOnly);
+}
+
+// The core FreeTunnel runs cannot compute the client random an auth-key server
+// checks, and is turned away at the handshake with no way to say why.
+void TestConfigImport::refusesAServerThatNeedsAnAuthKey() {
+    QString err;
+    LinkRefusal why = LinkRefusal::Damaged;
+    QVERIFY(!prepareDeepLinkImport(v2::kAuthKey, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::NeedsNewerCore);
+    QCOMPARE(err, newerCoreRefusal());
+    QVERIFY2(err.contains(QStringLiteral("newer TrustTunnel core")), qPrintable(err));
+    QVERIFY2(!err.contains(QStringLiteral("aabbccdd")), qPrintable(err));
+}
+
+// What the parser refuses keeps its own message, which the caller puts after
+// "Link error:": a version too new, an address that is not https://.
+void TestConfigImport::aDamagedLinkIsSaidToBeDamaged() {
+    QString err;
+    LinkRefusal why = LinkRefusal::SubscriptionOnly;
+    QVERIFY(!prepareDeepLinkImport(v2::kVersion3, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::Damaged);
+    QCOMPARE(err, QStringLiteral("unsupported deep link version 3"));
+
+    why = LinkRefusal::SubscriptionOnly;
+    QVERIFY(!prepareDeepLinkImport(v2::kHttpSubscription, &err, &why).has_value());
+    QCOMPARE(why, LinkRefusal::Damaged);
+    QVERIFY2(err.contains(QStringLiteral("https://")), qPrintable(err));
 }
 
 QTEST_MAIN(TestConfigImport)
