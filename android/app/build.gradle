@@ -41,6 +41,17 @@ android {
         def keyMatch = keyHeader =~ /MCowBQYDK2VwAyEA[A-Za-z0-9+\/=]+/
         if (!keyMatch.find()) throw new GradleException('Missing release verification key')
         buildConfigField 'String', 'RELEASE_SIGNING_KEY', '\"' + keyMatch.group() + '\"'
+        // The release certificate's SHA-256, which the app checks its own signer and
+        // every downloaded update against. Read as check-android-signer.sh reads it,
+        // trailing newlines dropped. Without the file the build is not official and
+        // never offers updates; a malformed pin would ship a build that can never
+        // update itself, so it fails the build.
+        def pinFile = rootProject.file('release-certificate.sha256')
+        def pin = pinFile.exists() ? pinFile.text.replaceAll(/\n+\z/, '') : ''
+        if (pinFile.exists() && !(pin ==~ /[0-9a-f]{64}/)) {
+            throw new GradleException('android/release-certificate.sha256 must be one line of 64 lowercase hex characters')
+        }
+        buildConfigField 'String', 'RELEASE_CERTIFICATE_SHA256', '\"' + pin + '\"'
     }
     buildFeatures { buildConfig true }
     // Release builds are unsigned. scripts/sign-android-release.sh signs them

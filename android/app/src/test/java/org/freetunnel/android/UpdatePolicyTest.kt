@@ -2,6 +2,7 @@ package org.freetunnel.android
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.Signature
@@ -62,5 +63,25 @@ class UpdatePolicyTest {
         assertThrows(IllegalArgumentException::class.java) { UpdatePolicy.verifyDigest(checksum, ByteArray(32)) }
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  other.apk\n") }
         assertThrows(IllegalArgumentException::class.java) { verify("#version=1.2.0\n$hash  ${release.filename}\n$hash  ${release.filename}\n") }
+    }
+    @Test fun signedByRequiresExactlyOnePinnedCertificate() {
+        val certificate = "a DER certificate".toByteArray()
+        val pin = MessageDigest.getInstance("SHA-256").digest(certificate).joinToString("") { "%02x".format(it) }
+        assertTrue(UpdatePolicy.signedBy(listOf(certificate), pin))
+        assertTrue(UpdatePolicy.signedBy(listOf(certificate.copyOf()), pin))
+        assertFalse(UpdatePolicy.signedBy(listOf("another certificate".toByteArray()), pin))
+        assertFalse(UpdatePolicy.signedBy(emptyList(), pin))
+        assertFalse(UpdatePolicy.signedBy(listOf(certificate, certificate), pin))
+        assertFalse(UpdatePolicy.signedBy(listOf("another certificate".toByteArray(), certificate), pin))
+        // The pin is compared as written: apksigner's lowercase hex, nothing else.
+        for (bad in listOf("", pin.uppercase(), pin.dropLast(1), "$pin\n", "$pin\r", pin.chunked(2).joinToString(":"))) {
+            assertFalse(bad, UpdatePolicy.signedBy(listOf(certificate), bad))
+        }
+    }
+    @Test fun pinIsWiredFromTheRepositoryFile() {
+        // Unit tests run in android/app; the pin file is android/release-certificate.sha256.
+        val pin = File("../release-certificate.sha256").readText().trimEnd('\n')
+        assertTrue(pin, Regex("[0-9a-f]{64}").matches(pin))
+        assertEquals(pin, BuildConfig.RELEASE_CERTIFICATE_SHA256)
     }
 }

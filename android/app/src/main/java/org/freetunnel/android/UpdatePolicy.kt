@@ -11,6 +11,17 @@ import java.security.MessageDigest
 object UpdatePolicy {
     const val REPOSITORY = "dimmmmmmmer/freetunnel"
     private val versionPattern = Regex("[0-9]{1,20}\\.[0-9]{1,20}\\.[0-9]{1,20}")
+    private val pinPattern = Regex("[0-9a-f]{64}")
+
+    /**
+     * The rule of scripts/check-android-signer.sh: exactly one signer, whose
+     * DER certificate has the pinned SHA-256 (64 lowercase hex characters). An
+     * empty or malformed pin matches nothing.
+     */
+    fun signedBy(certificates: List<ByteArray>, pin: String): Boolean =
+        pinPattern.matches(pin) && certificates.size == 1 && hex(MessageDigest.getInstance("SHA-256").digest(certificates[0])) == pin
+
+    private fun hex(bytes: ByteArray) = bytes.joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
     data class Candidate(val tag: String, val draft: Boolean, val prerelease: Boolean, val assets: Map<String, String>)
     data class Release(val version: String, val apk: String, val manifest: String, val signature: String) {
         val tag get() = "android-$version"
