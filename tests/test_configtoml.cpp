@@ -1459,6 +1459,12 @@ void TestConfigToml::anEndpointExportIsReadInEverySpelling()
     exported = parseEndpointExport(note + endpoint_export::text());
     QVERIFY(exported.has_value());
     QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
+    // Nor is a comment, whatever it reads like: an export that says in one how
+    // it would look as an inline table is still an export.
+    exported = parseEndpointExport(QStringLiteral("# endpoint = { hostname = \"elsewhere\" }\n")
+                                   + endpoint_export::text());
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
 
     // Quoted keys are the same keys, and CRLF line endings are line endings.
     QString quoted = endpoint_export::text();
