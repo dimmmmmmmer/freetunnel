@@ -641,6 +641,17 @@ public final class DeepLinkImportTest {
         DeepLinkImport.Imported pinned = exported(endpointExport("\"\"\"\n" + CHAIN_PEM + "\"\"\""));
         assertEquals(DeepLinkImport.parse(withField(V2_FULL, 8, CHAIN_DER)).toml, pinned.toml);
         assertFalse(pinned.certificateIgnored);
+        // The same chain in one block, as the desktop's FreeTunnel 1.1.9 and earlier
+        // stored a link's and exported it again, is the same certificates by the
+        // rule every import shares: nothing is left out, and nothing is said.
+        DeepLinkImport.Imported oneBlock = exported(endpointExport(
+                "\"\"\"\n" + CertificateVectors.pemBlock("CERTIFICATE", CHAIN_DER) + "\"\"\""));
+        assertEquals(pinned.toml, oneBlock.toml);
+        assertFalse(oneBlock.certificateIgnored);
+        // With a key beside it in the block, the block is not a certificate, and
+        // with nothing else in the field there is nothing left to pin.
+        exportRefused(endpointExport("\"\"\"\n" + CertificateVectors.pemBlock("CERTIFICATE", concat(CHAIN_DER, PKCS8_DER))
+                + "\"\"\""), R.string.text_the_configuration_contains_an_invalid_certificate);
     }
 
     @Test public void anEndpointExportKeepsOnlyItsCertificates() throws Exception {

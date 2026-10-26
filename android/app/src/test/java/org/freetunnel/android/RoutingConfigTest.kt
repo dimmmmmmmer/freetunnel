@@ -452,6 +452,12 @@ class RoutingConfigTest {
         assertNotNull(plan(enabled = false, text = plain.toml))
         // Taken in once, it is a whole file, which is kept as written from then on.
         assertEquals(plain.toml, RoutingConfig.cleanImport(plain.toml).toml)
+        // A chain in one block, as the desktop's FreeTunnel 1.1.9 and earlier exported
+        // it, holds only certificates, and they are written as a link's are.
+        val oneBlock = RoutingConfig.cleanImport(endpointExport(
+            "\"\"\"\n${CertificateVectors.pemBlock("CERTIFICATE", CertificateVectors.CHAIN_DER)}\"\"\""))
+        assertFalse(oneBlock.certificateIgnored)
+        assertEquals(CertificateVectors.CHAIN_PEM, Toml.parse(oneBlock.toml).getString("endpoint.certificate"))
     }
     @Test fun aClientConfigIsNeverReadAsAnExport() {
         val flat = "hostname = \"vpn.example.com\"\naddresses = [\"192.0.2.1:443\"]\nusername = \"alice\"\npassword = \"s3cret\"\n"
