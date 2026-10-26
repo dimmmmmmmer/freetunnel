@@ -287,6 +287,76 @@ class VpnDeviceTest {
         }
     }
 
+    private fun withMainActivity(block: (MainActivity) -> Unit) {
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        try { block(activity) } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+    private fun privateMethod(name: String, vararg types: Class<*>?) =
+        MainActivity::class.java.getDeclaredMethod(name, *types).apply { isAccessible = true }
+    private fun descendants(view: android.view.View): Sequence<android.view.View> = sequence {
+        yield(view)
+        if (view is android.view.ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
+    }
+    // Opens one of MainActivity's dialogs on the main thread, hands check the dialog's
+    // window and the view MainActivity put in it, and closes the dialog with Cancel.
+    private fun inDialog(start: () -> Unit, check: (android.view.View, android.view.ViewGroup) -> Unit) {
+        instrumentation.runOnMainSync { start() }
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync {
+            val window = android.view.inspector.WindowInspector.getGlobalWindowViews()
+                .last { it.findViewById<android.view.View>(android.R.id.custom) != null }
+            check(window, window.findViewById<android.view.ViewGroup>(android.R.id.custom))
+            assertTrue(window.findViewById<android.widget.Button>(android.R.id.button2).performClick())
+        }
+        instrumentation.waitForIdleSync()
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun editorKeepsTheTomlOutOfTheKeyboardsFullScreenView() {
+        withMainActivity { activity ->
+            inDialog({ privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) }) { _, content ->
+                val toml = descendants(content).filterIsInstance<android.widget.EditText>()
+                    .single { it.inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0 }
+                // What a keyboard is given when the field takes focus.
+                val info = android.view.inputmethod.EditorInfo()
+                assertNotNull(toml.onCreateInputConnection(info))
+                assertTrue("The TOML must not be copied into a full-screen keyboard",
+                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
+            }
+        }
+    }
+
+    // The light theme colours only the activity. AlertDialog.Builder(this) keeps
+    // Theme.Material's dark dialog in both themes, so the text MainActivity puts in a
+    // dialog has to be light in both.
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun dialogTextIsReadableInBothThemes() {
+        withMainActivity { activity ->
+            val dialogs = listOf<() -> Unit>(
+                { privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) },
+                { privateMethod("appPicker").invoke(activity) })
+            for (dark in listOf(false, true)) {
+                instrumentation.runOnMainSync {
+                    MainActivity::class.java.getDeclaredField("dark").apply { isAccessible = true }.setBoolean(activity, dark)
+                }
+                for (start in dialogs) inDialog(start) { window, content ->
+                    val attributes = window.context.obtainStyledAttributes(intArrayOf(android.R.attr.colorBackground))
+                    val background = try { attributes.getColor(0, android.graphics.Color.TRANSPARENT) } finally { attributes.recycle() }
+                    assertTrue("Dialogs are expected to stay dark in both themes",
+                        androidx.core.graphics.ColorUtils.calculateLuminance(background) < 0.2)
+                    val texts = descendants(content).filterIsInstance<android.widget.TextView>().filter { it.isShown }.toList()
+                    assertFalse("The dialog shows no text to check", texts.isEmpty())
+                    for (text in texts) {
+                        val contrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentTextColor, background)
+                        assertTrue("\"${text.hint ?: text.text}\" in the ${if (dark) "dark" else "light"} theme: contrast $contrast",
+                            contrast >= 4.5)
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun serviceStartsFromSavedProfileWithoutIntentExtras() {
         assertNull(VpnService.prepare(context))
         val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
