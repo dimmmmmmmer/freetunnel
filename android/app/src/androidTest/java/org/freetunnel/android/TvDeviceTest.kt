@@ -2,6 +2,7 @@ package org.freetunnel.android
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -24,7 +25,7 @@ import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.*
-import org.junit.Assume.assumeTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.ExecutorService
@@ -178,7 +179,10 @@ class TvDeviceTest {
         assertEquals(MainActivity::class.java.name, pm.getLeanbackLaunchIntentForPackage(context.packageName)?.component?.className)
         assertEquals(MainActivity::class.java.name, pm.getLaunchIntentForPackage(context.packageName)?.component?.className)
         assertNotEquals("A TV launcher shows the application's banner", 0, context.applicationInfo.banner)
-        if (isTv) assertTrue(pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK))
+        // What these tests expect of a TV follows the ui mode, and Android CI tells the
+        // TV leg by the leanback feature. A TV image without a TV ui mode would pass the
+        // TV leg with a phone's expectations.
+        assertEquals("A TV, and only a TV, reports a TV ui mode", pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK), isTv)
     }
 
     @Test fun everyControlIsAFocusStopWithAKeyAndARing() {
@@ -372,25 +376,48 @@ class TvDeviceTest {
             instrumentation.removeMonitor(openDocument)
             instrumentation.removeMonitor(getContent)
         }
+        // Where there is no OPEN_DOCUMENT, as on such a TV, starting it throws.
+        val content = picker(Intent.ACTION_GET_CONTENT)
+        val noDocuments = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? =
+                if (intent.action == Intent.ACTION_OPEN_DOCUMENT) throw ActivityNotFoundException("No OPEN_DOCUMENT here") else null
+        }.also { instrumentation.addMonitor(it) }
+        try {
+            onMain { method("pickFile").invoke(a) }
+            assertEquals("GET_CONTENT where OPEN_DOCUMENT is missing", 1, content.hits)
+            assertFalse(onMain { a.isFinishing })
+        } finally {
+            instrumentation.removeMonitor(content)
+            instrumentation.removeMonitor(noDocuments)
+        }
     }
 
-    // The updater's guard (C1 in the TV plan): without the install permission, it
-    // opens Android's screen for it, or says where the setting is on a TV that has
-    // none. Only on such a device, where it would otherwise crash.
-    @Test fun installWithoutAScreenForThePermissionDoesNotCrash() {
+    // The updater's guard (C1 in the TV plan): without the install permission, Install
+    // update opens Android's screen for it, or says where the setting is on a TV that
+    // has none, and stays available. Taking the permission away stops the app, and
+    // these tests with it, so Android CI runs this alone before it grants the
+    // permission, with withoutInstallPermission=true. With the permission it is skipped.
+    @Test fun installWithoutThePermissionKeepsTheUpdateReady() {
+        val allowed = context.packageManager.canRequestPackageInstalls()
+        if (InstrumentationRegistry.getArguments().getString("withoutInstallPermission") == "true")
+            assertFalse("Run this before granting REQUEST_INSTALL_PACKAGES", allowed)
+        else assumeFalse("Runs only without the install permission", allowed)
         val resolved = shell("cmd package resolve-activity --brief -a android.settings.MANAGE_UNKNOWN_APP_SOURCES -d package:${context.packageName}")
-        assumeTrue("Android has the screen here", resolved.contains("No activity found"))
-        shell("appops set ${context.packageName} REQUEST_INSTALL_PACKAGES default")
+        // Where Android has the screen, this answers instead of it, so that no Settings
+        // window opens. Where it has none, starting it throws.
+        val screen = if (resolved.contains("No activity found")) null else instrumentation.addMonitor(
+            IntentFilter(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply { addDataScheme("package") },
+            Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true)
         try {
-            eventually("The install permission must be withdrawn") { !context.packageManager.canRequestPackageInstalls() }
             updater("state", AndroidUpdater.State.READY)
             val a = open()
             onMain { AndroidUpdater.install(a) }
             instrumentation.waitForIdleSync()
+            screen?.let { assertEquals("Install update must open Android's screen for the permission", 1, it.hits) }
             assertFalse(onMain { a.isFinishing || a.isDestroyed })
             assertEquals("Install update stays available", AndroidUpdater.State.READY, AndroidUpdater.state)
         } finally {
-            shell("appops set ${context.packageName} REQUEST_INSTALL_PACKAGES allow")
+            screen?.let { instrumentation.removeMonitor(it) }
         }
     }
 

@@ -265,13 +265,17 @@ again: release a new one.
 ## Device checks
 
 The automated device suite is currently validated on **API 35** (arm64 locally,
-x86_64 in CI) and on **Android TV API 34** (x86 in CI); older supported Android
-versions have not been validated by this suite. Run on a dedicated emulator:
+x86_64 in CI), and CI also runs it on **Android TV API 34** (x86); older
+supported Android versions have not been validated by this suite. Run on a
+dedicated emulator, with a fresh install:
 
 ```sh
 ./android/gradlew -p android :app:installDebug :app:installDebugAndroidTest
 adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
 adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
+adb shell am instrument -w -e withoutInstallPermission true \
+  -e class org.freetunnel.android.TvDeviceTest#installWithoutThePermissionKeepsTheUpdateReady \
+  org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner
 adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
 ./android/gradlew -p android :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner \
@@ -282,7 +286,10 @@ adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
 The `debugCertificate` argument is apksigner's reading of the debug APK's
 signer. `UpdateDeviceTest` checks the app's own reading against it, and
 `TvDeviceTest` pins it so that Settings shows its update action as in an
-official build. Both fail without it.
+official build. Both fail without it. The `am instrument` line runs the one
+test that needs the app without the install permission. It has to come before
+the permission is granted: Android stops an app that loses it, and the tests
+with it. In the full run, that test is skipped.
 
 [Android CI](../.github/workflows/android.yml) runs JVM tests, lint, builds and
 emulator tests without lint baselines, the emulator tests on a phone and on an

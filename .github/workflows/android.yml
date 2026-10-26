@@ -122,10 +122,14 @@ jobs:
           # reading against, is worked out on the line that passes it. On the TV
           # leg, the image must be a TV, and the app is opened from the TV
           # launcher's entry, with screenshots of it and of the launcher for review.
+          # The one test of Install update without the install permission runs first,
+          # alone: taking the permission away later would stop the app, and the
+          # tests with it. am instrument exits 0 on a failed test, hence the grep.
           script: |
             ./android/gradlew -p android --no-daemon :app:installDebug :app:installDebugAndroidTest
             adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
             adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
+            adb shell am instrument -w -e withoutInstallPermission true -e class org.freetunnel.android.TvDeviceTest#installWithoutThePermissionKeepsTheUpdateReady org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner | tee /dev/stderr | grep -q 'OK (1 test)'
             adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
             if [ "${{ matrix.target }}" = android-tv ]; then adb shell pm list features | grep -qx 'feature:android.software.leanback'; fi
             if [ "${{ matrix.target }}" = android-tv ]; then mkdir -p android/app/build/reports/tv-screens && adb shell monkey -p org.freetunnel.android -c android.intent.category.LEANBACK_LAUNCHER 1 && sleep 5 && adb exec-out screencap -p > android/app/build/reports/tv-screens/app.png && adb shell input keyevent KEYCODE_HOME && sleep 3 && adb exec-out screencap -p > android/app/build/reports/tv-screens/launcher.png; fi
