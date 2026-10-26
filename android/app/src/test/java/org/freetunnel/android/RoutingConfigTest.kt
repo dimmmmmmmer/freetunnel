@@ -495,12 +495,22 @@ class RoutingConfigTest {
             assertEquals(message, refused.messageResource)
         }
     }
-    @Test fun anIncompleteEndpointExportIsLeftForValidation() {
-        // Without a subscription it is only an incomplete file, and validation says so.
-        val imported = RoutingConfig.cleanImport(endpointExport(subscription = false)
-            .replace("hostname = \"vpn.example.com\"", "hostname = \"\""))
-        assertEquals("", Toml.parse(imported.toml).getString("endpoint.hostname"))
-        assertThrows(IllegalArgumentException::class.java) { plan(enabled = false, text = imported.toml) }
+    @Test fun anIncompleteEndpointExportIsRefused() {
+        // Without a subscription it is refused as its link is, in a file's words.
+        // Validation would have saved an empty user name or password.
+        for ((setting, empty) in listOf(
+            "hostname = \"vpn.example.com\"" to "hostname = \"\"",
+            "addresses = [\"192.0.2.1:443\", \"192.0.2.2:443\"]" to "addresses = []",
+            "username = \"alice\"" to "username = \"\"",
+            "password = \"s3cret\"" to "password = \"\"",
+        )) {
+            val text = endpointExport(subscription = false)
+            assertTrue(setting, text.contains(setting))
+            val refused = assertThrows(RoutingConfig.ImportRefused::class.java) {
+                RoutingConfig.cleanImport(text.replace(setting, empty))
+            }
+            assertEquals(R.string.text_the_configuration_is_missing_required_server_settings, refused.messageResource)
+        }
     }
     @Test fun unreadableFilesAreLeftForValidation() {
         for (text in listOf("not toml [", "subscription_url = \"https://a:b@x/s\"\n", "endpoint = 5\nsubscription_url = \"x\"")) {

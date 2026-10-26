@@ -697,19 +697,30 @@ public final class DeepLinkImportTest {
         exportRefused(nothingToPin.replace("client_random_auth_key = \"\"", "client_random_auth_key = \"aa\""),
                 R.string.text_this_server_needs_a_newer_trusttunnel_core);
         exportRefused(nothingToPin.replace("username = \"alice\"", ""), R.string.text_subscription_links_are_not_supported_yet);
+        exportRefused(nothingToPin.replace("subscription_url = \"" + SUBSCRIPTION + "\"\n", "").replace("username = \"alice\"", ""),
+                R.string.text_the_configuration_is_missing_required_server_settings);
     }
 
-    // Without a subscription, an export that lacks a setting is only an incomplete
-    // file. It is read as far as it goes, and validation names what is missing, as
-    // it does for any other TOML file.
-    @Test public void anIncompleteEndpointExportIsLeftForValidation() throws Exception {
+    // Without a subscription, an export that lacks one of the server's settings is
+    // refused as its link is, but in a file's words. Validation would have let an
+    // empty user name or password through.
+    @Test public void anIncompleteEndpointExportIsRefused() throws Exception {
         String plain = NO_CERTIFICATE.replace("subscription_url = \"" + SUBSCRIPTION + "\"\n", "");
-        DeepLinkImport.Imported imported = exported(plain.replace("hostname = \"vpn.example.com\"", "hostname = \"\""));
-        assertFalse(imported.subscriptionNotKept);
-        assertTrue(imported.toml, imported.toml.contains("hostname = \"\"\n"));
-        assertTrue(exported(plain.replace("password = \"s3cret\"", "")).toml.contains("password = \"\"\n"));
-        assertTrue(exported(plain.replace("addresses = [\"1.2.3.4:443\", \"[2001:db8::1]:443\"]", "")).toml
-                .contains("addresses = []\n"));
+        // The whole file is taken, so each row below is refused for what it changes.
+        DeepLinkImport.Imported whole = exported(plain);
+        assertFalse(whole.subscriptionNotKept);
+        assertEquals(DeepLinkImport.parse(V2_FULL).toml, whole.toml);
+        String addresses = "addresses = [\"1.2.3.4:443\", \"[2001:db8::1]:443\"]";
+        for (String[] row : new String[][]{
+                {"hostname = \"vpn.example.com\"", ""}, {"hostname = \"vpn.example.com\"", "hostname = \"\""},
+                {"hostname = \"vpn.example.com\"", "hostname = \" \""}, {"hostname = \"vpn.example.com\"", "hostname = 5"},
+                {"username = \"alice\"", ""}, {"username = \"alice\"", "username = \"\""},
+                {"password = \"s3cret\"", ""}, {"password = \"s3cret\"", "password = \"\""},
+                {addresses, ""}, {addresses, "addresses = []"}, {addresses, "addresses = [\"\", \" \"]"},
+                {addresses, "addresses = \"1.2.3.4:443\""}}) {
+            assertTrue(row[0], plain.contains(row[0]));
+            exportRefused(plain.replace(row[0], row[1]), R.string.text_the_configuration_is_missing_required_server_settings);
+        }
     }
 
     @Test public void anEndpointExportWithoutANameLeavesItToTheCaller() throws Exception {

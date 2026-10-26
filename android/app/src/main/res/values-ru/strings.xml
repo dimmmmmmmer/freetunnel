@@ -121,6 +121,7 @@
     <string name="text_nsubscriptions_are_not_supported_yet_the_server_wont">"\nПодписки пока не поддерживаются: этот сервер не будет обновляться сам, а адрес подписки не сохраняется."</string>
     <string name="text_nextra_data_in_the_certificate_was_ignored">"\nЛишние данные в сертификате проигнорированы."</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"Некорректный сертификат в конфигурации"</string>
+    <string name="text_the_configuration_is_missing_required_server_settings">"В конфигурации не хватает данных сервера"</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Выбраны и приложения, и адреса. Для защиты всего выбранного включён полный VPN. Для выборочного режима оставьте один тип правил."</string>
     <string name="text_no_through_vpn_rules_full_vpn_is_enabled">"Нет правил «Через VPN»: включён полный VPN."</string>
     <string name="invalid_routing_rule">"Некорректный домен, IP или подсеть. Проверьте введённые правила."</string>

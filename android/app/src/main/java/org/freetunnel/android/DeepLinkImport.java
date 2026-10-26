@@ -154,9 +154,12 @@ final class DeepLinkImport {
             // With a subscription the static fields are optional, and a link without
             // them can only work once the subscription is fetched.
             if (subscription) throw new ParseException(R.string.text_subscription_links_are_not_supported_yet);
-            // An export without them is a TOML file that is only incomplete, and
-            // validation says what is missing, as it does for any other.
-            if (link) throw new ParseException(R.string.text_the_link_is_missing_required_server_settings);
+            // An export is refused for this as its link is, in a file's words; the
+            // desktop refuses one without addresses or a user name too. Left to
+            // validation, an empty user name or password would be saved, and the
+            // server would only refuse the connection later.
+            throw new ParseException(link ? R.string.text_the_link_is_missing_required_server_settings
+                    : R.string.text_the_configuration_is_missing_required_server_settings);
         }
         // Only the certificates are kept, so nothing else from the file the server's
         // certificate came from is stored. A certificate with none in it is refused:
