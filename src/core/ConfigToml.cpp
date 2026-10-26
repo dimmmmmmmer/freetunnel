@@ -80,6 +80,7 @@ struct OpenValue {
     bool literal = false; // inside ''' ... '''
     int brackets = 0;     // [ ... ] depth
     int braces = 0;       // { ... } depth
+    bool inlineTable = false; // a { ... } was opened, here or on an earlier line
     bool open() const { return basic || literal || brackets > 0 || braces > 0; }
 };
 
@@ -133,9 +134,10 @@ void countBracket(OpenValue *v, QChar c)
         ++v->brackets;
     else if (c == QLatin1Char(']') && v->brackets > 0)
         --v->brackets;
-    else if (c == QLatin1Char('{'))
+    else if (c == QLatin1Char('{')) {
         ++v->braces;
-    else if (c == QLatin1Char('}') && v->braces > 0)
+        v->inlineTable = true;
+    } else if (c == QLatin1Char('}') && v->braces > 0)
         --v->braces;
 }
 
@@ -813,20 +815,38 @@ QString endpointClientRandomAuthKey(const QString &toml)
 
 namespace {
 
-// Whether a line sets a key of another table without its header: dotted, as
-// `endpoint.hostname = ...`, or as an inline table, `endpoint = { ... }`.
-bool setsAKeyOfATable(const QString &line)
+// Whether a line sets a key of another table without its header, as a dotted
+// key does: `endpoint.hostname = ...` or `"endpoint".hostname = ...`. A dot or
+// an = inside a quoted part is part of that part's name, so `"a.b" = 1` sets a
+// key at the top, and `"a=b".c = 1` sets c in the table a=b. keyOf() splits at
+// the first =, quoted or not, and so read that line's key as `"a`, with no dot.
+bool setsADottedKey(const QString &line)
 {
-    const QString key = keyOf(line);
-    if (key.isEmpty())
-        return false;
-    return keyParts(key).size() > 1
-            || line.mid(line.indexOf(QLatin1Char('=')) + 1).trimmed().startsWith(QLatin1Char('{'));
+    bool dotted = false;
+    int i = 0;
+    while (i < line.size()) {
+        const QChar c = line.at(i);
+        if (c == QLatin1Char('='))
+            return dotted;
+        if (c == QLatin1Char('#'))
+            return false;
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            i = endOfQuoted(line, i);
+            continue;
+        }
+        dotted = dotted || c == QLatin1Char('.');
+        ++i;
+    }
+    return false;
 }
 
-// The endpoint's export, as parseEndpointExport() tells one: no table, no key of
-// one, and a server's four keys at the top. A line inside a value that runs on is
-// stepped over, so a certificate's text cannot pass for a key.
+// The endpoint's export, as parseEndpointExport() tells one: no table of any
+// kind, and a server's four keys at the top. A table can be a header, a dotted
+// key or an inline table anywhere, an array of them included, which Android
+// refuses as well. Only a { at the start of a value was counted before, so
+// `x = [{ ... }]` passed. A line inside a value that runs on is stepped over,
+// and so is a string, so neither a certificate's text nor a brace in quotes
+// counts.
 bool isEndpointExport(const QString &toml)
 {
     if (splitTomlTables(toml).size() != 1)
@@ -834,10 +854,12 @@ bool isEndpointExport(const QString &toml)
     OpenValue open;
     const QStringList lines = toml.split(QLatin1Char('\n'));
     for (const QString &line : lines) {
-        if (!open.open() && setsAKeyOfATable(line))
+        if (!open.open() && setsADottedKey(line))
             return false;
         advanceOpenValue(open, line);
     }
+    if (open.inlineTable)
+        return false;
     for (const char *key : {"hostname", "addresses", "username", "password"}) {
         if (valueStart(toml, key) < 0)
             return false;

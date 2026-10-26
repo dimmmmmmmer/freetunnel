@@ -349,11 +349,12 @@ server's keys are at the top, meant to be pasted under one. FreeTunnel imports
 it from file as it would the link with the same server.
 
 - **How it is told from a config.** Only a file whose `[endpoint]` names no
-  server is looked at. It is an export when it has no table at all, no dotted
-  key and no inline table, and sets `hostname`, `addresses`, `username` and
-  `password` at the top. A config in any spelling of `[endpoint]` is never read
-  as an export. A file with the server's keys at the top and a table besides is
-  neither, and is refused as before.
+  server is looked at. It is an export when it has no table at all (no table
+  header, no dotted key and no inline table anywhere, an array of them
+  included), and sets `hostname`, `addresses`, `username` and `password` at the
+  top. A config in any spelling of `[endpoint]` is never read as an export. A
+  file with the server's keys at the top and a table besides is neither, and is
+  refused as before.
 - **What its keys become.** Each is read as the same key under `[endpoint]` is
   (see the table above), and `client_random_prefix` as `client_random`.
   Anything else in the file is left out, as a link's unknown tags are.

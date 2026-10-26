@@ -75,11 +75,11 @@ struct EndpointExport {
 };
 
 // The export the text is, or nothing when it is not one. It is one only when it
-// has no table at all, no dotted key and no inline table, and sets hostname,
-// addresses, username and password at the top. The core reads its server from
-// [endpoint] alone, and every way of writing one - a header, a quoted header,
-// dotted keys, an inline table - fails this, so no client config is taken for
-// an export.
+// has no table at all - no table header, no dotted key and no inline table
+// anywhere, an array of them included - and sets hostname, addresses, username
+// and password at the top. The core reads its server from [endpoint] alone, and
+// every way of writing one - a header, a quoted header, dotted keys, an inline
+// table - fails this, so no client config is taken for an export.
 std::optional<EndpointExport> parseEndpointExport(const QString &toml);
 
 // The client_random_auth_key the config's [endpoint] sets, trimmed, or empty when

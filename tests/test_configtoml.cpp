@@ -1492,9 +1492,16 @@ void TestConfigToml::anEndpointExportIsReadInEverySpelling()
     QVERIFY(exported.has_value());
     QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
     // Nor is a comment, whatever it reads like: an export that says in one how
-    // it would look as an inline table is still an export.
-    exported = parseEndpointExport(QStringLiteral("# endpoint = { hostname = \"elsewhere\" }\n")
+    // it would look as an inline table or a dotted key is still an export.
+    exported = parseEndpointExport(QStringLiteral("# endpoint = { hostname = \"elsewhere\" }\n"
+                                                  "# endpoint.hostname = \"elsewhere\"\n")
                                    + endpoint_export::text());
+    QVERIFY(exported.has_value());
+    QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
+    // Nor is a brace inside a string, or a dot or an = inside a quoted key.
+    exported = parseEndpointExport(
+            QStringLiteral("note = \"{ hostname = 'elsewhere' }\"\n\"a=b\" = '{'\n\"a.b\" = 1\n")
+            + endpoint_export::text());
     QVERIFY(exported.has_value());
     QCOMPARE(exported->config.hostname, QStringLiteral("vpn.example.com"));
 
@@ -1539,6 +1546,18 @@ void TestConfigToml::anEndpointExportIsNeverAClientConfig_data()
                     + QStringLiteral("x = \"\"\"abc\\\"\"\"\ny = \"\"\"\n[endpoint]\nhostname = \"real.example\"\n"
                                      "addresses = [\"6.6.6.6:443\"]\nusername = \"e\"\npassword = \"e\"\n"
                                      "# \"\"\"\n");
+    // An inline table in any place, an array of them included, and a dotted key
+    // whose quoted part holds an =. None of them gives the core an [endpoint],
+    // and none is in an export: the rule is no table at all, as on Android.
+    QTest::newRow("an array of inline tables") << flat + QStringLiteral("x = [ { a = 1 } ]\n");
+    QTest::newRow("an endpoint array of inline tables")
+            << flat
+                    + QStringLiteral("endpoint = [ { hostname = \"e\", addresses = [\"6.6.6.6:443\"], "
+                                     "username = \"e\", password = \"e\" } ]\n");
+    QTest::newRow("an inline table in an array over lines") << flat + QStringLiteral("x = [\n  { a = 1 },\n]\n");
+    QTest::newRow("an inline table under a key with an =")
+            << flat + QStringLiteral("\"en=dpoint\" = { a = 1 }\n");
+    QTest::newRow("a dotted key with an = in its quoted part") << flat + QStringLiteral("\"a=b\".c = 1\n");
 }
 
 void TestConfigToml::anEndpointExportIsNeverAClientConfig()
