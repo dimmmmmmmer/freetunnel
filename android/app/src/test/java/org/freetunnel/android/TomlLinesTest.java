@@ -2,10 +2,12 @@ package org.freetunnel.android;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -106,6 +108,53 @@ public final class TomlLinesTest {
         // The last line need not end with a line break, the removed one included.
         assertEquals("[endpoint]\nhostname = \"h\"\n", without("[endpoint]\nhostname = \"h\"\nsubscription_url = " + URL));
         assertEquals("[endpoint]\nsubscription_note = 1", without("[endpoint]\nsubscription_url = " + URL + "\nsubscription_note = 1"));
+    }
+
+    private static final List<String> CERTIFICATE = Arrays.asList("endpoint", "certificate");
+    private static final String NEW_VALUE = "\"\"\"\n-----BEGIN CERTIFICATE-----\nMAswAgUAMAIFAAMBAA==\n-----END CERTIFICATE-----\n\"\"\"";
+
+    private static String replaced(String toml) {
+        return TomlLines.edit(toml, SUBSCRIPTION, Collections.singletonMap(CERTIFICATE, NEW_VALUE));
+    }
+
+    @Test public void editGivesAKeyANewValue() {
+        // The certificate's lines go, however many, and the new value takes their place
+        // after the key as it was written. Everything else stays.
+        String before = EXPORT.substring(0, EXPORT.indexOf("certificate = "));
+        String after = EXPORT.substring(EXPORT.indexOf("upstream_protocol"));
+        String expected = before + "certificate = " + NEW_VALUE + "\n" + after + TUN;
+        assertEquals(expected, replaced(EXPORT + TUN));
+        // A subscription goes at the same time.
+        assertEquals(expected, replaced(EXPORT + "subscription_url = " + URL + "\n" + TUN));
+        // On one line, with a comment after it, and spelled with a quoted key.
+        for (String line : new String[]{"certificate = \"\"", "certificate='x' # pinned", "\"certificate\" = \"a\\nb\""}) {
+            String key = line.substring(0, line.indexOf('=') + 1);
+            assertEquals(line, "[endpoint]\n" + key + " " + NEW_VALUE + "\nhostname = \"h\"\n",
+                    replaced("[endpoint]\n" + line + "\nhostname = \"h\"\n"));
+        }
+        // A dotted key at the top keeps naming [endpoint].
+        assertEquals("endpoint.hostname = \"h\"\nendpoint . certificate = " + NEW_VALUE + "\n" + TUN,
+                replaced("endpoint.hostname = \"h\"\nendpoint . certificate = '''\nold\n'''\n" + TUN));
+        // The line keeps its own line ending, and the last line need not have one.
+        String crlf = (EXPORT + TUN).replace("\n", "\r\n");
+        assertEquals(crlf.replace(EXPORT.substring(EXPORT.indexOf("certificate = "), EXPORT.indexOf("upstream_protocol"))
+                .replace("\n", "\r\n"), "certificate = " + NEW_VALUE + "\r\n"), replaced(crlf));
+        assertEquals("[endpoint]\ncertificate = " + NEW_VALUE, replaced("[endpoint]\ncertificate = \"x\""));
+    }
+
+    @Test public void editLeavesWhatItDoesNotName() {
+        // No such key: the text itself comes back.
+        String text = "[endpoint]\nhostname = \"h\"\n[other]\ncertificate = \"x\"\n";
+        assertSame(text, replaced(text));
+        // A key of that name elsewhere, or deeper, is not the one named.
+        String deeper = "[endpoint.extra]\ncertificate = \"x\"\n";
+        assertSame(deeper, replaced(deeper));
+        // Inside a table that is dropped, the key goes with the table.
+        assertEquals("[endpoint]\nhostname = \"h\"\n",
+                TomlLines.edit("[endpoint]\nhostname = \"h\"\n[endpoint.subscription]\ncertificate = \"x\"\n", SUBSCRIPTION,
+                        Collections.singletonMap(Arrays.asList("endpoint", "subscription", "certificate"), NEW_VALUE)));
+        // And what it cannot read, it still gives up on.
+        assertNull(replaced("[endpoint]\ncertificate = \"\"\"\nnever closed\n"));
     }
 
     @Test public void givesUpOnWhatItCannotRead() {

@@ -119,6 +119,8 @@
     <string name="text_subscription_links_are_not_supported_yet">"Subscription links aren’t supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive."</string>
     <string name="text_this_server_needs_a_newer_trusttunnel_core">"This server needs a newer TrustTunnel core than this version of FreeTunnel uses."</string>
     <string name="text_nsubscriptions_are_not_supported_yet_the_server_wont">"\nSubscriptions aren’t supported yet: this server won’t update itself, and its subscription address isn’t saved."</string>
+    <string name="text_nextra_data_in_the_certificate_was_ignored">"\nExtra data in the certificate was ignored."</string>
+    <string name="text_the_configuration_contains_an_invalid_certificate">"The configuration contains an invalid certificate"</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Applications and addresses are selected. Full VPN protects all selected traffic. Keep one rule type for selective routing."</string>
     <string name="text_no_through_vpn_rules_full_vpn_is_enabled">"No Through VPN rules: full VPN is enabled."</string>
     <string name="invalid_routing_rule">"Invalid domain, IP or subnet. Check the entered rules."</string>

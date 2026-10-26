@@ -29,11 +29,14 @@ final class DeepLinkImport {
         // this version cannot follow a subscription, and its address, which carries
         // the VPN password, is not kept anywhere.
         final boolean subscriptionNotKept;
+        // The link's certificate held more than certificates, and only those were kept.
+        final boolean certificateIgnored;
 
-        Imported(String name, String toml, boolean subscriptionNotKept) {
+        Imported(String name, String toml, boolean subscriptionNotKept, boolean certificateIgnored) {
             this.name = name;
             this.toml = toml;
             this.subscriptionNotKept = subscriptionNotKept;
+            this.certificateIgnored = certificateIgnored;
         }
     }
 
@@ -82,7 +85,12 @@ final class DeepLinkImport {
 
         if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         Fields fields = decode(bytes);
-        boolean subscription = fields.subscriptionUrl != null;
+        return finish(fields, fields.subscriptionUrl != null);
+    }
+
+    // What a link goes through once decoded, in the desktop's order: the auth key,
+    // then the server's own settings, then the certificate.
+    private static Imported finish(Fields fields, boolean subscription) throws ParseException {
         // An empty key is how a server without one is exported. A real key needs
         // TrustTunnel 1.3: core 1.1.7 would ignore it, and the server would then
         // refuse every connection without saying why.
@@ -95,10 +103,16 @@ final class DeepLinkImport {
             // them can only work once the subscription is fetched.
             throw new ParseException(subscription ? R.string.text_subscription_links_are_not_supported_yet
                     : R.string.text_the_link_is_missing_required_server_settings);
+        // Only the certificates are kept, so nothing else from the file the server's
+        // certificate came from is stored. A certificate with none in it is refused:
+        // the link meant to pin one, and the connection would only fail later.
+        Certificates.Kept certificate = Certificates.fromDer(fields.certificate);
+        if (certificate == null || (certificate.dropped && certificate.der.length == 0))
+            throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
         String name = clean(fields.displayName).trim();
         if (name.isEmpty()) name = hostname;
         if (name.length() > 80) name = name.substring(0, 80);
-        return new Imported(name, toToml(fields), subscription);
+        return new Imported(name, toToml(fields, certificate.pem), subscription, certificate.dropped);
     }
 
     // TrustTunnel requires https://. The address is not used or shown in this
@@ -308,37 +322,8 @@ final class DeepLinkImport {
         return out.append(']').toString();
     }
 
-    private static String certificatePem(byte[] der) throws ParseException {
-        if (der.length == 0) return "";
-        StringBuilder out = new StringBuilder();
-        int pos = 0;
-        while (pos < der.length) {
-            if (pos + 2 > der.length || (der[pos] & 0xff) != 0x30)
-                throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
-            int first = der[pos + 1] & 0xff;
-            int header = 2;
-            long length = first;
-            if ((first & 0x80) != 0) {
-                int count = first & 0x7f;
-                if (count == 0 || count > 4 || pos + 2 + count > der.length)
-                    throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
-                length = 0;
-                for (int i = 0; i < count; i++) length = (length << 8) | (der[pos + 2 + i] & 0xff);
-                header += count;
-            }
-            long end = pos + header + length;
-            if (end > der.length) throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
-            String b64 = Base64.getEncoder().encodeToString(copy(der, pos, (int) end));
-            out.append("-----BEGIN CERTIFICATE-----\n");
-            for (int i = 0; i < b64.length(); i += 64)
-                out.append(b64, i, Math.min(i + 64, b64.length())).append('\n');
-            out.append("-----END CERTIFICATE-----\n");
-            pos = (int) end;
-        }
-        return out.toString();
-    }
-
-    private static String toToml(Fields f) throws ParseException {
+    // The PEM is the link's certificates alone, as Certificates.fromDer renders them.
+    private static String toToml(Fields f, String pem) {
         StringBuilder out = new StringBuilder();
         out.append("loglevel = \"info\"\nvpn_mode = \"general\"\nkillswitch_enabled = true\n");
         out.append("post_quantum_group_enabled = true\n");
@@ -354,7 +339,6 @@ final class DeepLinkImport {
         out.append("skip_verification = ").append(f.skipVerification).append('\n');
         out.append("upstream_protocol = ").append(quoted(f.protocol == 2 ? "http3" : "http2")).append('\n');
         out.append("anti_dpi = ").append(f.antiDpi).append('\n');
-        String pem = certificatePem(f.certificate);
         if (pem.isEmpty()) out.append("certificate = \"\"\n");
         else out.append("certificate = \"\"\"\n").append(pem).append("\"\"\"\n");
         out.append("\n[listener.tun]\nbound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");

@@ -25,15 +25,17 @@ object RoutingConfig {
         else -> item.toString()
     }
     private fun key(text: String) = if (text.matches(Regex("[A-Za-z0-9_-]+"))) text else quote(text)
-    // Keys at a path in `drop` are left out, along with everything under them.
-    private fun document(root: Map<String, Any>, drop: Set<List<String>> = emptySet()): String = buildString {
+    // Keys at a path in `drop` are left out, along with everything under them, and a
+    // key at a path in `overrides` is written with the value given there.
+    private fun document(root: Map<String, Any>, drop: Set<List<String>> = emptySet(),
+                         overrides: Map<List<String>, Any> = emptyMap()): String = buildString {
         fun tableArray(value: Any): List<TomlTable>? {
             if (value !is TomlArray || value.isEmpty) return null
             val values = (0 until value.size()).map { value.get(it) }
             return if (values.all { it is TomlTable }) values.map { it as TomlTable } else null
         }
         fun writeTable(all: Map<String, Any>, path: List<String>, arrayElement: Boolean = false) {
-            val values = all.filterKeys { (path + it) !in drop }
+            val values = all.filterKeys { (path + it) !in drop }.mapValues { (name, value) -> overrides[path + name] ?: value }
             if (path.isNotEmpty()) {
                 append(if (arrayElement) "\n[[" else "\n[")
                 append(path.joinToString(".", transform = ::key))
@@ -91,8 +93,12 @@ object RoutingConfig {
         return parsed
     }
 
-    /** An imported file as it will be saved, and whether a subscription was dropped from it. */
-    data class Import(val toml: String, val subscriptionNotKept: Boolean)
+    /**
+     * An imported file as it will be saved, whether a subscription was dropped from
+     * it, and whether its certificate held more than certificates, which were kept alone.
+     */
+    data class Import @JvmOverloads constructor(val toml: String, val subscriptionNotKept: Boolean,
+                                                val certificateIgnored: Boolean = false)
 
     /** A file refused for a reason the user can act on; the message is shown as it is. */
     class ImportRefused(@JvmField val messageResource: Int) : IllegalArgumentException("Import refused")
@@ -120,20 +126,38 @@ object RoutingConfig {
     }
 
     // Whether `b` holds exactly what `a` does, apart from the keys at a path in `drop`.
-    private fun same(a: Any?, b: Any?, path: List<String> = emptyList(), drop: Set<List<String>> = emptySet()): Boolean =
+    // Those in `replaced` as well may be in `b` with a new value, which the caller checks.
+    private fun same(a: Any?, b: Any?, path: List<String> = emptyList(), drop: Set<List<String>> = emptySet(),
+                     replaced: Set<List<String>> = emptySet()): Boolean =
         when {
             a is TomlTable && b is TomlTable -> {
                 val kept = a.keySet().filter { (path + it) !in drop }
-                kept.toSet() == b.keySet() && kept.all { same(a.get(listOf(it)), b.get(listOf(it)), path + it, drop) }
+                kept.toSet() == b.keySet().filter { (path + it) !in replaced }.toSet() &&
+                    kept.all { same(a.get(listOf(it)), b.get(listOf(it)), path + it, drop, replaced) }
             }
             a is TomlArray && b is TomlArray -> a.size() == b.size() && (0 until a.size()).all { same(a.get(it), b.get(it)) }
             else -> a == b
         }
 
+    private val certificatePath = listOf("endpoint", "certificate")
+
+    // [endpoint].certificate with only its certificates kept, when it holds more than
+    // those, such as the private key a server can keep in the same file; null when
+    // there is nothing to take out. One with no certificate in it at all is refused:
+    // the file meant to pin one, and the connection would only fail later.
+    private fun certificates(endpoint: TomlTable): Certificates.Kept? {
+        val text = endpoint.get(listOf("certificate")) as? String ?: return null
+        val kept = Certificates.fromPem(text)
+        if (kept.dropped && kept.der.isEmpty())
+            throw ImportRefused(R.string.text_the_configuration_contains_an_invalid_certificate)
+        return kept.takeIf { it.dropped }
+    }
+
     /**
      * Checks an imported TOML file before it is confirmed. A file is kept as it was
-     * written unless it names a subscription; then only the subscription is taken
-     * out of it, and everything else stays as written.
+     * written unless it names a subscription or its certificate holds more than
+     * certificates; then only the subscription and whatever is not a certificate
+     * are taken out of it, and everything else stays as written.
      */
     @JvmStatic fun cleanImport(source: String): Import {
         // Anything unreadable is left to validate(), which says what is wrong.
@@ -148,21 +172,28 @@ object RoutingConfig {
         // would read it as no key.
         val authKey = endpoint.get(listOf("client_random_auth_key"))
         if (authKey != null && authKey != "") throw ImportRefused(R.string.text_this_server_needs_a_newer_trusttunnel_core)
-        if (subscriptionKeys.none { lookup(parsed, it) != null }) return Import(source, false)
+        val subscription = subscriptionKeys.any { lookup(parsed, it) != null }
         // With a subscription the server's own settings are optional, as in a link,
         // and a file without them could only work once the subscription is fetched.
-        if (!hasStaticServer(endpoint)) throw ImportRefused(R.string.text_subscription_links_are_not_supported_yet)
-        // Line by line first, which keeps comments, layout and certificates as they
+        if (subscription && !hasStaticServer(endpoint)) throw ImportRefused(R.string.text_subscription_links_are_not_supported_yet)
+        val certificate = certificates(endpoint)
+        if (!subscription && certificate == null) return Import(source, false)
+        val drop = if (certificate == null) subscriptionKeys else subscriptionKeys + setOf(certificatePath)
+        val replace = certificate?.let { mapOf(certificatePath to "\"\"\"\n${it.pem}\"\"\"") }.orEmpty()
+        // Line by line first, which keeps comments, layout and the other keys as they
         // were. A spelling that misses, such as an inline [endpoint] table, shows up
         // when the result is compared with the file as parsed. Such a file is written
-        // out again without the subscription: every value stays, its layout does not.
-        val lines: String? = TomlLines.without(source, subscriptionKeys)
+        // out again without what was taken out: every other value stays, its layout
+        // does not.
+        val lines: String? = TomlLines.edit(source, drop, replace)
         val kept = lines?.let { Toml.parse(it) }
-        if (lines != null && kept != null && !kept.hasErrors() && same(parsed, kept, emptyList(), subscriptionKeys))
-            return Import(lines, true)
+        if (lines != null && kept != null && !kept.hasErrors() && same(parsed, kept, emptyList(), drop, replace.keys) &&
+            (certificate == null || lookup(kept, certificatePath) == certificate.pem))
+            return Import(lines, subscription, certificate != null)
         val root = linkedMapOf<String, Any>()
         parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
-        return Import(document(root, subscriptionKeys), true)
+        val overrides = certificate?.let { mapOf(certificatePath to it.pem) }.orEmpty()
+        return Import(document(root, subscriptionKeys, overrides), subscription, certificate != null)
     }
 
     data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?)

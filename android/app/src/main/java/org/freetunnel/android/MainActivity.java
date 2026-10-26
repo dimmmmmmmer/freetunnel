@@ -337,16 +337,16 @@ public final class MainActivity extends Activity {
         }, () -> {});
     }
 
-    // A config that passed: the text to save, and whether a subscription was left out of it.
-    private interface Checked { void accept(String toml, boolean subscriptionNotKept); }
+    // A config that passed: the text to save, and what was left out of it.
+    private interface Checked { void accept(RoutingConfig.Import checked); }
 
     private void validateAsync(String source, Runnable accepted, Runnable rejected) {
-        validateAsync(source, false, (toml, dropped) -> accepted.run(), rejected);
+        validateAsync(source, false, checked -> accepted.run(), rejected);
     }
 
     // With asImport, the text is first checked as a file to add (RoutingConfig.cleanImport),
-    // which may refuse it or take a subscription out of it. Here on the worker, since
-    // that parses the whole file once more.
+    // which may refuse it, or take out a subscription or whatever in its certificate
+    // is not a certificate. Here on the worker, since that parses the whole file once more.
     private void validateAsync(String source, boolean asImport, Checked accepted, Runnable rejected) {
         if (storageFailed) { toast(getString(R.string.text_storage_is_unavailable_data_has_not_been_changed)); rejected.run(); return; }
         final long request = ++validationRequest;
@@ -360,7 +360,7 @@ public final class MainActivity extends Activity {
                     if (isDestroyed()) return;
                     if (request != validationRequest) { rejected.run(); return; }
                     if (plan.getWarning() != null) toast(getString(plan.getWarning()));
-                    accepted.accept(checked.getToml(), checked.getSubscriptionNotKept());
+                    accepted.accept(checked);
                 });
             } catch (RoutingConfig.ImportRefused refused) {
                 runOnUiThread(() -> {
@@ -482,12 +482,13 @@ public final class MainActivity extends Activity {
         try { imported = DeepLinkImport.parse(link); }
         catch (DeepLinkImport.ParseException e) { refuseImport(e.messageResource); return; }
 
-        // The text is the app's own, and any subscription was left out as it was read.
-        validateAsync(imported.toml, false, (toml, dropped) ->
-                showImportConfirmation(imported.name, toml, imported.subscriptionNotKept), () -> {});
+        // The text is the app's own, and the subscription and whatever in the
+        // certificate is not a certificate were left out as the link was read.
+        validateAsync(imported.toml, false, checked -> showImportConfirmation(imported.name,
+                new RoutingConfig.Import(checked.getToml(), imported.subscriptionNotKept, imported.certificateIgnored)), () -> {});
     }
     private void importToml(String name, String toml) {
-        validateAsync(stripBom(toml), true, (cleaned, dropped) -> showImportConfirmation(name, cleaned, dropped), () -> {});
+        validateAsync(stripBom(toml), true, checked -> showImportConfirmation(name, checked), () -> {});
     }
     // These two refusals are about what this version cannot do yet, and say what to
     // do instead. That is more than the two lines a toast shows, so they get a dialog.
@@ -498,12 +499,20 @@ public final class MainActivity extends Activity {
                     .setMessage(getString(messageResource)).setPositiveButton(getString(R.string.text_ok), null).show();
         else toast(getString(messageResource));
     }
-    private void showImportConfirmation(String name, String source, boolean subscriptionNotKept) {
+    // What an import left out, a line for each, each line starting with a line break.
+    private String importNotes(RoutingConfig.Import checked) {
+        String notes = "";
+        if (checked.getSubscriptionNotKept()) notes += getString(R.string.text_nsubscriptions_are_not_supported_yet_the_server_wont);
+        if (checked.getCertificateIgnored()) notes += getString(R.string.text_nextra_data_in_the_certificate_was_ignored);
+        return notes;
+    }
+    private void showImportConfirmation(String name, RoutingConfig.Import checked) {
+        String source = checked.getToml();
         org.tomlj.TomlTable parsed = RoutingConfig.validate(source);
         String message = getString(R.string.text_add_configuration_36) + name + getString(R.string.text_nserver) + parsed.getString("endpoint.hostname");
         if (Boolean.TRUE.equals(parsed.getBoolean("endpoint.skip_verification")))
             message += getString(R.string.text_nserver_certificate_verification_is_disabled);
-        if (subscriptionNotKept) message += getString(R.string.text_nsubscriptions_are_not_supported_yet_the_server_wont);
+        message += importNotes(checked);
         for (Config config : configs) {
             if (config.name.equals(name) || config.toml.equals(source)) {
                 message += getString(R.string.text_nthis_configuration_or_name_already_exists_a_separat); break;
@@ -562,18 +571,19 @@ public final class MainActivity extends Activity {
                     editor.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
                     // Checked as an import: the hint asks for a whole TrustTunnel file, and
                     // one pasted here, or saved by an earlier version, can carry a
-                    // subscription address or an auth key just as an imported one can.
-                    validateAsync(t, true, (saved, dropped) -> {
+                    // subscription address, an auth key or a private key with its
+                    // certificate just as an imported one can.
+                    validateAsync(t, true, checked -> {
                         if (!editor.isShowing()) return;
-                        if (editing == null) configs.add(new Config(n, saved));
+                        if (editing == null) configs.add(new Config(n, checked.getToml()));
                         else {
                             int current = configs.indexOf(editing);
                             if (current < 0) return;
-                            configs.set(current, new Config(n, saved));
+                            configs.set(current, new Config(n, checked.getToml()));
                         }
                         saveConfigs(); editor.dismiss(); applyCurrentRules(); render();
-                        if (dropped) new AlertDialog.Builder(this)
-                                .setMessage(getString(R.string.text_nsubscriptions_are_not_supported_yet_the_server_wont).trim())
+                        String notes = importNotes(checked).trim();
+                        if (!notes.isEmpty()) new AlertDialog.Builder(this).setMessage(notes)
                                 .setPositiveButton(getString(R.string.text_ok), null).show();
                     }, () -> editor.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
                 });

@@ -1,12 +1,15 @@
 package org.freetunnel.android;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Takes keys out of TOML text line by line, so that everything else stays exactly
- * as it was written: comments, layout, key order and multi-line certificates.
+ * Takes keys out of TOML text line by line, or gives them new values, so that
+ * everything else stays exactly as it was written: comments, layout, key order and
+ * multi-line certificates.
  */
 final class TomlLines {
     private TomlLines() { }
@@ -19,6 +22,15 @@ final class TomlLines {
      * seen either, so RoutingConfig checks the result against a full parse.
      */
     static String without(String toml, Set<List<String>> drop) {
+        return edit(toml, drop, Collections.emptyMap());
+    }
+
+    /**
+     * As without(), and a key at a path in `replace` is given the value there in
+     * place of its own, however many lines that ran to. The key stays as it was
+     * spelled, so a dotted key still names the same table.
+     */
+    static String edit(String toml, Set<List<String>> drop, Map<List<String>, String> replace) {
         StringBuilder out = new StringBuilder(toml.length());
         // Comments and blank lines after the last key of a dropped table: kept if a
         // table that is kept comes next, since they are then about that table.
@@ -63,10 +75,13 @@ final class TomlLines {
             int equals = readKey(line, at, key);
             if (equals < 0 || equals >= line.length() || line.charAt(equals) != '=') return null;
             held.setLength(0);
-            dropValue = dropTable || under(key, drop);
+            String replacement = dropTable ? null : replace.get(key);
+            dropValue = dropTable || replacement != null || under(key, drop);
             if (dropValue) removed = true;
             if (!value.read(line, equals + 1)) return null;
-            if (!dropValue) out.append(whole);
+            if (replacement != null)
+                out.append(line, 0, equals + 1).append(' ').append(replacement).append(whole, line.length(), whole.length());
+            else if (!dropValue) out.append(whole);
         }
         if (value.open()) return null;
         return removed ? out.toString() : toml;

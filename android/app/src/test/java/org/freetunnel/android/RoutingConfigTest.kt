@@ -247,13 +247,102 @@ class RoutingConfigTest {
         assertEquals("one", parsed.getArray("servers")!!.getTable(0).getString("name"))
         assertEquals(listOf("intranet.example"), parsed.getArray("exclusions")!!.toList())
     }
+    // [endpoint] with a multi-line certificate between two comments.
+    private fun withCertificate(pem: String, after: String = "") =
+        withEndpointKey("# The server's own certificate\ncertificate = \"\"\"\n$pem\"\"\"\n# Last comment$after")
+    private val key = CertificateVectors.keyPem()
+
     @Test fun commentsAndMultilineCertificatesStayAsWritten() {
-        val kept = withEndpointKey("# The server's own certificate\ncertificate = \"\"\"\n-----BEGIN CERTIFICATE-----\n" +
-            "MIIBszCCAVmgAwIBAgIUQ0FGRQ==\n-----END CERTIFICATE-----\n\"\"\"\n# Last comment")
+        // A real certificate: only certificates are kept, so a made-up one that is not
+        // a whole certificate would now be refused.
+        val kept = withCertificate(CertificateVectors.LEAF_PEM)
         val text = kept.replace("# Last comment", "# Last comment\nsubscription_url = \"https://a:b@vpn.example.com/s\"")
         val imported = RoutingConfig.cleanImport(text)
         assertTrue(imported.subscriptionNotKept)
+        assertFalse(imported.certificateIgnored)
         assertEquals(kept, imported.toml)
+    }
+    @Test fun aCombinedCertificateKeepsTheFileAsWritten() {
+        val leaf = CertificateVectors.LEAF_PEM
+        val bag = CertificateVectors.BAG_ATTRIBUTES
+        for ((combined, kept) in listOf(leaf + key to leaf, key + leaf to leaf,
+            leaf + key + CertificateVectors.CA_PEM to CertificateVectors.CHAIN_PEM, bag + leaf + bag + key to leaf)) {
+            val imported = RoutingConfig.cleanImport(withCertificate(combined))
+            assertTrue(imported.certificateIgnored)
+            assertFalse(imported.subscriptionNotKept)
+            // Only the certificate's lines change: comments and every other key stay.
+            assertEquals(withCertificate(kept), imported.toml)
+            assertFalse(imported.toml.contains(CertificateVectors.keyLabel()))
+            assertEquals(kept, Toml.parse(imported.toml).getString("endpoint.certificate"))
+            assertNotNull(plan(enabled = false, text = imported.toml))
+        }
+        // With a subscription as well, both go, and both are said.
+        val both = RoutingConfig.cleanImport(withCertificate(leaf + key, "\nsubscription_url = \"https://a:b@vpn.example.com/s\""))
+        assertTrue(both.certificateIgnored)
+        assertTrue(both.subscriptionNotKept)
+        assertEquals(withCertificate(leaf), both.toml)
+    }
+    @Test fun aCertificateIsCleanedInEverySpelling() {
+        val leaf = CertificateVectors.LEAF_PEM
+        // A dotted key at the top still names [endpoint] once rewritten.
+        val dotted = "endpoint.hostname = \"vpn.example.com\"\nendpoint.certificate = \"\"\"\n$leaf$key\"\"\"\n"
+        val fromDotted = RoutingConfig.cleanImport(dotted)
+        assertTrue(fromDotted.certificateIgnored)
+        assertEquals("endpoint.hostname = \"vpn.example.com\"\nendpoint.certificate = \"\"\"\n$leaf\"\"\"\n", fromDotted.toml)
+        // A literal string.
+        val literal = RoutingConfig.cleanImport(withEndpointKey("certificate = '''\n$key$leaf'''"))
+        assertTrue(literal.certificateIgnored)
+        assertEquals(withEndpointKey("certificate = \"\"\"\n$leaf\"\"\""), literal.toml)
+        // One line with escaped CRLF line breaks, as the endpoint's export can write
+        // it. The certificate is kept as it was written, line breaks included.
+        val escaped = (leaf + key).replace("\n", "\\r\\n")
+        val crlf = RoutingConfig.cleanImport(withEndpointKey("certificate = \"$escaped\""))
+        assertTrue(crlf.certificateIgnored)
+        assertFalse(crlf.toml.contains(CertificateVectors.keyLabel()))
+        assertEquals(leaf.replace("\n", "\r\n").removeSuffix("\r\n") + "\n", Toml.parse(crlf.toml).getString("endpoint.certificate"))
+        assertNotNull(plan(enabled = false, text = crlf.toml))
+    }
+    @Test fun anInlineEndpointTableIsWrittenOutWithItsCertificatesAlone() {
+        val escaped = (CertificateVectors.LEAF_PEM + key).replace("\n", "\\n")
+        val text = "endpoint = { hostname = \"vpn.example.com\", addresses = [\"192.0.2.1:443\"], username = \"u\", " +
+            "password = \"p\", certificate = \"$escaped\" }\n[listener.tun]\nincluded_routes = [\"0.0.0.0/0\"]\n" +
+            "excluded_routes = [\"192.168.0.0/16\"]\nmtu_size = 1350\n"
+        assertFalse(Toml.parse(text).hasErrors())
+        val imported = RoutingConfig.cleanImport(text)
+        assertTrue(imported.certificateIgnored)
+        assertFalse(imported.subscriptionNotKept)
+        assertFalse(imported.toml.contains(CertificateVectors.keyLabel()))
+        val parsed = Toml.parse(imported.toml)
+        assertFalse(parsed.hasErrors())
+        assertEquals(CertificateVectors.LEAF_PEM, parsed.getString("endpoint.certificate"))
+        assertEquals("p", parsed.getString("endpoint.password"))
+        assertEquals(1350L, parsed.getLong("listener.tun.mtu_size"))
+    }
+    @Test fun aCertificateWithNoCertificateIsRefused() {
+        for (pem in listOf(key, CertificateVectors.pemBlock("CERTIFICATE", CertificateVectors.PKCS8_DER),
+            "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0FGRQ==\n-----END CERTIFICATE-----\n", "certificate line\n")) {
+            val refused = assertThrows(RoutingConfig.ImportRefused::class.java) { RoutingConfig.cleanImport(withCertificate(pem)) }
+            assertEquals(R.string.text_the_configuration_contains_an_invalid_certificate, refused.messageResource)
+        }
+        // An empty one pins nothing, and it is kept as written, as a clean one is.
+        for (pem in listOf("", "\n", CertificateVectors.CA_PEM, CertificateVectors.CHAIN_PEM,
+            CertificateVectors.pemBlock("X509 CERTIFICATE", CertificateVectors.CA_DER))) {
+            val text = withCertificate(pem)
+            val imported = RoutingConfig.cleanImport(text)
+            assertEquals(text, imported.toml)
+            assertFalse(imported.certificateIgnored)
+            assertFalse(imported.subscriptionNotKept)
+        }
+        // A real auth key, then a missing server, are what is said first, as for a link.
+        val keyed = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport(withCertificate(key).replace("has_ipv6 = false", "has_ipv6 = false\nclient_random_auth_key = \"aa\""))
+        }
+        assertEquals(R.string.text_this_server_needs_a_newer_trusttunnel_core, keyed.messageResource)
+        val onlySubscription = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport(withCertificate(key, "\nsubscription_url = \"https://a:b@vpn.example.com/s\"")
+                .replace("hostname = \"vpn.example.com\"", "hostname = \"\""))
+        }
+        assertEquals(R.string.text_subscription_links_are_not_supported_yet, onlySubscription.messageResource)
     }
     @Test fun aSubscriptionTheLinesMissIsStillTakenOut() {
         val url = "https://alice:s3cret@vpn.example.com/subscription"
