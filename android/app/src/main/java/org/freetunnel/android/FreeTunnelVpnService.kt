@@ -152,8 +152,10 @@ class FreeTunnelVpnService : VpnService() {
             // the first is still setting up, and the reconnect after an update
             // only start a VPN that is not running, so neither cuts a working
             // connection. A client that is connecting or recovering counts as
-            // running. A TUN the kill switch keeps after a failure has no client,
-            // so these starts still reconnect it.
+            // running, and so does an automatic attempt while the kill switch
+            // blocks traffic: that episode goes on and reconnects by itself.
+            // Between attempts the kept TUN has no client, and these starts
+            // reconnect it at once.
             val resuming = intent?.action == ACTION_RESUME
             if ((resuming || intent?.action == VpnService.SERVICE_INTERFACE) && client != null) {
                 logEvent("VPN already running or reconnecting; start ignored")
