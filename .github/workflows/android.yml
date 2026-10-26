@@ -50,9 +50,13 @@ jobs:
       - run: bash tests/test_android_signer.sh
       - run: bash tests/test_android_sign_release.sh
       - run: bash tests/test_android_release_unpublished.sh
+      - run: bash tests/test_android_tv_dialogs.sh
       - run: scripts/prepare-trusttunnel-android.sh
       - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
+      # What TV launchers and app stores read once the AAR's manifest is merged in,
+      # which lint doesn't see.
+      - run: bash tests/test_android_tv_manifest.sh android/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-ci-builds
@@ -62,9 +66,30 @@ jobs:
             android/app/build/outputs/bundle/release/*.aab
             android/app/build/reports/
   device-tests:
-    name: Android API 35 device tests
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android API 35 device tests
+            api: 35
+            target: default
+            arch: x86_64
+            profile: pixel_2
+            timeout: 25
+            artifact: android-device-results
+          # Google publishes no Android TV image for API 35. If the TrustTunnel
+          # AAR's x86 library fails on this 32-bit image, API 36's android-tv
+          # x86_64 image is the fallback.
+          - name: Android TV API 34 device tests
+            api: 34
+            target: android-tv
+            arch: x86
+            profile: tv_1080p
+            timeout: 30
+            artifact: android-tv-device-results
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -88,23 +113,30 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 35
-          arch: x86_64
-          profile: pixel_2
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          profile: ${{ matrix.profile }}
           # The runner runs each line in its own shell, so the debug APK's signer
-          # digest, which UpdateDeviceTest checks the app's own reading against,
-          # is worked out on the line that passes it.
+          # digest, which UpdateDeviceTest and TvDeviceTest check the app's own
+          # reading against, is worked out on the line that passes it. On the TV
+          # leg, the image must be a TV, and the app is opened from the TV
+          # launcher's entry, with screenshots of it and of the launcher for review.
           script: |
             ./android/gradlew -p android --no-daemon :app:installDebug :app:installDebugAndroidTest
             adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
             adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
             adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
+            if [ "${{ matrix.target }}" = android-tv ]; then adb shell pm list features | grep -qx 'feature:android.software.leanback'; fi
+            if [ "${{ matrix.target }}" = android-tv ]; then mkdir -p android/app/build/reports/tv-screens && adb shell monkey -p org.freetunnel.android -c android.intent.category.LEANBACK_LAUNCHER 1 && sleep 5 && adb exec-out screencap -p > android/app/build/reports/tv-screens/app.png && adb shell input keyevent KEYCODE_HOME && sleep 3 && adb exec-out screencap -p > android/app/build/reports/tv-screens/launcher.png; fi
             ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: android-device-results
-          path: android/app/build/reports/androidTests/
+          name: ${{ matrix.artifact }}
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/reports/tv-screens/
   release-signing:
     name: Release signing, with a throwaway key
     # What android-release.yml's build and sign jobs do, with real Build
