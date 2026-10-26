@@ -113,6 +113,11 @@ QByteArray certificateBlockDer(const QString &label, QString body)
         return QByteArray();
     static const QRegularExpression space(QStringLiteral("\\s"));
     body.remove(space);
+    // One character past a whole group of four encodes no byte. Qt's decoder
+    // drops it without a word; OpenSSL and the Android app refuse the block, and
+    // so does this, so the two apps keep and drop the same blocks.
+    if (body.size() % 4 == 1)
+        return QByteArray();
     const QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(
             body.toLatin1(), QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
     return decoded && certificatesBackToBack(decoded.decoded) ? decoded.decoded : QByteArray();

@@ -1149,6 +1149,12 @@ void TestConfigToml::certificatesOnly_data()
             << true;
     QTest::newRow("an empty block") << pemBlock(QStringLiteral("CERTIFICATE"), QByteArray()) + kCaPem << kCaPem
                                     << true;
+    // The Android app's row of the same name: one base64 character too many.
+    QTest::newRow("a stray base64 character")
+            << pemBlock(QStringLiteral("CERTIFICATE"), certShaped(4))
+                       .replace(QStringLiteral("\n-----END"), QStringLiteral("A\n-----END"))
+                       + kCaPem
+            << kCaPem << true;
     QTest::newRow("a key inside a certificate block")
             << QStringLiteral("-----BEGIN CERTIFICATE-----\n") + keyPem()
                        + QStringLiteral("-----END CERTIFICATE-----\n") + kCaPem
