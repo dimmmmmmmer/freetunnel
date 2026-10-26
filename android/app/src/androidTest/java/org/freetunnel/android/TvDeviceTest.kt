@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.inspector.WindowInspector
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.test.filters.SdkSuppress
@@ -26,6 +27,8 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.TimeUnit
 
 // Android TV: the TV launcher entry, a focus stop with a key and a ring on every
 // control, focus and scroll kept when render() rebuilds the views, Back, and the
@@ -272,6 +275,12 @@ class TvDeviceTest {
         render(a, 1)
         eventually("The focus must stay") { focusedKey(a) == "config:10:edit" }
         assertEquals(y, scrollY())
+        // Twice before a frame, as the last ping result and the end of the ping: the
+        // second finds the first one's views, not focused or scrolled yet.
+        onMain { method("render").invoke(a); method("render").invoke(a) }
+        instrumentation.waitForIdleSync()
+        eventually("The focus must stay over two rebuilds in one frame") { focusedKey(a) == "config:10:edit" }
+        assertEquals(y, scrollY())
         // Deleting the focused one moves the focus to the one before.
         focusOn(a, "config:11:remove")
         onMain { method("confirmRemove", Int::class.javaPrimitiveType).invoke(a, 11) }
@@ -306,10 +315,16 @@ class TvDeviceTest {
     @Test fun backGoesHomeFirstOnATv() {
         val a = open()
         render(a, 3)
+        if (isTv) {
+            leaveTouchMode(a)
+            // Where OK on the Settings tab leaves it.
+            focusOn(a, "tab:3")
+        }
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         instrumentation.waitForIdleSync()
         if (isTv) {
             assertEquals("Back on a TV goes to Home", 0, onMain { field("page").getInt(a) })
+            eventually("on Home's own control: on the Settings tab, the next OK would go back") { focusedKey(a) == "home:toggle" }
             assertFalse(onMain { a.isFinishing })
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         }
@@ -377,6 +392,80 @@ class TvDeviceTest {
         } finally {
             shell("appops set ${context.packageName} REQUEST_INSTALL_PACKAGES allow")
         }
+    }
+
+    // With a remote, the focus must never land on "Show TOML and password" by itself,
+    // where an OK shows the password to the room: not as the editor opens, and not
+    // after a Save that the check refuses.
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun aRemoteNeverLandsOnShowTomlAndPassword() {
+        val a = open()
+        leaveTouchMode(a)
+        onMain { method("editConfig", Int::class.javaPrimitiveType).invoke(a, 0) }
+        instrumentation.waitForIdleSync()
+        val editor = onMain { WindowInspector.getGlobalWindowViews().last { it.findViewById<View>(android.R.id.button1) != null } }
+        // The check runs on the activity's worker and answers on the main thread.
+        fun checked() {
+            (field("validationWorker").get(a) as ExecutorService).submit {}.get(30, TimeUnit.SECONDS)
+            instrumentation.waitForIdleSync()
+        }
+        fun requests() = onMain { field("validationRequest").getLong(a) }
+        try {
+            eventually("The editor must open on the name") {
+                onMain { (editor.findFocus() as? EditText)?.text?.toString() == "Profile 0" }
+            }
+            val save = onMain { editor.findViewById<Button>(android.R.id.button1) }
+            val before = requests()
+            onMain {
+                descendants(editor).filterIsInstance<EditText>().last().setText("not a configuration")
+                assertTrue("Save must take the focus", save.requestFocus())
+                save.performClick()
+                save.performClick()
+            }
+            assertEquals("A second OK while the check runs starts no other", before + 1, requests())
+            checked()
+            onMain {
+                assertTrue("A refused Save leaves the editor open", editor.isShown)
+                assertSame("A refused Save keeps the focus", save, editor.findFocus())
+                assertTrue(save.isEnabled)
+                assertFalse(descendants(editor).filterIsInstance<CheckBox>().single().isChecked)
+                save.performClick()
+            }
+            assertEquals("Once refused, Save checks again", before + 2, requests())
+            checked()
+            // A tap, as on a phone, greys Save out until the check answers.
+            instrumentation.setInTouchMode(true)
+            eventually("The editor must be in touch mode") { onMain { editor.isInTouchMode } }
+            onMain { save.performClick(); assertFalse("Save must be greyed out during a check", save.isEnabled) }
+            checked()
+            assertTrue(onMain { save.isEnabled })
+        } finally {
+            onMain { editor.findViewById<Button>(android.R.id.button2).performClick() }
+            instrumentation.waitForIdleSync()
+        }
+    }
+
+    // While a check or an install runs, the update action ignores OK and keeps a
+    // remote's focus. Disabled, it would send the focus to the top of the window.
+    @Test fun theUpdateActionKeepsTheFocusWhileItWaits() {
+        officialBuild()
+        val a = open()
+        leaveTouchMode(a)
+        render(a, 3)
+        focusOn(a, "settings:update")
+        val action = onMain { root(a).findViewWithTag<TextView>("settings:update") }
+        updater("committed", false)
+        for (state in listOf(AndroidUpdater.State.CHECKING, AndroidUpdater.State.INSTALLING)) {
+            updater("state", state)
+            onMain { method("refreshUpdateControls").invoke(a) }
+            instrumentation.waitForIdleSync()
+            assertFalse("$state: the action must ignore OK", onMain { action.isClickable })
+            assertEquals("$state: the focus must stay", "settings:update", focusedKey(a))
+        }
+        updater("state", AndroidUpdater.State.IDLE)
+        onMain { method("refreshUpdateControls").invoke(a) }
+        assertTrue(onMain { action.isClickable })
+        assertEquals("settings:update", focusedKey(a))
     }
 
     // Dialogs stay dark in both themes, and a remote needs to see which button has the focus.

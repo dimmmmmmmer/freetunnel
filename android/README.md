@@ -75,8 +75,12 @@ the TV launcher with its banner. It works with a remote:
 - The arrows reach every control, and a ring shows which one has the focus,
   in dialogs too. When a page updates, such as on a ping result or a change of
   connection state, the focus and the scroll position stay where they were.
-- Home opens on Connect, or on Reconnect while the kill switch blocks traffic.
-  Back goes to Home first, and leaves the app from there.
+- Home opens on Connect or Disconnect, or on Reconnect while the kill switch
+  blocks traffic. Back goes to Home first, onto that control, and leaves the
+  app from there.
+- The configuration editor opens on the name. The focus never moves onto Show
+  TOML and password by itself, where an OK would show the password to the
+  room.
 - Pages keep clear of the screen's edges, which some TVs crop, and the log is
   not selectable, so the arrows scroll through it.
 - The split-tunnelling app picker also lists apps made only for TVs.

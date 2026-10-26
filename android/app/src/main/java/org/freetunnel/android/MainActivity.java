@@ -86,6 +86,11 @@ public final class MainActivity extends Activity {
     private ScrollView pageScroll;
     private int renderedPage = -1;
     private int renderGeneration;
+    private boolean restorePending;
+    private String restoreKey;
+    private int restoreScrollY;
+    // Makes the next render() focus the page's own control (see onBackPressed).
+    private boolean pageFocus;
     private int vpnState;
     private String pendingConfig;
     private boolean receiverRegistered;
@@ -263,9 +268,15 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
-        View focused = getCurrentFocus();
-        String focusKey = focused != null && focused.getTag() instanceof String ? (String) focused.getTag() : null;
-        int scrollY = pageScroll != null && renderedPage == page ? pageScroll.getScrollY() : 0;
+        // Until the last render()'s views are drawn, nothing in them has the focus and
+        // they have not scrolled, so a render() before that, such as the last ping result
+        // and the end of the ping in one frame, keeps what that one is about to restore.
+        if (!restorePending) {
+            View focused = getCurrentFocus();
+            restoreKey = focused != null && focused.getTag() instanceof String ? (String) focused.getTag() : null;
+            restoreScrollY = pageScroll != null && renderedPage == page ? pageScroll.getScrollY() : 0;
+        } else if (renderedPage != page) restoreScrollY = 0;
+        if (pageFocus) { restoreKey = null; pageFocus = false; }
         int generation = ++renderGeneration;
         getWindow().setStatusBarColor(bg()); getWindow().setNavigationBarColor(bg());
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -302,22 +313,26 @@ public final class MainActivity extends Activity {
             }
         }
         renderedPage = page;
-        restoreFocus(generation, focusKey, scrollY);
+        restoreFocus(generation, restoreKey, restoreScrollY);
     }
 
     // Puts a remote's focus back on the control that had it before render(), and the
     // page back where it was scrolled to. A phone in touch mode shows no focus and is
     // left as it was. This runs once the new views are laid out, because a ScrollView
-    // cannot scroll before that, and only for the latest render(), as ping results
-    // can render several times in one frame.
+    // cannot scroll before that, and only for the latest render(): ping results can
+    // render several times in one frame, and restorePending keeps the key and the
+    // scroll position the same over them.
     private void restoreFocus(int generation, String key, int scrollY) {
         View decor = getWindow().getDecorView();
-        if (decor.isInTouchMode()) return;
+        restorePending = !decor.isInTouchMode();
+        if (!restorePending) return;
         ScrollView scroll = pageScroll;
         decor.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
             @Override public boolean onPreDraw() {
                 decor.getViewTreeObserver().removeOnPreDrawListener(this);
-                if (generation != renderGeneration || decor.isInTouchMode()) return true;
+                if (generation != renderGeneration) return true;
+                restorePending = false;
+                if (decor.isInTouchMode()) return true;
                 if (scroll != null) scroll.scrollTo(0, scrollY);
                 View target = focusTarget(key);
                 if (target != null) target.requestFocus();
@@ -343,10 +358,12 @@ public final class MainActivity extends Activity {
         return found;
     }
     // Without tabs to tap, Back on a TV goes to Home first, and leaves the app from there.
+    // Home's own control gets the focus: left on the tab it was on, the next OK would go
+    // straight back to that page.
     // Still delivered at targetSdk 35; targetSdk 36 needs an OnBackInvokedCallback.
     @SuppressWarnings("deprecation")
     @Override public void onBackPressed() {
-        if (isTv() && page != 0) { page = 0; render(); return; }
+        if (isTv() && page != 0) { page = 0; pageFocus = true; render(); return; }
         super.onBackPressed();
     }
 
@@ -707,11 +724,20 @@ public final class MainActivity extends Activity {
         });
         show(editor);
         editor.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        editor.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        // A dialog shown to a remote focuses its first control, here the check box that
+        // shows the TOML and password, where the first OK would show them to the room.
+        if (!editor.getWindow().getDecorView().isInTouchMode()) name.requestFocus();
+        Button save = editor.getButton(AlertDialog.BUTTON_POSITIVE);
+        // One check at a time. Only a phone greys Save out meanwhile: disabling the view
+        // that has a remote's focus moves the focus to that check box as well.
+        boolean[] checking = {false};
+        save.setOnClickListener(v -> {
+                    if (checking[0]) return;
                     String n = name.getText().toString().trim();
                     String t = stripBom(raw.getText().toString().trim());
                     if (n.isEmpty()) { toast(getString(R.string.text_enter_a_configuration_name)); return; }
-                    editor.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+                    checking[0] = true;
+                    if (save.isInTouchMode()) save.setEnabled(false);
                     // Checked as an import: the hint asks for a whole TrustTunnel file, and
                     // one pasted here, or saved by an earlier version, can carry a
                     // subscription address, an auth key or a private key with its
@@ -729,7 +755,7 @@ public final class MainActivity extends Activity {
                         String notes = importNotes(checked).trim();
                         if (!notes.isEmpty()) show(new AlertDialog.Builder(this).setMessage(notes)
                                 .setPositiveButton(getString(R.string.text_ok), null));
-                    }, () -> editor.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
+                    }, () -> { checking[0] = false; save.setEnabled(true); });
                 });
     }
     private void confirmRemove(int index) {
@@ -993,7 +1019,9 @@ public final class MainActivity extends Activity {
         else if (update == AndroidUpdater.State.DOWNLOADING) action = R.string.update_cancel;
         else if (update == AndroidUpdater.State.READY || reinstall) action = R.string.update_install;
         updateAction.setText(getString(action));
-        updateAction.setEnabled(update != AndroidUpdater.State.CHECKING
+        // Not setEnabled: disabling the view that has a remote's focus moves the focus to
+        // the top of the window. Not clickable, it ignores taps and OK just the same.
+        updateAction.setClickable(update != AndroidUpdater.State.CHECKING
                 && (update != AndroidUpdater.State.INSTALLING || reinstall));
     }
     private static int updateFailureText(UpdatePolicy.Failure failure) {
