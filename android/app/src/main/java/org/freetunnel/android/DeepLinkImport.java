@@ -9,18 +9,30 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
-/** Decodes TrustTunnel's version 0/1 QUIC-varint TLV share links. */
+/** Decodes TrustTunnel's version 0-2 QUIC-varint TLV share links. */
 final class DeepLinkImport {
     private static final int MAX_LINK_CHARS = 131072;
     private static final int MAX_PAYLOAD_BYTES = 65536;
+    // TrustTunnel endpoint 1.3.0 writes version 2 into every link, even one without
+    // a version 2 field, so stopping at 1 refused all of them. This app never writes
+    // links; the desktop's share links stay at version 1, which older readers accept.
+    static final long MAX_READ_VERSION = 2;
+    // A subscription address is a short https URL. Keep this equal to the desktop's
+    // cap, so that both apps refuse the same links.
+    static final int MAX_SUBSCRIPTION_URL_BYTES = 2048;
 
     static final class Imported {
         final String name;
         final String toml;
+        // The link also named a subscription. Only its static settings are imported:
+        // this version cannot follow a subscription, and its address, which carries
+        // the VPN password, is not kept anywhere.
+        final boolean subscriptionNotKept;
 
-        Imported(String name, String toml) {
+        Imported(String name, String toml, boolean subscriptionNotKept) {
             this.name = name;
             this.toml = toml;
+            this.subscriptionNotKept = subscriptionNotKept;
         }
     }
 
@@ -44,6 +56,8 @@ final class DeepLinkImport {
         String clientRandom = "";
         String displayName = "";
         final List<String> dnsUpstreams = new ArrayList<>();
+        String subscriptionUrl;
+        String authKey = "";
     }
 
     private DeepLinkImport() { }
@@ -65,17 +79,53 @@ final class DeepLinkImport {
             throw new ParseException(R.string.text_unsupported_link_size);
 
         Fields fields = decode(bytes);
-        if (fields.version > 1) throw new ParseException(R.string.text_unsupported_link_version);
-        if (fields.hostname == null || fields.hostname.isEmpty() || fields.addresses.isEmpty()
+        if (fields.version > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
+        boolean subscription = fields.subscriptionUrl != null;
+        if (subscription && !isValidSubscriptionUrl(fields.subscriptionUrl))
+            throw new ParseException(R.string.text_the_link_contains_an_invalid_subscription_address);
+        // An empty key is how a server without one is exported. A real key needs
+        // TrustTunnel 1.3: core 1.1.7 would ignore it, and the server would then
+        // refuse every connection without saying why.
+        if (!fields.authKey.isEmpty()) {
+            if (!isHex(fields.authKey)) throw new ParseException(R.string.text_the_link_is_damaged);
+            throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
+        }
+        String hostname = fields.hostname == null ? "" : clean(fields.hostname).trim();
+        if (hostname.isEmpty() || fields.addresses.isEmpty()
                 || fields.username == null || fields.username.isEmpty()
                 || fields.password == null || fields.password.isEmpty())
-            throw new ParseException(R.string.text_the_link_is_missing_required_server_settings);
-        String hostname = clean(fields.hostname).trim();
-        if (hostname.isEmpty()) throw new ParseException(R.string.text_the_link_is_missing_required_server_settings);
+            // With a subscription the static fields are optional, and a link without
+            // them can only work once the subscription is fetched.
+            throw new ParseException(subscription ? R.string.text_subscription_links_are_not_supported_yet
+                    : R.string.text_the_link_is_missing_required_server_settings);
         String name = clean(fields.displayName).trim();
         if (name.isEmpty()) name = hostname;
         if (name.length() > 80) name = name.substring(0, 80);
-        return new Imported(name, toToml(fields));
+        return new Imported(name, toToml(fields), subscription);
+    }
+
+    // TrustTunnel requires https://. The address is not used or shown in this
+    // version, but a link that carries a malformed one is refused, not half-read.
+    private static boolean isValidSubscriptionUrl(String url) {
+        if (!url.startsWith("https://")) return false;
+        if (url.getBytes(StandardCharsets.UTF_8).length > MAX_SUBSCRIPTION_URL_BYTES) return false;
+        // Control characters include tab and line breaks; space characters include
+        // no-break and other Unicode spaces. Together they cover all whitespace.
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isISOControl(c) || Character.isSpaceChar(c)) return false;
+        }
+        return true;
+    }
+
+    // Character.digit() would also accept other scripts' digits.
+    private static boolean isHex(String text) {
+        if (text.length() % 2 != 0) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+        }
+        return true;
     }
 
     private static String extractPayload(String link) throws ParseException {
@@ -119,7 +169,7 @@ final class DeepLinkImport {
             long length = readVarint(bytes, pos, bytes.length);
             if (length > bytes.length - pos[0]) throw new ParseException(R.string.text_the_link_is_damaged);
             int end = pos[0] + (int) length;
-            if (tag > 13) { pos[0] = end; continue; }
+            if (tag > 15) { pos[0] = end; continue; }
             switch ((int) tag) {
                 case 0: fields.version = scalar(bytes, pos, end); break;
                 case 1: fields.hostname = utf8(bytes, pos[0], end); break;
@@ -135,6 +185,9 @@ final class DeepLinkImport {
                 case 11: fields.clientRandom = utf8(bytes, pos[0], end); break;
                 case 12: fields.displayName = utf8(bytes, pos[0], end); break;
                 case 13: decodeDns(bytes, pos[0], end, fields.dnsUpstreams); break;
+                // Read in any version, as TrustTunnel's own decoder does.
+                case 14: fields.subscriptionUrl = utf8(bytes, pos[0], end); break;
+                case 15: fields.authKey = utf8(bytes, pos[0], end); break;
                 default: break; // Ignore future fields, as the official decoder does.
             }
             pos[0] = end;

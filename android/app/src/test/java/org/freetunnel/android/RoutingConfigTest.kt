@@ -167,6 +167,82 @@ class RoutingConfigTest {
         assertEquals("one\\", parsed.getArray("extra")!!.getTable(0).getString("value"))
         assertEquals("two", parsed.getArray("extra")!!.getTable(1).getString("value"))
     }
+    private fun withEndpointKey(line: String) = source.replace("has_ipv6 = false", "has_ipv6 = false\n$line")
+
+    @Test fun anEmptyOrMissingAuthKeyIsImportedAsWritten() {
+        for (text in listOf(source, withEndpointKey("client_random_auth_key = \"\""))) {
+            val imported = RoutingConfig.cleanImport(text)
+            assertEquals(text, imported.toml)
+            assertFalse(imported.subscriptionNotKept)
+        }
+        // At the top level the core never reads it, so it is just another unknown key.
+        val topLevel = "client_random_auth_key = \"aabbccdd\"\n$source"
+        assertEquals(topLevel, RoutingConfig.cleanImport(topLevel).toml)
+    }
+    @Test fun aRealAuthKeyIsRefusedWithItsOwnMessage() {
+        for (value in listOf("\"aabbccdd\"", "\" \"", "'00'", "5", "[\"aa\"]")) {
+            val refused = assertThrows(RoutingConfig.ImportRefused::class.java) {
+                RoutingConfig.cleanImport(withEndpointKey("client_random_auth_key = $value"))
+            }
+            assertEquals(R.string.text_this_server_needs_a_newer_trusttunnel_core, refused.messageResource)
+            assertFalse(refused.message!!.contains("aabbccdd"))
+        }
+        // Refused before anything is dropped: the subscription changes nothing.
+        assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport("subscription_url = \"https://a:b@vpn.example.com/s\"\n" +
+                withEndpointKey("client_random_auth_key = \"aabbccdd\""))
+        }
+    }
+    @Test fun subscriptionAddressesAreDroppedBeforeSaving() {
+        val url = "https://alice:s3cret@vpn.example.com/subscription"
+        val variants = listOf(
+            "subscription_url = \"$url\"\n$source",
+            withEndpointKey("subscription_url = '$url'"),
+            source.replace("[listener.tun]", "[endpoint.subscription]\nurl = \"$url\"\n[listener.tun]"),
+            withEndpointKey("subscription = { url = \"$url\" }"),
+            withEndpointKey("subscription.url = \"\"\"\n$url\"\"\""),
+            source.replace("[listener.tun]", "[[endpoint.subscription]]\nurl = \"$url\"\n[listener.tun]"),
+        )
+        for (text in variants) {
+            assertFalse(Toml.parse(text).hasErrors())
+            val imported = RoutingConfig.cleanImport(text)
+            assertTrue(imported.subscriptionNotKept)
+            assertFalse(imported.toml.contains("subscription"))
+            assertFalse(imported.toml.contains("s3cret"))
+            val parsed = Toml.parse(imported.toml)
+            assertFalse(parsed.hasErrors())
+            assertEquals(Toml.parse(source).getString("endpoint.password"), parsed.getString("endpoint.password"))
+            assertEquals("vpn.example.com", parsed.getString("endpoint.hostname"))
+            assertEquals(1350L, parsed.getLong("listener.tun.mtu_size"))
+            assertNotNull(plan(enabled = false, text = imported.toml))
+        }
+    }
+    @Test fun droppingASubscriptionKeepsEveryOtherKeyAndTable() {
+        val text = "subscription_url = \"https://a:b@vpn.example.com/s\"\nextra_root = 7\n" +
+            withEndpointKey("client_random_auth_key = \"\"\nsubscription_note = \"kept\"\nnested = { keep = [1, 2] }") +
+            "\n[extra]\nsubscription = \"not the endpoint's\"\n[[servers]]\nname = 'one'\n"
+        val imported = RoutingConfig.cleanImport(text)
+        assertTrue(imported.subscriptionNotKept)
+        val parsed = Toml.parse(imported.toml)
+        val original = Toml.parse(text)
+        assertFalse(parsed.hasErrors())
+        assertNull(parsed.get(listOf("subscription_url")))
+        assertEquals(original.keySet() - "subscription_url", parsed.keySet())
+        assertEquals(original.getTable("endpoint")!!.keySet(), parsed.getTable("endpoint")!!.keySet())
+        assertEquals(7L, parsed.getLong("extra_root"))
+        assertEquals("", parsed.getString("endpoint.client_random_auth_key"))
+        assertEquals("kept", parsed.getString("endpoint.subscription_note"))
+        assertEquals(listOf(1L, 2L), parsed.getArray("endpoint.nested.keep")!!.toList())
+        assertEquals("not the endpoint's", parsed.getString("extra.subscription"))
+        assertEquals("one", parsed.getArray("servers")!!.getTable(0).getString("name"))
+        assertEquals(listOf("intranet.example"), parsed.getArray("exclusions")!!.toList())
+    }
+    @Test fun unreadableFilesAreLeftForValidation() {
+        for (text in listOf("not toml [", "subscription_url = \"https://a:b@x/s\"\n", "endpoint = 5\nsubscription_url = \"x\"")) {
+            val imported = RoutingConfig.cleanImport(text)
+            assertEquals(text, imported.toml); assertFalse(imported.subscriptionNotKept)
+        }
+    }
     @Test fun validationIncludesAutomaticPlatformExclusions() {
         val rules = listOf("0.0.0.0/1", "128.0.0.0/2", "192.0.0.0/3")
         assertFalse(SplitRules.coversAddressFamily(rules))

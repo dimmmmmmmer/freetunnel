@@ -455,19 +455,23 @@ public final class MainActivity extends Activity {
         try { imported = DeepLinkImport.parse(link); }
         catch (DeepLinkImport.ParseException e) { toast(getString(e.messageResource)); return; }
 
-        confirmImport(imported.name, imported.toml);
+        confirmImport(imported.name, imported.toml, imported.subscriptionNotKept);
     }
     private void importToml(String name, String toml) {
-        confirmImport(name, stripBom(toml));
+        final RoutingConfig.Import cleaned;
+        try { cleaned = RoutingConfig.cleanImport(stripBom(toml)); }
+        catch (RoutingConfig.ImportRefused e) { toast(getString(e.messageResource)); return; }
+        confirmImport(name, cleaned.getToml(), cleaned.getSubscriptionNotKept());
     }
-    private void confirmImport(String name, String source) {
-        validateAsync(source, () -> showImportConfirmation(name, source), () -> {});
+    private void confirmImport(String name, String source, boolean subscriptionNotKept) {
+        validateAsync(source, () -> showImportConfirmation(name, source, subscriptionNotKept), () -> {});
     }
-    private void showImportConfirmation(String name, String source) {
+    private void showImportConfirmation(String name, String source, boolean subscriptionNotKept) {
         org.tomlj.TomlTable parsed = RoutingConfig.validate(source);
         String message = getString(R.string.text_add_configuration_36) + name + getString(R.string.text_nserver) + parsed.getString("endpoint.hostname");
         if (Boolean.TRUE.equals(parsed.getBoolean("endpoint.skip_verification")))
             message += getString(R.string.text_nserver_certificate_verification_is_disabled);
+        if (subscriptionNotKept) message += getString(R.string.text_nsubscriptions_are_not_supported_yet_the_server_wont);
         for (Config config : configs) {
             if (config.name.equals(name) || config.toml.equals(source)) {
                 message += getString(R.string.text_nthis_configuration_or_name_already_exists_a_separat); break;

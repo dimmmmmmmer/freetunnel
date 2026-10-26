@@ -25,13 +25,15 @@ object RoutingConfig {
         else -> item.toString()
     }
     private fun key(text: String) = if (text.matches(Regex("[A-Za-z0-9_-]+"))) text else quote(text)
-    private fun document(root: Map<String, Any>): String = buildString {
+    // Keys at a path in `drop` are left out, along with everything under them.
+    private fun document(root: Map<String, Any>, drop: Set<List<String>> = emptySet()): String = buildString {
         fun tableArray(value: Any): List<TomlTable>? {
             if (value !is TomlArray || value.isEmpty) return null
             val values = (0 until value.size()).map { value.get(it) }
             return if (values.all { it is TomlTable }) values.map { it as TomlTable } else null
         }
-        fun writeTable(values: Map<String, Any>, path: List<String>, arrayElement: Boolean = false) {
+        fun writeTable(all: Map<String, Any>, path: List<String>, arrayElement: Boolean = false) {
+            val values = all.filterKeys { (path + it) !in drop }
             if (path.isNotEmpty()) {
                 append(if (arrayElement) "\n[[" else "\n[")
                 append(path.joinToString(".", transform = ::key))
@@ -87,6 +89,47 @@ object RoutingConfig {
         val mtu = tun.getLong("mtu_size") ?: error("Missing mtu_size")
         require(mtu in (if (ipv6) 1280L else 576L)..65535L) { "Invalid TUN MTU" }
         return parsed
+    }
+
+    /** An imported file as it will be saved, and whether a subscription was dropped from it. */
+    data class Import(val toml: String, val subscriptionNotKept: Boolean)
+
+    /** A file refused for a reason the user can act on; the message is shown as it is. */
+    class ImportRefused(@JvmField val messageResource: Int) : IllegalArgumentException("Import refused")
+
+    // Where TrustTunnel 1.3 writes a subscription address: the client's own config
+    // as an [endpoint.subscription] table, the endpoint's export as subscription_url,
+    // which ends up at the top or inside [endpoint]. The address carries the VPN
+    // password, and this version cannot follow a subscription, so it is not kept.
+    private val subscriptionKeys = setOf(listOf("subscription_url"), listOf("endpoint", "subscription"),
+        listOf("endpoint", "subscription_url"))
+
+    private fun lookup(table: TomlTable, path: List<String>): Any? {
+        var current = table
+        for (name in path.dropLast(1)) current = current.get(listOf(name)) as? TomlTable ?: return null
+        return current.get(listOf(path.last()))
+    }
+
+    /**
+     * Checks an imported TOML file before it is confirmed. A file is kept as it was
+     * written unless it names a subscription; then it is written out again without
+     * one, which keeps every other key and table but not comments or layout.
+     */
+    @JvmStatic fun cleanImport(source: String): Import {
+        // Anything unreadable is left to validate(), which says what is wrong.
+        if (source.length > 1_048_576) return Import(source, false)
+        val parsed = Toml.parse(source)
+        if (parsed.hasErrors()) return Import(source, false)
+        val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return Import(source, false)
+        // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
+        // then refuses every connection without saying why. The endpoint writes an
+        // empty one into every export, so only a key with something in it is refused.
+        val authKey = endpoint.get(listOf("client_random_auth_key"))
+        if (authKey != null && authKey != "") throw ImportRefused(R.string.text_this_server_needs_a_newer_trusttunnel_core)
+        if (subscriptionKeys.none { lookup(parsed, it) != null }) return Import(source, false)
+        val root = linkedMapOf<String, Any>()
+        parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
+        return Import(document(root, subscriptionKeys), true)
     }
 
     data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?)
