@@ -82,17 +82,18 @@ TlsTestServer::TlsTestServer(QObject *parent)
     connect(&m_tls, &QSslServer::pendingConnectionAvailable, this, &TlsTestServer::onTlsConnection);
 }
 
-bool TlsTestServer::listen(const QList<QSslCertificate> &chain, const QSslKey &key)
+bool TlsTestServer::listen(const QList<QSslCertificate> &chain, const QSslKey &key, const QHostAddress &address)
 {
     QSslConfiguration tls = QSslConfiguration::defaultConfiguration();
     tls.setLocalCertificateChain(chain);
     tls.setPrivateKey(key);
     tls.setPeerVerifyMode(QSslSocket::VerifyNone);
+    tls.setAllowedNextProtocols({QSslConfiguration::ALPNProtocolHTTP2, QSslConfiguration::NextProtocolHttp1_1});
     m_tls.setSslConfiguration(tls);
     // Never through a proxy a test sets for the whole application.
     m_tls.setProxy(QNetworkProxy::NoProxy);
     m_front.setProxy(QNetworkProxy::NoProxy);
-    return m_tls.listen(QHostAddress::LocalHost) && m_front.listen(QHostAddress::LocalHost);
+    return m_tls.listen(QHostAddress::LocalHost) && m_front.listen(address);
 }
 
 void TlsTestServer::onFrontConnection()
@@ -100,7 +101,7 @@ void TlsTestServer::onFrontConnection()
     while (QTcpSocket *client = m_front.nextPendingConnection()) {
         ++m_connections;
         QTcpSocket *upstream = nullptr;
-        if (!m_closeAfterHello) {
+        if (m_refusal == Refusal::None) {
             // Written to before it connects, which it sends once it has.
             upstream = new QTcpSocket(client);
             upstream->setProxy(QNetworkProxy::NoProxy);
@@ -127,7 +128,10 @@ void TlsTestServer::noteClientHello(QTcpSocket *client, QTcpSocket *upstream)
             client->setProperty("helloNoted", true);
             m_hellos.remove(client);
             m_serverNames.append(*name);
-            if (m_closeAfterHello) {
+            if (m_refusal != Refusal::None) {
+                // A TLS 1.2 record: alert, fatal, handshake_failure.
+                if (m_refusal == Refusal::Alert)
+                    client->write(QByteArray::fromHex("15030300020228"));
                 client->disconnectFromHost();
                 return;
             }
@@ -141,6 +145,7 @@ void TlsTestServer::onTlsConnection()
 {
     while (auto *socket = qobject_cast<QSslSocket *>(m_tls.nextPendingConnection())) {
         ++m_handshakesDone;
+        m_protocols.append(QString::fromLatin1(socket->sslConfiguration().nextNegotiatedProtocol()));
         connect(socket, &QSslSocket::readyRead, this, [this, socket]() { onRequestData(socket); });
         connect(socket, &QSslSocket::disconnected, this, [this, socket]() {
             m_incoming.remove(socket);
@@ -181,6 +186,10 @@ void TlsTestServer::onRequestData(QSslSocket *socket)
 
 void TlsTestServer::respond(QSslSocket *socket, const Response &response)
 {
+    if (response.hangUp) {
+        socket->disconnectFromHost();
+        return;
+    }
     QByteArray head = "HTTP/1.1 " + QByteArray::number(response.status)
             + (response.status == 200 ? " OK\r\n" : " Status\r\n");
     if (!response.contentType.isEmpty())
@@ -206,11 +215,20 @@ void TlsTestServer::respond(QSslSocket *socket, const Response &response)
         timer->start(response.trickleMs);
         return;
     }
-    if (response.chunked) {
+    sendBody(socket, response);
+}
+
+void TlsTestServer::sendBody(QSslSocket *socket, const Response &response)
+{
+    if (response.cutAfter >= 0) {
+        socket->write(response.body.left(response.cutAfter));
+    } else if (response.chunked) {
         for (qsizetype at = 0; at < response.body.size(); at += 4096) {
             const QByteArray chunk = response.body.mid(at, 4096);
             socket->write(QByteArray::number(chunk.size(), 16) + "\r\n" + chunk + "\r\n");
         }
+        if (response.endless)
+            return;
         socket->write("0\r\n\r\n");
     } else {
         socket->write(response.body);

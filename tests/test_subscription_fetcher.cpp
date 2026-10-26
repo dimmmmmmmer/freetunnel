@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include <QElapsedTimer>
+#include <QNetworkInterface>
 #include <QNetworkProxy>
 #include <QScopeGuard>
 #include <QSslConfiguration>
@@ -31,6 +32,7 @@ using namespace freetunnel;
 
 Q_DECLARE_METATYPE(freetunnel::SubscriptionFetchError)
 Q_DECLARE_METATYPE(freetunnel::SubscriptionDocError)
+Q_DECLARE_METATYPE(TlsTestServer::Refusal)
 
 namespace {
 
@@ -126,6 +128,7 @@ private slots:
     // Trust.
     void aPinnedFetchReachesANameThatDoesNotResolve();
     void aWrongPinIsRefusedBeforeTheRequest();
+    void aPinnedCertificateThatACaSignedIsTaken_data();
     void aPinnedCertificateThatACaSignedIsTaken();
     void aPinnedChainIsTaken();
     void pinningOnlyTheCaIsNotEnough();
@@ -143,12 +146,15 @@ private slots:
     void aRedirectElsewhereIsRefused();
     void aRedirectLoopIsRefused();
     void threeRedirectsAreTheMost();
+    void theDefaultPortWrittenOutIsTheSameOrigin();
     void noCookieGoesBack();
 
     // The reply.
     void theCapHoldsAtItsEdge_data();
     void theCapHoldsAtItsEdge();
     void anAnnouncedBodyOverTheCapIsRefusedBeforeItArrives();
+    void aBodyThatKeepsComingIsRefusedAtTheCap();
+    void aReplyCutShortIsANetworkError();
     void onlyJsonIsTaken_data();
     void onlyJsonIsTaken();
     void eachStatusMeansSomething_data();
@@ -158,7 +164,9 @@ private slots:
 
     // Failures, and what is never done.
     void aTrickleHitsTheDeadline();
-    void aConnectionClosedAfterTheClientHelloIsRefusedByServer();
+    void aHandshakeTheServerEndsIsRefusedByServer_data();
+    void aHandshakeTheServerEndsIsRefusedByServer();
+    void aServerThatHangsUpIsANetworkError();
     void nothingListeningIsANetworkError();
     void noLogLineHoldsTheCredentials();
     void anApplicationProxyIsNotUsed();
@@ -198,8 +206,9 @@ SubscriptionFetchRequest TestSubscriptionFetcher::pinned(quint16 port, const QSt
 
 std::optional<SubscriptionFetchResult> TestSubscriptionFetcher::fetch(const SubscriptionFetchRequest &request)
 {
-    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
+    // Before the fetcher, so it outlives it.
     std::optional<SubscriptionFetchResult> result;
+    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
     connect(&fetcher, &SubscriptionFetcher::finished, this,
             [&result](const SubscriptionFetchResult &r) { result = r; });
     fetcher.start(request);
@@ -361,13 +370,17 @@ void TestSubscriptionFetcher::aPinnedFetchReachesANameThatDoesNotResolve()
     QCOMPARE(request.method, QByteArray("GET"));
     QCOMPARE(request.target, QByteArray("/sub"));
     QCOMPARE(request.header("Host"), "vpn.test:" + port);
-    const auto isHost = [](const TlsTestServer::Header &h) { return h.first.compare("Host", Qt::CaseInsensitive) == 0; };
+    const auto isHost = [](const TlsTestServer::Header &h) {
+        return h.first.compare("Host", Qt::CaseInsensitive) == 0;
+    };
     QCOMPARE(std::count_if(request.headers.cbegin(), request.headers.cend(), isHost), 1);
     QCOMPARE(request.header("Authorization"), "Basic " + QStringLiteral(u"al@ice:p:ssé").toUtf8().toBase64());
     QCOMPARE(request.header("User-Agent"), QByteArray("FreeTunnel/9.8.7"));
     QCOMPARE(request.header("Accept"), QByteArray("application/json"));
     QCOMPARE(request.header("Accept-Encoding"), QByteArray("identity"));
     QVERIFY(!request.hasHeader("Cookie"));
+    // HTTP/1.1, which the server would have given up for HTTP/2 had it been asked.
+    QCOMPARE(server.protocols(), QStringList{QString()});
 }
 
 void TestSubscriptionFetcher::aWrongPinIsRefusedBeforeTheRequest()
@@ -388,11 +401,21 @@ void TestSubscriptionFetcher::aWrongPinIsRefusedBeforeTheRequest()
     }
 }
 
-// The errors that only say no CA vouches for it are the pin's to answer.
+void TestSubscriptionFetcher::aPinnedCertificateThatACaSignedIsTaken_data()
+{
+    QTest::addColumn<bool>("withItsCa");
+    QTest::newRow("served alone") << false;
+    QTest::newRow("served with its CA") << true;
+}
+
+// The errors that only say no CA vouches for it are the pin's to answer. They
+// differ with what the server sends: alone, OpenSSL finds no issuer; with its
+// CA, it finds a self-signed one it does not trust.
 void TestSubscriptionFetcher::aPinnedCertificateThatACaSignedIsTaken()
 {
+    QFETCH(bool, withItsCa);
     TlsTestServer server;
-    QVERIFY(listen(server, m_certs->caSigned, &m_certs->ca));
+    QVERIFY(listen(server, m_certs->caSigned, withItsCa ? &m_certs->ca : nullptr));
     server.setRoute("/sub", json());
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->caSigned})));
     QVERIFY_FETCH(result, SubscriptionFetchError::None);
@@ -583,6 +606,9 @@ void TestSubscriptionFetcher::aRedirectLoopIsRefused()
     server.setRoute("/a", redirect(302, "/b"));
     server.setRoute("/b", redirect(302, "/a"));
     server.setRoute("/c", redirect(302, "/c#again"));
+    server.setRoute("/x", redirect(302, "/y"));
+    server.setRoute("/y", redirect(302, "/z"));
+    server.setRoute("/z", redirect(302, "/y"));
     std::optional<SubscriptionFetchResult> result =
             fetch(pinned(server.port(), pemOf({&m_certs->selfSigned}), QStringLiteral("/a")));
     QVERIFY_FETCH(result, SubscriptionFetchError::BadRedirect);
@@ -591,6 +617,11 @@ void TestSubscriptionFetcher::aRedirectLoopIsRefused()
     result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned}), QStringLiteral("/c")));
     QVERIFY_FETCH(result, SubscriptionFetchError::BadRedirect);
     QCOMPARE(server.requests().size(), 3);
+    // Between later steps: refused when it comes round, not one request later at
+    // the limit.
+    result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned}), QStringLiteral("/x")));
+    QVERIFY_FETCH(result, SubscriptionFetchError::BadRedirect);
+    QCOMPARE(server.requests().size(), 6);
 }
 
 void TestSubscriptionFetcher::threeRedirectsAreTheMost()
@@ -613,6 +644,27 @@ void TestSubscriptionFetcher::threeRedirectsAreTheMost()
     QVERIFY_FETCH(result, SubscriptionFetchError::BadRedirect);
     QCOMPARE(server.requests().size(), 8);
     QCOMPARE(server.requests().constLast().target, QByteArray("/r4"));
+}
+
+// https://vpn.test and https://vpn.test:443 are one origin. A pinned fetch
+// connects to the config's address whatever the port, so a test server serves
+// both.
+void TestSubscriptionFetcher::theDefaultPortWrittenOutIsTheSameOrigin()
+{
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    server.setRoute("/start", redirect(302, "https://vpn.test:443/sub"));
+    server.setRoute("/sub", json());
+    ConfigToml config;
+    config.hostname = QStringLiteral("vpn.test");
+    config.addresses = QStringLiteral("127.0.0.1:%1").arg(server.port());
+    config.certificate = pemOf({&m_certs->selfSigned});
+    const std::optional<SubscriptionFetchResult> result =
+            fetch(subscriptionRequestFor(QStringLiteral("https://alice:s3cret@vpn.test/start"), config));
+    QVERIFY_FETCH(result, SubscriptionFetchError::None);
+    QCOMPARE(server.requests().size(), 2);
+    QCOMPARE(server.requests().at(0).header("Host"), QByteArray("vpn.test"));
+    QCOMPARE(server.requests().at(1).header("Host"), QByteArray("vpn.test:443"));
 }
 
 void TestSubscriptionFetcher::noCookieGoesBack()
@@ -668,6 +720,37 @@ void TestSubscriptionFetcher::anAnnouncedBodyOverTheCapIsRefusedBeforeItArrives(
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
     QVERIFY_FETCH(result, SubscriptionFetchError::TooLarge);
     QVERIFY2(elapsed.elapsed() < 4000, qPrintable(QString::number(elapsed.elapsed())));
+}
+
+// Refused as it passes the cap, not when the server stops, which this one never
+// does: the read is bounded, and so is what is held.
+void TestSubscriptionFetcher::aBodyThatKeepsComingIsRefusedAtTheCap()
+{
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    TlsTestServer::Response response = json(QByteArray(int(kMaxSubscriptionBodyBytes) + 4096, ' '));
+    response.chunked = true;
+    response.endless = true;
+    server.setRoute("/sub", response);
+    qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "5000");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    QVERIFY_FETCH(result, SubscriptionFetchError::TooLarge);
+    QVERIFY2(elapsed.elapsed() < 4000, qPrintable(QString::number(elapsed.elapsed())));
+}
+
+// A 200 whose body stops short is not read as a document.
+void TestSubscriptionFetcher::aReplyCutShortIsANetworkError()
+{
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    TlsTestServer::Response response = json(kDocument + QByteArray(100, ' '));
+    response.cutAfter = int(kDocument.size());
+    server.setRoute("/sub", response);
+    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    QVERIFY_FETCH(result, SubscriptionFetchError::Network);
+    QCOMPARE(result->httpStatus, 200);
 }
 
 void TestSubscriptionFetcher::onlyJsonIsTaken_data()
@@ -778,16 +861,38 @@ void TestSubscriptionFetcher::aTrickleHitsTheDeadline()
     QCOMPARE(server.requests().size(), 1);
 }
 
-// As an endpoint whose rules deny the client: the connection ends during the
-// TLS handshake, with no certificate to blame.
-void TestSubscriptionFetcher::aConnectionClosedAfterTheClientHelloIsRefusedByServer()
+void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer_data()
 {
+    QTest::addColumn<TlsTestServer::Refusal>("refusal");
+    QTest::newRow("closed") << TlsTestServer::Refusal::Close;
+    QTest::newRow("an alert") << TlsTestServer::Refusal::Alert;
+}
+
+// As an endpoint whose rules deny the client: the connection ends during the
+// TLS handshake, with no certificate to blame. How each backend reports that
+// is its own, and is what this records.
+void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer()
+{
+    QFETCH(TlsTestServer::Refusal, refusal);
     TlsTestServer server;
     QVERIFY(listen(server, m_certs->selfSigned));
-    server.setCloseAfterClientHello(true);
+    server.setRefusal(refusal);
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
     QVERIFY_FETCH(result, SubscriptionFetchError::RefusedByServer);
     QCOMPARE(server.serverNames().value(0), QStringLiteral("vpn.test"));
+}
+
+// After the handshake it is the network's, whatever Qt tries again.
+void TestSubscriptionFetcher::aServerThatHangsUpIsANetworkError()
+{
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    TlsTestServer::Response response;
+    response.hangUp = true;
+    server.setRoute("/sub", response);
+    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    QVERIFY_FETCH(result, SubscriptionFetchError::Network);
+    QVERIFY(!server.requests().isEmpty());
 }
 
 void TestSubscriptionFetcher::nothingListeningIsANetworkError()
@@ -845,12 +950,33 @@ void TestSubscriptionFetcher::noLogLineHoldsTheCredentials()
 }
 
 // The fetch goes direct, as the core's connection does: a proxy would see it,
-// and one that is down would stop every refresh.
+// and one that is down would stop every refresh. Qt never takes a loopback
+// address through a proxy, so the server is reached at an address of this
+// machine's own instead.
 void TestSubscriptionFetcher::anApplicationProxyIsNotUsed()
 {
+    const QList<QHostAddress> addresses = QNetworkInterface::allAddresses();
+    const auto own = std::find_if(addresses.cbegin(), addresses.cend(), [](const QHostAddress &a) {
+        return a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback() && !a.isLinkLocal();
+    });
+    if (own == addresses.cend())
+        QSKIP("This machine has no IPv4 address but loopback, which Qt never sends through a proxy");
     TlsTestServer server;
-    QVERIFY(listen(server, m_certs->selfSigned));
+    QVERIFY(server.listen({m_certs->selfSigned.certificate}, m_certs->selfSigned.key, *own));
     server.setRoute("/sub", json());
+    QTcpSocket probe;
+    probe.setProxy(QNetworkProxy::NoProxy);
+    probe.connectToHost(*own, server.port());
+    if (!probe.waitForConnected(3000))
+        QSKIP("This machine cannot reach its own address here, a firewall's doing");
+    probe.abort();
+    ConfigToml config;
+    config.hostname = QStringLiteral("vpn.test");
+    config.addresses = own->toString() + QLatin1Char(':') + QString::number(server.port());
+    config.certificate = pemOf({&m_certs->selfSigned});
+    const SubscriptionFetchRequest request =
+            subscriptionRequestFor(QStringLiteral("https://alice:s3cret@vpn.test/sub"), config);
+
     QTcpServer dead;
     dead.setProxy(QNetworkProxy::NoProxy);
     QVERIFY(dead.listen(QHostAddress::LocalHost));
@@ -860,15 +986,16 @@ void TestSubscriptionFetcher::anApplicationProxyIsNotUsed()
     QNetworkProxy::setApplicationProxy(
             QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), deadPort));
     auto restore = qScopeGuard([previous]() { QNetworkProxy::setApplicationProxy(previous); });
-    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    const std::optional<SubscriptionFetchResult> result = fetch(request);
     QVERIFY_FETCH(result, SubscriptionFetchError::None);
+    QCOMPARE(server.requests().size(), 1);
 }
 
 void TestSubscriptionFetcher::aResultNeverComesFromInsideStart()
 {
-    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
     int results = 0;
     SubscriptionFetchError error = SubscriptionFetchError::None;
+    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
     connect(&fetcher, &SubscriptionFetcher::finished, this, [&](const SubscriptionFetchResult &r) {
         ++results;
         error = r.error;
@@ -889,9 +1016,9 @@ void TestSubscriptionFetcher::anAbortedFetchNeverFinishes()
     server.setRoute("/held", held);
     server.setRoute("/sub", json());
     const QString pins = pemOf({&m_certs->selfSigned});
-    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
     int results = 0;
     SubscriptionFetchError error = SubscriptionFetchError::None;
+    SubscriptionFetcher fetcher(QStringLiteral("9.8.7"));
     connect(&fetcher, &SubscriptionFetcher::finished, this, [&](const SubscriptionFetchResult &r) {
         ++results;
         error = r.error;
@@ -908,9 +1035,11 @@ void TestSubscriptionFetcher::anAbortedFetchNeverFinishes()
     QTest::qWait(300);
     QCOMPARE(results, 0);
 
-    // A fetch started over another one ends that one without its result.
+    // A fetch started over another one ends that one without its result, whether
+    // it is still running or its result is on its way.
     fetcher.start(pinned(server.port(), pins, QStringLiteral("/held")));
     QTRY_COMPARE(server.requests().size(), 2);
+    fetcher.start(subscriptionRequestFor(QStringLiteral("http://vpn.test/sub"), ConfigToml()));
     fetcher.start(pinned(server.port(), pins));
     QTRY_COMPARE(results, 1);
     QCOMPARE(error, SubscriptionFetchError::None);

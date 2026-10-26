@@ -133,15 +133,12 @@ bool isJson(const QByteArray &contentType)
 // handshake, with no certificate at fault, is the server turning this client
 // away: an endpoint does that before any HTTP when its rules deny the client.
 // OpenSSL reports a reset there as RemoteHostClosedError, and an alert as
-// SslHandshakeFailedError.
+// SslHandshakeFailedError. Anything else is the network's.
 SubscriptionFetchError transportError(QNetworkReply::NetworkError error, bool handshakeDone)
 {
     const bool closed = error == QNetworkReply::RemoteHostClosedError
             || error == QNetworkReply::SslHandshakeFailedError;
-    if (closed && !handshakeDone)
-        return SubscriptionFetchError::RefusedByServer;
-    return error == QNetworkReply::TimeoutError ? SubscriptionFetchError::Timeout
-                                                : SubscriptionFetchError::Network;
+    return closed && !handshakeDone ? SubscriptionFetchError::RefusedByServer : SubscriptionFetchError::Network;
 }
 
 // https, the same host in any case, and the same port, 443 when none is given.
