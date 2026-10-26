@@ -298,16 +298,24 @@ class VpnDeviceTest {
         yield(view)
         if (view is android.view.ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
     }
+    // Runs block on the main thread and rethrows what it throws on the test thread. Thrown
+    // on the main thread, a failed assertion would crash the instrumentation process and
+    // skip every test after this one.
+    private fun onMain(block: () -> Unit) {
+        var failure: Throwable? = null
+        instrumentation.runOnMainSync { try { block() } catch (t: Throwable) { failure = t } }
+        failure?.let { throw it }
+    }
     // Opens one of MainActivity's dialogs on the main thread, hands check the dialog's
     // window and the view MainActivity put in it, and closes the dialog with Cancel.
     private fun inDialog(start: () -> Unit, check: (android.view.View, android.view.ViewGroup) -> Unit) {
-        instrumentation.runOnMainSync { start() }
+        onMain { start() }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMain {
             val window = android.view.inspector.WindowInspector.getGlobalWindowViews()
                 .last { it.findViewById<android.view.View>(android.R.id.custom) != null }
-            check(window, window.findViewById<android.view.ViewGroup>(android.R.id.custom))
-            assertTrue(window.findViewById<android.widget.Button>(android.R.id.button2).performClick())
+            try { check(window, window.findViewById<android.view.ViewGroup>(android.R.id.custom)) }
+            finally { window.findViewById<android.widget.Button>(android.R.id.button2)?.performClick() }
         }
         instrumentation.waitForIdleSync()
     }
@@ -321,6 +329,8 @@ class VpnDeviceTest {
                 // What a keyboard is given when the field takes focus.
                 val info = android.view.inputmethod.EditorInfo()
                 assertNotNull(toml.onCreateInputConnection(info))
+                assertTrue("The keyboard must be asked not to go full screen",
+                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN != 0)
                 assertTrue("The TOML must not be copied into a full-screen keyboard",
                     info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
             }
@@ -328,8 +338,8 @@ class VpnDeviceTest {
     }
 
     // The light theme colours only the activity. AlertDialog.Builder(this) keeps
-    // Theme.Material's dark dialog in both themes, so the text MainActivity puts in a
-    // dialog has to be light in both.
+    // Theme.Material's dark dialog in both themes, so the text, hints and check boxes
+    // MainActivity puts in a dialog have to be light in both.
     @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
     @Test fun dialogTextIsReadableInBothThemes() {
         withMainActivity { activity ->
@@ -337,7 +347,7 @@ class VpnDeviceTest {
                 { privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) },
                 { privateMethod("appPicker").invoke(activity) })
             for (dark in listOf(false, true)) {
-                instrumentation.runOnMainSync {
+                onMain {
                     MainActivity::class.java.getDeclaredField("dark").apply { isAccessible = true }.setBoolean(activity, dark)
                 }
                 for (start in dialogs) inDialog(start) { window, content ->
@@ -348,9 +358,18 @@ class VpnDeviceTest {
                     val texts = descendants(content).filterIsInstance<android.widget.TextView>().filter { it.isShown }.toList()
                     assertFalse("The dialog shows no text to check", texts.isEmpty())
                     for (text in texts) {
+                        val where = "\"${text.hint ?: text.text}\" in the ${if (dark) "dark" else "light"} theme"
                         val contrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentTextColor, background)
-                        assertTrue("\"${text.hint ?: text.text}\" in the ${if (dark) "dark" else "light"} theme: contrast $contrast",
-                            contrast >= 4.5)
+                        assertTrue("$where: contrast $contrast", contrast >= 4.5)
+                        // Hints are drawn lighter on purpose, and an empty editor shows only
+                        // its hints. 3:1 is the minimum for them and for the check boxes.
+                        if (text.hint != null) {
+                            val hintContrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentHintTextColor, background)
+                            assertTrue("$where: hint contrast $hintContrast", hintContrast >= 3.0)
+                        }
+                        val tint = (text as? android.widget.CompoundButton)?.buttonTintList ?: continue
+                        val boxContrast = androidx.core.graphics.ColorUtils.calculateContrast(tint.defaultColor, background)
+                        assertTrue("$where: check box contrast $boxContrast", boxContrast >= 3.0)
                     }
                 }
             }

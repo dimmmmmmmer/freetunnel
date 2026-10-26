@@ -158,9 +158,12 @@ public final class MainActivity extends Activity {
     private int surface() { return Color.parseColor(dark ? "#262626" : "#e2e2e2"); }
     private int tile() { return Color.parseColor(dark ? "#202020" : "#d8d8d8"); }
     private int textColor() { return Color.parseColor(dark ? "#eaeaea" : "#1b1b1b"); }
-    // Text put inside a dialog. AlertDialog.Builder(this) uses Theme.Material's dialog,
-    // which stays dark in the app's light theme, so this is the dark theme's text colour.
+    // Colours put inside a dialog. AlertDialog.Builder(this) uses Theme.Material's dialog,
+    // which stays dark in the app's light theme, so these are the dark theme's text, dim
+    // and success colours.
     private int dialogTextColor() { return Color.parseColor("#eaeaea"); }
+    private int dialogHintColor() { return Color.parseColor("#9a9a9a"); }
+    private int dialogSuccess() { return Color.parseColor("#3fbf93"); }
     private int dim() { return Color.parseColor(dark ? "#9a9a9a" : "#6b6b6b"); }
     private int faint() { return Color.parseColor(dark ? "#6a6a6a" : "#9a9a9a"); }
     private int success() { return Color.parseColor(dark ? "#3fbf93" : "#1d9e75"); }
@@ -526,13 +529,14 @@ public final class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         LinearLayout form = column(); form.setPadding(dp(20), dp(5), dp(20), 0);
         EditText name = new EditText(this); name.setSingleLine(true); name.setTextColor(dialogTextColor());
-        name.setHint(getString(R.string.text_configuration_name)); name.setHintTextColor(faint());
-        EditText raw = new EditText(this); raw.setTextColor(dialogTextColor()); raw.setHintTextColor(faint());
+        name.setHint(getString(R.string.text_configuration_name)); name.setHintTextColor(dialogHintColor());
+        EditText raw = new EditText(this); raw.setTextColor(dialogTextColor()); raw.setHintTextColor(dialogHintColor());
         raw.setHint(getString(R.string.text_paste_complete_trusttunnel_toml)); raw.setMinLines(8); raw.setGravity(Gravity.TOP);
         raw.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        // In landscape a keyboard can fill the screen with its own copy of the text, which
-        // it draws without the password mask and outside FLAG_SECURE. The TOML asks for none.
-        raw.setImeOptions(raw.getImeOptions() | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        // In landscape a keyboard can fill the screen with its own copy of the text. Ask it
+        // not to go full screen, and not to copy the text if it does anyway: the copy has no
+        // password mask and is outside FLAG_SECURE.
+        raw.setImeOptions(raw.getImeOptions() | EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         raw.setTransformationMethod(PasswordTransformationMethod.getInstance());
         CheckBox show = new CheckBox(this); show.setText(getString(R.string.text_show_toml_and_password)); show.setTextColor(dialogTextColor());
         show.setOnCheckedChangeListener((b, checked) -> raw.setTransformationMethod(checked ? null : PasswordTransformationMethod.getInstance()));
@@ -721,7 +725,7 @@ public final class MainActivity extends Activity {
             String pkg = app.activityInfo.packageName;
             if (pkg.equals(getPackageName()) || !seen.add(pkg)) continue;
             CheckBox box = new CheckBox(this); box.setText(app.loadLabel(pm)); box.setTextColor(dialogTextColor());
-            box.setButtonTintList(android.content.res.ColorStateList.valueOf(success()));
+            box.setButtonTintList(android.content.res.ColorStateList.valueOf(dialogSuccess()));
             box.setChecked(chosen.contains(pkg)); box.setPadding(dp(4), dp(6), dp(4), dp(6));
             box.setOnCheckedChangeListener((b, checked) -> { if (checked) chosen.add(pkg); else chosen.remove(pkg); });
             list.addView(box, lp(-1, 52));
