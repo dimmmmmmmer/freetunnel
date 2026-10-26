@@ -195,8 +195,8 @@ the next version instead.
 
 Before `android-1.0.0`: the `## Unreleased` section of `android/CHANGELOG.md`
 still holds the preview's notes, partly written for reviewers ("No fork signing
-identity or stable-release claim is part of this PR"), and a stray ` preview`
-line left from a split heading. Everything from `## 1.0.0` down to the next
+identity or stable-release claim is part of this PR"), and a stray line that
+reads only "preview", left from a split heading. Everything from `## 1.0.0` down to the next
 heading is published, so rewrite all of it in the 1.0.0 release pull request.
 
 The workflow checks the tag, that its commit is on `main`, that the version is
