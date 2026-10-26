@@ -89,7 +89,8 @@ final class DeepLinkImport {
     }
 
     // What a link goes through once decoded, in the desktop's order: the auth key,
-    // then the server's own settings, then the certificate.
+    // then the server's own settings, then whether the certificate holds any
+    // certificate. Damage to the certificate was refused while decoding.
     private static Imported finish(Fields fields, boolean subscription) throws ParseException {
         // An empty key is how a server without one is exported. A real key needs
         // TrustTunnel 1.3: core 1.1.7 would ignore it, and the server would then
@@ -107,7 +108,7 @@ final class DeepLinkImport {
         // certificate came from is stored. A certificate with none in it is refused:
         // the link meant to pin one, and the connection would only fail later.
         Certificates.Kept certificate = Certificates.fromDer(fields.certificate);
-        if (certificate == null || (certificate.dropped && certificate.der.length == 0))
+        if (certificate.dropped && certificate.der.length == 0)
             throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
         String name = clean(fields.displayName).trim();
         if (name.isEmpty()) name = hostname;
@@ -139,6 +140,16 @@ final class DeepLinkImport {
             i += Character.charCount(c);
         }
         return true;
+    }
+
+    // DER elements, one after another. Bytes that do not split into whole ones are
+    // damage, as the desktop and TrustTunnel's own decoder take them, and every copy
+    // is checked, as tags 0x0E and 0x0F are. Which of the elements are certificates
+    // is finish()'s question.
+    private static byte[] certificate(byte[] der) throws ParseException {
+        if (Certificates.fromDer(der) == null)
+            throw new ParseException(R.string.text_the_link_contains_an_invalid_certificate);
+        return der;
     }
 
     // Whole bytes of hex, checked in every copy as TrustTunnel's own decoder does.
@@ -230,7 +241,7 @@ final class DeepLinkImport {
                 case 5: fields.username = utf8(bytes, pos[0], end); break;
                 case 6: fields.password = utf8(bytes, pos[0], end); break;
                 case 7: fields.skipVerification = bool(bytes, pos[0], end); break;
-                case 8: fields.certificate = copy(bytes, pos[0], end); break;
+                case 8: fields.certificate = certificate(copy(bytes, pos[0], end)); break;
                 case 9: fields.protocol = scalar(bytes, pos, end); break;
                 case 10: fields.antiDpi = bool(bytes, pos[0], end); break;
                 case 11: fields.clientRandom = utf8(bytes, pos[0], end); break;

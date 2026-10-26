@@ -492,18 +492,43 @@ public final class DeepLinkImportTest {
         for (byte[] der : new byte[][]{hex("030100"), concat(V2_SELF_SIGNED_CERTIFICATE, hex("00")),
                 Arrays.copyOf(LEAF_DER, LEAF_DER.length - 1), hex("30800000")})
             refused(withCertificate(der), R.string.text_the_link_contains_an_invalid_certificate);
-        // The other checks come first, in the desktop's order: the auth key, then the
-        // server's own settings.
-        ByteArrayOutputStream keyFirst = new ByteArrayOutputStream();
-        byte[] keyed = withStatic(2, 15, "aabbccdd");
-        keyFirst.write(keyed, 0, keyed.length);
-        field(keyFirst, 8, PKCS8_DER);
-        refused(link(keyFirst.toByteArray()), R.string.text_this_server_needs_a_newer_trusttunnel_core);
+        // Those are damage to the link itself, so every copy is checked, as on the
+        // desktop: a good last one does not excuse a bad first one.
+        for (boolean brokenFirst : new boolean[]{true, false}) {
+            ByteArrayOutputStream twice = new ByteArrayOutputStream();
+            byte[] plain = withStatic(2, 0, null);
+            twice.write(plain, 0, plain.length);
+            field(twice, 8, brokenFirst ? hex("030100") : LEAF_DER);
+            field(twice, 8, brokenFirst ? LEAF_DER : hex("030100"));
+            refused(link(twice.toByteArray()), R.string.text_the_link_contains_an_invalid_certificate);
+        }
+        // Whole elements with no certificate among them come after the other checks,
+        // in the desktop's order: the auth key, then the server's own settings. Bytes
+        // that are not whole elements are refused before any of those, as the
+        // desktop refuses them while it reads the link.
+        ByteArrayOutputStream noUsername = new ByteArrayOutputStream();
+        field(noUsername, 0, new byte[]{2});
+        text(noUsername, 1, "vpn.example.com");
+        text(noUsername, 6, "secret");
+        text(noUsername, 2, "1.2.3.4:443");
         ByteArrayOutputStream onlySubscription = new ByteArrayOutputStream();
         field(onlySubscription, 0, new byte[]{2});
-        field(onlySubscription, 8, PKCS8_DER);
         text(onlySubscription, 14, SUBSCRIPTION);
-        refused(link(onlySubscription.toByteArray()), R.string.text_subscription_links_are_not_supported_yet);
+        Object[][] rows = {
+            {withStatic(2, 15, "aabbccdd"), R.string.text_this_server_needs_a_newer_trusttunnel_core},
+            {noUsername.toByteArray(), R.string.text_the_link_is_missing_required_server_settings},
+            {onlySubscription.toByteArray(), R.string.text_subscription_links_are_not_supported_yet},
+        };
+        for (Object[] row : rows) {
+            for (boolean whole : new boolean[]{true, false}) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] head = (byte[]) row[0];
+                out.write(head, 0, head.length);
+                field(out, 8, whole ? PKCS8_DER : hex("030100"));
+                refused(link(out.toByteArray()),
+                        whole ? (Integer) row[1] : R.string.text_the_link_contains_an_invalid_certificate);
+            }
+        }
     }
 
     // Like the desktop's seeded mutation loop: damaged links, version 1 and 2 alike,
