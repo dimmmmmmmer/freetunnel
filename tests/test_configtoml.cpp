@@ -1068,8 +1068,12 @@ void TestConfigToml::certificatesOnly_data()
     QString oneLine = kCaPem;
     oneLine.remove(QLatin1Char('\n'));
     const QString legacy = pemBlock(QStringLiteral("X509 CERTIFICATE"), derOf(kCaPem));
+    // FreeTunnel 1.1.9 and earlier wrote a link's chain as one block, of which
+    // OpenSSL reads the first certificate. It holds nothing but certificates.
+    const QString oneBlock = pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + derOf(kCaPem));
     QTest::newRow("a certificate") << kCaPem << kCaPem << false;
     QTest::newRow("a chain") << kChainPem << kChainPem << false;
+    QTest::newRow("a chain in one block, as 1.1.9 wrote it") << oneBlock << oneBlock << false;
     QTest::newRow("CRLF") << crlf << crlf << false;
     QTest::newRow("76 columns") << wrapped(derOf(kCaPem), 76) << wrapped(derOf(kCaPem), 76) << false;
     QTest::newRow("on one line") << oneLine << oneLine << false;
@@ -1092,6 +1096,13 @@ void TestConfigToml::certificatesOnly_data()
             << pemBlock(QStringLiteral("CERTIFICATE REQUEST"), certShaped(4)) + kCaPem << kCaPem << true;
     QTest::newRow("a key labelled as a certificate")
             << pemBlock(QStringLiteral("CERTIFICATE"), kPkcs8Der) + kCaPem << kCaPem << true;
+    QTest::newRow("a key after a certificate in one block")
+            << pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + kPkcs8Der) + kCaPem << kCaPem << true;
+    QTest::newRow("a byte after a chain in one block")
+            << pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + derOf(kCaPem) + '\0') + kCaPem << kCaPem
+            << true;
+    QTest::newRow("an empty block") << pemBlock(QStringLiteral("CERTIFICATE"), QByteArray()) + kCaPem << kCaPem
+                                    << true;
     QTest::newRow("a key inside a certificate block")
             << QStringLiteral("-----BEGIN CERTIFICATE-----\n") + keyPem()
                        + QStringLiteral("-----END CERTIFICATE-----\n") + kCaPem
@@ -1149,6 +1160,9 @@ void TestConfigToml::certificatesDerMatchesTheKeptBlocks()
     QVERIFY(certificatesDer(QString(), &dropped).isEmpty());
     QVERIFY(!dropped);
     QCOMPARE(certificatesDer(kCaPem), derOf(kCaPem));
+    // A chain in one block, as 1.1.9 wrote it, is the whole chain.
+    QCOMPARE(certificatesDer(pemBlock(QStringLiteral("CERTIFICATE"), chain), &dropped), chain);
+    QVERIFY(!dropped);
 
     // Strict base64. Decoded leniently, as derOf() does, a stray padding
     // character is skipped and the certificate comes out whole; it is a damaged
@@ -1241,6 +1255,10 @@ void TestConfigToml::withCertificatesOnlyLeavesACleanConfigAsItWas()
             QStringLiteral("[endpoint]\r\nhostname = \"h\"\r\ncertificate = \"\"\"\r\n") + crlfChain
                     + QStringLiteral("\"\"\"\r\n"),
             QStringLiteral("[endpoint]\ncertificate = \"\"\"\n") + kChainPem + QStringLiteral("\"\"\""),
+            // A chain in one block, as 1.1.9 wrote it.
+            QStringLiteral("[endpoint]\ncertificate = \"\"\"\n")
+                    + pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + derOf(kCaPem))
+                    + QStringLiteral("\"\"\"\n"),
             QStringLiteral("[endpoint]\ncertificate = \"\"\n"),
             QStringLiteral("[endpoint]\nhostname = \"h\"\n"),
             QString(),
@@ -1275,6 +1293,8 @@ void TestConfigToml::randomCertificatesKeepTheRules()
                              kBagAttributes,
                              pemBlock(keyLabel(QStringLiteral("RSA ")), kPkcs1Der),
                              pemBlock(QStringLiteral("CERTIFICATE"), kSec1Der),
+                             pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + derOf(kCaPem)),
+                             pemBlock(QStringLiteral("CERTIFICATE"), derOf(kLeafPem) + kPkcs8Der),
                              QStringLiteral("-----BEGIN CERTIFICATE-----\n"),
                              QStringLiteral("-----END CERTIFICATE-----\n"),
                              QStringLiteral("\r\n"),

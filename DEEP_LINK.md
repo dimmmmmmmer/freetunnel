@@ -323,8 +323,10 @@ config arrives: from a file, from the config editor, or as a link (see
 [tag `0x08`](#certificate-tag-0x08)).
 
 - A block is kept when it is labelled `CERTIFICATE` (or `X509 CERTIFICATE`,
-  which OpenSSL reads as well) and decodes to a certificate. A private key,
-  any other block, a damaged block and text between the blocks are left out.
+  which OpenSSL reads as well) and decodes to one or more certificates. A
+  private key, any other block, a damaged block and text between the blocks
+  are left out. FreeTunnel 1.1.9 and earlier wrote a link's whole chain into
+  one block, and such a block is kept as it is.
 - From a file, only the `certificate` lines of the copy FreeTunnel stores
   change, and the notice after the import says "Extra data in the certificate
   was ignored." The file you picked is not changed. The editor says the same

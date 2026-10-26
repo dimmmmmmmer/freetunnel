@@ -87,6 +87,23 @@ bool isCertificateDer(const QByteArray &der)
 
 namespace {
 
+// Whether the bytes are one or more certificates, one after another, and nothing
+// else. FreeTunnel 1.1.9 and earlier put a link's whole chain into one block, and
+// OpenSSL, which the core reads it with, takes the first certificate of it as the
+// pin. Read as one certificate, such a block held none, and a config stored back
+// then lost its pin at the next start.
+bool certificatesBackToBack(const QByteArray &der)
+{
+    int pos = 0;
+    while (pos < der.size()) {
+        const int end = derElementEnd(der, pos);
+        if (end <= pos || !isCertificateDer(der.mid(pos, end - pos)))
+            return false;
+        pos = end;
+    }
+    return pos > 0;
+}
+
 // The DER of one PEM block, or nothing when the block is not a certificate. The
 // body has to be strict base64 once its line breaks are out: decoded leniently,
 // what is not base64 is skipped, and a damaged block could still pass.
@@ -98,7 +115,7 @@ QByteArray certificateBlockDer(const QString &label, QString body)
     body.remove(space);
     const QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(
             body.toLatin1(), QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
-    return decoded && isCertificateDer(decoded.decoded) ? decoded.decoded : QByteArray();
+    return decoded && certificatesBackToBack(decoded.decoded) ? decoded.decoded : QByteArray();
 }
 
 struct PemCertificates {

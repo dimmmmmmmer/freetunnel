@@ -101,8 +101,9 @@ bool isCertificateDer(const QByteArray &der);
 
 // The certificates of a PEM text, and nothing else. A block is kept, exactly as
 // written, when its label is CERTIFICATE (or X509 CERTIFICATE, which OpenSSL
-// reads as well), its body is base64 and it decodes to a certificate
-// (isCertificateDer). Anything else is left out: a private key above all, which
+// reads as well), its body is base64 and it decodes to one or more certificates,
+// one after another (isCertificateDer), as FreeTunnel 1.1.9 and earlier wrote a
+// link's chain. Anything else is left out: a private key above all, which
 // a file that combines the certificate with its key carries beside it, but also
 // another label, a damaged block and any text outside the blocks. *dropped says
 // whether there was any. The text comes back as it was when there was not;

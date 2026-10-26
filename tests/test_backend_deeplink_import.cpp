@@ -58,6 +58,7 @@ private slots:
     void aLinkWithNoCertificateInItsCertificateIsALinkError();
     void importFileDropsAKeyFromTheCertificate();
     void importFileRefusesACertificateThatHoldsNoCertificate();
+    void importFileKeepsAChainInOneBlock();
     void cleanupTestCase();
 };
 
@@ -888,6 +889,32 @@ void TestBackendDeepLinkImport::importFileRefusesACertificateThatHoldsNoCertific
     QCOMPARE(backend.configs().size(), before);
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QVERIFY(!QFileInfo::exists(QDir(base).filePath(QStringLiteral("key-only.toml"))));
+    QFile::remove(path);
+}
+
+// FreeTunnel 1.1.9 and earlier wrote a link's chain into one block, and so did
+// its export of such a config. That block holds nothing but certificates: the
+// file imports, and the copy keeps it as it is.
+void TestBackendDeepLinkImport::importFileKeepsAChainInOneBlock()
+{
+    const QByteArray chain = certs::derOf(certs::kLeafPem) + certs::derOf(certs::kCaPem);
+    const QString oneBlock = certs::pemBlock(QStringLiteral("CERTIFICATE"), chain);
+    QByteArray body = validImportBody();
+    body.append("certificate = \"\"\"\n");
+    body.append(oneBlock.toLatin1());
+    body.append("\"\"\"\n");
+    const QString path = writeTempConfig(QStringLiteral("one-block.toml"), body);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QSignalSpy notices(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.importFile(path));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(notices.count(), 0);
+    const QString onDisk = readConfigText(pathOfImported(imported));
+    QCOMPARE(freetunnel::parseConfigToml(onDisk).certificate, oneBlock.trimmed());
+    QCOMPARE(freetunnel::certificatesDer(freetunnel::parseConfigToml(onDisk).certificate), chain);
     QFile::remove(path);
 }
 

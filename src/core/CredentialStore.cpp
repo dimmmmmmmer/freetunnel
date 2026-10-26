@@ -658,7 +658,8 @@ void sweepLegacyPlaintextStorage()
 // The same goes for whatever such a config holds beside its certificates, such as
 // a private key pasted in with them: the import keeps only the certificates now
 // (withCertificatesOnly), and the rest is taken out here, by the same rules. A
-// certificate with none left is emptied, which is what the core makes of it.
+// block holding a whole chain, as 1.1.9 and earlier wrote one, holds nothing
+// but certificates and stays as it is; a certificate with none left is emptied.
 void sweepStoredSubscriptionAddresses(const QStringList &configPaths)
 {
     const QString ownDir =

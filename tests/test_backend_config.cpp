@@ -72,6 +72,7 @@ private slots:
     void theEditorRefusesACertificateWithNoCertificate();
     void aShareLinkNeverCarriesAKey();
     void aTomlExportNeverCarriesAKey();
+    void aChainInOneBlockIsSharedWhole();
     void aFailedCommitPutsThePreviousPasswordBack();
     void aFailedEditSaveKeepsTheStoredPassword();
     void aRefusedCertificateFileIsExplained();
@@ -1110,11 +1111,17 @@ void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
     // of it.
     const QString keyOnly = QDir(dir).filePath(QStringLiteral("key-only.toml"));
     write(keyOnly, config(block(certs::keyPem())));
+    // A chain in one block, as 1.1.9 and earlier wrote a link's: nothing but
+    // certificates, so nothing to take out.
+    const QString oneBlock = QDir(dir).filePath(QStringLiteral("one-block.toml"));
+    const QByteArray chainInOneBlock = config(block(certs::pemBlock(
+            QStringLiteral("CERTIFICATE"), certs::derOf(certs::kLeafPem) + certs::derOf(certs::kCaPem))));
+    write(oneBlock, chainInOneBlock);
     QTemporaryDir elsewhere;
     QVERIFY(elsewhere.isValid());
     const QString theirs = QDir(elsewhere.path()).filePath(QStringLiteral("theirs.toml"));
     write(theirs, body);
-    QStringList configs{stored, keyOnly, theirs};
+    QStringList configs{stored, keyOnly, oneBlock, theirs};
 #if !defined(Q_OS_WIN)
     const QString linked = QDir(dir).filePath(QStringLiteral("linked.toml"));
     QVERIFY(QFile::link(theirs, linked));
@@ -1127,6 +1134,7 @@ void TestBackendConfig::aStoredKeyIsTakenOutAtStart()
     QCOMPARE(backend.configs().size(), configs.size());
     QCOMPARE(readAll(stored).toUtf8(), config(block(certs::kLeafPem)));
     QCOMPARE(readAll(keyOnly).toUtf8(), config(QStringLiteral("certificate = \"\"\n")));
+    QCOMPARE(readAll(oneBlock).toUtf8(), chainInOneBlock);
     assertOwnerOnly(stored);
     QCOMPARE(readAll(theirs).toUtf8(), body);
 #if !defined(Q_OS_WIN)
@@ -1157,6 +1165,14 @@ void TestBackendConfig::theEditorSavesOnlyTheCertificates()
     QVERIFY(backend.createConfig(chain));
     QCOMPARE(notices.count(), 1);
     QCOMPARE(backend.configFields(0).value(QStringLiteral("certificate")).toString(), certs::kChainPem.trimmed());
+    // And so is a chain in one block, as 1.1.9 and earlier wrote a link's.
+    const QString merged = certs::pemBlock(QStringLiteral("CERTIFICATE"),
+                                           certs::derOf(certs::kLeafPem) + certs::derOf(certs::kCaPem));
+    QVariantMap oneBlock = editorForm(backend, 0);
+    oneBlock[QStringLiteral("certificate")] = merged;
+    QVERIFY(backend.createConfig(oneBlock));
+    QCOMPARE(notices.count(), 1);
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("certificate")).toString(), merged.trimmed());
 }
 
 // A certificate field with no certificate in it is refused, and says what a
@@ -1185,22 +1201,27 @@ void TestBackendConfig::theEditorRefusesACertificateWithNoCertificate()
 }
 
 // Written past the editor, the way a config kept outside the app's folder, which
-// is never cleaned at start, can still be: a key under the certificate label, and
-// a key block of its own, beside the certificate.
-static void putAKeyInTheCertificate(const QString &path)
+// is never cleaned at start, can still be.
+static void putInTheCertificate(const QString &path, const QString &certificate)
 {
     QFile in(path);
     QVERIFY(in.open(QIODevice::ReadOnly));
     QString text = QString::fromUtf8(in.readAll());
     in.close();
-    const QString certificate = certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der) + certs::kLeafPem
-            + certs::keyPem();
     QVERIFY(text.contains(QStringLiteral("certificate = \"\"\n")));
     text.replace(QStringLiteral("certificate = \"\"\n"),
                  QStringLiteral("certificate = \"\"\"\n") + certificate + QStringLiteral("\"\"\"\n"));
     QFile out(path);
     QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
     out.write(text.toUtf8());
+}
+
+// A key under the certificate label, and a key block of its own, beside the
+// certificate.
+static void putAKeyInTheCertificate(const QString &path)
+{
+    putInTheCertificate(path, certs::pemBlock(QStringLiteral("CERTIFICATE"), certs::kPkcs8Der) + certs::kLeafPem
+                                      + certs::keyPem());
 }
 
 // A link is made to be handed on: it carries the certificate alone.
@@ -1233,6 +1254,30 @@ void TestBackendConfig::aTomlExportNeverCarriesAKey()
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(exported);
     QCOMPARE(c.certificate, certs::kLeafPem.trimmed());
     QCOMPARE(c.password, QStringLiteral("hunter2"));
+}
+
+// A chain in one block, as 1.1.9 and earlier wrote a link's, holds nothing but
+// certificates: its link carries the whole chain, as it always did, and so does
+// its export.
+void TestBackendConfig::aChainInOneBlockIsSharedWhole()
+{
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
+    const QByteArray chain = certs::derOf(certs::kLeafPem) + certs::derOf(certs::kCaPem);
+    const QString oneBlock = certs::pemBlock(QStringLiteral("CERTIFICATE"), chain);
+    putInTheCertificate(pathFor(backend, 0), oneBlock);
+
+    QString err;
+    const auto dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->certificate, chain);
+
+    const QString dest = QDir(m_home.path()).filePath(QStringLiteral("exported.toml"));
+    QFile::remove(dest);
+    QVERIFY(backend.exportConfigToml(0, dest));
+    const QString exported = readAll(dest);
+    QFile::remove(dest);
+    QCOMPARE(freetunnel::parseConfigToml(exported).certificate, oneBlock.trimmed());
 }
 
 // The editor keeps its certificate field when a pick reads nothing, so the
