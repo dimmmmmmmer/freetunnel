@@ -390,6 +390,39 @@ bool isSubscriptionTable(QString name)
             || name.startsWith(QLatin1String("endpoint.subscription."));
 }
 
+// What withoutSubscription() keeps, one line at a time. A line inside a value
+// that runs on goes or stays with the key that opened it.
+class SubscriptionLineFilter {
+public:
+    bool keeps(const QString &line)
+    {
+        if (m_open.open()) {
+            advanceOpenValue(m_open, line);
+            return !m_dropTable && !m_dropKey;
+        }
+        QString name;
+        if (isTableHeader(line, &name)) {
+            m_table = name;
+            m_dropTable = isSubscriptionTable(name);
+            m_dropKey = false;
+            m_removedAny = m_removedAny || m_dropTable;
+            return !m_dropTable;
+        }
+        m_dropKey = !m_dropTable && isSubscriptionKey(m_table, keyOf(line));
+        m_removedAny = m_removedAny || m_dropKey;
+        advanceOpenValue(m_open, line);
+        return !m_dropTable && !m_dropKey;
+    }
+    bool removedAny() const { return m_removedAny; }
+
+private:
+    QString m_table;
+    bool m_dropTable = false;
+    bool m_dropKey = false;
+    bool m_removedAny = false;
+    OpenValue m_open;
+};
+
 } // namespace
 
 // Line by line, as splitTomlTables() reads tables, so everything else stays
@@ -402,37 +435,14 @@ QString withoutSubscription(const QString &toml, bool *removed)
     if (finalNewline)
         lines.removeLast();
     QStringList kept;
-    QString table;
-    bool dropTable = false;
-    bool dropKey = false;
-    bool any = false;
-    OpenValue open;
+    SubscriptionLineFilter filter;
     for (const QString &line : lines) {
-        if (open.open()) {
-            if (!dropTable && !dropKey)
-                kept << line;
-            advanceOpenValue(open, line);
-            continue;
-        }
-        QString name;
-        if (isTableHeader(line, &name)) {
-            table = name;
-            dropTable = isSubscriptionTable(name);
-            dropKey = false;
-            any = any || dropTable;
-            if (!dropTable)
-                kept << line;
-            continue;
-        }
-        dropKey = !dropTable && isSubscriptionKey(table, keyOf(line));
-        any = any || dropKey;
-        if (!dropTable && !dropKey)
+        if (filter.keeps(line))
             kept << line;
-        advanceOpenValue(open, line);
     }
     if (removed)
-        *removed = any;
-    if (!any)
+        *removed = filter.removedAny();
+    if (!filter.removedAny())
         return toml;
     QString out = kept.join(QLatin1Char('\n'));
     if (finalNewline && !out.isEmpty())
