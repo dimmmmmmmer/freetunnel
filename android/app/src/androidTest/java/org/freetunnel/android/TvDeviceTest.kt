@@ -556,8 +556,14 @@ class TvDeviceTest {
         return "POST $path HTTP/1.1\r\nHost: $host\r\nContent-Type: application/x-www-form-urlencoded\r\n" +
             "Content-Length: ${body.length}\r\n\r\n$body"
     }
-    private fun assertClosed(url: String) = assertThrows("$url must be closed", ConnectException::class.java) {
-        http(url) { host, _ -> "GET / HTTP/1.1\r\nHost: $host\r\n\r\n" }
+    // stop() closes the port, but the receiver's thread, waiting in accept(), lets go
+    // of it only once it wakes, a moment later on a slow emulator. Until then a
+    // connection is taken or reset rather than refused.
+    private fun assertClosed(url: String) = eventually("$url must be closed", 2_000) {
+        val page = URI(url)
+        try { Socket(page.host, page.port).close(); false }
+        catch (_: ConnectException) { true }
+        catch (_: java.io.IOException) { false }
     }
 
     @SdkSuppress(minSdkVersion = 29)

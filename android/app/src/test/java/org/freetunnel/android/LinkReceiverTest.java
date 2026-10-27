@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import io.nayuki.qrcodegen.QrCode;
 
@@ -439,8 +440,18 @@ public final class LinkReceiverTest {
     private static String loopbackPost(int port, String path, String body) {
         return post(path, "127.0.0.1:" + port, "Content-Type: application/x-www-form-urlencoded\r\n", body);
     }
-    private static void assertClosed(int port) {
-        assertThrows("The port must be closed", ConnectException.class, () -> connect(port).close());
+    // stop() from another thread closes the port, but the receiver's thread, if it
+    // waits in accept(), lets go of it only once it wakes, a moment later on a busy
+    // machine. Until then a connection is taken or reset rather than refused.
+    private static void assertClosed(int port) throws InterruptedException {
+        long end = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < end) {
+            try { connect(port).close(); }
+            catch (ConnectException refused) { return; }
+            catch (IOException closing) { /* not yet */ }
+            Thread.sleep(20);
+        }
+        fail("The port must be closed");
     }
 
     @Test public void oneTextIsReceivedAndThenThePortCloses() throws Exception {
