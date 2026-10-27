@@ -108,9 +108,9 @@ certificate, then any that signed it.
 - The value has to split into whole DER elements. One that does not fails the
   import as damaged ("malformed certificate"), as in TrustTunnel's own decoder.
 - Only the elements with the outer shape of an X.509 certificate are kept:
-  `SEQUENCE { SEQUENCE, SEQUENCE, BIT STRING }`. Anything else, such as a
-  private key, is left out of the config, and the question before the import
-  says "Extra data in the certificate was ignored."
+  `SEQUENCE { SEQUENCE, SEQUENCE, BIT STRING }`. Anything else is left out of
+  the config, and the question before the import says "Extra data in the
+  certificate was ignored."
 - A value with no certificate in it at all fails the import as damaged. The
   link meant to pin its server, and without the pin, a server with a
   self-signed certificate would fail later, at the handshake.
@@ -324,9 +324,8 @@ config arrives: from a file, from the config editor, or as a link (see
 [tag `0x08`](#certificate-tag-0x08)).
 
 - A block is kept when it is labelled `CERTIFICATE` (or `X509 CERTIFICATE`,
-  which OpenSSL reads as well) and decodes to one or more certificates. A
-  private key, any other block, a damaged block and text between the blocks
-  are left out. FreeTunnel 1.1.9 and earlier wrote a link's whole chain into
+  which OpenSSL reads as well) and decodes to one or more certificates. Any
+  other block, a damaged block and text between the blocks are left out. FreeTunnel 1.1.9 and earlier wrote a link's whole chain into
   one block, and such a block is kept as it is.
 - From a file, only the `certificate` lines of the copy FreeTunnel stores
   change, and the notice after the import says "Extra data in the certificate

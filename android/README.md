@@ -22,8 +22,8 @@ certificate is not an official release or an update compatibility contract.
   desktop, which also reads a blank key, or one that is not a string, as no
   key. The endpoint writes only an empty key or a hex one, so the two differ
   only on a file edited by hand. Of a server's certificate, only
-  the certificates are kept: other PEM data, such as a private key, is left
-  out and the import says so. A whole chain in one block, as the desktop's
+  the certificates are kept: other PEM data is left out and the import says
+  so. A whole chain in one block, as the desktop's
   FreeTunnel 1.1.9 and earlier wrote one, is kept as it is. A certificate
   with no certificate in it is refused. The TOML file a TrustTunnel endpoint
   exports, with the server's settings at the top and no `[endpoint]` table,
