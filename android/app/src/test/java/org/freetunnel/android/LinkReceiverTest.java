@@ -205,7 +205,7 @@ public final class LinkReceiverTest {
         String two = "Content-Type: application/x-www-form-urlencoded\r\nContent-Type: application/x-www-form-urlencoded\r\n";
         assertRefused("two types", "HTTP/1.1 415 Unsupported Media Type", exchange(post("/K7QM4XHD", HOST, two, body)));
         // Other methods get nothing, not even the form, and a query is no way in.
-        for (String method : new String[]{"PUT", "HEAD", "OPTIONS", "DELETE", "get"}) {
+        for (String method : new String[]{"PUT", "HEAD", "OPTIONS", "DELETE", "GETX"}) {
             Exchange exchange = exchange(post("/K7QM4XHD", body).replaceFirst("POST", method));
             assertRefused(method, "HTTP/1.1 405 Method Not Allowed", exchange);
             assertTrue(exchange.response.contains("\r\nAllow: GET, POST\r\n"));
@@ -223,6 +223,39 @@ public final class LinkReceiverTest {
         Exchange cut = exchange("GET / HTTP/1.1\r\nHost: " + HOST + "\r\n");
         assertSame(LinkReceiver.Kind.REFUSED, cut.outcome.kind);
         assertEquals("", cut.response);
+    }
+
+    @Test public void aTlsHandshakeIsDroppedAtItsFirstByte() throws IOException {
+        // A browser that tries https first sends a TLS ClientHello, which starts with
+        // 0x16. Dropped at once, it falls back to http instead of waiting.
+        byte[] hello = {0x16, 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, (byte) 0xfc, 0x03, 0x03};
+        Exchange tls = exchange(hello, false);
+        assertSame(LinkReceiver.Kind.REFUSED, tls.outcome.kind);
+        assertEquals("", tls.response);
+        assertEquals("Nothing after the first byte is read", hello.length - 1, tls.unread);
+        for (String start : new String[]{"\r\nGET / HTTP/1.1", " GET / HTTP/1.1", "get / HTTP/1.1"}) {
+            Exchange other = exchange(start + "\r\nHost: " + HOST + "\r\n\r\n");
+            assertEquals(start, "", other.response);
+            assertSame(start, LinkReceiver.Kind.REFUSED, other.outcome.kind);
+        }
+    }
+
+    @Test public void aTlsHandshakeIsDroppedWithoutWaiting() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 5_000, 10_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        try (Socket tls = connect(port)) {
+            tls.setSoTimeout(5_000);
+            long started = System.nanoTime();
+            tls.getOutputStream().write(new byte[]{0x16, 0x03, 0x01, 0x02, 0x00});
+            int read;
+            try { read = tls.getInputStream().read(); }
+            catch (java.net.SocketException reset) { read = -1; }
+            assertEquals(-1, read);
+            assertTrue("Dropped at once, not at its read timeout", System.nanoTime() - started < 2_000_000_000L);
+        }
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
+        assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
     }
 
     @Test public void aBrokenOrEmptyTextIsRefusedWithoutAStrike() throws IOException {
@@ -462,10 +495,11 @@ public final class LinkReceiverTest {
         long cutAfterMs;
         try (Socket trickling = connect(port)) {
             trickling.setSoTimeout(5_000);
-            // A byte every 100 ms, well inside each read's timeout, and never a whole request.
+            // A byte every 100 ms, well inside each read's timeout, and never a whole
+            // request, though it starts as one.
             Thread writer = new Thread(() -> {
                 try {
-                    for (int i = 0; i < 50; i++) { trickling.getOutputStream().write('x'); Thread.sleep(100); }
+                    for (int i = 0; i < 50; i++) { trickling.getOutputStream().write(i == 0 ? 'G' : 'x'); Thread.sleep(100); }
                 } catch (IOException | InterruptedException done) {
                     // Cut off, or the test is over.
                 }

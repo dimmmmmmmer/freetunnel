@@ -340,13 +340,16 @@ final class LinkReceiver {
     }
 
     // The request line and headers, up to the blank line after them. Null when the
-    // client closes before that, empty when they are longer than MAX_HEADER_BYTES.
+    // client closes before that, or sends what cannot start a method, such as the
+    // TLS handshake of a browser that tries https first: dropped at once, it falls
+    // back to http instead of waiting out a read timeout. Empty when they are longer
+    // than MAX_HEADER_BYTES.
     private static byte[] readHead(InputStream in) throws IOException {
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         int matched = 0;
         while (head.size() < MAX_HEADER_BYTES) {
             int b = in.read();
-            if (b < 0) return null;
+            if (b < 0 || head.size() == 0 && (b < 'A' || b > 'Z')) return null;
             head.write(b);
             matched = b == "\r\n\r\n".charAt(matched) ? matched + 1 : b == '\r' ? 1 : 0;
             if (matched == 4) return head.toByteArray();
