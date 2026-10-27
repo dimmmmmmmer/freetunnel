@@ -142,6 +142,9 @@ jobs:
       - name: Every action is pinned to a commit
         run: bash scripts/check-pinned-deps.sh
 
+      - name: The third-party notices name the pinned versions
+        run: bash scripts/check-third-party-notices.sh
+
       # What changed comes from android/CHANGELOG.md, so every release says
       # something about itself. Its sections are '## <version>' under one
       # '# ' title, as in the desktop's CHANGELOG.md. The install notes are the

@@ -133,6 +133,10 @@ jobs:
       - name: Verify pinned upstream and FetchContent tags
         run: bash scripts/check-pinned-deps.sh
 
+      # A dependency bump that leaves THIRD_PARTY_NOTICES.md behind fails here.
+      - name: The third-party notices name the pinned versions
+        run: bash scripts/check-third-party-notices.sh
+
   dependency-review:
     permissions:
       contents: read
