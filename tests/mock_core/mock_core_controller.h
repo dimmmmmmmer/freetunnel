@@ -66,10 +66,6 @@ struct CoreConfigSnapshot {
     std::string client_random_auth_key;
     // [endpoint] tls_profile, as written ("" when the config says nothing).
     std::string tls_profile;
-    // What the most recent connect() was told to do when the first attempt fails
-    // (ConnectOptions::fall_into_recovery): -1 until a connect was made. Not part
-    // of the config, but it belongs to the same hand-over to the core.
-    int connect_fall_into_recovery = -1;
 };
 
 // One call of TrustTunnelClient::update_exclusions() on a running session: the
@@ -103,6 +99,7 @@ public:
         m_lastConfig = CoreConfigSnapshot{};
         m_configCaptures = 0;
         m_connectOptions.clear();
+        m_contractViolations.clear();
         m_certError.clear();
         m_lastVerifiedCert.clear();
         m_lastVerifiedChain.clear();
@@ -241,6 +238,16 @@ public:
         return m_connectOptions;
     }
 
+    // Things the test asked this mock core to do that the real core cannot do,
+    // recorded rather than thrown so that a fixture can check them once the test
+    // is over (a state the mock was told to report is only worth testing against
+    // if the real core could have reported it). Empty when there were none.
+    std::vector<std::string> contractViolations()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_contractViolations;
+    }
+
     std::string lastVerifiedCert()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -289,6 +296,7 @@ public:
     void fireStateChanged(uint64_t id, ag::VpnSessionState state, int code = ag::VPN_EC_NOERROR,
                           const char *text = nullptr)
     {
+        noteStateAgainstConnectOptions(id, state);
         ag::VpnCallbacks cbs = callbacksFor(id);
         if (!cbs.state_changed_handler)
             return;
@@ -411,10 +419,9 @@ public:
         ++m_connectCalls;
         m_lastClientId = id;
         m_connectOptions.push_back(fallIntoRecovery);
-        m_lastConfig.connect_fall_into_recovery = fallIntoRecovery ? 1 : 0;
+        if (const auto it = m_clients.find(id); it != m_clients.end())
+            it->second.fallIntoRecovery = fallIntoRecovery;
         noteLifecycle("connect", id);
-        // Mirrored like the config, for the helper process (see recordCoreConfig).
-        dumpCoreConfig(m_lastConfig);
         m_cv.wait(lock, [this]() { return !m_blockConnect; });
         return m_connectError;
     }
@@ -528,7 +535,37 @@ private:
         int disconnects = 0;
         std::vector<NetworkChange> networkChanges;
         std::vector<uint32_t> dnsReads; // outbound interface at each set_system_dns()
+        // What the client's connect() asked for (ConnectOptions::fall_into_recovery),
+        // and whether the test has reported it connected yet; see
+        // noteStateAgainstConnectOptions().
+        bool fallIntoRecovery = false;
+        bool reportedConnected = false;
     };
+
+    // The core's state machine (core/src/vpn_fsm.cpp) leaves CONNECTING for
+    // WAITING_RECOVERY, and so reaches RECOVERING, only when the connect asked to
+    // fall into recovery, or once the session has been connected. Without that a
+    // first connect that fails retries a few times and ends DISCONNECTED. A test
+    // that reports a recovery state for a session that could not be in one is
+    // testing the wrapper against a core that does not exist.
+    void noteStateAgainstConnectOptions(uint64_t id, ag::VpnSessionState state)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_clients.find(id);
+        if (it == m_clients.end())
+            return;
+        Record &record = it->second;
+        if (state == ag::VPN_SS_CONNECTED) {
+            record.reportedConnected = true;
+        } else if ((state == ag::VPN_SS_WAITING_RECOVERY || state == ag::VPN_SS_RECOVERING)
+                   && !record.reportedConnected && !record.fallIntoRecovery) {
+            m_contractViolations.push_back(
+                    "client " + std::to_string(id) + " was told to enter "
+                    + (state == ag::VPN_SS_RECOVERING ? "RECOVERING" : "WAITING_RECOVERY")
+                    + " before it connected, but its connect() did not ask to fall into "
+                      "recovery (the kill switch is off), so the real core would not get there");
+        }
+    }
 
     // The core's lifecycle as it happens, one `event id` line per call, appended
     // to FT_TEST_CORE_EVENT_LOG. For the same reason as dumpCoreConfig: in the
@@ -597,8 +634,7 @@ private:
             out << "exclusions=" << oneLine(update.exclusions) << '\n';
         }
         // Published by rename, as dumpCoreConfig() below explains.
-        std::remove(target.c_str());
-        std::rename(partial.c_str(), target.c_str());
+        publishByRename(partial, target);
     }
 
     static void dumpCoreConfig(const CoreConfigSnapshot &snap)
@@ -633,12 +669,21 @@ private:
             out << "netns=" << orUnset(snap.netns) << '\n';
             out << "client_random_auth_key=" << oneLine(snap.client_random_auth_key) << '\n';
             out << "tls_profile=" << oneLine(snap.tls_profile) << '\n';
-            out << "connect_fall_into_recovery=" << snap.connect_fall_into_recovery << '\n';
         }
         // Publish by rename so a reader polling for the file never gets a
-        // half-written one. The remove() is for Windows, whose rename() refuses
-        // an existing target; the file only ever appears fully formed either way.
+        // half-written one.
+        publishByRename(partial, target);
+    }
+
+    // POSIX rename() replaces the target in one step, so a reader that polls for
+    // the file never finds the path missing between the old file and the new one.
+    // Only Windows' rename() refuses an existing target, and only there is it
+    // removed first; the file only ever appears fully formed either way.
+    static void publishByRename(const std::string &partial, const std::string &target)
+    {
+#ifdef _WIN32
         std::remove(target.c_str());
+#endif
         std::rename(partial.c_str(), target.c_str());
     }
 
@@ -654,6 +699,7 @@ private:
     CoreConfigSnapshot m_lastConfig;
     int m_configCaptures = 0;
     std::vector<bool> m_connectOptions;
+    std::vector<std::string> m_contractViolations;
     std::string m_certError;
     std::string m_lastVerifiedCert;
     std::string m_lastVerifiedChain;

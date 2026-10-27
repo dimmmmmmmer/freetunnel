@@ -112,6 +112,9 @@ private slots:
         QVERIFY(m_thread->wait(kLongWaitMs));
         delete m_thread;
         m_thread = nullptr;
+        // After the teardown, so a failure here leaks nothing into the next test.
+        const std::vector<std::string> violations = mockcore::Controller::instance().contractViolations();
+        QVERIFY2(violations.empty(), violations.empty() ? "" : violations.front().c_str());
     }
 
     void connectReachesConnectedAndDisconnects();
@@ -1408,6 +1411,11 @@ void TestQtTrustTunnelClient::disconnectStopsASessionTheCoreIsStillRetrying()
 void TestQtTrustTunnelClient::aNewSessionSaysWhyItIsNotConnectingAgain()
 {
     auto &ctl = mockcore::Controller::instance();
+    // The kill switch is what makes the core keep a first connect that fails and
+    // go round its recovery loop; without it the core never reports this state
+    // for a session that has not connected.
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
     ctl.fireStateChanged(ctl.lastClientId(), ag::VPN_SS_WAITING_RECOVERY, ag::VPN_EC_ERROR,
