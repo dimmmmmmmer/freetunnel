@@ -34,7 +34,7 @@ needs Android 8.0 or later.
   recording, and asks the keyboard neither to learn from what is typed there
   nor to show its own copy of it.
 - Of a server's certificate, only the certificates are kept. Anything else in
-  it, such as a private key, is left out, and the import says so.
+  it is left out, and the import says so.
 - An update must be a newer version, match the checksum in a manifest signed
   with the project's release key, and be signed with the release certificate.
   A build signed with another key never checks for updates.
