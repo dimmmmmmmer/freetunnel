@@ -481,7 +481,8 @@ the user can tell it to stop asking.
   - every `tt://` import asks, answered the same way: by a click;
   - config import links use TrustTunnel's type-length-value (TLV) / base64url
     format, read with TLV parser limits;
-  - passwords from links go directly to the credential store, not on-disk TOML;
+  - passwords and client random auth keys from links go directly to the
+    credential store, not on-disk TOML;
   - the helper clears the config keys that would point root at a path, port or
     interface ([config files](#config-files-reaching-root)).
 
@@ -514,7 +515,11 @@ Service, is in [SECURITY.md](../SECURITY.md#credential-storage).
 - **Threat:** passwords read from config files on disk.
 - **Mitigation:** passwords live in the OS credential store; passwords from
   links go directly there; the helper's config is built in memory for each
-  connect ([SECURITY.md](../SECURITY.md#during-connect)).
+  connect ([SECURITY.md](../SECURITY.md#during-connect)). A client random auth
+  key (TrustTunnel 1.3) is kept the same way: it is never on the wire, so the
+  config file and the link are the only places it could leak from, and whoever
+  holds it passes the server's gate, which a prober could use to tell the
+  server from any other.
 - **Residual risk:**
   - password files older builds wrote stay on disk until the app next reads
     each one with secure storage available

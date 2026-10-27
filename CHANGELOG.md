@@ -11,6 +11,8 @@ compare link at the bottom of its release notes.
 
 - Links and config files from TrustTunnel 1.3 servers are read, and so is the
   TOML file a TrustTunnel endpoint exports.
+- Servers that check a client random auth key now connect, and the VPN core is
+  TrustTunnel 1.3.
 - A 1.3 config's subscription address, which holds the VPN password, is no
   longer kept in plain text, and a config's certificate keeps only its
   certificates.
@@ -32,8 +34,36 @@ compare link at the bottom of its release notes.
   next time FreeTunnel starts. A certificate with no certificate in it is
   refused, and so is a link whose certificate is damaged.
 
+### Added
+
+- **Windows, macOS and Linux: servers that check a client random auth key now
+  connect.** TrustTunnel 1.3 servers can require one. The key comes in with the
+  server from a tt:// link, a config file or the file an endpoint exports, and
+  the config editor has an Auth key field.
+  - The key is a secret, like the password. It is kept in the system's
+    credential store, never in the config file, and it is not shown in the
+    question before an import. A config that is replaced by a link or file
+    without a key loses the key it had.
+  - A share link or export of such a config carries the key, as a link without
+    it could not connect. That link is the newer format (version 2), which
+    FreeTunnel 1.2.3 and earlier cannot read; a config without a key still makes
+    the older kind.
+  - A key that is not whole bytes of hex is refused, as TrustTunnel would
+    connect without it and the server would turn the connection away.
+  - While a key is set, the client random is not used. The editor says so.
+
 ### Changed
 
+- **Windows, macOS and Linux: the VPN core is TrustTunnel 1.3**, up from 1.1.7.
+  - A config file's `tls_profile`, which picks the browser whose TLS fingerprint
+    the connection imitates (`chrome`, `chrome_canary`, `safari`, `firefox`,
+    `okhttp`, `openssl` or `default`), takes effect now. It used to be ignored.
+    A name the core does not know fails the connection, with "Invalid
+    TrustTunnel config structure".
+  - Linux: a default route through a network interface that is gone is no longer
+    used.
+  - Linux: a tunnel device that fails for good no longer fills the log with an
+    error on every pass of the core's loop, about 20 MB a second.
 - **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
   exports.** That file (`--format toml`) has the server's keys but no
   `[endpoint]` table, and was refused as not a valid config. FreeTunnel now
@@ -48,8 +78,6 @@ compare link at the bottom of its release notes.
   - Subscriptions aren't supported yet. A subscription link that also carries
     its server adds that server, which won't update itself; one without is
     refused, and says so.
-  - A server that needs a client random auth key is refused, link or file: it
-    needs a newer TrustTunnel core than this version uses.
 - **Windows: installing no longer stops on "Error opening file for writing",
   and uninstalling no longer leaves files behind, when FreeTunnel is slow to
   close.** After closing it by force at ten seconds, both now wait up to about

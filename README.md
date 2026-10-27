@@ -132,7 +132,9 @@ exports with `--format toml`, imported from file (see
 [DEEP_LINK.md](DEEP_LINK.md#the-endpoints-toml-export)).
 
 Passwords stay in the OS credential store: Keychain on macOS, Credential Manager
-on Windows, libsecret on Linux.
+on Windows, libsecret on Linux. So does the client random auth key that a
+TrustTunnel 1.3 server may ask for, which a link, a config file and an endpoint's
+export can carry and the config editor has a field for.
 
 ## Split tunnelling
 
