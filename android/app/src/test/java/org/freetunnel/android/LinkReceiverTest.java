@@ -295,6 +295,7 @@ public final class LinkReceiverTest {
                 post("/K7QM4XHD", HOST, "", "x"), "PUT / HTTP/1.1\r\nHost: " + HOST + "\r\n\r\n",
                 "GET / HTTP/1.1\r\nHost: " + HOST + "\r\nX: " + "x".repeat(LinkReceiver.MAX_HEADER_BYTES) + "\r\n\r\n"};
         List<String> statuses = new ArrayList<>();
+        List<String> types = new ArrayList<>();
         for (String request : requests) {
             Exchange exchange = exchange(request);
             statuses.add(exchange.status().substring(9, 12));
@@ -303,9 +304,13 @@ public final class LinkReceiverTest {
                     "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY", "Content-Security-Policy: " + CSP,
                     "Content-Length: " + exchange.body().getBytes(StandardCharsets.UTF_8).length})
                 assertTrue(exchange.status() + " lacks " + expected, headers.contains(expected));
-            assertTrue(exchange.status(), headers.get(1).startsWith("Content-Type: text/") && headers.get(1).endsWith("; charset=utf-8"));
+            types.add(headers.get(1));
         }
         assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431"), statuses);
+        // The pages are HTML, which nosniff makes the browser take at its word; the refusals are plain text.
+        String html = "Content-Type: text/html; charset=utf-8";
+        String plain = "Content-Type: text/plain; charset=utf-8";
+        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain), types);
     }
 
     @Test public void thePagesLoadNothingAndEscapeTheirText() {
