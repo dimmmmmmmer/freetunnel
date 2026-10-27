@@ -159,4 +159,20 @@
     <string name="text_no_file_picker">На этом устройстве нет выбора файлов. Вставьте ссылку из буфера или создайте конфигурацию вручную.</string>
     <string name="text_vpn_consent_unavailable">На этом устройстве нет экрана Android для разрешения VPN-подключений, поэтому FreeTunnel не может подключиться.</string>
     <string name="text_no_always_on_here">На этом устройстве нет постоянного VPN, поэтому kill switch защищает, только пока FreeTunnel работает.</string>
+    <string name="text_receive_from_phone">Получить с телефона</string>
+    <string name="text_receive_hint">Отсканируйте код телефоном в той же сети или откройте адрес в его браузере и отправьте ссылку tt:// или TOML-файл. Если страница не открывается, выключите VPN на телефоне. Только в доверенной сети: ссылка передаётся по ней без шифрования. Работает один раз, 5 минут.</string>
+    <string name="text_receive_no_network">У устройства нет адреса в домашней сети, по которому его найдёт телефон. Подключите его к Wi-Fi или Ethernet.</string>
+    <string name="text_receive_failed">Не удалось получить с телефона. Попробуйте ещё раз.</string>
+    <string name="text_receive_timed_out">За 5 минут ничего не пришло. Откройте «Получить с телефона» снова, чтобы получить новый код.</string>
+    <string name="text_receive_locked_out">Неверный код отправлен 3 раза, поэтому приём остановлен. Если это были не вы, кто-то другой в этой сети пытался отправить конфигурацию. Откройте «Получить с телефона» снова, чтобы получить новый код.</string>
+    <string name="text_nsent_from_s">"\nОтправлено с %1$s"</string>
+    <string name="text_from_another_device">С другого устройства</string>
+    <string name="text_no_file_picker_receive">На этом телевизоре нет выбора файлов. Используйте «Получить с телефона» или создайте конфигурацию вручную.</string>
+    <string name="receive_page_title">Отправка в FreeTunnel</string>
+    <string name="receive_page_prompt">Вставьте ссылку tt:// или TOML-файл TrustTunnel:</string>
+    <string name="receive_page_send">Отправить на телевизор</string>
+    <string name="receive_page_note">Телевизор покажет, что получил, и спросит, прежде чем добавить. Текст передаётся по сети без шифрования, поэтому отправляйте его только в доверенной сети.</string>
+    <string name="receive_page_sent">Отправлено. Подтвердите на телевизоре.</string>
+    <string name="receive_page_wrong_code">Неверный код. Проверьте адрес на экране телевизора и попробуйте ещё раз.</string>
+    <string name="receive_page_locked_out">Снова неверный код, поэтому телевизор прекратил приём. Откройте на нём «Получить с телефона» ещё раз, чтобы получить новый адрес.</string>
 </resources>

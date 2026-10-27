@@ -159,4 +159,20 @@
     <string name="text_no_file_picker">This device has no file picker. Paste a link from the clipboard, or create the configuration manually.</string>
     <string name="text_vpn_consent_unavailable">This device has no Android screen for allowing VPN connections, so FreeTunnel can’t connect.</string>
     <string name="text_no_always_on_here">This device has no Always-on VPN, so the kill switch protects only while FreeTunnel runs.</string>
+    <string name="text_receive_from_phone">Receive from phone</string>
+    <string name="text_receive_hint">Scan the code with a phone on the same network, or open the address in a browser there, and send a tt:// link or a TOML file. If the page doesn’t open, turn off the phone’s VPN. Use a network you trust: the link crosses it unencrypted. This works once, for 5 minutes.</string>
+    <string name="text_receive_no_network">This device has no home network address for a phone to reach. Connect it to Wi-Fi or Ethernet.</string>
+    <string name="text_receive_failed">Couldn’t receive from a phone. Try again.</string>
+    <string name="text_receive_timed_out">Nothing arrived in 5 minutes. Open Receive from phone again for a new code.</string>
+    <string name="text_receive_locked_out">A wrong code was sent 3 times, so receiving stopped. If that wasn’t you, someone else on this network tried to send a configuration. Open Receive from phone again for a new code.</string>
+    <string name="text_nsent_from_s">"\nSent from %1$s"</string>
+    <string name="text_from_another_device">From another device</string>
+    <string name="text_no_file_picker_receive">This TV has no file picker. Use Receive from phone, or create the configuration manually.</string>
+    <string name="receive_page_title">Send to FreeTunnel</string>
+    <string name="receive_page_prompt">Paste a tt:// link or a TrustTunnel TOML file:</string>
+    <string name="receive_page_send">Send to TV</string>
+    <string name="receive_page_note">The TV shows what it received and asks before adding it. The text crosses your network unencrypted, so send it only over a network you trust.</string>
+    <string name="receive_page_sent">Sent. Confirm it on the TV.</string>
+    <string name="receive_page_wrong_code">Wrong code. Check the address the TV shows, and try again.</string>
+    <string name="receive_page_locked_out">Wrong code again, so the TV stopped receiving. Open Receive from phone on the TV again for a new address.</string>
 </resources>
