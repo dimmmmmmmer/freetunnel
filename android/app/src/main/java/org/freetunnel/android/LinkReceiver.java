@@ -574,15 +574,18 @@ final class LinkReceiver {
     /**
      * A file's name as a browser sends it, to name a configuration as a file picked on
      * the TV is named: the quote and line breaks browsers write as %22, %0D and %0A
-     * undone, then only what follows the last / or \, without control, line or
-     * paragraph separator characters, trimmed, and cut to MAX_FILE_NAME characters.
-     * Null when the confirmation would show nothing of it (ShownText), which also
-     * shows it on one line and cut, without what else could reverse, hide or paint
-     * over text.
+     * undone, then only what follows the last /, as for a file picked on the TV,
+     * without control, line or paragraph separator characters, trimmed, and cut to
+     * MAX_FILE_NAME characters. Null when the confirmation would show nothing of it
+     * (ShownText), which also shows it on one line and cut, without what else could
+     * reverse, hide or paint over text.
+     *
+     * <p>Browsers send no path, and those escapes are the only ones they write, so a
+     * backslash is part of the name, as macOS, iOS and Linux allow in one.
      */
     static String fileName(String sent) {
         String name = sent.replace("%22", "\"").replace("%0D", "").replace("%0A", "");
-        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+        name = name.substring(name.lastIndexOf('/') + 1);
         StringBuilder kept = new StringBuilder(name.length());
         for (int i = 0; i < name.length(); ) {
             int c = name.codePointAt(i);

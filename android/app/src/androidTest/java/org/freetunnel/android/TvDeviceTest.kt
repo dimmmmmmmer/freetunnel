@@ -660,8 +660,9 @@ class TvDeviceTest {
     // Both legs: a file chosen on the phone instead of pasted. A send with nothing
     // in it or one too large to take is no strike. A TOML file with no name of its
     // own is named after its file, without the escape the browser wrote for the
-    // quote. It is the TOML that VpnDeviceTest validates natively, with a byte order
-    // mark and CRLF line ends.
+    // quote, and with the backslash a name on a phone or a Mac may have. It is the
+    // TOML that VpnDeviceTest validates natively, with a byte order mark and CRLF
+    // line ends.
     @SdkSuppress(minSdkVersion = 29)
     @Test fun aFileFromAPhoneIsNamedAfterItAndAddedOnlyOnceTheTvConfirmsIt() {
         val a = open()
@@ -687,13 +688,13 @@ class TvDeviceTest {
             photo.contains(LinkReceiver.escape(context.getString(R.string.receive_page_too_large))))
         assertSame(opened, receiver(a))
         val toml = "\uFEFF" + source.replace("vpn.invalid", "file.example.com").replace("\n", "\r\n") + "\r\n"
-        val sent = httpBytes(url) { h, path -> filePost(h, path, "Home %22TV%22\u202E VPN.toml", toml.toByteArray()) }
+        val sent = httpBytes(url) { h, path -> filePost(h, path, "Home\\Office %22TV%22\u202E VPN.toml", toml.toByteArray()) }
         assertTrue(sent, sent.startsWith("HTTP/1.1 200 ") && sent.contains(context.getString(R.string.receive_page_sent)))
         eventually("The receiver must stop") { receiver(a) == null }
         assertClosed(url)
         // Shown without what would reverse the rest; saved as the file has it, as one
         // picked on the TV is.
-        val name = "Home \"TV\" VPN.toml"
+        val name = "Home\\Office \"TV\" VPN.toml"
         val from = context.getString(R.string.text_nsent_from_s, URI(url).host).trim()
         fun confirmation() = windows().lastOrNull { window ->
             window.findViewById<TextView>(android.R.id.message)?.text
@@ -703,7 +704,7 @@ class TvDeviceTest {
         assertEquals("Nothing is added before the TV confirms", 2, saved().size)
         onMain { confirmation()!!.findViewById<Button>(android.R.id.button1).performClick() }
         eventually("Add must save it") { saved().size == 3 }
-        assertEquals("Home \"TV\"\u202E VPN.toml", saved().last().getString("name"))
+        assertEquals("Home\\Office \"TV\"\u202E VPN.toml", saved().last().getString("name"))
         assertTrue(saved().last().getString("toml").contains("hostname = \"file.example.com\""))
     }
 

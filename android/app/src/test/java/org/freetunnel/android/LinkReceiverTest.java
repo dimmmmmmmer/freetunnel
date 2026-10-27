@@ -473,9 +473,13 @@ public final class LinkReceiverTest {
         // It names the configuration, as a file picked on the TV does. The confirmation
         // shows it as ShownText shows any name, without what only it leaves out.
         String[][] names = {
-            // As browsers write a quote and line breaks, and a path some send.
+            // As browsers write a quote and line breaks, and a path, which none sends now.
             {"My %22home%22 VPN.toml", "My \"home\" VPN.toml"}, {"Мой сервер.toml", "Мой сервер.toml"},
-            {"a%0D%0Ab.toml", "ab.toml"}, {"C:\\Users\\me\\home.toml", "home.toml"}, {"dir/home.toml", "home.toml"},
+            {"a%0D%0Ab.toml", "ab.toml"}, {"dir/home.toml", "home.toml"},
+            // A backslash is sent as it is, as part of the name: macOS, iOS and Linux
+            // allow one, and Chrome, Safari and Firefox send no path.
+            {"Home\\Office.toml", "Home\\Office.toml"}, {"C:\\Users\\me\\home.toml", "C:\\Users\\me\\home.toml"},
+            {"x\\", "x\\"}, {"\\", "\\"},
             // Nothing that breaks the line, and trimmed.
             {"a\u2028b\u2029c\u0085d\u0007", "abcd"}, {" home.toml ", "home.toml"},
             // What only the confirmation leaves out is kept: what reverses text or joins
@@ -494,13 +498,16 @@ public final class LinkReceiverTest {
         for (String[] name : names) assertEquals(name[0], name[1], LinkReceiver.fileName(name[0]));
         assertEquals(255, LinkReceiver.MAX_FILE_NAME);
         // Null when the confirmation would show nothing of it.
-        for (String nothing : new String[]{"", " ", "dir/", "x\\", "\u200F\u061C\u00AD", "%0D%0A", "\u3000\u00A0",
+        for (String nothing : new String[]{"", " ", "dir/", "\\/ ", "\u200F\u061C\u00AD", "%0D%0A", "\u3000\u00A0",
                 "\u115F\u1160\u3164\uFFA0", "\u2800\u2800", "\u0301\u0302", " \uFE0F", "\u20DD"})
             assertNull(nothing, LinkReceiver.fileName(nothing));
         // Browsers send other control characters in a file name as they are.
         for (String sent : new String[]{"home\u0001.toml", "\u001bhome.toml", "home\u007f.toml", "home\t.toml"})
             assertEquals(sent, "home.toml", exchange(multipartPost("/K7QM4XHD", pageForm("", sent, utf8(TOML))), false).outcome.fileName);
-        // Through the form, and a file with no name is received without one.
+        // Through the form, as Chrome, Safari and Firefox send "Home\Office q"u.toml",
+        // and a file with no name is received without one.
+        assertEquals("Home\\Office q\"u.toml", exchange(multipartPost("/K7QM4XHD",
+                pageForm("", "Home\\Office q%22u.toml", utf8(TOML))), false).outcome.fileName);
         assertEquals("\u202Elmot.exe", exchange(multipartPost("/K7QM4XHD", pageForm("", "\u202Elmot.exe", utf8(TOML))), false)
                 .outcome.fileName);
         for (String none : new String[]{"", "\u202E"}) {
