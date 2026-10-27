@@ -17,6 +17,7 @@
 #include "core/ConfigPaths.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 namespace freetunnel::backend_config {
 
@@ -268,6 +269,17 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
     if (!freetunnel::isValidClientRandomAuthKey(freetunnel::endpointClientRandomAuthKey(content))) {
         if (errOut)
             *errOut = QStringLiteral("authkey");
+        return false;
+    }
+    // Core 1.3 refuses the whole config for a tls_profile it has no name for, and
+    // says so only in a log the user does not see; a file with one would import
+    // and then never connect. The content is handed back for the message to name it.
+    const QString profile = freetunnel::endpointTlsProfile(content);
+    if (!profile.isEmpty() && !freetunnel::isKnownTlsProfile(profile.toStdString())) {
+        if (errOut)
+            *errOut = QStringLiteral("tlsprofile");
+        if (contentOut)
+            *contentOut = content;
         return false;
     }
     // A certificate with no certificate in it is refused, as a link's is: the

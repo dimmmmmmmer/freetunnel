@@ -893,9 +893,12 @@ void TestQtTrustTunnelClient::theTlsKeysOfCore13ReachTheCoreAsTheyAre()
     QVERIFY(ctl.lastCoreConfig().tls_profile.empty());
 }
 
-// The core refuses the whole config for a profile it has no name for, and says
-// only "invalid config structure". Mirrored by the mock, so this is the shape of
-// what a value a later core adds looks like to an older FreeTunnel.
+// The core refuses the whole config for a profile it has no name for (the match is
+// exact: "Chrome" is not "chrome"), and its only words for it are an error line in a
+// log that is not open yet when the helper first connects. So the wrapper says it,
+// naming the key and the value, rather than that the structure is invalid. The
+// mock refuses the same names, so this is also what a value a later core adds looks
+// like to an older FreeTunnel.
 void TestQtTrustTunnelClient::aTlsProfileTheCoreDoesNotKnowFailsTheConfig()
 {
     auto &ctl = mockcore::Controller::instance();
@@ -908,7 +911,22 @@ void TestQtTrustTunnelClient::aTlsProfileTheCoreDoesNotKnowFailsTheConfig()
 
     QTRY_COMPARE(m_lastState, State::Error);
     QTRY_VERIFY(!m_errors.isEmpty());
-    QVERIFY(m_errors.join(QLatin1Char('|')).contains(QStringLiteral("Invalid TrustTunnel config structure")));
+    const QString shown = m_errors.join(QLatin1Char('|'));
+    QVERIFY2(shown.contains(QStringLiteral("tls_profile \"netscape\"")), qPrintable(shown));
+    QVERIFY2(shown.contains(QStringLiteral("chrome, chrome_canary, safari, firefox, okhttp, openssl, default")),
+             qPrintable(shown));
+    QVERIFY2(!shown.contains(QStringLiteral("Invalid TrustTunnel config structure")), qPrintable(shown));
+    QCOMPARE(ctl.connectCallCount(), before);
+
+    // The case counts.
+    m_errors.clear();
+    beginConnect(QStringLiteral("loglevel = \"warn\"\n"
+                                "[endpoint]\n"
+                                "hostname = \"vpn.example\"\n"
+                                "tls_profile = \"Chrome\"\n"));
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QVERIFY2(m_errors.join(QLatin1Char('|')).contains(QStringLiteral("tls_profile \"Chrome\"")),
+             qPrintable(m_errors.join(QLatin1Char('|'))));
     QCOMPARE(ctl.connectCallCount(), before);
 }
 

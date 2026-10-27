@@ -49,6 +49,7 @@ private slots:
     void aConfigWithoutASubscriptionComesBackAsItWas();
     void aRewriteNeverPutsASubscriptionBack();
     void theAuthKeyIsReadFromTheEndpoint();
+    void theTlsProfileIsReadFromTheEndpointAsWritten();
     void theAuthKeyIsAFieldOfTheConfig();
     void anAuthKeyIsValidWhenItIsWholeBytesOfHex();
 
@@ -1011,6 +1012,23 @@ void TestConfigToml::theAuthKeyIsReadFromTheEndpoint()
     // From [endpoint], where the core reads it, and nowhere else.
     QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[provider]\nclient_random_auth_key = \"aabb\"\n"
                                                        "[endpoint]\nhostname = \"h\"\n"))
+                    .isEmpty());
+}
+
+// The core compares the tls_profile as it is written and refuses the config for a
+// name it does not know, so it is read untrimmed, from [endpoint] alone, and only
+// when it is a string.
+void TestConfigToml::theTlsProfileIsReadFromTheEndpointAsWritten()
+{
+    QVERIFY(endpointTlsProfile(QStringLiteral("[endpoint]\nhostname = \"h\"\n")).isEmpty());
+    QCOMPARE(endpointTlsProfile(QStringLiteral("[endpoint]\ntls_profile = \"firefox\"\n")),
+             QStringLiteral("firefox"));
+    QCOMPARE(endpointTlsProfile(QStringLiteral("[endpoint]\n 'tls_profile' = 'Chrome' # c\n")),
+             QStringLiteral("Chrome"));
+    QCOMPARE(endpointTlsProfile(QStringLiteral("[endpoint]\ntls_profile = \" chrome\"\n")),
+             QStringLiteral(" chrome"));
+    QVERIFY(endpointTlsProfile(QStringLiteral("[endpoint]\ntls_profile = 5\n")).isEmpty());
+    QVERIFY(endpointTlsProfile(QStringLiteral("[provider]\ntls_profile = \"x\"\n[endpoint]\nhostname = \"h\"\n"))
                     .isEmpty());
 }
 
