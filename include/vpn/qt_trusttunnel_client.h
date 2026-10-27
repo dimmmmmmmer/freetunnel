@@ -130,6 +130,9 @@ private:
         quint64 attemptGen = 0;
         ag::TrustTunnelConfig config;
         Routing routing; // what `config` routes by, kept after it moves into the core
+        // Whether `config` had the kill switch on, kept for the same reason: the
+        // connect call needs it after the config has moved into the core.
+        bool killSwitch = false;
         std::string boundIf;
         ag::VpnCallbacks callbacks;
         // The previous session, retired by the worker: disconnecting a live core

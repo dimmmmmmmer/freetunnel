@@ -21,6 +21,16 @@ class TrustTunnelClient {
 public:
     struct AutoSetup {};
 
+    // As in the real header (core 1.3): what the caller wants of a connect that
+    // does not come up at once. The parameter has NO default there, so none here:
+    // a call that leaves it out must fail to compile against the mock too.
+    struct ConnectOptions {
+        /// If true, failures during initial connection establishment enter the
+        /// recovery algorithm (VPN_CRP_FALL_INTO_RECOVERY) instead of retrying a
+        /// fixed number of times (VPN_CRP_SEVERAL_ATTEMPTS).
+        bool fall_into_recovery = false;
+    };
+
     struct Error {
         std::string text;
         std::string str() const { return text; }
@@ -68,9 +78,10 @@ public:
         return Error{err};
     }
 
-    std::optional<Error> connect(AutoSetup)
+    std::optional<Error> connect(AutoSetup, ConnectOptions options)
     {
-        const std::string err = mockcore::Controller::instance().onConnect(m_id);
+        const std::string err =
+                mockcore::Controller::instance().onConnect(m_id, options.fall_into_recovery);
         if (err.empty()) {
             m_running = true;
             // What a connected core does next; see the controller.
@@ -86,7 +97,7 @@ public:
         mockcore::Controller::instance().onDisconnect(m_id);
     }
 
-    // Mirrors what vendor/trusttunnel/03-*.patch adds to the real wrapper,
+    // Mirrors what vendor/trusttunnel/03-live-exclusions.patch adds to the real wrapper,
     // including that it does nothing unless a session is running: the real one
     // asks the core only while it holds a Vpn, from connect() until disconnect().
     void update_exclusions(VpnMode mode, std::string_view exclusions)
@@ -137,6 +148,8 @@ private:
         snap.certificate = cfg.location.certificate;
         snap.client_random = cfg.location.client_random;
         snap.client_random_mask = cfg.location.client_random_mask;
+        snap.client_random_auth_key = cfg.location.client_random_auth_key;
+        snap.tls_profile = cfg.location.tls_profile;
         snap.killswitch_enabled = cfg.killswitch_enabled;
         snap.mode = static_cast<int>(cfg.mode);
         snap.loglevel = static_cast<int>(cfg.loglevel);
