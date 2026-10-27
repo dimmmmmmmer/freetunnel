@@ -1,0 +1,24 @@
+Microsoft redistributable files (Windows only)
+
+The files below are Microsoft Corporation's, Copyright (c) Microsoft
+Corporation. FreeTunnel's Windows download carries them unmodified, as
+Microsoft's terms for redistributable code allow, and they remain under those
+terms: FreeTunnel's license and the other licenses in these notices do not
+apply to them. FreeTunnel is not endorsed by Microsoft.
+
+Visual C++ runtime
+  Files: the DLLs of the Visual Studio redistributable folder
+    Microsoft.VC14x.CRT (msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll
+    and the others in it), copied next to FreeTunnel.exe; and the Visual C++
+    Redistributable installer vc_redist.x64.exe, which Qt's windeployqt
+    places there and which FreeTunnel's installer does not run.
+  Terms: the Distributable Code terms of the Microsoft Visual Studio license.
+  See https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+
+Direct3D shader compilers
+  Files: d3dcompiler_47.dll, dxcompiler.dll and dxil.dll, which Qt's
+    windeployqt copies from the Windows SDK's redistributable folder.
+  Terms: the redistributable code terms of the Windows SDK license.
+  dxcompiler.dll is the DirectX Shader Compiler; its source and the licenses
+  of its open-source parts are at
+  https://github.com/microsoft/DirectXShaderCompiler
