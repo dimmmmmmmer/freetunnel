@@ -656,6 +656,39 @@ class TvDeviceTest {
         assertClosed(second)
     }
 
+    // A file sets the name and the server that the confirmation shows. Line breaks or
+    // a long run of text in them must not push what comes after, the sender and that
+    // verification is off, out of a message a remote cannot scroll. The confirmation
+    // is opened directly, as after the checks: whether the core takes such a server
+    // name is the core's to say.
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun theConfirmationShowsTheSenderWhateverTheFileSays() {
+        val a = open()
+        val toml = source.replace("hostname = \"vpn.invalid\"",
+            "hostname = \"my-real-vpn.example${"\\n".repeat(40)}${"x".repeat(62)}\"\nskip_verification = true")
+        val name = "My \uD83D\uDD12 VPN" + "\u2028\u2029\r".repeat(20) + "y".repeat(72)
+        onMain {
+            method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
+                .invoke(a, name, RoutingConfig.Import(toml, false), "192.0.2.7")
+        }
+        instrumentation.waitForIdleSync()
+        val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
+        try {
+            val message = onMain { dialog.findViewById<TextView>(android.R.id.message).text.toString() }
+            // Each on one line and cut to 80 characters, so the sender is the third line.
+            // On one line, the name is 80, so it is shown whole, and the server is 81.
+            val shownName = "My \uD83D\uDD12 VPN" + "y".repeat(72)
+            val shownServer = "my-real-vpn.example" + "x".repeat(60) + "…"
+            assertTrue(message, message.startsWith(context.getString(R.string.text_add_configuration_36) + shownName +
+                context.getString(R.string.text_nserver) + shownServer + context.getString(R.string.text_nsent_from_s, "192.0.2.7") +
+                context.getString(R.string.text_nserver_certificate_verification_is_disabled)))
+            assertEquals(context.getString(R.string.text_nsent_from_s, "192.0.2.7").trim(), message.split("\n")[2])
+        } finally {
+            onMain { dialog.findViewById<Button>(android.R.id.button2).performClick() }
+            instrumentation.waitForIdleSync()
+        }
+    }
+
     // "Create manually" reads a pasted link as the link, under the name typed there: on
     // a TV, a phone's keyboard can paste one where a whole TOML file is too much.
     @SdkSuppress(minSdkVersion = 29)
