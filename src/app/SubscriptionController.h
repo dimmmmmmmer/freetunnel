@@ -143,6 +143,8 @@ public:
     void setRandomForTest(std::function<qint64(qint64)> random) { m_random = std::move(random); }
     void runSchedulerTickForTest() { tick(); }
     bool schedulingForTest() const { return m_firstCheck.isActive() || m_timer.isActive(); }
+    int firstCheckDelayMsForTest() const { return m_firstCheck.interval(); }
+    int checkIntervalMsForTest() const { return m_timer.interval(); }
     // The checks come from runSchedulerTickForTest() alone from then on.
     void stopSchedulerForTest()
     {

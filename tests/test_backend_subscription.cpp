@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QScopeGuard>
 #include <QSemaphore>
 #include <QSettings>
@@ -32,6 +34,7 @@
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
 #include "core/SubscriptionStore.h"
+#include "certificate_vectors.h"
 #include "deeplink_v2_vectors.h"
 #include "endpoint_export_vectors.h"
 #include "fake_subscription_fetcher.h"
@@ -66,6 +69,18 @@ QString readText(const QString &path)
 QString passwordOf(const QString &path)
 {
     return CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path));
+}
+
+// Every entry the tests leave in this run's credential service: the password of
+// each config, and the address of each linked subscription. The service is the
+// run's own, but on a machine with a keychain it is in the user's keychain.
+void removeStoredCredentials()
+{
+    const QFileInfoList files = QDir(appConfigDir()).entryInfoList({QStringLiteral("*.toml")}, QDir::Files);
+    for (const QFileInfo &file : files)
+        CredentialStore::deletePassword(CredentialStore::keyForConfigPath(file.absoluteFilePath()));
+    for (const SubscriptionRecord &record : freetunnel::loadSubscriptions())
+        CredentialStore::deletePassword(CredentialStore::keyForSubscription(record.sourceId));
 }
 
 // A link with only a version 2 record and a subscription address.
@@ -146,6 +161,7 @@ class TestBackendSubscription : public QObject {
 private slots:
     void initTestCase();
     void init();
+    void cleanupTestCase();
 
     // The setting, and adding a config from a subscription.
     void theSettingIsOffByDefault();
@@ -177,6 +193,7 @@ private slots:
     void replacingWithAnotherServerDetachesAndSaysSo();
     void sharingALinkedConfigLeavesTheSubscriptionOut();
     void anEditorSaveKeepsWhatTheSubscriptionOwns();
+    void withTheSettingOffAnEditorSaveWritesTheForm();
     void linksWhoseConfigIsGoneAreRemovedAtStart();
 
     // Refreshing.
@@ -189,6 +206,8 @@ private slots:
     void anUpdateWaitsWhileTheEditorHasTheConfigOpen();
     void aStoreThatRefusesLeavesTheConfigAsItWas();
     void anUpdateHeldForAConnectThatEndsBeforeTheHelperIsApplied();
+    void aConfigUnlinkedWhileItsPasswordIsReadIsNotWritten();
+    void aMissingAddressIsTriedAgainSoon();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser_data();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser();
     void failuresThatMayPassBackOffThenWaitTheInterval();
@@ -197,6 +216,7 @@ private slots:
     void noConfigIsFetchedByItselfTwiceInTenMinutes();
     void aCustomSniConfigIsNeverRefreshedByItself();
     void theSchedulerRunsOnlyWithTheSettingOn();
+    void theChecksStartAfterTheJitterThenComeEveryTenMinutes();
     void aRemovalWhileItFetchesDropsTheResult();
 
     // With the real fetcher, against a TLS server of the test's own.
@@ -215,6 +235,8 @@ void TestBackendSubscription::initTestCase()
 
 void TestBackendSubscription::init()
 {
+    qputenv("FT_TEST_KEYRING", "present");
+    removeStoredCredentials();
     QDir(appConfigDir()).removeRecursively();
     QDir().mkpath(appConfigDir());
     QSettings().clear();
@@ -222,7 +244,13 @@ void TestBackendSubscription::init()
     settings.hotkeys_enabled = false;
     settings.log_path = QDir(appConfigDir()).filePath(QStringLiteral("subscription-test.log"));
     saveAppSettings(settings);
+}
+
+void TestBackendSubscription::cleanupTestCase()
+{
     qputenv("FT_TEST_KEYRING", "present");
+    removeStoredCredentials();
+    QDir(appConfigDir()).removeRecursively();
 }
 
 // ---- the setting, and adding a config ----------------------------------------
@@ -907,7 +935,9 @@ void TestBackendSubscription::sharingALinkedConfigLeavesTheSubscriptionOut()
     QVERIFY2(text.contains(QStringLiteral("203.0.113.7:443")), qPrintable(text));
 }
 
-// A form opened before a refresh holds the old server; its save keeps the new.
+// A form opened before a refresh holds the old server; its save keeps the new:
+// every field the subscription owns, the accepted hostname among them, which
+// written back would be asked about again at the next refresh.
 void TestBackendSubscription::anEditorSaveKeepsWhatTheSubscriptionOwns()
 {
     Rig rig;
@@ -916,18 +946,60 @@ void TestBackendSubscription::anEditorSaveKeepsWhatTheSubscriptionOwns()
                                                                 QStringLiteral(R"(,"name":"Work")")));
     QVERIFY(!path.isEmpty());
     QVariantMap form = rig.backend->configFields(rig.backend->configIndex(path));
+    const QJsonObject refreshed{
+            {QStringLiteral("version"), 1},
+            {QStringLiteral("hostname"), QStringLiteral("vpn2.example.com")},
+            {QStringLiteral("address"), QStringLiteral("203.0.113.8:8443")},
+            {QStringLiteral("username"), QStringLiteral("bob")},
+            {QStringLiteral("password"), QStringLiteral("n3w")},
+            {QStringLiteral("certificate"), certs::kLeafPem},
+            {QStringLiteral("custom_sni"), QStringLiteral("cdn.example.net")},
+            {QStringLiteral("client_random_prefix"), QStringLiteral("abcd")},
+    };
     QVERIFY(rig.backend->refreshSubscription(path));
-    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
-            subscriptionDocument("vpn.example.com", "203.0.113.8:8443", QStringLiteral("n3w")))));
-    QVERIFY(readText(path).contains(QStringLiteral("203.0.113.8:8443")));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(QJsonDocument(refreshed).toJson())));
+    QVERIFY(rig.backend->answerHostnameChange(path, true));
+    QTRY_VERIFY(readText(path).contains(QStringLiteral("203.0.113.8:8443")));
+    const freetunnel::ConfigToml before = freetunnel::parseConfigToml(readText(path));
+    QCOMPARE(before.hostname, QStringLiteral("vpn2.example.com"));
+    QVERIFY(!before.certificate.isEmpty());
     form.insert(QStringLiteral("editIndex"), rig.backend->configIndex(path));
     form.insert(QStringLiteral("dns"), QStringLiteral("9.9.9.9"));
     QVERIFY(rig.backend->createConfig(form));
     const QString toml = readText(path);
-    QVERIFY2(toml.contains(QStringLiteral("203.0.113.8:8443")), qPrintable(toml));
-    QVERIFY2(toml.contains(QStringLiteral("9.9.9.9")), qPrintable(toml)); // the user's own edit stays
+    const freetunnel::ConfigToml after = freetunnel::parseConfigToml(toml);
+    QCOMPARE(after.hostname, QStringLiteral("vpn2.example.com"));
+    QCOMPARE(after.addresses, QStringLiteral("203.0.113.8:8443"));
+    QCOMPARE(after.username, QStringLiteral("bob"));
+    QCOMPARE(after.certificate, before.certificate);
+    QCOMPARE(after.customSni, QStringLiteral("cdn.example.net"));
+    QCOMPARE(after.clientRandom, QStringLiteral("abcd"));
+    QCOMPARE(after.dns, QStringLiteral("9.9.9.9")); // the user's own edit stays
     QCOMPARE(passwordOf(path), QStringLiteral("n3w"));
     QVERIFY(rig.subs()->isLinked(path));
+    QCOMPARE(rig.record(path)->heldHostname, QString());
+}
+
+// Off, a linked config is an ordinary one: the editor writes what the form says.
+void TestBackendSubscription::withTheSettingOffAnEditorSaveWritesTheForm()
+{
+    QString path;
+    {
+        Rig rig;
+        path = linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+        QVERIFY(!path.isEmpty());
+    }
+    Rig rig(false);
+    QVERIFY(rig.subs()->isLinked(path));
+    QVariantMap form = rig.backend->configFields(rig.backend->configIndex(path));
+    form.insert(QStringLiteral("editIndex"), rig.backend->configIndex(path));
+    form.insert(QStringLiteral("editPath"), path);
+    form.insert(QStringLiteral("addresses"), QStringLiteral("203.0.113.99:443"));
+    form.insert(QStringLiteral("username"), QStringLiteral("dave"));
+    QVERIFY(rig.backend->createConfig(form));
+    const freetunnel::ConfigToml saved = freetunnel::parseConfigToml(readText(path));
+    QCOMPARE(saved.addresses, QStringLiteral("203.0.113.99:443"));
+    QCOMPARE(saved.username, QStringLiteral("dave"));
 }
 
 void TestBackendSubscription::linksWhoseConfigIsGoneAreRemovedAtStart()
@@ -946,6 +1018,10 @@ void TestBackendSubscription::linksWhoseConfigIsGoneAreRemovedAtStart()
         QVERIFY(out.open(QIODevice::WriteOnly));
         out.write(freetunnel::buildConfigToml(c).toUtf8());
     }
+    const auto forget = qScopeGuard([&orphanSource, &keptSource]() {
+        CredentialStore::deletePassword(CredentialStore::keyForSubscription(orphanSource));
+        CredentialStore::deletePassword(CredentialStore::keyForSubscription(keptSource));
+    });
     saveStoredConfigs({kept});
     SubscriptionRecord orphan;
     orphan.sourceId = orphanSource;
@@ -1208,6 +1284,49 @@ void TestBackendSubscription::anUpdateHeldForAConnectThatEndsBeforeTheHelperIsAp
     QCOMPARE(passwordOf(path), QStringLiteral("s3cret"));
 }
 
+// Unlinked while the update read the config's password, which runs the
+// credential store's event loop: nothing of the update is written.
+void TestBackendSubscription::aConfigUnlinkedWhileItsPasswordIsReadIsNotWritten()
+{
+    Rig rig;
+    const QString path =
+            linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    const QString toml = readText(path);
+    const QString key = CredentialStore::keyForConfigPath(path);
+    Backend *backend = rig.backend.get();
+    bool detached = false;
+    CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
+        if (!detached && qstrcmp(call, "load") == 0 && k == key && QThread::currentThread() == qApp->thread())
+            detached = backend->detachSubscription(path);
+    });
+    const auto unhook = qScopeGuard([]() { CredentialStore::setCallHookForTest({}); });
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn.example.com", "203.0.113.9:443"))));
+    QVERIFY(detached);
+    QCOMPARE(readText(path), toml);
+    QVERIFY(!rig.subs()->isLinked(path));
+}
+
+// A keyring that gives no address, locked or emptied by hand, may give it next
+// time: tried again soon, as what may pass is.
+void TestBackendSubscription::aMissingAddressIsTriedAgainSoon()
+{
+    Rig rig;
+    const QString path =
+            linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    const int fetches = rig.network.fetches();
+    QVERIFY(CredentialStore::deletePassword(CredentialStore::keyForSubscription(rig.record(path)->sourceId)));
+    QVERIFY(!rig.backend->refreshSubscription(path));
+    QCOMPARE(rig.network.fetches(), fetches);
+    QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("no_address"));
+    QCOMPARE(rig.record(path)->failures, 1);
+    QCOMPARE(rig.record(path)->nextAttemptAt, rig.clock + 10 * 60);
+    QVERIFY(rig.record(path)->autoRefresh);
+}
+
 // 403, 404, 405 and 407 are a server offering no updates, 401 credentials it
 // refuses, and an untrusted certificate wants a new link: nothing asks again by
 // itself, and the user's own refresh, once it gets through, turns it back on.
@@ -1327,8 +1446,6 @@ void TestBackendSubscription::onlyWhatIsDueIsFetchedAndNoMoreThanTwoAtOnce()
     QVERIFY(!rig.backend->refreshSubscription(paths.at(2)));
 }
 
-// A custom SNI hides the server's name in the tunnel's handshake, and a fetch
-// sends the real one: only the user's own refresh does that.
 // Whatever the schedule says, as a record a crash or an older version left can:
 // a config fetched less than ten minutes ago waits.
 void TestBackendSubscription::noConfigIsFetchedByItselfTwiceInTenMinutes()
@@ -1346,6 +1463,8 @@ void TestBackendSubscription::noConfigIsFetchedByItselfTwiceInTenMinutes()
     saveStoredConfigs({path});
     SubscriptionRecord record;
     record.sourceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto forget = qScopeGuard(
+            [&record]() { CredentialStore::deletePassword(CredentialStore::keyForSubscription(record.sourceId)); });
     QVERIFY(CredentialStore::storePassword(CredentialStore::keyForSubscription(record.sourceId), v2::kSubscription));
     record.lastAttemptAt = kStart - kCheck + 1;
     record.nextAttemptAt = 0;
@@ -1356,9 +1475,10 @@ void TestBackendSubscription::noConfigIsFetchedByItselfTwiceInTenMinutes()
     rig.clock += 1;
     rig.subs()->runSchedulerTickForTest();
     QCOMPARE(rig.network.fetches(), 1);
-    CredentialStore::deletePassword(CredentialStore::keyForSubscription(record.sourceId));
 }
 
+// A custom SNI hides the server's name in the tunnel's handshake, and a fetch
+// sends the real one: only the user's own refresh does that.
 void TestBackendSubscription::aCustomSniConfigIsNeverRefreshedByItself()
 {
     Rig rig;
@@ -1393,6 +1513,18 @@ void TestBackendSubscription::theSchedulerRunsOnlyWithTheSettingOn()
         Backend backend;
         QVERIFY(backend.subscriptions()->schedulingForTest());
     }
+}
+
+// The first check comes 0 to 10 minutes after start-up, so the configs of many
+// users do not all fetch in the same minute; then one every ten minutes.
+void TestBackendSubscription::theChecksStartAfterTheJitterThenComeEveryTenMinutes()
+{
+    Rig rig;
+    rig.jitter = 7 * 60;
+    rig.subs()->start(QStringList(), true);
+    QCOMPARE(rig.subs()->firstCheckDelayMsForTest(), 7 * 60 * 1000);
+    QCOMPARE(rig.subs()->checkIntervalMsForTest(), 10 * 60 * 1000);
+    rig.subs()->stopSchedulerForTest();
 }
 
 void TestBackendSubscription::aRemovalWhileItFetchesDropsTheResult()
