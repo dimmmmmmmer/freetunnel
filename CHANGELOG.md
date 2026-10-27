@@ -5,16 +5,19 @@ built from the section below it, so this file is the description of the release 
 write it before tagging. For the full commit history of a release, follow the
 compare link at the bottom of its release notes.
 
-## Unreleased
+## 1.3.0
 
-### Added
+### Highlights
 
-- **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
-  exports.** That file (`--format toml`) has the server's keys but no
-  `[endpoint]` table, and was refused as not a valid config. FreeTunnel now
-  asks before adding it, as it does for a tt:// link. The config takes the
-  name the file gives, or the file's own name, and leaves the subscription
-  address out.
+- Links and config files from TrustTunnel 1.3 servers are read, and so is the
+  TOML file a TrustTunnel endpoint exports.
+- A 1.3 config's subscription address, which holds the VPN password, is no
+  longer kept in plain text, and a config's certificate keeps only its
+  certificates.
+- Windows: a link or command no longer gets lost while FreeTunnel is busy, and
+  installing no longer stops on a file still in use.
+- Linux: launches and links reach FreeTunnel after an AppImage update, and from
+  outside the desktop session.
 
 ### Security
 
@@ -23,11 +26,20 @@ compare link at the bottom of its release notes.
   the config file leaves it out of the copy FreeTunnel stores. A config
   imported by 1.2.3 or earlier loses it the next time FreeTunnel starts.
 - **Windows, macOS and Linux: a config's certificate keeps only its
-  certificates.** Anything else pasted or imported with them, such as a private
-  key, is ignored: it is never stored or shared, and the import or the editor
-  says so. This applies to tt:// links, config files and the config editor; a
-  stored config loses it the next time FreeTunnel starts. A certificate with no
-  certificate in it is refused, and so is a link whose certificate is damaged.
+  certificates.** Anything else pasted or imported with them is ignored: it is
+  never stored or shared, and the import or the editor says so. This applies to
+  tt:// links, config files and the config editor; a stored config loses it the
+  next time FreeTunnel starts. A certificate with no certificate in it is
+  refused, and so is a link whose certificate is damaged.
+
+### Changed
+
+- **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
+  exports.** That file (`--format toml`) has the server's keys but no
+  `[endpoint]` table, and was refused as not a valid config. FreeTunnel now
+  asks before adding it, as it does for a tt:// link. The config takes the
+  name the file gives, or the file's own name, and leaves the subscription
+  address out.
 
 ### Fixed
 
