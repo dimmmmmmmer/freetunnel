@@ -988,7 +988,13 @@ void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer()
     QCOMPARE(server.serverNames().value(afterARedirect ? 1 : 0), QStringLiteral("vpn.test"));
 }
 
-// After the handshake it is the network's, whatever Qt tries again.
+// After the handshake it is the network's, whatever Qt tries again. Except on
+// schannel, where Qt 6.8 never ends the reply: its schannel backend takes the
+// server's close_notify after the handshake as a close of its own and reports
+// no error (TlsCryptographSchannel::transmit()), and the HTTP channel, waiting
+// for a reply with nothing to read, just goes idle (_q_disconnected()). Only the
+// deadline ends that fetch. Both outcomes mean the same to the user and to the
+// next refresh, so this pins which one each backend gives.
 void TestSubscriptionFetcher::aServerThatHangsUpIsANetworkError()
 {
     TlsTestServer server;
@@ -996,8 +1002,15 @@ void TestSubscriptionFetcher::aServerThatHangsUpIsANetworkError()
     TlsTestServer::Response response;
     response.hangUp = true;
     server.setRoute("/sub", response);
+    const bool schannel = m_backend == QLatin1String("schannel");
+    if (schannel)
+        qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "1500");
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
-    QVERIFY_FETCH(result, SubscriptionFetchError::Network);
+    QVERIFY_FETCH(result, schannel ? SubscriptionFetchError::Timeout : SubscriptionFetchError::Network);
+    QCOMPARE(refreshPolicyFor(result->error, SubscriptionDocError::Invalid),
+             refreshPolicyFor(SubscriptionFetchError::Network, SubscriptionDocError::Invalid));
+    QCOMPARE(subscriptionFailureText(result->error, SubscriptionDocError::Invalid),
+             subscriptionFailureText(SubscriptionFetchError::Network, SubscriptionDocError::Invalid));
     QVERIFY(!server.requests().isEmpty());
 }
 
