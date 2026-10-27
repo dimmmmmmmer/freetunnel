@@ -81,7 +81,6 @@ SubscriptionFetchRequest subscriptionRequestFor(const QString &url, const Config
 enum class SubscriptionRefreshPolicy {
     Normal,     // after the refresh interval
     Backoff,    // sooner at first, then after the interval
-    Weekly,     // in a week
     ManualOnly, // not until the user asks for one that then succeeds
 };
 

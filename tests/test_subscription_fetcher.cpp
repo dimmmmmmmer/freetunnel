@@ -1282,9 +1282,9 @@ void TestSubscriptionFetcher::aFetchThatEndedHearsNothingMoreFromItsReply()
 }
 
 // Every outcome has a row: a code, a policy, and words for the user, but
-// success. A 403 is the operator turning updates off, so nothing automatic
-// asks again; a 404 is asked again weekly; what only a new link or a newer
-// FreeTunnel can fix waits for the user.
+// success. A 403 is the operator turning updates off, and a 404, 405 or 407 a
+// server with no subscription, so nothing automatic asks again; nor for what
+// only a new link or a newer FreeTunnel can fix.
 void TestSubscriptionFetcher::everyOutcomeHasACodeAPolicyAndWords()
 {
     using E = SubscriptionFetchError;
@@ -1294,7 +1294,7 @@ void TestSubscriptionFetcher::everyOutcomeHasACodeAPolicyAndWords()
             {E::None, P::Normal},           {E::BadUrl, P::ManualOnly},         {E::BadPin, P::ManualOnly},
             {E::Network, P::Backoff},       {E::Timeout, P::Backoff},           {E::RefusedByServer, P::Backoff},
             {E::CertificateUntrusted, P::ManualOnly}, {E::BadRedirect, P::ManualOnly}, {E::Http401, P::ManualOnly},
-            {E::Http403, P::ManualOnly},    {E::HttpNoSubscription, P::Weekly}, {E::HttpServer, P::Backoff},
+            {E::Http403, P::ManualOnly},    {E::HttpNoSubscription, P::ManualOnly}, {E::HttpServer, P::Backoff},
             {E::HttpOther, P::Backoff},     {E::BadContentType, P::Backoff},    {E::TooLarge, P::Backoff},
     };
     const QList<std::pair<D, P>> documentOutcomes = {

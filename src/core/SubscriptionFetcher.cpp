@@ -180,10 +180,10 @@ constexpr const char *kNewerFormat =
 constexpr const char *kNewerCore = QT_TRANSLATE_NOOP(
         "SubscriptionFetcher", "This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses");
 
-// A 403 is the operator turning updates off: nothing automatic tries again
-// until the user does. A 404 may be a subscription not set up yet, so it is asked
-// again weekly. What only a new link or a new FreeTunnel can fix waits for the
-// user; what may pass, such as a lost network, backs off.
+// A 403 is the operator turning updates off, and a 404, 405 or 407 a server with
+// no subscription here: nothing automatic tries again until the user does. So
+// does what only a new link or a new FreeTunnel can fix; what may pass, such as
+// a lost network, backs off.
 constexpr std::pair<Fetch, Outcome> kFetchOutcomes[] = {
     {Fetch::None, {"ok", Policy::Normal, ""}},
     {Fetch::BadUrl, {"bad_url", Policy::ManualOnly, kBadAddress}},
@@ -195,7 +195,7 @@ constexpr std::pair<Fetch, Outcome> kFetchOutcomes[] = {
     {Fetch::BadRedirect, {"bad_redirect", Policy::ManualOnly, kInvalid}},
     {Fetch::Http401, {"http_401", Policy::ManualOnly, kDenied}},
     {Fetch::Http403, {"http_403", Policy::ManualOnly, kNoUpdates}},
-    {Fetch::HttpNoSubscription, {"no_subscription", Policy::Weekly, kNoUpdates}},
+    {Fetch::HttpNoSubscription, {"no_subscription", Policy::ManualOnly, kNoUpdates}},
     {Fetch::HttpServer, {"http_server", Policy::Backoff, kOffline}},
     {Fetch::HttpOther, {"http_other", Policy::Backoff, kInvalid}},
     {Fetch::BadContentType, {"bad_content_type", Policy::Backoff, kInvalid}},
