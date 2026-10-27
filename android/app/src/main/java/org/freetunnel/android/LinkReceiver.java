@@ -14,6 +14,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URLDecoder;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -27,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * A one-time web page on the local network that takes a link or a TOML file from a
  * phone's browser, for a TV, which has no camera to scan a QR code and no keyboard
  * to type a link. The TV shows a QR code of url(); the page there sends the text
- * back. Plain JDK, so the JVM tests drive it with real sockets.
+ * back, pasted or as a file. Plain JDK, so the JVM tests drive it with real sockets.
  *
  * <p>Browsers give a page on a local http:// address no way to encrypt, so the text
  * crosses the local network in the clear, once. What limits that: it binds only to
@@ -55,7 +58,8 @@ final class LinkReceiver {
 
     /** Called on the receiver's own thread, at most once, and never after stop(). */
     interface Listener {
-        void received(String text, String sender);
+        /** fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted. */
+        void received(String text, String fileName, String sender);
         void stopped(Stop reason);
     }
 
@@ -64,27 +68,38 @@ final class LinkReceiver {
     static final class Outcome {
         final Kind kind;
         final String text;
-        Outcome(Kind kind, String text) { this.kind = kind; this.text = text; }
+        final String fileName;
+        Outcome(Kind kind, String text) { this(kind, text, null); }
+        Outcome(Kind kind, String text, String fileName) { this.kind = kind; this.text = text; this.fileName = fileName; }
     }
 
     /** The pages the phone's browser shows, whole and static: nothing a request sends is put in them. */
     static final class Pages {
         final String form;
         final String sent;
+        final String retry;
         final String wrongCode;
         final String lockedOut;
 
         // The strings are the app's own, in the TV's language. The form has no action,
-        // so it posts back to the address it was opened at, code and all.
-        Pages(String lang, String title, String prompt, String send, String note,
-              String sent, String wrongCode, String lockedOut) {
-            form = page(lang, title, "<form method=\"post\" accept-charset=\"utf-8\">"
+        // so it posts back to the address it was opened at, code and all. It takes a
+        // pasted text or a file, so neither field is required: a send with neither,
+        // with both, or with a file that is not text gets the form again under the
+        // retry text. No accept attribute: a phone's picker may not know a .toml
+        // file's type, and would grey it out.
+        Pages(String lang, String title, String prompt, String file, String send, String note,
+              String sent, String retry, String wrongCode, String lockedOut) {
+            String fields = "<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"
                     + "<label for=\"link\">" + escape(prompt) + "</label>"
-                    + "<textarea id=\"link\" name=\"link\" required autocomplete=\"off\" autocapitalize=\"off\""
+                    + "<textarea id=\"link\" name=\"link\" autocomplete=\"off\" autocapitalize=\"off\""
                     + " autocorrect=\"off\" spellcheck=\"false\"></textarea>"
+                    + "<label for=\"file\">" + escape(file) + "</label>"
+                    + "<input type=\"file\" id=\"file\" name=\"file\">"
                     + "<button type=\"submit\">" + escape(send) + "</button></form>"
-                    + "<p>" + escape(note) + "</p>");
+                    + "<p>" + escape(note) + "</p>";
+            form = page(lang, title, fields);
             this.sent = page(lang, title, "<p>" + escape(sent) + "</p>");
+            this.retry = page(lang, title, "<p>" + escape(retry) + "</p>" + fields);
             this.wrongCode = page(lang, title, "<p>" + escape(wrongCode) + "</p>");
             this.lockedOut = page(lang, title, "<p>" + escape(lockedOut) + "</p>");
         }
@@ -96,8 +111,9 @@ final class LinkReceiver {
                     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
                     + "<title>" + escape(title) + "</title><style>"
                     + ":root{color-scheme:light dark}body{font:16px/1.4 system-ui,sans-serif;margin:0 auto;padding:16px;max-width:40em}"
-                    + "label,textarea,button{display:block;width:100%;box-sizing:border-box}"
+                    + "label,textarea,input,button{display:block;width:100%;box-sizing:border-box}"
                     + "textarea{min-height:12em;margin:8px 0 12px;font:14px monospace}"
+                    + "input{margin:8px 0 16px}"
                     + "button{padding:12px;font-size:16px}"
                     + "</style></head><body><h1>" + escape(title) + "</h1>" + body + "</body></html>";
         }
@@ -255,7 +271,7 @@ final class LinkReceiver {
                     current = null;
                 }
                 if (outcome.kind == Kind.RECEIVED) {
-                    if (stopSelf()) listener.received(outcome.text, sender);
+                    if (stopSelf()) listener.received(outcome.text, outcome.fileName, sender);
                     return;
                 }
                 if (outcome.kind == Kind.WRONG_CODE && ++wrongCodes >= MAX_WRONG_CODES) {
@@ -303,8 +319,10 @@ final class LinkReceiver {
 
     /**
      * One request: a GET gets the form, whatever its path; a POST to the code's path
-     * with a link= form field is the text. lastStrike shows the page that says the
-     * receiver stopped instead of the wrong-code page.
+     * is the text: the page's multipart form with the link field or a file in its
+     * file field, or a link= form field as the page sent before it took files.
+     * lastStrike shows the page that says the receiver stopped instead of the
+     * wrong-code page.
      */
     static Outcome handle(InputStream in, OutputStream out, String code, String host, Pages pages,
                           boolean lastStrike) throws IOException {
@@ -327,7 +345,10 @@ final class LinkReceiver {
         int length = Integer.parseInt(lengths.get(0));
         if (length > MAX_BODY_BYTES) return refuse(out, 413, "Content Too Large");
         List<String> types = values(headers, "content-type");
-        if (types.size() != 1 || !types.get(0).split(";", 2)[0].trim().equalsIgnoreCase("application/x-www-form-urlencoded"))
+        String type = types.size() == 1 ? types.get(0).split(";", 2)[0].trim() : "";
+        // Null for the urlencoded form; a multipart form without a boundary RFC 2046 allows is no form.
+        String boundary = type.equalsIgnoreCase("multipart/form-data") ? boundary(types.get(0)) : null;
+        if (boundary == null && !type.equalsIgnoreCase("application/x-www-form-urlencoded"))
             return refuse(out, 415, "Unsupported Media Type");
         byte[] body = new byte[length];
         for (int read = 0; read < length; ) {
@@ -343,10 +364,237 @@ final class LinkReceiver {
             answer(out, 404, "Not Found", lastStrike ? pages.lockedOut : pages.wrongCode);
             return new Outcome(Kind.WRONG_CODE, null);
         }
+        if (boundary != null) return multipartSend(out, body, boundary, pages);
         String text = formField(body, "link");
         if (text == null || text.trim().isEmpty()) return refuse(out, 400, "Bad Request");
         answer(out, 200, "OK", pages.sent);
         return new Outcome(Kind.RECEIVED, text.trim());
+    }
+
+    // The page's own form, to the right code. What no browser sends is refused as
+    // any such request is. A send with no text and no file, both, or a file that is
+    // not UTF-8 text gets the form again under the retry text, and the receiver
+    // goes on waiting: the phone can fix it.
+    private static Outcome multipartSend(OutputStream out, byte[] body, String boundary, Pages pages) throws IOException {
+        Field[] fields = multipart(body, boundary);
+        if (fields == null) return refuse(out, 400, "Bad Request");
+        String text = fields[0] == null ? "" : utf8(body, fields[0].from, fields[0].to);
+        if (text == null) return refuse(out, 400, "Bad Request");
+        String file = fields[1] == null ? "" : utf8(body, fields[1].from, fields[1].to);
+        // As a TOML file picked on the TV: a byte order mark is not part of the text.
+        if (file != null && file.startsWith("\uFEFF")) file = file.substring(1);
+        if (file == null || text.trim().isEmpty() == file.trim().isEmpty()) {
+            answer(out, 400, "Bad Request", pages.retry);
+            return new Outcome(Kind.REFUSED, null);
+        }
+        answer(out, 200, "OK", pages.sent);
+        if (!text.trim().isEmpty()) return new Outcome(Kind.RECEIVED, text.trim());
+        return new Outcome(Kind.RECEIVED, file.trim(), fileName(fields[1].fileName));
+    }
+
+    // Where a field's content is in the body, and the file name it came with: null
+    // for the text field, empty for a file field with no file chosen.
+    private static final class Field {
+        final int from;
+        final int to;
+        final String fileName;
+        Field(int from, int to, String fileName) { this.from = from; this.to = to; this.fileName = fileName; }
+    }
+
+    private static final byte[] CRLF = {'\r', '\n'};
+    private static final byte[] CRLF_CRLF = {'\r', '\n', '\r', '\n'};
+    private static final byte[] DASHES = {'-', '-'};
+
+    // The link and file fields of a multipart/form-data body, either null when it has
+    // none, or null when the body is not as a browser writes one: no preamble, each
+    // part's headers, a blank line and its content, the last boundary followed by
+    // nothing or a line end, link with no file name and file with one, at most one
+    // of each. Fields of other names are skipped, as in the urlencoded form.
+    private static Field[] multipart(byte[] body, String boundary) {
+        byte[] delimiter = ("\r\n--" + boundary).getBytes(StandardCharsets.US_ASCII);
+        if (!matches(body, 0, delimiter, 2)) return null;
+        Field[] fields = new Field[2];
+        int at = delimiter.length - 2;
+        while (true) {
+            if (matches(body, at, DASHES, 0))
+                return at + 2 == body.length || at + 4 == body.length && matches(body, at + 2, CRLF, 0) ? fields : null;
+            if (!matches(body, at, CRLF, 0)) return null;
+            int start = at + 2;
+            int next = indexOf(body, delimiter, start, body.length);
+            int headEnd = next < 0 ? -1 : indexOf(body, CRLF_CRLF, start, next);
+            if (headEnd < 0) return null;
+            String[] disposition = disposition(body, start, headEnd);
+            if (disposition == null) return null;
+            int index = disposition[0].equals("link") ? 0 : disposition[0].equals("file") ? 1 : -1;
+            if (index >= 0) {
+                if (fields[index] != null || (disposition[1] == null) != (index == 0)) return null;
+                fields[index] = new Field(headEnd + 4, next, disposition[1]);
+            }
+            at = next + delimiter.length;
+        }
+    }
+
+    // The name and file name of a part's Content-Disposition: form-data header, the
+    // file name null when it has none. Null when the part has not exactly one such
+    // header with exactly one name and at most one file name, or when its headers are
+    // not UTF-8, have a lone CR or LF or a NUL, a folded line or a name that is not a
+    // token. Other control characters are let through: browsers escape only CR, LF
+    // and the quote in a file name, which a file system may allow them in, and
+    // fileName() drops them. Its other headers, such as a file's Content-Type, and
+    // other parameters, such as a filename* no browser sends, are ignored.
+    private static String[] disposition(byte[] body, int from, int to) {
+        String head = utf8(body, from, to);
+        if (head == null) return null;
+        String[] found = null;
+        for (String line : head.split("\r\n", -1)) {
+            for (char c : line.toCharArray()) if (c == '\r' || c == '\n' || c == 0) return null;
+            int colon = line.indexOf(':');
+            if (colon <= 0 || !line.substring(0, colon).matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) return null;
+            if (!line.substring(0, colon).equalsIgnoreCase("content-disposition")) continue;
+            if (found != null) return null;
+            String value = line.substring(colon + 1);
+            int semicolon = value.indexOf(';');
+            if (semicolon < 0 || !value.substring(0, semicolon).trim().equalsIgnoreCase("form-data")) return null;
+            List<String[]> parameters = parameters(value.substring(semicolon));
+            if (parameters == null) return null;
+            found = new String[2];
+            int names = 0;
+            int fileNames = 0;
+            for (String[] parameter : parameters) {
+                if (parameter[0].equals("name")) { found[0] = parameter[1]; names++; }
+                if (parameter[0].equals("filename")) { found[1] = parameter[1]; fileNames++; }
+            }
+            if (names != 1 || fileNames > 1) return null;
+        }
+        return found;
+    }
+
+    // The parameters after a header value's type, from its first ';', as lower-case
+    // names and values: ';' name=value with optional spaces around the ';', the value
+    // a token or a quoted string. Null for anything else. A quoted string runs to the
+    // next quote: browsers write a quote in a name as %22 and a backslash as it is,
+    // so a backslash escapes nothing.
+    private static List<String[]> parameters(String text) {
+        List<String[]> found = new ArrayList<>();
+        int i = 0;
+        while (true) {
+            i = skipSpaces(text, i);
+            if (i == text.length()) return found;
+            if (text.charAt(i) != ';') return null;
+            i = skipSpaces(text, i + 1);
+            int name = i;
+            while (i < text.length() && isTokenChar(text.charAt(i))) i++;
+            if (i == name || i == text.length() || text.charAt(i) != '=') return null;
+            String key = text.substring(name, i).toLowerCase(Locale.ROOT);
+            int value = ++i;
+            if (i < text.length() && text.charAt(i) == '"') {
+                int close = text.indexOf('"', i + 1);
+                if (close < 0) return null;
+                found.add(new String[]{key, text.substring(i + 1, close)});
+                i = close + 1;
+            } else {
+                while (i < text.length() && isTokenChar(text.charAt(i))) i++;
+                if (i == value) return null;
+                found.add(new String[]{key, text.substring(value, i)});
+            }
+        }
+    }
+
+    private static int skipSpaces(String text, int i) {
+        while (i < text.length() && (text.charAt(i) == ' ' || text.charAt(i) == '\t')) i++;
+        return i;
+    }
+
+    private static boolean isTokenChar(char c) {
+        return c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
+    }
+
+    // The boundary of a multipart/form-data type: its one boundary parameter, of 1 to
+    // 70 of the characters RFC 2046 allows, the last not a space. Null for no
+    // boundary, two, or another one.
+    private static String boundary(String type) {
+        int semicolon = type.indexOf(';');
+        List<String[]> parameters = semicolon < 0 ? null : parameters(type.substring(semicolon));
+        if (parameters == null) return null;
+        String boundary = null;
+        for (String[] parameter : parameters) {
+            if (!parameter[0].equals("boundary")) continue;
+            if (boundary != null) return null;
+            boundary = parameter[1];
+        }
+        return boundary != null && boundary.matches("[0-9A-Za-z'()+_,./:=? -]{0,69}[0-9A-Za-z'()+_,./:=?-]") ? boundary : null;
+    }
+
+    // Letters that draw nothing, though they are not spaces: the Hangul fillers and
+    // the blank braille pattern. A name of them alone would look like no name.
+    private static final String BLANK_LETTERS = "\u115F\u1160\u3164\uFFA0\u2800";
+
+    /**
+     * A file's name as a browser sends it, fit to name a configuration and to show in
+     * the TV's confirmation: the quote and line breaks browsers write as %22, %0D and
+     * %0A undone, then only what follows the last / or \, on one line, trimmed and
+     * cut to 80 characters. Null when nothing visible is left.
+     *
+     * <p>On one line means without control, format (such as the ones that reverse or
+     * hide text), line or paragraph separator characters, with any other space as an
+     * ordinary one, and without letters that draw nothing. A character keeps at most
+     * two combining marks, as many as a language stacks on one, and marks that
+     * enclose it are dropped: drawn above and below it, a long stack of them would
+     * paint over the lines after the name, where the confirmation says where it came
+     * from.
+     */
+    static String fileName(String sent) {
+        String name = sent.replace("%22", "\"").replace("%0D", "").replace("%0A", "");
+        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+        StringBuilder kept = new StringBuilder(name.length());
+        // Combining marks kept on the last character; -1 at the start or after a
+        // space, where a mark has nothing to sit on.
+        int marks = -1;
+        for (int i = 0; i < name.length(); ) {
+            int c = name.codePointAt(i);
+            i += Character.charCount(c);
+            int type = Character.getType(c);
+            if (type == Character.CONTROL || type == Character.FORMAT || type == Character.LINE_SEPARATOR
+                    || type == Character.PARAGRAPH_SEPARATOR || type == Character.SURROGATE
+                    || type == Character.ENCLOSING_MARK || BLANK_LETTERS.indexOf(c) >= 0) continue;
+            if (type == Character.NON_SPACING_MARK) {
+                if (marks < 0 || marks >= 2) continue;
+                marks++;
+            } else if (Character.isSpaceChar(c)) {
+                c = ' ';
+                marks = -1;
+            } else {
+                marks = 0;
+            }
+            kept.appendCodePoint(c);
+        }
+        // Trimmed, it starts with a visible character, as a mark is kept only after one.
+        String shown = kept.toString().trim();
+        if (shown.codePointCount(0, shown.length()) > 80) shown = shown.substring(0, shown.offsetByCodePoints(0, 80)).trim();
+        return shown.isEmpty() ? null : shown;
+    }
+
+    // UTF-8 text, or null when the bytes are not.
+    private static String utf8(byte[] bytes, int from, int to) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes, from, to - from)).toString();
+        } catch (CharacterCodingException notText) {
+            return null;
+        }
+    }
+
+    // Whether bytes holds part's bytes from skip on at at.
+    private static boolean matches(byte[] bytes, int at, byte[] part, int skip) {
+        if (at < 0 || bytes.length - at < part.length - skip) return false;
+        for (int i = skip; i < part.length; i++) if (bytes[at + i - skip] != part[i]) return false;
+        return true;
+    }
+
+    // Where part first lies wholly inside bytes[from, to), or -1.
+    private static int indexOf(byte[] bytes, byte[] part, int from, int to) {
+        for (int at = from; at <= to - part.length; at++) if (matches(bytes, at, part, 0)) return at;
+        return -1;
     }
 
     // The answer to a whole send, which counts whether or not the answer gets

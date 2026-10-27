@@ -39,7 +39,7 @@ public final class LinkReceiverTest {
     private static final String HOST = "192.168.1.23:41234";
     private static final String LINK = "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz";
     private static final LinkReceiver.Pages PAGES = new LinkReceiver.Pages("en", "Send to the TV", "Paste a link",
-            "Send", "The TV asks first", "Sent", "Wrong code", "Stopped");
+            "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Wrong code", "Stopped");
     private static final String CSP =
             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -86,6 +86,51 @@ public final class LinkReceiverTest {
     }
     private static String form(String text) throws IOException { return "link=" + URLEncoder.encode(text, "UTF-8"); }
 
+    // The page's own form, multipart as Chrome and Safari send it, with their kind
+    // of boundary: the text field with no file name and no type, then the file field
+    // with both. With no file chosen, that has an empty name and no content.
+    private static final String BOUNDARY = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+    private static byte[] utf8(String text) { return text.getBytes(StandardCharsets.UTF_8); }
+    private static byte[] concat(byte[]... parts) {
+        ByteArrayOutputStream all = new ByteArrayOutputStream();
+        for (byte[] part : parts) all.write(part, 0, part.length);
+        return all.toByteArray();
+    }
+    private static byte[] textField(String name, String text) {
+        return utf8("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n" + text);
+    }
+    // The name as the browser writes it, with %22 for a quote and %0D%0A for a line break.
+    private static byte[] fileField(String fileName, byte[] content) {
+        return concat(utf8("Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName
+                + "\"\r\nContent-Type: application/octet-stream\r\n\r\n"), content);
+    }
+    private static byte[] noFile() { return fileField("", new byte[0]); }
+    private static byte[] parts(String boundary, byte[]... parts) {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        for (byte[] part : parts) {
+            byte[] start = utf8("--" + boundary + "\r\n");
+            body.write(start, 0, start.length);
+            body.write(part, 0, part.length);
+            body.write('\r');
+            body.write('\n');
+        }
+        byte[] end = utf8("--" + boundary + "--\r\n");
+        body.write(end, 0, end.length);
+        return body.toByteArray();
+    }
+    private static byte[] pageForm(String text, String fileName, byte[] file) {
+        return parts(BOUNDARY, textField("link", text), fileField(fileName, file));
+    }
+    private static byte[] multipartPost(String path, String host, String type, byte[] body) {
+        return concat(utf8("POST " + path + " HTTP/1.1\r\nHost: " + host + "\r\nContent-Type: " + type
+                + "\r\nContent-Length: " + body.length + "\r\n\r\n"), body);
+    }
+    private static byte[] multipartPost(String path, byte[] body) {
+        return multipartPost(path, HOST, "multipart/form-data; boundary=" + BOUNDARY, body);
+    }
+    private static final String TOML = "[endpoint]\r\nhostname = \"сервер.example\"\r\npassword = \"a+b&c=d %41\"\r\n";
+    private static final byte[] BOM = {(byte) 0xef, (byte) 0xbb, (byte) 0xbf};
+
     private static void assertRefused(String why, String status, Exchange exchange) {
         assertEquals(why, status, exchange.status());
         assertSame(why, LinkReceiver.Kind.REFUSED, exchange.outcome.kind);
@@ -108,6 +153,7 @@ public final class LinkReceiverTest {
         assertEquals(PAGES.sent, exchange.body());
         assertSame(LinkReceiver.Kind.RECEIVED, exchange.outcome.kind);
         assertEquals(LINK, exchange.outcome.text);
+        assertNull("Pasted, it has no file name", exchange.outcome.fileName);
         assertEquals(0, exchange.unread);
     }
 
@@ -199,7 +245,7 @@ public final class LinkReceiverTest {
 
     @Test public void onlyAFormPostCarriesTheText() throws IOException {
         String body = form(LINK);
-        for (String type : new String[]{"text/plain", "multipart/form-data; boundary=x", "application/json",
+        for (String type : new String[]{"text/plain", "multipart/mixed; boundary=x", "application/json",
                 "application/x-www-form-urlencodedx", ""}) {
             String headers = type.isEmpty() ? "" : "Content-Type: " + type + "\r\n";
             assertRefused(type, "HTTP/1.1 415 Unsupported Media Type", exchange(post("/K7QM4XHD", HOST, headers, body)));
@@ -272,6 +318,199 @@ public final class LinkReceiverTest {
         }
     }
 
+    @Test public void aFileIsReceivedWithItsName() throws IOException {
+        // A TOML file with a Russian server name and CRLF line ends, the text field left empty.
+        Exchange exchange = exchange(multipartPost("/K7QM-4XHD", pageForm("", "home.toml", utf8(TOML))), false);
+        assertEquals("HTTP/1.1 200 OK", exchange.status());
+        assertEquals(PAGES.sent, exchange.body());
+        assertSame(LinkReceiver.Kind.RECEIVED, exchange.outcome.kind);
+        assertEquals(TOML.trim(), exchange.outcome.text);
+        assertEquals("home.toml", exchange.outcome.fileName);
+        assertEquals(0, exchange.unread);
+        // A text file with a link, a byte order mark and a CRLF after it, as Notepad saves one.
+        LinkReceiver.Outcome link = exchange(multipartPost("/K7QM4XHD",
+                pageForm(" \r\n", "link.txt", concat(BOM, utf8(LINK + "\r\n")))), false).outcome;
+        assertSame(LinkReceiver.Kind.RECEIVED, link.kind);
+        assertEquals(LINK, link.text);
+        assertEquals("link.txt", link.fileName);
+        // Firefox's boundary, and the type it gives a file.
+        String gecko = "----geckoformboundary1f6c0a9e2b3d4c5e8a7b6c5d4e3f2a1b";
+        byte[] firefox = parts(gecko, textField("link", ""), concat(utf8("Content-Disposition: form-data; name=\"file\"; "
+                + "filename=\"home.toml\"\r\nContent-Type: application/toml\r\n\r\n"), utf8(TOML)));
+        LinkReceiver.Outcome fromFirefox = exchange(multipartPost("/K7QM4XHD", HOST, "multipart/form-data; boundary=" + gecko,
+                firefox), false).outcome;
+        assertEquals(TOML.trim(), fromFirefox.text);
+        assertEquals("home.toml", fromFirefox.fileName);
+    }
+
+    @Test public void aPastedTextStillWorksInTheMultipartForm() throws IOException {
+        for (String text : new String[]{LINK, " " + LINK + "\r\n", TOML}) {
+            Exchange exchange = exchange(multipartPost("/K7QM4XHD", pageForm(text, "", new byte[0])), false);
+            assertSame(LinkReceiver.Kind.RECEIVED, exchange.outcome.kind);
+            assertEquals(text.trim(), exchange.outcome.text);
+            assertNull(exchange.outcome.fileName);
+        }
+        // In any order, with other fields skipped, a name as a token, any case where a
+        // header's is free, other headers, and without the last line end.
+        byte[] plain = pageForm(LINK, "", new byte[0]);
+        byte[][] forms = {
+            parts(BOUNDARY, noFile(), textField("other", "x"), textField("link", LINK)),
+            parts(BOUNDARY, utf8("content-DISPOSITION: Form-Data;NAME=link\r\nX-Other: 1\r\n\r\n" + LINK), noFile()),
+            Arrays.copyOf(plain, plain.length - 2)};
+        for (byte[] form : forms)
+            assertEquals(new String(form, StandardCharsets.UTF_8), LINK, exchange(multipartPost("/K7QM4XHD", form), false).outcome.text);
+        // A file of nothing but white space counts as none, as an empty text does.
+        assertEquals(LINK, exchange(multipartPost("/K7QM4XHD", pageForm(LINK, "blank.txt", utf8(" \r\n"))), false).outcome.text);
+    }
+
+    @Test public void nothingOrBothGetsTheFormAgainWithoutAStrike() throws IOException {
+        // Neither, both, or a file that is not UTF-8 text: the phone can fix any of them.
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0x0d};
+        byte[] utf16 = {(byte) 0xff, (byte) 0xfe, '[', 0, 'e', 0};
+        byte[][] forms = {pageForm("", "", new byte[0]), pageForm(" \r\n\t", "", new byte[0]),
+                pageForm(LINK, "home.toml", utf8(TOML)), pageForm("", "photo.png", png), pageForm(LINK, "photo.png", png),
+                pageForm("", "home.toml", utf16), parts(BOUNDARY, textField("Link", LINK), noFile()),
+                parts(BOUNDARY, textField("other", LINK)), utf8("--" + BOUNDARY + "--\r\n")};
+        for (byte[] form : forms) {
+            Exchange exchange = exchange(multipartPost("/K7QM4XHD", form), false);
+            String what = new String(form, StandardCharsets.UTF_8);
+            assertEquals(what, "HTTP/1.1 400 Bad Request", exchange.status());
+            assertEquals(what, PAGES.retry, exchange.body());
+            assertSame(what, LinkReceiver.Kind.REFUSED, exchange.outcome.kind);
+            assertEquals(what, 0, exchange.unread);
+        }
+    }
+
+    @Test public void aMultipartFormMustBeAsABrowserWritesIt() throws IOException {
+        byte[] good = pageForm(LINK, "", new byte[0]);
+        String d = "--" + BOUNDARY;
+        String link = "Content-Disposition: form-data; name=\"link\"";
+        byte[] badText = pageForm("ab", "", new byte[0]);
+        badText[new String(badText, StandardCharsets.ISO_8859_1).indexOf("ab")] = (byte) 0xff;
+        byte[] badName = pageForm("", "ab.toml", utf8(TOML));
+        badName[new String(badName, StandardCharsets.ISO_8859_1).indexOf("ab.toml")] = (byte) 0xc0;
+        byte[][] bodies = {
+            // A preamble, an epilogue, no last boundary, padding after a boundary, a
+            // boundary in the content, bare LFs, a part with no headers or no blank line.
+            concat(utf8("preamble\r\n"), good), concat(good, utf8("epilogue")), Arrays.copyOf(good, good.length - 10),
+            utf8(d + " \r\n" + link + "\r\n\r\n" + LINK + "\r\n" + d + "--\r\n"),
+            pageForm(LINK + "\r\n" + d + "x", "", new byte[0]),
+            utf8(d + "\n" + link + "\n\n" + LINK + "\n" + d + "--\n"),
+            utf8(d + "\r\n\r\n" + LINK + "\r\n" + d + "--\r\n"),
+            utf8(d + "\r\n" + link + "\r\n" + d + "--\r\n"),
+            // Not exactly one Content-Disposition: form-data with one name, at most
+            // one file name, link without one, file with one, each field once.
+            parts(BOUNDARY, utf8("Content-Type: text/plain\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8(link + "\r\n" + link + "\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: attachment; name=\"link\"\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data; filename=\"a.txt\"\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data; name=\"link\"; name=\"file\"\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data; name=\"file\"; filename=\"a\"; filename=\"b\"\r\n\r\n" + LINK)),
+            parts(BOUNDARY, textField("link", LINK), textField("link", ""), noFile()),
+            parts(BOUNDARY, textField("link", LINK), noFile(), noFile()),
+            parts(BOUNDARY, utf8(link + "; filename=\"a.txt\"\r\n\r\n" + LINK), noFile()),
+            parts(BOUNDARY, textField("link", ""), textField("file", TOML)),
+            // Header syntax no browser writes.
+            parts(BOUNDARY, utf8("Content-Disposition: form-data; name=\"link\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data; name=li nk\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8(link + ";\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content-Disposition: form-data;\r\n name=\"link\"\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8("Content Disposition: form-data; name=\"link\"\r\n\r\n" + LINK)),
+            // A NUL, or a CR or LF on its own, which browsers write as %0D and %0A.
+            parts(BOUNDARY, utf8(link + "\r\nX: a\0b\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8(link + "\r\nX: a\rb\r\n\r\n" + LINK)),
+            parts(BOUNDARY, utf8(link + "\r\nX: a\nb\r\n\r\n" + LINK)),
+            parts(BOUNDARY, textField("link", ""), fileField("a\nb.toml", utf8(TOML))),
+            // A backslash escapes nothing, so old Firefox's \" for a quote breaks the name.
+            pageForm("", "a\\\"b.toml", utf8(TOML)),
+            // A text or a file name that is not UTF-8.
+            badText, badName};
+        for (byte[] body : bodies)
+            assertRefused(new String(body, StandardCharsets.UTF_8), "HTTP/1.1 400 Bad Request", exchange(multipartPost("/K7QM4XHD", body), false));
+        // A boundary is matched as it was given, case and all.
+        assertRefused("case", "HTTP/1.1 400 Bad Request", exchange(multipartPost("/K7QM4XHD", HOST,
+                "multipart/form-data; boundary=" + BOUNDARY.toLowerCase(java.util.Locale.ROOT), good), false));
+    }
+
+    @Test public void aMultipartTypeNeedsOneBoundaryRfc2046Allows() throws IOException {
+        byte[] body = pageForm(LINK, "", new byte[0]);
+        for (String type : new String[]{"multipart/form-data", "multipart/form-data;", "multipart/form-data; boundary=",
+                "multipart/form-data; boundary=\"\"", "multipart/form-data; boundary=" + "a".repeat(71),
+                "multipart/form-data; boundary=x; boundary=x", "multipart/form-data; boundary=a/b",
+                "multipart/form-data; boundary=\"abc \"", "multipart/form-data; boundary=\"a\\b\"",
+                "multipart/form-data; boundary=x;", "multipart/form-data boundary=x", "multipart/form-data; boundary =x",
+                "multipart/form-datax; boundary=x", "multipart/mixed; boundary=" + BOUNDARY}) {
+            Exchange exchange = exchange(multipartPost("/K7QM4XHD", HOST, type, body), false);
+            assertRefused(type, "HTTP/1.1 415 Unsupported Media Type", exchange);
+            assertEquals("Refused before the text is read", body.length, exchange.unread);
+        }
+        // Any case and spacing where they are free, other parameters, quoted or not,
+        // and every character RFC 2046 allows in one, up to 70. The last is old Firefox's.
+        for (String boundary : new String[]{"a".repeat(70), "\"gc0p4Jq0M2Yt08j34c0p (x)\"", "\"'()+_,-./:=?\"", "x",
+                "---------------------------9051914041544843365972754266"}) {
+            String bare = boundary.startsWith("\"") ? boundary.substring(1, boundary.length() - 1) : boundary;
+            String type = "Multipart/Form-Data ;\tcharset=utf-8; BOUNDARY=" + boundary;
+            Exchange exchange = exchange(multipartPost("/K7QM4XHD", HOST, type, parts(bare, textField("link", LINK), noFile())), false);
+            assertSame(type, LinkReceiver.Kind.RECEIVED, exchange.outcome.kind);
+        }
+    }
+
+    @Test public void aFileNameIsMadeFitToShow() throws IOException {
+        String[][] names = {
+            // As browsers write a quote and line breaks, and a path some send.
+            {"My %22home%22 VPN.toml", "My \"home\" VPN.toml"}, {"Мой сервер.toml", "Мой сервер.toml"},
+            {"a%0D%0Ab.toml", "ab.toml"}, {"C:\\Users\\me\\home.toml", "home.toml"}, {"dir/home.toml", "home.toml"},
+            // Nothing that reverses text, is invisible, or breaks the line.
+            {"\u202Elmot.exe", "lmot.exe"}, {" \u2066x\u2069.toml ", "x.toml"}, {"a\u2028b\u2029c\u0085d\u0007", "abcd"},
+            // 80 characters at most, an emoji counted once.
+            {"x".repeat(100), "x".repeat(80)}, {"\uD83D\uDD12".repeat(90), "\uD83D\uDD12".repeat(80)},
+            {"x".repeat(79) + " y", "x".repeat(79)},
+            // Any other space as a space, and no letter that draws nothing.
+            {"My\u3000VPN\u00A0.toml", "My VPN .toml"}, {"\u3164\u3164.toml", ".toml"},
+            // Two combining marks on a character at most, as Vietnamese has, none
+            // with nothing to sit on, and none that enclose it.
+            {"a" + "\u0336".repeat(20) + "b", "a\u0336\u0336b"}, {"Vie\u0323\u0302t.toml", "Vie\u0323\u0302t.toml"},
+            {"\u0301x", "x"}, {"a \u0301b", "a b"}, {"1\u20DD.toml", "1.toml"}};
+        for (String[] name : names) assertEquals(name[0], name[1], LinkReceiver.fileName(name[0]));
+        for (String nothing : new String[]{"", " ", "dir/", "x\\", "\u200F\u061C\u00AD", "%0D%0A", "\u3000\u00A0",
+                "\u115F\u1160\u3164\uFFA0", "\u2800\u2800", "\u0301\u0302", " \uFE0F"})
+            assertNull(nothing, LinkReceiver.fileName(nothing));
+        // Browsers send other control characters in a file name as they are.
+        for (String sent : new String[]{"home\u0001.toml", "\u001bhome.toml", "home\u007f.toml", "home\t.toml"})
+            assertEquals(sent, "home.toml", exchange(multipartPost("/K7QM4XHD", pageForm("", sent, utf8(TOML))), false).outcome.fileName);
+        // Through the form, and a file with no name is received without one.
+        assertEquals("lmot.exe", exchange(multipartPost("/K7QM4XHD", pageForm("", "\u202Elmot.exe", utf8(TOML))), false).outcome.fileName);
+        LinkReceiver.Outcome nameless = exchange(multipartPost("/K7QM4XHD", pageForm("", "", utf8(TOML))), false).outcome;
+        assertSame(LinkReceiver.Kind.RECEIVED, nameless.kind);
+        assertNull(nameless.fileName);
+    }
+
+    @Test public void aMultipartFormHasTheSameSizeLimit() throws IOException {
+        // The limit is on the whole body, boundaries and headers included.
+        int room = LinkReceiver.MAX_BODY_BYTES - pageForm("", "big.toml", new byte[0]).length;
+        byte[] content = new byte[room + 1];
+        Arrays.fill(content, (byte) '#');
+        byte[] full = pageForm("", "big.toml", Arrays.copyOf(content, room));
+        assertEquals(LinkReceiver.MAX_BODY_BYTES, full.length);
+        assertSame(LinkReceiver.Kind.RECEIVED, exchange(multipartPost("/K7QM4XHD", full), false).outcome.kind);
+        Exchange tooLarge = exchange(multipartPost("/K7QM4XHD", pageForm("", "big.toml", content)), false);
+        assertRefused("too large", "HTTP/1.1 413 Content Too Large", tooLarge);
+        assertEquals(LinkReceiver.MAX_BODY_BYTES + 1, tooLarge.unread);
+    }
+
+    @Test public void aWrongCodeIsAStrikeWhateverTheForm() throws IOException {
+        // The code is checked before the form is read, as for the urlencoded one.
+        for (byte[] body : new byte[][]{pageForm("", "home.toml", utf8(TOML)), utf8("not a form")}) {
+            Exchange exchange = exchange(multipartPost("/K7QM-4XHE", body), false);
+            assertEquals("HTTP/1.1 404 Not Found", exchange.status());
+            assertEquals(PAGES.wrongCode, exchange.body());
+            assertSame(LinkReceiver.Kind.WRONG_CODE, exchange.outcome.kind);
+            assertNull(exchange.outcome.fileName);
+            assertEquals(PAGES.lockedOut, exchange(multipartPost("/K7QM-4XHE", body), true).body());
+        }
+    }
+
     @Test public void requestsNoBrowserSendsAreRefused() throws IOException {
         String host = "\r\nHost: " + HOST;
         for (String request : new String[]{
@@ -295,7 +534,9 @@ public final class LinkReceiverTest {
                 post("/K7QM4XHD", "link="), post("/K7QM4XHD", HOST, type, "").replace("Content-Length: 0\r\n", ""),
                 post("/K7QM4XHD", HOST, type + "Transfer-Encoding: chunked\r\n", "x"),
                 post("/K7QM4XHD", HOST, "", "x"), "PUT / HTTP/1.1\r\nHost: " + HOST + "\r\n\r\n",
-                "GET / HTTP/1.1\r\nHost: " + HOST + "\r\nX: " + "x".repeat(LinkReceiver.MAX_HEADER_BYTES) + "\r\n\r\n"};
+                "GET / HTTP/1.1\r\nHost: " + HOST + "\r\nX: " + "x".repeat(LinkReceiver.MAX_HEADER_BYTES) + "\r\n\r\n",
+                new String(multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))), StandardCharsets.UTF_8),
+                new String(multipartPost("/K7QM4XHD", pageForm("", "", new byte[0])), StandardCharsets.UTF_8)};
         List<String> statuses = new ArrayList<>();
         List<String> types = new ArrayList<>();
         for (String request : requests) {
@@ -308,28 +549,36 @@ public final class LinkReceiverTest {
                 assertTrue(exchange.status() + " lacks " + expected, headers.contains(expected));
             types.add(headers.get(1));
         }
-        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431"), statuses);
+        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431", "200", "400"), statuses);
         // The pages are HTML, which nosniff makes the browser take at its word; the refusals are plain text.
         String html = "Content-Type: text/html; charset=utf-8";
         String plain = "Content-Type: text/plain; charset=utf-8";
-        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain), types);
+        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html), types);
     }
 
     @Test public void thePagesLoadNothingAndEscapeTheirText() {
         String hostile = "<script>alert(\"x\")</script> & 'y'";
-        LinkReceiver.Pages pages = new LinkReceiver.Pages("en\"><script>", hostile, hostile, hostile, hostile, hostile, hostile, hostile);
+        LinkReceiver.Pages pages = new LinkReceiver.Pages("en\"><script>", hostile, hostile, hostile, hostile, hostile, hostile,
+                hostile, hostile, hostile);
         String escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;";
-        for (String page : new String[]{pages.form, pages.sent, pages.wrongCode, pages.lockedOut}) {
+        for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.wrongCode, pages.lockedOut}) {
             assertFalse(page, page.contains("<script"));
             assertTrue(page, page.contains(escaped));
             assertTrue(page, page.startsWith("<!doctype html><html lang=\"en&quot;&gt;&lt;script&gt;\">"));
             for (String outside : new String[]{"src=", "href=", "http:", "https:", "url(", "@import", "action="})
                 assertFalse(outside + " in " + page, page.toLowerCase(java.util.Locale.ROOT).contains(outside));
         }
-        // It posts back to its own address, which carries the code.
-        assertTrue(PAGES.form.contains("<form method=\"post\" accept-charset=\"utf-8\">"));
-        assertTrue(PAGES.form.contains("<textarea id=\"link\" name=\"link\" required"));
-        assertTrue(PAGES.form.contains("autocomplete=\"off\""));
+        // It posts back to its own address, which carries the code, a pasted text or a
+        // file, so neither field is required.
+        assertTrue(PAGES.form.contains("<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"));
+        assertTrue(PAGES.form.contains("<textarea id=\"link\" name=\"link\" autocomplete=\"off\""));
+        assertTrue(PAGES.form.contains("<label for=\"file\">Or choose a file</label><input type=\"file\" id=\"file\" name=\"file\">"));
+        assertFalse(PAGES.form.contains("required"));
+        // Any file: a browser may not know a .toml file's type and grey it out.
+        assertFalse(PAGES.form.contains("accept="));
+        // The retry page is the form again, under its text.
+        String form = PAGES.form.substring(PAGES.form.indexOf("<form"));
+        assertTrue(PAGES.retry.endsWith("<p>Paste or choose one</p>" + form));
         assertEquals("a&amp;b", LinkReceiver.escape("a&b"));
     }
 
@@ -416,7 +665,9 @@ public final class LinkReceiverTest {
     private static BlockingQueue<String> start(LinkReceiver receiver) {
         BlockingQueue<String> events = new LinkedBlockingQueue<>();
         receiver.start(new LinkReceiver.Listener() {
-            @Override public void received(String text, String sender) { events.add("received " + text + " from " + sender); }
+            @Override public void received(String text, String fileName, String sender) {
+                events.add("received " + text + (fileName == null ? "" : " as " + fileName) + " from " + sender);
+            }
             @Override public void stopped(LinkReceiver.Stop reason) { events.add("stopped " + reason); }
         });
         return events;
@@ -440,10 +691,11 @@ public final class LinkReceiverTest {
         }
     }
     private static Socket connect(int port) throws IOException { return connect(port, 5_000); }
-    private static String send(int port, String request) throws IOException {
+    private static String send(int port, String request) throws IOException { return send(port, utf8(request)); }
+    private static String send(int port, byte[] request) throws IOException {
         try (Socket socket = connect(port)) {
             socket.setSoTimeout(5_000);
-            socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+            socket.getOutputStream().write(request);
             socket.getOutputStream().flush();
             return new String(socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         }
@@ -499,8 +751,11 @@ public final class LinkReceiverTest {
     // A whole send made by a client that leaves at once, without reading the answer:
     // with a reset, as SO_LINGER 0 gives, or with an ordinary close.
     private static void sendAndLeave(int port, String request, boolean reset) throws IOException {
+        sendAndLeave(port, utf8(request), reset);
+    }
+    private static void sendAndLeave(int port, byte[] request, boolean reset) throws IOException {
         Socket socket = connect(port);
-        socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+        socket.getOutputStream().write(request);
         if (reset) socket.setSoLinger(true, 0);
         socket.close();
     }
@@ -533,6 +788,36 @@ public final class LinkReceiverTest {
             Thread.sleep(100);
             holder.shutdownOutput();
             assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        }
+        assertClosed(port);
+    }
+
+    @Test public void aFileIsReceivedOnceTheFormIsRight() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        String type = "multipart/form-data; boundary=" + BOUNDARY;
+        String host = "127.0.0.1:" + port;
+        // Sent with nothing in it, the form comes back, and the TV goes on waiting.
+        assertTrue(send(port, multipartPost("/K7QM-4XHD", host, type, pageForm("", "", new byte[0]))).endsWith(PAGES.retry));
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+        assertTrue(send(port, multipartPost("/K7QM-4XHD", host, type, pageForm("", "home.toml", concat(BOM, utf8(TOML)))))
+                .endsWith(PAGES.sent));
+        assertEquals("received " + TOML.trim() + " as home.toml from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertClosed(port);
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+    }
+
+    @Test public void aFileIsReceivedThoughItsSenderLeavesBeforeTheAnswer() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 5_000, 10_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        try (Socket holder = connect(port)) {
+            sendAndLeave(port, multipartPost("/K7QM-4XHD", "127.0.0.1:" + port, "multipart/form-data; boundary=" + BOUNDARY,
+                    pageForm("", "link.txt", utf8(LINK + "\n"))), true);
+            Thread.sleep(100);
+            holder.shutdownOutput();
+            assertEquals("received " + LINK + " as link.txt from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
         }
         assertClosed(port);
     }

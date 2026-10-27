@@ -105,9 +105,13 @@ SVG, run the script and commit both.
 The TV shows a QR code and an address such as
 `http://192.168.1.23:41234/K7QM-4XHD`. A phone, tablet or laptop on the same
 network opens it, with its camera or by typing the address into a browser, and
-pastes a `tt://` link or a TOML file into the page there; no app is needed on
-it. The TV then shows what it received, with the address it came from, and
-adds it only once you confirm, as for any other import.
+pastes a `tt://` link or a TOML file into the page there, or picks the file
+itself: a TOML file, or a text file that holds a link. No app is needed on it.
+The TV then shows what it received, with the address it came from, and adds it
+only once you confirm, as for any other import. A TOML file without a name of
+its own is named after its file, as one picked on the TV is; a link names
+itself. If choosing a file does nothing, as in the browser some QR code scanner
+apps open pages in, open the address in Chrome or Safari instead.
 
 - It listens only on the TV's own address on the home network (10/8,
   172.16/12 or 192.168/16, over Wi-Fi or Ethernet), never on a public,
@@ -116,14 +120,18 @@ adds it only once you confirm, as for any other import.
 - It takes one link or file and stops. The address carries an 8-character
   code (40 bits, Crockford's base32), and 3 sends with a wrong code stop it.
   Every address shows the same page, so only a send tests a code.
-- A send is a form post of at most 512 KiB that names the TV's address as its
-  host. The page loads nothing and runs no script, and nothing about a
-  transfer is logged.
-- The link crosses the home network unencrypted: a browser has no way to
-  encrypt a page on a local `http://` address. Someone already watching that
+- A send is a form post of at most 512 KiB, a file included, that names the
+  TV's address as its host. The page loads nothing and runs no script, and
+  nothing about a transfer is logged. A send with nothing in it, with both
+  pasted text and a file, or with a file that is not UTF-8 text shows the page
+  again with a note; it is not a wrong code, and the TV goes on waiting.
+- The link or file crosses the home network unencrypted: a browser has no way
+  to encrypt a page on a local `http://` address. Someone already watching that
   network at that moment could read the VPN password in it, or send their own
   configuration first. The TV's confirmation shows the server and the sender's
-  address, so check both, and use it only on a network you trust.
+  address, so check both, and use it only on a network you trust. A file's name
+  is shown there on one line, without characters that reverse or hide text,
+  and cut to 80 characters.
 - It does not work while the phone's VPN is on, over mobile data, or on a guest
   network that keeps its devices apart.
 

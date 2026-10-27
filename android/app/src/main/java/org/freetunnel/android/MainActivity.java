@@ -683,8 +683,9 @@ public final class MainActivity extends Activity {
     }
 
     // Receive from phone: a phone on the same network opens the page the QR code or
-    // the address leads to, and sends a link or a TOML file from there (LinkReceiver).
-    // What arrives goes through the same checks and confirmation as any import.
+    // the address leads to, and sends a link or a TOML file from there, pasted or as
+    // a file (LinkReceiver). What arrives goes through the same checks and
+    // confirmation as any import.
     private void receiveFromPhone() {
         stopReceiver();
         InetAddress address = lanAddress();
@@ -721,11 +722,12 @@ public final class MainActivity extends Activity {
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setFocusedByDefault(true);
         // These arrive on the receiver's thread, and count only for the receiver still open.
         r.start(new LinkReceiver.Listener() {
-            @Override public void received(String text, String sender) {
+            @Override public void received(String text, String fileName, String sender) {
                 runOnUiThread(() -> {
                     if (isDestroyed() || linkReceiver != r) return;
                     stopReceiver();
-                    importText(getString(R.string.text_from_another_device), text, sender);
+                    // A TOML file is named after its file, as one picked here is; a link names itself.
+                    importText(fileName != null ? fileName : getString(R.string.text_from_another_device), text, sender);
                 });
             }
             @Override public void stopped(LinkReceiver.Stop reason) {
@@ -768,8 +770,9 @@ public final class MainActivity extends Activity {
     // The phone's page in this device's language.
     private LinkReceiver.Pages receivePages() {
         return new LinkReceiver.Pages(java.util.Locale.getDefault().toLanguageTag(), getString(R.string.receive_page_title),
-                getString(R.string.receive_page_prompt), getString(R.string.receive_page_send), getString(R.string.receive_page_note),
-                getString(R.string.receive_page_sent), getString(R.string.receive_page_wrong_code), getString(R.string.receive_page_locked_out));
+                getString(R.string.receive_page_prompt), getString(R.string.receive_page_file), getString(R.string.receive_page_send),
+                getString(R.string.receive_page_note), getString(R.string.receive_page_sent), getString(R.string.receive_page_retry),
+                getString(R.string.receive_page_wrong_code), getString(R.string.receive_page_locked_out));
     }
     // These two refusals are about what this version cannot do yet, and say what to
     // do instead. That is more than the two lines a toast shows, so they get a dialog.
@@ -814,15 +817,17 @@ public final class MainActivity extends Activity {
                     saveConfigs(); page = 1; render();
                 }));
     }
-    // A name or a server as the confirmation shows it: on one line, and cut to 80
-    // characters. A file sets both, and a remote cannot scroll a dialog's message,
-    // so line breaks or a long run of text in them could push the lines after them,
-    // where the text was sent from and that verification is off, out of sight.
-    // What is saved stays as it was.
+    // A name or a server as the confirmation shows it: on one line, without the
+    // invisible characters that reverse or hide text, and cut to 80 characters. A
+    // file sets both, and a remote cannot scroll a dialog's message, so line breaks
+    // or a long run of text in them could push the lines after them, where the text
+    // was sent from and that verification is off, out of sight. What is saved stays
+    // as it was.
     private static String shown(String text) {
         StringBuilder line = new StringBuilder(text.length());
         text.codePoints().filter(c -> !Character.isISOControl(c) && Character.getType(c) != Character.LINE_SEPARATOR
-                && Character.getType(c) != Character.PARAGRAPH_SEPARATOR).forEach(line::appendCodePoint);
+                && Character.getType(c) != Character.PARAGRAPH_SEPARATOR && Character.getType(c) != Character.FORMAT)
+                .forEach(line::appendCodePoint);
         if (line.codePointCount(0, line.length()) <= 80) return line.toString();
         return line.substring(0, line.offsetByCodePoints(0, 79)) + "…";
     }

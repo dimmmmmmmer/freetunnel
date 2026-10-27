@@ -170,9 +170,11 @@
     <string name="text_no_file_picker_receive">На этом телевизоре нет выбора файлов. Используйте «Получить с телефона» или создайте конфигурацию вручную.</string>
     <string name="receive_page_title">Отправка в FreeTunnel</string>
     <string name="receive_page_prompt">Вставьте ссылку tt:// или TOML-файл TrustTunnel:</string>
+    <string name="receive_page_file">Или выберите TOML-файл либо текстовый файл со ссылкой tt://:</string>
     <string name="receive_page_send">Отправить на телевизор</string>
     <string name="receive_page_note">Телевизор покажет, что получил, и спросит, прежде чем добавить. Текст передаётся по сети без шифрования, поэтому отправляйте его только в доверенной сети.</string>
     <string name="receive_page_sent">Отправлено. Подтвердите на телевизоре.</string>
+    <string name="receive_page_retry">Телевизор ничего не принял. Вставьте ссылку или TOML-файл либо выберите файл, но не то и другое сразу, и отправьте снова. Файл должен быть текстом в UTF-8: TOML-файлом или текстовым файлом со ссылкой tt://.</string>
     <string name="receive_page_wrong_code">Неверный код. Проверьте адрес на экране телевизора и попробуйте ещё раз.</string>
     <string name="receive_page_locked_out">Снова неверный код, поэтому телевизор прекратил приём. Откройте на нём «Получить с телефона» ещё раз, чтобы получить новый адрес.</string>
 </resources>
