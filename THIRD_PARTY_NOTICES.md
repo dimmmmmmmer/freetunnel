@@ -98,20 +98,23 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 Every download contains the TrustTunnel VPN core. The desktop builds compile it
 from source and link it statically into FreeTunnel. In the Android app it is
 part of the TrustTunnel Android client's native library
-(`libtrusttunnel_android.so`), built by FreeTunnel from the same stable
-release with its routing-priority patch. Unless noted, each library below is compiled into the core in all
+(`libtrusttunnel_android.so`), built by FreeTunnel from stable 1.1.11 with its routing-priority patch.
+The desktop uses TrustTunnelClient 1.3.0-rc.2. Unless noted, each library below is compiled into the core in all
 downloads.
 
 ### TrustTunnel client core
 
-- Version: TrustTunnelClient 1.1.11, commit
+- Version, desktop: TrustTunnelClient 1.3.0-rc.2, commit
+  b1ddbd293e530d8ae49097727030773f964ef2cc.
+- Version, Android: TrustTunnelClient 1.1.11, commit
   c0990e174fc75b2e52acd15882c62e69a3022581. The desktop builds apply
   FreeTunnel's changes to it, which are in
   [vendor/trusttunnel/](vendor/trusttunnel/) in FreeTunnel's source. Android
   applies the routing-priority patch listed in [android/core-source.json](android/core-source.json).
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/c0990e174fc75b2e52acd15882c62e69a3022581>
+- Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/b1ddbd293e530d8ae49097727030773f964ef2cc>
+- Source, Android: <https://github.com/TrustTunnel/TrustTunnelClient/tree/c0990e174fc75b2e52acd15882c62e69a3022581>
 
 ### NativeLibsCommon
 
@@ -122,10 +125,12 @@ downloads.
 
 ### DnsLibs
 
-- Version: 2.10.2-6-gc68d7dde, commit c68d7dde992a147587b8ac200ae3b7d978c3e378
+- Version, desktop: 2.10.2-9-ge27180de, commit e27180de801a8a99cde4ee81358adef499171c6a
+- Version, Android: 2.10.2-6-gc68d7dde, commit c68d7dde992a147587b8ac200ae3b7d978c3e378
 - License: Apache-2.0
 - Copyright: Copyright 2022 Adguard Software Ltd
-- Source: <https://github.com/AdguardTeam/DnsLibs/tree/c68d7dde992a147587b8ac200ae3b7d978c3e378>
+- Source, desktop: <https://github.com/AdguardTeam/DnsLibs/tree/e27180de801a8a99cde4ee81358adef499171c6a>
+- Source, Android: <https://github.com/AdguardTeam/DnsLibs/tree/c68d7dde992a147587b8ac200ae3b7d978c3e378>
 
 ### BoringSSL
 

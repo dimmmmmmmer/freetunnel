@@ -1,6 +1,6 @@
 lwIP (vendored in TrustTunnelClient's third-party/lwip)
 Version: 2.1.2
-Source: https://github.com/TrustTunnel/TrustTunnelClient/tree/170609c24ca865819fed68437b01c013049bc3fa/third-party/lwip/lwip
+Source: https://github.com/TrustTunnel/TrustTunnelClient/tree/b1ddbd293e530d8ae49097727030773f964ef2cc/third-party/lwip/lwip
 License: BSD-3-Clause
 The lwIP files compiled into the core carry this license with these copyright
 notices as well: Swedish Institute of Computer Science (2001-2004); Inico
@@ -8,7 +8,7 @@ Technologies Ltd. (2010); Simon Goldschmidt (2017, 2018); Adam Dunkels
 (2002-2003); Dominik Spies (2007); Leon Woestenberg (2001-2004); Axon Digital
 Design B.V., The Netherlands (2001-2004); CITEL Technologies Ltd. (2002).
 
-[TrustTunnel/TrustTunnelClient@170609c24ca865819fed68437b01c013049bc3fa: third-party/lwip/lwip/COPYING]
+[TrustTunnel/TrustTunnelClient@b1ddbd293e530d8ae49097727030773f964ef2cc: third-party/lwip/lwip/COPYING]
 /*
  * Copyright (c) 2001, 2002 Swedish Institute of Computer Science.
  * All rights reserved. 

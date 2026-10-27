@@ -63,16 +63,28 @@ endif ()
 set(FREETUNNEL_CORE_REF "unknown")
 find_package(Git QUIET)
 if (GIT_FOUND)
-    # The TrustTunnel core lives in the parent (upstream) checkout. Prefer the
-    # nearest *stable* release tag (skip beta/rc/alpha pre-releases), falling
-    # back to a short commit when no stable tag is reachable.
+    # The TrustTunnel core lives in the parent (upstream) checkout. A tag on the
+    # pinned commit itself names it (v1.3.0-rc.2 while the pin is a release
+    # candidate, v1.3.0 once it is the release). Failing that, the nearest
+    # *stable* release tag (skip beta/rc/alpha pre-releases), falling back to a
+    # short commit when no stable tag is reachable. The nearest stable tag alone
+    # is wrong for a release candidate: it sits on a branch that does not
+    # descend from the last stable tags, and answers with an older version.
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" describe --tags --always
-                --exclude "*beta*" --exclude "*rc*" --exclude "*alpha*" --exclude "*-dev*"
+        COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" describe --tags --exact-match
         OUTPUT_VARIABLE FREETUNNEL_CORE_REF
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
+    if (NOT FREETUNNEL_CORE_REF)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${TRUSTTUNNEL_REPO_ROOT}" describe --tags --always
+                    --exclude "*beta*" --exclude "*rc*" --exclude "*alpha*" --exclude "*-dev*"
+            OUTPUT_VARIABLE FREETUNNEL_CORE_REF
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif()
 endif()
 if (NOT FREETUNNEL_CORE_REF)
     set(FREETUNNEL_CORE_REF "unknown")
