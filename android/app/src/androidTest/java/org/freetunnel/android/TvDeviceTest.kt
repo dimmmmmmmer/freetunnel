@@ -554,7 +554,10 @@ class TvDeviceTest {
         instrumentation.waitForIdleSync()
         val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button1) != null } }
         try {
-            val scroll = onMain { descendants(dialog).filterIsInstance<ScrollView>().single { it.isShown } }
+            // The text's, not the button bar's: in the framework's Material
+            // AlertDialog the buttons sit in a ScrollView too (buttonPanel, shown
+            // while the dialog has a button), around a ButtonBarLayout.
+            val scroll = onMain { descendants(dialog).filterIsInstance<ScrollView>().single { it.isShown && it.getChildAt(0) is TextView } }
             onMain {
                 assertTrue((scroll.getChildAt(0) as TextView).text.startsWith("# Third-party notices"))
                 assertTrue("The text's frame shows the focus", (scroll.parent as View).foreground?.isStateful == true)
