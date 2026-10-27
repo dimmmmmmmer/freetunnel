@@ -72,6 +72,10 @@ struct EndpointExport {
     QString name;                // trimmed; the endpoint writes "" when it has none
     QString clientRandomAuthKey; // trimmed; "" is no key
     bool subscription = false;   // it had a subscription address, which is not kept
+    // That address, userinfo and all, for the subscription flow to take with the
+    // user's consent (Backend, experimental/subscriptions). In memory only: it is in
+    // no field of config, so nothing written from the export carries it.
+    QString subscriptionUrl;
 };
 
 // The export the text is, or nothing when it is not one. It is one only when it

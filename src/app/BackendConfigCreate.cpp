@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "BackendConfigShared.h"
+#include "SubscriptionController.h"
 #include "core/AppSettings.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
@@ -300,6 +301,9 @@ bool Backend::createConfig(const QVariantMap &f)
         return false;
     }
     keepWhatTheFormDoesNotShow(edit.content, &parsed.ct);
+    // The certificate kept is the file's, which the form's trimming said nothing about.
+    if (keepSubscriptionOwnedFields(oldPath, edit.content, edit.password, &parsed.ct, &parsed.password))
+        parsed.certificateTrimmed = false;
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
@@ -349,6 +353,8 @@ void Backend::persistCreatedConfigPaths(const QString &oldPath, const QString &t
             QFile::remove(oldPath);
         if (wasActive)
             m_activePath = target;
+        // The link to a subscription goes with the config.
+        m_subscriptions->rename(oldPath, target);
     }
     QStringList stored = loadStoredConfigs();
     freetunnel::backend_config::updateStoredConfigList(stored, oldPath, target);

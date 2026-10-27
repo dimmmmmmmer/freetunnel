@@ -197,4 +197,19 @@ std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, c
     return out;
 }
 
+// The server is a config's, as an export's is, so it is read as an export's:
+// named after the document, or after its hostname when it gives no name.
+std::optional<PreparedImport> prepareSubscriptionImport(const ConfigToml &server, const QString &password,
+                                                        QString *error)
+{
+    EndpointExport asExport;
+    asExport.config = server;
+    asExport.config.password = password;
+    asExport.name = server.name.trimmed();
+    KeptCertificates certificates;
+    certificates.given = !server.certificate.trimmed().isEmpty();
+    certificates.der = certificatesDer(server.certificate, &certificates.dropped);
+    return prepareServer(serverOfExport(asExport, QString()), false, certificates, error, nullptr);
+}
+
 } // namespace freetunnel

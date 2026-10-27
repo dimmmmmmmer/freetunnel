@@ -877,7 +877,13 @@ std::optional<EndpointExport> parseEndpointExport(const QString &toml)
     if (!isEndpointExport(toml))
         return std::nullopt;
     EndpointExport out;
-    const QString wrapped = withoutSubscription(QStringLiteral("[endpoint]\n") + toml, &out.subscription);
+    const QString whole = QStringLiteral("[endpoint]\n") + toml;
+    const QString wrapped = withoutSubscription(whole, &out.subscription);
+    // With no table and no dotted key in an export, subscription_url is the one
+    // way it can name the address.
+    if (out.subscription)
+        out.subscriptionUrl =
+                readString(tableBody(splitTomlTables(whole), QStringLiteral("endpoint")), "subscription_url").trimmed();
     out.config = parseConfigToml(wrapped);
     const QString body = tableBody(splitTomlTables(wrapped), QStringLiteral("endpoint"));
     // The endpoint's name for the client random. A file written by hand may use

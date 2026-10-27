@@ -28,11 +28,15 @@ class QHostAddress;
 
 class QHotkey;
 class QLocalServer;
+class SubscriptionController;
+struct HeldSubscriptionUpdate;
 class UpdateChecker;
 
 namespace freetunnel {
+struct ConfigToml;
 struct ControlCommand;
 struct PreparedImport;
+struct SubscriptionFetchResult;
 }
 
 class Backend : public QObject {
@@ -287,6 +291,22 @@ public:
     // Ask again, and tell QML if the answer moved. See the definition.
     void recheckCredentialStorage();
 
+    // TrustTunnel subscriptions, with experimental/subscriptions on (BackendSubscriptions.cpp).
+    // None of it is Q_INVOKABLE: the window has no part in it until its screens come.
+    // Answers and status come through subscriptions()'s signals; the question about
+    // what a fetch gave is deepLinkImportConfirmationRequired()'s, with a token for
+    // a link, and the answer confirmDeepLinkImport()'s.
+    SubscriptionController *subscriptions() const { return m_subscriptions; }
+    bool beginSubscriptionImport(const QString &url); // "Add from subscription URL"; asks first
+    bool fetchSubscriptionForImport(const QString &token); // the user agreed to the fetch
+    bool confirmSubscriptionImport(const QString &token, bool replaceExisting, bool useLinkFallback);
+    void cancelSubscriptionImport(const QString &token);
+    bool refreshSubscription(const QString &path);
+    bool detachSubscription(const QString &path);
+    bool answerHostnameChange(const QString &path, bool accept);
+    // The config the editor has open, or empty once it closes: an update to it waits.
+    void setConfigOpenInEditor(const QString &path);
+
 signals:
     void stateChanged();
     void tick();
@@ -374,11 +394,32 @@ private:
     void pingConfigAtIndex(int index);
     bool finalizeImportedConfig(const QString &target, bool hadNoActive,
                                 bool targetPreExisted = false);
-    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
-                                bool replaceExisting);
+    QString importTargetFor(const freetunnel::PreparedImport &prepared, bool replaceExisting) const;
+    bool importPreparedDeepLink(const freetunnel::PreparedImport &prepared, const QString &target);
     QString deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const;
-    void askToImport(const freetunnel::PreparedImport &prepared); // the question before a link or export is added
+    // The question before a link or export is added, with `notes` after what it says.
+    void askToImport(const freetunnel::PreparedImport &prepared, const QStringList &notes = {});
     bool importEndpointExport(const QString &content, const QString &fileName); // a file the endpoint exported
+    // Subscriptions (BackendSubscriptions.cpp).
+    void startSubscriptions();
+    bool offerSubscriptionLink(const QString &link);
+    bool offerSubscriptionExport(const QString &content, const QString &fileName);
+    bool offerSubscription(const QString &url, const freetunnel::ConfigToml &trustSource,
+                           const freetunnel::PreparedImport *given, bool fromFile);
+    bool confirmPendingSubscriptionImport(const QString &token, bool replaceExisting);
+    void onSubscriptionFetched(const QString &key, bool manual, const freetunnel::SubscriptionFetchResult &result);
+    void onSubscriptionImportFetched(const QString &token, const freetunnel::SubscriptionFetchResult &result);
+    bool startSubscriptionRefresh(const QString &path, bool manual);
+    bool automaticRefreshAllowed(const QString &path) const;
+    void applySubscriptionUpdate(const QString &path, const HeldSubscriptionUpdate &update);
+    bool subscriptionUpdateWaits(const QString &path) const;
+    void flushHeldSubscriptionUpdates();
+    void forgetSubscription(const QString &path);
+    bool keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
+                                     freetunnel::ConfigToml *ct, QString *password) const;
+    void logSubscription(const QString &path, const QString &line, const QString &detail);
+    SubscriptionController *m_subscriptions = nullptr;
+    QString m_configOpenInEditor;
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
     // Install a verified Linux download: replace the running .AppImage and
     // restart, or explain why the user has to finish the job themselves.

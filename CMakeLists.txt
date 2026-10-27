@@ -105,6 +105,9 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendConfigShared.cpp
     src/app/BackendConfigShared.h
     src/app/BackendSplit.cpp
+    src/app/BackendSubscriptions.cpp
+    src/app/SubscriptionController.cpp
+    src/app/SubscriptionController.h
     src/app/DesktopChrome.cpp
     include/app/DesktopChrome.h
     src/app/LogModel.cpp

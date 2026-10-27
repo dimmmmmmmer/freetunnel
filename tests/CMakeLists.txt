@@ -199,6 +199,13 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
+    ../src/app/BackendSubscriptions.cpp
+    ../src/app/SubscriptionController.cpp
+    ../src/app/SubscriptionController.h
+    ../src/core/Subscription.cpp
+    ../src/core/SubscriptionFetcher.cpp
+    ../include/core/SubscriptionFetcher.h
+    ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
@@ -262,6 +269,13 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
+    ../src/app/BackendSubscriptions.cpp
+    ../src/app/SubscriptionController.cpp
+    ../src/app/SubscriptionController.h
+    ../src/core/Subscription.cpp
+    ../src/core/SubscriptionFetcher.cpp
+    ../include/core/SubscriptionFetcher.h
+    ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
@@ -711,6 +725,13 @@ set(BACKEND_TEST_SOURCES
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
+    ../src/app/BackendSubscriptions.cpp
+    ../src/app/SubscriptionController.cpp
+    ../src/app/SubscriptionController.h
+    ../src/core/Subscription.cpp
+    ../src/core/SubscriptionFetcher.cpp
+    ../include/core/SubscriptionFetcher.h
+    ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
@@ -742,7 +763,7 @@ set(BACKEND_TEST_SOURCES
 )
 add_executable(test_integration_backend_vpn ${BACKEND_TEST_SOURCES})
 target_include_directories(test_integration_backend_vpn PRIVATE
-    . ../include ../include/app ../include/core ../include/vpn)
+    . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_integration_backend_vpn PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 # Quick for Backend::renderWholeText, which reaches into the Logs page's TextEdit.
 target_link_libraries(test_integration_backend_vpn PRIVATE
@@ -813,6 +834,38 @@ if(FT_TEST_OPENSSL_CLI)
 else()
     message(STATUS "subscription_fetcher not built: it needs the openssl command")
 endif()
+
+# Subscriptions in Backend, with a stand-in for the fetcher, and one case with
+# the real one against the TLS test server, which needs the openssl command.
+add_executable(test_backend_subscription
+    test_backend_subscription.cpp
+    fake_subscription_fetcher.h
+    ${BACKEND_IMPORT_TEST_SOURCES}
+    ../i18n/i18n.qrc
+    ../qml.qrc
+)
+target_include_directories(test_backend_subscription PRIVATE
+    . ../include ../include/app ../include/core ../include/vpn ../src)
+target_compile_definitions(test_backend_subscription PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
+target_link_libraries(test_backend_subscription PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
+if(FT_TEST_OPENSSL_CLI)
+    target_sources(test_backend_subscription PRIVATE tls_test_certs.cpp tls_test_server.cpp)
+    target_compile_definitions(test_backend_subscription PRIVATE FT_TEST_OPENSSL_CLI="${FT_TEST_OPENSSL_CLI}")
+endif()
+if(TARGET Qt6::Widgets)
+    target_link_libraries(test_backend_subscription PRIVATE Qt6::Widgets)
+endif()
+freetunnel_link_linux_secrets(test_backend_subscription)
+if(WIN32)
+    target_link_libraries(test_backend_subscription PRIVATE shell32 advapi32)
+elseif(APPLE)
+    target_link_libraries(test_backend_subscription PRIVATE Qt6::Svg "-framework Security" "-framework AppKit")
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(test_backend_subscription PRIVATE OpenSSL::Crypto)
+endif()
+add_test(NAME backend_subscription COMMAND test_backend_subscription -o ${CMAKE_CURRENT_BINARY_DIR}/report-backend_subscription.txt,txt)
 
 # QtTrustTunnelClient state machine against the mock core in tests/mock_core —
 # connect/disconnect/config-switch/reconnect behavior without the native VPN

@@ -61,6 +61,9 @@ public:
     void refuseConnectsWith(const QString &value, const QString &error) { m_refusing.insert(value, error); }
     // The old session reports `error` while a disconnect is tearing it down.
     void setTeardownError(const QString &error) { m_teardownError = error; }
+    // The session reports `state` by itself, as one that was retrying does when
+    // it comes up ("Connected").
+    void reportState(const QString &state) { send(QJsonObject{{"ev", "state"}, {"state", state}}); }
     // Answer the next disconnect only on releaseDisconnect(), and hold every
     // command after it until then: the real helper's VPN thread does nothing else
     // while a teardown blocks, and one stuck behind a connect takes seconds.

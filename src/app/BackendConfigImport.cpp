@@ -12,6 +12,7 @@
 #include <QUrl>
 
 #include "BackendConfigShared.h"
+#include "SubscriptionController.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
@@ -158,6 +159,10 @@ void Backend::restoreReplacedConfig(const QString &target, const QByteArray &pre
 // first 50 characters, which the question could not tell apart from this one.
 QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepared) const
 {
+    // The config made from the same subscription comes first, whatever either is
+    // called: it is the one this import updates.
+    if (!prepared.existingPath.isEmpty() && m_paths.contains(prepared.existingPath))
+        return prepared.existingPath;
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     for (const QString &name : {prepared.unclippedFileName, prepared.fileName, prepared.legacyFileName}) {
         // existingConfigPath() takes an empty name for the directory itself.
@@ -168,8 +173,9 @@ QString Backend::deepLinkCollisionPath(const freetunnel::PreparedImport &prepare
     return QString();
 }
 
-bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
-                                     bool replaceExisting)
+// The file an import is written to. Split out of importPreparedDeepLink(), so a
+// subscription's import knows it before anything is written.
+QString Backend::importTargetFor(const freetunnel::PreparedImport &prepared, bool replaceExisting) const
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(base);
@@ -180,10 +186,16 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
     // server you already have — but it is the USER's call, made in the dialog, not
     // the link's.
     const QString collision = deepLinkCollisionPath(prepared);
-    const bool replacing = replaceExisting && !collision.isEmpty();
-    const QString target = replacing
+    return replaceExisting && !collision.isEmpty()
             ? collision
             : freetunnel::uniqueOwnerConfigPath(QFileInfo(prepared.fileName).completeBaseName());
+}
+
+bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared, const QString &target)
+{
+    // A file already there is the config the user chose to replace: otherwise
+    // importTargetFor() names one that is not.
+    const bool replacing = QFileInfo::exists(target);
 
     // Enough to put the old config back if this goes wrong.
     QByteArray previousToml;
@@ -215,6 +227,10 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
             restoreReplacedConfig(target, previousToml);
         return false;
     }
+    // Another server now: the subscription the config came from would put the
+    // old one back at its next refresh.
+    if (replacing)
+        forgetSubscription(target);
     // Replacing the config the tunnel is currently built from leaves the session
     // running the old server — rebuild it, like selecting a different config does.
     if (replacing && target == m_activePath && (m_connected || m_connecting))
@@ -232,7 +248,7 @@ static QString linkRefusedMessage(const QString &err, freetunnel::LinkRefusal wh
 
 // The question before a link or an endpoint's export is added, and the link the
 // answer is given with (PreparedImport::link). Split out of importDeepLink().
-void Backend::askToImport(const freetunnel::PreparedImport &prepared)
+void Backend::askToImport(const freetunnel::PreparedImport &prepared, const QStringList &notes)
 {
     const QString collision = deepLinkCollisionPath(prepared);
     const QString existingName = collision.isEmpty() ? QString() : nameForPath(collision);
@@ -272,6 +288,13 @@ void Backend::askToImport(const freetunnel::PreparedImport &prepared)
     // which the config will not have.
     if (prepared.certificateExtraIgnored)
         lines << freetunnel::certificateExtraIgnoredNote();
+    // A server from elsewhere in place of one a subscription keeps up to date: the
+    // subscription would put its own back. A subscription's own import links the
+    // config to it again instead.
+    if (!collision.isEmpty() && m_subscriptions->isLinked(collision)
+            && !SubscriptionController::isImportToken(prepared.link))
+        lines << tr("“%1” updates from a subscription. Replacing it stops that.").arg(existingName);
+    lines << notes;
     const QString message = lines.join(QLatin1Char('\n'));
 
     emit deepLinkImportConfirmationRequired(message, prepared.link, existingName);
@@ -279,6 +302,10 @@ void Backend::askToImport(const freetunnel::PreparedImport &prepared)
 
 bool Backend::importDeepLink(const QString &link)
 {
+    // A link with a subscription address asks first whether to fetch it, with
+    // experimental/subscriptions on (BackendSubscriptions.cpp).
+    if (offerSubscriptionLink(link))
+        return false;
     QString err;
     freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
     auto prepared = freetunnel::prepareDeepLinkImport(link, &err, &why);
@@ -303,6 +330,8 @@ bool Backend::importDeepLink(const QString &link)
 // the user has. fileName names it when the export does not.
 bool Backend::importEndpointExport(const QString &content, const QString &fileName)
 {
+    if (offerSubscriptionExport(content, fileName))
+        return false;
     QString err;
     freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
     const auto prepared = freetunnel::prepareEndpointExportImport(content, fileName, &err, &why);
@@ -317,6 +346,10 @@ bool Backend::importEndpointExport(const QString &content, const QString &fileNa
 
 bool Backend::confirmDeepLinkImport(const QString &link, bool replaceExisting)
 {
+    // The answer to a question about a subscription's server comes with the
+    // import's token, never with a link that would carry its address.
+    if (m_settings.subscriptions_enabled && SubscriptionController::isImportToken(link))
+        return confirmPendingSubscriptionImport(link, replaceExisting);
     QString err;
     freetunnel::LinkRefusal why = freetunnel::LinkRefusal::Damaged;
     auto prepared = freetunnel::prepareDeepLinkImport(link, &err, &why);
@@ -324,5 +357,5 @@ bool Backend::confirmDeepLinkImport(const QString &link, bool replaceExisting)
         emit errorOccurred(linkRefusedMessage(err, why));
         return false;
     }
-    return importPreparedDeepLink(*prepared, replaceExisting);
+    return importPreparedDeepLink(*prepared, importTargetFor(*prepared, replaceExisting));
 }

@@ -393,6 +393,46 @@
         <source>This file turns off server certificate verification.</source>
         <translation>Этот файл отключает проверку сертификата сервера.</translation>
     </message>
+    <message>
+        <source>“%1” updates from a subscription. Replacing it stops that.</source>
+        <translation>«%1» обновляется из подписки. Замена это прекратит.</translation>
+    </message>
+    <message>
+        <source>Secure credential storage is unavailable, so the subscription can&apos;t be added: its address holds the VPN password.</source>
+        <translation>Защищённое хранилище учётных данных недоступно, поэтому подписку нельзя добавить: её адрес содержит пароль VPN.</translation>
+    </message>
+    <message>
+        <source>Subscription %1 did not update “%2”: %3</source>
+        <translation>Подписка %1 не обновила «%2»: %3</translation>
+    </message>
+    <message>
+        <source>Updates from %1</source>
+        <translation>Обновляется с %1</translation>
+    </message>
+    <message>
+        <source>The server given with it is %1.</source>
+        <translation>Сервер, указанный вместе с ней: %1.</translation>
+    </message>
+    <message>
+        <source>That import has expired. Open the link again.</source>
+        <translation>Время на этот импорт истекло. Откройте ссылку ещё раз.</translation>
+    </message>
+    <message>
+        <source>Config added: %1. It won&apos;t update from its subscription, which couldn&apos;t be saved.</source>
+        <translation>Конфиг добавлен: %1. Он не будет обновляться из подписки: её не удалось сохранить.</translation>
+    </message>
+    <message>
+        <source>Subscription %1 has an update for “%2”, held: %3</source>
+        <translation>У подписки %1 есть обновление для «%2», оно отложено: %3</translation>
+    </message>
+    <message>
+        <source>Subscription %1 updated “%2”: %3</source>
+        <translation>Подписка %1 обновила «%2»: %3</translation>
+    </message>
+    <message>
+        <source>The server given with the subscription can be added now, and updates from it later.</source>
+        <translation>Сервер, указанный вместе с подпиской, можно добавить сейчас; он обновится из неё позже.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>

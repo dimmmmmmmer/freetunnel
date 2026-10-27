@@ -19,6 +19,7 @@
 #include <QTcpServer>
 #include <QTranslator>
 #include <QScopeGuard>
+#include <QUuid>
 
 #include "app/Backend.h"
 #include "app/LogModel.h"
@@ -28,6 +29,8 @@
 #include "core/ControlCommand.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+#include "core/SubscriptionStore.h"
+#include "fake_subscription_fetcher.h"
 #include "helper_ipc_mock_server.h"
 
 class TestIntegrationBackendVpn : public QObject {
@@ -61,6 +64,12 @@ private slots:
     void deletingActiveConfigWhileConnectedTearsDownTunnel();
     void aDisconnectAtLaunchWinsOverConnectOnStartup();
     void aLinkAsksBeforeTurningTheVpnOffACommandDoesNot();
+    // A refresh from a subscription, and the tunnel.
+    void aRefreshOfTheConnectedServerReconnectsToIt();
+    void aRefreshWhileConnectingWaitsUntilConnected();
+    void aRefreshWhileOffIsAppliedWithoutConnecting();
+    void aRefreshWhileDisconnectingWaitsUntilOff();
+    void theKillSwitchWhileReconnectingPutsOffTheAutomaticRefresh();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
 };
@@ -94,6 +103,7 @@ void TestIntegrationBackendVpn::init()
 {
     freetunnel::sweepStaleMaterializedConfigs();
     saveStoredConfigs({});
+    QFile::remove(freetunnel::subscriptionsPath());
 }
 
 void TestIntegrationBackendVpn::backendConnectsThroughMockHelper()
@@ -1403,6 +1413,243 @@ void TestIntegrationBackendVpn::aLinkAsksBeforeTurningTheVpnOffACommandDoesNot()
     QTest::qWait(300);
     QVERIFY2(backend.connecting() && !backend.disconnecting(),
              "a link called off a connection attempt without asking");
+    backend.prepareQuit();
+}
+
+namespace {
+
+const QString kSubscriptionUrl = QStringLiteral("https://user:secret@sub.example.com/subscription");
+
+// `path` updates from a subscription, as an import would have left it, and the
+// setting is on. Due for a refresh at once. Called after TestConfigs::install(),
+// which puts the settings back. The source id, or empty.
+QString linkBeforeStart(const QString &path)
+{
+    const QString source = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (!freetunnel::CredentialStore::storePassword(freetunnel::CredentialStore::keyForSubscription(source),
+                                                    kSubscriptionUrl))
+        return QString();
+    freetunnel::SubscriptionRecord record;
+    record.sourceId = source;
+    record.origin = QStringLiteral("https://sub.example.com");
+    if (!freetunnel::saveSubscriptions({{path, record}}))
+        return QString();
+    AppSettings settings = loadAppSettings();
+    settings.subscriptions_enabled = true;
+    saveAppSettings(settings);
+    return source;
+}
+
+// The address taken out of the credential store however the test ends.
+struct LinkedConfig {
+    explicit LinkedConfig(const QString &path) : source(linkBeforeStart(path)) {}
+    ~LinkedConfig()
+    {
+        freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForSubscription(source));
+    }
+    LinkedConfig(const LinkedConfig &) = delete;
+    LinkedConfig &operator=(const LinkedConfig &) = delete;
+    QString source;
+};
+
+// What the subscription says now: the config's own server at another address.
+freetunnel::SubscriptionFetchResult movedTo(const QString &hostname, const QString &address)
+{
+    return FakeSubscriptionNetwork::document(
+            QStringLiteral(R"({"version":1,"hostname":"%1","address":"%2","username":"user","password":"secret"})")
+                    .arg(hostname, address)
+                    .toUtf8());
+}
+
+QString readConfig(const QString &path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+}
+
+} // namespace
+
+// The server the tunnel is connected to moved: the tunnel follows it at once,
+// and nothing else changes, the active config least of all.
+void TestIntegrationBackendVpn::aRefreshOfTheConnectedServerReconnectsToIt()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-connected")));
+    QVERIFY(configs.add(QStringLiteral("sub-other")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-connected-token"));
+    QVERIFY(env.start());
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(env.server.connectCount(), 1);
+    QVERIFY(env.lastConnectConfig().contains(QStringLiteral("203.0.113.50:443")));
+
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-connected"), QStringLiteral("203.0.113.77:443"))));
+    QVERIFY(readConfig(path).contains(QStringLiteral("203.0.113.77:443")));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); }, 10000),
+             "the tunnel stayed on the old address");
+    QVERIFY(env.server.countFor(QStringLiteral("disconnect")) >= 1);
+    QVERIFY2(env.lastConnectConfig().contains(QStringLiteral("203.0.113.77:443")), qPrintable(env.lastConnectConfig()));
+    QCOMPARE(backend.activeIndex(), backend.configIndex(path));
+    QCOMPARE(loadAppSettings().last_config_path, path);
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// Never while a connection is being made: the attempt goes on with the server
+// it started with, and the update follows once it is up.
+void TestIntegrationBackendVpn::aRefreshWhileConnectingWaitsUntilConnected()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-connecting")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-connecting-token"));
+    QVERIFY(env.start());
+    env.server.failConnectsWith(QStringLiteral("sub-connecting"),
+                                QStringLiteral("Connection failed: endpoint timed out (~30s)"));
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return anyErrorIs(errors, QStringLiteral("Server isn't responding (timed out).")); }, 10000));
+    QVERIFY(backend.connecting());
+    const QString before = readConfig(path);
+
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-connecting"), QStringLiteral("203.0.113.78:443"))));
+    QTest::qWait(300);
+    QCOMPARE(readConfig(path), before);
+    QCOMPARE(env.server.connectCount(), 1);
+
+    env.server.reportState(QStringLiteral("Connected"));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2; }, 10000),
+             "the update was not applied once the tunnel came up");
+    QVERIFY(readConfig(path).contains(QStringLiteral("203.0.113.78:443")));
+    QVERIFY2(env.lastConnectConfig().contains(QStringLiteral("203.0.113.78:443")), qPrintable(env.lastConnectConfig()));
+    QCOMPARE(backend.activeIndex(), backend.configIndex(path));
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+void TestIntegrationBackendVpn::aRefreshWhileOffIsAppliedWithoutConnecting()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-off")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-off-token"));
+    QVERIFY(env.start());
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-off"), QStringLiteral("203.0.113.79:443"))));
+    QVERIFY(readConfig(path).contains(QStringLiteral("203.0.113.79:443")));
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QVERIFY(!backend.connected() && !backend.connecting());
+    QCOMPARE(backend.activeIndex(), backend.configIndex(path));
+    backend.prepareQuit();
+}
+
+void TestIntegrationBackendVpn::aRefreshWhileDisconnectingWaitsUntilOff()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-disconnecting")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-disconnecting-token"));
+    QVERIFY(env.start());
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    env.server.holdNextDisconnect();
+    backend.disconnectVpn();
+    QVERIFY(backend.disconnecting());
+    const QString before = readConfig(path);
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-disconnecting"), QStringLiteral("203.0.113.80:443"))));
+    QTest::qWait(300);
+    QCOMPARE(readConfig(path), before);
+
+    env.server.releaseDisconnect();
+    QVERIFY(QTest::qWaitFor([&]() { return readConfig(path).contains(QStringLiteral("203.0.113.80:443")); }, 10000));
+    QVERIFY(!backend.connected() && !backend.connecting());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 1);
+    backend.prepareQuit();
+}
+
+// With the kill switch on, a tunnel that is coming up blocks what goes around
+// it, a fetch too: the automatic refresh waits, and is not counted as failed.
+void TestIntegrationBackendVpn::theKillSwitchWhileReconnectingPutsOffTheAutomaticRefresh()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-killswitch")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    AppSettings settings = loadAppSettings();
+    settings.killswitch_enabled = true;
+    saveAppSettings(settings);
+    MockHelperEnv env(QStringLiteral("backend-sub-killswitch-token"));
+    QVERIFY(env.start());
+    env.server.failConnectsWith(QStringLiteral("sub-killswitch"),
+                                QStringLiteral("Connection failed: endpoint timed out (~30s)"));
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return anyErrorIs(errors, QStringLiteral("Server isn't responding (timed out).")); }, 10000));
+    QVERIFY(backend.connecting());
+    backend.subscriptions()->runSchedulerTickForTest();
+    QCOMPARE(network.fetches(), 0);
+    QCOMPARE(backend.subscriptions()->record(path)->failures, 0);
+    QCOMPARE(backend.subscriptions()->record(path)->lastAttemptAt, 0);
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.subscriptions()->runSchedulerTickForTest();
+    QCOMPARE(network.fetches(), 1);
+    QCOMPARE(network.requests().constFirst().url, kSubscriptionUrl);
     backend.prepareQuit();
 }
 

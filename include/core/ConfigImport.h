@@ -9,6 +9,8 @@
 
 namespace freetunnel {
 
+struct ConfigToml;
+
 struct PreparedImport {
     QString fileName;    // safe target file name (ends with .toml)
     // The name 1.2.0 gave the same link, which turned every space and punctuation
@@ -32,8 +34,13 @@ struct PreparedImport {
     bool fromFile = false;
     // What confirmDeepLinkImport() is handed once the user says yes, and makes
     // this same config from again: the link itself, or for a file, the link it
-    // was turned into.
+    // was turned into. For a server a subscription names, the token of the
+    // import waiting for that answer (SubscriptionController), so the
+    // subscription's address never goes to the window.
     QString link;
+    // A config this import is known to update, the one made from the same
+    // subscription, offered for replacement ahead of any by name.
+    QString existingPath;
 };
 
 // Why prepareDeepLinkImport() gave nothing back. A damaged link's message is the
@@ -56,6 +63,12 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
 std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, const QString &fallbackName,
                                                           QString *error = nullptr,
                                                           LinkRefusal *refusal = nullptr);
+
+// The server a subscription's document names, as applySubscription() makes it
+// when a config is created from one, with its password: named, refused and
+// written as the link with that server is. Its link is left for the caller.
+std::optional<PreparedImport> prepareSubscriptionImport(const ConfigToml &server, const QString &password,
+                                                        QString *error = nullptr);
 
 // What an import says, in the user's language, when a link or a file asks for
 // what this version does not have yet. One wording for both, so a server is
