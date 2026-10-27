@@ -341,6 +341,11 @@ QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
     return QFileInfo(absoluteConfigPath).absoluteFilePath();
 }
 
+QString CredentialStore::keyForSubscription(const QString &sourceId)
+{
+    return QStringLiteral("subscription/") + sourceId;
+}
+
 namespace {
 
 // Every call below talks to the OS credential store, and every one of them
@@ -421,7 +426,9 @@ bool secretServiceOnSessionBus()
 #if defined(FT_ENABLE_TEST_HOOKS)
 // Tests only. "absent": no store at all; "locked": a store that is there and
 // refuses, as a keyring does whose unlock prompt was dismissed. Neither can be
-// had from a real store on demand, on any platform.
+// had from a real store on demand, on any platform. "present": a store that is
+// there and takes what it is given, wherever this build keeps it, for a test of
+// what needs one on a machine with no keyring.
 static QByteArray testKeyring()
 {
     return qgetenv("FT_TEST_KEYRING");
@@ -454,7 +461,7 @@ static bool doStorePassword(const QString &key, const QString &password)
     if (key.isEmpty())
         return false;
 #if defined(FT_ENABLE_TEST_HOOKS)
-    if (!testKeyring().isEmpty())
+    if (const QByteArray keyring = testKeyring(); !keyring.isEmpty() && keyring != "present")
         return false;
 #endif
 

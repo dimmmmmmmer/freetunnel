@@ -26,6 +26,11 @@ bool secretServiceOnSessionBus();
 class CredentialStore {
 public:
     static QString keyForConfigPath(const QString &absoluteConfigPath);
+    // The entry a TrustTunnel subscription's address is kept in, by the source id
+    // its record names (SubscriptionRecord). Keyed by the subscription, not by its
+    // config, so a rename moves nothing in the store; and never an absolute path,
+    // so never a config's own entry.
+    static QString keyForSubscription(const QString &sourceId);
     /// True when the OS can encrypt credentials at rest (always on macOS/Windows).
     static bool secureStorageAvailable();
     static bool storePassword(const QString &key, const QString &password);

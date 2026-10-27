@@ -432,6 +432,15 @@ target_include_directories(test_configstore PRIVATE ../include ../include/core)
 target_link_libraries(test_configstore PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME configstore COMMAND test_configstore -o ${CMAKE_CURRENT_BINARY_DIR}/report-configstore.txt,txt)
 
+add_executable(test_subscriptionstore
+    test_subscriptionstore.cpp
+    ../src/core/SubscriptionStore.cpp
+    ../src/core/ConfigStore.cpp
+)
+target_include_directories(test_subscriptionstore PRIVATE ../include ../include/core)
+target_link_libraries(test_subscriptionstore PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME subscriptionstore COMMAND test_subscriptionstore -o ${CMAKE_CURRENT_BINARY_DIR}/report-subscriptionstore.txt,txt)
+
 add_executable(test_control
     test_control.cpp
     ../src/core/ControlCommand.cpp

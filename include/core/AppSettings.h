@@ -68,6 +68,12 @@ struct AppSettings {
 
     // Last used config
     QString last_config_path = "";
+
+    // TrustTunnel subscriptions (experimental/subscriptions): linking a config to
+    // one, and refreshing it from there. Off, and with nothing in the window to
+    // turn it on: the endpoint's format is still in beta, and the screens for it
+    // come once it is stable. Off, links and files behave as without it.
+    bool subscriptions_enabled = false;
 };
 
 AppSettings loadAppSettings();
