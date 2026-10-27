@@ -715,8 +715,10 @@ public final class MainActivity extends Activity {
         // No screensaver while the phone is used instead of the remote: it would stop the activity, and the receiver with it.
         dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // A remote starts on Cancel. Left to itself, the focus would go to the scroll
-        // view around the code, which has no ring and does nothing on OK.
-        if (!dialog.getWindow().getDecorView().isInTouchMode()) dialog.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus();
+        // view around the code, which has no ring and does nothing on OK. As in the
+        // editor, Cancel is the view focused by default rather than asked about touch
+        // mode here, before the dialog is attached.
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setFocusedByDefault(true);
         // These arrive on the receiver's thread, and count only for the receiver still open.
         r.start(new LinkReceiver.Listener() {
             @Override public void received(String text, String sender) {
