@@ -644,7 +644,8 @@ void QtTrustTunnelClient::handleCoreRecovery(const QString &reason)
 }
 
 // A session that has not connected yet waits for recovery only when the kill
-// switch has the core keep trying (vendor patch 03). Without it the core ends the
+// switch has the core keep trying (ConnectOptions::fall_into_recovery, which
+// establishTunnel() sets with the kill switch). Without it the core ends the
 // session and handleCoreDisconnected() says why; with it the session carries on,
 // rightly still Connecting, and this is where the user learns that the server is
 // failing rather than slow. Once per reason, not once per round of retries.

@@ -133,8 +133,11 @@ private slots:
     void structurallyInvalidConfigReportsError();
     void logLevelIsReadBackFromConfig();
     void killSwitchAndVpnModeReachTheCoreConfig();
+    void killSwitchDecidesWhetherTheCoreKeepsRetryingAFirstConnect();
     void splitRoutesAndExclusionsReachTheCoreConfig();
     void keysThatMakeRootActOnANameNeverReachTheCore();
+    void theTlsKeysOfCore13ReachTheCoreAsTheyAre();
+    void aTlsProfileTheCoreDoesNotKnowFailsTheConfig();
     void aSocksListenerIsRefused();
     void aSecondRouteListReplacesTheFirst();
     void aConfigsKillSwitchPortsReachTheCoreOnlyWhenTheUserLetsThem();
@@ -799,6 +802,31 @@ void TestQtTrustTunnelClient::killSwitchAndVpnModeReachTheCoreConfig()
     QCOMPARE(cfg.mode, int(ag::VPN_MODE_GENERAL));
 }
 
+// The other half of the kill switch: with it on, a first connect that fails must
+// not end the session, because the block lives in the session. The core takes
+// that as an option of the connect call (ConnectOptions::fall_into_recovery;
+// before core 1.3 a vendor patch set the same policy inside the core), and an
+// option nobody sets reads as off, so a wrapper that forgets it ends sessions
+// and lifts the block for as long as the next attempt takes to be built.
+void TestQtTrustTunnelClient::killSwitchDecidesWhetherTheCoreKeepsRetryingAFirstConnect()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, true));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QCOMPARE(ctl.connectFallIntoRecovery(), std::vector<bool>({true}));
+
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    QMetaObject::invokeMethod(m_client, "setKillSwitch", Qt::BlockingQueuedConnection,
+                              Q_ARG(bool, false));
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.connectCallCount() >= 2, kLongWaitMs);
+    QCOMPARE(ctl.connectFallIntoRecovery(), std::vector<bool>({true, false}));
+}
+
 // Same argument for the split-tunnel settings: the routes and the domain
 // exclusions decide what leaves the machine outside the tunnel, and until now
 // nothing checked that the lists the GUI sends survive as far as the core.
@@ -826,6 +854,59 @@ void TestQtTrustTunnelClient::splitRoutesAndExclusionsReachTheCoreConfig()
     const QString exclusions = QString::fromStdString(cfg.exclusions);
     QVERIFY2(exclusions.contains(QStringLiteral("intranet.example")), qPrintable(exclusions));
     QVERIFY2(exclusions.contains(QStringLiteral("printer.local")), qPrintable(exclusions));
+}
+
+// Core 1.3 reads two more keys from [endpoint]: the ClientHello fingerprint and the
+// key its client random is derived from. Neither names a file or an interface, so
+// the wrapper clears neither (verify_upstream_patch.sh lists them as checked), and
+// both have to arrive: a key lost on the way means a server that checks one turns
+// the client away, and nothing in the app says why.
+void TestQtTrustTunnelClient::theTlsKeysOfCore13ReachTheCoreAsTheyAre()
+{
+    auto &ctl = mockcore::Controller::instance();
+
+    beginConnect(QStringLiteral("loglevel = \"warn\"\n"
+                                "[endpoint]\n"
+                                "hostname = \"vpn.example\"\n"
+                                "client_random = \"aabb/ff00\"\n"
+                                "client_random_auth_key = \"00112233aabbccdd\"\n"
+                                "tls_profile = \"firefox\"\n"));
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QTRY_VERIFY(ctl.lastCoreConfig().captured);
+
+    const mockcore::CoreConfigSnapshot cfg = ctl.lastCoreConfig();
+    QCOMPARE(QString::fromStdString(cfg.client_random_auth_key), QStringLiteral("00112233aabbccdd"));
+    QCOMPARE(QString::fromStdString(cfg.tls_profile), QStringLiteral("firefox"));
+    // The core ignores the client random while there is a key (with a warning);
+    // the wrapper does not take it out, which is the core's rule to apply.
+    QCOMPARE(QString::fromStdString(cfg.client_random), QStringLiteral("aabb"));
+
+    // A config without either has neither: nothing is added on the way.
+    requestDisconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(m_lastState, State::Disconnected, kLongWaitMs);
+    beginConnect();
+    QTRY_VERIFY_WITH_TIMEOUT(ctl.coreConfigCaptureCount() >= 2, kLongWaitMs);
+    QVERIFY(ctl.lastCoreConfig().client_random_auth_key.empty());
+    QVERIFY(ctl.lastCoreConfig().tls_profile.empty());
+}
+
+// The core refuses the whole config for a profile it has no name for, and says
+// only "invalid config structure". Mirrored by the mock, so this is the shape of
+// what a value a later core adds looks like to an older FreeTunnel.
+void TestQtTrustTunnelClient::aTlsProfileTheCoreDoesNotKnowFailsTheConfig()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const int before = ctl.connectCallCount();
+
+    beginConnect(QStringLiteral("loglevel = \"warn\"\n"
+                                "[endpoint]\n"
+                                "hostname = \"vpn.example\"\n"
+                                "tls_profile = \"netscape\"\n"));
+
+    QTRY_COMPARE(m_lastState, State::Error);
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QVERIFY(m_errors.join(QLatin1Char('|')).contains(QStringLiteral("Invalid TrustTunnel config structure")));
+    QCOMPARE(ctl.connectCallCount(), before);
 }
 
 // This object is the root helper's, and the TOML it is handed keeps every key an
@@ -1243,8 +1324,8 @@ void TestQtTrustTunnelClient::aBurstOfEditsLeavesTheSessionOnTheLastOne()
 }
 
 // With the kill switch on, the core keeps a first connect that fails inside its
-// session (vendor patch 03) and goes round its recovery loop, and the block holds
-// while it does. Nothing of ours may take that session down: the state stays
+// session (ConnectOptions::fall_into_recovery) and goes round its recovery loop,
+// and the block holds while it does. Nothing of ours may take that session down: the state stays
 // Connecting, which is true, and the reason it is not connecting yet is said once
 // per reason rather than once per round, where the core giving up used to say it.
 void TestQtTrustTunnelClient::aFirstConnectTheCoreKeepsRetryingStaysConnectingAndSaysWhy()

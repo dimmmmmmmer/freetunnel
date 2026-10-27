@@ -59,11 +59,23 @@ struct CoreConfigSnapshot {
     std::string device_name;
     bool use_existing = false;
     std::optional<std::string> netns;
+    // [endpoint] client_random_auth_key, as the hex text the config carried. The
+    // real core decodes it and derives the ClientHello's random from it; a test
+    // can only see that the key the app injected arrived (and that a replaced
+    // config did not keep the old one).
+    std::string client_random_auth_key;
+    // [endpoint] tls_profile, as written ("" when the config says nothing).
+    std::string tls_profile;
+    // What the most recent connect() was told to do when the first attempt fails
+    // (ConnectOptions::fall_into_recovery): -1 until a connect was made. Not part
+    // of the config, but it belongs to the same hand-over to the core.
+    int connect_fall_into_recovery = -1;
 };
 
 // One call of TrustTunnelClient::update_exclusions() on a running session: the
 // mode and exclusion list a session was handed live, as the wrapper of the real
-// core (vendor/trusttunnel/03-*.patch) hands them to vpn_update_exclusions().
+// core (vendor/trusttunnel/03-live-exclusions.patch) hands them to
+// vpn_update_exclusions().
 struct ExclusionsUpdate {
     uint64_t client = 0;
     int mode = -1; // ag::VpnMode
@@ -90,6 +102,7 @@ public:
         m_nextId = 1;
         m_lastConfig = CoreConfigSnapshot{};
         m_configCaptures = 0;
+        m_connectOptions.clear();
         m_certError.clear();
         m_lastVerifiedCert.clear();
         m_lastVerifiedChain.clear();
@@ -219,6 +232,13 @@ public:
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return m_configCaptures;
+    }
+
+    // ConnectOptions::fall_into_recovery of every connect() so far, oldest first.
+    std::vector<bool> connectFallIntoRecovery()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_connectOptions;
     }
 
     std::string lastVerifiedCert()
@@ -385,12 +405,16 @@ public:
 
     // May block (scripted via setBlockConnect) to simulate a native connect()
     // stuck on an unreachable server.
-    std::string onConnect(uint64_t id)
+    std::string onConnect(uint64_t id, bool fallIntoRecovery)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         ++m_connectCalls;
         m_lastClientId = id;
+        m_connectOptions.push_back(fallIntoRecovery);
+        m_lastConfig.connect_fall_into_recovery = fallIntoRecovery ? 1 : 0;
         noteLifecycle("connect", id);
+        // Mirrored like the config, for the helper process (see recordCoreConfig).
+        dumpCoreConfig(m_lastConfig);
         m_cv.wait(lock, [this]() { return !m_blockConnect; });
         return m_connectError;
     }
@@ -607,6 +631,9 @@ private:
             out << "device_name=" << oneLine(snap.device_name) << '\n';
             out << "use_existing=" << (snap.use_existing ? 1 : 0) << '\n';
             out << "netns=" << orUnset(snap.netns) << '\n';
+            out << "client_random_auth_key=" << oneLine(snap.client_random_auth_key) << '\n';
+            out << "tls_profile=" << oneLine(snap.tls_profile) << '\n';
+            out << "connect_fall_into_recovery=" << snap.connect_fall_into_recovery << '\n';
         }
         // Publish by rename so a reader polling for the file never gets a
         // half-written one. The remove() is for Windows, whose rename() refuses
@@ -626,6 +653,7 @@ private:
     uint64_t m_nextId = 1;
     CoreConfigSnapshot m_lastConfig;
     int m_configCaptures = 0;
+    std::vector<bool> m_connectOptions;
     std::string m_certError;
     std::string m_lastVerifiedCert;
     std::string m_lastVerifiedChain;
