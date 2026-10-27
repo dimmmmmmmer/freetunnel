@@ -20,6 +20,9 @@ dependencies {
     implementation 'com.akuleshov7:ktoml-core:0.7.0'
     implementation 'org.tomlj:tomlj:1.1.1'
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
+    // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
+    // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.
+    implementation 'io.nayuki:qrcodegen:1.8.0'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     implementation 'androidx.core:core-ktx:1.16.0'
