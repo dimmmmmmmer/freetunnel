@@ -454,7 +454,9 @@ SubscriptionApplied applySubscription(const ConfigToml &current, const QString &
     next.customSni = document.customSni;
     next.clientRandom = document.clientRandomPrefix;
     out.password = document.password;
-    out.clientRandomAuthKey = document.clientRandomAuthKey;
+    // A document that does not mention the key leaves it as it is (see the header).
+    out.clientRandomAuthKey =
+            document.clientRandomAuthKey.value_or(creation ? QString() : current.clientRandomAuthKey);
     if (creation) {
         next.protocol = document.upstreamProtocol;
         next.allowIpv6 = document.hasIpv6;

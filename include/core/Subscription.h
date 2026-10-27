@@ -55,9 +55,13 @@ struct SubscriptionDocument {
     std::optional<QString> name;
     std::optional<QStringList> dnsUpstreams;
     // The key the server checks the TLS client random against (core 1.3), whole
-    // bytes of hex; empty when the document sets none. A secret, like the
-    // password: applySubscription() hands it on for the credential store.
-    QString clientRandomAuthKey;
+    // bytes of hex. A secret, like the password: applySubscription() hands it on
+    // for the credential store. Absent unless the document has the field, and
+    // absent is not "no key": the endpoint's own format (1.3.0-beta.2) has no such
+    // field and never sends one, so a server that checks a key still serves a
+    // document without it. Only the deep link carries it. Present and empty says
+    // the server has none.
+    std::optional<QString> clientRandomAuthKey;
 };
 
 // Why a document was not taken. Each is a different answer to the user, and
@@ -112,14 +116,19 @@ struct SubscriptionApplied {
 
 // The config a document makes, as TrustTunnel's own client applies one. The
 // subscription owns the hostname, the address, the credentials, the certificate,
-// the SNI, the client random and the auth key: Refresh overwrites them all, an
-// address list becomes the document's one address, and a certificate, SNI,
-// client random or auth key the document leaves out is cleared. Everything else
-// stays the user's: the protocol,
+// the SNI and the client random: Refresh overwrites them all, an address list
+// becomes the document's one address, and a certificate, SNI or client random the
+// document leaves out is cleared. Everything else stays the user's: the protocol,
 // IPv6 and anti-DPI, which the endpoint serves fixed values for and which would
 // undo the user's own choice on every refresh; the name and the DNS servers; and
 // what is local by nature, such as skip_verification, post-quantum, the tunnel's
 // routing and the keys this editor does not know.
+//
+// The auth key is the subscription's only when the document says something about
+// it (SubscriptionDocument::clientRandomAuthKey). The endpoint's format has no
+// field for it, so a refresh keeps the key the config has, and lists no change;
+// Creation has none to keep, and the caller gives the one the link it came with
+// carried (Backend, serverOfDocument).
 //
 // Creation starts from a new config instead, and also takes the protocol, IPv6,
 // anti-DPI, the name and the DNS servers from the document; `current` and

@@ -333,8 +333,7 @@ bool Backend::createConfig(const QVariantMap &f)
     }
     keepWhatTheFormDoesNotShow(edit.content, &parsed.ct);
     // The certificate kept is the file's, which the form's trimming said nothing about.
-    if (keepSubscriptionOwnedFields(oldPath, edit.content, edit.password, edit.authKey, &parsed.ct,
-                                    &parsed.password, &parsed.authKey))
+    if (keepSubscriptionOwnedFields(oldPath, edit.content, edit.password, &parsed.ct, &parsed.password))
         parsed.certificateTrimmed = false;
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
