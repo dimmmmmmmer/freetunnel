@@ -19,6 +19,7 @@
 #include <QTcpServer>
 #include <QTranslator>
 #include <QScopeGuard>
+#include <QThread>
 #include <QUuid>
 
 #include "app/Backend.h"
@@ -70,6 +71,9 @@ private slots:
     void aRefreshWhileOffIsAppliedWithoutConnecting();
     void aRefreshWhileDisconnectingWaitsUntilOff();
     void theKillSwitchWhileReconnectingPutsOffTheAutomaticRefresh();
+    void aDropWhileARefreshIsWrittenRebuildsTheTunnelOnceItIsUp();
+    void aNewConnectAfterSuchADropNeedsNoRebuild();
+    void anUpdateHeldForTheActiveConfigIsWrittenOnceAnotherIsPicked();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
 };
@@ -1650,6 +1654,154 @@ void TestIntegrationBackendVpn::theKillSwitchWhileReconnectingPutsOffTheAutomati
     backend.subscriptions()->runSchedulerTickForTest();
     QCOMPARE(network.fetches(), 1);
     QCOMPARE(network.requests().constFirst().url, kSubscriptionUrl);
+    backend.prepareQuit();
+}
+
+// The write runs the credential store's event loop, and the helper can report
+// the tunnel dropping meanwhile, as the old server goes away. The core's
+// retries still go to that server: the tunnel is rebuilt with the new one once
+// it is up again, and not while it comes up.
+void TestIntegrationBackendVpn::aDropWhileARefreshIsWrittenRebuildsTheTunnelOnceItIsUp()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-drop")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-drop-token"));
+    QVERIFY(env.start());
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(env.server.connectCount(), 1);
+
+    const QString key = freetunnel::CredentialStore::keyForConfigPath(path);
+    bool dropped = false;
+    freetunnel::CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
+        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != qApp->thread())
+            return;
+        env.server.reportState(QStringLiteral("Reconnecting"));
+        dropped = QTest::qWaitFor([&]() { return backend.connecting(); }, 5000);
+    });
+    const auto unhook = qScopeGuard([]() { freetunnel::CredentialStore::setCallHookForTest({}); });
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-drop"), QStringLiteral("203.0.113.81:443"))));
+    QVERIFY2(dropped, "the helper's state did not arrive while the password was stored");
+    QVERIFY(readConfig(path).contains(QStringLiteral("203.0.113.81:443")));
+    QTest::qWait(300);
+    QVERIFY(backend.connecting());
+    QCOMPARE(env.server.connectCount(), 1);
+
+    env.server.reportState(QStringLiteral("Connected"));
+    QVERIFY2(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && backend.connected(); }, 10000),
+             "the tunnel stayed on the old address");
+    QVERIFY2(env.lastConnectConfig().contains(QStringLiteral("203.0.113.81:443")), qPrintable(env.lastConnectConfig()));
+    QCOMPARE(backend.activeIndex(), backend.configIndex(path));
+    // Once: the session it was rebuilt into is the new server's.
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 2);
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// The tunnel dropped while the refresh was written, and the user then connects
+// again: that attempt reads the new server, and is not rebuilt once it is up.
+void TestIntegrationBackendVpn::aNewConnectAfterSuchADropNeedsNoRebuild()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-drop-again")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-drop-again-token"));
+    QVERIFY(env.start());
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+
+    const QString key = freetunnel::CredentialStore::keyForConfigPath(path);
+    bool dropped = false;
+    freetunnel::CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
+        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != qApp->thread())
+            return;
+        env.server.reportState(QStringLiteral("Reconnecting"));
+        dropped = QTest::qWaitFor([&]() { return backend.connecting(); }, 5000);
+    });
+    const auto unhook = qScopeGuard([]() { freetunnel::CredentialStore::setCallHookForTest({}); });
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-drop-again"), QStringLiteral("203.0.113.86:443"))));
+    QVERIFY2(dropped, "the helper's state did not arrive while the password was stored");
+
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return !backend.connected() && !backend.connecting() && !backend.disconnecting(); }, 5000));
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QCOMPARE(env.server.connectCount(), 2);
+    QVERIFY2(env.lastConnectConfig().contains(QStringLiteral("203.0.113.86:443")), qPrintable(env.lastConnectConfig()));
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 2);
+    QCOMPARE(env.server.countFor(QStringLiteral("disconnect")), 1);
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// The update waited because the tunnel was coming up from its config. Once
+// another config is picked, that is no longer so, though the tunnel still comes
+// up: it is written then, and the old config is up to date when picked again.
+void TestIntegrationBackendVpn::anUpdateHeldForTheActiveConfigIsWrittenOnceAnotherIsPicked()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-picked-away")));
+    QVERIFY(configs.add(QStringLiteral("sub-picked")));
+    configs.install();
+    const QString first = configs.paths.at(0);
+    const LinkedConfig linked(first);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-picked-token"));
+    QVERIFY(env.start());
+    env.server.failConnectsWith(QStringLiteral("sub-picked-away"),
+                                QStringLiteral("Connection failed: endpoint timed out (~30s)"));
+    env.server.failConnectsWith(QStringLiteral("sub-picked"),
+                                QStringLiteral("Connection failed: endpoint timed out (~30s)"));
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return anyErrorIs(errors, QStringLiteral("Server isn't responding (timed out).")); }, 10000));
+    QVERIFY(backend.connecting());
+    const QString before = readConfig(first);
+    QVERIFY(backend.refreshSubscription(first));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-picked-away"), QStringLiteral("203.0.113.85:443"))));
+    QCOMPARE(readConfig(first), before);
+
+    backend.selectConfig(backend.configIndex(configs.paths.at(1)));
+    QVERIFY(QTest::qWaitFor([&]() { return readConfig(first).contains(QStringLiteral("203.0.113.85:443")); }, 5000));
+    QVERIFY(QTest::qWaitFor([&]() { return env.server.connectCount() == 2; }, 10000));
+    QVERIFY(env.lastConnectConfig().contains(QStringLiteral("sub-picked")));
+    QVERIFY(backend.connecting());
+    QCOMPARE(backend.activeIndex(), backend.configIndex(configs.paths.at(1)));
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
     backend.prepareQuit();
 }
 

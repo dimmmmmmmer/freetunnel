@@ -413,6 +413,7 @@ private:
     bool automaticRefreshAllowed(const QString &path) const;
     void applySubscriptionUpdate(const QString &path, const HeldSubscriptionUpdate &update);
     bool subscriptionUpdateWaits(const QString &path) const;
+    void rebuildForSubscriptionUpdate(const QString &path);
     void flushHeldSubscriptionUpdates();
     void forgetSubscription(const QString &path);
     bool keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
@@ -420,6 +421,9 @@ private:
     void logSubscription(const QString &path, const QString &line, const QString &detail);
     SubscriptionController *m_subscriptions = nullptr;
     QString m_configOpenInEditor;
+    // A refresh wrote the active config while its tunnel was coming up from the
+    // old one: rebuilt once it is up, unless a new attempt reads the file first.
+    bool m_subscriptionRebuildPending = false;
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
     // Install a verified Linux download: replace the running .AppImage and
     // restart, or explain why the user has to finish the job themselves.

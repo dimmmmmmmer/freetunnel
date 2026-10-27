@@ -4,6 +4,10 @@
 #include <QString>
 #include <QStringList>
 
+#if defined(FT_ENABLE_TEST_HOOKS)
+#include <functional>
+#endif
+
 namespace freetunnel {
 
 // Name the OS credential stores are keyed by (Keychain service, libsecret schema,
@@ -36,6 +40,17 @@ public:
     static bool storePassword(const QString &key, const QString &password);
     static QString loadPassword(const QString &key);
     static bool deletePassword(const QString &key);
+
+#if defined(FT_ENABLE_TEST_HOOKS)
+    // Tests only. Called first by each of the three calls above, on the thread
+    // that makes it, with what the call is ("store", "load" or "delete") and its
+    // key. On the GUI thread the store's own event loop turns while the OS store
+    // answers, so what the hook lets happen there is what can happen meanwhile,
+    // such as the helper reporting a state; on a worker it can hold the call, as a
+    // Keychain prompt does.
+    using CallHookForTest = std::function<void(const char *call, const QString &key)>;
+    static void setCallHookForTest(CallHookForTest hook);
+#endif
 };
 
 // Move inline passwords into the credential store and strip them from TOML.

@@ -53,6 +53,8 @@ void Backend::failConnectNoPassword()
     m_reapplying = false;
     emit stateChanged();
     emit errorOccurred(tr("Config has no password — edit it and try again"));
+    // Nor would anything apply a subscription's update held for the attempt.
+    flushHeldSubscriptionUpdates();
 }
 
 void Backend::connectVpn() {
@@ -91,6 +93,9 @@ void Backend::buildConnectTomlAsync()
 {
     const quint64 generation = ++m_connectGen;
     m_awaitingToml = true;
+    // This attempt reads the config as it is now, whatever a subscription wrote
+    // into it before (rebuildForSubscriptionUpdate).
+    m_subscriptionRebuildPending = false;
     const QString path = m_activePath;
     const QString level =
             m_settings.verbose_logs ? QStringLiteral("info") : QStringLiteral("warn");

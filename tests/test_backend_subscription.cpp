@@ -11,12 +11,15 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QScopeGuard>
+#include <QSemaphore>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUuid>
 
+#include <atomic>
 #include <memory>
 
 #include "app/Backend.h"
@@ -182,6 +185,7 @@ private slots:
     void anotherServerRefusedStopsAutomaticRefresh();
     void anUpdateWaitsWhileTheEditorHasTheConfigOpen();
     void aStoreThatRefusesLeavesTheConfigAsItWas();
+    void anUpdateHeldForAConnectThatEndsBeforeTheHelperIsApplied();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser_data();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser();
     void failuresThatMayPassBackOffThenWaitTheInterval();
@@ -1046,6 +1050,44 @@ void TestBackendSubscription::aStoreThatRefusesLeavesTheConfigAsItWas()
     QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("not_saved"));
     QCOMPARE(rig.record(path)->failures, 1);
     QCOMPARE(rig.record(path)->nextAttemptAt, rig.clock + 10 * 60);
+}
+
+// A connect that ends while it reads the password, the keyring giving none,
+// reaches no helper, and no state of the helper's says it ended: an update
+// held for it is applied all the same.
+void TestBackendSubscription::anUpdateHeldForAConnectThatEndsBeforeTheHelperIsApplied()
+{
+    Rig rig;
+    const QString path =
+            linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    QCOMPARE(rig.backend->activeIndex(), rig.backend->configIndex(path));
+    const QString key = CredentialStore::keyForConfigPath(path);
+    QVERIFY(CredentialStore::deletePassword(key));
+    // The connect's read waits, on its worker, for the update to be held.
+    const auto gate = std::make_shared<QSemaphore>();
+    const auto gated = std::make_shared<std::atomic<bool>>(false);
+    CredentialStore::setCallHookForTest([gate, gated, key](const char *call, const QString &k) {
+        if (QThread::currentThread() != qApp->thread() && qstrcmp(call, "load") == 0 && k == key
+                && !gated->exchange(true))
+            gate->tryAcquire(1, 10000);
+    });
+    const auto unhook = qScopeGuard([gate]() {
+        gate->release();
+        CredentialStore::setCallHookForTest({});
+    });
+    QVERIFY(rig.backend->refreshSubscription(path));
+    rig.backend->connectVpn();
+    QVERIFY(rig.backend->connecting());
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn.example.com", "203.0.113.9:443"))));
+    QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("held"));
+    QVERIFY(!readText(path).contains(QStringLiteral("203.0.113.9")));
+    gate->release();
+    QTRY_VERIFY(!rig.backend->connecting());
+    QTRY_VERIFY(readText(path).contains(QStringLiteral("203.0.113.9:443")));
+    QVERIFY(!rig.subs()->held(path));
+    QCOMPARE(passwordOf(path), QStringLiteral("s3cret"));
 }
 
 // 403, 404, 405 and 407 are a server offering no updates, 401 credentials it

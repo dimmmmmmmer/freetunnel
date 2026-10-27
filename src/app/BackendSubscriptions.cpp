@@ -428,8 +428,7 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     }
     m_subscriptions->noteApplied(path, update, summary);
     logSubscription(path, tr("Subscription %1 updated “%2”: %3"), summary);
-    if (path == m_activePath && m_connected)
-        reconnectActiveConfig();
+    rebuildForSubscriptionUpdate(path);
 }
 
 // The active config while its tunnel is between states, or the config the
@@ -442,13 +441,33 @@ bool Backend::subscriptionUpdateWaits(const QString &path) const
             && (m_connecting || m_disconnecting || m_reapplying || m_awaitingToml || m_pendingReconnect);
 }
 
+// The tunnel built from the config a refresh has just written is rebuilt with
+// it: now when it is up, or once it is up when it is coming up. Asked after the
+// write, not before it: the write runs the credential store's event loop, in
+// which the helper can report the tunnel dropping, and the core's retries still
+// go to the server it was built with. A rebuild already under way needs
+// nothing: its new attempt reads the file as written.
+void Backend::rebuildForSubscriptionUpdate(const QString &path)
+{
+    if (path != m_activePath)
+        return;
+    if (m_connected)
+        reconnectActiveConfig();
+    else if (m_connecting || m_awaitingToml)
+        m_subscriptionRebuildPending = true;
+}
+
 // Later, from the event loop: this is called from the VPN client's own state
 // callback, and applying can rebuild the tunnel and read the credential store.
 void Backend::flushHeldSubscriptionUpdates()
 {
-    if (!m_subscriptions || m_subscriptions->heldPaths().isEmpty())
+    if (!m_subscriptions || (m_subscriptions->heldPaths().isEmpty() && !m_subscriptionRebuildPending))
         return;
     QTimer::singleShot(0, this, [this]() {
+        if (m_subscriptionRebuildPending && m_connected) {
+            m_subscriptionRebuildPending = false;
+            reconnectActiveConfig();
+        }
         for (const QString &path : m_subscriptions->heldPaths()) {
             const std::optional<HeldSubscriptionUpdate> held = m_subscriptions->held(path);
             const std::optional<freetunnel::SubscriptionRecord> record = m_subscriptions->record(path);

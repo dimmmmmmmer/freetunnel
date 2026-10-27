@@ -149,7 +149,8 @@ void Backend::onVpnClientStateChanged(VpnHelperClient::State st)
     if (st == VpnHelperClient::State::Disconnected && m_pendingReconnect)
         QTimer::singleShot(0, this, [this]() { firePendingReconnect(); });
     // A subscription's update to the active config waits while the tunnel is
-    // coming up or going down, and applies once it is not.
+    // coming up or going down, and applies once it is not; and a tunnel that came
+    // up from the config before a refresh wrote it is rebuilt with it.
     if (!m_connecting && !m_disconnecting)
         flushHeldSubscriptionUpdates();
 }
@@ -516,6 +517,9 @@ void Backend::selectConfig(int index) {
     // kept describing the config before this one. removeProfile() emits both for
     // the same reason.
     emit splitChanged();
+    // An update held for the config the tunnel was coming up from need not wait
+    // for the tunnel any more.
+    flushHeldSubscriptionUpdates();
     if (m_connected || m_connecting)
         reconnectActiveConfig();
 }
