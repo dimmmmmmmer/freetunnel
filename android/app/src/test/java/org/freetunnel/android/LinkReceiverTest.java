@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 // The receiver a TV opens for Receive from phone: what one request gets (handle(),
 // driven through byte streams), the code and address rules, the pages and the QR
@@ -39,7 +40,7 @@ public final class LinkReceiverTest {
     private static final String HOST = "192.168.1.23:41234";
     private static final String LINK = "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz";
     private static final LinkReceiver.Pages PAGES = new LinkReceiver.Pages("en", "Send to the TV", "Paste a link",
-            "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Wrong code", "Stopped");
+            "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Too large", "Wrong code", "Stopped");
     private static final String CSP =
             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -154,6 +155,7 @@ public final class LinkReceiverTest {
         assertSame(LinkReceiver.Kind.RECEIVED, exchange.outcome.kind);
         assertEquals(LINK, exchange.outcome.text);
         assertNull("Pasted, it has no file name", exchange.outcome.fileName);
+        assertFalse("Read whole, it leaves nothing to drain", exchange.outcome.bodyUnread);
         assertEquals(0, exchange.unread);
     }
 
@@ -226,13 +228,24 @@ public final class LinkReceiverTest {
                 + body.length() + "\r\n\r\n" + body));
         String length = "Content-Length: " + body.length() + "\r\n";
         assertRefused("two lengths", "HTTP/1.1 400 Bad Request", exchange(head + length + length + "\r\n" + body));
-        for (String bad : new String[]{"+5", "-1", "1e3", "12345678", "", "5 5", "0x10"})
+        for (String bad : new String[]{"+5", "-1", "1e3", "", "5 5", "0x10", "1234567x"})
             assertRefused(bad, "HTTP/1.1 400 Bad Request", exchange(head + "Content-Length: " + bad + "\r\n\r\n" + body));
-        // Over the limit, the text is not even read.
+        // Over the limit, the text is not even read, and serve() is told to read the
+        // rest before it closes. The page says so, with the form.
         String large = head + "Content-Length: " + (LinkReceiver.MAX_BODY_BYTES + 1) + "\r\n\r\n";
         Exchange tooLarge = exchange(large + "x".repeat(LinkReceiver.MAX_BODY_BYTES + 1));
         assertRefused("too large", "HTTP/1.1 413 Content Too Large", tooLarge);
+        assertEquals(PAGES.tooLarge, tooLarge.body());
+        assertTrue(tooLarge.outcome.bodyUnread);
         assertEquals(LinkReceiver.MAX_BODY_BYTES + 1, tooLarge.unread);
+        // So is a length of 8 digits or more, as a photo or a video can have.
+        for (String huge : new String[]{"12345678", "10000000", "99999999999999999999"}) {
+            Exchange photo = exchange(head + "Content-Length: " + huge + "\r\n\r\n" + body);
+            assertRefused(huge, "HTTP/1.1 413 Content Too Large", photo);
+            assertEquals(huge, PAGES.tooLarge, photo.body());
+            assertTrue(huge, photo.outcome.bodyUnread);
+            assertEquals(huge, body.length(), photo.unread);
+        }
         // At the limit it is.
         String padded = form(LINK) + "&pad=" + "x".repeat(LinkReceiver.MAX_BODY_BYTES - form(LINK).length() - 5);
         assertEquals(LinkReceiver.MAX_BODY_BYTES, padded.length());
@@ -496,6 +509,7 @@ public final class LinkReceiverTest {
         assertSame(LinkReceiver.Kind.RECEIVED, exchange(multipartPost("/K7QM4XHD", full), false).outcome.kind);
         Exchange tooLarge = exchange(multipartPost("/K7QM4XHD", pageForm("", "big.toml", content)), false);
         assertRefused("too large", "HTTP/1.1 413 Content Too Large", tooLarge);
+        assertEquals(PAGES.tooLarge, tooLarge.body());
         assertEquals(LinkReceiver.MAX_BODY_BYTES + 1, tooLarge.unread);
     }
 
@@ -536,7 +550,8 @@ public final class LinkReceiverTest {
                 post("/K7QM4XHD", HOST, "", "x"), "PUT / HTTP/1.1\r\nHost: " + HOST + "\r\n\r\n",
                 "GET / HTTP/1.1\r\nHost: " + HOST + "\r\nX: " + "x".repeat(LinkReceiver.MAX_HEADER_BYTES) + "\r\n\r\n",
                 new String(multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))), StandardCharsets.UTF_8),
-                new String(multipartPost("/K7QM4XHD", pageForm("", "", new byte[0])), StandardCharsets.UTF_8)};
+                new String(multipartPost("/K7QM4XHD", pageForm("", "", new byte[0])), StandardCharsets.UTF_8),
+                post("/K7QM4XHD", HOST, type, "x".repeat(LinkReceiver.MAX_BODY_BYTES + 1))};
         List<String> statuses = new ArrayList<>();
         List<String> types = new ArrayList<>();
         for (String request : requests) {
@@ -549,19 +564,19 @@ public final class LinkReceiverTest {
                 assertTrue(exchange.status() + " lacks " + expected, headers.contains(expected));
             types.add(headers.get(1));
         }
-        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431", "200", "400"), statuses);
+        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431", "200", "400", "413"), statuses);
         // The pages are HTML, which nosniff makes the browser take at its word; the refusals are plain text.
         String html = "Content-Type: text/html; charset=utf-8";
         String plain = "Content-Type: text/plain; charset=utf-8";
-        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html), types);
+        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html, html), types);
     }
 
     @Test public void thePagesLoadNothingAndEscapeTheirText() {
         String hostile = "<script>alert(\"x\")</script> & 'y'";
         LinkReceiver.Pages pages = new LinkReceiver.Pages("en\"><script>", hostile, hostile, hostile, hostile, hostile, hostile,
-                hostile, hostile, hostile);
+                hostile, hostile, hostile, hostile);
         String escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;";
-        for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.wrongCode, pages.lockedOut}) {
+        for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.tooLarge, pages.wrongCode, pages.lockedOut}) {
             assertFalse(page, page.contains("<script"));
             assertTrue(page, page.contains(escaped));
             assertTrue(page, page.startsWith("<!doctype html><html lang=\"en&quot;&gt;&lt;script&gt;\">"));
@@ -579,6 +594,7 @@ public final class LinkReceiverTest {
         // The retry page is the form again, under its text.
         String form = PAGES.form.substring(PAGES.form.indexOf("<form"));
         assertTrue(PAGES.retry.endsWith("<p>Paste or choose one</p>" + form));
+        assertTrue(PAGES.tooLarge.endsWith("<p>Too large</p>" + form));
         assertEquals("a&amp;b", LinkReceiver.escape("a&b"));
     }
 
@@ -820,6 +836,63 @@ public final class LinkReceiverTest {
             assertEquals("received " + LINK + " as link.txt from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
         }
         assertClosed(port);
+    }
+
+    // A photo chosen by mistake: the TV answers before it reads the body, and a
+    // browser reads that answer only once it has sent the body. Closed with the body
+    // unread, the connection would be reset instead, which fails the browser's
+    // writes and can erase the answer it has not read yet.
+    @Test public void aSendTooLargeToTakeGetsItsPageAndTheTvGoesOnWaiting() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        byte[] photo = multipartPost("/K7QM-4XHD", "127.0.0.1:" + port, "multipart/form-data; boundary=" + BOUNDARY,
+                pageForm("", "photo.jpg", new byte[2 * LinkReceiver.MAX_BODY_BYTES]));
+        AtomicReference<IOException> failed = new AtomicReference<>();
+        String answer;
+        try (Socket browser = connect(port)) {
+            browser.setSoTimeout(5_000);
+            // As a browser, it goes on sending while the answer waits.
+            Thread writer = new Thread(() -> {
+                try {
+                    browser.getOutputStream().write(photo);
+                    browser.shutdownOutput();
+                } catch (IOException reset) {
+                    failed.set(reset);
+                }
+            });
+            writer.start();
+            answer = new String(browser.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            writer.join(5_000);
+            assertFalse("The whole body must be taken", writer.isAlive());
+        }
+        assertNull("The body must be read, not reset: " + failed.get(), failed.get());
+        assertTrue(answer, answer.startsWith("HTTP/1.1 413 Content Too Large\r\n"));
+        assertTrue(answer.endsWith(PAGES.tooLarge));
+        // No strike: the right file from the same page goes through.
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
+        assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+    }
+
+    @Test public void aTooLargeSendThatNeverEndsHoldsTheTvForTheDrainOnly() throws Exception {
+        // It announces a body it never sends. Its answer comes at once, and the TV
+        // waits for the rest for DRAIN_MS, not for its read timeout or deadline.
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000, 20_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        try (Socket stalled = connect(port)) {
+            stalled.setSoTimeout(5_000);
+            stalled.getOutputStream().write(utf8("POST /K7QM-4XHD HTTP/1.1\r\nHost: 127.0.0.1:" + port
+                    + "\r\nContent-Type: multipart/form-data; boundary=" + BOUNDARY + "\r\nContent-Length: 99999999\r\n\r\n"));
+            assertTrue(new String(stalled.getInputStream().readAllBytes(), StandardCharsets.UTF_8).endsWith(PAGES.tooLarge));
+            long started = System.nanoTime();
+            // Waits in the queue behind the stalled one, until its drain is over.
+            assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
+            long heldMs = (System.nanoTime() - started) / 1_000_000;
+            assertTrue("Held " + heldMs + " ms: for the drain, not the read timeout", heldMs >= LinkReceiver.DRAIN_MS - 500 && heldMs < 4_500);
+        }
+        assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
     }
 
     @Test public void itStopsWhenTheTimeIsUp() throws Exception {

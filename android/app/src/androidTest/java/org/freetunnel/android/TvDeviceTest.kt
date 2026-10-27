@@ -657,9 +657,10 @@ class TvDeviceTest {
         assertTrue(saved().last().getString("toml").contains("hostname = \"vpn.example.com\""))
     }
 
-    // Both legs: a file chosen on the phone instead of pasted. A TOML file with no
-    // name of its own is named after its file, without the escape the browser wrote
-    // for the quote or the character that would reverse the rest. It is the TOML that
+    // Both legs: a file chosen on the phone instead of pasted. A send with nothing
+    // in it or one too large to take is no strike. A TOML file with no name of its
+    // own is named after its file, without the escape the browser wrote for the
+    // quote or the character that would reverse the rest. It is the TOML that
     // VpnDeviceTest validates natively, with a byte order mark and CRLF line ends.
     @SdkSuppress(minSdkVersion = 29)
     @Test fun aFileFromAPhoneIsNamedAfterItAndAddedOnlyOnceTheTvConfirmsIt() {
@@ -678,6 +679,12 @@ class TvDeviceTest {
         val empty = httpBytes(url) { h, path -> filePost(h, path, "", ByteArray(0)) }
         assertTrue(empty, empty.startsWith("HTTP/1.1 400 ") &&
             empty.contains(LinkReceiver.escape(context.getString(R.string.receive_page_retry))))
+        assertSame(opened, receiver(a))
+        // A photo chosen by mistake gets the page that says it is too large: the TV
+        // reads the rest before it closes, so the answer is not lost to a reset.
+        val photo = httpBytes(url) { h, path -> filePost(h, path, "photo.jpg", ByteArray(2 * LinkReceiver.MAX_BODY_BYTES)) }
+        assertTrue(photo, photo.startsWith("HTTP/1.1 413 ") &&
+            photo.contains(LinkReceiver.escape(context.getString(R.string.receive_page_too_large))))
         assertSame(opened, receiver(a))
         val toml = "\uFEFF" + source.replace("vpn.invalid", "file.example.com").replace("\n", "\r\n") + "\r\n"
         val sent = httpBytes(url) { h, path -> filePost(h, path, "Home %22TV%22\u202E VPN.toml", toml.toByteArray()) }

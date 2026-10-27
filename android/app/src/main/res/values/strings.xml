@@ -175,6 +175,7 @@
     <string name="receive_page_note">The TV shows what it received and asks before adding it. The text crosses your network unencrypted, so send it only over a network you trust.</string>
     <string name="receive_page_sent">Sent. Confirm it on the TV.</string>
     <string name="receive_page_retry">The TV took nothing. Paste a link or a TOML file, or choose a file, but not both, and send again. A file must be UTF-8 text: a TOML file, or a text file with a tt:// link.</string>
+    <string name="receive_page_too_large">The TV took nothing: that was over 512 KiB, far more than a link or a TOML file. Choose the TOML file, or the text file with the tt:// link, and send again.</string>
     <string name="receive_page_wrong_code">Wrong code. Check the address the TV shows, and try again.</string>
     <string name="receive_page_locked_out">Wrong code again, so the TV stopped receiving. Open Receive from phone on the TV again for a new address.</string>
 </resources>

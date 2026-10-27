@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -46,6 +47,7 @@ final class LinkReceiver {
     static final int FIRST_BYTE_TIMEOUT_MS = 2_000;
     static final int READ_TIMEOUT_MS = 10_000;
     static final int CONNECTION_DEADLINE_MS = 15_000;
+    static final int DRAIN_MS = 2_000;
     static final int MAX_HEADER_BYTES = 8192;
     static final int MAX_BODY_BYTES = 512 * 1024;
     static final int MAX_WRONG_CODES = 3;
@@ -69,8 +71,14 @@ final class LinkReceiver {
         final Kind kind;
         final String text;
         final String fileName;
-        Outcome(Kind kind, String text) { this(kind, text, null); }
-        Outcome(Kind kind, String text, String fileName) { this.kind = kind; this.text = text; this.fileName = fileName; }
+        // Answered with the request's body still unread, so serve() reads the rest
+        // before it closes the connection.
+        final boolean bodyUnread;
+        Outcome(Kind kind, String text) { this(kind, text, null, false); }
+        Outcome(Kind kind, String text, String fileName) { this(kind, text, fileName, false); }
+        Outcome(Kind kind, String text, String fileName, boolean bodyUnread) {
+            this.kind = kind; this.text = text; this.fileName = fileName; this.bodyUnread = bodyUnread;
+        }
     }
 
     /** The pages the phone's browser shows, whole and static: nothing a request sends is put in them. */
@@ -78,6 +86,7 @@ final class LinkReceiver {
         final String form;
         final String sent;
         final String retry;
+        final String tooLarge;
         final String wrongCode;
         final String lockedOut;
 
@@ -85,10 +94,11 @@ final class LinkReceiver {
         // so it posts back to the address it was opened at, code and all. It takes a
         // pasted text or a file, so neither field is required: a send with neither,
         // with both, or with a file that is not text gets the form again under the
-        // retry text. No accept attribute: a phone's picker may not know a .toml
-        // file's type, and would grey it out.
+        // retry text, and one too large to take, such as a photo chosen by mistake,
+        // under the too-large text. No accept attribute: a phone's picker may not
+        // know a .toml file's type, and would grey it out.
         Pages(String lang, String title, String prompt, String file, String send, String note,
-              String sent, String retry, String wrongCode, String lockedOut) {
+              String sent, String retry, String tooLarge, String wrongCode, String lockedOut) {
             String fields = "<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"
                     + "<label for=\"link\">" + escape(prompt) + "</label>"
                     + "<textarea id=\"link\" name=\"link\" autocomplete=\"off\" autocapitalize=\"off\""
@@ -100,6 +110,7 @@ final class LinkReceiver {
             form = page(lang, title, fields);
             this.sent = page(lang, title, "<p>" + escape(sent) + "</p>");
             this.retry = page(lang, title, "<p>" + escape(retry) + "</p>" + fields);
+            this.tooLarge = page(lang, title, "<p>" + escape(tooLarge) + "</p>" + fields);
             this.wrongCode = page(lang, title, "<p>" + escape(wrongCode) + "</p>");
             this.lockedOut = page(lang, title, "<p>" + escape(lockedOut) + "</p>");
         }
@@ -264,6 +275,7 @@ final class LinkReceiver {
                     OutputStream out = open.getOutputStream();
                     outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES);
                     out.flush();
+                    if (outcome.bodyUnread) drain(open, deadline);
                 } catch (IOException slowOrGone) {
                     // Too slow, or gone before the end: the next connection may be the phone.
                     continue;
@@ -282,6 +294,30 @@ final class LinkReceiver {
         } catch (IOException failed) {
             // A close by stop() lands here too; stopSelf() tells the two apart.
             if (stopSelf()) listener.stopped(Stop.FAILED);
+        }
+    }
+
+    // After an answer sent before the request's body was read, as to a photo too
+    // large to take. Closed with the body unread, the connection would be reset, and
+    // a reset can erase the answer on the phone before its browser reads it, which it
+    // does once it has sent the body. So the TV ends its side after the answer, and
+    // reads and drops what the phone still sends until the phone ends its side too,
+    // for DRAIN_MS at most and never past the connection's deadline.
+    private static void drain(Socket socket, long deadline) {
+        long end = System.nanoTime() + DRAIN_MS * 1_000_000L;
+        if (deadline - end < 0) end = deadline;
+        try {
+            socket.shutdownOutput();
+            InputStream in = socket.getInputStream();
+            byte[] dropped = new byte[8192];
+            while (true) {
+                long left = (end - System.nanoTime()) / 1_000_000;
+                if (left <= 0) return;
+                socket.setSoTimeout((int) left);
+                if (in.read(dropped) < 0) return;
+            }
+        } catch (IOException doneOrGone) {
+            // Its time is up, or the phone has gone: the connection closes either way.
         }
     }
 
@@ -341,9 +377,16 @@ final class LinkReceiver {
         if (!values(headers, "transfer-encoding").isEmpty()) return refuse(out, 501, "Not Implemented");
         List<String> lengths = values(headers, "content-length");
         if (lengths.isEmpty()) return refuse(out, 411, "Length Required");
-        if (lengths.size() != 1 || !lengths.get(0).matches("[0-9]{1,7}")) return refuse(out, 400, "Bad Request");
-        int length = Integer.parseInt(lengths.get(0));
-        if (length > MAX_BODY_BYTES) return refuse(out, 413, "Content Too Large");
+        if (lengths.size() != 1 || !lengths.get(0).matches("[0-9]+")) return refuse(out, 400, "Bad Request");
+        // A length of 8 digits or more is over the limit too, and not parsed: a photo
+        // or a video chosen by mistake can be that large.
+        int length = lengths.get(0).length() > 7 ? Integer.MAX_VALUE : Integer.parseInt(lengths.get(0));
+        if (length > MAX_BODY_BYTES) {
+            // The page is the form again under a note, which a GET shows anyone, so it
+            // needs no code, and it is no strike.
+            answer(out, 413, "Content Too Large", pages.tooLarge);
+            return new Outcome(Kind.REFUSED, null, null, true);
+        }
         List<String> types = values(headers, "content-type");
         String type = types.size() == 1 ? types.get(0).split(";", 2)[0].trim() : "";
         // Null for the urlencoded form; a multipart form without a boundary RFC 2046 allows is no form.
@@ -693,8 +736,12 @@ final class LinkReceiver {
                 + "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'\r\n"
                 + (status == 405 ? "Allow: GET, POST\r\n" : "")
                 + "\r\n";
-        out.write(head.getBytes(StandardCharsets.US_ASCII));
-        out.write(content);
+        // In one write: the body written on its own would wait for the head's
+        // acknowledgement, and a connection reset meanwhile would drop it.
+        byte[] start = head.getBytes(StandardCharsets.US_ASCII);
+        byte[] whole = Arrays.copyOf(start, start.length + content.length);
+        System.arraycopy(content, 0, whole, start.length, content.length);
+        out.write(whole);
     }
 
     static String escape(String text) {

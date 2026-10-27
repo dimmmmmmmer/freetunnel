@@ -772,7 +772,8 @@ public final class MainActivity extends Activity {
         return new LinkReceiver.Pages(java.util.Locale.getDefault().toLanguageTag(), getString(R.string.receive_page_title),
                 getString(R.string.receive_page_prompt), getString(R.string.receive_page_file), getString(R.string.receive_page_send),
                 getString(R.string.receive_page_note), getString(R.string.receive_page_sent), getString(R.string.receive_page_retry),
-                getString(R.string.receive_page_wrong_code), getString(R.string.receive_page_locked_out));
+                getString(R.string.receive_page_too_large), getString(R.string.receive_page_wrong_code),
+                getString(R.string.receive_page_locked_out));
     }
     // These two refusals are about what this version cannot do yet, and say what to
     // do instead. That is more than the two lines a toast shows, so they get a dialog.

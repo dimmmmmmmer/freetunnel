@@ -123,8 +123,11 @@ apps open pages in, open the address in Chrome or Safari instead.
 - A send is a form post of at most 512 KiB, a file included, that names the
   TV's address as its host. The page loads nothing and runs no script, and
   nothing about a transfer is logged. A send with nothing in it, with both
-  pasted text and a file, or with a file that is not UTF-8 text shows the page
-  again with a note; it is not a wrong code, and the TV goes on waiting.
+  pasted text and a file, with a file that is not UTF-8 text, or over 512 KiB,
+  such as a photo chosen by mistake, shows the page again with a note; it is
+  not a wrong code, and the TV goes on waiting. Before it closes, the TV reads
+  the rest of a send it refused as too large, for 2 seconds at most, so that
+  the browser can show that page instead of a connection error.
 - The link or file crosses the home network unencrypted: a browser has no way
   to encrypt a page on a local `http://` address. Someone already watching that
   network at that moment could read the VPN password in it, or send their own
