@@ -1027,9 +1027,16 @@ void TestIntegrationBackendVpn::aFailureBeforeTheSessionCameUpIsSaidInTheUsersTe
                                  << QStringLiteral("Authentication failed — check the username and password.");
     QTest::newRow("no answer") << QStringLiteral("Connection failed: endpoint timed out (~30s)")
                                << QStringLiteral("Server isn't responding (timed out).");
-    // Core 1.3 words a failure of the client random auth key with "auth" in it, which
-    // is not a wrong password and must not be told as one.
-    QTest::newRow("auth key failure keeps its reason")
+    // What core 1.3 reports when a session cannot be opened, whatever the reason:
+    // a failed derivation of the client random from the auth key is one (it is in
+    // the core's log, not here), and it has to stay a connect failure in the user's
+    // words, not be taken for a wrong password.
+    QTest::newRow("a session the core could not open")
+            << QStringLiteral("Connection failed: Failed to open session with endpoint")
+            << QStringLiteral("Couldn't connect to the server: Failed to open session with endpoint");
+    // The core's own wording for the key, which only its log has today. Kept in
+    // case a later core reports it: "auth" in it is not a wrong password either.
+    QTest::newRow("auth key wording keeps its reason")
             << QStringLiteral("Connection failed: Failed to derive client_random from auth key")
             << QStringLiteral("Couldn't connect to the server: Failed to derive client_random "
                               "from auth key");

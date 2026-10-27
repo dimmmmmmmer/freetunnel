@@ -169,7 +169,11 @@ namespace {
 // contain "auth" or "credential". So do its words about the client random auth
 // key (core 1.3: "Failed to derive client_random from auth key", when the
 // handshake has no server name to bind the key to), and telling the user to
-// check their password for that would send them the wrong way.
+// check their password for that would send them the wrong way. Those words
+// reach the core's log, not the state event FreeTunnel reports from: an upstream
+// that cannot open its session says "Failed to open session with endpoint"
+// whatever the reason was. So this is a guard against a core that does say it,
+// not a reading of what 1.3 sends.
 bool sayCredentialsWereRefused(const QString &lower)
 {
     if (lower.contains(QLatin1String("auth key")) || lower.contains(QLatin1String("auth_key"))
