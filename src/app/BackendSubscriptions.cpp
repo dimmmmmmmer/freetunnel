@@ -13,7 +13,6 @@
 #include <QFileInfo>
 #include <QScopeGuard>
 #include <QTimer>
-#include <QUrl>
 
 #include "BackendConfigShared.h"
 #include "SubscriptionController.h"
@@ -94,12 +93,6 @@ std::optional<PreparedImport> serverOfDocument(const freetunnel::SubscriptionDoc
     if (out)
         out->certificateExtraIgnored = out->certificateExtraIgnored || document.extraPemIgnored;
     return out;
-}
-
-QString hostKey(const QString &hostname)
-{
-    const QByteArray ace = QUrl::toAce(hostname);
-    return (ace.isEmpty() ? hostname : QString::fromLatin1(ace)).toLower();
 }
 
 } // namespace
@@ -263,7 +256,7 @@ void Backend::onSubscriptionImportFetched(const QString &token, const freetunnel
             QStringList notes{updatesFrom};
             const QString givenHost =
                     import->given ? freetunnel::parseConfigToml(import->given->tomlContent).hostname : QString();
-            if (!givenHost.isEmpty() && hostKey(givenHost) != hostKey(result.document->hostname))
+            if (!givenHost.isEmpty() && !freetunnel::sameSubscriptionHost(givenHost, result.document->hostname))
                 notes << tr("The server given with it is %1.").arg(givenHost);
             askToImport(*fetched, notes);
             return;

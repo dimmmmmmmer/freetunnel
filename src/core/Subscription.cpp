@@ -461,8 +461,13 @@ SubscriptionApplied applySubscription(const ConfigToml &current, const QString &
         return out;
     }
     out.changes = changesBetween(current, currentPassword, next, out.password);
-    out.hostnameChanged = hostIdentity(current.hostname) != hostIdentity(next.hostname);
+    out.hostnameChanged = !sameSubscriptionHost(current.hostname, next.hostname);
     return out;
+}
+
+bool sameSubscriptionHost(const QString &a, const QString &b)
+{
+    return hostIdentity(a) == hostIdentity(b);
 }
 
 std::optional<SubscriptionUrl> parseSubscriptionUrl(const QString &url)

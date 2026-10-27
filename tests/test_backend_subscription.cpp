@@ -1071,9 +1071,10 @@ void TestBackendSubscription::anotherServerAcceptedAfterARestartIsFetchedAgain()
     QVERIFY(rig.backend->answerHostnameChange(path, true));
     QCOMPARE(rig.network.fetches(), 1);
     QCOMPARE(rig.network.requests().constFirst().url, v2::kSubscription);
+    // The server accepted, in whatever letter case it is named this time.
     QVERIFY(rig.network.answer(
-            FakeSubscriptionNetwork::document(subscriptionDocument("vpn2.example.com", "198.51.100.2:443"))));
-    QVERIFY(readText(path).contains(QStringLiteral("hostname = \"vpn2.example.com\"")));
+            FakeSubscriptionNetwork::document(subscriptionDocument("VPN2.example.com", "198.51.100.2:443"))));
+    QVERIFY(readText(path).contains(QStringLiteral("hostname = \"VPN2.example.com\"")));
     QCOMPARE(rig.record(path)->heldHostname, QString());
 }
 

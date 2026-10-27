@@ -3,7 +3,6 @@
 
 #include <QDateTime>
 #include <QRandomGenerator>
-#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
@@ -32,14 +31,6 @@ constexpr qint64 kImportSeconds = 10 * 60;
 constexpr int kMaxFetches = 2;
 
 const QString kTokenPrefix = QStringLiteral("subscription-import:");
-
-// A hostname as it names a server, as applySubscription() compares them: in
-// ACE form, in any case.
-QString hostKey(const QString &hostname)
-{
-    const QByteArray ace = QUrl::toAce(hostname);
-    return (ace.isEmpty() ? hostname : QString::fromLatin1(ace)).toLower();
-}
 
 } // namespace
 
@@ -329,7 +320,7 @@ bool SubscriptionController::answerHostname(const QString &path, bool accept)
 bool SubscriptionController::hostnameAccepted(const QString &path, const QString &hostname) const
 {
     const auto it = m_acceptedHostnames.constFind(path);
-    return it != m_acceptedHostnames.constEnd() && hostKey(*it) == hostKey(hostname);
+    return it != m_acceptedHostnames.constEnd() && freetunnel::sameSubscriptionHost(*it, hostname);
 }
 
 void SubscriptionController::setBusy(const QString &path, bool busy)

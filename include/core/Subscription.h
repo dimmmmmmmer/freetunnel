@@ -120,6 +120,10 @@ struct SubscriptionApplied {
 SubscriptionApplied applySubscription(const ConfigToml &current, const QString &currentPassword,
                                       const SubscriptionDocument &document, SubscriptionApplyMode mode);
 
+// Whether two hostnames name the same server, as applySubscription() decides
+// hostnameChanged: once both are in ACE form, ignoring case.
+bool sameSubscriptionHost(const QString &a, const QString &b);
+
 struct SubscriptionUrl {
     QUrl requestUrl;          // without its userinfo and fragment
     QByteArray authorization; // "Basic ..." for the userinfo; empty when there is none
