@@ -22,14 +22,15 @@ tv_ready() {
   if ! grep -qE "^application: .* banner='[^']+'" "$badging"; then
     echo "the application has no banner for the TV launcher"; found=1
   fi
+  # aapt2 prints every feature indented under a "feature-group:" line.
   for feature in android.software.leanback android.hardware.touchscreen; do
-    if ! grep -qxF "uses-feature-not-required: name='$feature'" "$badging"; then
+    if ! grep -qxE "[[:space:]]*uses-feature-not-required: name='${feature//./\\.}'" "$badging"; then
       echo "$feature is not declared as not required"; found=1
     fi
   done
   # A required feature, declared or implied by a permission, hides the app from
   # every TV without it. Touchscreen not being declared implies faketouch.
-  if grep -E "^uses-(implied-)?feature: " "$badging"; then
+  if grep -E "^[[:space:]]*uses-(implied-)?feature: " "$badging"; then
     echo "the lines above require features that TVs may not have"; found=1
   fi
   # Most TVs run 32-bit ARM, and the TV emulator is 32-bit x86.
@@ -42,7 +43,8 @@ tv_ready() {
 }
 
 # What aapt2 prints for the app as it should be, trimmed to the lines checked
-# and their neighbours.
+# and their neighbours: Build Tools 35.0.0's aapt2 on the debug APK, features
+# indented under their group as it prints them.
 cat > "$TMP/good" <<'EOF'
 package: name='org.freetunnel.android' versionCode='900' versionName='0.9.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
 sdkVersion:'26'
@@ -51,9 +53,10 @@ uses-permission: name='android.permission.INTERNET'
 application-label:'FreeTunnel'
 application: label='FreeTunnel' icon='res/drawable-nodpi-v4/logo.png' banner='res/drawable-xhdpi-v4/banner.png'
 launchable-activity: name='org.freetunnel.android.MainActivity'  label='FreeTunnel' icon=''
-leanback-launchable-activity: name='org.freetunnel.android.MainActivity'  label='FreeTunnel' icon='' banner='res/drawable-xhdpi-v4/banner.png'
-uses-feature-not-required: name='android.software.leanback'
-uses-feature-not-required: name='android.hardware.touchscreen'
+leanback-launchable-activity: name='org.freetunnel.android.MainActivity'  label='' icon='' banner=''
+feature-group: label=''
+  uses-feature-not-required: name='android.hardware.touchscreen'
+  uses-feature-not-required: name='android.software.leanback'
 main
 supports-screens: 'small' 'normal' 'large' 'xlarge'
 native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
@@ -85,24 +88,27 @@ case_ "TV launcher entry for another activity" fail \
   "no TV launcher entry"
 case_ "no banner" fail "s/ banner='[^']*'//g" "no banner"
 case_ "leanback required" fail \
-  "s/^uses-feature-not-required: name='android.software.leanback'/uses-feature: name='android.software.leanback'/" \
+  "s/uses-feature-not-required: name='android.software.leanback'/uses-feature: name='android.software.leanback'/" \
   "android.software.leanback is not declared as not required"
 case_ "touchscreen not declared" fail "/name='android.hardware.touchscreen'/d" \
   "android.hardware.touchscreen is not declared as not required"
 case_ "touchscreen not declared, so faketouch is implied" fail \
   "/name='android.hardware.touchscreen'/c\\
-uses-feature: name='android.hardware.faketouch'\\
-uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'" \
+\\  uses-feature: name='android.hardware.faketouch'\\
+\\  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'" \
   "uses-implied-feature: name='android.hardware.faketouch'"
 case_ "a library's permission implies Wi-Fi" fail \
   "/^main\$/i\\
-uses-feature: name='android.hardware.wifi'\\
-uses-implied-feature: name='android.hardware.wifi' reason='requested android.permission.ACCESS_WIFI_STATE permission'" \
+\\  uses-feature: name='android.hardware.wifi'\\
+\\  uses-implied-feature: name='android.hardware.wifi' reason='requested android.permission.ACCESS_WIFI_STATE permission'" \
   "require features that TVs may not have"
 case_ "a library requires a camera" fail "/^main\$/i\\
-uses-feature: name='android.hardware.camera'" "uses-feature: name='android.hardware.camera'"
+\\  uses-feature: name='android.hardware.camera'" "uses-feature: name='android.hardware.camera'"
 case_ "a feature not required is fine" pass "/^main\$/i\\
-uses-feature-not-required: name='android.hardware.camera'"
+\\  uses-feature-not-required: name='android.hardware.camera'"
+case_ "another feature named like leanback" fail \
+  "s/name='android.software.leanback'/name='android.softwareXleanback'/" \
+  "android.software.leanback is not declared as not required"
 case_ "no 32-bit ARM code" fail "s/ 'armeabi-v7a'//" "no native code for armeabi-v7a"
 case_ "x86_64 but no x86" fail "s/ 'x86' / /" "no native code for x86"
 case_ "x86 last" pass "s/ 'x86' 'x86_64'/ 'x86_64' 'x86'/"

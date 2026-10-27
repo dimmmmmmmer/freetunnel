@@ -282,14 +282,18 @@ public final class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         root = column(); root.setBackgroundColor(bg());
         // A TV may crop the edges of the picture (overscan), so content keeps clear of them.
+        // Set here as well as with the bars: before Android 15 the window is not edge to
+        // edge, the decor takes the insets, and this listener may never run. On the TV
+        // emulator (Android 14) it did not.
         int sides = isTv() ? dp(48) : 0;
         int ends = isTv() ? dp(27) : 0;
+        root.setPadding(sides, ends, sides, ends);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                root.setPadding(sides, bars.top + ends, sides, bars.bottom + ends);
+                view.setPadding(sides, bars.top + ends, sides, bars.bottom + ends);
             } else {
-                root.setPadding(sides, insets.getSystemWindowInsetTop() + ends, sides, insets.getSystemWindowInsetBottom() + ends);
+                view.setPadding(sides, insets.getSystemWindowInsetTop() + ends, sides, insets.getSystemWindowInsetBottom() + ends);
             }
             return insets;
         });
@@ -726,7 +730,10 @@ public final class MainActivity extends Activity {
         editor.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         // A dialog shown to a remote focuses its first control, here the check box that
         // shows the TOML and password, where the first OK would show them to the room.
-        if (!editor.getWindow().getDecorView().isInTouchMode()) name.requestFocus();
+        // Android gives a window its first focus only out of touch mode, and then to the
+        // view focused by default. Asking the dialog here whether it is in touch mode is
+        // too early: until its first frame it is not attached and answers for no window.
+        name.setFocusedByDefault(true);
         Button save = editor.getButton(AlertDialog.BUTTON_POSITIVE);
         // One check at a time. Only a phone greys Save out meanwhile: disabling the view
         // that has a remote's focus moves the focus to that check box as well.
