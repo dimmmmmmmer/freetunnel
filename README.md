@@ -350,3 +350,11 @@ limitations, and how to report a vulnerability privately.
 ## License
 
 [Apache-2.0](LICENSE)
+
+The downloads also contain software by others, under its own licenses: Qt
+(LGPL-3.0), the VPN core's libraries, Wintun on Windows and the bundled system
+libraries on Linux, among others. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+lists them with their license texts, which are in [licenses/](licenses/), and
+every download carries both. When a dependency changes, so must the notices; for
+the pinned ones, `scripts/check-third-party-notices.sh` fails until they name the
+new version.

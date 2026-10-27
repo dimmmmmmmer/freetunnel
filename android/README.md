@@ -348,6 +348,14 @@ remote-server, DNS or HTTP/3 coverage.
 FreeTunnel and TrustTunnel are Apache-2.0. See [LICENSE](../LICENSE) and
 [TrustTunnelClient v1.1.7](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.7).
 
+The APK also contains the libraries in the Android section of
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md), under their own
+licenses. `app/build.gradle` copies the notices, `LICENSE` and the texts under
+`licenses/common` and `licenses/android` into the APK's assets, Settings → About
+→ Open-source licenses shows them, and `scripts/check-apk-notices.sh` checks a
+built APK for them. A new or bumped dependency in `app/build.gradle`, or a new
+AAR, needs its entry there, or `scripts/check-third-party-notices.sh` fails.
+
 ### Failure handling and legacy rules
 
 With kill switch enabled, a fatal native disconnect or a failed start after TUN
