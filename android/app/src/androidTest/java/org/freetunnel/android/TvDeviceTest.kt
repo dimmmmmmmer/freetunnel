@@ -559,12 +559,12 @@ class TvDeviceTest {
         return "POST $path HTTP/1.1\r\nHost: $host\r\nContent-Type: application/x-www-form-urlencoded\r\n" +
             "Content-Length: ${body.length}\r\n\r\n$body"
     }
-    // The page's own form as Chrome sends it with a file chosen and nothing pasted:
-    // the empty text field, then the file field with its name, as the browser writes
-    // it, and its content.
-    private fun filePost(host: String, path: String, fileName: String, content: ByteArray): ByteArray {
+    // The page's own form as Chrome sends it, with a file chosen and nothing pasted
+    // unless text is given: the text field, then the file field with its name, as the
+    // browser writes it, and its content. With no file chosen, both are empty.
+    private fun filePost(host: String, path: String, fileName: String, content: ByteArray, text: String = ""): ByteArray {
         val boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-        val body = ("--$boundary\r\nContent-Disposition: form-data; name=\"link\"\r\n\r\n\r\n" +
+        val body = ("--$boundary\r\nContent-Disposition: form-data; name=\"link\"\r\n\r\n$text\r\n" +
             "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n" +
             "Content-Type: application/octet-stream\r\n\r\n").toByteArray() + content + "\r\n--$boundary--\r\n".toByteArray()
         return ("POST $path HTTP/1.1\r\nHost: $host\r\nContent-Type: multipart/form-data; boundary=$boundary\r\n" +
@@ -706,6 +706,40 @@ class TvDeviceTest {
         eventually("Add must save it") { saved().size == 3 }
         assertEquals("Home\\Office \"TV\"\u202E VPN.toml", saved().last().getString("name"))
         assertTrue(saved().last().getString("toml").contains("hostname = \"file.example.com\""))
+    }
+
+    // Both legs: a TOML file with no name of its own and no file's name to go by,
+    // pasted into the page or in a file whose name shows nothing, is named for where
+    // it came from.
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun aTomlFromAPhoneWithNoFileNameIsNamedForWhereItCameFrom() {
+        val a = open()
+        render(a, 1)
+        val named = context.getString(R.string.text_from_another_device)
+        for ((server, fileName) in listOf("pasted.example.com" to null, "nameless.example.com" to "\u202E\u200F")) {
+            onMain { method("receiveFromPhone").invoke(a) }
+            instrumentation.waitForIdleSync()
+            val opened = receiver(a)
+            assertNotNull("The emulator must have a private-network IPv4 address on Wi-Fi or Ethernet", opened)
+            val url = opened!!.url()
+            val toml = source.replace("vpn.invalid", server)
+            val sent = httpBytes(url) { h, path ->
+                if (fileName == null) filePost(h, path, "", ByteArray(0), text = toml) else filePost(h, path, fileName, toml.toByteArray())
+            }
+            assertTrue(sent, sent.startsWith("HTTP/1.1 200 ") && sent.contains(context.getString(R.string.receive_page_sent)))
+            eventually("The receiver must stop") { receiver(a) == null }
+            val from = context.getString(R.string.text_nsent_from_s, URI(url).host).trim()
+            fun confirmation() = windows().lastOrNull { window ->
+                window.findViewById<TextView>(android.R.id.message)?.text
+                    ?.let { it.contains(named) && it.contains(server) && it.contains(from) } == true
+            }
+            eventually("The confirmation must say \"$named\", $server and \"$from\"", 30_000) { onMain { confirmation() != null } }
+            val before = saved().size
+            onMain { confirmation()!!.findViewById<Button>(android.R.id.button1).performClick() }
+            eventually("Add must save it") { saved().size == before + 1 }
+            assertEquals(named, saved().last().getString("name"))
+            assertTrue(saved().last().getString("toml").contains("hostname = \"$server\""))
+        }
     }
 
     @SdkSuppress(minSdkVersion = 29)
