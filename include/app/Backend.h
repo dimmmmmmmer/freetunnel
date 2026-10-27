@@ -418,6 +418,7 @@ private:
     void forgetSubscription(const QString &path);
     bool keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
                                      freetunnel::ConfigToml *ct, QString *password) const;
+    void noteSubscriptionNotApplied(const QString &path, const QString &code);
     void logSubscription(const QString &path, const QString &line, const QString &detail);
     SubscriptionController *m_subscriptions = nullptr;
     QString m_configOpenInEditor;

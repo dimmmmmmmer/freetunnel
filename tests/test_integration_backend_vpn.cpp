@@ -1761,7 +1761,7 @@ void TestIntegrationBackendVpn::aDropWhileARefreshIsWrittenRebuildsTheTunnelOnce
     const QString key = freetunnel::CredentialStore::keyForConfigPath(path);
     bool dropped = false;
     freetunnel::CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
-        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != qApp->thread())
+        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != QCoreApplication::instance()->thread())
             return;
         env.server.reportState(QStringLiteral("Reconnecting"));
         dropped = QTest::qWaitFor([&]() { return backend.connecting(); }, 5000);
@@ -1812,7 +1812,7 @@ void TestIntegrationBackendVpn::aNewConnectAfterSuchADropNeedsNoRebuild()
     const QString key = freetunnel::CredentialStore::keyForConfigPath(path);
     bool dropped = false;
     freetunnel::CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
-        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != qApp->thread())
+        if (dropped || qstrcmp(call, "store") != 0 || k != key || QThread::currentThread() != QCoreApplication::instance()->thread())
             return;
         env.server.reportState(QStringLiteral("Reconnecting"));
         dropped = QTest::qWaitFor([&]() { return backend.connecting(); }, 5000);

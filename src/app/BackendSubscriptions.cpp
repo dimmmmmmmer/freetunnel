@@ -394,9 +394,7 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     if (!isUsableServer(next.config)) {
         const QString code =
                 freetunnel::subscriptionFetchCode(SubscriptionFetchError::Document, SubscriptionDocError::Invalid);
-        m_subscriptions->noteFailure(path, code, freetunnel::SubscriptionRefreshPolicy::Backoff);
-        logSubscription(path, tr("Subscription %1 did not update “%2”: %3"), code);
-        return;
+        return noteSubscriptionNotApplied(path, code);
     }
     // Nothing to write: the time of the fetch moves, and that is all.
     if (next.changes.isEmpty()) {
@@ -421,9 +419,7 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     if (!freetunnel::backend_config::saveConfigWithPassword(path, freetunnel::buildConfigToml(next.config).toUtf8(),
                                                             next.password, password, &saveErr)) {
         const QString code = QStringLiteral("not_saved");
-        m_subscriptions->noteFailure(path, code, freetunnel::SubscriptionRefreshPolicy::Backoff);
-        logSubscription(path, tr("Subscription %1 did not update “%2”: %3"), code);
-        return;
+        return noteSubscriptionNotApplied(path, code);
     }
     m_subscriptions->noteApplied(path, update, summary);
     logSubscription(path, tr("Subscription %1 updated “%2”: %3"), summary);
@@ -527,6 +523,13 @@ bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fi
     if (!storedPassword.isEmpty())
         *password = storedPassword;
     return true;
+}
+
+// A fetched document that could not be applied: tried again with backoff.
+void Backend::noteSubscriptionNotApplied(const QString &path, const QString &code)
+{
+    m_subscriptions->noteFailure(path, code, freetunnel::SubscriptionRefreshPolicy::Backoff);
+    logSubscription(path, tr("Subscription %1 did not update “%2”: %3"), code);
 }
 
 // One line in the log: `line` names the subscription by its origin (%1), never

@@ -1262,7 +1262,7 @@ void TestBackendSubscription::anUpdateHeldForAConnectThatEndsBeforeTheHelperIsAp
     const auto gate = std::make_shared<QSemaphore>();
     const auto gated = std::make_shared<std::atomic<bool>>(false);
     CredentialStore::setCallHookForTest([gate, gated, key](const char *call, const QString &k) {
-        if (QThread::currentThread() != qApp->thread() && qstrcmp(call, "load") == 0 && k == key
+        if (QThread::currentThread() != QCoreApplication::instance()->thread() && qstrcmp(call, "load") == 0 && k == key
                 && !gated->exchange(true))
             gate->tryAcquire(1, 10000);
     });
@@ -1297,7 +1297,7 @@ void TestBackendSubscription::aConfigUnlinkedWhileItsPasswordIsReadIsNotWritten(
     Backend *backend = rig.backend.get();
     bool detached = false;
     CredentialStore::setCallHookForTest([&](const char *call, const QString &k) {
-        if (!detached && qstrcmp(call, "load") == 0 && k == key && QThread::currentThread() == qApp->thread())
+        if (!detached && qstrcmp(call, "load") == 0 && k == key && QThread::currentThread() == QCoreApplication::instance()->thread())
             detached = backend->detachSubscription(path);
     });
     const auto unhook = qScopeGuard([]() { CredentialStore::setCallHookForTest({}); });
