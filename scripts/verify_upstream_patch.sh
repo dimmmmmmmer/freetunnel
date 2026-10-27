@@ -95,13 +95,27 @@ grep -q 'vpn_update_exclusions(vpn, mode,' \
 # and the core maps it to the recovery loop, so a first connect that fails keeps
 # the session (and the block) while the core retries. The patches do not
 # provide that, so assert the upstream contract FreeTunnel now relies on: the
-# option exists, and connect_to_server turns it into the policy. A policy set
-# on the wrong struct would still mention the constant, so the second check
-# names the field.
+# option exists, and connect_to_server turns it into the policy. The mapping
+# spans several lines (.retry_info = { .policy = options... ? ... }), so the
+# second check reads the function's text rather than one line of it, and names
+# the destination: a policy set on some other struct would still mention the
+# constant, and only .retry_info.policy reaches the core's retry decision.
 grep -qF 'bool fall_into_recovery' \
   "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
-grep -qF 'options.fall_into_recovery ? VPN_CRP_FALL_INTO_RECOVERY' \
-  "$TMP/upstream/trusttunnel/src/client.cpp"
+python3 - "$TMP/upstream/trusttunnel/src/client.cpp" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+start = text.find("TrustTunnelClient::connect_to_server(")
+body = text[start:text.find("\n}\n", start)] if start >= 0 else ""
+if not re.search(r"\.retry_info\s*=\s*\{[^{}]*?\.policy\s*=\s*"
+                 r"options\.fall_into_recovery\s*\?\s*VPN_CRP_FALL_INTO_RECOVERY\b", body):
+    print("error: connect_to_server no longer maps options.fall_into_recovery onto "
+          "retry_info.policy; FreeTunnel's kill switch relies on it", file=sys.stderr)
+    sys.exit(1)
+PY
 
 # The elevated helper hands the core every key of the config the GUI sends,
 # except the few that would point root at a file, an interface or a hole in the
@@ -207,7 +221,10 @@ problems="$(LC_ALL=C awk -v checked="${CHECKED_CONFIG_KEYS//$'\n'/ }" '
     return "\"" key "\" on " obj " in " fn "(), which this scan cannot place in a table"
   }
   function read_at(path) {
-    if (path in listed) seen[path] = 1
+    # A read in the CLI-only export still has to be a listed key, so a key added
+    # there is flagged, but it does not count as seen: it does not prove that
+    # build_config / build_endpoint, the parser the helper runs, still reads it.
+    if (path in listed) { if (fn != "build_deeplink_export_table") seen[path] = 1 }
     else printf "%s:%d: %s\n", FILENAME, FNR, path
   }
 ' "${TOML_SOURCES[@]}")"
