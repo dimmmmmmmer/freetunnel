@@ -46,8 +46,9 @@ compare link at the bottom of its release notes.
     without a key loses the key it had.
   - A share link or export of such a config carries the key, as a link without
     it could not connect. That link is the newer format (version 2), which
-    FreeTunnel 1.2.3 and earlier cannot read; a config without a key still makes
-    the older kind.
+    FreeTunnel 1.2.3 and earlier, and TrustTunnel's own clients up to 1.1.11,
+    cannot read. FreeTunnel for Android reads it but cannot use such a server
+    yet. A config without a key still makes the older kind.
   - A key that is not whole bytes of hex is refused, as TrustTunnel would
     connect without it and the server would turn the connection away.
   - While a key is set, the client random is not used. The editor says so.
