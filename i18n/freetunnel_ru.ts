@@ -437,16 +437,20 @@
         <source>That import has expired. Start it again.</source>
         <translation>Время на этот импорт истекло. Начните его заново.</translation>
     </message>
+    <message>
+        <source>The auth key must be hexadecimal in whole bytes (an even number of digits)</source>
+        <translation>Ключ авторизации должен быть в hex-формате целыми байтами (чётное число цифр)</translation>
+    </message>
+    <message>
+        <source>Could not store the auth key in the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
+        <translation>Не удалось сохранить ключ авторизации в системном хранилище учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
     <message>
         <source>Subscription links aren&apos;t supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive.</source>
         <translation>Ссылки-подписки пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки.</translation>
-    </message>
-    <message>
-        <source>This server needs a newer TrustTunnel core than this version of FreeTunnel uses.</source>
-        <translation>Этому серверу нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel.</translation>
     </message>
     <message>
         <source>Subscriptions aren&apos;t supported yet: this server won&apos;t update itself, and its subscription address isn&apos;t saved.</source>
@@ -648,6 +652,18 @@
     <message>
         <source>Default</source>
         <translation>По умолчанию</translation>
+    </message>
+    <message>
+        <source>Auth key (hex)</source>
+        <translation>Ключ авторизации (hex)</translation>
+    </message>
+    <message>
+        <source>Client random is not used while an auth key is set</source>
+        <translation>Пока задан ключ авторизации, client random не используется</translation>
+    </message>
+    <message>
+        <source>Kept in the system&apos;s credential store, like the password</source>
+        <translation>Хранится в системном хранилище учётных данных, как и пароль</translation>
     </message>
 </context>
 <context>
@@ -1178,10 +1194,6 @@
     <message>
         <source>Update FreeTunnel to read this subscription</source>
         <translation>Обновите FreeTunnel, чтобы прочитать эту подписку</translation>
-    </message>
-    <message>
-        <source>This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses</source>
-        <translation>Этой подписке нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel</translation>
     </message>
 </context>
 <context>

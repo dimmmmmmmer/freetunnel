@@ -21,13 +21,6 @@ QString subscriptionOnlyRefusal()
                                        "a regular link, or update FreeTunnel when subscriptions arrive.");
 }
 
-QString newerCoreRefusal()
-{
-    return QCoreApplication::translate("ConfigImport",
-                                       "This server needs a newer TrustTunnel core than this version of "
-                                       "FreeTunnel uses.");
-}
-
 QString subscriptionNotKeptNote()
 {
     return QCoreApplication::translate("ConfigImport",
@@ -69,11 +62,6 @@ std::optional<PreparedImport> prepareServer(DeepLinkConfig cfg, bool subscriptio
                                             const KeptCertificates &certificates, QString *error,
                                             LinkRefusal *refusal)
 {
-    // A server that checks the auth key turns this core away at the TLS
-    // handshake, and with nothing in the app to say why. First, because it is
-    // the last word: a subscription would hand out the same server.
-    if (!cfg.clientRandomAuthKey.isEmpty())
-        return refuse(LinkRefusal::NeedsNewerCore, newerCoreRefusal(), error, refusal);
     // A link that is only a subscription address names no server until the
     // subscription is fetched, and fetching one is later work. One that carries
     // its server as well imports that server, without the address (below).
@@ -101,8 +89,9 @@ std::optional<PreparedImport> prepareServer(DeepLinkConfig cfg, bool subscriptio
         out.unclippedFileName = whole;
     if (!name.isEmpty())
         out.legacyFileName = legacyConfigBaseName(name) + QStringLiteral(".toml");
-    // deepLinkConfigToToml() writes neither of the version 2 fields, so the
-    // address, and the password in it, go no further than this.
+    // deepLinkConfigToToml() does not write the subscription address, so it, and
+    // the password in it, go no further than this. The auth key is written, for
+    // the import to move to the credential store with the password.
     out.tomlContent = deepLinkConfigToToml(cfg);
     out.skipVerification = cfg.skipVerification;
     out.subscriptionNotKept = subscription;
@@ -168,7 +157,8 @@ std::optional<PreparedImport> prepareDeepLinkImport(const QString &link, QString
 }
 
 // Damage first, as a link's parser refuses it before the rules that follow:
-// a server the file does not name, then a client random the core cannot use.
+// a server the file does not name, then a client random or an auth key the core
+// cannot use.
 std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, const QString &fallbackName,
                                                           QString *error, LinkRefusal *refusal)
 {
@@ -183,6 +173,12 @@ std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, c
     if (!isValidClientRandom(clientRandomForCore(cfg.clientRandomPrefix)))
         return refuse(LinkRefusal::Damaged,
                       QCoreApplication::translate("DeepLink", "malformed client_random value"), error, refusal);
+    // As a link's tag 0x0F is: whole bytes of hex, or a key the core would do
+    // without. The endpoint writes "" for none, which is no key.
+    if (!isValidClientRandomAuthKey(cfg.clientRandomAuthKey))
+        return refuse(LinkRefusal::Damaged,
+                      QCoreApplication::translate("DeepLink", "malformed client_random_auth_key value"), error,
+                      refusal);
     KeptCertificates certificates;
     certificates.given = !exported->config.certificate.trimmed().isEmpty();
     certificates.der = certificatesDer(exported->config.certificate, &certificates.dropped);
@@ -190,8 +186,8 @@ std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, c
     if (!out)
         return out;
     out->fromFile = true;
-    // Version 1, with the name (0x0C) and the certificates alone, and never the
-    // subscription address or an auth key (see encodeDeepLink).
+    // Version 1, or 2 with an auth key (0x0F), with the name (0x0C) and the
+    // certificates alone, and never the subscription address (see encodeDeepLink).
     cfg.certificate = certificates.der;
     out->link = encodeDeepLink(cfg);
     return out;
@@ -200,11 +196,12 @@ std::optional<PreparedImport> prepareEndpointExportImport(const QString &toml, c
 // The server is a config's, as an export's is, so it is read as an export's:
 // named after the document, or after its hostname when it gives no name.
 std::optional<PreparedImport> prepareSubscriptionImport(const ConfigToml &server, const QString &password,
-                                                        QString *error)
+                                                        const QString &authKey, QString *error)
 {
     EndpointExport asExport;
     asExport.config = server;
     asExport.config.password = password;
+    asExport.clientRandomAuthKey = authKey.trimmed();
     asExport.name = server.name.trimmed();
     KeptCertificates certificates;
     certificates.given = !server.certificate.trimmed().isEmpty();

@@ -1302,7 +1302,6 @@ void TestSubscriptionFetcher::everyOutcomeHasACodeAPolicyAndWords()
             {D::TooLarge, P::Backoff},
             {D::UnsupportedVersion, P::ManualOnly},
             {D::SkipVerification, P::ManualOnly},
-            {D::NeedsNewerCore, P::ManualOnly},
     };
     QSet<QString> codes;
     for (const auto &[error, policy] : fetchOutcomes) {

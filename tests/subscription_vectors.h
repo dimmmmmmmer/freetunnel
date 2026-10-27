@@ -66,8 +66,8 @@ inline QByteArray selfSignedWithKey()
     return out;
 }
 
-// kMinimal with an auth key, which no version of the format has yet; the deep
-// link's 0x0F is where endpoint 1.3.0-beta.2 sends one.
+// kMinimal with an auth key, the key the deep link's 0x0F carries as well (endpoint
+// 1.3.0-beta.2). The document field is read as the link's tag is: whole bytes of hex.
 inline const QByteArray kAuthKey(
         R"({"version":1,"hostname":"vpn.example.com","address":"1.2.3.4:443","username":"alice",)"
         R"("password":"s3cret","has_ipv6":true,"upstream_protocol":"http2","anti_dpi":false,)"

@@ -24,6 +24,7 @@ struct EditSnapshot {
     QString oldPath;
     QString content;
     QString password;
+    QString authKey; // the config's client random auth key, as the store holds it
     QString profile;
     bool active = false;
 };
@@ -40,6 +41,8 @@ EditSnapshot snapshotForEdit(int editIndex, const QStringList &paths, const AppS
         snap.content = QString::fromUtf8(of.readAll());
     snap.password = freetunnel::CredentialStore::loadPassword(
             freetunnel::CredentialStore::keyForConfigPath(snap.oldPath));
+    snap.authKey = freetunnel::CredentialStore::loadPassword(
+            freetunnel::CredentialStore::keyForConfigAuthKey(snap.oldPath));
     snap.profile = settings.config_profiles.value(snap.oldPath);
     if (snap.profile.isEmpty() || !settings.profiles.contains(snap.profile))
         snap.profile = QStringLiteral("Default");
@@ -68,6 +71,7 @@ void assignSplitProfile(AppSettings &settings, const QString &oldPath, const QSt
 struct ParsedCreateConfig {
     freetunnel::ConfigToml ct;
     QString password;
+    QString authKey; // the form's, trimmed; not in ct, which is what goes to disk
     QString safeName;
     // What was pasted as the certificate had something else in it, which is not
     // saved (see keepOnlyTheCertificates).
@@ -87,6 +91,13 @@ bool validateCreateOptionalFields(const freetunnel::ConfigToml &ct, QString *err
     if (!freetunnel::isValidClientRandom(ct.clientRandom.trimmed())) {
         if (err)
             *err = QStringLiteral("bad_client_random");
+        return false;
+    }
+    // The same for the auth key: the core quietly connects without a key it cannot
+    // decode, and a server that checks one then turns the client away.
+    if (!freetunnel::isValidClientRandomAuthKey(ct.clientRandomAuthKey)) {
+        if (err)
+            *err = QStringLiteral("bad_auth_key");
         return false;
     }
     return true;
@@ -122,6 +133,7 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.dns = f.value(QStringLiteral("dns")).toString();
     out->ct.customSni = f.value(QStringLiteral("customSni")).toString();
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
+    out->ct.clientRandomAuthKey = f.value(QStringLiteral("authKey")).toString().trimmed();
 }
 
 // Only the certificates of what was pasted into the certificate field. A file
@@ -164,11 +176,12 @@ void keepWhatTheFormDoesNotShow(const QString &existingToml, freetunnel::ConfigT
     ct->postQuantum = existing.postQuantum;
 }
 
-// A renamed config's password moves with it: stored under the new path by the
-// save, and dropped from the old one here. A rename that only changed the letter
-// case gives two keys the Windows credential store takes for one, so deleting the
-// old took the new with it; it is put back.
-void forgetOldPassword(const QString &oldPath, const QString &target, const QString &password)
+// A renamed config's password and auth key move with it: stored under the new
+// path by the save, and dropped from the old one here. A rename that only changed
+// the letter case gives two keys the Windows credential store takes for one, so
+// deleting the old took the new with it; it is put back.
+void forgetOldPassword(const QString &oldPath, const QString &target, const QString &password,
+                       const QString &authKey, const QString &previousAuthKey)
 {
     using freetunnel::CredentialStore;
     const QString oldKey = CredentialStore::keyForConfigPath(oldPath);
@@ -176,6 +189,14 @@ void forgetOldPassword(const QString &oldPath, const QString &target, const QStr
     CredentialStore::deletePassword(oldKey);
     if (oldKey.compare(newKey, Qt::CaseInsensitive) == 0 && !password.isEmpty())
         CredentialStore::storePassword(newKey, password);
+    // A config that had no key has no entry to drop.
+    if (previousAuthKey.isEmpty())
+        return;
+    const QString oldAuthKey = CredentialStore::keyForConfigAuthKey(oldPath);
+    const QString newAuthKey = CredentialStore::keyForConfigAuthKey(target);
+    CredentialStore::deletePassword(oldAuthKey);
+    if (oldAuthKey.compare(newAuthKey, Qt::CaseInsensitive) == 0 && !authKey.isEmpty())
+        CredentialStore::storePassword(newAuthKey, authKey);
 }
 
 // What the credential store holds for the file a save is about to write: the
@@ -184,6 +205,12 @@ void forgetOldPassword(const QString &oldPath, const QString &target, const QStr
 QString passwordStoredFor(const QString &target, const EditSnapshot &edit)
 {
     return freetunnel::namesTheSameFile(edit.oldPath, target) ? edit.password : QString();
+}
+
+// And the same for the auth key.
+QString authKeyStoredFor(const QString &target, const EditSnapshot &edit)
+{
+    return freetunnel::namesTheSameFile(edit.oldPath, target) ? edit.authKey : QString();
 }
 
 // Whether a config file is the app's own copy, in its config directory.
@@ -207,6 +234,8 @@ bool finalizeParsedCreateConfig(const QVariantMap &f, ParsedCreateConfig *out)
     const QString name = f.value(QStringLiteral("name")).toString().trimmed();
     out->password = out->ct.password;
     out->ct.password.clear();
+    out->authKey = out->ct.clientRandomAuthKey;
+    out->ct.clientRandomAuthKey.clear();
     out->safeName = freetunnel::sanitizeConfigBaseName(
             name.isEmpty() ? freetunnel::clippedConfigName(out->ct.hostname) : name,
             QStringLiteral("config"));
@@ -246,6 +275,8 @@ void Backend::emitCreateConfigError(const QString &parseErr)
     else if (parseErr == QLatin1String("bad_client_random"))
         emit errorOccurred(tr("Client random must be hexadecimal in whole bytes (an even number of "
                               "digits, at most 64), optionally followed by /mask"));
+    else if (parseErr == QLatin1String("bad_auth_key"))
+        emit errorOccurred(tr("The auth key must be hexadecimal in whole bytes (an even number of digits)"));
     else if (parseErr == QLatin1String("bad_certificate"))
         emit errorOccurred(tr("The certificate must be in PEM format, as one or more BEGIN CERTIFICATE "
                               "blocks"));
@@ -302,33 +333,40 @@ bool Backend::createConfig(const QVariantMap &f)
     }
     keepWhatTheFormDoesNotShow(edit.content, &parsed.ct);
     // The certificate kept is the file's, which the form's trimming said nothing about.
-    if (keepSubscriptionOwnedFields(oldPath, edit.content, edit.password, &parsed.ct, &parsed.password))
+    if (keepSubscriptionOwnedFields(oldPath, edit.content, edit.password, edit.authKey, &parsed.ct,
+                                    &parsed.password, &parsed.authKey))
         parsed.certificateTrimmed = false;
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
     QString saveErr;
-    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(), parsed.password,
-                                                            passwordStoredFor(target, edit), &saveErr)) {
+    if (!freetunnel::backend_config::saveConfigWithPassword(
+                target, tomlBody.toUtf8(), parsed.password, passwordStoredFor(target, edit), parsed.authKey,
+                authKeyStoredFor(target, edit), &saveErr)) {
         if (saveErr == QLatin1String("password")) {
             reportPasswordNotStored();
+        } else if (saveErr == QLatin1String("authkey")) {
+            recheckCredentialStorage();
+            emit errorOccurred(freetunnel::backend_config::authKeyNotStoredMessage());
         } else {
             emit errorOccurred(tr("Could not write config"));
         }
         return false;
     }
     if (!oldPath.isEmpty() && oldPath != target)
-        forgetOldPassword(oldPath, target, parsed.password);
+        forgetOldPassword(oldPath, target, parsed.password, parsed.authKey, edit.authKey);
 
     CreatedConfigFinalize ctx;
     ctx.form = f;
     ctx.oldPath = oldPath;
     ctx.target = target;
     ctx.password = parsed.password;
+    ctx.authKey = parsed.authKey;
     ctx.tomlBody = tomlBody;
     ctx.editContent = edit.content;
     ctx.editPassword = edit.password;
+    ctx.editAuthKey = edit.authKey;
     ctx.editProfile = edit.profile;
     ctx.editingSnapshot = edit.active;
     ctx.editIndex = editIndex;
@@ -388,7 +426,7 @@ void Backend::maybeReapplyCreatedConfig(const CreatedConfigFinalize &ctx)
     const bool editing = ctx.editIndex >= 0;
     const bool noChange = ctx.editingSnapshot && ctx.oldPath == ctx.target
             && ctx.tomlBody == ctx.editContent && ctx.password == ctx.editPassword
-            && newProfile == ctx.editProfile;
+            && ctx.authKey == ctx.editAuthKey && newProfile == ctx.editProfile;
     if (m_activePath != ctx.target)
         return;
     if (editing) {

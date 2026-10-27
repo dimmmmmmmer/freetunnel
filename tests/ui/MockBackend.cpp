@@ -241,6 +241,7 @@ QVariantMap MockBackend::configFields(int index) const
     f[QStringLiteral("addresses")] = QStringLiteral("1.2.3.4:443");
     f[QStringLiteral("username")] = QStringLiteral("user");
     f[QStringLiteral("password")] = QStringLiteral("pass");
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
     f[QStringLiteral("protocol")] = QStringLiteral("http2");
     f[QStringLiteral("allowIpv6")] = true;
     f[QStringLiteral("splitProfile")] = QStringLiteral("Default");

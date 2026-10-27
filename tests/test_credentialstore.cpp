@@ -20,6 +20,7 @@ private slots:
     void init();
     void storeLoadDelete();
     void migrateStripsPassword();
+    void migrateMovesTheAuthKeyToo();
     void keepsTheEventLoopRunningWhileItWaits();
     void worksOffTheMainThread();
     void reentryDoesNotStackEventLoops();
@@ -83,6 +84,66 @@ void TestCredentialStore::migrateStripsPassword()
     // service) and the file is ours.
     CredentialStore::deletePassword(CredentialStore::keyForConfigPath(path));
     rf.close();
+    QFile::remove(path);
+}
+
+// The second secret of a config, the client random auth key (TrustTunnel 1.3),
+// leaves the file as the password does, into an entry of its own, and goes back
+// into the text the core is given. The file is rewritten once, with neither.
+void TestCredentialStore::migrateMovesTheAuthKeyToo()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    const QString path = QDir(base).filePath(
+            QStringLiteral("migrate-key-%1.toml").arg(QCoreApplication::applicationPid()));
+    QFile::remove(path);
+    ConfigToml c;
+    c.hostname = "h.example";
+    c.addresses = "1.2.3.4:443";
+    c.username = "u";
+    c.password = "pw";
+    c.clientRandomAuthKey = "aabbccdd";
+    QFile tf(path);
+    QVERIFY(tf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    tf.write(buildConfigToml(c).toUtf8());
+    tf.close();
+
+    // The entries are the config's own, and not each other's.
+    const QString passwordEntry = CredentialStore::keyForConfigPath(path);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(passwordEntry != keyEntry);
+    QVERIFY(keyEntry.endsWith(passwordEntry));
+    QVERIFY(!QFileInfo(keyEntry).isAbsolute()); // never another config's own entry
+
+    QVERIFY(migrateConfigPassword(path));
+
+    QFile rf(path);
+    QVERIFY(rf.open(QIODevice::ReadOnly));
+    const QString onDisk = QString::fromUtf8(rf.readAll());
+    rf.close();
+    QVERIFY2(!onDisk.contains(QStringLiteral("aabbccdd")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("auth_key")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("pw")), qPrintable(onDisk));
+    QCOMPARE(CredentialStore::loadPassword(passwordEntry), QStringLiteral("pw"));
+    QCOMPARE(CredentialStore::loadPassword(keyEntry), QStringLiteral("aabbccdd"));
+
+    // And back, for the core, in memory.
+    const ConfigToml connect = parseConfigToml(buildConnectConfigToml(path));
+    QCOMPARE(connect.password, QStringLiteral("pw"));
+    QCOMPARE(connect.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+
+    // A key alone migrates too, when the password is already stored.
+    ConfigToml keyOnly = parseConfigToml(onDisk);
+    keyOnly.clientRandomAuthKey = QStringLiteral("11223344");
+    QVERIFY(tf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    tf.write(buildConfigToml(keyOnly).toUtf8());
+    tf.close();
+    QVERIFY(migrateConfigPassword(path));
+    QCOMPARE(CredentialStore::loadPassword(passwordEntry), QStringLiteral("pw"));
+    QCOMPARE(CredentialStore::loadPassword(keyEntry), QStringLiteral("11223344"));
+
+    CredentialStore::deletePassword(passwordEntry);
+    CredentialStore::deletePassword(keyEntry);
     QFile::remove(path);
 }
 

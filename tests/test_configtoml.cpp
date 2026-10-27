@@ -49,6 +49,8 @@ private slots:
     void aConfigWithoutASubscriptionComesBackAsItWas();
     void aRewriteNeverPutsASubscriptionBack();
     void theAuthKeyIsReadFromTheEndpoint();
+    void theAuthKeyIsAFieldOfTheConfig();
+    void anAuthKeyIsValidWhenItIsWholeBytesOfHex();
 
     // A certificate keeps only its certificates.
     void derElementEndReadsOneElementOfTheTagAsked();
@@ -989,9 +991,9 @@ void TestConfigToml::aRewriteNeverPutsASubscriptionBack()
     QVERIFY2(rebuilt.contains(QStringLiteral("provider_tag = \"gold\"")), qPrintable(rebuilt));
     QVERIFY2(rebuilt.contains(QStringLiteral("[provider]\nport = 1080")), qPrintable(rebuilt));
     QVERIFY2(rebuilt.contains(QStringLiteral("mtu_size = 1280")), qPrintable(rebuilt));
-    // The empty auth key the export writes is a key this editor does not know,
-    // and is carried over as written, as such keys always were.
-    QVERIFY2(rebuilt.contains(QStringLiteral("client_random_auth_key = \"\"\n")), qPrintable(rebuilt));
+    // The empty auth key the export writes is no key: a field of the config now,
+    // and written only when there is one.
+    QVERIFY2(!rebuilt.contains(QStringLiteral("client_random_auth_key")), qPrintable(rebuilt));
     QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
 }
 
@@ -1010,6 +1012,54 @@ void TestConfigToml::theAuthKeyIsReadFromTheEndpoint()
     QVERIFY(endpointClientRandomAuthKey(QStringLiteral("[provider]\nclient_random_auth_key = \"aabb\"\n"
                                                        "[endpoint]\nhostname = \"h\"\n"))
                     .isEmpty());
+}
+
+// A field of the config, like the password: read in every spelling, written back
+// only when there is one, and not kept as an unknown key besides.
+void TestConfigToml::theAuthKeyIsAFieldOfTheConfig()
+{
+    const QString text = QStringLiteral(
+            "[endpoint]\nhostname = \"h\"\naddresses = [\"1.2.3.4:443\"]\nusername = \"u\"\n"
+            "'client_random_auth_key' = \" aabbccdd \" # the key\nprovider_tag = \"gold\"\n");
+    ConfigToml c = parseConfigToml(text);
+    QCOMPARE(c.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QVERIFY2(!c.extraEndpointKeys.contains(QStringLiteral("auth_key")), qPrintable(c.extraEndpointKeys));
+    QVERIFY(c.extraEndpointKeys.contains(QStringLiteral("provider_tag")));
+
+    // Written once, as the core reads it, with the other keys of the same table.
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("client_random_auth_key")), 1);
+    QVERIFY2(rebuilt.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(rebuilt));
+    QCOMPARE(parseConfigToml(rebuilt).clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+    // And it is in [endpoint], before the tables after it.
+    QVERIFY(rebuilt.indexOf(QStringLiteral("client_random_auth_key")) > rebuilt.indexOf(QStringLiteral("[endpoint]")));
+    QVERIFY(rebuilt.indexOf(QStringLiteral("client_random_auth_key")) < rebuilt.indexOf(QStringLiteral("[listener.tun]")));
+
+    // None, or an empty one, writes nothing: the line is the key's, not the config's.
+    c.clientRandomAuthKey.clear();
+    QVERIFY2(!buildConfigToml(c).contains(QStringLiteral("auth_key")), qPrintable(buildConfigToml(c)));
+    QVERIFY(parseConfigToml(QStringLiteral("[endpoint]\nclient_random_auth_key = \"\"\n")).clientRandomAuthKey.isEmpty());
+
+    // At the root it means nothing to the core, and is not read as the endpoint's.
+    QVERIFY(parseConfigToml(QStringLiteral("client_random_auth_key = \"aabb\"\n[endpoint]\nhostname = \"h\"\n"))
+                    .clientRandomAuthKey.isEmpty());
+}
+
+// What the core can use: whole bytes of hex, upper or lower case. It decodes the
+// text itself and drops what it cannot, silently, so nothing else is let through.
+// A trailing newline is not hex either, though a regular expression's $ would
+// let it.
+void TestConfigToml::anAuthKeyIsValidWhenItIsWholeBytesOfHex()
+{
+    for (const QString &ok : {QString(), QStringLiteral("aa"), QStringLiteral("09afAF"),
+                              QStringLiteral("00112233445566778899aabbccddeeff"), QString(128, QLatin1Char('a'))})
+        QVERIFY2(isValidClientRandomAuthKey(ok), qPrintable(ok));
+    for (const QString &bad : {QStringLiteral("a"), QStringLiteral("abc"), QStringLiteral("zz"), QStringLiteral("aa bb"),
+                               QStringLiteral(" aabb"), QStringLiteral("aabb "), QStringLiteral("aabb\n"),
+                               QStringLiteral("aa/bb"), QStringLiteral("0x1234"), QStringLiteral("g0"),
+                               QStringLiteral("\u0661\u0662")}) // Arabic-Indic digits
+        QVERIFY2(!isValidClientRandomAuthKey(bad), qPrintable(bad));
 }
 
 // ---- certificates -------------------------------------------------------------

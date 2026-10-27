@@ -112,6 +112,7 @@ private slots:
     void escapeStandsDownForTheEditorsFileDialog();
     void aRefusedCertificateFileKeepsTheField();
     void anUnchangedEditClosesWithoutSaving();
+    void theEditorHasAMaskedAuthKeyFieldThatSavesWithTheForm();
     void pasteImportsOnlyWhileTheConfigsPageIsInFront();
     void tabMovesThroughTheEditorsFields();
     void aToastStaysOffTheEditorsButtons();
@@ -3794,6 +3795,57 @@ void TestQmlUi::anUnchangedEditClosesWithoutSaving()
     // And a new config is always taken to the backend, which says what is missing.
     saveAfter(-1, QString());
     QCOMPARE(m_backend.createConfigCalls, saves + 2);
+}
+
+// The client random auth key (TrustTunnel 1.3) is a secret like the password, so
+// the field masks it, says where it is kept, and warns that the client random
+// beside it is not used while it is set (the core takes the key first). It is
+// opened with the config's key and saved with the form.
+void TestQmlUi::theEditorHasAMaskedAuthKeyFieldThatSavesWithTheForm()
+{
+    const auto restore = qScopeGuard([this] {
+        m_shell.setEditIndex(-1);
+        m_shell.setOverlay(QString());
+    });
+    m_shell.setEditIndex(0);
+    m_shell.setOverlay(QStringLiteral("create"));
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QQuickItem *page = showInWindow(root, window, 400, 900);
+    QVERIFY(page);
+
+    QObject *field = namedIn(page, QStringLiteral("authKeyField"));
+    QVERIFY2(field, "the editor has no auth key field");
+    QObject *input = field->property("input").value<QObject *>();
+    QVERIFY(input);
+    QCOMPARE(input->property("text").toString(), QStringLiteral("aabbccdd")); // the config's own
+    QCOMPARE(input->property("echoMode").toInt(), 2); // TextInput.Password: masked like the password
+    QVERIFY(textIn(page, QStringLiteral("Auth key (hex)")));
+
+    // Where it is kept, until it is set beside a client random.
+    const QString kept = QStringLiteral("Kept in the system's credential store, like the password");
+    const QString unused = QStringLiteral("Client random is not used while an auth key is set");
+    evaluateIn(root, QStringLiteral("fRandom.text = ''"));
+    QVERIFY(textIn(page, kept));
+    QVERIFY(!textIn(page, unused));
+    evaluateIn(root, QStringLiteral("fRandom.text = 'aabb'"));
+    QVERIFY(textIn(page, unused));
+    QVERIFY(!textIn(page, kept));
+    evaluateIn(root, QStringLiteral("fAuthKey.text = ''"));
+    QVERIFY(textIn(page, kept));
+    QVERIFY(!textIn(page, unused));
+
+    // And the form sends it: changed, so that Save has something to save.
+    evaluateIn(root, QStringLiteral("fAuthKey.text = '11223344'"));
+    evaluateIn(root, QStringLiteral("formFlick.contentY = Math.max(0, formFlick.contentHeight - formFlick.height)"));
+    QQuickItem *save = namedIn(page, QStringLiteral("saveButton"));
+    QVERIFY(save);
+    const int saves = m_backend.createConfigCalls;
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(save));
+    QCOMPARE(m_backend.createConfigCalls, saves + 1);
+    QCOMPARE(m_backend.lastCreateConfig.value(QStringLiteral("authKey")).toString(), QStringLiteral("11223344"));
+    delete root;
 }
 
 // The first open of the picker scanned on the UI thread, and on Windows the

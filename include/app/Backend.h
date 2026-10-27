@@ -375,9 +375,11 @@ private:
         QString oldPath;
         QString target;
         QString password;
+        QString authKey;
         QString tomlBody;
         QString editContent;
         QString editPassword;
+        QString editAuthKey;
         QString editProfile;
         bool editingSnapshot = false;
         int editIndex = -1;
@@ -417,7 +419,8 @@ private:
     void flushHeldSubscriptionUpdates();
     void forgetSubscription(const QString &path);
     bool keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
-                                     freetunnel::ConfigToml *ct, QString *password) const;
+                                     const QString &storedAuthKey, freetunnel::ConfigToml *ct, QString *password,
+                                     QString *authKey) const;
     void noteSubscriptionNotApplied(const QString &path, const QString &code);
     void logSubscription(const QString &path, const QString &line, const QString &detail);
     SubscriptionController *m_subscriptions = nullptr;

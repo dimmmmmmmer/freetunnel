@@ -20,10 +20,16 @@ namespace freetunnel {
 inline constexpr int kDeepLinkMaxVersion = 2;
 
 // The version this client writes on its own links. Not the maximum: version 2
-// only adds tags these links never carry, and FreeTunnel 1.2.3 and earlier and
-// TrustTunnel's clients up to 1.1.11 refuse a version 2 link outright, so writing
-// it would only stop them reading a link they understand in full.
+// only adds tags (0x0E, 0x0F), and FreeTunnel 1.2.3 and earlier and TrustTunnel's
+// clients up to 1.1.11 refuse a version 2 link outright, so writing it on a link
+// that does not need it would only stop them reading a link they understand in
+// full.
 inline constexpr int kDeepLinkWriteVersion = 1;
+
+// The version of a link that carries a client random auth key (tag 0x0F). The
+// server such a link names cannot be connected to without the key, so a client
+// that refuses version 2 loses nothing by refusing the link.
+inline constexpr int kDeepLinkAuthKeyWriteVersion = 2;
 
 // The longest subscription address (tag 0x0E) a link may carry, in bytes. An
 // address that long is already far past any real one.
@@ -47,9 +53,10 @@ struct DeepLinkConfig {
     QString clientRandomPrefix;                        // 0x0B "prefix[/mask]" (hex)
     QString name;                                      // 0x0C display name
     QStringList dnsUpstreams;                          // 0x0D
-    // Version 2. Neither is written anywhere: not by encodeDeepLink(), not by
-    // deepLinkConfigToToml(). The subscription address holds the VPN password in
-    // plain text, and the core this app runs cannot use the auth key.
+    // Version 2. The subscription address is written nowhere: not by
+    // encodeDeepLink(), not by deepLinkConfigToToml(). It holds the VPN password
+    // in plain text. The auth key is written by both: it is what the core derives
+    // the TLS client random from, and the server turns a client away without it.
     QString subscriptionUrl;                           // 0x0E https:// address
     QString clientRandomAuthKey;                       // 0x0F hex; empty = none
 };
@@ -75,13 +82,15 @@ bool deepLinkHasStaticServer(const DeepLinkConfig &cfg);
 QByteArray deepLinkCertificates(const QByteArray &der, bool *dropped = nullptr);
 
 // Encode a config back into a `tt://?...` deep link (for QR export / round-trip).
-// It is always version kDeepLinkWriteVersion, and never carries tag 0x0E or 0x0F.
-// Its tag 0x08 holds the certificates alone (deepLinkCertificates).
+// It is version kDeepLinkWriteVersion, or kDeepLinkAuthKeyWriteVersion with the
+// client random auth key as tag 0x0F when the config has one, and never carries
+// tag 0x0E. Its tag 0x08 holds the certificates alone (deepLinkCertificates).
 QString encodeDeepLink(const DeepLinkConfig &cfg);
 
 // Render the config as TrustTunnel client TOML so the normal import path can
 // consume it. Mirrors the schema produced by the create-config form. The
-// certificate holds the certificates alone, one PEM block each.
+// certificate holds the certificates alone, one PEM block each. The password and
+// the auth key are in it, for the import to move to the credential store.
 QString deepLinkConfigToToml(const DeepLinkConfig &cfg);
 
 } // namespace freetunnel

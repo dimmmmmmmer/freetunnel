@@ -30,6 +30,13 @@ bool secretServiceOnSessionBus();
 class CredentialStore {
 public:
     static QString keyForConfigPath(const QString &absoluteConfigPath);
+    // The entry a config's client random auth key (TrustTunnel 1.3) is kept in: a
+    // second secret beside the password, under the same path with a prefix that
+    // no absolute path starts with, so it is never another config's password
+    // entry. The store's password calls below hold any secret under any key.
+    // Written only for a config that has a key, so a config without one costs the
+    // store nothing.
+    static QString keyForConfigAuthKey(const QString &absoluteConfigPath);
     // The entry a TrustTunnel subscription's address is kept in, by the source id
     // its record names (SubscriptionRecord). Keyed by the subscription, not by its
     // config, so a rename moves nothing in the store; and never an absolute path,
@@ -53,10 +60,14 @@ public:
 #endif
 };
 
-// Move inline passwords into the credential store and strip them from TOML.
+// Move the inline password and client random auth key into the credential store
+// and strip them from TOML. Both are stored before either is stripped, and the
+// file is rewritten only when the store has taken what was in it; a false return
+// leaves the file as it was.
 bool migrateConfigPassword(const QString &configPath);
 
-// Build a helper-readable config TOML with password injected (in-memory only).
+// Build a helper-readable config TOML with the password and the client random
+// auth key injected (in-memory only).
 // logLevel sets the core's verbosity ("warn" by default; "info" for debug logs).
 QString buildConnectConfigToml(const QString &configPath,
                                const QString &logLevel = QStringLiteral("warn"));

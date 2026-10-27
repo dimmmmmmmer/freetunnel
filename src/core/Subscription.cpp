@@ -339,25 +339,24 @@ bool readDnsUpstreams(const DocumentReader &in, SubscriptionDocument *doc)
     return true;
 }
 
+// The key the server checks the client random against, as a link's tag 0x0F
+// takes it: whole bytes of hex, or none. A key the core cannot decode would be
+// dropped by it, silently, and the server would turn the client away.
+bool isAuthKey(const QString &s)
+{
+    return isValidClientRandomAuthKey(s);
+}
+
 bool readOptionalFields(const DocumentReader &in, SubscriptionDocument *doc)
 {
     QString clientRandom;
     if (!in.optional("custom_sni", isCustomSni, &doc->customSni)
             || !in.optional("client_random_prefix", isClientRandom, &clientRandom)
+            || !in.optional("client_random_auth_key", isAuthKey, &doc->clientRandomAuthKey)
             || !in.optional("name", isName, &doc->name))
         return false;
     doc->clientRandomPrefix = clientRandomForCore(clientRandom);
     return readDnsUpstreams(in, doc);
-}
-
-// No version of the format has the key yet; a server that checks one turns this
-// core away at the TLS handshake, as a link's 0x0F does. Empty is no key.
-bool readAuthKey(const DocumentReader &in)
-{
-    QString key;
-    if (!in.optional("client_random_auth_key", isAnyText, &key))
-        return false;
-    return key.isEmpty() || in.refuse("client_random_auth_key", SubscriptionDocError::NeedsNewerCore);
 }
 
 QStringList addressList(const QString &addresses)
@@ -379,7 +378,8 @@ QString hostIdentity(const QString &hostname)
 // The certificates compared as DER, so the same ones written another way, with
 // other line breaks or beside a key a sweep has not taken out yet, are no change.
 QList<SubscriptionChange> changesBetween(const ConfigToml &before, const QString &beforePassword,
-                                         const ConfigToml &after, const QString &password)
+                                         const ConfigToml &after, const QString &password,
+                                         const QString &authKey)
 {
     QList<SubscriptionChange> out;
     const auto withValues = [&out](SubscriptionField field, const QString &from, const QString &to) {
@@ -395,6 +395,7 @@ QList<SubscriptionChange> changesBetween(const ConfigToml &before, const QString
         out.append({SubscriptionField::Address, before.addresses, after.addresses});
     withoutValues(SubscriptionField::Username, before.username != after.username);
     withoutValues(SubscriptionField::Password, beforePassword != password);
+    withoutValues(SubscriptionField::AuthKey, before.clientRandomAuthKey != authKey);
     withoutValues(SubscriptionField::Certificate,
                   certificatesDer(before.certificate) != certificatesDer(after.certificate));
     withValues(SubscriptionField::CustomSni, before.customSni, after.customSni);
@@ -432,7 +433,7 @@ std::optional<SubscriptionDocument> parseSubscriptionJson(const QByteArray &body
     const DocumentReader in(*object, error);
     SubscriptionDocument doc;
     if (!readVersion(in) || !readServer(in, &doc) || !readSettings(in, &doc) || !readCertificate(in, &doc)
-            || !readOptionalFields(in, &doc) || !readAuthKey(in))
+            || !readOptionalFields(in, &doc))
         return std::nullopt;
     return doc;
 }
@@ -448,10 +449,12 @@ SubscriptionApplied applySubscription(const ConfigToml &current, const QString &
     next.addresses = document.address;
     next.username = document.username;
     next.password.clear();
+    next.clientRandomAuthKey.clear();
     next.certificate = document.certificatePem;
     next.customSni = document.customSni;
     next.clientRandom = document.clientRandomPrefix;
     out.password = document.password;
+    out.clientRandomAuthKey = document.clientRandomAuthKey;
     if (creation) {
         next.protocol = document.upstreamProtocol;
         next.allowIpv6 = document.hasIpv6;
@@ -460,7 +463,7 @@ SubscriptionApplied applySubscription(const ConfigToml &current, const QString &
         next.dns = document.dnsUpstreams.value_or(QStringList()).join(QStringLiteral(", "));
         return out;
     }
-    out.changes = changesBetween(current, currentPassword, next, out.password);
+    out.changes = changesBetween(current, currentPassword, next, out.password, out.clientRandomAuthKey);
     out.hostnameChanged = !sameSubscriptionHost(current.hostname, next.hostname);
     return out;
 }

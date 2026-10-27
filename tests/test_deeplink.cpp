@@ -49,7 +49,8 @@ private slots:
     void aHugeVersionIsNotCutDownToOneThisClientReads();
     void version1LinksReadAsBefore();
     void ourOwnLinksStayVersion1();
-    void theTomlNeverHoldsTheVersion2Fields();
+    void ourLinkWithAnAuthKeyIsVersion2();
+    void theTomlHoldsTheAuthKeyAndNeverTheSubscription();
     void readsASelfSignedVersion2Link();
     void aVersion2LinkIgnoresTagsItDoesNotDefine();
     void everyVersionRecordCounts();
@@ -930,10 +931,10 @@ void TestDeepLink::version1LinksReadAsBefore()
                      .has_value());
 }
 
-// Version 2 adds only tags our links never carry, and FreeTunnel 1.2.3 and
-// earlier, like TrustTunnel's clients up to 1.1.11, refuse a version 2 link
-// outright. So a share link stays version 1, whatever the config it came from
-// was imported from.
+// Version 2 adds tags our links carry only when they have to, and FreeTunnel
+// 1.2.3 and earlier, like TrustTunnel's clients up to 1.1.11, refuse a version 2
+// link outright. So a share link stays version 1, whatever the config it came
+// from was imported from, unless it carries an auth key (ourLinkWithAnAuthKeyIsVersion2).
 void TestDeepLink::ourOwnLinksStayVersion1()
 {
     QCOMPARE(kDeepLinkWriteVersion, 1);
@@ -942,7 +943,6 @@ void TestDeepLink::ourOwnLinksStayVersion1()
     QString err;
     auto cfg = parseDeepLink(v2::kFull, &err);
     QVERIFY2(cfg.has_value(), qPrintable(err));
-    cfg->clientRandomAuthKey = QStringLiteral("aabbccdd");
     cfg->version = kDeepLinkMaxVersion; // what the struct says is not what is written
     const QString ours = encodeDeepLink(*cfg);
 
@@ -963,20 +963,60 @@ void TestDeepLink::ourOwnLinksStayVersion1()
     QVERIFY(back->clientRandomAuthKey.isEmpty());
 }
 
+// With the key, though: the link is the only way it reaches the config. The
+// import moves it from the TOML to the credential store, with the password.
+void TestDeepLink::ourLinkWithAnAuthKeyIsVersion2()
+{
+    QCOMPARE(kDeepLinkAuthKeyWriteVersion, 2);
+    DeepLinkConfig c;
+    c.hostname = QStringLiteral("vpn.example.com");
+    c.addresses = {QStringLiteral("1.2.3.4:443")};
+    c.username = QStringLiteral("alice");
+    c.password = QStringLiteral("secret");
+    // Without a key: version 1, byte for byte as before.
+    QCOMPARE(encodeDeepLink(c), v2::kWrittenWithoutAuthKey);
+    // With one, and not a byte more: version 2 and the key as the last record.
+    c.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    c.version = 1; // the struct's own version is not what is written
+    QCOMPARE(encodeDeepLink(c), v2::kWrittenWithAuthKey);
+
+    QString err;
+    const auto back = parseDeepLink(encodeDeepLink(c), &err);
+    QVERIFY2(back.has_value(), qPrintable(err));
+    QCOMPARE(back->version, 2);
+    QCOMPARE(back->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(back->hostname, c.hostname);
+    QCOMPARE(back->password, c.password);
+    QVERIFY(back->subscriptionUrl.isEmpty());
+
+    // A key and an address: still no subscription address, which a link of ours
+    // never carries.
+    c.subscriptionUrl = v2::kSubscription;
+    QVERIFY(parseDeepLink(encodeDeepLink(c))->subscriptionUrl.isEmpty());
+    QVERIFY2(!tagsOf(encodeDeepLink(c)).contains(0x0E), qPrintable(encodeDeepLink(c)));
+    // Every record is there once, the key last.
+    const QList<quint64> tags = tagsOf(encodeDeepLink(c));
+    QCOMPARE(tags.last(), quint64(0x0F));
+    QCOMPARE(tags.count(0x0F), 1);
+}
+
 // The subscription address carries the VPN password in plain text; what a link
-// becomes on disk never holds it, nor an auth key the core would not use.
-void TestDeepLink::theTomlNeverHoldsTheVersion2Fields()
+// becomes on disk never holds it. The auth key it does hold, for the import to
+// move to the credential store with the password; a link without one writes none.
+void TestDeepLink::theTomlHoldsTheAuthKeyAndNeverTheSubscription()
 {
     QString err;
     auto cfg = parseDeepLink(v2::kFull, &err);
     QVERIFY2(cfg.has_value(), qPrintable(err));
+    QVERIFY2(!deepLinkConfigToToml(*cfg).contains(QStringLiteral("auth_key")),
+             qPrintable(deepLinkConfigToToml(*cfg)));
     cfg->clientRandomAuthKey = QStringLiteral("aabbccdd");
     const QString toml = deepLinkConfigToToml(*cfg);
     QVERIFY2(!toml.contains(QStringLiteral("subscription")), qPrintable(toml));
     QVERIFY2(!toml.contains(QStringLiteral("https://alice")), qPrintable(toml));
-    QVERIFY2(!toml.contains(QStringLiteral("auth_key")) && !toml.contains(QStringLiteral("aabbccdd")),
-             qPrintable(toml));
+    QVERIFY2(toml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(toml));
     QVERIFY2(toml.contains(QStringLiteral("hostname = \"vpn.example.com\"")), qPrintable(toml));
+    QCOMPARE(parseConfigToml(toml).clientRandomAuthKey, QStringLiteral("aabbccdd"));
 }
 
 // What the endpoint exports for every server whose certificate the system does

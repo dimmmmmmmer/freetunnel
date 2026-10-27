@@ -48,9 +48,11 @@ private slots:
     void aVersion2LinkFromTheEndpointImports();
     void aSubscriptionLinkSaysItsServerWontUpdateItself();
     void aSubscriptionOnlyLinkIsRefusedWithItsReason();
-    void aServerThatNeedsAnAuthKeyIsRefusedWithItsReason();
+    void aServerThatNeedsAnAuthKeyIsImportedWithItsKeyInTheStore();
+    void aLinkWithoutAKeyReplacingOneWithAKeyDropsTheOldKey();
     void aLinkTooNewIsStillALinkError();
-    void importFileRefusesAServerThatNeedsAnAuthKey();
+    void importFileTakesAServerThatNeedsAnAuthKey();
+    void importFileRefusesAnAuthKeyThatIsNotHex();
     void importFileTakesAnEmptyAuthKey();
     void importFileLeavesTheSubscriptionOut();
 
@@ -67,7 +69,8 @@ private slots:
     void anEndpointExportWithTheNameOfAConfigOffersReplace();
     void anEndpointExportWithoutANameIsNamedAfterItsFile();
     void anEndpointExportThatSkipsCertificateChecksSaysSo();
-    void importFileRefusesAnEndpointExportThatNeedsAnAuthKey();
+    void importFileKeepsAnEndpointExportsAuthKeyInTheStore();
+    void importFileRefusesAnEndpointExportWithAnAuthKeyThatIsNotHex();
     void importFileRefusesAnEndpointExportThatIsOnlyASubscription();
     void importFileRefusesAnEndpointExportWithAMalformedClientRandom();
     void importFileRefusesAnEndpointExportWithoutAServer();
@@ -643,19 +646,71 @@ void TestBackendDeepLinkImport::aSubscriptionOnlyLinkIsRefusedWithItsReason()
     QCOMPARE(backend.configs().size(), before);
 }
 
-void TestBackendDeepLinkImport::aServerThatNeedsAnAuthKeyIsRefusedWithItsReason()
+// The client random auth key is a secret the core derives the TLS client random
+// from. It is kept where the password is, in the credential store, and the config
+// file on disk holds neither: the file is copied, backed up and attached to
+// support threads, and whoever has the key can pass the server's gate.
+void TestBackendDeepLinkImport::aServerThatNeedsAnAuthKeyIsImportedWithItsKeyInTheStore()
 {
     Backend backend;
-    const int before = backend.configs().size();
     QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
     QSignalSpy failed(&backend, &Backend::errorOccurred);
     QVERIFY(!backend.importDeepLink(v2::kAuthKey));
-    QCOMPARE(confirmSpy.count(), 0);
-    QCOMPARE(failed.count(), 1);
-    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
-    QVERIFY(!backend.confirmDeepLinkImport(v2::kAuthKey));
-    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
-    QCOMPARE(backend.configs().size(), before);
+    QCOMPARE(confirmSpy.count(), 1);
+    QCOMPARE(failed.count(), 0);
+    // Not shown to whoever is asked.
+    QVERIFY2(!confirmSpy.last().at(0).toString().contains(QStringLiteral("aabbccdd")),
+             qPrintable(confirmSpy.last().at(0).toString()));
+
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(v2::kAuthKey));
+    QCOMPARE(imported.count(), 1);
+    const QString path = pathOfImported(imported);
+    const QString onDisk = readConfigText(path);
+    QVERIFY2(!onDisk.contains(QStringLiteral("aabbccdd")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("client_random_auth_key")), qPrintable(onDisk));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(path)),
+             QStringLiteral("aabbccdd"));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path)),
+             QStringLiteral("secret"));
+    // And it goes to the core with the password, in the connect TOML only.
+    const QString connectToml = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(connectToml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")),
+             qPrintable(connectToml));
+    QVERIFY(connectToml.contains(QStringLiteral("password = \"secret\"")));
+}
+
+// The credential is keyed by the config's path, and a replace keeps the path. A
+// link that brings no key must not hand the old one to whatever server it names
+// (nor keep one the new server does not ask for), as one that brings no password
+// does not inherit the old password.
+void TestBackendDeepLinkImport::aLinkWithoutAKeyReplacingOneWithAKeyDropsTheOldKey()
+{
+    Backend backend;
+    // Links under one name, the first with a key.
+    const auto named = [](const QByteArray &key) {
+        QList<QPair<char, QByteArray>> records{{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
+                                               {0x02, "1.2.3.4:443"},    {0x05, "alice"},
+                                               {0x06, "secret"},         {0x0C, "Rotated"}};
+        if (!key.isEmpty())
+            records << qMakePair(char(0x0F), key);
+        return v2::linkFromRecords(records);
+    };
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(named("aabbccdd")));
+    QCOMPARE(imported.count(), 1);
+    const QString path = pathOfImported(imported);
+    const QString keyEntry = freetunnel::CredentialStore::keyForConfigAuthKey(path);
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(keyEntry), QStringLiteral("aabbccdd"));
+
+    // Replaced by a link with another key: the new one.
+    QVERIFY(backend.confirmDeepLinkImport(named("11223344"), true));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(keyEntry), QStringLiteral("11223344"));
+    // And by one with none: nothing is left to send.
+    QVERIFY(backend.confirmDeepLinkImport(named(QByteArray()), true));
+    QVERIFY2(freetunnel::CredentialStore::loadPassword(keyEntry).isEmpty(),
+             "the old server's key stayed in the store for the new server");
+    QVERIFY(!freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key")));
 }
 
 // A version this client does not read is still said to be a link problem.
@@ -668,9 +723,10 @@ void TestBackendDeepLinkImport::aLinkTooNewIsStillALinkError()
     QCOMPARE(failed.last().at(0).toString(), QStringLiteral("Link error: unsupported deep link version 3"));
 }
 
-// A config file for a server that checks the auth key would import and then fail
-// every connect, turned away at the handshake with nothing to say why.
-void TestBackendDeepLinkImport::importFileRefusesAServerThatNeedsAnAuthKey()
+// A client config for a server that checks the auth key, as TrustTunnel's own
+// client reads one. The copy FreeTunnel stores has the key in the credential store
+// and not in the file, as it has the password; the file the user picked is theirs.
+void TestBackendDeepLinkImport::importFileTakesAServerThatNeedsAnAuthKey()
 {
     QByteArray body = validImportBody();
     body.append("client_random_auth_key = \"aabbccdd\"\n");
@@ -678,15 +734,42 @@ void TestBackendDeepLinkImport::importFileRefusesAServerThatNeedsAnAuthKey()
     QVERIFY(!path.isEmpty());
 
     Backend backend;
-    const int before = backend.configs().size();
+    QSignalSpy imported(&backend, &Backend::configImported);
     QSignalSpy failed(&backend, &Backend::errorOccurred);
-    QVERIFY(!backend.importFile(path));
-    QCOMPARE(failed.count(), 1);
-    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
-    QCOMPARE(backend.configs().size(), before);
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QVERIFY(!QFileInfo::exists(QDir(base).filePath(QStringLiteral("auth-key.toml"))));
+    QVERIFY(backend.importFile(path));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(failed.count(), 0);
+    const QString stored = pathOfImported(imported);
+    const QString onDisk = readConfigText(stored);
+    QVERIFY2(!onDisk.contains(QStringLiteral("aabbccdd")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("client_random_auth_key")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("filepass")), qPrintable(onDisk));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(stored)),
+             QStringLiteral("aabbccdd"));
+    QCOMPARE(readConfigText(path).toUtf8(), body);
     QFile::remove(path);
+}
+
+// A key the core cannot decode is dropped by it without a word, and the server
+// that checks one then turns the client away: refused here, where it can be said.
+void TestBackendDeepLinkImport::importFileRefusesAnAuthKeyThatIsNotHex()
+{
+    for (const QByteArray &key : {QByteArray("abc"), QByteArray("not hex")}) {
+        QByteArray body = validImportBody();
+        body.append("client_random_auth_key = \"" + key + "\"\n");
+        const QString path = writeTempConfig(QStringLiteral("bad-auth-key.toml"), body);
+        QVERIFY(!path.isEmpty());
+
+        Backend backend;
+        const int before = backend.configs().size();
+        QSignalSpy failed(&backend, &Backend::errorOccurred);
+        QVERIFY(!backend.importFile(path));
+        QCOMPARE(failed.count(), 1);
+        QCOMPARE(failed.last().at(0).toString(),
+                 QStringLiteral("Not a valid TrustTunnel config: malformed client_random_auth_key value"));
+        QCOMPARE(backend.configs().size(), before);
+        QFile::remove(path);
+    }
 }
 
 // The endpoint's export always writes the key, empty for a server without one.
@@ -703,9 +786,12 @@ void TestBackendDeepLinkImport::importFileTakesAnEmptyAuthKey()
     QVERIFY(backend.importFile(path));
     QCOMPARE(imported.count(), 1);
     QCOMPARE(failed.count(), 0);
-    // Kept as written, like any key this app does not know.
-    const QString onDisk = readConfigText(pathOfImported(imported));
-    QVERIFY2(onDisk.contains(QStringLiteral("client_random_auth_key = \"\"")), qPrintable(onDisk));
+    // There is no key to keep, in the file or in the store.
+    const QString stored = pathOfImported(imported);
+    const QString onDisk = readConfigText(stored);
+    QVERIFY2(!onDisk.contains(QStringLiteral("aabbccdd")), qPrintable(onDisk));
+    QVERIFY(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(stored))
+                    .isEmpty());
     QFile::remove(path);
 }
 
@@ -1112,13 +1198,41 @@ static QString refusalOf(const QString &fileName, const endpoint_export::Fields 
     return failed.last().at(0).toString();
 }
 
-// The refusals a link meets, each with its own sentence.
-void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportThatNeedsAnAuthKey()
+// The server the export names is asked about as a link's is, key and all; the key
+// is neither in the question nor on disk once the answer is yes.
+void TestBackendDeepLinkImport::importFileKeepsAnEndpointExportsAuthKeyInTheStore()
 {
     endpoint_export::Fields f;
+    f.subscriptionUrl.clear();
     f.clientRandomAuthKey = QStringLiteral("aabbccdd");
-    QCOMPARE(refusalOf(QStringLiteral("export-auth-key.toml"), f), freetunnel::newerCoreRefusal());
+    const QString path = writeExport(QStringLiteral("export-auth-key.toml"), f);
+    QVERIFY(!path.isEmpty());
+
+    Backend backend;
+    QSignalSpy confirmSpy(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(confirmSpy.count(), 1);
+    QVERIFY2(!confirmSpy.last().at(0).toString().contains(QStringLiteral("aabbccdd")),
+             qPrintable(confirmSpy.last().at(0).toString()));
+    QVERIFY(backend.confirmDeepLinkImport(confirmSpy.last().at(1).toString()));
+    QCOMPARE(imported.count(), 1);
+    const QString stored = pathOfImported(imported);
+    QVERIFY2(!readConfigText(stored).contains(QStringLiteral("aabbccdd")), qPrintable(readConfigText(stored)));
+    QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(stored)),
+             QStringLiteral("aabbccdd"));
+    QFile::remove(path);
 }
+
+void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportWithAnAuthKeyThatIsNotHex()
+{
+    endpoint_export::Fields f;
+    f.clientRandomAuthKey = QStringLiteral("abc");
+    QCOMPARE(refusalOf(QStringLiteral("export-bad-auth-key.toml"), f),
+             QStringLiteral("Not a valid TrustTunnel config: malformed client_random_auth_key value"));
+}
+
+// The refusals a link meets, each with its own sentence.
 
 void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportThatIsOnlyASubscription()
 {
