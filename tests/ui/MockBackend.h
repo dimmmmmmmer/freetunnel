@@ -323,7 +323,12 @@ public:
     }
     Q_INVOKABLE void quitApplication() { prepareQuit(); }
     // Main.qml's onClosing asks this before treating a close as a real quit.
-    Q_INVOKABLE bool applicationClosingDown() const { return m_shutdownPrepared; }
+    Q_INVOKABLE bool applicationClosingDown() const { return m_shutdownPrepared || m_exiting; }
+    // For a test that quits and has others to run after it in the same process.
+    void resetShutdown() { m_shutdownPrepared = false; m_exiting = false; }
+    // The application is on its way out without anyone having said so to the window:
+    // QCoreApplication::closingDown() is true, and aboutToShutdown never came.
+    void setExitingSilently(bool exiting) { m_exiting = exiting; }
 
 signals:
     void stateChanged();
@@ -391,5 +396,6 @@ private:
     QVariantList m_pings = {QStringLiteral("42 ms"), QStringLiteral("—")};
     QString m_credentialStorageWarning;
     bool m_shutdownPrepared = false;
+    bool m_exiting = false;
     int m_toggleCount = 0;
 };

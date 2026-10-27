@@ -23,7 +23,12 @@
 #include <QThread>
 #include <QTimer>
 
+#include <xcb/xcb.h>
+
 #include <csignal>
+#include <cstdlib>
+#include <optional>
+#include <vector>
 #include <sys/prctl.h>
 #endif
 
@@ -51,6 +56,9 @@ private slots:
     void aSlowPortalDoesNotHoldTheWindowButIsStillHeard();
     void aChangeRightAfterTheFirstReadIsNotLost();
     void aTrayHostThatArrivesLateIsReported();
+    void theTrayHostIsAskedNotAssumed();
+    void aBarThatLeftTheBusIsNoPlaceToHideTheWindow();
+    void aWindowIsIconifiedWhenItsWindowManagerSaysSo();
     // Last: it is the one test that points this process's session bus somewhere.
     void followingTheDesktopReadsTheSessionBus();
 #endif
@@ -225,6 +233,145 @@ struct PortalOnABus {
         delete portal; // its thread has finished: nothing else can touch it now
     }
 };
+
+// Stands in for a StatusNotifierWatcher: the one property the code under test
+// reads, and nothing else a watcher does. On a thread of its own for the reason
+// FakePortal is.
+class FakeWatcher : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.StatusNotifierWatcher")
+    Q_PROPERTY(bool IsStatusNotifierHostRegistered READ hostRegistered)
+
+public:
+    explicit FakeWatcher(bool host) : m_host(host) {}
+    bool hostRegistered() const { return m_host; }
+
+private:
+    bool m_host;
+};
+
+// A watcher that owns the name and has no such property: one that is not the
+// StatusNotifierWatcher it says it is, or an old one.
+class FakeWatcherWithoutTheProperty : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.StatusNotifierWatcher")
+};
+
+// What the stand-in watcher on a private bus is like.
+enum class Watcher { None, HostRegistered, NoHost, NoProperty };
+
+// A private bus with a stand-in watcher on it (or none), and a connection for the
+// code under test.
+struct WatcherOnABus {
+    PrivateBus bus;
+    QThread thread;
+    QObject *watcher = nullptr;
+    QString watcherName = QStringLiteral("fake-tray-watcher");
+    QString clientName = QStringLiteral("tray-watcher-client");
+
+    bool start(Watcher kind)
+    {
+        if (!bus.start())
+            return false;
+        if (kind != Watcher::None) {
+            QDBusConnection side = QDBusConnection::connectToBus(bus.address, watcherName);
+            if (kind == Watcher::NoProperty)
+                watcher = new FakeWatcherWithoutTheProperty;
+            else
+                watcher = new FakeWatcher(kind == Watcher::HostRegistered);
+            thread.start();
+            watcher->moveToThread(&thread);
+            if (!side.registerObject(QStringLiteral("/StatusNotifierWatcher"), watcher,
+                                     QDBusConnection::ExportAllProperties)
+                || !side.registerService(QStringLiteral("org.kde.StatusNotifierWatcher")))
+                return false;
+        }
+        return client().isConnected();
+    }
+    QDBusConnection client() const { return QDBusConnection::connectToBus(bus.address, clientName); }
+
+    // The watcher leaves the bus, as it does when the bar that owned it is gone.
+    // Returns once the bus has noticed.
+    bool stopWatcher()
+    {
+        QDBusConnection::disconnectFromBus(watcherName);
+        const QDBusConnection connection = client();
+        for (int waited = 0; waited < 5000; waited += 20) {
+            if (!connection.interface()->isServiceRegistered(QStringLiteral("org.kde.StatusNotifierWatcher")))
+                return true;
+            QTest::qWait(20);
+        }
+        return false;
+    }
+
+    ~WatcherOnABus()
+    {
+        QDBusConnection::disconnectFromBus(clientName);
+        QDBusConnection::disconnectFromBus(watcherName);
+        thread.quit();
+        thread.wait();
+        delete watcher; // its thread has finished: nothing else can touch it now
+    }
+};
+
+// A private X server, which starts on a display number of its own choosing and so
+// can never be the one the machine is showing. It is connected to by that name and
+// never by DISPLAY. Without Xvfb the tests that need it skip.
+class PrivateXServer {
+public:
+    bool start()
+    {
+        const QString xvfb = QStandardPaths::findExecutable(QStringLiteral("Xvfb"));
+        if (xvfb.isEmpty())
+            return false;
+        m_server.setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGTERM); });
+        // -displayfd 1: the display number it picked, on its standard output, once it
+        // is ready to be connected to.
+        m_server.start(xvfb, {QStringLiteral("-displayfd"), QStringLiteral("1"),
+                              QStringLiteral("-screen"), QStringLiteral("0"),
+                              QStringLiteral("64x64x24"), QStringLiteral("-nolisten"),
+                              QStringLiteral("tcp")});
+        if (!m_server.waitForStarted(5000))
+            return false;
+        while (!m_server.canReadLine() && m_server.waitForReadyRead(5000)) {}
+        const QString number = QString::fromUtf8(m_server.readLine()).trimmed();
+        if (number.isEmpty())
+            return false;
+        display = QStringLiteral(":") + number;
+        return true;
+    }
+    ~PrivateXServer()
+    {
+        m_server.terminate();
+        m_server.waitForFinished(5000);
+    }
+
+    QString display;
+
+private:
+    QProcess m_server;
+};
+
+// What windowIconified() said, in words a failure can show.
+QString saying(const std::optional<bool> &iconified)
+{
+    return !iconified ? QStringLiteral("cannot tell") : (*iconified ? QStringLiteral("iconified") : QStringLiteral("not iconified"));
+}
+
+// What trayHostRegistered() said.
+QString sayingHost(const std::optional<bool> &registered)
+{
+    return !registered ? QStringLiteral("cannot tell") : (*registered ? QStringLiteral("a host") : QStringLiteral("no host"));
+}
+
+xcb_atom_t atomOf(xcb_connection_t *c, const char *name)
+{
+    xcb_intern_atom_reply_t *reply =
+            xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, static_cast<uint16_t>(qstrlen(name)), name), nullptr);
+    const xcb_atom_t atom = reply ? reply->atom : static_cast<xcb_atom_t>(XCB_ATOM_NONE);
+    std::free(reply);
+    return atom;
+}
 
 // Without a dbus-daemon these cannot run. That is a reason to skip on a
 // developer's machine, never on CI, where it would quietly drop the only tests of
@@ -537,6 +684,124 @@ void TestDesktopChrome::aTrayHostThatArrivesLateIsReported()
     }
     QDBusConnection::disconnectFromBus(hostName);
     QDBusConnection::disconnectFromBus(clientName);
+}
+
+// Qt's tray.available is that a StatusNotifierWatcher was on the bus when the icon
+// was made, and a bar can own one and show no icons. Whether a host is behind it is
+// the watcher's own IsStatusNotifierHostRegistered, which is asked. No watcher on
+// the bus is an answer too, and it is no. Only a question that was not answered
+// leaves it open.
+void TestDesktopChrome::theTrayHostIsAskedNotAssumed()
+{
+    struct Case {
+        const char *name;
+        Watcher watcher;
+        std::optional<bool> expected; // empty: cannot tell
+    };
+    static const Case cases[] = {
+        {"a host is registered", Watcher::HostRegistered, true},
+        {"a watcher with no host", Watcher::NoHost, false},
+        {"no watcher", Watcher::None, false},
+        {"a watcher without the property", Watcher::NoProperty, std::nullopt},
+    };
+    for (const Case &testCase : cases) {
+        WatcherOnABus setup;
+        if (!setup.start(testCase.watcher)) {
+            if (qEnvironmentVariableIsSet("CI"))
+                QFAIL("could not start a private dbus-daemon with a stand-in tray watcher");
+            QSKIP("no dbus-daemon to run a stand-in tray watcher on");
+        }
+        QElapsedTimer clock;
+        clock.start();
+        const std::optional<bool> answer = freetunnel::trayHostRegistered(setup.client());
+        QVERIFY2(clock.elapsed() < freetunnel::kTrayHostTimeoutMs + 400,
+                 qPrintable(QStringLiteral("%1: it took %2 ms")
+                                    .arg(QString::fromLatin1(testCase.name)).arg(clock.elapsed())));
+        QVERIFY2(sayingHost(answer) == sayingHost(testCase.expected),
+                 qPrintable(QStringLiteral("%1: %2, not %3").arg(QString::fromLatin1(testCase.name),
+                                                                  sayingHost(answer),
+                                                                  sayingHost(testCase.expected))));
+    }
+    // And no bus at all: nothing was asked.
+    QVERIFY(!freetunnel::trayHostRegistered(QDBusConnection(QStringLiteral("no-such-connection"))).has_value());
+}
+
+// The bar that made the tray icon is gone (it crashed, or a key bound to restart it
+// ran `pkill waybar || waybar`). The icon still says `available`, because Qt
+// asked once; the window hidden to it could not be brought back, and the only way
+// out would be a second launch. So the close that would have hidden it quits, as
+// with no tray at all.
+void TestDesktopChrome::aBarThatLeftTheBusIsNoPlaceToHideTheWindow()
+{
+    WatcherOnABus setup;
+    if (!setup.start(Watcher::HostRegistered)) {
+        if (qEnvironmentVariableIsSet("CI"))
+            QFAIL("could not start a private dbus-daemon with a stand-in tray watcher");
+        QSKIP("no dbus-daemon to run a stand-in tray watcher on");
+    }
+    const QDBusConnection client = setup.client();
+    DesktopChrome chrome;
+    chrome.setTrayHostProbe([client] { return freetunnel::trayHostRegistered(client); });
+    QObject icon;
+    icon.setProperty("available", true); // what Qt said when the icon was made
+
+    QVERIFY2(chrome.trayCanHoldWindow(&icon), "a bar with a host is a place to hide the window");
+    QVERIFY(setup.stopWatcher());
+    QVERIFY2(chrome.hasTray(&icon), "the icon still says it has a tray");
+    QVERIFY2(!chrome.trayCanHoldWindow(&icon), "but with the bar gone there is nowhere to hide the window");
+}
+
+// A window manager that minimises says so twice, ICCCM's way (WM_STATE) and EWMH's
+// (_NET_WM_STATE_HIDDEN), and one that is asked to and does not says neither. The
+// properties are set here by hand on a private X server, which stands in for both
+// kinds, down to what Hyprland does: it rewrites _NET_WM_STATE on every change of
+// focus and lists HIDDEN as supported without ever setting it.
+void TestDesktopChrome::aWindowIsIconifiedWhenItsWindowManagerSaysSo()
+{
+    PrivateXServer server;
+    if (!server.start())
+        QSKIP("no Xvfb to run a private X server on");
+    xcb_connection_t *c = xcb_connect(server.display.toUtf8().constData(), nullptr);
+    const auto disconnect = qScopeGuard([c] { xcb_disconnect(c); });
+    QVERIFY2(xcb_connection_has_error(c) == 0, "could not connect to the private X server");
+    const xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+    const xcb_window_t window = xcb_generate_id(c);
+    xcb_create_window(c, XCB_COPY_FROM_PARENT, window, screen->root, 0, 0, 10, 10, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, 0, nullptr);
+    const xcb_atom_t wmState = atomOf(c, "WM_STATE");
+    const xcb_atom_t netState = atomOf(c, "_NET_WM_STATE");
+    const xcb_atom_t hidden = atomOf(c, "_NET_WM_STATE_HIDDEN");
+    const xcb_atom_t focused = atomOf(c, "_NET_WM_STATE_FOCUSED");
+    QVERIFY(wmState != XCB_ATOM_NONE && netState != XCB_ATOM_NONE && hidden != XCB_ATOM_NONE);
+
+    const auto setWmState = [&](uint32_t state) {
+        const uint32_t value[2] = {state, XCB_WINDOW_NONE};
+        xcb_change_property(c, XCB_PROP_MODE_REPLACE, window, wmState, wmState, 32, 2, value);
+    };
+    const auto setNetState = [&](std::initializer_list<xcb_atom_t> atoms) {
+        const std::vector<xcb_atom_t> value(atoms);
+        xcb_change_property(c, XCB_PROP_MODE_REPLACE, window, netState, XCB_ATOM_ATOM, 32,
+                            static_cast<uint32_t>(value.size()), value.data());
+    };
+    const auto now = [&] { return saying(freetunnel::windowIconified(c, window)); };
+
+    QCOMPARE(now(), QStringLiteral("not iconified")); // nobody has touched it
+    setWmState(1);                                    // NormalState
+    QCOMPARE(now(), QStringLiteral("not iconified"));
+    setWmState(3);                                    // IconicState
+    QCOMPARE(now(), QStringLiteral("iconified"));
+
+    setWmState(1);
+    setNetState({focused}); // what Hyprland writes whenever focus moves
+    QCOMPARE(now(), QStringLiteral("not iconified"));
+    setNetState({focused, hidden});
+    QCOMPARE(now(), QStringLiteral("iconified")); // EWMH alone is enough
+    setNetState({});
+    QCOMPARE(now(), QStringLiteral("not iconified"));
+
+    // Nothing to ask about is not an answer of "no".
+    QCOMPARE(saying(freetunnel::windowIconified(c, xcb_generate_id(c))), QStringLiteral("cannot tell"));
+    QCOMPARE(saying(freetunnel::windowIconified(nullptr, window)), QStringLiteral("cannot tell"));
 }
 
 // What the app itself calls: followDesktop(), on the session bus.

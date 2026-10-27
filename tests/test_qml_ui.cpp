@@ -157,6 +157,21 @@ private slots:
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
+    void theCloseButtonMinimisesWhenThereIsATray();
+    void aWindowManagerWithNoMinimiseHidesTheWindowToTheTray();
+    void aTrayWithNoHostIsNotAPlaceToHideTheWindow();
+    void theMinimiseButtonNeverHidesOrQuits();
+    void aWindowManagersCloseIsTheCloseButton();
+    void aWindowManagersCloseQuitsWhenThereIsNoTray();
+    void aWindowManagersCloseQuitsWhereAMinimiseCannotBeChecked();
+    void aClosingApplicationIsNotRefused();
+    void aMinimiseTheWindowManagerIgnoredIsTakenBack();
+    void aMinimiseTheWindowManagerHonouredIsLeftAlone();
+    void aWindowRestoredOrDestroyedBeforeTheCheckIsNotTouched();
+    void theDesktopSaysWhatCameOfAMinimise();
+    void theDesktopAsksTheWindowManagerWhetherItMinimised();
+    void theDesktopKnowsWhetherThereIsATray();
+    void theDesktopAsksWhetherTheTrayHasAHost();
 
 private:
     QObject *loadPage(const char *qmlPath);
@@ -3870,6 +3885,519 @@ void TestQmlUi::aDoubleClickThatOpensTheAddMenuLeavesItOpen()
     QCOMPARE(root->property("overlay").toString(), QString());
     QVERIFY(!page->findChild<QObject *>(QStringLiteral("configImportDialog"))->property("visible").toBool());
     delete root;
+}
+
+namespace {
+
+// A click on one of the window's own buttons, by the name the window agent finds
+// it by. False if it is not on screen to be clicked, which proves nothing.
+bool clickWindowButton(QQuickWindow *window, const char *objectName)
+{
+    auto *button = window->findChild<QQuickItem *>(QLatin1String(objectName));
+    if (!button || !button->isVisible())
+        return false;
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(button));
+    return true;
+}
+
+} // namespace
+
+// ✕ with a tray asks for a minimise and does nothing else yet. What comes of the
+// minimise is a moment away on X11, and a window manager that did it has nothing
+// further to be done: the window is where the user can get it back from.
+void TestQmlUi::theCloseButtonMinimisesWhenThereIsATray()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+    const int hides = m_desktop.hideRequests;
+
+    QVERIFY2(clickWindowButton(window, "windowCloseButton"), "the window's own close button");
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY2(root->property("closeWaitingOnMinimize").toBool(), "the ✕ waits for the answer");
+
+    emit m_desktop.minimizeSettled(window, true);
+    QVERIFY2(!root->property("closeWaitingOnMinimize").toBool(), "and is done with it");
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY2(!m_backend.applicationClosingDown(), "a window manager that minimised has nothing left to do");
+    delete root;
+#endif
+}
+
+// Hyprland and sway have no minimise. They take the request and do nothing, the
+// window stays on screen, and the ✕ did nothing at all, again and again. Once
+// the window is seen to be still there it goes to the tray instead.
+void TestQmlUi::aWindowManagerWithNoMinimiseHidesTheWindowToTheTray()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int hides = m_desktop.hideRequests;
+
+    QVERIFY(clickWindowButton(window, "windowCloseButton"));
+    QCOMPARE(m_desktop.hideRequests, hides);
+
+    // Somebody else's answer is not ours.
+    QWindow other;
+    emit m_desktop.minimizeSettled(&other, false);
+    QCOMPARE(m_desktop.hideRequests, hides);
+
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QVERIFY2(!m_backend.applicationClosingDown(), "hidden to the tray, not quit");
+
+    // The next answer to a minimise nobody closed with is not another hide.
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    delete root;
+#endif
+}
+
+// Qt's tray.available is that a StatusNotifierWatcher is on the bus. A bar can own
+// one and show no icons, and a window hidden to that has nothing to bring it back.
+// Then it is the same as having no tray at all: ✕ quits.
+void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true, false);
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int hides = m_desktop.hideRequests;
+
+    QVERIFY(clickWindowButton(window, "windowCloseButton"));
+    QVERIFY(!m_backend.applicationClosingDown());
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY2(m_backend.applicationClosingDown(), "nowhere to hide it, so it quits");
+    delete root;
+#endif
+}
+
+// The minimise button was asked to minimise, not to hide: on a window manager that
+// cannot, the window stays where it is, as every application's does there. What it
+// must never do is what the ✕ does.
+void TestQmlUi::theMinimiseButtonNeverHidesOrQuits()
+{
+#ifdef Q_OS_MACOS
+    QSKIP("macOS draws its own traffic lights");
+#else
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+    const int hides = m_desktop.hideRequests;
+
+    QVERIFY(clickWindowButton(window, "windowMinButton"));
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QVERIFY(!root->property("closeWaitingOnMinimize").toBool());
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY(!m_backend.applicationClosingDown());
+
+    // Nor does a title bar whose click the desktop has set to minimise.
+    QMetaObject::invokeMethod(root, "titlebarAction", Q_ARG(QVariant, QStringLiteral("minimize")));
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY(!m_backend.applicationClosingDown());
+    delete root;
+#endif
+}
+
+// Hyprland's killactive and closewindow, Alt+F4 and a taskbar's Close all reach
+// the window as a close request, and FreeTunnel took every one for a quit. On
+// Linux with a tray they do what ✕ does. Windows keeps quitting on them.
+void TestQmlUi::aWindowManagersCloseIsTheCloseButton()
+{
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+    const int hides = m_desktop.hideRequests;
+
+    window->close();
+#ifdef Q_OS_LINUX
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QVERIFY2(!m_backend.applicationClosingDown(), "a close from the window manager must not quit");
+    QVERIFY2(window->isVisible(), "and must not close the window either: it is refused");
+    emit m_desktop.minimizeSettled(window, false);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QVERIFY(!m_backend.applicationClosingDown());
+#else
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY2(m_backend.applicationClosingDown(), "Windows and macOS keep quitting on a close request");
+#endif
+    delete root;
+}
+
+// With no tray the same close request ends the application on every platform:
+// there is nothing to bring a minimised window back from.
+void TestQmlUi::aWindowManagersCloseQuitsWhenThereIsNoTray()
+{
+    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
+    m_backend.resetShutdown();
+    m_desktop.useTray(false);
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+
+    window->close();
+    QVERIFY(m_backend.applicationClosingDown());
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+    delete root;
+}
+
+// Native Wayland: a minimise there gets no answer, so a compositor with none (sway)
+// would leave the window where it is and a close that waited on it would do
+// nothing. It quits, as it did before.
+void TestQmlUi::aWindowManagersCloseQuitsWhereAMinimiseCannotBeChecked()
+{
+    const auto restore = qScopeGuard([this] {
+        m_desktop.useRealTray();
+        m_desktop.setMinimizeCanBeChecked(true);
+        m_backend.resetShutdown();
+    });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+    m_desktop.setMinimizeCanBeChecked(false);
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+    const int hides = m_desktop.hideRequests;
+
+    window->close();
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+    QCOMPARE(m_desktop.hideRequests, hides);
+    QVERIFY2(m_backend.applicationClosingDown(), "nothing can say where the window went, so it quits");
+    delete root;
+}
+
+// A window that refuses to close while the application is already quitting would
+// only be in the way.
+void TestQmlUi::aClosingApplicationIsNotRefused()
+{
+    const auto restore = qScopeGuard([this] {
+        m_desktop.useRealTray();
+        m_backend.resetShutdown();
+    });
+    m_backend.resetShutdown();
+    m_desktop.useTray(true);
+
+    // Quitting from the tray, with the window manager's close arriving after it.
+    {
+        QObject *root = createMainWindow(m_engine);
+        QVERIFY(root);
+        auto *window = exposed(root);
+        QVERIFY(window);
+        const int minimises = m_desktop.minimizeRequests;
+        m_backend.quitApplication();
+        QVERIFY(m_backend.applicationClosingDown());
+        window->close();
+        QCOMPARE(m_desktop.minimizeRequests, minimises);
+        delete root;
+    }
+    // And one that arrives when the application is already exiting for a reason the
+    // window was never told of.
+    {
+        QObject *root = createMainWindow(m_engine);
+        QVERIFY(root);
+        auto *window = exposed(root);
+        QVERIFY(window);
+        const int minimises = m_desktop.minimizeRequests;
+        m_backend.resetShutdown();
+        m_backend.setExitingSilently(true);
+        window->close();
+        QCOMPARE(m_desktop.minimizeRequests, minimises);
+        delete root;
+    }
+}
+
+namespace {
+
+constexpr int kQuickCheckMs = 20;
+
+freetunnel::IconifiedProbe probeAnswering(std::optional<bool> answer, int &asked)
+{
+    return [answer, &asked](QWindow *) {
+        ++asked;
+        return answer;
+    };
+}
+
+bool shownWindow(QWindow &window)
+{
+    window.resize(200, 200);
+    window.show();
+    return QTest::qWaitForWindowExposed(&window);
+}
+
+} // namespace
+
+// Qt records Minimized whatever the window manager does with the request, and with
+// it recorded sends nothing the next time: the window that would not minimise
+// would never be asked to again.
+void TestQmlUi::aMinimiseTheWindowManagerIgnoredIsTakenBack()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    window.setWindowStates(Qt::WindowMaximized);
+    int asked = 0;
+    QList<bool> answers;
+    const auto done = [&answers](bool honoured) { answers << honoured; };
+
+    freetunnel::minimizeWindowChecked(&window, probeAnswering(false, asked), kQuickCheckMs, done);
+    QCOMPARE(window.windowStates(), Qt::WindowMaximized | Qt::WindowMinimized);
+    QCOMPARE(asked, 0); // the window manager is given its time first
+    QTRY_COMPARE(answers.size(), 1);
+    QVERIFY(!answers.constFirst());
+    QCOMPARE(asked, 1);
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized)); // only Minimized goes
+    QTest::qWait(4 * kQuickCheckMs);
+    QCOMPARE(answers.size(), 1);
+
+    // So the next minimise is a minimise again.
+    freetunnel::minimizeWindowChecked(&window, probeAnswering(false, asked), kQuickCheckMs, done);
+    QVERIFY(window.windowStates() & Qt::WindowMinimized);
+    QTRY_COMPARE(answers.size(), 2);
+    QVERIFY(!(window.windowStates() & Qt::WindowMinimized));
+}
+
+// A window manager that minimised, and one that cannot be asked, are taken at their
+// word: nothing is undone.
+void TestQmlUi::aMinimiseTheWindowManagerHonouredIsLeftAlone()
+{
+    for (const std::optional<bool> answer : {std::optional<bool>(true), std::optional<bool>()}) {
+        QWindow window;
+        QVERIFY(shownWindow(window));
+        int asked = 0;
+        QList<bool> answers;
+        freetunnel::minimizeWindowChecked(&window, probeAnswering(answer, asked), kQuickCheckMs,
+                                          [&answers](bool honoured) { answers << honoured; });
+        QTRY_COMPARE(answers.size(), 1);
+        QVERIFY(answers.constFirst());
+        QCOMPARE(asked, 1);
+        QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMinimized));
+    }
+}
+
+// Back from the tray, or closed, between the request and the look.
+void TestQmlUi::aWindowRestoredOrDestroyedBeforeTheCheckIsNotTouched()
+{
+    int asked = 0;
+    QList<bool> answers;
+    const auto done = [&answers](bool honoured) { answers << honoured; };
+    {
+        QWindow window;
+        QVERIFY(shownWindow(window));
+        freetunnel::minimizeWindowChecked(&window, probeAnswering(false, asked), kQuickCheckMs, done);
+        window.setWindowStates(window.windowStates() & ~Qt::WindowMinimized);
+        QTRY_COMPARE(answers.size(), 1);
+        QVERIFY2(answers.constFirst(), "nothing is stuck, so nothing to put right");
+        QCOMPARE(asked, 0);
+        QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowNoState));
+    }
+    answers.clear();
+    auto *gone = new QWindow;
+    freetunnel::minimizeWindowChecked(gone, probeAnswering(false, asked), kQuickCheckMs, done);
+    delete gone;
+    QTest::qWait(5 * kQuickCheckMs);
+    QCOMPARE(asked, 0);
+    QVERIFY(answers.isEmpty());
+    // And no window at all.
+    freetunnel::minimizeWindowChecked(nullptr, probeAnswering(false, asked), kQuickCheckMs, done);
+    QTest::qWait(5 * kQuickCheckMs);
+    QCOMPARE(asked, 0);
+    QVERIFY(answers.isEmpty());
+}
+
+// The QML hears it as a signal, once per minimise, with the window it was about.
+// Offscreen is not a display server that can be asked, which is the same as an
+// answer of nothing to put right.
+void TestQmlUi::theDesktopSaysWhatCameOfAMinimise()
+{
+    freetunnel::DesktopChrome chrome;
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy settled(&chrome, &freetunnel::DesktopChrome::minimizeSettled);
+
+    chrome.minimize(&window);
+    QVERIFY(window.windowStates() & Qt::WindowMinimized);
+    QTRY_COMPARE(settled.count(), 1);
+    QCOMPARE(settled.constFirst().at(0).value<QObject *>(), &window);
+    QVERIFY(settled.constFirst().at(1).toBool());
+    QTest::qWait(2 * freetunnel::kMinimizeCheckMs);
+    QCOMPARE(settled.count(), 1);
+
+    // Not a window: nothing to minimise and nothing to say about it.
+    QObject notAWindow;
+    chrome.minimize(&notAWindow);
+    chrome.minimize(nullptr);
+    QTest::qWait(2 * freetunnel::kMinimizeCheckMs);
+    QCOMPARE(settled.count(), 1);
+}
+
+// The probe the desktop asks is the one it was given, and its answer is acted on:
+// a window manager that drops a minimise (Hyprland, sway) comes to a window that is
+// on screen and no longer marked minimised, and a signal that says so. (The real
+// probe is the X server's, which offscreen has none to ask; it is the default on
+// Linux, and what it reads from a window is tested in test_desktopchrome.)
+void TestQmlUi::theDesktopAsksTheWindowManagerWhetherItMinimised()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    struct Outcome {
+        int settledCount = 0;
+        bool honoured = false;
+        bool minimizedAtOnce = false;
+        int askedAtOnce = 0;
+        bool minimizedAfter = false;
+    };
+    int asked = 0;
+    const auto minimiseWith = [&](std::optional<bool> answer) {
+        window.setWindowStates(Qt::WindowNoState);
+        asked = 0;
+        freetunnel::DesktopChrome chrome;
+        chrome.setIconifiedProbe(probeAnswering(answer, asked));
+        QSignalSpy spy(&chrome, &freetunnel::DesktopChrome::minimizeSettled);
+        Outcome out;
+        chrome.minimize(&window);
+        out.minimizedAtOnce = window.windowStates() & Qt::WindowMinimized;
+        out.askedAtOnce = asked;
+        spy.wait(2000);
+        out.settledCount = int(spy.count());
+        out.honoured = out.settledCount == 1 && spy.constFirst().at(1).toBool();
+        out.minimizedAfter = window.windowStates() & Qt::WindowMinimized;
+        return out;
+    };
+
+    // It did not: the window is on screen, taken out of the state Qt put it in, and
+    // the desktop says so.
+    Outcome out = minimiseWith(false);
+    QVERIFY2(out.minimizedAtOnce, "the minimise is asked for first");
+    QCOMPARE(out.askedAtOnce, 0);
+    QCOMPARE(out.settledCount, 1);
+    QVERIFY2(!out.honoured, "a window manager that did nothing did not minimise");
+    QCOMPARE(asked, 1);
+    QVERIFY2(!out.minimizedAfter, "and Qt's record of it is taken back");
+
+    // It did.
+    out = minimiseWith(true);
+    QCOMPARE(out.settledCount, 1);
+    QVERIFY(out.honoured);
+    QVERIFY(out.minimizedAfter);
+
+    // It could not be asked.
+    out = minimiseWith(std::nullopt);
+    QCOMPARE(out.settledCount, 1);
+    QVERIFY(out.honoured);
+    QVERIFY(out.minimizedAfter);
+
+    // And with nothing to ask at all, as off Linux, the answer comes at once.
+    window.setWindowStates(Qt::WindowNoState);
+    freetunnel::DesktopChrome chrome;
+    chrome.setIconifiedProbe({});
+    QSignalSpy spy(&chrome, &freetunnel::DesktopChrome::minimizeSettled);
+    chrome.minimize(&window);
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(spy.constFirst().at(1).toBool());
+    QVERIFY(window.windowStates() & Qt::WindowMinimized);
+}
+
+// What the QML asks of the tray icon: its own word for whether it has a tray. No
+// icon, or one without the property, has none. (Whether a host is behind it is
+// asked of the session bus, which a test does not touch.)
+void TestQmlUi::theDesktopKnowsWhetherThereIsATray()
+{
+    freetunnel::DesktopChrome chrome;
+    QObject icon;
+    QVERIFY(!chrome.hasTray(nullptr));
+    QVERIFY(!chrome.hasTray(&icon));
+    icon.setProperty("available", true);
+    QVERIFY(chrome.hasTray(&icon));
+    icon.setProperty("available", false);
+    QVERIFY(!chrome.hasTray(&icon));
+    QVERIFY(!chrome.trayCanHoldWindow(&icon));
+    QVERIFY(!chrome.trayCanHoldWindow(nullptr));
+    // Offscreen is not an X server, so a minimise there is not one that can be checked.
+    QVERIFY(!chrome.minimizeCanBeChecked());
+}
+
+// Whether a window hidden for the tray can be got back from it is the host's
+// answer, asked each time: a tray icon says `available` for as long as it lives,
+// and the bar that made it so can be gone. Only a host that cannot be asked
+// leaves it to the icon.
+void TestQmlUi::theDesktopAsksWhetherTheTrayHasAHost()
+{
+    freetunnel::DesktopChrome chrome;
+    QObject icon;
+    icon.setProperty("available", true);
+    int asked = 0;
+    std::optional<bool> host = true;
+    chrome.setTrayHostProbe([&]() {
+        ++asked;
+        return host;
+    });
+
+    QVERIFY(chrome.trayCanHoldWindow(&icon));
+    QCOMPARE(asked, 1);
+    host = false; // the bar left, and the icon still says it has a tray
+    QVERIFY(chrome.hasTray(&icon));
+    QVERIFY2(!chrome.trayCanHoldWindow(&icon), "no host: nowhere to hide the window");
+    QCOMPARE(asked, 2);
+    host = std::nullopt; // could not be asked: Qt's word stands
+    QVERIFY(chrome.trayCanHoldWindow(&icon));
+    host = true;
+    QVERIFY(chrome.trayCanHoldWindow(&icon));
+
+    // No tray, no question.
+    icon.setProperty("available", false);
+    asked = 0;
+    QVERIFY(!chrome.trayCanHoldWindow(&icon));
+    QCOMPARE(asked, 0);
+
+    // With no probe at all, as off Linux, a tray is a tray.
+    chrome.setTrayHostProbe({});
+    icon.setProperty("available", true);
+    QVERIFY(chrome.trayCanHoldWindow(&icon));
 }
 
 int main(int argc, char *argv[])
