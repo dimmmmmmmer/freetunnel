@@ -85,9 +85,15 @@ QString changeSummary(const QList<freetunnel::SubscriptionChange> &changes)
     return parts.join(QStringLiteral(", "));
 }
 
-// The config a document makes, checked as the editor checks one.
-std::optional<PreparedImport> serverOfDocument(const freetunnel::SubscriptionDocument &document)
+// The config a document makes, checked as the editor checks one. `givenAuthKey` is
+// the key the link or export the subscription came with carried: the document has
+// no field for one (SubscriptionDocument::clientRandomAuthKey), so a server that
+// checks a key is not told by it, and the key is the one place it was given.
+std::optional<PreparedImport> serverOfDocument(freetunnel::SubscriptionDocument document,
+                                               const QString &givenAuthKey)
 {
+    if (!document.clientRandomAuthKey)
+        document.clientRandomAuthKey = givenAuthKey;
     const freetunnel::SubscriptionApplied made =
             freetunnel::applySubscription({}, {}, document, freetunnel::SubscriptionApplyMode::Creation);
     if (!isUsableServer(made.config))
@@ -114,8 +120,8 @@ void Backend::startSubscriptions()
 
 // ---- adding a config from a subscription ---------------------------------
 
-// A link with a subscription address and nothing else this version refuses (an
-// auth key, a damaged server). False sends the link on as it would go without
+// A link with a subscription address and nothing else this version refuses (a
+// damaged server, a malformed auth key). False sends the link on as it would go without
 // subscriptions, and what it says about it is said there: so does a subscription
 // that cannot be added, once offerSubscription() has said why, when the link
 // gives a server of its own.
@@ -252,7 +258,9 @@ void Backend::onSubscriptionImportFetched(const QString &token, const freetunnel
     const QString updatesFrom = tr("Updates from %1").arg(import->origin);
     const QString existing = m_subscriptions->pathWithIdentity(import->identity, m_paths);
     if (result.document) {
-        if (std::optional<PreparedImport> fetched = serverOfDocument(*result.document)) {
+        const QString givenAuthKey =
+                import->given ? freetunnel::parseConfigToml(import->given->tomlContent).clientRandomAuthKey : QString();
+        if (std::optional<PreparedImport> fetched = serverOfDocument(*result.document, givenAuthKey)) {
             fetched->link = token;
             fetched->existingPath = existing;
             import->fetched = fetched;
@@ -518,10 +526,11 @@ void Backend::forgetSubscription(const QString &path)
 // A linked config's server is its subscription's: an editor save keeps what
 // the file and the credential store hold for it, so a form opened before a
 // refresh does not write the old server back. The password stays the form's
-// when the store gives none, rather than none.
+// when the store gives none, rather than none. The auth key is not kept: the
+// subscription's format has no field for it, so it is the user's, from the link
+// the config came with, and the editor can change it.
 bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
-                                          const QString &storedAuthKey, freetunnel::ConfigToml *ct, QString *password,
-                                          QString *authKey) const
+                                          freetunnel::ConfigToml *ct, QString *password) const
 {
     if (!m_settings.subscriptions_enabled || path.isEmpty() || !m_subscriptions->isLinked(path))
         return false;
@@ -534,9 +543,6 @@ bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fi
     ct->clientRandom = file.clientRandom;
     if (!storedPassword.isEmpty())
         *password = storedPassword;
-    // The key goes with the server, so a form opened before a refresh does not
-    // write the old one back, or clear the new one: the store's, or none.
-    *authKey = storedAuthKey;
     return true;
 }
 

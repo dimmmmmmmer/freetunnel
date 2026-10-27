@@ -100,6 +100,26 @@ QString staticLink(const QString &name, const QString &hostname)
                                 {0x0c, name.toUtf8()}});
 }
 
+// A version 2 link with a server of its own, an auth key and a subscription
+// address: what the endpoint exports from 1.3.0 on for a server that checks a key.
+// The key is in the link alone; the subscription's document has no field for it.
+QString keyedSubscriptionLink(const QString &key)
+{
+    return v2::linkFromRecords({{0x00, QByteArray(1, 2)},
+                                {0x01, QByteArrayLiteral("vpn.example.com")},
+                                {0x02, QByteArrayLiteral("203.0.113.7:443")},
+                                {0x05, QByteArrayLiteral("alice")},
+                                {0x06, QByteArrayLiteral("s3cret")},
+                                {0x0c, QByteArrayLiteral("Keyed")},
+                                {0x0e, v2::kSubscription.toUtf8()},
+                                {0x0f, key.toUtf8()}});
+}
+
+QString authKeyOf(const QString &path)
+{
+    return CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path));
+}
+
 // The app's state for one Backend: the settings it starts with, the stand-in
 // network, the clock and the jitter. Declared before the Backend, so they
 // outlive it.
@@ -193,6 +213,10 @@ private slots:
     void replacingWithAnotherServerDetachesAndSaysSo();
     void sharingALinkedConfigLeavesTheSubscriptionOut();
     void anEditorSaveKeepsWhatTheSubscriptionOwns();
+    void aKeyedLinkKeepsItsKeyThroughTheFetch();
+    void aRefreshThatSaysNothingOfTheKeyLeavesItInTheStore();
+    void aRefreshThatDoesSayItFollowsIt();
+    void theEditorCanSetTheKeyOfALinkedConfig();
     void withTheSettingOffAnEditorSaveWritesTheForm();
     void linksWhoseConfigIsGoneAreRemovedAtStart();
 
@@ -985,6 +1009,123 @@ void TestBackendSubscription::anEditorSaveKeepsWhatTheSubscriptionOwns()
 }
 
 // Off, a linked config is an ordinary one: the editor writes what the form says.
+// The endpoint's document has no field for the auth key (1.3.0-beta.2): only the
+// link carries it. The fetch succeeding must not read that as "the server has no
+// key" and drop the one the link gave; the server's rules admit the client by it.
+void TestBackendSubscription::aKeyedLinkKeepsItsKeyThroughTheFetch()
+{
+    Rig rig;
+    const QString path = linkThroughImport(rig, keyedSubscriptionLink(QStringLiteral("aabbccdd")),
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(rig.subs()->isLinked(path));
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+    const QString connect = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(connect.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(connect));
+    QVERIFY(!readText(path).contains(QStringLiteral("aabbccdd")));
+
+    // And when the fetch fails, the server given with the link is the one added,
+    // with its key.
+    QSignalSpy consent(rig.subs(), &SubscriptionController::consentRequired);
+    rig.backend->importDeepLink(keyedSubscriptionLink(QStringLiteral("11223344")));
+    QCOMPARE(consent.count(), 1);
+    const QString token = consent.last().at(0).toString();
+    QVERIFY(rig.backend->fetchSubscriptionForImport(token));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::failure(SubscriptionFetchError::Network)));
+    QSignalSpy imported(rig.backend.get(), &Backend::configImported);
+    QVERIFY(rig.backend->confirmDeepLinkImport(token, false));
+    QCOMPARE(authKeyOf(rig.pathOf(imported.last().at(0).toString())), QStringLiteral("11223344"));
+}
+
+// A refresh, which the document used to turn into "no key": the first one that
+// succeeded deleted the key from the store, and the config stopped connecting as
+// soon as the server's rules required it.
+void TestBackendSubscription::aRefreshThatSaysNothingOfTheKeyLeavesItInTheStore()
+{
+    Rig rig;
+    const QString path = linkThroughImport(rig, keyedSubscriptionLink(QStringLiteral("aabbccdd")),
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+
+    // One that changes something else: written, and the key is still there.
+    QSignalSpy updated(rig.subs(), &SubscriptionController::updated);
+    rig.clock += 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn.example.com", "203.0.113.9:443"))));
+    QVERIFY(readText(path).contains(QStringLiteral("203.0.113.9:443")));
+    QCOMPARE(updated.count(), 1);
+    QVERIFY2(!updated.last().at(1).toString().contains(QStringLiteral("auth_key")),
+             qPrintable(updated.last().at(1).toString()));
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+    QVERIFY(freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"")));
+
+    // And one that changes nothing.
+    rig.clock += 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn.example.com", "203.0.113.9:443"))));
+    QCOMPARE(updated.count(), 1);
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+}
+
+// A document that does mention the key (a server or a later format that says it)
+// is followed, by name in the summary and never by value.
+void TestBackendSubscription::aRefreshThatDoesSayItFollowsIt()
+{
+    Rig rig;
+    const QString path = linkThroughImport(rig, keyedSubscriptionLink(QStringLiteral("aabbccdd")),
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    QSignalSpy updated(rig.subs(), &SubscriptionController::updated);
+
+    rig.clock += 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
+            subscriptionDocument("vpn.example.com", "203.0.113.7:443", QStringLiteral("s3cret"),
+                                 QStringLiteral(R"(,"client_random_auth_key":"11223344")")))));
+    QCOMPARE(authKeyOf(path), QStringLiteral("11223344"));
+    QCOMPARE(updated.last().at(1).toString(), QStringLiteral("client_random_auth_key"));
+    QVERIFY(!rig.backend->logText().contains(QStringLiteral("11223344")));
+
+    // Said to be none: cleared.
+    rig.clock += 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
+            subscriptionDocument("vpn.example.com", "203.0.113.7:443", QStringLiteral("s3cret"),
+                                 QStringLiteral(R"(,"client_random_auth_key":"")")))));
+    QVERIFY(authKeyOf(path).isEmpty());
+}
+
+// The key is the user's on a linked config, since the subscription cannot send
+// it: the editor shows it, takes a new one, and a refresh afterwards keeps that.
+void TestBackendSubscription::theEditorCanSetTheKeyOfALinkedConfig()
+{
+    Rig rig;
+    // A link that brought no key, to a server that came to need one.
+    const QString path = linkThroughImport(rig, v2::kSubscriptionOnly,
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(authKeyOf(path).isEmpty());
+
+    QVariantMap form = rig.backend->configFields(rig.backend->configIndex(path));
+    form.insert(QStringLiteral("editIndex"), rig.backend->configIndex(path));
+    form.insert(QStringLiteral("authKey"), QStringLiteral("aabbccdd"));
+    QVERIFY(rig.backend->createConfig(form));
+    QVERIFY(rig.subs()->isLinked(path));
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+    QCOMPARE(rig.backend->configFields(rig.backend->configIndex(path)).value(QStringLiteral("authKey")).toString(),
+             QStringLiteral("aabbccdd"));
+
+    rig.clock += 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn.example.com", "203.0.113.9:443"))));
+    QVERIFY(readText(path).contains(QStringLiteral("203.0.113.9:443")));
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+}
+
 void TestBackendSubscription::withTheSettingOffAnEditorSaveWritesTheForm()
 {
     QString path;
