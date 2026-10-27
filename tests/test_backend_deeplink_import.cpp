@@ -11,6 +11,7 @@
 #include <QSignalSpy>
 
 #include "app/Backend.h"
+#include "app/BackendConfigShared.h"
 #include "core/ConfigImport.h"
 #include "core/ConfigPaths.h"
 #include "core/ConfigStore.h"
@@ -51,6 +52,9 @@ private slots:
     void aServerThatNeedsAnAuthKeyIsImportedWithItsKeyInTheStore();
     void aLinkWithoutAKeyReplacingOneWithAKeyDropsTheOldKey();
     void aLinkTooNewIsStillALinkError();
+    void aKeyTheStoreRefusesTakesTheNewPasswordBackOutOfIt();
+    void aKeyTheStoreRefusesLeavesAReplacedConfigItsOwnPassword();
+    void aNewConfigDoesNotTakeAKeyLeftAtItsPath();
     void importFileTakesAServerThatNeedsAnAuthKey();
     void importFileRefusesAnAuthKeyThatIsNotHex();
     void importFileTakesAnEmptyAuthKey();
@@ -1278,6 +1282,140 @@ void TestBackendDeepLinkImport::importFileRefusesAnEndpointExportWithoutAServer(
     QCOMPARE(failed.last().at(0).toString(),
              QStringLiteral("Not a valid TrustTunnel config (missing address or credentials)"));
     QFile::remove(path);
+}
+
+// A link with a password and a key puts both in the store. The store takes the
+// password and refuses the key (a Keychain prompt denied, a key past what
+// Windows' Credential Manager holds); the import fails, and had left the
+// password where the config would have had it, saying that the password could
+// not be stored when it was the key.
+namespace {
+
+QString probeLink(const char *name, const QByteArray &password, const QByteArray &key)
+{
+    QList<QPair<char, QByteArray>> records{{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
+                                           {0x02, "1.2.3.4:443"},    {0x05, "alice"},
+                                           {0x06, password},         {0x0C, name}};
+    if (!key.isEmpty())
+        records << qMakePair(char(0x0F), key);
+    return v2::linkFromRecords(records);
+}
+
+// Refuses the first store of `keyEntry`, as a store does that is locked for that
+// one item, and is open again for whatever is stored after it - what the import
+// then does to put things back.
+class RefuseOneKey {
+public:
+    explicit RefuseOneKey(const QString &keyEntry)
+    {
+        freetunnel::CredentialStore::setCallHookForTest([this, keyEntry](const char *call, const QString &key) {
+            if (QLatin1String(call) != QLatin1String("store"))
+                return;
+            if (key == keyEntry) {
+                ++refusals;
+                qputenv("FT_TEST_KEYRING", "locked");
+            } else if (refusals > 0) {
+                qunsetenv("FT_TEST_KEYRING");
+            }
+        });
+    }
+    ~RefuseOneKey()
+    {
+        freetunnel::CredentialStore::setCallHookForTest(nullptr);
+        qunsetenv("FT_TEST_KEYRING");
+    }
+    int refusals = 0;
+};
+
+} // namespace
+
+void TestBackendDeepLinkImport::aKeyTheStoreRefusesTakesTheNewPasswordBackOutOfIt()
+{
+    using freetunnel::CredentialStore;
+    const QString path = freetunnel::uniqueOwnerConfigPath(QStringLiteral("ProbeFresh"));
+    QVERIFY(!QFileInfo::exists(path));
+    Backend backend;
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    bool imported = true;
+    int refusals = 0;
+    {
+        RefuseOneKey refuse(CredentialStore::keyForConfigAuthKey(path));
+        imported = backend.confirmDeepLinkImport(probeLink("ProbeFresh", "link-pass", "aabbccdd"));
+        refusals = refuse.refusals;
+    }
+    QVERIFY2(refusals >= 1, "the key was never offered to the store");
+    QVERIFY(!imported);
+    QVERIFY2(!QFileInfo::exists(path), "a config the import could not finish was kept");
+    QVERIFY2(CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path)).isEmpty(),
+             "the password stayed in the store for a config that is not there");
+    QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)).isEmpty());
+    // Said as it was: the key, not the password.
+    QVERIFY(!failed.isEmpty());
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::backend_config::authKeyNotStoredMessage());
+}
+
+// And on a replace, the old config is put back with its own password: the one the
+// store held before is what comes back, not the link's and not none.
+void TestBackendDeepLinkImport::aKeyTheStoreRefusesLeavesAReplacedConfigItsOwnPassword()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(probeLink("ProbeReplace", "first-pass", QByteArray())));
+    QCOMPARE(imported.count(), 1);
+    const QString path = pathOfImported(imported);
+    const QString before = readConfigText(path);
+    const QString passwordEntry = CredentialStore::keyForConfigPath(path);
+    QCOMPARE(CredentialStore::loadPassword(passwordEntry), QStringLiteral("first-pass"));
+
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    bool replaced = true;
+    {
+        RefuseOneKey refuse(CredentialStore::keyForConfigAuthKey(path));
+        replaced = backend.confirmDeepLinkImport(probeLink("ProbeReplace", "attacker-pass", "aabbccdd"), true);
+        QVERIFY2(refuse.refusals >= 1, "the key was never offered to the store");
+    }
+    QVERIFY(!replaced);
+    QCOMPARE(readConfigText(path), before);
+    QCOMPARE(CredentialStore::loadPassword(passwordEntry), QStringLiteral("first-pass"));
+    QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)).isEmpty());
+    QVERIFY(!failed.isEmpty());
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::backend_config::authKeyNotStoredMessage());
+}
+
+// Credentials are kept by path, and a name is used again. An entry for the key
+// left behind by a config of that name (a removal a locked keyring refused, or
+// one made under 1.2.x, which knows nothing of these entries) is not the key of a
+// new config that brings none: it would be sent to whatever server that names.
+void TestBackendDeepLinkImport::aNewConfigDoesNotTakeAKeyLeftAtItsPath()
+{
+    using freetunnel::CredentialStore;
+    const QString path = freetunnel::uniqueOwnerConfigPath(QStringLiteral("ProbeStale"));
+    QVERIFY(!QFileInfo::exists(path));
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(CredentialStore::storePassword(keyEntry, QStringLiteral("deadbeef")));
+
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QVERIFY(backend.confirmDeepLinkImport(probeLink("ProbeStale", "link-pass", QByteArray())));
+    QCOMPARE(imported.count(), 1);
+    QCOMPARE(pathOfImported(imported), path);
+    QVERIFY2(CredentialStore::loadPassword(keyEntry).isEmpty(), "the leftover key was kept for the new config");
+    const QString connect = freetunnel::buildConnectConfigToml(path);
+    QVERIFY(connect.contains(QStringLiteral("link-pass")));
+    QVERIFY2(!connect.contains(QStringLiteral("client_random_auth_key")), qPrintable(connect));
+
+    // The same for a config file the user picks.
+    const QString filePath = freetunnel::uniqueOwnerConfigPath(QStringLiteral("ProbeStaleFile"));
+    const QString fileKeyEntry = CredentialStore::keyForConfigAuthKey(filePath);
+    QVERIFY(CredentialStore::storePassword(fileKeyEntry, QStringLiteral("deadbeef")));
+    const QString source = writeTempConfig(QStringLiteral("ProbeStaleFile.toml"), validImportBody());
+    QVERIFY(!source.isEmpty());
+    QVERIFY(backend.importFile(source));
+    QFile::remove(source);
+    QVERIFY(QFileInfo::exists(filePath));
+    QVERIFY2(CredentialStore::loadPassword(fileKeyEntry).isEmpty(), "the leftover key was kept for the new file");
+    QVERIFY(!freetunnel::buildConnectConfigToml(filePath).contains(QStringLiteral("client_random_auth_key")));
 }
 
 QTEST_MAIN(TestBackendDeepLinkImport)

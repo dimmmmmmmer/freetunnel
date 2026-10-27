@@ -340,6 +340,7 @@ bool Backend::createConfig(const QVariantMap &f)
 
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
+    const bool newFile = !QFileInfo::exists(target);
     QString saveErr;
     if (!freetunnel::backend_config::saveConfigWithPassword(
                 target, tomlBody.toUtf8(), parsed.password, passwordStoredFor(target, edit), parsed.authKey,
@@ -354,6 +355,11 @@ bool Backend::createConfig(const QVariantMap &f)
         }
         return false;
     }
+    // A new file brings its own key or none: not one left at its path by a config
+    // that was called the same. After the save, which is the credential store's
+    // all-or-nothing step and has nothing to do with it.
+    if (newFile && parsed.authKey.isEmpty())
+        freetunnel::backend_config::dropLeftoverAuthKey(target);
     if (!oldPath.isEmpty() && oldPath != target)
         forgetOldPassword(oldPath, target, parsed.password, parsed.authKey, edit.authKey);
 

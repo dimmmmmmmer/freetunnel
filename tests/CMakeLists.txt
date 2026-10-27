@@ -312,7 +312,7 @@ add_executable(test_backend_deeplink_import
     ../qml.qrc
 )
 target_include_directories(test_backend_deeplink_import PRIVATE
-    . ../include ../include/app ../include/core ../include/vpn)
+    . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_deeplink_import PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)

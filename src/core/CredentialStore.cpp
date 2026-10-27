@@ -617,22 +617,45 @@ static bool writeConfigText(const QString &path, const QString &toml)
     return f.commit();
 }
 
-bool migrateConfigPassword(const QString &configPath)
+bool migrateConfigPassword(const QString &configPath, SecretRefused *refused)
 {
+    if (refused)
+        *refused = SecretRefused::None;
     const QString abs = QFileInfo(configPath).absoluteFilePath();
-    const QString key = CredentialStore::keyForConfigPath(abs);
+    const QString passwordEntry = CredentialStore::keyForConfigPath(abs);
+    const QString authKeyEntry = CredentialStore::keyForConfigAuthKey(abs);
     ConfigToml c = parseConfigToml(readConfigText(abs));
     if (c.password.isEmpty() && c.clientRandomAuthKey.isEmpty())
         return true;
 
-    if (!c.password.isEmpty() && !CredentialStore::storePassword(key, c.password))
+    // The one case where a refusal can come after something was written: the
+    // password lands, then the key is refused (a denied Keychain prompt for an
+    // item that is there, or a key over what Windows' Credential Manager holds).
+    // What the password's entry held is read before it is overwritten, and only
+    // then, so that the password can be put back; a config with one secret has
+    // nothing written by the time its only store can fail.
+    const bool both = !c.password.isEmpty() && !c.clientRandomAuthKey.isEmpty();
+    const QString previousPassword = both ? CredentialStore::loadPassword(passwordEntry) : QString();
+
+    if (!c.password.isEmpty() && !CredentialStore::storePassword(passwordEntry, c.password)) {
+        if (refused)
+            *refused = SecretRefused::Password;
         return false;
+    }
     // The second secret of the config, stored the same way before the file loses
     // it. A key that is already stored is not what the file holds any more, and
     // is not read back: the file's is the newer, as the password's is.
-    if (!c.clientRandomAuthKey.isEmpty()
-        && !CredentialStore::storePassword(CredentialStore::keyForConfigAuthKey(abs), c.clientRandomAuthKey))
+    if (!c.clientRandomAuthKey.isEmpty() && !CredentialStore::storePassword(authKeyEntry, c.clientRandomAuthKey)) {
+        if (both) {
+            if (previousPassword.isEmpty())
+                CredentialStore::deletePassword(passwordEntry);
+            else
+                CredentialStore::storePassword(passwordEntry, previousPassword);
+        }
+        if (refused)
+            *refused = SecretRefused::AuthKey;
         return false;
+    }
 
     c.password.clear();
     c.clientRandomAuthKey.clear();
@@ -651,6 +674,14 @@ QString buildConnectConfigToml(const QString &configPath, const QString &logLeve
         return QString();
     if (c.clientRandomAuthKey.isEmpty())
         c.clientRandomAuthKey = CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(abs));
+    // With a key the core derives the client random from it, replaces whatever
+    // client_random says and clears its mask - and warns about the one it ignores
+    // on every TLS handshake and every ping, which the recovery loop of a kill
+    // switch repeats for as long as it runs. The config on disk keeps the user's
+    // value for the day the key goes; the core is only handed what it will use.
+    // Not in buildConfigToml(): an export or a share link keeps both.
+    if (!c.clientRandomAuthKey.isEmpty())
+        c.clientRandom.clear();
     return buildConfigToml(c, logLevel);
 }
 

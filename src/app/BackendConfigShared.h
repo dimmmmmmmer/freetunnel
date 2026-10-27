@@ -17,6 +17,13 @@ bool storeConfigPassword(const QString &target, const QString &password);
 // the store held for target before) says there is one, so a config without a key
 // never touches the store. True once the store holds exactly authKey.
 bool storeConfigAuthKey(const QString &target, const QString &authKey, const QString &previousAuthKey);
+// For a config being made at a path that had no file before, and brings no key.
+// Credentials are keyed by path, and a name is reused: an entry for this path is a
+// leftover of an earlier config of that name (a removal the keyring refused, one
+// made under 1.2.x, which knows nothing of these entries), and the new config
+// would send its key to whatever server it names. Costs the store nothing when
+// there is no entry.
+void dropLeftoverAuthKey(const QString &target);
 // Body + password + auth key as one all-or-nothing step: the destination is
 // untouched unless the credential store accepted both, and when the file then
 // cannot be written the store is put back to previousPassword and previousAuthKey,
