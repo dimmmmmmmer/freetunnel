@@ -85,6 +85,8 @@ private slots:
 
     // The client random auth key (TrustTunnel 1.3), a second secret beside the password.
     void theEditorStoresTheAuthKeyBesideThePassword();
+    void theCoreIsNotHandedAClientRandomItWouldIgnore();
+    void aNewConfigDoesNotTakeAKeyLeftAtItsPath();
     void theEditorRefusesAnAuthKeyThatIsNotHex();
     void clearingTheAuthKeyTakesItOutOfTheStore();
     void renamingCarriesTheAuthKeyToTheNewPath();
@@ -818,6 +820,76 @@ void TestBackendConfig::theEditorStoresTheAuthKeyBesideThePassword()
     const QString plain = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("Plain.toml"));
     QVERIFY(QFileInfo::exists(plain));
     QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(plain)).isEmpty());
+}
+
+// With a key the core derives the client random from it and ignores client_random,
+// and logs a warning about the ignored one on every TLS handshake and ping. So the
+// core is handed the key alone; the config keeps the user's client random for when
+// the key goes, and the connect TOML gets it back then.
+void TestBackendConfig::theCoreIsNotHandedAClientRandomItWouldIgnore()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("clientRandom")] = QStringLiteral("deadbeef/ffff0000");
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+
+    const QString connect = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(connect.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(connect));
+    QVERIFY2(connect.contains(QStringLiteral("client_random = \"\"\n")), qPrintable(connect));
+    QVERIFY2(!connect.contains(QStringLiteral("deadbeef")), qPrintable(connect));
+    // The config itself, and what an export or a share link is made from, keep it.
+    QVERIFY2(readAll(path).contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")),
+             qPrintable(readAll(path)));
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("clientRandom")).toString(),
+             QStringLiteral("deadbeef/ffff0000"));
+
+    // Without a key it is the config's again.
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("authKey")] = QString();
+    QVERIFY(backend.createConfig(edit));
+    QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)).isEmpty());
+    const QString without = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(without.contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")), qPrintable(without));
+    QVERIFY(!without.contains(QStringLiteral("client_random_auth_key")));
+}
+
+// Credentials are kept by path and a name is used again. A key entry left at the
+// path by a config of that name (a removal the keyring refused, or one made under
+// 1.2.x, which knows nothing of these entries) is not the key of a new config made
+// without one: it would be sent to whatever server that config names.
+void TestBackendConfig::aNewConfigDoesNotTakeAKeyLeftAtItsPath()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Stale"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString entry = CredentialStore::keyForConfigAuthKey(path);
+    QCOMPARE(CredentialStore::loadPassword(entry), QStringLiteral("aabbccdd"));
+
+    backend.removeConfig(0);
+    QVERIFY(!QFileInfo::exists(path));
+    // As a keyring that refused the delete leaves it.
+    QVERIFY(CredentialStore::storePassword(entry, QStringLiteral("aabbccdd")));
+
+    QVERIFY(backend.createConfig(form(QStringLiteral("Stale"), QStringLiteral("other-pass"))));
+    QCOMPARE(pathFor(backend, 0), path);
+    QVERIFY2(CredentialStore::loadPassword(entry).isEmpty(), "the new config took the old one's key");
+    const QString connect = freetunnel::buildConnectConfigToml(path);
+    QVERIFY(connect.contains(QStringLiteral("other-pass")));
+    QVERIFY2(!connect.contains(QStringLiteral("client_random_auth_key")), qPrintable(connect));
+    QVERIFY(backend.configFields(0).value(QStringLiteral("authKey")).toString().isEmpty());
+
+    // One that brings a key keeps it: the entry is not dropped from under it.
+    backend.removeConfig(0);
+    QVariantMap keyed = form(QStringLiteral("Stale"), QStringLiteral("third-pass"));
+    keyed[QStringLiteral("authKey")] = QStringLiteral("11223344");
+    QVERIFY(backend.createConfig(keyed));
+    QCOMPARE(CredentialStore::loadPassword(entry), QStringLiteral("11223344"));
 }
 
 // The core quietly connects without a key it cannot decode, and a server that

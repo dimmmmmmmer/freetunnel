@@ -135,6 +135,11 @@ bool storeConfigAuthKey(const QString &target, const QString &authKey, const QSt
     return freetunnel::CredentialStore::loadPassword(key) == authKey;
 }
 
+void dropLeftoverAuthKey(const QString &target)
+{
+    freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigAuthKey(target));
+}
+
 bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
                             const QString &previousPassword, const QString &authKey,
                             const QString &previousAuthKey, QString *errOut)

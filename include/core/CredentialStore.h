@@ -60,11 +60,19 @@ public:
 #endif
 };
 
+// Which secret the credential store would not take, when a migration failed.
+enum class SecretRefused { None, Password, AuthKey };
+
 // Move the inline password and client random auth key into the credential store
 // and strip them from TOML. Both are stored before either is stripped, and the
 // file is rewritten only when the store has taken what was in it; a false return
-// leaves the file as it was.
-bool migrateConfigPassword(const QString &configPath);
+// leaves the file as it was. When the store takes the password and then refuses the
+// key, the password goes back to what the store held for this config (deleted when
+// it held none), so a config the caller keeps or puts back does not find another
+// provider's password at its path. (A file that then cannot be rewritten is a
+// different failure, and is not undone here.)
+// *refused says which of the two the store refused.
+bool migrateConfigPassword(const QString &configPath, SecretRefused *refused = nullptr);
 
 // Build a helper-readable config TOML with the password and the client random
 // auth key injected (in-memory only).

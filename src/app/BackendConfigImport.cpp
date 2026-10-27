@@ -35,13 +35,30 @@ bool Backend::importFromClipboard()
 
 bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bool targetPreExisted)
 {
-    if (!freetunnel::migrateConfigPassword(target)) {
+    // A new config has the key its file brings, which the migration below moves
+    // into the store, or none: not one left at this path by a config that was
+    // called the same. (A replace has dealt with its entry already.)
+    if (!targetPreExisted) {
+        QFile file(target);
+        const QString text = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        if (freetunnel::parseConfigToml(text).clientRandomAuthKey.isEmpty())
+            freetunnel::backend_config::dropLeftoverAuthKey(target);
+    }
+    freetunnel::SecretRefused refused = freetunnel::SecretRefused::None;
+    if (!freetunnel::migrateConfigPassword(target, &refused)) {
         // Only remove what we created. On the replace path this is the user's
         // own config, and deleting it because a keyring was locked is exactly the
         // data loss the create/edit path was fixed for.
         if (!targetPreExisted)
             QFile::remove(target);
-        reportPasswordNotStored();
+        // Said as the editor says it: the password was stored (and has been put
+        // back), and it is the key the store would not take.
+        if (refused == freetunnel::SecretRefused::AuthKey) {
+            recheckCredentialStorage();
+            emit errorOccurred(freetunnel::backend_config::authKeyNotStoredMessage());
+        } else {
+            reportPasswordNotStored();
+        }
         return false;
     }
     QStringList stored = loadStoredConfigs();

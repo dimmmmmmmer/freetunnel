@@ -360,9 +360,15 @@ bool Backend::createConfig(const QVariantMap &f)
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
+    const bool newFile = !QFileInfo::exists(target);
     if (!writeCreatedConfig(target, tomlBody, parsed.password, passwordStoredFor(target, edit),
                             parsed.authKey, authKeyStoredFor(target, edit)))
         return false;
+    // A new file brings its own key or none: not one left at its path by a config
+    // that was called the same. After the save, which is the credential store's
+    // all-or-nothing step and has nothing to do with it.
+    if (newFile && parsed.authKey.isEmpty())
+        freetunnel::backend_config::dropLeftoverAuthKey(target);
     if (!oldPath.isEmpty() && oldPath != target)
         forgetOldPassword(oldPath, target, parsed.password, parsed.authKey, edit.authKey);
 
