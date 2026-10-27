@@ -186,6 +186,12 @@ void TlsTestServer::onRequestData(QSslSocket *socket)
 
 void TlsTestServer::respond(QSslSocket *socket, const Response &response)
 {
+    if (response.delayMs > 0) {
+        Response later = response;
+        later.delayMs = 0;
+        QTimer::singleShot(response.delayMs, socket, [this, socket, later]() { respond(socket, later); });
+        return;
+    }
     if (response.hangUp) {
         socket->disconnectFromHost();
         return;
@@ -196,8 +202,10 @@ void TlsTestServer::respond(QSslSocket *socket, const Response &response)
         head += "Content-Type: " + response.contentType + "\r\n";
     for (const Header &h : response.headers)
         head += h.first + ": " + h.second + "\r\n";
-    head += response.chunked ? QByteArray("Transfer-Encoding: chunked\r\n")
-                             : "Content-Length: " + QByteArray::number(response.body.size()) + "\r\n";
+    if (response.chunked)
+        head += "Transfer-Encoding: chunked\r\n";
+    else if (!response.lengthless)
+        head += "Content-Length: " + QByteArray::number(response.body.size()) + "\r\n";
     socket->write(head + "Connection: close\r\n\r\n");
     if (response.holdBody)
         return;

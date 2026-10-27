@@ -34,9 +34,13 @@ public:
         QList<Header> headers; // more, such as Location or Set-Cookie
         QByteArray body;
         bool chunked = false;  // no Content-Length, and the body in chunks
+        // No Content-Length and no chunks: the body ends where the connection does,
+        // as an endpoint sends a 401, 403, 404 or 405.
+        bool lengthless = false;
         bool endless = false;  // chunked: the chunks, then never the last one
         bool holdBody = false; // the head with the body's length, then nothing
         int trickleMs = 0;     // the body a byte at a time, this far apart
+        int delayMs = 0;       // the whole answer only this long after the request
         int cutAfter = -1;     // only this many bytes of the body, then close
         bool hangUp = false;   // close the connection without an answer
     };

@@ -423,9 +423,24 @@ void SubscriptionFetcher::onEncrypted(QNetworkReply *reply)
         cancel(reply, &m_untrusted);
 }
 
+// A reply other than a 200 is judged on its headers, as they arrive: nothing in
+// its body counts. An endpoint sends a 401, 403, 404 or 405 with no length, so
+// that body ends where the connection does, and on schannel Qt never hears that
+// close: its backend takes the server's close_notify as a close of its own and
+// reports nothing, and the HTTP channel leaves the reply open. Waiting for the
+// end of the body would make each of those a timeout at the deadline.
 // A body announced as too large is refused before it arrives.
 void SubscriptionFetcher::onMetaDataChanged(QNetworkReply *reply)
 {
+    const QVariant status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+    if (status.isValid() && status.toInt() != 200) {
+        reply->disconnect(this);
+        m_reply = nullptr;
+        onHttpReply(reply, status.toInt());
+        reply->abort();
+        reply->deleteLater();
+        return;
+    }
     const QVariant length = reply->header(QNetworkRequest::ContentLengthHeader);
     if (length.isValid() && length.toLongLong() > kMaxSubscriptionBodyBytes)
         cancel(reply, &m_tooLarge);

@@ -79,12 +79,12 @@ TlsTestServer::Response redirect(int code, const QByteArray &location)
     return status(code, {{"Location", location}});
 }
 
-// A redirect whose few bytes of body take most of a second to arrive.
+// A redirect that takes most of a second to come. Its headers are what is
+// late: the fetch follows a redirect as soon as they arrive.
 TlsTestServer::Response slowRedirect(const QByteArray &location)
 {
     TlsTestServer::Response response = redirect(302, location);
-    response.body = "xxxxxx";
-    response.trickleMs = 100;
+    response.delayMs = 600;
     return response;
 }
 
@@ -175,6 +175,8 @@ private slots:
     void onlyJsonIsTaken();
     void eachStatusMeansSomething_data();
     void eachStatusMeansSomething();
+    void aStatusIsJudgedOnItsHeaders_data();
+    void aStatusIsJudgedOnItsHeaders();
     void aDocumentTheParserRefusesSaysWhy_data();
     void aDocumentTheParserRefusesSaysWhy();
 
@@ -874,6 +876,57 @@ void TestSubscriptionFetcher::eachStatusMeansSomething()
     QCOMPARE(server.requests().size(), 1);
 }
 
+// An endpoint sends a 401, 403, 404 or 405 with no length, so the body ends
+// where the connection does, and on schannel Qt never hears that close (see
+// aServerThatHangsUpIsANetworkError). Held open, the connection stands for that
+// on every backend: only the headers can decide, and they must, or each refusal
+// would end at the deadline as a timeout and be tried again.
+//
+// Except a 401, which Qt reads to its end before it says anything of it
+// (QHttpNetworkReplyPrivate::shouldEmitSignals(), then handleStatus() once all
+// is read), so nothing can judge one on its headers. Held open it waits out the
+// deadline, and so does the endpoint's own on schannel. This pins that.
+void TestSubscriptionFetcher::aStatusIsJudgedOnItsHeaders_data()
+{
+    QTest::addColumn<int>("code");
+    QTest::addColumn<bool>("heldOpen");
+    QTest::addColumn<SubscriptionFetchError>("expected");
+    for (const bool held : {false, true}) {
+        const char *how = held ? "held open" : "closed";
+        QTest::addRow("401, %s", how) << 401 << held << SubscriptionFetchError::Http401;
+        QTest::addRow("403, %s", how) << 403 << held << SubscriptionFetchError::Http403;
+        QTest::addRow("404, %s", how) << 404 << held << SubscriptionFetchError::HttpNoSubscription;
+        QTest::addRow("405, %s", how) << 405 << held << SubscriptionFetchError::HttpNoSubscription;
+        QTest::addRow("500, %s", how) << 500 << held << SubscriptionFetchError::HttpServer;
+        // A redirect is followed on its headers too.
+        QTest::addRow("302 to the document, %s", how) << 302 << held << SubscriptionFetchError::None;
+    }
+}
+
+void TestSubscriptionFetcher::aStatusIsJudgedOnItsHeaders()
+{
+    QFETCH(int, code);
+    QFETCH(bool, heldOpen);
+    QFETCH(SubscriptionFetchError, expected);
+    TlsTestServer server;
+    QVERIFY(listen(server, m_certs->selfSigned));
+    TlsTestServer::Response response = code == 302 ? redirect(302, "/doc") : status(code);
+    response.lengthless = true;
+    response.holdBody = heldOpen;
+    server.setRoute("/sub", response);
+    server.setRoute("/doc", json());
+    const bool waits = code == 401 && (heldOpen || m_backend == QLatin1String("schannel"));
+    if (waits)
+        qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "1500");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
+    QVERIFY_FETCH(result, waits ? SubscriptionFetchError::Timeout : expected);
+    if (!waits)
+        QCOMPARE(result->httpStatus, code == 302 ? 200 : code);
+    QVERIFY2(elapsed.elapsed() < 5000, qPrintable(QString::number(elapsed.elapsed())));
+}
+
 void TestSubscriptionFetcher::aDocumentTheParserRefusesSaysWhy_data()
 {
     QTest::addColumn<QByteArray>("body");
@@ -976,7 +1029,7 @@ void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer()
         server.setRefusal(refusal);
     fetcher.start(pinned(server.port(), pemOf({&m_certs->selfSigned}),
                          afterARedirect ? QStringLiteral("/start") : QStringLiteral("/sub")));
-    // Once the redirect is asked for, while its body is still coming.
+    // Once the redirect is asked for, while its answer is still to come.
     if (afterARedirect) {
         QTRY_COMPARE(server.requests().size(), 1);
         server.setRefusal(refusal);
