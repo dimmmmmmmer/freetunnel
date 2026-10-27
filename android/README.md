@@ -1,11 +1,11 @@
-# FreeTunnel for Android (preview)
+# FreeTunnel for Android
 
 Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.7**
-adapter. This preview is submitted to the original
-[dimmmmmmmer/freetunnel](https://github.com/dimmmmmmmer/freetunnel) project.
-Official Android release publishing and signing are controlled by that project;
-a fork's release name or certificate is not an official release or an update
-compatibility contract.
+adapter, for phones, tablets and Android TV (Android 8.0 or later). Official
+releases are the `android-X.Y.Z` releases of
+[dimmmmmmmer/freetunnel](https://github.com/dimmmmmmmer/freetunnel), signed with
+the certificate pinned in `release-certificate.sha256`; a fork's release name or
+certificate is not an official release or an update compatibility contract.
 
 ## Features
 
@@ -171,7 +171,7 @@ scripts/build-android-release.sh
 The version is set once, as `appVersion` in `android/app/build.gradle`
 (`X.Y.Z`); `versionCode` is derived from it (`X*10000 + Y*100 + Z`). Official
 releases are tagged `android-X.Y.Z`, and the tag must equal `appVersion`. The
-preview is `0.9.0`.
+preview was `0.9.0`; the first official release is `1.0.0`.
 
 The script checks the required variables, runs the release tests and lint with
 Gradle's environment cleared of them, builds the APK unsigned, and signs it

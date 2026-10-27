@@ -1,45 +1,58 @@
-# Android preview changes
+# Android changes
 
 ## Unreleased
 
-- Android TV: Receive from phone. Under Add configuration, a TV shows a QR code and an address; a phone, tablet or laptop on the same network opens it in a browser and sends a `tt://` link or a TOML file from there, with no app on it. The TV shows what it received, with the address it came from, and adds it only once you confirm. It listens only on the home network, for one link and at most 5 minutes, and stops after 3 wrong codes. The link crosses the home network unencrypted, so use it on a network you trust.
-- Android TV: Receive from phone also takes a file. Next to the box for pasting, the page has a file field: pick a TOML file, or a text file that holds a `tt://` link, on the phone instead of copying its text. A TOML file without a name of its own is named after its file, as one picked on the TV is. The confirmation shows any configuration's name and server, a file's name too, without characters that reverse or hide text and with at most two marks, such as accents, on a letter, so that nothing in them can cover the line that says where it was sent from; what is saved is unchanged. Pasting works as before, and a send with nothing, with both, or with a file that isn't UTF-8 text shows the page again while the TV goes on waiting. So does a file over 512 KiB, such as a photo chosen by mistake, with a note saying so: the TV reads the rest of it for up to 2 seconds before closing, so the phone's browser can show that page instead of a connection error. A much larger file, such as a video, may still end in a connection error, and the TV goes on waiting all the same.
-- A configuration named after its file, such as `Дом.toml`, is no longer said to mix similar characters from different alphabets: the file's extension is not counted. A name that mixes them itself still gets that note, and so does a link's or an export's own name, which is checked whole: `раураӏ.com`, Cyrillic letters before a Latin ending, is still a mix.
-- The configuration editor also takes a pasted `tt://` link, and reads it as importing the link would, under the name typed there.
-- The import confirmation shows the configuration's name and server on one line, cut to 80 characters. A file could otherwise push the lines after them, such as where it was sent from or that certificate verification is off, out of sight, and a TV's remote cannot scroll there. What is saved is unchanged.
-- Android TV: FreeTunnel appears on the TV launcher with a banner, and works with a remote. The arrows reach every control, in dialogs too, and a ring shows which one has the focus. When a page updates, the focus and the scroll position stay where they were. Home opens on Connect or Disconnect, or on Reconnect while traffic is blocked, and Back goes to Home first, onto that control. The configuration editor opens on the name, and the focus never moves onto Show TOML and password by itself, where an OK would show the password on the screen. Pages keep clear of the screen's edges, and the app picker lists apps made only for TVs. Where a TV has no file picker, no screen for allowing VPN connections or no Always-on VPN, the app says so instead of closing or offering it.
-- Only the official build updates itself. A build that isn't signed with the release certificate says it doesn't come from the official channel and never checks for updates, and a downloaded update must be signed with that same certificate.
-- Installing an update while the VPN is on asks first, because Android turns the VPN off while it replaces the app. FreeTunnel then reconnects by itself after the update, unless you disconnected in the meantime. Android's Always-on start no longer restarts a connection that is already running.
-- Cancelling Android's install dialog keeps the verified download, so Install update works again without downloading it again, and if the dialog got lost, Install update starts over. The downloaded file is deleted after the update.
-- A download can be cancelled, and a failed update says whether the network, GitHub's rate limit, the security check or Android's installer stopped it. The update status names the version, and Settings keeps its scroll position when you come back to the app.
-- In the light theme, the text in the configuration editor and the app picker was dark on their dark dialogs and hard to read, and the picker's check boxes were faint. They now use the dark theme's colours. In the dark theme, the editor's hints were faint and are now lighter.
-- The configuration editor asks the keyboard not to go full screen, which some keyboards do in landscape, and not to show its own copy of the TOML if it does anyway. The keyboard draws that copy itself, without the password mask and outside the editor's screen-capture protection, where the TOML and its password could appear in plain text. It also asks the keyboard not to learn from what is typed there, such as the password.
-- Import the TOML file a TrustTunnel endpoint exports. It holds the server's settings with no `[endpoint]` table, and the app refused it as missing one. It is now imported as a link with the same settings would be, by the same rules: one that lacks the server's host name, addresses, user name or password is refused, as such a link is. It is named after the server's `name`, or, when it has none, as other TOML files are: after the file, or "From clipboard" when pasted. This includes an export pasted into the editor, which keeps the name typed there.
-- Ignore non-certificate PEM data in imported certificates. A certificate from a link or a TOML file, the editor's included, keeps only its certificates; anything else in it, such as a private key, is not saved, and the import says so. A certificate with no certificate in it is refused.
-- Reconnect by itself after the connection is lost with the kill switch on, instead of blocking traffic until you tap Reconnect. This includes a first connection that never succeeded, such as Always-on starting at boot before there is a network. Attempts run on the blocking interface FreeTunnel already holds, after 1 s, doubling to 30 s, and again from 1 s when a network appears. They never wake a sleeping phone. An alert says that traffic is blocked, with Reconnect and Disconnect, and the home screen offers Reconnect too. If a server accepts the connection and drops it within 10 s, the delays keep growing and the alert comes back without sound.
-- Import links from TrustTunnel endpoint 1.3. It marks every link as format version 2, and the app refused all of them as an unsupported version.
-- Subscriptions are not supported yet. A link or TOML file with only a subscription is refused and says so. From one that also has the server's settings, those settings are imported and the confirmation says the server won't update itself. The subscription address, which holds the VPN password, is not kept; the rest of a TOML file is kept as written. This includes TOML pasted into the editor, and a subscription address saved by an earlier version is no longer passed to the TrustTunnel core.
-- Refuse links and TOML files, the editor's included, for servers that need a TrustTunnel auth key, with a message saying a newer TrustTunnel core is needed, instead of failing to connect without a reason.
+## 1.0.0
 
-- Add authenticated official Android update discovery, Ed25519/version/hash verification, private downloads and PackageInstaller consent; launch checks are optional.
+The first official FreeTunnel for Android: a TrustTunnel VPN client for phones,
+tablets and Android TV, built on TrustTunnel's own Android library 1.1.7. It
+needs Android 8.0 or later.
 
-- Retain a blocking TUN after fatal native disconnect and post-establishment start failures when kill switch is enabled; add reconnect/disconnect notification actions.
-- Isolate native validation in a disposable private process and move UI validation off the main thread.
-- Fix permission-revocation cleanup, preserve state after rejected replacement, and reuse one network collector per service lifetime.
-- Migrate unsupported legacy destination rules, show imported rules, explain per-app lockdown, and require unlock for secure locked tiles.
-- Pin Android CI to Ubuntu 24.04, serialize superseded runs and limit push builds to main; verify release APK signer identity.
- preview
+### Highlights
 
-The preview includes import-only external links, private VPN consent, shared
-split-routing policy, process-local connection state, default kill switch,
-non-destructive encrypted storage, TOML/adapter/native validation, service
-lifecycle handling, IPv6 protection and upstream network collection. The official
-TrustTunnel 1.1.7 adapter and build tooling are pinned by checksums.
+- Add servers from `tt://` links, TrustTunnel's QR pages, TOML files (a client
+  config, or the file a TrustTunnel endpoint exports) and the clipboard.
+  Nothing is added until you confirm, and importing never connects.
+- The kill switch is on by default. If the connection is lost, traffic stays
+  blocked and FreeTunnel reconnects by itself: after 1 s, then up to every
+  30 s, and at once when a network appears. An alert offers Reconnect and
+  Disconnect.
+- Split tunnelling by app or by destination (domains and addresses).
+- Android TV: FreeTunnel is on the TV launcher, and every control is reachable
+  with a remote. **Receive from phone** shows a QR code on the TV; a phone,
+  tablet or laptop on the same network opens it in a browser and sends a link
+  or a TOML file.
+- Updates come from this project's GitHub releases. Settings checks for them
+  and verifies each one before Android is asked to install it.
+- A Quick Settings tile, Android's Always-on VPN, and English and Russian.
 
-Review follow-up rejects `/0` destination rules and whole-family exclusions,
-restores global IPv6 link-import routes, and serializes ordinary TOML tables for
-adapter compatibility with escaped credentials and PEM certificates.
+### Security
 
-Release signing remains parameterized by environment variables or CI secrets.
-Official release publishing, versioning and signing are managed by the original
-project. No fork signing identity or stable-release claim is part of this PR.
+- Profiles are encrypted with a key kept in Android Keystore, and are left out
+  of backups and device transfer.
+- The configuration editor hides the password, blocks screenshots and screen
+  recording, and asks the keyboard neither to learn from what is typed there
+  nor to show its own copy of it.
+- Of a server's certificate, only the certificates are kept. Anything else in
+  it, such as a private key, is left out, and the import says so.
+- An update must be a newer version, match the checksum in a manifest signed
+  with the project's release key, and be signed with the release certificate.
+  A build signed with another key never checks for updates.
+- Installing an update while the VPN is on asks first, because Android turns
+  the VPN off while it replaces the app. FreeTunnel reconnects after the
+  update, unless you disconnected in the meantime.
+- Receive from phone listens only on the home network, for one link and at
+  most 5 minutes, behind a one-time code, and stops after 3 wrong codes. The
+  link crosses the network unencrypted, so use it on a network you trust. The
+  TV shows which address sent the link, and adds nothing until you confirm.
+
+### Not yet
+
+- TrustTunnel 1.3 subscriptions are not followed. A link or file with only a
+  subscription is refused. From one that also has its server, the server is
+  added, and won't update itself. The subscription address, which holds the
+  VPN password, is not kept.
+- Servers that need a client random auth key are refused, with a message: they
+  need TrustTunnel core 1.3.
+- Checking for updates when the app starts is off by default. It can be turned
+  on in Settings.
