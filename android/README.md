@@ -132,9 +132,11 @@ apps open pages in, open the address in Chrome or Safari instead.
   to encrypt a page on a local `http://` address. Someone already watching that
   network at that moment could read the VPN password in it, or send their own
   configuration first. The TV's confirmation shows the server and the sender's
-  address, so check both, and use it only on a network you trust. A file's name
-  is shown there on one line, without characters that reverse or hide text,
-  and cut to 80 characters.
+  address, so check both, and use it only on a network you trust. The name and
+  the server, a file's name too, are shown there on one line, without
+  characters that reverse or hide text, with at most two marks such as accents
+  on a letter, and cut to 80 characters, so that nothing in them can cover the
+  sender's address. What is saved is the name as the file has it.
 - It does not work while the phone's VPN is on, over mobile data, or on a guest
   network that keeps its devices apart.
 

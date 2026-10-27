@@ -60,7 +60,7 @@ final class LinkReceiver {
 
     /** Called on the receiver's own thread, at most once, and never after stop(). */
     interface Listener {
-        /** fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted. */
+        /** fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted or has none. */
         void received(String text, String fileName, String sender);
         void stopped(Stop reason);
     }
@@ -568,53 +568,33 @@ final class LinkReceiver {
         return boundary != null && boundary.matches("[0-9A-Za-z'()+_,./:=? -]{0,69}[0-9A-Za-z'()+_,./:=?-]") ? boundary : null;
     }
 
-    // Letters that draw nothing, though they are not spaces: the Hangul fillers and
-    // the blank braille pattern. A name of them alone would look like no name.
-    private static final String BLANK_LETTERS = "\u115F\u1160\u3164\uFFA0\u2800";
+    // Longer than any file system lets a file's name be, so only a name no file has is cut.
+    static final int MAX_FILE_NAME = 255;
 
     /**
-     * A file's name as a browser sends it, fit to name a configuration and to show in
-     * the TV's confirmation: the quote and line breaks browsers write as %22, %0D and
-     * %0A undone, then only what follows the last / or \, on one line, trimmed and
-     * cut to 80 characters. Null when nothing visible is left.
-     *
-     * <p>On one line means without control, format (such as the ones that reverse or
-     * hide text), line or paragraph separator characters, with any other space as an
-     * ordinary one, and without letters that draw nothing. A character keeps at most
-     * two combining marks, as many as a language stacks on one, and marks that
-     * enclose it are dropped: drawn above and below it, a long stack of them would
-     * paint over the lines after the name, where the confirmation says where it came
-     * from.
+     * A file's name as a browser sends it, to name a configuration as a file picked on
+     * the TV is named: the quote and line breaks browsers write as %22, %0D and %0A
+     * undone, then only what follows the last / or \, without control, line or
+     * paragraph separator characters, trimmed, and cut to MAX_FILE_NAME characters.
+     * Null when the confirmation would show nothing of it (ShownText), which also
+     * shows it on one line and cut, without what else could reverse, hide or paint
+     * over text.
      */
     static String fileName(String sent) {
         String name = sent.replace("%22", "\"").replace("%0D", "").replace("%0A", "");
         name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
         StringBuilder kept = new StringBuilder(name.length());
-        // Combining marks kept on the last character; -1 at the start or after a
-        // space, where a mark has nothing to sit on.
-        int marks = -1;
         for (int i = 0; i < name.length(); ) {
             int c = name.codePointAt(i);
             i += Character.charCount(c);
             int type = Character.getType(c);
-            if (type == Character.CONTROL || type == Character.FORMAT || type == Character.LINE_SEPARATOR
-                    || type == Character.PARAGRAPH_SEPARATOR || type == Character.SURROGATE
-                    || type == Character.ENCLOSING_MARK || BLANK_LETTERS.indexOf(c) >= 0) continue;
-            if (type == Character.NON_SPACING_MARK) {
-                if (marks < 0 || marks >= 2) continue;
-                marks++;
-            } else if (Character.isSpaceChar(c)) {
-                c = ' ';
-                marks = -1;
-            } else {
-                marks = 0;
-            }
-            kept.appendCodePoint(c);
+            if (type != Character.CONTROL && type != Character.LINE_SEPARATOR && type != Character.PARAGRAPH_SEPARATOR
+                    && type != Character.SURROGATE) kept.appendCodePoint(c);
         }
-        // Trimmed, it starts with a visible character, as a mark is kept only after one.
-        String shown = kept.toString().trim();
-        if (shown.codePointCount(0, shown.length()) > 80) shown = shown.substring(0, shown.offsetByCodePoints(0, 80)).trim();
-        return shown.isEmpty() ? null : shown;
+        String saved = kept.toString().trim();
+        if (saved.codePointCount(0, saved.length()) > MAX_FILE_NAME)
+            saved = saved.substring(0, saved.offsetByCodePoints(0, MAX_FILE_NAME)).trim();
+        return ShownText.oneLine(saved).trim().isEmpty() ? null : saved;
     }
 
     // UTF-8 text, or null when the bytes are not.

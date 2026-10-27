@@ -469,34 +469,45 @@ public final class LinkReceiverTest {
         }
     }
 
-    @Test public void aFileNameIsMadeFitToShow() throws IOException {
+    @Test public void aFileNameIsKeptAsTheFileHasIt() throws IOException {
+        // It names the configuration, as a file picked on the TV does. The confirmation
+        // shows it as ShownText shows any name, without what only it leaves out.
         String[][] names = {
             // As browsers write a quote and line breaks, and a path some send.
             {"My %22home%22 VPN.toml", "My \"home\" VPN.toml"}, {"Мой сервер.toml", "Мой сервер.toml"},
             {"a%0D%0Ab.toml", "ab.toml"}, {"C:\\Users\\me\\home.toml", "home.toml"}, {"dir/home.toml", "home.toml"},
-            // Nothing that reverses text, is invisible, or breaks the line.
-            {"\u202Elmot.exe", "lmot.exe"}, {" \u2066x\u2069.toml ", "x.toml"}, {"a\u2028b\u2029c\u0085d\u0007", "abcd"},
-            // 80 characters at most, an emoji counted once.
-            {"x".repeat(100), "x".repeat(80)}, {"\uD83D\uDD12".repeat(90), "\uD83D\uDD12".repeat(80)},
-            {"x".repeat(79) + " y", "x".repeat(79)},
-            // Any other space as a space, and no letter that draws nothing.
-            {"My\u3000VPN\u00A0.toml", "My VPN .toml"}, {"\u3164\u3164.toml", ".toml"},
-            // Two combining marks on a character at most, as Vietnamese has, none
-            // with nothing to sit on, and none that enclose it.
-            {"a" + "\u0336".repeat(20) + "b", "a\u0336\u0336b"}, {"Vie\u0323\u0302t.toml", "Vie\u0323\u0302t.toml"},
-            {"\u0301x", "x"}, {"a \u0301b", "a b"}, {"1\u20DD.toml", "1.toml"}};
+            // Nothing that breaks the line, and trimmed.
+            {"a\u2028b\u2029c\u0085d\u0007", "abcd"}, {" home.toml ", "home.toml"},
+            // What only the confirmation leaves out is kept: what reverses text or joins
+            // characters, other spaces, and every mark a script stacks on a character.
+            // Tibetan and Hebrew with cantillation stack more than two.
+            {"\u202Elmot.exe", "\u202Elmot.exe"}, {"\u2066x\u2069.toml", "\u2066x\u2069.toml"},
+            {"\uD83D\uDC69\u200D\uD83D\uDCBB.toml", "\uD83D\uDC69\u200D\uD83D\uDCBB.toml"},
+            {"My\u3000VPN\u00A0.toml", "My\u3000VPN\u00A0.toml"},
+            {"\u0F66\u0F92\u0FB2\u0F74\u0F56.toml", "\u0F66\u0F92\u0FB2\u0F74\u0F56.toml"},
+            {"\u05D1\u05BC\u05B0\u0591\u05E8.toml", "\u05D1\u05BC\u05B0\u0591\u05E8.toml"},
+            {"a" + "\u0336".repeat(20) + "b", "a" + "\u0336".repeat(20) + "b"},
+            // 255 characters at most, more than a file system lets a name have, an
+            // emoji counted once.
+            {"x".repeat(300), "x".repeat(255)}, {"\uD83D\uDD12".repeat(300), "\uD83D\uDD12".repeat(255)},
+            {"x".repeat(254) + " y", "x".repeat(254)}};
         for (String[] name : names) assertEquals(name[0], name[1], LinkReceiver.fileName(name[0]));
+        assertEquals(255, LinkReceiver.MAX_FILE_NAME);
+        // Null when the confirmation would show nothing of it.
         for (String nothing : new String[]{"", " ", "dir/", "x\\", "\u200F\u061C\u00AD", "%0D%0A", "\u3000\u00A0",
-                "\u115F\u1160\u3164\uFFA0", "\u2800\u2800", "\u0301\u0302", " \uFE0F"})
+                "\u115F\u1160\u3164\uFFA0", "\u2800\u2800", "\u0301\u0302", " \uFE0F", "\u20DD"})
             assertNull(nothing, LinkReceiver.fileName(nothing));
         // Browsers send other control characters in a file name as they are.
         for (String sent : new String[]{"home\u0001.toml", "\u001bhome.toml", "home\u007f.toml", "home\t.toml"})
             assertEquals(sent, "home.toml", exchange(multipartPost("/K7QM4XHD", pageForm("", sent, utf8(TOML))), false).outcome.fileName);
         // Through the form, and a file with no name is received without one.
-        assertEquals("lmot.exe", exchange(multipartPost("/K7QM4XHD", pageForm("", "\u202Elmot.exe", utf8(TOML))), false).outcome.fileName);
-        LinkReceiver.Outcome nameless = exchange(multipartPost("/K7QM4XHD", pageForm("", "", utf8(TOML))), false).outcome;
-        assertSame(LinkReceiver.Kind.RECEIVED, nameless.kind);
-        assertNull(nameless.fileName);
+        assertEquals("\u202Elmot.exe", exchange(multipartPost("/K7QM4XHD", pageForm("", "\u202Elmot.exe", utf8(TOML))), false)
+                .outcome.fileName);
+        for (String none : new String[]{"", "\u202E"}) {
+            LinkReceiver.Outcome nameless = exchange(multipartPost("/K7QM4XHD", pageForm("", none, utf8(TOML))), false).outcome;
+            assertSame(none, LinkReceiver.Kind.RECEIVED, nameless.kind);
+            assertNull(none, nameless.fileName);
+        }
     }
 
     @Test public void aMultipartFormHasTheSameSizeLimit() throws IOException {

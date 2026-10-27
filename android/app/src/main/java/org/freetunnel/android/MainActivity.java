@@ -793,11 +793,13 @@ public final class MainActivity extends Activity {
     }
     // origin is the address the text was sent from, shown so that a text someone
     // else on the network sent first can be told apart; null when it came from here.
+    // The name and the server are shown as ShownText shows them, so that whatever
+    // sent them, the lines after them stay in sight.
     private void showImportConfirmation(String name, RoutingConfig.Import checked, String origin) {
         String source = checked.getToml();
         org.tomlj.TomlTable parsed = RoutingConfig.validate(source);
-        String message = getString(R.string.text_add_configuration_36) + shown(name) + getString(R.string.text_nserver)
-                + shown(parsed.getString("endpoint.hostname"));
+        String message = getString(R.string.text_add_configuration_36) + ShownText.of(name) + getString(R.string.text_nserver)
+                + ShownText.of(parsed.getString("endpoint.hostname"));
         if (origin != null) message += getString(R.string.text_nsent_from_s, origin);
         if (Boolean.TRUE.equals(parsed.getBoolean("endpoint.skip_verification")))
             message += getString(R.string.text_nserver_certificate_verification_is_disabled);
@@ -820,20 +822,6 @@ public final class MainActivity extends Activity {
                     if (configs.size() == 1) activeIndex = 0;
                     saveConfigs(); page = 1; render();
                 }));
-    }
-    // A name or a server as the confirmation shows it: on one line, without the
-    // invisible characters that reverse or hide text, and cut to 80 characters. A
-    // file sets both, and a remote cannot scroll a dialog's message, so line breaks
-    // or a long run of text in them could push the lines after them, where the text
-    // was sent from and that verification is off, out of sight. What is saved stays
-    // as it was.
-    private static String shown(String text) {
-        StringBuilder line = new StringBuilder(text.length());
-        text.codePoints().filter(c -> !Character.isISOControl(c) && Character.getType(c) != Character.LINE_SEPARATOR
-                && Character.getType(c) != Character.PARAGRAPH_SEPARATOR && Character.getType(c) != Character.FORMAT)
-                .forEach(line::appendCodePoint);
-        if (line.codePointCount(0, line.length()) <= 80) return line.toString();
-        return line.substring(0, line.offsetByCodePoints(0, 79)) + "…";
     }
     private static String stripBom(String toml) {
         return toml.startsWith("\uFEFF") ? toml.substring(1) : toml;

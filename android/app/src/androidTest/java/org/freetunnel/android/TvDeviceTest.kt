@@ -660,8 +660,8 @@ class TvDeviceTest {
     // Both legs: a file chosen on the phone instead of pasted. A send with nothing
     // in it or one too large to take is no strike. A TOML file with no name of its
     // own is named after its file, without the escape the browser wrote for the
-    // quote or the character that would reverse the rest. It is the TOML that
-    // VpnDeviceTest validates natively, with a byte order mark and CRLF line ends.
+    // quote. It is the TOML that VpnDeviceTest validates natively, with a byte order
+    // mark and CRLF line ends.
     @SdkSuppress(minSdkVersion = 29)
     @Test fun aFileFromAPhoneIsNamedAfterItAndAddedOnlyOnceTheTvConfirmsIt() {
         val a = open()
@@ -691,6 +691,8 @@ class TvDeviceTest {
         assertTrue(sent, sent.startsWith("HTTP/1.1 200 ") && sent.contains(context.getString(R.string.receive_page_sent)))
         eventually("The receiver must stop") { receiver(a) == null }
         assertClosed(url)
+        // Shown without what would reverse the rest; saved as the file has it, as one
+        // picked on the TV is.
         val name = "Home \"TV\" VPN.toml"
         val from = context.getString(R.string.text_nsent_from_s, URI(url).host).trim()
         fun confirmation() = windows().lastOrNull { window ->
@@ -701,7 +703,7 @@ class TvDeviceTest {
         assertEquals("Nothing is added before the TV confirms", 2, saved().size)
         onMain { confirmation()!!.findViewById<Button>(android.R.id.button1).performClick() }
         eventually("Add must save it") { saved().size == 3 }
-        assertEquals(name, saved().last().getString("name"))
+        assertEquals("Home \"TV\"\u202E VPN.toml", saved().last().getString("name"))
         assertTrue(saved().last().getString("toml").contains("hostname = \"file.example.com\""))
     }
 
@@ -731,36 +733,45 @@ class TvDeviceTest {
     }
 
     // A file sets the name and the server that the confirmation shows. Line breaks,
-    // characters that reverse or hide text, or a long run of text in them must not
-    // push what comes after, the sender and that verification is off, out of a
-    // message a remote cannot scroll. The confirmation is opened directly, as after
-    // the checks: whether the core takes such a server name is the core's to say.
+    // characters that reverse or hide text, a long run of text or a tall stack of
+    // marks in them must not push what comes after, the sender and that verification
+    // is off, out of a message a remote cannot scroll, or paint over it. The
+    // confirmation is opened directly, as after the checks: whether the core takes
+    // such a server name is the core's to say.
     @SdkSuppress(minSdkVersion = 29)
     @Test fun theConfirmationShowsTheSenderWhateverTheFileSays() {
         val a = open()
-        val toml = source.replace("hostname = \"vpn.invalid\"",
-            "hostname = \"my-real-vpn.example${"\\n".repeat(40)}${"x".repeat(62)}\"\nskip_verification = true")
-        val name = "My \uD83D\uDD12 VPN" + "\u2028\u2029\r\u202E\u2066".repeat(20) + "y".repeat(72)
-        onMain {
-            method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
-                .invoke(a, name, RoutingConfig.Import(toml, false), "192.0.2.7")
+        // The confirmation's message for that name and server, then cancelled.
+        fun message(name: String, hostname: String): String {
+            val toml = source.replace("hostname = \"vpn.invalid\"", "hostname = \"$hostname\"\nskip_verification = true")
+            onMain {
+                method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
+                    .invoke(a, name, RoutingConfig.Import(toml, false), "192.0.2.7")
+            }
+            instrumentation.waitForIdleSync()
+            val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
+            try {
+                return onMain { dialog.findViewById<TextView>(android.R.id.message).text.toString() }
+            } finally {
+                onMain { dialog.findViewById<Button>(android.R.id.button2).performClick() }
+                instrumentation.waitForIdleSync()
+            }
         }
-        instrumentation.waitForIdleSync()
-        val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
-        try {
-            val message = onMain { dialog.findViewById<TextView>(android.R.id.message).text.toString() }
-            // Each on one line and cut to 80 characters, so the sender is the third line.
-            // On one line, the name is 80, so it is shown whole, and the server is 81.
-            val shownName = "My \uD83D\uDD12 VPN" + "y".repeat(72)
-            val shownServer = "my-real-vpn.example" + "x".repeat(60) + "…"
+        // Each on one line and cut to 80 characters, so the sender is the third line.
+        fun assertShown(message: String, shownName: String, shownServer: String) {
             assertTrue(message, message.startsWith(context.getString(R.string.text_add_configuration_36) + shownName +
                 context.getString(R.string.text_nserver) + shownServer + context.getString(R.string.text_nsent_from_s, "192.0.2.7") +
                 context.getString(R.string.text_nserver_certificate_verification_is_disabled)))
             assertEquals(context.getString(R.string.text_nsent_from_s, "192.0.2.7").trim(), message.split("\n")[2])
-        } finally {
-            onMain { dialog.findViewById<Button>(android.R.id.button2).performClick() }
-            instrumentation.waitForIdleSync()
         }
+        // On one line, the name is 80, so it is shown whole, and the server is 81.
+        assertShown(message("My \uD83D\uDD12 VPN" + "\u2028\u2029\r\u202E\u2066".repeat(20) + "y".repeat(72),
+                "my-real-vpn.example${"\\n".repeat(40)}${"x".repeat(62)}"),
+            "My \uD83D\uDD12 VPN" + "y".repeat(72), "my-real-vpn.example" + "x".repeat(60) + "…")
+        // A letter and 79 marks under it fit in 80 characters, and drawn, a stack that
+        // tall would cover the lines below it. Each character is shown with two at most.
+        val stack = "\u0316\u0317\u0318\u0319".repeat(20).dropLast(1)
+        assertShown(message("a$stack", "vpn${stack}.example"), "a\u0316\u0317", "vpn\u0316\u0317.example")
     }
 
     // A configuration named after its file keeps the file's extension, which is not
