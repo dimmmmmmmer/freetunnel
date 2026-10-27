@@ -464,6 +464,47 @@ public final class LinkReceiverTest {
         assertNull(events.poll(300, TimeUnit.MILLISECONDS));
     }
 
+    // A whole send made by a client that leaves at once, without reading the answer:
+    // with a reset, as SO_LINGER 0 gives, or with an ordinary close.
+    private static void sendAndLeave(int port, String request, boolean reset) throws IOException {
+        Socket socket = connect(port);
+        socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+        if (reset) socket.setSoLinger(true, 0);
+        socket.close();
+    }
+
+    // Each send below waits behind a connection that holds the receiver, so that it
+    // was made and its sender gone before the receiver reads it, and the answer
+    // cannot be written.
+    @Test public void wrongCodesCountThoughTheirSendersLeaveBeforeTheAnswer() throws Exception {
+        // Or a guesser that never reads the answers would never use up its tries.
+        LinkReceiver receiver = loopback(CODE, 60_000, 5_000, 10_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        try (Socket holder = connect(port)) {
+            for (int strike = 0; strike < LinkReceiver.MAX_WRONG_CODES; strike++)
+                sendAndLeave(port, loopbackPost(port, "/K7QM-4XHE", form(LINK)), strike % 2 == 0);
+            Thread.sleep(100);
+            // Lets go: the receiver reads its end, and goes on to the sends.
+            holder.shutdownOutput();
+            assertEquals("stopped LOCKED_OUT", events.poll(5, TimeUnit.SECONDS));
+        }
+        assertClosed(port);
+    }
+
+    @Test public void aTextIsReceivedThoughItsSenderLeavesBeforeTheAnswer() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 5_000, 10_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        try (Socket holder = connect(port)) {
+            sendAndLeave(port, loopbackPost(port, "/K7QM-4XHD", form(LINK)), true);
+            Thread.sleep(100);
+            holder.shutdownOutput();
+            assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        }
+        assertClosed(port);
+    }
+
     @Test public void itStopsWhenTheTimeIsUp() throws Exception {
         LinkReceiver receiver = loopback(CODE, 200, 2_000, 5_000);
         int port = port(receiver);

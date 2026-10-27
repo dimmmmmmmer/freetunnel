@@ -330,13 +330,25 @@ final class LinkReceiver {
         String path = request[1];
         byte[] sentCode = normalizeCode(path.substring(1)).getBytes(StandardCharsets.UTF_8);
         if (!MessageDigest.isEqual(sentCode, code.getBytes(StandardCharsets.UTF_8))) {
-            respond(out, 404, "Not Found", "text/html", lastStrike ? pages.lockedOut : pages.wrongCode);
+            answer(out, 404, "Not Found", lastStrike ? pages.lockedOut : pages.wrongCode);
             return new Outcome(Kind.WRONG_CODE, null);
         }
         String text = formField(body, "link");
         if (text == null || text.trim().isEmpty()) return refuse(out, 400, "Bad Request");
-        respond(out, 200, "OK", "text/html", pages.sent);
+        answer(out, 200, "OK", pages.sent);
         return new Outcome(Kind.RECEIVED, text.trim());
+    }
+
+    // The answer to a whole send, which counts whether or not the answer gets
+    // through: a guesser that leaves without reading it must still use up its
+    // tries, and a phone that leaves early has still sent its text.
+    private static void answer(OutputStream out, int status, String reason, String page) {
+        try {
+            respond(out, status, reason, "text/html", page);
+            out.flush();
+        } catch (IOException ignored) {
+            // The sender is gone.
+        }
     }
 
     // The request line and headers, up to the blank line after them. Null when the
