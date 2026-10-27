@@ -25,7 +25,7 @@ model.
 
 | Area | Protection | Details |
 | --- | --- | --- |
-| VPN passwords | Kept in the OS credential store, not in config files | [Credential storage](#credential-storage), [threat model](docs/security-threats.md#credential-storage) |
+| VPN passwords and auth keys | Kept in the OS credential store, not in config files | [Credential storage](#credential-storage), [threat model](docs/security-threats.md#credential-storage) |
 | Connecting | The helper's config is built in memory and sent over an authenticated loopback channel | [During connect](#during-connect) |
 | Privileged helper | Only the helper runs elevated; it listens on loopback only and both sides prove a one-time token | [How the app is split](#how-the-app-is-split), [threat model](docs/security-threats.md#privileged-helper-and-its-ipc) |
 | Configs reaching root | The helper clears config keys that would point the elevated core at a path, port or interface | [What the helper takes from a config](#what-the-helper-takes-from-a-config), [threat model](docs/security-threats.md#config-files-reaching-root) |
@@ -92,7 +92,9 @@ for someone who trusts every config they use.
 ## Credential storage
 
 VPN passwords are **not stored in user-editable TOML** config files under normal
-operation. They go to the OS credential store:
+operation. Nor is a config's client random auth key (TrustTunnel 1.3), which
+whoever holds can pass the server's TLS-level gate. They go to the OS credential
+store, the key in an entry of its own beside the password's:
 
 | Platform | Store |
 | --- | --- |
