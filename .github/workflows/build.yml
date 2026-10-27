@@ -711,6 +711,19 @@ jobs:
           # where AppStartup looks first. Checked, as the other two platforms are.
           test -e AppDir/usr/translations/qtbase_ru.qm \
             || { echo "::error::Qt's Russian catalogue (usr/translations/qtbase_ru.qm) was not deployed"; exit 1; }
+          # The third-party notices, into the AppDir: the AppImage keeps them in
+          # usr/share/doc/freetunnel, and the .deb, made from the same AppDir,
+          # moves them to /usr/share/doc/freetunnel. linuxdeploy copied the
+          # Debian copyright files of most of the system libraries it bundled;
+          # list-bundled-debs.sh adds the others and writes down the packages'
+          # exact versions, which the notices' source offer points to.
+          doc=AppDir/usr/share/doc/freetunnel
+          mkdir -p "$doc/licenses"
+          cp client/THIRD_PARTY_NOTICES.md client/LICENSE "$doc/"
+          cp -R client/licenses/common client/licenses/desktop "$doc/licenses/"
+          bash client/scripts/list-bundled-debs.sh AppDir "$doc/bundled-system-packages.txt"
+          test -s "$doc/THIRD_PARTY_NOTICES.md" && grep -q "$(printf '\t')" "$doc/bundled-system-packages.txt" \
+            || { echo "::error::the third-party notices were not added to the AppDir"; exit 1; }
 
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
@@ -735,6 +748,12 @@ jobs:
                    "$root/DEBIAN"
           # Bundled runtime (binary + Qt libs/plugins/qml + qt.conf).
           cp -a AppDir/usr/. "$root/opt/freetunnel/"
+          # The third-party notices go where Debian keeps a package's documents.
+          # The copyright files of the bundled libraries stay under
+          # /opt/freetunnel/share/doc: in /usr/share/doc they would clash with
+          # the system's own packages of those libraries.
+          mkdir -p "$root/usr/share/doc"
+          mv "$root/opt/freetunnel/share/doc/freetunnel" "$root/usr/share/doc/freetunnel"
           # Launcher on PATH (rpath is $ORIGIN/../lib, so the symlink works).
           ln -sf /opt/freetunnel/bin/FreeTunnel "$root/usr/bin/freetunnel"
           # Menu entry + icons (multiple sizes for launchers / software centers).
@@ -817,6 +836,9 @@ jobs:
           # dpkg (1.20) cannot unpack a zstd .deb.
           dpkg-deb -Zxz --build --root-owner-group "$root" \
             "out/${{ matrix.artifact }}.deb"
+          dpkg-deb --contents "out/${{ matrix.artifact }}.deb" \
+            | grep -q ' \./usr/share/doc/freetunnel/THIRD_PARTY_NOTICES\.md$' \
+            || { echo "::error::the .deb has no /usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md"; exit 1; }
           ls -la out
 
       # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
@@ -829,6 +851,8 @@ jobs:
             echo "::error::AppDir missing — cannot build AppImage"
             exit 1
           fi
+          test -s AppDir/usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md \
+            || { echo "::error::AppDir has no usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md"; exit 1; }
           # No FUSE in a container: without this linuxdeploy cannot mount itself.
           export APPIMAGE_EXTRACT_AND_RUN=1
           ld=linuxdeploy-x86_64.AppImage
@@ -918,6 +942,13 @@ jobs:
           cp "$QT_ROOT_DIR/translations/qtbase_ru.qm" "$QT_ROOT_DIR/translations/qtdeclarative_ru.qm" \
             "$APP/Contents/Resources/translations/"
           cp client/assets/logo.icns "$APP/Contents/Resources/logo.icns"
+          # The third-party notices, in the bundle's Resources, before the
+          # signature below seals them.
+          mkdir -p "$APP/Contents/Resources/licenses"
+          cp client/THIRD_PARTY_NOTICES.md client/LICENSE "$APP/Contents/Resources/"
+          cp -R client/licenses/common client/licenses/desktop "$APP/Contents/Resources/licenses/"
+          test -s "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md" \
+            || { echo "::error::THIRD_PARTY_NOTICES.md is not in the bundle's Resources"; exit 1; }
           # UIDesignRequiresCompatibility makes an app built with the new SDK look
           # as if it were built with an old one. It is a documented, copy-pasted
           # workaround — Qt's own Tahoe notes suggest it — so refuse it outright
@@ -1102,6 +1133,16 @@ jobs:
           Copy-Item "wintun_extract\wintun\bin\amd64\wintun.dll" dist\ -Force
           if (-not (Test-Path "dist\wintun.dll")) { throw "wintun.dll was not bundled" }
 
+          # The third-party notices, next to FreeTunnel.exe: the installer's
+          # File /r installs them with the rest of dist, and refuses to build
+          # without them.
+          Copy-Item client\THIRD_PARTY_NOTICES.md, client\LICENSE dist\ -Force
+          New-Item -ItemType Directory -Force -Path dist\licenses | Out-Null
+          Copy-Item client\licenses\common, client\licenses\desktop dist\licenses\ -Recurse -Force
+          if (-not (Test-Path "dist\THIRD_PARTY_NOTICES.md") -or -not (Test-Path "dist\licenses\desktop\Wintun.txt")) {
+              throw "the third-party notices were not bundled"
+          }
+
           $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
           if (-not (Test-Path $nsis)) { throw "NSIS not found at $nsis" }
           $distAbs = (Resolve-Path dist).Path
@@ -1167,6 +1208,7 @@ jobs:
           $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$app" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "silent install exited $($p.ExitCode)" }
           if (-not (Test-Path (Join-Path $app 'FreeTunnel.exe'))) { throw "silent install left no FreeTunnel.exe" }
+          if (-not (Test-Path (Join-Path $app 'THIRD_PARTY_NOTICES.md'))) { throw "silent install left no THIRD_PARTY_NOTICES.md" }
           $rules = @(Get-NetFirewallRule -DisplayName 'FreeTunnel' -ErrorAction SilentlyContinue)
           $inbound = @($rules | Where-Object { $_.Direction -eq 'Inbound' }).Count
           $outbound = @($rules | Where-Object { $_.Direction -eq 'Outbound' }).Count

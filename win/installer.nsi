@@ -38,6 +38,15 @@ Unicode true
   !define BUILD_DIR "build\FreeTunnel"
 !endif
 
+; The third-party notices go wherever the files they are about go: Qt, Wintun
+; and the Microsoft runtime are redistributed on the condition that their
+; notices travel with them. The build copies THIRD_PARTY_NOTICES.md, LICENSE and
+; licenses\ into BUILD_DIR, and File /r below installs them next to the app; an
+; installer without them is not built at all.
+!if ! /FileExists "${BUILD_DIR}\THIRD_PARTY_NOTICES.md"
+  !error "${BUILD_DIR}\THIRD_PARTY_NOTICES.md is missing: copy THIRD_PARTY_NOTICES.md, LICENSE and licenses\ into it, as .github/workflows/build.yml does"
+!endif
+
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "FreeTunnel-${PRODUCT_VERSION}-Setup.exe"
 InstallDir "$PROGRAMFILES64\${PRODUCT_NAME}"
@@ -227,6 +236,8 @@ Section "Install"
   ; previously dropped qml/, so the QML engine couldn't load its imports, no
   ; window was created, and the app appeared not to launch. Recursing over the
   ; whole build dir also future-proofs against windeployqt adding new plugin dirs.
+  ; It also installs the third-party notices (THIRD_PARTY_NOTICES.md, LICENSE,
+  ; licenses\) the build puts next to the exe; see the check under General.
   File /r "${BUILD_DIR}\*"
 
   SetOutPath "$INSTDIR"
