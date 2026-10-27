@@ -746,8 +746,9 @@ class TvDeviceTest {
         fun message(name: String, hostname: String): String {
             val toml = source.replace("hostname = \"vpn.invalid\"", "hostname = \"$hostname\"\nskip_verification = true")
             onMain {
-                method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
-                    .invoke(a, name, RoutingConfig.Import(toml, false), "192.0.2.7")
+                method("showImportConfirmation", String::class.java, Boolean::class.javaPrimitiveType,
+                    RoutingConfig.Import::class.java, String::class.java)
+                    .invoke(a, name, false, RoutingConfig.Import(toml, false), "192.0.2.7")
             }
             instrumentation.waitForIdleSync()
             val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
@@ -777,22 +778,28 @@ class TvDeviceTest {
 
     // A configuration named after its file keeps the file's extension, which is not
     // counted as another alphabet: "Дом.toml" is no mix, but a name that mixes them
-    // itself, or in its extension, still is.
+    // itself, or in its extension, still is. A link's or an export's own name is
+    // counted whole, as is the server a link without one is named after: "раураӏ.com"
+    // is Cyrillic made to look like "paypal.com".
     @SdkSuppress(minSdkVersion = 29)
     @Test fun aFilesExtensionIsNoOtherAlphabet() {
         val a = open()
         val note = context.getString(R.string.text_nthe_name_mixes_similar_characters_from_different_al).trim()
-        for ((name, mixed) in listOf("\u0414\u043e\u043c.toml" to false, "\u0414o\u043c.toml" to true,
-                "\u0414\u043e\u043c.t\u043eml" to true, "home.toml" to false)) {
+        val lookalike = "\u0440\u0430\u0443\u0440\u0430\u04cf.com"
+        for ((name, namedAfterFile, mixed) in listOf(Triple("\u0414\u043e\u043c.toml", true, false),
+                Triple("\u0414o\u043c.toml", true, true), Triple("\u0414\u043e\u043c.t\u043eml", true, true),
+                Triple("home.toml", true, false), Triple(lookalike, false, true), Triple("\u0414\u043e\u043c.toml", false, true),
+                Triple("home.toml", false, false))) {
             onMain {
-                method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
-                    .invoke(a, name, RoutingConfig.Import(source, false), "192.0.2.7")
+                method("showImportConfirmation", String::class.java, Boolean::class.javaPrimitiveType,
+                    RoutingConfig.Import::class.java, String::class.java)
+                    .invoke(a, name, namedAfterFile, RoutingConfig.Import(source, false), "192.0.2.7")
             }
             instrumentation.waitForIdleSync()
             val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
             try {
                 val message = onMain { dialog.findViewById<TextView>(android.R.id.message).text.toString() }
-                assertEquals("$name: $message", mixed, message.contains(note))
+                assertEquals("$name, named after a file: $namedAfterFile: $message", mixed, message.contains(note))
             } finally {
                 onMain { dialog.findViewById<Button>(android.R.id.button2).performClick() }
                 instrumentation.waitForIdleSync()

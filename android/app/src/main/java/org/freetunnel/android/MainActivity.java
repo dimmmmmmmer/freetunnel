@@ -672,14 +672,14 @@ public final class MainActivity extends Activity {
 
         // The text is the app's own, and the subscription and whatever in the
         // certificate is not a certificate were left out as the link was read.
-        validateAsync(imported.toml, false, checked -> showImportConfirmation(imported.name,
+        validateAsync(imported.toml, false, checked -> showImportConfirmation(imported.name, false,
                 new RoutingConfig.Import(checked.getToml(), imported.subscriptionNotKept, imported.certificateIgnored), origin), () -> {});
     }
-    // Named after where the text came from, unless it is an endpoint's export that
-    // names its server.
+    // Named after its file or where the text came from, unless it is an endpoint's
+    // export that names its server.
     private void importToml(String name, String toml, String origin) {
         validateAsync(stripBom(toml), true, checked -> showImportConfirmation(
-                checked.getName() != null ? checked.getName() : name, checked, origin), () -> {});
+                checked.getName() != null ? checked.getName() : name, checked.getName() == null, checked, origin), () -> {});
     }
 
     // Receive from phone: a phone on the same network opens the page the QR code or
@@ -794,8 +794,10 @@ public final class MainActivity extends Activity {
     // origin is the address the text was sent from, shown so that a text someone
     // else on the network sent first can be told apart; null when it came from here.
     // The name and the server are shown as ShownText shows them, so that whatever
-    // sent them, the lines after them stay in sight.
-    private void showImportConfirmation(String name, RoutingConfig.Import checked, String origin) {
+    // sent them, the lines after them stay in sight. namedAfterFile is true when name
+    // is the one the text was imported under, its file's name or the app's words for
+    // where it came from, and false when it is a link's or an export's own.
+    private void showImportConfirmation(String name, boolean namedAfterFile, RoutingConfig.Import checked, String origin) {
         String source = checked.getToml();
         org.tomlj.TomlTable parsed = RoutingConfig.validate(source);
         String message = getString(R.string.text_add_configuration_36) + ShownText.of(name) + getString(R.string.text_nserver)
@@ -810,8 +812,10 @@ public final class MainActivity extends Activity {
             }
         }
         // A file's extension is not counted: a configuration named after "Дом.toml"
-        // would otherwise always be said to mix alphabets.
-        String word = name.matches("(?s).+\\.[0-9A-Za-z]{1,5}") ? name.substring(0, name.lastIndexOf('.')) : name;
+        // would otherwise always be said to mix alphabets. Only a file's: a link's or
+        // an export's name, or the server a link is named after, such as "раураӏ.com",
+        // is counted whole.
+        String word = namedAfterFile && name.matches("(?s).+\\.[0-9A-Za-z]{1,5}") ? name.substring(0, name.lastIndexOf('.')) : name;
         if (word.codePoints().mapToObj(Character.UnicodeScript::of)
                 .filter(script -> script != Character.UnicodeScript.COMMON && script != Character.UnicodeScript.INHERITED
                         && script != Character.UnicodeScript.UNKNOWN).distinct().count() > 1)
