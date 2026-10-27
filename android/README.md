@@ -89,15 +89,43 @@ Most TVs have no Always-on VPN, no Quick Settings tile and no notification
 shade. Where Android has no VPN settings screen, Settings says that the kill
 switch then protects only while FreeTunnel runs. Where a TV has no file picker,
 or no screen for allowing VPN connections, the app says so instead of closing.
-A configuration gets onto a TV through the file picker where there is one, or
-through Create manually, typed or pasted with a phone's keyboard, for example
-the Google TV app's.
+A configuration gets onto a TV with Receive from phone, the first item under
+Add configuration on a TV, through the file picker where there is one, or
+through Create manually, which also takes a `tt://` link, typed or pasted with
+a phone's keyboard, for example the Google TV app's.
 
 The banner is [art/tv-banner.svg](art/tv-banner.svg), rendered into
 `app/src/main/res/drawable-xhdpi/banner.png` by
 [scripts/render-android-tv-banner.sh](../scripts/render-android-tv-banner.sh).
 Its font comes from fontconfig, so the PNG is committed: after changing the
 SVG, run the script and commit both.
+
+### Receive from phone
+
+The TV shows a QR code and an address such as
+`http://192.168.1.23:41234/K7QM-4XHD`. A phone, tablet or laptop on the same
+network opens it, with its camera or by typing the address into a browser, and
+pastes a `tt://` link or a TOML file into the page there; no app is needed on
+it. The TV then shows what it received, with the address it came from, and
+adds it only once you confirm, as for any other import.
+
+- It listens only on the TV's own address on the home network (10/8,
+  172.16/12 or 192.168/16, over Wi-Fi or Ethernet), never on a public,
+  carrier-grade NAT or IPv6-only address, and only while its dialog is open:
+  5 minutes at most, and not past Home or a screensaver.
+- It takes one link or file and stops. The address carries an 8-character
+  code (40 bits, Crockford's base32), and 3 sends with a wrong code stop it.
+  Every address shows the same page, so only a send tests a code.
+- A send is a form post of at most 512 KiB that names the TV's address as its
+  host. The page loads nothing and runs no script, and nothing about a
+  transfer is logged.
+- The link crosses the home network unencrypted: a browser has no way to
+  encrypt a page on a local `http://` address. Someone already watching that
+  network at that moment could read the VPN password in it, or send their own
+  configuration first. The TV's confirmation shows the server and the sender's
+  address, so check both, and use it only on a network you trust.
+- It does not work while the phone's VPN is on, over mobile data, or on a guest
+  network that keeps its devices apart.
 
 ## Build and signing
 
