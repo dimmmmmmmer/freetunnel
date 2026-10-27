@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -425,10 +426,20 @@ public final class LinkReceiverTest {
         return Integer.parseInt(url.substring(url.lastIndexOf(':') + 1, url.lastIndexOf('/')));
     }
     // The test's own end of a loopback connection, as a browser would open it: plain
-    // HTTP, which is all the receiver speaks.
-    private static Socket connect(int port) throws IOException {
-        return new Socket(InetAddress.getLoopbackAddress(), port); // nosemgrep: java.lang.security.audit.crypto.unencrypted-socket.unencrypted-socket
+    // HTTP, which is all the receiver speaks. With a timeout: a port that no one
+    // takes connections on any more fills its queue, and a connect would then wait
+    // for minutes.
+    private static Socket connect(int port, int timeoutMs) throws IOException {
+        Socket socket = new Socket(); // nosemgrep: java.lang.security.audit.crypto.unencrypted-socket.unencrypted-socket
+        try {
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), timeoutMs);
+            return socket;
+        } catch (IOException failed) {
+            socket.close();
+            throw failed;
+        }
     }
+    private static Socket connect(int port) throws IOException { return connect(port, 5_000); }
     private static String send(int port, String request) throws IOException {
         try (Socket socket = connect(port)) {
             socket.setSoTimeout(5_000);
@@ -446,7 +457,7 @@ public final class LinkReceiverTest {
     private static void assertClosed(int port) throws InterruptedException {
         long end = System.nanoTime() + 2_000_000_000L;
         while (System.nanoTime() < end) {
-            try { connect(port).close(); }
+            try { connect(port, 200).close(); }
             catch (ConnectException refused) { return; }
             catch (IOException closing) { /* not yet */ }
             Thread.sleep(20);

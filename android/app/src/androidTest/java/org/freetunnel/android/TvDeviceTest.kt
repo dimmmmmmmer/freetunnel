@@ -558,10 +558,12 @@ class TvDeviceTest {
     }
     // stop() closes the port, but the receiver's thread, waiting in accept(), lets go
     // of it only once it wakes, a moment later on a slow emulator. Until then a
-    // connection is taken or reset rather than refused.
+    // connection is taken or reset rather than refused. With a connect timeout: a
+    // port that no one takes connections on any more fills its queue, and a connect
+    // would then wait for minutes.
     private fun assertClosed(url: String) = eventually("$url must be closed", 2_000) {
         val page = URI(url)
-        try { Socket(page.host, page.port).close(); false }
+        try { Socket().use { it.connect(java.net.InetSocketAddress(page.host, page.port), 500) }; false }
         catch (_: ConnectException) { true }
         catch (_: java.io.IOException) { false }
     }
