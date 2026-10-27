@@ -638,10 +638,14 @@ class TvDeviceTest {
     @SdkSuppress(minSdkVersion = 29)
     @Test fun cancelOrLeavingTheAppClosesThePort() {
         val a = open()
+        // With a remote, the dialog opens on Cancel, not on the code above it.
+        leaveTouchMode(a)
         onMain { method("receiveFromPhone").invoke(a) }
         instrumentation.waitForIdleSync()
         val first = receiver(a)!!.url()
-        onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null }.findViewById<Button>(android.R.id.button2).performClick() }
+        val cancel = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null }.findViewById<Button>(android.R.id.button2) }
+        eventually("A remote must start on Cancel") { onMain { cancel.isFocused } }
+        onMain { cancel.performClick() }
         instrumentation.waitForIdleSync()
         assertNull("Cancel must stop the receiver", receiver(a))
         assertClosed(first)
