@@ -472,6 +472,11 @@ file rather than carrying a SHA of their own.
    port, clear it there as well.
 5. Then add it to the list in the script, by its full TOML path
    (`listener.tun.netns`, not `netns`).
+
+   The script also compares the core's `tls_profile` names with
+   `include/vpn/trusttunnel_tls_profiles.h`, the list FreeTunnel turns a file
+   away by and explains a failed connect with. When they differ, change the
+   header to match.
 6. Update `THIRD_PARTY_NOTICES.md` and `licenses/` for the new core commit and
    for the NativeLibsCommon and DnsLibs versions it pulls in (its
    `conanfile.py` names them), and `NLC_COMMIT` in

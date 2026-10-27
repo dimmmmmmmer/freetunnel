@@ -39,6 +39,7 @@ QString passwordNotStoredMessage(bool storeIsThere);
 QString authKeyNotStoredMessage();
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target);
 // *errOut: "read"|"invalid"|"authkey" (a client_random_auth_key that is not whole bytes of hex)|
+// "tlsprofile" (an [endpoint] tls_profile the core has no name for; *contentOut is set)|
 // "certificate" (an [endpoint] certificate with no certificate in it, see certificatesOnly)|
 // "export" (the TOML file an endpoint exports, see parseEndpointExport; *contentOut is set).
 bool readValidatedImportContent(const QString &path, QString *contentOut, QString *errOut);

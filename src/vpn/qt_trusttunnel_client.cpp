@@ -2,6 +2,7 @@
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
 #include "qt_trusttunnel_events.h"
+#include "trusttunnel_tls_profiles.h"
 #include "core/AppRules.h"
 #include "core/ProcessLookup.h"
 #include <QCoreApplication>
@@ -416,6 +417,30 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
     return fallback;
 }
 
+// The [endpoint] tls_profile the core would refuse the whole config for, as the
+// message that says so, or empty when it takes it (or ignores it: it reads the key
+// only as a string). The core's own words for it are an error line in the log of a
+// session that has not opened its log yet, which on the helper's first connect
+// goes to a stderr nobody reads, so the user would be told only that the
+// structure is invalid. The value is a file's, shown to the user: cut short and
+// cleaned of line breaks and other control characters.
+static QString refusedTlsProfileMessage(const toml::table &t)
+{
+    const auto profile = t["endpoint"]["tls_profile"].value<std::string>();
+    if (!profile || profile->empty() || freetunnel::isKnownTlsProfile(*profile))
+        return QString();
+    QString shown = QString::fromStdString(*profile).left(40);
+    for (QChar &ch : shown) {
+        if (!ch.isPrint())
+            ch = QLatin1Char(' ');
+    }
+    QStringList known;
+    for (const std::string_view name : freetunnel::kTrustTunnelTlsProfiles)
+        known << QString::fromUtf8(name.data(), static_cast<int>(name.size()));
+    return QtTrustTunnelClient::tr("The config's tls_profile \"%1\" is not one TrustTunnel knows. Use one of: %2.")
+            .arg(shown.trimmed(), known.join(QStringLiteral(", ")));
+}
+
 bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
     if (tomlContent.isEmpty()) {
         setState(State::Error);
@@ -429,6 +454,12 @@ bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
         const std::string descr{parsed.error().description()};
         setState(State::Error);
         emit vpnError(tr("Failed parsing config: %1").arg(QString::fromStdString(descr)));
+        return false;
+    }
+
+    if (const QString badProfile = refusedTlsProfileMessage(parsed.table()); !badProfile.isEmpty()) {
+        setState(State::Error);
+        emit vpnError(badProfile);
         return false;
     }
 

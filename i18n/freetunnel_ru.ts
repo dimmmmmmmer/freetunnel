@@ -445,6 +445,10 @@
         <source>Could not store the auth key in the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
         <translation>Не удалось сохранить ключ авторизации в системном хранилище учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
     </message>
+    <message>
+        <source>Not a valid TrustTunnel config: tls_profile &quot;%1&quot; is not one TrustTunnel knows</source>
+        <translation>Это не похоже на конфиг TrustTunnel: TrustTunnel не знает значение tls_profile «%1»</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -917,6 +921,10 @@
     <message>
         <source>Your internet connection is a PPP link (PPPoE or a modem), which the VPN can&apos;t run over on Windows. Connect through a router, Ethernet or Wi-Fi instead.</source>
         <translation>Интернет подключён через PPP (PPPoE или модем), а через такое подключение VPN на Windows работать не может. Подключитесь через роутер, Ethernet или Wi-Fi.</translation>
+    </message>
+    <message>
+        <source>The config&apos;s tls_profile &quot;%1&quot; is not one TrustTunnel knows. Use one of: %2.</source>
+        <translation>TrustTunnel не знает значение tls_profile «%1» в конфиге. Допустимые значения: %2.</translation>
     </message>
 </context>
 <context>

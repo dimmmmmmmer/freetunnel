@@ -58,6 +58,7 @@ private slots:
     void importFileTakesAServerThatNeedsAnAuthKey();
     void importFileRefusesAnAuthKeyThatIsNotHex();
     void importFileTakesAnEmptyAuthKey();
+    void importFileRefusesATlsProfileTheCoreDoesNotKnow();
     void importFileLeavesTheSubscriptionOut();
 
     // A certificate keeps only its certificates.
@@ -803,6 +804,39 @@ void TestBackendDeepLinkImport::importFileTakesAnEmptyAuthKey()
 // the address holds the VPN password in plain text. The import moved the password
 // itself to the credential store and kept the address on disk as written. It is
 // left out of the copy now, and the notice that replaces "Config added" says so.
+// Core 1.3 refuses the whole config for a tls_profile it has no name for, so a file
+// with one would import and then never connect, with only "invalid config
+// structure" to show for it. Refused at the door, naming the key and the value;
+// a name the core knows, an empty one and one that is no string are taken.
+void TestBackendDeepLinkImport::importFileRefusesATlsProfileTheCoreDoesNotKnow()
+{
+    const auto bodyWith = [](const QByteArray &line) {
+        QByteArray body = validImportBody();
+        body.append(line);
+        return body;
+    };
+    Backend backend;
+    QSignalSpy failed(&backend, &Backend::errorOccurred);
+    for (const char *bad : {"tls_profile = \"netscape\"\n", "tls_profile = \"Chrome\"\n"}) {
+        const QString path = writeTempConfig(QStringLiteral("tls-profile-bad.toml"), bodyWith(bad));
+        QVERIFY(!path.isEmpty());
+        const int configs = backend.configs().size();
+        QVERIFY2(!backend.importFile(path), bad);
+        QCOMPARE(backend.configs().size(), configs);
+        const QString shown = failed.last().at(0).toString();
+        const QString value = QString::fromLatin1(bad).section(QLatin1Char('"'), 1, 1);
+        QCOMPARE(shown, QStringLiteral("Not a valid TrustTunnel config: tls_profile \"%1\" is not one TrustTunnel knows")
+                                .arg(value));
+        QFile::remove(path);
+    }
+    for (const char *good : {"tls_profile = \"firefox\"\n", "tls_profile = \"\"\n", "tls_profile = 5\n"}) {
+        const QString path = writeTempConfig(QStringLiteral("tls-profile-good.toml"), bodyWith(good));
+        QVERIFY(!path.isEmpty());
+        QVERIFY2(backend.importFile(path), good);
+        QFile::remove(path);
+    }
+}
+
 void TestBackendDeepLinkImport::importFileLeavesTheSubscriptionOut()
 {
     const auto body = [](bool password, bool skipVerification) {

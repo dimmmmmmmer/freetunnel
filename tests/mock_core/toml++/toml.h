@@ -56,10 +56,14 @@ inline std::string unquote(const std::string &v)
 
 } // namespace detail
 
+class table;
+
 class node_view {
 public:
     node_view() = default;
     explicit node_view(std::string raw) : m_raw(std::move(raw)), m_present(true) {}
+    // A table, by its dotted name, for `table["endpoint"]["key"]` to look into.
+    node_view(const table *within, std::string name) : m_table(within), m_name(std::move(name)) {}
 
     template <typename T>
     std::optional<T> value() const
@@ -67,9 +71,13 @@ public:
         return std::nullopt;
     }
 
+    inline node_view operator[](std::string_view key) const;
+
 private:
     std::string m_raw;
     bool m_present = false;
+    const table *m_table = nullptr;
+    std::string m_name;
 };
 
 template <>
@@ -97,9 +105,15 @@ public:
     node_view operator[](std::string_view key) const
     {
         const auto it = m_values.find(std::string(key));
-        if (it == m_values.end())
-            return {};
-        return node_view(it->second);
+        if (it != m_values.end())
+            return node_view(it->second);
+        // Not a key but a table, when some key is inside it: the parser keeps
+        // those under their dotted names.
+        const std::string prefix = std::string(key) + ".";
+        const auto inside = m_values.lower_bound(prefix);
+        if (inside != m_values.end() && inside->first.compare(0, prefix.size(), prefix) == 0)
+            return node_view(this, std::string(key));
+        return {};
     }
 
     bool contains(std::string_view key) const
@@ -114,6 +128,13 @@ public:
 private:
     std::map<std::string, std::string> m_values;
 };
+
+inline node_view node_view::operator[](std::string_view key) const
+{
+    if (m_table == nullptr)
+        return {};
+    return (*m_table)[m_name + "." + std::string(key)];
+}
 
 struct parse_error {
     std::string_view description() const { return m_description; }

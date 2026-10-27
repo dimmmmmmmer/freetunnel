@@ -117,6 +117,28 @@ if not re.search(r"\.retry_info\s*=\s*\{[^{}]*?\.policy\s*=\s*"
     sys.exit(1)
 PY
 
+# The tls_profile names the core takes (TLS_PROFILE_MAP) are the list FreeTunnel
+# explains a refusal with and refuses a file by (include/vpn/
+# trusttunnel_tls_profiles.h). A name the core adds would be turned away by us as
+# unknown, and one it drops would be taken and then fail at connect.
+python3 - "$TMP/upstream/trusttunnel/src/config.cpp" "$ROOT/include/vpn/trusttunnel_tls_profiles.h" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+core = Path(sys.argv[1]).read_text()
+ours = Path(sys.argv[2]).read_text()
+block = re.search(r"TLS_PROFILE_MAP\s*=\s*\{(.*?)\n\};", core, re.S)
+theirs = set(re.findall(r'\{\s*"([^"]+)"\s*,\s*VPN_TLS_PROFILE_\w+\s*\}', block.group(1))) if block else set()
+listed = re.search(r"kTrustTunnelTlsProfiles\{(.*?)\};", ours, re.S)
+mine = set(re.findall(r'"([^"]+)"', listed.group(1))) if listed else set()
+if not theirs or theirs != mine:
+    print("error: the core's tls_profile names (TLS_PROFILE_MAP in trusttunnel/src/config.cpp) are "
+          f"{sorted(theirs)}, and include/vpn/trusttunnel_tls_profiles.h lists {sorted(mine)}",
+          file=sys.stderr)
+    sys.exit(1)
+PY
+
 # The elevated helper hands the core every key of the config the GUI sends,
 # except the few that would point root at a file, an interface or a hole in the
 # kill switch, which clearKeysRootMustNotTakeFromAConfig() in

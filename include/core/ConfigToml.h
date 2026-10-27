@@ -96,6 +96,13 @@ std::optional<EndpointExport> parseEndpointExport(const QString &toml);
 // does not use one, so empty is the ordinary case and means no key.
 QString endpointClientRandomAuthKey(const QString &toml);
 
+// The tls_profile the config's [endpoint] sets, as written (not trimmed: the core
+// compares it as it is), or empty when it sets none or sets something that is not
+// a string, which the core leaves alone. Core 1.3 refuses the whole config for a
+// name it does not know (include/vpn/trusttunnel_tls_profiles.h), and the config
+// editor has no field for the key, so a file's is kept as it came.
+QString endpointTlsProfile(const QString &toml);
+
 // Whether a client random auth key is one the core can use: empty (no key), or
 // whole bytes in hex. The core decodes the text itself and, when it cannot (an
 // odd digit out, a character that is not hex), quietly connects without a key,

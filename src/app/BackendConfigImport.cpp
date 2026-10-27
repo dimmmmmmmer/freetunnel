@@ -99,6 +99,18 @@ static QString importedFileNotice(const QString &name, bool skipVerification, bo
     return notice + QLatin1Char(' ') + notes.join(QLatin1Char(' '));
 }
 
+// A file's value, to show in a message: cut short, and with anything that is not
+// printable made a space.
+static QString shownValue(QString value)
+{
+    value = value.left(40);
+    for (QChar &ch : value) {
+        if (!ch.isPrint())
+            ch = QLatin1Char(' ');
+    }
+    return value.trimmed();
+}
+
 bool Backend::importFile(const QString &path)
 {
     QString p = path;
@@ -119,6 +131,9 @@ bool Backend::importFile(const QString &path)
             emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
                                        .arg(QCoreApplication::translate("DeepLink",
                                                                         "malformed client_random_auth_key value")));
+        else if (importErr == QLatin1String("tlsprofile"))
+            emit errorOccurred(tr("Not a valid TrustTunnel config: tls_profile \"%1\" is not one TrustTunnel knows")
+                                       .arg(shownValue(freetunnel::endpointTlsProfile(content))));
         else if (importErr == QLatin1String("certificate"))
             emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
                                        .arg(QCoreApplication::translate("DeepLink", "malformed certificate")));

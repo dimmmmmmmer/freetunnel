@@ -9,6 +9,7 @@
 
 #include <toml++/toml.h>
 
+#include "vpn/trusttunnel_tls_profiles.h"
 #include "vpn/vpn.h"
 
 namespace ag {
@@ -86,15 +87,11 @@ struct TrustTunnelConfig {
         return !loc.client_random_mask.empty();
     }
 
-    // The spellings of the real TLS_PROFILE_MAP (trusttunnel/src/config.cpp).
+    // The spellings of the real TLS_PROFILE_MAP (trusttunnel/src/config.cpp), from
+    // the list the wrapper's explanation of a refusal and the import use too.
     static bool knownTlsProfile(const std::string &name)
     {
-        for (const char *known : {"chrome", "chrome_canary", "safari", "firefox", "okhttp",
-                                  "openssl", "default"}) {
-            if (name == known)
-                return true;
-        }
-        return false;
+        return freetunnel::isKnownTlsProfile(name);
     }
 
     // The real build_config rejects a table that parses as TOML but isn't a

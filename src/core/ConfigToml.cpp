@@ -821,6 +821,12 @@ QString endpointClientRandomAuthKey(const QString &toml)
     return readString(tableBody(tables, QStringLiteral("endpoint")), "client_random_auth_key").trimmed();
 }
 
+QString endpointTlsProfile(const QString &toml)
+{
+    const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
+    return readString(tableBody(tables, QStringLiteral("endpoint")), "tls_profile");
+}
+
 namespace {
 
 // Whether a line sets a key of another table without its header, as a dotted

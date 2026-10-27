@@ -59,8 +59,9 @@ compare link at the bottom of its release notes.
   - A config file's `tls_profile`, which picks the browser whose TLS fingerprint
     the connection imitates (`chrome`, `chrome_canary`, `safari`, `firefox`,
     `okhttp`, `openssl` or `default`), takes effect now. It used to be ignored.
-    A name the core does not know fails the connection, with "Invalid
-    TrustTunnel config structure".
+    A file with a name the core does not know, capital letters included, is
+    refused when it is imported. A config that already has one fails to
+    connect, and says which name it is.
   - Linux: a default route through a network interface that is gone is no longer
     used.
   - Linux: a tunnel device that fails for good no longer fills the log with an
