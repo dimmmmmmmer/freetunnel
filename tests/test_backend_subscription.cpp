@@ -166,9 +166,12 @@ private slots:
     void aSubscriptionThatNamesAnotherServerThanItsLinkSaysBoth();
     void anAddressTheStoreRefusesAddsNothing();
     void aLinkThatCannotBeSavedLeavesAPlainConfigAndNoAddress();
+    void aSubscriptionThatCannotBeAddedLeavesTheServerGivenWithIt();
+    void anotherSubscriptionsServerOfTheSameNameSaysWhatItReplaces();
 
     // The link, through what happens to its config.
     void aRenameKeepsTheLink();
+    void aRenameTheListCannotRecordKeepsTheLinkWhereTheListHasIt();
     void removingTheConfigRemovesItsAddress();
     void detachingKeepsTheConfigAndDropsTheAddress();
     void replacingWithAnotherServerDetachesAndSaysSo();
@@ -277,6 +280,11 @@ void TestBackendSubscription::aSubscriptionLinkAsksBeforeAnyFetch()
     QCOMPARE(details.value(QStringLiteral("origin")).toString(), QStringLiteral("https://vpn.example.com/subscription"));
     QCOMPARE(details.value(QStringLiteral("server")).toString(), QString());
     QVERIFY(!details.value(QStringLiteral("fromFile")).toBool());
+    // The log says it waits, by the origin alone.
+    QVERIFY2(rig.backend->logText().contains(
+                     QStringLiteral("Subscription https://vpn.example.com: nothing is fetched from it until you agree")),
+             qPrintable(rig.backend->logText()));
+    QVERIFY(!rig.backend->logText().contains(QStringLiteral("s3cret")));
 
     // A link with its server says which server it gives.
     QVERIFY(!rig.backend->importDeepLink(v2::kFull));
@@ -376,7 +384,7 @@ void TestBackendSubscription::cancellingOrWaitingTooLongAddsNothing()
     QCOMPARE(asked.count(), 1);
     rig.clock += 10 * 60 + 1;
     QVERIFY(!rig.backend->confirmDeepLinkImport(token, false));
-    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("That import has expired. Open the link again."));
+    QCOMPARE(failed.last().at(0).toString(), QStringLiteral("That import has expired. Start it again."));
     QCOMPARE(rig.backend->configs().size(), 0);
     QVERIFY(freetunnel::loadSubscriptions().isEmpty());
 
@@ -685,6 +693,84 @@ void TestBackendSubscription::aLinkThatCannotBeSavedLeavesAPlainConfigAndNoAddre
              QString());
 }
 
+// A subscription address this version cannot fetch, such as one whose user has a
+// colon in it, which Basic credentials cannot carry: said, and the server the
+// link gives is added as it would be with the setting off.
+void TestBackendSubscription::aSubscriptionThatCannotBeAddedLeavesTheServerGivenWithIt()
+{
+    Rig rig;
+    QSignalSpy consent(rig.subs(), &SubscriptionController::consentRequired);
+    QSignalSpy asked(rig.backend.get(), &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failed(rig.backend.get(), &Backend::errorOccurred);
+    const QString link = v2::linkFromRecords(
+            {{0x00, QByteArray(1, 2)},
+             {0x01, QByteArrayLiteral("vpn.example.com")},
+             {0x02, QByteArrayLiteral("198.51.100.4:443")},
+             {0x05, QByteArrayLiteral("bob")},
+             {0x06, QByteArrayLiteral("hunter2")},
+             {0x0e, QByteArrayLiteral("https://al%3Aice:s3cret@vpn.example.com/subscription")}});
+    QVERIFY(freetunnel::parseDeepLink(link));
+    rig.backend->importDeepLink(link);
+    QCOMPARE(consent.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(),
+             freetunnel::subscriptionFailureText(SubscriptionFetchError::BadUrl, freetunnel::SubscriptionDocError::Invalid));
+    QCOMPARE(asked.count(), 1);
+    QVERIFY(asked.last().at(0).toString().contains(freetunnel::subscriptionNotKeptNote()));
+    QCOMPARE(asked.last().at(1).toString(), link);
+    QVERIFY(rig.backend->confirmDeepLinkImport(link, false));
+    QCOMPARE(rig.backend->configs().size(), 1);
+    QVERIFY(freetunnel::loadSubscriptions().isEmpty());
+    QCOMPARE(rig.network.fetches(), 0);
+
+    // The same for an endpoint's export.
+    const QString file = QDir(appConfigDir()).filePath(QStringLiteral("../export-bad-subscription.toml"));
+    const auto remove = qScopeGuard([&file]() { QFile::remove(file); });
+    endpoint_export::Fields fields;
+    fields.subscriptionUrl = QStringLiteral("https://al%3Aice:s3cret@vpn.example.com/s");
+    {
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        out.write(endpoint_export::text(fields).toUtf8());
+    }
+    QVERIFY(!rig.backend->importFile(file));
+    QCOMPARE(consent.count(), 0);
+    QCOMPARE(failed.count(), 2);
+    QCOMPARE(asked.count(), 2);
+    QVERIFY(asked.last().at(0).toString().contains(freetunnel::subscriptionNotKeptNote()));
+}
+
+// Two subscriptions that name their configs alike are two subscriptions: the
+// question says the config it would replace updates from one already, and
+// would stop to update from the other one.
+void TestBackendSubscription::anotherSubscriptionsServerOfTheSameNameSaysWhatItReplaces()
+{
+    Rig rig;
+    const QString path = linkThroughImport(rig, v2::kSubscriptionOnly,
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443", QStringLiteral("s3cret"),
+                                                                QStringLiteral(R"(,"name":"Work")")));
+    QVERIFY(!path.isEmpty());
+    const QString source = rig.record(path)->sourceId;
+    QSignalSpy consent(rig.subs(), &SubscriptionController::consentRequired);
+    QSignalSpy asked(rig.backend.get(), &Backend::deepLinkImportConfirmationRequired);
+    const QString otherUrl = QStringLiteral("https://carol:pw@other.example.com/subscription");
+    rig.backend->importDeepLink(subscriptionOnlyLink(otherUrl));
+    QVERIFY(rig.backend->fetchSubscriptionForImport(consent.last().at(0).toString()));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
+            subscriptionDocument("other.example.com", "198.51.100.9:443", QStringLiteral("pw"),
+                                 QStringLiteral(R"(,"name":"Work")")))));
+    QCOMPARE(asked.last().at(2).toString(), QStringLiteral("Work"));
+    const QStringList lines = asked.last().at(0).toString().split(QLatin1Char('\n'));
+    QVERIFY2(lines.contains(QStringLiteral("“Work” updates from a subscription. Replacing it stops that.")),
+             qPrintable(lines.join('|')));
+    QVERIFY2(lines.contains(QStringLiteral("Updates from https://other.example.com")), qPrintable(lines.join('|')));
+    QVERIFY(rig.backend->confirmDeepLinkImport(asked.last().at(1).toString(), true));
+    QCOMPARE(rig.backend->configs().size(), 1);
+    QVERIFY(rig.record(path) && rig.record(path)->sourceId != source);
+    QCOMPARE(rig.subs()->address(path), otherUrl);
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForSubscription(source)), QString());
+}
+
 // ---- the link, through what happens to its config ------------------------------
 
 void TestBackendSubscription::aRenameKeepsTheLink()
@@ -708,6 +794,37 @@ void TestBackendSubscription::aRenameKeepsTheLink()
     QVERIFY(freetunnel::loadSubscriptions().contains(renamed));
     QVERIFY(rig.backend->refreshSubscription(renamed));
     QCOMPARE(rig.network.requests().last().url, v2::kSubscription);
+}
+
+// The link follows a rename once the config list names the new file. A list that
+// could not be written still names the old one, and a link moved anyway would
+// be removed at the next start, address and all, as one whose config is gone.
+void TestBackendSubscription::aRenameTheListCannotRecordKeepsTheLinkWhereTheListHasIt()
+{
+    QString path;
+    QString source;
+    {
+        Rig rig;
+        path = linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+        QVERIFY(!path.isEmpty());
+        source = rig.record(path)->sourceId;
+        QVERIFY(QFile::setPermissions(storagePath(), QFileDevice::ReadOwner));
+        const auto writable = qScopeGuard(
+                []() { QFile::setPermissions(storagePath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner); });
+        if (QFileInfo(storagePath()).isWritable())
+            QSKIP("configs.json stays writable here (run as root?)");
+        QVariantMap form = rig.backend->configFields(rig.backend->configIndex(path));
+        form.insert(QStringLiteral("name"), QStringLiteral("Renamed"));
+        form.insert(QStringLiteral("editIndex"), rig.backend->configIndex(path));
+        form.insert(QStringLiteral("editPath"), path);
+        rig.backend->createConfig(form);
+        QCOMPARE(loadStoredConfigs(), QStringList{path});
+        QVERIFY(rig.subs()->isLinked(path));
+    }
+    Rig rig;
+    QVERIFY(rig.subs()->isLinked(path));
+    QCOMPARE(rig.subs()->address(path), v2::kSubscription);
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForSubscription(source)), v2::kSubscription);
 }
 
 void TestBackendSubscription::removingTheConfigRemovesItsAddress()

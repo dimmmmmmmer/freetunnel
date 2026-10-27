@@ -289,10 +289,10 @@ void Backend::askToImport(const freetunnel::PreparedImport &prepared, const QStr
     if (prepared.certificateExtraIgnored)
         lines << freetunnel::certificateExtraIgnoredNote();
     // A server from elsewhere in place of one a subscription keeps up to date: the
-    // subscription would put its own back. A subscription's own import links the
-    // config to it again instead.
-    if (!collision.isEmpty() && m_subscriptions->isLinked(collision)
-            && !SubscriptionController::isImportToken(prepared.link))
+    // subscription would put its own back. Another subscription's server too,
+    // which the config would then update from instead. Only the same
+    // subscription's import, which links the config to it again, says nothing.
+    if (!collision.isEmpty() && collision != prepared.existingPath && m_subscriptions->isLinked(collision))
         lines << tr("“%1” updates from a subscription. Replacing it stops that.").arg(existingName);
     lines << notes;
     const QString message = lines.join(QLatin1Char('\n'));

@@ -119,7 +119,9 @@ void Backend::startSubscriptions()
 
 // A link with a subscription address and nothing else this version refuses (an
 // auth key, a damaged server). False sends the link on as it would go without
-// subscriptions, and what it says about it is said there.
+// subscriptions, and what it says about it is said there: so does a subscription
+// that cannot be added, once offerSubscription() has said why, when the link
+// gives a server of its own.
 bool Backend::offerSubscriptionLink(const QString &link)
 {
     if (!m_settings.subscriptions_enabled)
@@ -132,9 +134,9 @@ bool Backend::offerSubscriptionLink(const QString &link)
     if (!given && why != LinkRefusal::SubscriptionOnly)
         return false;
     // What the fetch trusts is what the link pins, read as the link's import reads it.
-    offerSubscription(cfg->subscriptionUrl, freetunnel::parseConfigToml(freetunnel::deepLinkConfigToToml(*cfg)),
-                      given ? &*given : nullptr, false);
-    return true;
+    return offerSubscription(cfg->subscriptionUrl, freetunnel::parseConfigToml(freetunnel::deepLinkConfigToToml(*cfg)),
+                             given ? &*given : nullptr, false)
+            || !given;
 }
 
 // The same for the TOML file an endpoint exports.
@@ -150,8 +152,7 @@ bool Backend::offerSubscriptionExport(const QString &content, const QString &fil
             freetunnel::prepareEndpointExportImport(content, fileName, nullptr, &why);
     if (!given && why != LinkRefusal::SubscriptionOnly)
         return false;
-    offerSubscription(exported->subscriptionUrl, exported->config, given ? &*given : nullptr, true);
-    return true;
+    return offerSubscription(exported->subscriptionUrl, exported->config, given ? &*given : nullptr, true) || !given;
 }
 
 bool Backend::beginSubscriptionImport(const QString &url)
@@ -177,9 +178,10 @@ bool Backend::offerSubscription(const QString &url, const freetunnel::ConfigToml
                               "its address holds the VPN password."));
         return false;
     }
+    const QString origin = freetunnel::redactUrl(parsed->requestUrl);
     SubscriptionImport import;
     import.url = url;
-    import.origin = freetunnel::redactUrl(parsed->requestUrl);
+    import.origin = origin;
     import.identity = parsed->identity;
     import.trustSource = trustSource;
     if (given)
@@ -194,6 +196,10 @@ bool Backend::offerSubscription(const QString &url, const freetunnel::ConfigToml
              given && freetunnel::nameMixesScripts(QFileInfo(given->fileName).completeBaseName())},
     };
     m_subscriptions->open(std::move(import), details);
+    // In the log too, by its origin alone, so an import waiting for the answer is
+    // seen to wait.
+    appendLog(QStringLiteral("INFO"),
+              tr("Subscription %1: nothing is fetched from it until you agree").arg(origin));
     return true;
 }
 
@@ -302,7 +308,7 @@ bool Backend::confirmSubscriptionImport(const QString &token, bool replaceExisti
         return false;
     const SubscriptionImport *pending = m_subscriptions->pendingImport(token);
     if (!pending) {
-        emit errorOccurred(tr("That import has expired. Open the link again."));
+        emit errorOccurred(tr("That import has expired. Start it again."));
         return false;
     }
     // A copy: what follows runs the credential store's event loop.

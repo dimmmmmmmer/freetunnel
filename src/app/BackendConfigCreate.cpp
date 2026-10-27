@@ -353,13 +353,17 @@ void Backend::persistCreatedConfigPaths(const QString &oldPath, const QString &t
             QFile::remove(oldPath);
         if (wasActive)
             m_activePath = target;
-        // The link to a subscription goes with the config.
-        m_subscriptions->rename(oldPath, target);
     }
     QStringList stored = loadStoredConfigs();
     freetunnel::backend_config::updateStoredConfigList(stored, oldPath, target);
     saveStoredConfigs(stored);
     reloadConfigs();
+    // The link to a subscription goes with the config, once the list names it
+    // there. A link whose config the list does not name is removed at the next
+    // start, its address with it, and a list that could not be saved still
+    // names the old path.
+    if (!oldPath.isEmpty() && oldPath != target && m_paths.contains(target))
+        m_subscriptions->rename(oldPath, target);
     freetunnel::migrateConfigPassword(target);
 
     if (!editing) {

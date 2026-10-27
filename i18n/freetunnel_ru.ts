@@ -414,10 +414,6 @@
         <translation>Сервер, указанный вместе с ней: %1.</translation>
     </message>
     <message>
-        <source>That import has expired. Open the link again.</source>
-        <translation>Время на этот импорт истекло. Откройте ссылку ещё раз.</translation>
-    </message>
-    <message>
         <source>Config added: %1. It won&apos;t update from its subscription, which couldn&apos;t be saved.</source>
         <translation>Конфиг добавлен: %1. Он не будет обновляться из подписки: её не удалось сохранить.</translation>
     </message>
@@ -432,6 +428,14 @@
     <message>
         <source>The server given with the subscription can be added now, and updates from it later.</source>
         <translation>Сервер, указанный вместе с подпиской, можно добавить сейчас; он обновится из неё позже.</translation>
+    </message>
+    <message>
+        <source>Subscription %1: nothing is fetched from it until you agree</source>
+        <translation>Подписка %1: с неё ничего не загружается, пока вы не согласитесь</translation>
+    </message>
+    <message>
+        <source>That import has expired. Start it again.</source>
+        <translation>Время на этот импорт истекло. Начните его заново.</translation>
     </message>
 </context>
 <context>
