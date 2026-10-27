@@ -2,9 +2,9 @@ name: Android
 on:
   push:
     branches: [main]
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', '.github/workflows/android.yml']
   pull_request:
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', '.github/workflows/android.yml']
   workflow_dispatch:
   # android-release.yml runs this whole workflow on the tagged commit, and signs
   # nothing until it has passed there.
@@ -57,6 +57,9 @@ jobs:
       # What TV launchers and app stores read once the AAR's manifest is merged in,
       # which lint doesn't see.
       - run: bash tests/test_android_tv_manifest.sh android/app/build/outputs/apk/debug/app-debug.apk
+      # The third-party notices, in both APKs, as this commit has them.
+      - run: bash scripts/check-apk-notices.sh android/app/build/outputs/apk/debug/app-debug.apk
+      - run: bash scripts/check-apk-notices.sh android/app/build/outputs/apk/release/app-release-unsigned.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-ci-builds

@@ -72,6 +72,52 @@ android {
     kotlinOptions { jvmTarget = '11' }
 }
 
+// The third-party notices, from the repository, into the APK's assets:
+// THIRD_PARTY_NOTICES.md, LICENSE (the Apache License 2.0 that most of the
+// libraries use) and the license texts under licenses/common and
+// licenses/android. Settings, About, Open-source licenses shows them, and
+// scripts/check-apk-notices.sh checks a built APK for them. Copied at build
+// time rather than kept here as a second copy that could fall behind.
+abstract class CopyThirdPartyNotices extends DefaultTask {
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getNotices()
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getLicense()
+    @InputDirectory @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getLicenseTexts()
+    @OutputDirectory
+    abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void copy() {
+        def out = outputDir.get().asFile
+        out.deleteDir()
+        out.mkdirs()
+        java.nio.file.Files.copy(notices.get().asFile.toPath(), new File(out, 'THIRD_PARTY_NOTICES.md').toPath())
+        java.nio.file.Files.copy(license.get().asFile.toPath(), new File(out, 'LICENSE').toPath())
+        ['common', 'android'].each { group ->
+            def from = new File(licenseTexts.get().asFile, group)
+            if (!from.isDirectory()) throw new GradleException("Missing ${from}")
+            def to = new File(out, "licenses/${group}")
+            to.mkdirs()
+            from.eachFile(groovy.io.FileType.FILES) { text ->
+                java.nio.file.Files.copy(text.toPath(), new File(to, text.name).toPath())
+            }
+        }
+    }
+}
+def copyThirdPartyNotices = tasks.register('copyThirdPartyNotices', CopyThirdPartyNotices) {
+    notices.set(rootProject.file('../THIRD_PARTY_NOTICES.md'))
+    license.set(rootProject.file('../LICENSE'))
+    licenseTexts.set(rootProject.file('../licenses'))
+    outputDir.set(layout.buildDirectory.dir('generated/thirdPartyNotices'))
+}
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyThirdPartyNotices) { it.outputDir }
+    }
+}
+
 tasks.register('verifyPinnedRuntime') {
     def artifact = file('libs/trusttunnel-client-android-1.1.7.aar')
     inputs.file(artifact)

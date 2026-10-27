@@ -1132,6 +1132,60 @@ public final class MainActivity extends Activity {
         section(body, getString(R.string.text_about));
         body.addView(label(getString(R.string.text_freetunnel_for_android), 14, textColor(), false), lp(-1, 42));
         body.addView(label(getString(R.string.text_version) + BuildConfig.VERSION_NAME, 12, dim(), false), lp(-1, 28));
+        LinearLayout licenses = row();
+        licenses.addView(label(getString(R.string.text_open_source_licenses), 14, textColor(), false),
+                new LinearLayout.LayoutParams(0, dp(48), 1));
+        licenses.addView(label(getString(R.string.text_open), 13, accent(), false), lp(-2, 48));
+        focus(licenses, "settings:licenses").setOnClickListener(v -> openSourceLicenses());
+        body.addView(licenses, lp(-1, 48));
+    }
+    // The third-party notices and the license texts, as app/build.gradle copies them
+    // from the repository into the APK's assets.
+    private void openSourceLicenses() {
+        List<String> files = new ArrayList<>();
+        files.add("THIRD_PARTY_NOTICES.md");
+        files.add("LICENSE");
+        for (String group : new String[]{"licenses/common", "licenses/android"}) {
+            List<String> texts = new ArrayList<>();
+            try {
+                String[] names = getAssets().list(group);
+                if (names != null) for (String name : names) texts.add(group + "/" + name);
+            } catch (IOException e) {
+                // Listed as far as it goes: a text that is missing says so when opened.
+            }
+            Collections.sort(texts, String.CASE_INSENSITIVE_ORDER);
+            files.addAll(texts);
+        }
+        show(new AlertDialog.Builder(this).setTitle(getString(R.string.text_open_source_licenses))
+                .setItems(files.toArray(new String[0]), (d, which) -> showLicenseText(files.get(which)))
+                .setNegativeButton(getString(R.string.text_done), null));
+    }
+    // One of them. A remote scrolls it with the arrows: the scroll view takes the
+    // focus, and the frame around it, which takes on the scroll view's states, shows
+    // the ring while it has it. Back returns to the list.
+    private void showLicenseText(String asset) {
+        String text;
+        try (InputStream input = getAssets().open(asset); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            for (int n; (n = input.read(buffer)) > 0; ) out.write(buffer, 0, n);
+            text = new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            toast(getString(R.string.text_licenses_unavailable));
+            return;
+        }
+        TextView body = label(text, 12, dialogTextColor(), false);
+        body.setGravity(Gravity.START);
+        body.setPadding(dp(20), dp(8), dp(20), dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
+        scroll.setFocusedByDefault(true);
+        FrameLayout frame = new FrameLayout(this);
+        frame.setAddStatesFromChildren(true);
+        frame.addView(scroll);
+        dialogFocus(frame);
+        show(new AlertDialog.Builder(this).setTitle(asset).setView(frame)
+                .setPositiveButton(getString(R.string.text_done), null)
+                .setOnCancelListener(d -> openSourceLicenses()));
     }
     // Installing replaces the app, and Android stops the VPN with it, so say so
     // first. Without the install permission, install() opens its settings screen.

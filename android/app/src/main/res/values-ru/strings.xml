@@ -88,6 +88,8 @@
     <string name="text_about">"О приложении"</string>
     <string name="text_freetunnel_for_android">"FreeTunnel для Android"</string>
     <string name="text_version">"Версия "</string>
+    <string name="text_open_source_licenses">"Лицензии открытого ПО"</string>
+    <string name="text_licenses_unavailable">"В этой сборке нет текстов лицензий"</string>
     <string name="text_copy">"Копировать"</string>
     <string name="text_log_is_empty">"Журнал пуст"</string>
     <string name="text_log_copied">"Журнал скопирован"</string>

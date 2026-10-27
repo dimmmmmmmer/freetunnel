@@ -88,6 +88,8 @@
     <string name="text_about">"About"</string>
     <string name="text_freetunnel_for_android">"FreeTunnel for Android"</string>
     <string name="text_version">"Version "</string>
+    <string name="text_open_source_licenses">"Open-source licenses"</string>
+    <string name="text_licenses_unavailable">"This build has no license texts"</string>
     <string name="text_copy">"Copy"</string>
     <string name="text_log_is_empty">"Log is empty"</string>
     <string name="text_log_copied">"Log copied"</string>

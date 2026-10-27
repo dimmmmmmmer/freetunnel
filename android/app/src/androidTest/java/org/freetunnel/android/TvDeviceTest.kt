@@ -534,6 +534,41 @@ class TvDeviceTest {
         }
     }
 
+    // Settings, About, Open-source licenses lists the notices and the license texts
+    // the APK carries, and not the desktop's. With a remote, a text starts with the
+    // focus on it, its frame shows the ring, and Down scrolls it.
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun theOpenSourceLicensesOpenAndScrollWithTheArrows() {
+        val a = open()
+        leaveTouchMode(a)
+        render(a, 3)
+        onMain { assertTrue(root(a).findViewWithTag<View>("settings:licenses").performClick()) }
+        instrumentation.waitForIdleSync()
+        val list = onMain { windows().mapNotNull { window -> descendants(window).filterIsInstance<ListView>().firstOrNull() }.last() }
+        val items = onMain { (0 until list.adapter.count).map { list.adapter.getItem(it).toString() } }
+        assertEquals(listOf("THIRD_PARTY_NOTICES.md", "LICENSE"), items.take(2))
+        assertTrue("The core's license texts are listed", items.contains("licenses/common/nghttp2.txt"))
+        assertTrue("The app's license texts are listed", items.contains("licenses/android/EPL-1.0.txt"))
+        assertFalse("The desktop's license texts stay out of the APK", items.any { it.startsWith("licenses/desktop/") })
+        onMain { list.performItemClick(list.getChildAt(0), 0, list.adapter.getItemId(0)) }
+        instrumentation.waitForIdleSync()
+        val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button1) != null } }
+        try {
+            val scroll = onMain { descendants(dialog).filterIsInstance<ScrollView>().single { it.isShown } }
+            onMain {
+                assertTrue((scroll.getChildAt(0) as TextView).text.startsWith("# Third-party notices"))
+                assertTrue("The text's frame shows the focus", (scroll.parent as View).foreground?.isStateful == true)
+                assertTrue("Done shows the focus", dialog.findViewById<Button>(android.R.id.button1).foreground?.isStateful == true)
+            }
+            eventually("A remote starts on the text") { onMain { scroll.isFocused } }
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN)
+            eventually("Down scrolls the text") { onMain { scroll.scrollY > 0 } }
+        } finally {
+            onMain { dialog.findViewById<Button>(android.R.id.button1).performClick() }
+            instrumentation.waitForIdleSync()
+        }
+    }
+
     // Receive from phone. The link is DeepLinkImportTest's V2_PLAIN: vpn.example.com,
     // with no name of its own.
     private val link = "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz"
