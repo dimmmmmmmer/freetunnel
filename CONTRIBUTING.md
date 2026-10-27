@@ -427,7 +427,13 @@ three, all in the core's C++ wrapper (`trusttunnel/`):
 | --- | --- |
 | `01-tunnel-stats-handler.patch` | Per-connection upload/download counts, for the live speeds in the UI |
 | `02-connect-request-handler.patch` | The per-connection hook that per-application split tunnelling decides on |
-| `03-live-exclusions-and-connect-retry.patch` | Hands a running session new split-tunnelling rules and mode instead of rebuilding it; with the kill switch on, keeps a first connect that fails retrying inside its session rather than ending it |
+| `03-live-exclusions.patch` | Hands a running session new split-tunnelling rules and mode instead of rebuilding it |
+
+The other half of the kill-switch change, a first connect that fails keeps
+retrying inside its session while the kill switch is on, was a part of this
+patch until core 1.3 (the 1.3.0 release candidates) added it as
+`ConnectOptions::fall_into_recovery`. FreeTunnel now passes that option, and
+`scripts/verify_upstream_patch.sh` asserts that the core still has it.
 
 Rules:
 
@@ -466,6 +472,13 @@ file rather than carrying a SHA of their own.
    port, clear it there as well.
 5. Then add it to the list in the script, by its full TOML path
    (`listener.tun.netns`, not `netns`).
+6. Update `THIRD_PARTY_NOTICES.md` and `licenses/` for the new core commit and
+   for the NativeLibsCommon and DnsLibs versions it pulls in (its
+   `conanfile.py` names them), and `NLC_COMMIT` in
+   `scripts/export-patched-boringssl.sh` if the NativeLibsCommon changed.
+   `scripts/check-third-party-notices.sh` fails until the "Source, desktop"
+   lines name the pinned commits. The Android app runs the core of its AAR,
+   not this one, so its lines stay as they are.
 
 The script fails, too, on a read it cannot place in a table and on a listed key
 it no longer finds. Its comments say why, and what to do about each.

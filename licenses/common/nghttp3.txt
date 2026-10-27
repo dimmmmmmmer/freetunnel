@@ -1,7 +1,7 @@
 nghttp3
 Version: 1.0.0, with the patches of AdGuard's conan recipe
 Source: https://github.com/ngtcp2/nghttp3/tree/v1.0.0
-Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/nghttp3-1.0.0
+Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/nghttp3-1.0.0
 License: MIT
 
 [ngtcp2/nghttp3@v1.0.0: COPYING]
