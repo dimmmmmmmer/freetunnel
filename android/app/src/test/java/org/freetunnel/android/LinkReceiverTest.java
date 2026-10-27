@@ -396,8 +396,13 @@ public final class LinkReceiverTest {
 
     // Real sockets: the receiver on loopback, a raw socket as the phone's browser.
 
+    // The first byte gets as long as every other read, unless a test says otherwise.
     private LinkReceiver loopback(String code, long lifetimeMs, int readTimeoutMs, int deadlineMs) throws IOException {
-        LinkReceiver receiver = new LinkReceiver(InetAddress.getLoopbackAddress(), code, PAGES, lifetimeMs, readTimeoutMs, deadlineMs);
+        return loopback(code, lifetimeMs, readTimeoutMs, readTimeoutMs, deadlineMs);
+    }
+    private LinkReceiver loopback(String code, long lifetimeMs, int firstByteMs, int readTimeoutMs, int deadlineMs) throws IOException {
+        LinkReceiver receiver = new LinkReceiver(InetAddress.getLoopbackAddress(), code, PAGES, lifetimeMs, firstByteMs,
+                readTimeoutMs, deadlineMs);
         opened.add(receiver);
         return receiver;
     }
@@ -514,19 +519,46 @@ public final class LinkReceiverTest {
     }
 
     @Test public void aSilentClientIsDroppedAndThePhoneStillGetsThrough() throws Exception {
-        LinkReceiver receiver = loopback(CODE, 60_000, 300, 5_000);
+        // As a browser's connection opened ahead of time, while it sends the request
+        // on another one.
+        LinkReceiver receiver = loopback(CODE, 60_000, 300, 4_000, 8_000);
         int port = port(receiver);
         BlockingQueue<String> events = start(receiver);
         try (Socket silent = connect(port)) {
             silent.setSoTimeout(5_000);
             long started = System.nanoTime();
-            // Waits in the queue behind the silent one, until its read times out.
+            // Waits in the queue behind the silent one, until its first byte's wait is up.
             assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
             long heldMs = (System.nanoTime() - started) / 1_000_000;
-            assertTrue("Held " + heldMs + " ms: for its read timeout, not to its deadline", heldMs >= 250 && heldMs < 3_000);
+            assertTrue("Held " + heldMs + " ms: for its first byte, not its read timeout", heldMs >= 250 && heldMs < 2_000);
             assertEquals(-1, silent.getInputStream().read());
         }
         assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+    }
+
+    @Test public void aRequestThatHasStartedWaitsForItsReadTimeout() throws Exception {
+        // Only the first byte has the short wait. After it, a pause shorter than the
+        // read timeout is waited out, and a longer one ends the connection, long
+        // before its deadline.
+        LinkReceiver receiver = loopback(CODE, 60_000, 200, 1_500, 8_000);
+        int port = port(receiver);
+        start(receiver);
+        byte[] begun = "GET / HTTP/1.1\r\n".getBytes(StandardCharsets.US_ASCII);
+        try (Socket slow = connect(port)) {
+            slow.setSoTimeout(5_000);
+            slow.getOutputStream().write(begun);
+            Thread.sleep(700);
+            slow.getOutputStream().write(("Host: 127.0.0.1:" + port + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            assertTrue(new String(slow.getInputStream().readAllBytes(), StandardCharsets.UTF_8).endsWith(PAGES.form));
+        }
+        try (Socket stalled = connect(port)) {
+            stalled.setSoTimeout(5_000);
+            long started = System.nanoTime();
+            stalled.getOutputStream().write(begun);
+            assertEquals(-1, stalled.getInputStream().read());
+            long heldMs = (System.nanoTime() - started) / 1_000_000;
+            assertTrue("Held " + heldMs + " ms: for its read timeout, not to its deadline", heldMs >= 1_400 && heldMs < 4_000);
+        }
     }
 
     @Test public void aTricklingClientIsCutOffAtItsDeadline() throws Exception {

@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class LinkReceiver {
     static final long LIFETIME_MS = 300_000;
+    static final int FIRST_BYTE_TIMEOUT_MS = 2_000;
     static final int READ_TIMEOUT_MS = 10_000;
     static final int CONNECTION_DEADLINE_MS = 15_000;
     static final int MAX_HEADER_BYTES = 8192;
@@ -114,6 +115,7 @@ final class LinkReceiver {
     private final String host;
     private final Pages pages;
     private final long lifetimeMs;
+    private final int firstByteTimeoutMs;
     private final int readTimeoutMs;
     private final int connectionDeadlineMs;
     private final AtomicBoolean stopped = new AtomicBoolean();
@@ -122,16 +124,17 @@ final class LinkReceiver {
 
     /** Binds to address, which must be a private-network IPv4 address (see pickAddress), on a port the system picks. */
     LinkReceiver(InetAddress address, String code, Pages pages) throws IOException {
-        this(lanOnly(address), code, pages, LIFETIME_MS, READ_TIMEOUT_MS, CONNECTION_DEADLINE_MS);
+        this(lanOnly(address), code, pages, LIFETIME_MS, FIRST_BYTE_TIMEOUT_MS, READ_TIMEOUT_MS, CONNECTION_DEADLINE_MS);
     }
 
     // For tests: any address, loopback too, and shorter times.
-    LinkReceiver(InetAddress address, String code, Pages pages, long lifetimeMs, int readTimeoutMs,
-                 int connectionDeadlineMs) throws IOException {
+    LinkReceiver(InetAddress address, String code, Pages pages, long lifetimeMs, int firstByteTimeoutMs,
+                 int readTimeoutMs, int connectionDeadlineMs) throws IOException {
         this.code = normalizeCode(code);
         if (this.code.length() != CODE_LENGTH || !inAlphabet(this.code)) throw new IllegalArgumentException("Not a receiver code");
         this.pages = pages;
         this.lifetimeMs = lifetimeMs;
+        this.firstByteTimeoutMs = firstByteTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
         this.connectionDeadlineMs = connectionDeadlineMs;
         // Plain HTTP on purpose: it serves a phone's browser on the local network,
@@ -241,7 +244,7 @@ final class LinkReceiver {
                 try (Socket open = client) {
                     if (stopped.get()) return;
                     long deadline = System.nanoTime() + connectionDeadlineMs * 1_000_000L;
-                    InputStream in = new BufferedInputStream(new DeadlineInput(open, readTimeoutMs, deadline));
+                    InputStream in = new BufferedInputStream(new DeadlineInput(open, firstByteTimeoutMs, readTimeoutMs, deadline));
                     OutputStream out = open.getOutputStream();
                     outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES);
                     out.flush();
@@ -267,24 +270,31 @@ final class LinkReceiver {
     }
 
     // Each read waits at most readTimeoutMs, and all of them together end at the
-    // deadline, so a client that trickles bytes cannot hold the port either.
+    // deadline, so a client that trickles bytes cannot hold the port either. The
+    // first read waits only firstByteMs: a browser can open a connection ahead of
+    // time and send its request on another one, which would otherwise wait behind
+    // it for a whole read timeout. A request that has been sent is already there
+    // when its connection is taken.
     private static final class DeadlineInput extends InputStream {
         private final Socket socket;
         private final InputStream in;
         private final int readTimeoutMs;
         private final long deadline;
+        private int waitMs;
 
-        DeadlineInput(Socket socket, int readTimeoutMs, long deadline) throws IOException {
+        DeadlineInput(Socket socket, int firstByteMs, int readTimeoutMs, long deadline) throws IOException {
             this.socket = socket;
             this.in = socket.getInputStream();
             this.readTimeoutMs = readTimeoutMs;
             this.deadline = deadline;
+            this.waitMs = firstByteMs;
         }
 
         private void arm() throws IOException {
             long left = (deadline - System.nanoTime()) / 1_000_000;
             if (left <= 0) throw new SocketTimeoutException("Connection deadline");
-            socket.setSoTimeout((int) Math.min(readTimeoutMs, left));
+            socket.setSoTimeout((int) Math.min(waitMs, left));
+            waitMs = readTimeoutMs;
         }
 
         @Override public int read() throws IOException { arm(); return in.read(); }
