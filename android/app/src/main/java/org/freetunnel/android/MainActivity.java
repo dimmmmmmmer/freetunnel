@@ -807,7 +807,10 @@ public final class MainActivity extends Activity {
                 message += getString(R.string.text_nthis_configuration_or_name_already_exists_a_separat); break;
             }
         }
-        if (name.codePoints().mapToObj(Character.UnicodeScript::of)
+        // A file's extension is not counted: a configuration named after "Дом.toml"
+        // would otherwise always be said to mix alphabets.
+        String word = name.matches("(?s).+\\.[0-9A-Za-z]{1,5}") ? name.substring(0, name.lastIndexOf('.')) : name;
+        if (word.codePoints().mapToObj(Character.UnicodeScript::of)
                 .filter(script -> script != Character.UnicodeScript.COMMON && script != Character.UnicodeScript.INHERITED
                         && script != Character.UnicodeScript.UNKNOWN).distinct().count() > 1)
             message += getString(R.string.text_nthe_name_mixes_similar_characters_from_different_al);

@@ -763,6 +763,31 @@ class TvDeviceTest {
         }
     }
 
+    // A configuration named after its file keeps the file's extension, which is not
+    // counted as another alphabet: "Дом.toml" is no mix, but a name that mixes them
+    // itself, or in its extension, still is.
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun aFilesExtensionIsNoOtherAlphabet() {
+        val a = open()
+        val note = context.getString(R.string.text_nthe_name_mixes_similar_characters_from_different_al).trim()
+        for ((name, mixed) in listOf("\u0414\u043e\u043c.toml" to false, "\u0414o\u043c.toml" to true,
+                "\u0414\u043e\u043c.t\u043eml" to true, "home.toml" to false)) {
+            onMain {
+                method("showImportConfirmation", String::class.java, RoutingConfig.Import::class.java, String::class.java)
+                    .invoke(a, name, RoutingConfig.Import(source, false), "192.0.2.7")
+            }
+            instrumentation.waitForIdleSync()
+            val dialog = onMain { windows().last { it.findViewById<View>(android.R.id.button2) != null } }
+            try {
+                val message = onMain { dialog.findViewById<TextView>(android.R.id.message).text.toString() }
+                assertEquals("$name: $message", mixed, message.contains(note))
+            } finally {
+                onMain { dialog.findViewById<Button>(android.R.id.button2).performClick() }
+                instrumentation.waitForIdleSync()
+            }
+        }
+    }
+
     // "Create manually" reads a pasted link as the link, under the name typed there: on
     // a TV, a phone's keyboard can paste one where a whole TOML file is too much.
     @SdkSuppress(minSdkVersion = 29)
