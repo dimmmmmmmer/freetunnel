@@ -15,9 +15,6 @@ compare link at the bottom of its release notes.
   asks before adding it, as it does for a tt:// link. The config takes the
   name the file gives, or the file's own name, and leaves the subscription
   address out.
-- **Android preview: check for official Android updates in Settings.** Downloads
-  require a signed manifest naming the offered version and a matching APK hash.
-  Android asks before installation. Optional launch checks can be disabled.
 
 ### Security
 
@@ -33,12 +30,6 @@ compare link at the bottom of its release notes.
   certificate in it is refused, and so is a link whose certificate is damaged.
 
 ### Fixed
-
-- **Android preview: kill switch keeps traffic blocked after a fatal connection
-  error or a failed settings replacement.** Reconnect or disconnect from the VPN
-  notification. Configuration checks run in an isolated background process;
-  cancelling an edit no longer applies it later. Unsupported old routing rules
-  are removed with a notice instead of preventing connections.
 
 - **Windows, macOS and Linux: tt:// links from TrustTunnel 1.3 servers are no
   longer refused as an unsupported version.**
