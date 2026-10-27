@@ -42,7 +42,7 @@
     <string name="text_cancel">"Cancel"</string>
     <string name="text_add">"Add"</string>
     <string name="text_configuration_name">"Configuration name"</string>
-    <string name="text_paste_complete_trusttunnel_toml">"Paste complete TrustTunnel TOML"</string>
+    <string name="text_paste_complete_trusttunnel_toml">"Paste complete TrustTunnel TOML or a tt:// link"</string>
     <string name="text_show_toml_and_password">"Show TOML and password"</string>
     <string name="text_new_configuration">"New configuration"</string>
     <string name="text_edit_configuration">"Edit configuration"</string>

@@ -42,7 +42,7 @@
     <string name="text_cancel">"Отмена"</string>
     <string name="text_add">"Добавить"</string>
     <string name="text_configuration_name">"Имя конфига"</string>
-    <string name="text_paste_complete_trusttunnel_toml">"Вставьте полный TrustTunnel TOML"</string>
+    <string name="text_paste_complete_trusttunnel_toml">"Вставьте полный TrustTunnel TOML или ссылку tt://"</string>
     <string name="text_show_toml_and_password">"Показать TOML и пароль"</string>
     <string name="text_new_configuration">"Новый конфиг"</string>
     <string name="text_edit_configuration">"Изменить конфиг"</string>

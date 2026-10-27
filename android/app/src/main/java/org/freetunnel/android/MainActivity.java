@@ -859,14 +859,23 @@ public final class MainActivity extends Activity {
                     String n = name.getText().toString().trim();
                     String t = stripBom(raw.getText().toString().trim());
                     if (n.isEmpty()) { toast(getString(R.string.text_enter_a_configuration_name)); return; }
+                    // A link pasted here is read as the link it is. On a TV, a phone's
+                    // keyboard, such as the Google TV app's, can paste one where a whole
+                    // file is a lot to get across.
+                    final DeepLinkImport.Imported link;
+                    try { link = DeepLinkImport.looksLikeLink(t) ? DeepLinkImport.parse(t) : null; }
+                    catch (DeepLinkImport.ParseException e) { refuseImport(e.messageResource); return; }
                     checking[0] = true;
                     if (save.isInTouchMode()) save.setEnabled(false);
                     // Checked as an import: the hint asks for a whole TrustTunnel file, and
                     // one pasted here, or saved by an earlier version, can carry a
                     // subscription address, an auth key or a private key with its
                     // certificate just as an imported one can. An endpoint's export is
-                    // turned into a whole file, and the name stays the one typed here.
-                    validateAsync(t, true, checked -> {
+                    // turned into a whole file, and the name stays the one typed here,
+                    // as it does for a link, which is checked as importDeepLink() checks it.
+                    validateAsync(link != null ? link.toml : t, link == null, result -> {
+                        RoutingConfig.Import checked = link == null ? result
+                                : new RoutingConfig.Import(result.getToml(), link.subscriptionNotKept, link.certificateIgnored);
                         if (!editor.isShowing()) return;
                         if (editing == null) configs.add(new Config(n, checked.getToml()));
                         else {
