@@ -178,6 +178,7 @@ private slots:
     void anUnchangedReplyMovesOnlyTheFetchTime();
     void anotherServerIsHeldUntilAccepted();
     void anotherServerAcceptedAfterARestartIsFetchedAgain();
+    void theOldServerBackAgainDropsTheQuestion();
     void anotherServerRefusedStopsAutomaticRefresh();
     void anUpdateWaitsWhileTheEditorHasTheConfigOpen();
     void aStoreThatRefusesLeavesTheConfigAsItWas();
@@ -186,6 +187,7 @@ private slots:
     void failuresThatMayPassBackOffThenWaitTheInterval();
     void theJitterStaysWithinTenMinutes();
     void onlyWhatIsDueIsFetchedAndNoMoreThanTwoAtOnce();
+    void noConfigIsFetchedByItselfTwiceInTenMinutes();
     void aCustomSniConfigIsNeverRefreshedByItself();
     void theSchedulerRunsOnlyWithTheSettingOn();
     void aRemovalWhileItFetchesDropsTheResult();
@@ -373,6 +375,14 @@ void TestBackendSubscription::cancellingOrWaitingTooLongAddsNothing()
     QCOMPARE(failed.last().at(0).toString(), QStringLiteral("That import has expired. Open the link again."));
     QCOMPARE(rig.backend->configs().size(), 0);
     QVERIFY(freetunnel::loadSubscriptions().isEmpty());
+
+    // Another link while one fetches: the new one takes its place, fetch and all.
+    rig.backend->importDeepLink(v2::kSubscriptionOnly);
+    QVERIFY(rig.backend->fetchSubscriptionForImport(consent.last().at(0).toString()));
+    QCOMPARE(rig.network.waiting(), 1);
+    rig.backend->importDeepLink(v2::kFull);
+    QCOMPARE(rig.network.waiting(), 0);
+    QCOMPARE(rig.network.aborts(), 2);
 }
 
 void TestBackendSubscription::aFailedFetchOfASubscriptionOnlyLinkAddsNothing()
@@ -431,6 +441,19 @@ void TestBackendSubscription::aFailedFetchOfALinkWithItsServerOffersThatServer()
     QCOMPARE(record->lastStatus, QStringLiteral("network"));
     QCOMPARE(record->lastFetchedAt, 0);
     QCOMPARE(record->nextAttemptAt, kStart + 10 * 60);
+    QVERIFY(record->autoRefresh);
+
+    // Added after a fetch that a server offering no updates refused, it is not
+    // asked again by itself either.
+    rig.backend->importDeepLink(v2::kFull);
+    const QString second = consent.last().at(0).toString();
+    QVERIFY(rig.backend->fetchSubscriptionForImport(second));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::failure(SubscriptionFetchError::Http403, 403)));
+    QVERIFY(rig.backend->confirmDeepLinkImport(second, false));
+    const QString copy = rig.pathOf(imported.last().at(0).toString());
+    QVERIFY(copy != path);
+    QVERIFY(!rig.record(copy)->autoRefresh);
+    QCOMPARE(rig.record(copy)->lastStatus, QStringLiteral("http_403"));
 }
 
 void TestBackendSubscription::anInvalidDocumentIsAFailedFetch()
@@ -535,6 +558,19 @@ void TestBackendSubscription::anEndpointExportWithASubscriptionAsksBeforeAnyFetc
     // The export pins its certificate, and the fetch trusts that alone.
     QVERIFY(request.pinned);
     QCOMPARE(request.connectHost, QStringLiteral("203.0.113.5"));
+
+    // One that needs an auth key is refused as it was, subscription or not.
+    endpoint_export::Fields withKey;
+    withKey.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    {
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        out.write(endpoint_export::text(withKey).toUtf8());
+    }
+    QSignalSpy failed(rig.backend.get(), &Backend::errorOccurred);
+    QVERIFY(!rig.backend->importFile(file));
+    QCOMPARE(consent.count(), 1);
+    QCOMPARE(failed.last().at(0).toString(), freetunnel::newerCoreRefusal());
 }
 
 void TestBackendSubscription::aLinkRefusedForSomethingElseIsRefusedAsBefore()
@@ -920,6 +956,27 @@ void TestBackendSubscription::anotherServerAcceptedAfterARestartIsFetchedAgain()
     QCOMPARE(rig.record(path)->heldHostname, QString());
 }
 
+// The subscription names the config's own server again before the user
+// answered: there is nothing left to ask about.
+void TestBackendSubscription::theOldServerBackAgainDropsTheQuestion()
+{
+    Rig rig;
+    const QByteArray document = subscriptionDocument("vpn.example.com", "203.0.113.7:443");
+    const QString path = linkThroughImport(rig, v2::kSubscriptionOnly, document);
+    QVERIFY(!path.isEmpty());
+    const QString toml = readText(path);
+    QVERIFY(refreshByItself(rig, path));
+    QVERIFY(rig.network.answer(
+            FakeSubscriptionNetwork::document(subscriptionDocument("vpn2.example.com", "198.51.100.2:443"))));
+    QCOMPARE(rig.record(path)->heldHostname, QStringLiteral("vpn2.example.com"));
+    QVERIFY(refreshByItself(rig, path));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(document)));
+    QCOMPARE(rig.record(path)->heldHostname, QString());
+    QVERIFY(!rig.subs()->held(path));
+    QVERIFY(!rig.backend->answerHostnameChange(path, true));
+    QCOMPARE(readText(path), toml);
+}
+
 void TestBackendSubscription::anotherServerRefusedStopsAutomaticRefresh()
 {
     Rig rig;
@@ -931,8 +988,11 @@ void TestBackendSubscription::anotherServerRefusedStopsAutomaticRefresh()
     QVERIFY(rig.network.answer(
             FakeSubscriptionNetwork::document(subscriptionDocument("vpn2.example.com", "198.51.100.2:443"))));
     QVERIFY(rig.backend->answerHostnameChange(path, false));
-    QCoreApplication::processEvents();
+    // Nor later, by what applies a held update otherwise.
+    rig.backend->setConfigOpenInEditor(QString());
+    QTest::qWait(20);
     QCOMPARE(readText(path), toml);
+    QVERIFY(!rig.subs()->held(path));
     QVERIFY(!rig.record(path)->autoRefresh);
     QVERIFY(!refreshByItself(rig, path));
     // The user's own refresh still fetches, and asks again.
@@ -1109,6 +1169,36 @@ void TestBackendSubscription::onlyWhatIsDueIsFetchedAndNoMoreThanTwoAtOnce()
 
 // A custom SNI hides the server's name in the tunnel's handshake, and a fetch
 // sends the real one: only the user's own refresh does that.
+// Whatever the schedule says, as a record a crash or an older version left can:
+// a config fetched less than ten minutes ago waits.
+void TestBackendSubscription::noConfigIsFetchedByItselfTwiceInTenMinutes()
+{
+    const QString path = QDir(appConfigDir()).filePath(QStringLiteral("recent.toml"));
+    {
+        freetunnel::ConfigToml c;
+        c.hostname = QStringLiteral("vpn.example.com");
+        c.addresses = QStringLiteral("203.0.113.7:443");
+        c.username = QStringLiteral("alice");
+        QFile out(path);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write(freetunnel::buildConfigToml(c).toUtf8());
+    }
+    saveStoredConfigs({path});
+    SubscriptionRecord record;
+    record.sourceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QVERIFY(CredentialStore::storePassword(CredentialStore::keyForSubscription(record.sourceId), v2::kSubscription));
+    record.lastAttemptAt = kStart - kCheck + 1;
+    record.nextAttemptAt = 0;
+    QVERIFY(freetunnel::saveSubscriptions({{path, record}}));
+    Rig rig;
+    rig.subs()->runSchedulerTickForTest();
+    QCOMPARE(rig.network.fetches(), 0);
+    rig.clock += 1;
+    rig.subs()->runSchedulerTickForTest();
+    QCOMPARE(rig.network.fetches(), 1);
+    CredentialStore::deletePassword(CredentialStore::keyForSubscription(record.sourceId));
+}
+
 void TestBackendSubscription::aCustomSniConfigIsNeverRefreshedByItself()
 {
     Rig rig;
