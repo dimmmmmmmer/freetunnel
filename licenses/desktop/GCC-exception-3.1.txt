@@ -1,5 +1,7 @@
 GCC Runtime Library Exception, version 3.1
-Applies with GPL-3.0.txt to libstdc++.so.6 and libgcc_s.so.1 in the Linux packages.
+Applies with GPL-3.0.txt to libstdc++.so.6 and libgcc_s.so.1 in the Linux packages,
+whichever GCC release they come from. The text below is from gcc-13.1.0, and it is
+identical on GCC's master branch, which the GCC 16 snapshots are taken from.
 
 [gcc-mirror/gcc@releases/gcc-13.1.0: COPYING.RUNTIME]
 GCC RUNTIME LIBRARY EXCEPTION

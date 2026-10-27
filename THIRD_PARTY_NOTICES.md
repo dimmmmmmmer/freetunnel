@@ -25,8 +25,8 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 - Linux .deb: in `/usr/share/doc/freetunnel/`. The Debian copyright files of
   the bundled system libraries are in `/opt/freetunnel/share/doc/<package>/`.
 - Linux AppImage: in `usr/share/doc/freetunnel/` inside the image (run it with
-  `--appimage-extract` to unpack it), and the system libraries' copyright files
-  in `usr/share/doc/<package>/`.
+  `--appimage-extract` to unpack it), with `appimage-runtime.txt`, and the
+  system libraries' copyright files in `usr/share/doc/<package>/`.
 - Android: Settings, About, Open-source licenses; the files are in the APK's
   `assets/`.
 
@@ -84,6 +84,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries) and [Rust
   crates](#rust-crates-in-the-trusttunnel-native-library).
 - [Java and Kotlin libraries](#java-and-kotlin-libraries).
+- [An icon derived from Feather](#feather-icons-in-the-android-app).
 
 ## The VPN core and its libraries
 
@@ -136,7 +137,8 @@ packages uses the system's OpenSSL, if one is installed.)
 
 ### nghttp2
 
-- Version: 1.56.0
+- Version: 1.56.0, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/nghttp2-1.56.0>)
 - License: MIT, [licenses/common/nghttp2.txt](licenses/common/nghttp2.txt)
 - Copyright: Copyright (c) 2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa;
   Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors
@@ -144,21 +146,24 @@ packages uses the system's OpenSSL, if one is installed.)
 
 ### nghttp3
 
-- Version: 1.0.0
+- Version: 1.0.0, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/nghttp3-1.0.0>)
 - License: MIT, [licenses/common/nghttp3.txt](licenses/common/nghttp3.txt)
 - Copyright: Copyright (c) 2019 nghttp3 contributors
 - Source: <https://github.com/ngtcp2/nghttp3/tree/v1.0.0>
 
 ### ngtcp2
 
-- Version: 1.22.1
+- Version: 1.22.1, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/ngtcp2-1.22.1>)
 - License: MIT, [licenses/common/ngtcp2.txt](licenses/common/ngtcp2.txt)
 - Copyright: Copyright (c) 2016 ngtcp2 contributors
 - Source: <https://github.com/ngtcp2/ngtcp2/tree/v1.22.1>
 
 ### libevent
 
-- Version: 2.1.11-stable
+- Version: 2.1.11-stable, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/libevent>)
 - License: BSD-3-Clause AND ISC AND MIT,
   [licenses/common/libevent.txt](licenses/common/libevent.txt)
 - Copyright: Copyright (c) 2000-2007 Niels Provos; Copyright (c) 2007-2012
@@ -207,7 +212,8 @@ packages uses the system's OpenSSL, if one is installed.)
 
 ### llhttp
 
-- Version: 9.3.0
+- Version: 9.3.0, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/llhttp-9.3.0>)
 - License: MIT, [licenses/common/llhttp.txt](licenses/common/llhttp.txt)
 - Copyright: Copyright Fedor Indutny, 2018
 - Source: <https://github.com/nodejs/llhttp/tree/release/v9.3.0>
@@ -228,7 +234,8 @@ packages uses the system's OpenSSL, if one is installed.)
 
 ### libuv
 
-- Version: 1.41.0, with AdGuard's patches
+- Version: 1.41.0, with the patches of AdGuard's conan recipe
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/libuv>)
 - License: MIT AND BSD-2-Clause AND BSD-3-Clause AND ISC,
   [licenses/common/libuv.txt](licenses/common/libuv.txt)
 - Copyright: Copyright (c) 2015-present libuv project contributors; Copyright
@@ -326,11 +333,14 @@ Windows only.
 ### Qt
 
 FreeTunnel's desktop interface is built with Qt 6.8.3: The Qt Company's
-official binaries, built from unmodified source. The deployment tools
-(windeployqt, macdeployqt, linuxdeploy) only change the paths in them that say
-where Qt's parts are, and macdeployqt and linuxdeploy strip their debugging
-symbols. FreeTunnel uses Qt under the GNU Lesser General
-Public License version 3 ([licenses/desktop/LGPL-3.0.txt](licenses/desktop/LGPL-3.0.txt)),
+official binaries, built from unmodified source. On Windows, windeployqt
+copies Qt's DLLs and plugins unchanged. On macOS, macdeployqt rewrites the
+install names that say where Qt's frameworks are and strips their debugging
+symbols, and the bundle's ad-hoc signature is added to each of them. On Linux,
+linuxdeploy sets the RPATH of Qt's libraries and plugins, the path they load
+libraries from, and does not strip them. FreeTunnel uses Qt under the GNU
+Lesser General Public License version 3
+([licenses/desktop/LGPL-3.0.txt](licenses/desktop/LGPL-3.0.txt)),
 which incorporates the GNU General Public License version 3
 ([licenses/desktop/GPL-3.0.txt](licenses/desktop/GPL-3.0.txt)). Qt is
 also available under other licenses: `LicenseRef-Qt-Commercial OR
@@ -394,9 +404,10 @@ Windows only: the frameless window's shadow, corners and snap layouts.
 
 ### Feather and Lucide icons
 
-Four of the interface's icons (`assets/icons/settings.svg`, `export.svg` and
-`close.svg` from Feather, `edit.svg` from Lucide) are derived from these icon
-sets.
+Five of the interface's icons (`assets/icons/settings.svg`, `export.svg`,
+`close.svg` and `connection.svg` from Feather, `edit.svg` from Lucide) are
+derived from these icon sets. The Android app's Configurations icon comes from
+Feather too: see [Feather icons in the Android app](#feather-icons-in-the-android-app).
 
 - License: MIT (Feather) AND ISC (Lucide),
   [licenses/desktop/Feather-Lucide-icons.txt](licenses/desktop/Feather-Lucide-icons.txt)
@@ -449,7 +460,16 @@ installer system they are built with.
 - Version: NSIS 3.13.0
 - License: Zlib AND CPL-1.0 (its LZMA decompressor, under the Common Public
   License 1.0 with the authors' linking exception),
-  [licenses/desktop/NSIS.txt](licenses/desktop/NSIS.txt)
+  [licenses/desktop/NSIS.txt](licenses/desktop/NSIS.txt). The setup program and
+  the uninstaller are compressed with LZMA, so both contain the LZMA module in
+  object code, which FreeTunnel distributes under the Common Public License
+  1.0. Its source code is available at the address below, in `Source/7zip/`.
+  On behalf of the LZMA module's contributors, FreeTunnel disclaims all
+  warranties and conditions, express and implied, including those of title,
+  non-infringement, merchantability and fitness for a particular purpose, and
+  excludes their liability for all damages, direct, indirect, special,
+  incidental and consequential, including lost profits. Any terms here that
+  differ from the CPL are offered by FreeTunnel alone.
 - Copyright: Copyright (C) 1999-2026 Contributors; the LZMA module: Igor Pavlov
   and Amir Szekely
 - Source: <https://github.com/nsis-dev/nsis/tree/v313>, <https://nsis.sourceforge.io/>
@@ -509,14 +529,22 @@ notices are in their Debian copyright files.
 ### GCC runtime libraries
 
 Linux only: `libstdc++.so.6` and `libgcc_s.so.1`, from the packages libstdc++6
-and libgcc-s1 of Ubuntu's `ppa:ubuntu-toolchain-r/test`, which the build
-installs GCC 13 from. Their versions are in `bundled-system-packages.txt`.
+and libgcc-s1 of Ubuntu's `ppa:ubuntu-toolchain-r/test`. The build installs
+GCC 13 from that PPA, which brings in the newest libstdc++6 and libgcc-s1 the
+PPA has, so these libraries can come from a later GCC than 13. At the time of
+writing they are a GCC 16 snapshot: source package `gcc-16`, version
+`16-20260315-1ubuntu1~20~ppa1`. `bundled-system-packages.txt` gives the exact
+version in each package.
 
 - License: GPL-3.0-or-later WITH GCC-exception-3.1,
   [licenses/desktop/GPL-3.0.txt](licenses/desktop/GPL-3.0.txt) and
   [licenses/desktop/GCC-exception-3.1.txt](licenses/desktop/GCC-exception-3.1.txt)
 - Copyright: Copyright (C) Free Software Foundation, Inc.
-- Source: <https://launchpad.net/~ubuntu-toolchain-r/+archive/ubuntu/test>
+- Source: `gcc-runtime-source.tar`, attached to the same release as the Linux
+  packages on <https://github.com/dimmmmmmmer/freetunnel/releases>. It holds
+  the source package of exactly the version they carry, as the PPA published
+  it: unpack it with `tar -xf` and then `dpkg-source -x` on its `.dsc` file.
+  The PPA itself keeps only its newest version.
 
 ### AppImage runtime
 
@@ -525,16 +553,23 @@ mounts or extracts the image. It is the type 2 runtime of the AppImage project
 and links libfuse, squashfuse, zstd, zlib, musl and mimalloc statically.
 
 - Version: the `continuous` build of AppImage/type2-runtime at the time the
-  AppImage was built
+  AppImage was built. `appimage-runtime.txt`, next to this file in the
+  AppImage, names the commit it was built from and its SHA-256. At the time of
+  writing that is commit fedfad51acc2860b2916a1eef32ba4a500ff31ef, which links
+  libfuse 3.15.0, squashfuse 0.5.2, and musl 1.2.5, zstd 1.5.6, zlib and
+  mimalloc from Alpine Linux 3.21.
 - License: MIT AND LGPL-2.1-only (libfuse) AND BSD-2-Clause (squashfuse) AND
   BSD-3-Clause (zstd) AND Zlib AND MIT (musl, mimalloc),
   [licenses/desktop/AppImage-runtime.txt](licenses/desktop/AppImage-runtime.txt),
   with libfuse's license text in [licenses/desktop/LGPL-2.1.txt](licenses/desktop/LGPL-2.1.txt)
 - Copyright: Copyright (c) 2004-23 probonopd; libfuse: Copyright (C) 2001-2007
   Miklos Szeredi and contributors; squashfuse: Dave Vasilevsky
-- Source: <https://github.com/AppImage/type2-runtime>; libfuse 3.15.0:
-  <https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0>, with the
-  runtime's `patches/libfuse/mount.c.diff`
+- Source: `https://github.com/AppImage/type2-runtime/tree/<commit>`, for the
+  commit in `appimage-runtime.txt`. Its `scripts/common/install-dependencies.sh`
+  names the libfuse release the runtime is built with, and its
+  `patches/libfuse/` the changes made to it; at the time of writing libfuse
+  3.15.0, <https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0>, with
+  `patches/libfuse/mount.c.diff`.
 
 ## Android components
 
@@ -723,20 +758,31 @@ Dependencies of AndroidX.
 - Copyright: Copyright The Guava Authors; Copyright The JSpecify Authors
 - Source: <https://github.com/google/guava>, <https://github.com/jspecify/jspecify/tree/v1.0.0>
 
+### Feather icons in the Android app
+
+The Configurations tab's icon (`res/drawable/ic_servers.xml`) is derived from
+Feather's `server` icon.
+
+- License: MIT, [licenses/android/Feather-icons.txt](licenses/android/Feather-icons.txt)
+- Copyright: Copyright (c) 2013-2023 Cole Bemis
+- Source: <https://github.com/feathericons/feather>
+
 ## Source code of the LGPL and GPL components
 
-FreeTunnel ships these components as binaries built from their unmodified
-source:
+FreeTunnel ships these components as binaries built from source that it has
+not changed:
 
 - Qt 6.8.3 (LGPL-3.0, all desktop downloads): the source is at the addresses
   given under [Qt](#qt).
-- The LGPL-licensed Ubuntu 20.04 libraries and the GCC runtime libraries
-  (GPL-3.0 with the GCC Runtime Library Exception) in the Linux packages:
-  `bundled-system-packages.txt` names each source package and its version. The
-  source of an Ubuntu package is at
-  `https://launchpad.net/ubuntu/+source/<source package>/<version>`, and that
-  of the GCC packages at <https://launchpad.net/~ubuntu-toolchain-r/+archive/ubuntu/test>.
-- libfuse in the AppImage runtime (LGPL-2.1): the source is at the addresses
+- The LGPL-licensed Ubuntu 20.04 libraries in the Linux packages:
+  `bundled-system-packages.txt` names each source package and its version, and
+  the source of each is at
+  `https://launchpad.net/ubuntu/+source/<source package>/<version>`.
+- The GCC runtime libraries in the Linux packages (GPL-3.0 with the GCC Runtime
+  Library Exception): `gcc-runtime-source.tar` on the release the packages come
+  from, as given under [GCC runtime libraries](#gcc-runtime-libraries).
+- libfuse in the AppImage runtime (LGPL-2.1): `appimage-runtime.txt` in the
+  AppImage names the runtime's commit, and the source is at the addresses
   given under [AppImage runtime](#appimage-runtime).
 
 If any of this source is no longer available there, ask in FreeTunnel's issue
@@ -756,5 +802,5 @@ LGPL-3.0, Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
 Qt-6.8.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
-checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, slf4j,
+checker-qual, EPL-1.0, Feather-icons, ktoml, NOTICE-files, qrcodegen, slf4j,
 ThreeTen-Backport, winnow.

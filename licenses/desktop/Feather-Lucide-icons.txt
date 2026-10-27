@@ -1,6 +1,6 @@
 Feather and Lucide icons
-settings.svg, export.svg and close.svg in assets/icons are derived from Feather's
-'settings', 'upload' and 'x'; edit.svg from Lucide's 'pencil'.
+settings.svg, export.svg, close.svg and connection.svg in assets/icons are derived from
+Feather's 'settings', 'upload', 'x' and 'server'; edit.svg from Lucide's 'pencil'.
 Source: https://github.com/feathericons/feather , https://github.com/lucide-icons/lucide
 License: MIT (Feather) AND ISC (Lucide)
 

@@ -1,14 +1,16 @@
 AppImage type 2 runtime (the start of the .AppImage file)
-Version: the 'continuous' build of AppImage/type2-runtime that appimagetool
-downloaded when the AppImage was built.
-Source: https://github.com/AppImage/type2-runtime ; libfuse:
-https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0 (with type2-runtime's
-patches/libfuse/mount.c.diff); squashfuse: https://github.com/vasi/squashfuse/tree/0.5.2 ;
-musl, zstd, zlib and mimalloc from Alpine Linux 3.21.
+Version: the 'continuous' build of AppImage/type2-runtime when the AppImage was
+built; appimage-runtime.txt in the AppImage names its commit and SHA-256. The
+texts below are for commit fedfad51acc2860b2916a1eef32ba4a500ff31ef.
+Source: https://github.com/AppImage/type2-runtime/tree/fedfad51acc2860b2916a1eef32ba4a500ff31ef ;
+libfuse: https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0 (with
+type2-runtime's patches/libfuse/mount.c.diff); squashfuse:
+https://github.com/vasi/squashfuse/tree/0.5.2 ; musl, zstd, zlib and mimalloc from
+Alpine Linux 3.21.
 License: MIT (runtime) AND LGPL-2.1-only (libfuse, text in LGPL-2.1.txt) AND
 BSD-2-Clause (squashfuse) AND BSD-3-Clause (zstd) AND Zlib AND MIT (musl, mimalloc)
 
-[AppImage/type2-runtime@main: LICENSE]
+[AppImage/type2-runtime@fedfad51: LICENSE]
 MIT License
 
 Copyright (c) 2004-23 probonopd

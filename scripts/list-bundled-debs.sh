@@ -7,7 +7,8 @@
 # container (Ubuntu 20.04) into the AppDir, and the copyright files of most of
 # their packages with them, but not of all: it found none for libdbus-1-3,
 # libsystemd0, libgcc-s1 and a few more. THIRD_PARTY_NOTICES.md points to these
-# files, and its source offer to the package versions written here. Libraries
+# files, and its source offer to the package versions written here (and, for
+# the GCC runtime, to archive-gcc-runtime-source.sh's tarball). Libraries
 # no package owns, Qt's own and the ICU that comes with Qt, are left out: with
 # QT_ROOT_DIR set, as install-qt-action sets it, a library of that name in Qt's
 # lib directory counts as Qt's even where a system package has one too.
@@ -56,7 +57,9 @@ mkdir -p "$(dirname "$out")"
   echo "# Written when the bundle was built (scripts/list-bundled-debs.sh); see"
   echo "# THIRD_PARTY_NOTICES.md. Each source package is at"
   echo "# https://launchpad.net/ubuntu/+source/<source package>/<source version>,"
-  echo "# or, for a version from a PPA, in that PPA."
+  echo "# except the GCC runtime's (libstdc++6, libgcc-s1), from a PPA that keeps"
+  echo "# only its newest version: that is gcc-runtime-source.tar, on the GitHub"
+  echo "# release this bundle comes from."
   while IFS= read -r p; do
     # Source is empty when the source package has the binary package's name and
     # version, "name" when only the name differs, and "name (version)" otherwise.

@@ -319,8 +319,9 @@ jobs:
           # when this was built on 22.04) misses some transitive includes the core
           # relies on (e.g. <algorithm>); clang-18 auto-selects the newest GCC,
           # matching what works on ubuntu-24.04.
+          # -s: with the PPA's sources too, for archive-gcc-runtime-source.sh.
           for attempt in 1 2 3; do
-            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test && break
+            sudo add-apt-repository -y -s ppa:ubuntu-toolchain-r/test && break
             echo "add-apt-repository failed (attempt $attempt), retrying…"
             sleep 20
           done
@@ -725,6 +726,27 @@ jobs:
           test -s "$doc/THIRD_PARTY_NOTICES.md" && grep -q "$(printf '\t')" "$doc/bundled-system-packages.txt" \
             || { echo "::error::the third-party notices were not added to the AppDir"; exit 1; }
 
+      # The GPL source of the GCC runtime libraries the bundle carries, which
+      # their PPA does not keep (see scripts/archive-gcc-runtime-source.sh).
+      # Fetched on every build, so a pull request shows that it still works; a
+      # tag's build hands it to the release, where the source offer in
+      # THIRD_PARTY_NOTICES.md points.
+      - name: Archive the GCC runtime's source (Linux)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
+        shell: bash -e {0}
+        run: |
+          set -eux
+          bash client/scripts/archive-gcc-runtime-source.sh gcc-runtime-source.tar
+          # The notices name the version "at the time of writing"; a new one says
+          # so, as a reminder to update them.
+          ver="$(dpkg-query -W -f='${Version}' "libstdc++6:$(dpkg --print-architecture)")"
+          grep -qF "$ver" client/THIRD_PARTY_NOTICES.md \
+            || echo "::warning::the bundled GCC runtime is now $ver, which THIRD_PARTY_NOTICES.md does not name: update its GCC runtime libraries section"
+          case "$GITHUB_REF" in
+            refs/tags/v*) mv gcc-runtime-source.tar out/ ;;
+            *) rm gcc-runtime-source.tar ;;
+          esac
+
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
       # /opt/freetunnel. A /usr/bin symlink + .desktop entry integrate it into
@@ -841,22 +863,53 @@ jobs:
             || { echo "::error::the .deb has no /usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md"; exit 1; }
           ls -la out
 
+      # The AppImage runtime, the small program at the start of the AppImage that
+      # links libfuse (see scripts/fetch-appimage-runtime.sh): fetched before
+      # appimagetool would fetch it, and written down in the AppDir, so the
+      # AppImage says which runtime it carries. After the .deb, which has none.
+      # A step of its own for the token, which the next step, the one that runs
+      # linuxdeploy, does not get.
+      - name: Fetch the AppImage runtime (Linux)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
+        shell: bash -e {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          bash client/scripts/fetch-appimage-runtime.sh runtime-x86_64 \
+            AppDir/usr/share/doc/freetunnel/appimage-runtime.txt
+          # The notices name the runtime "at the time of writing"; the record is
+          # what counts. A new runtime still says so, as a reminder to check them.
+          commit="$(sed -n 's/^commit\t//p' AppDir/usr/share/doc/freetunnel/appimage-runtime.txt)"
+          grep -qF "$commit" client/THIRD_PARTY_NOTICES.md \
+            || echo "::warning::the AppImage runtime is now type2-runtime $commit, which THIRD_PARTY_NOTICES.md does not name: check the libfuse, squashfuse and Alpine versions there and in licenses/desktop/AppImage-runtime.txt"
+
       # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
       - name: Package AppImage (Linux)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
         run: |
-          set -eux
+          set -euxo pipefail
           if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
             echo "::error::AppDir missing — cannot build AppImage"
             exit 1
           fi
           test -s AppDir/usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md \
             || { echo "::error::AppDir has no usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md"; exit 1; }
+          test -s AppDir/usr/share/doc/freetunnel/appimage-runtime.txt && test -s runtime-x86_64 \
+            || { echo "::error::the AppImage runtime was not fetched"; exit 1; }
           # No FUSE in a container: without this linuxdeploy cannot mount itself.
           export APPIMAGE_EXTRACT_AND_RUN=1
+          # The runtime the step above fetched and wrote down, which the plugin
+          # passes to appimagetool as --runtime-file. Without it appimagetool
+          # downloads the newest one itself, which the record would not name.
+          export LDAI_RUNTIME_FILE="$PWD/runtime-x86_64"
           ld=linuxdeploy-x86_64.AppImage
-          PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage
+          PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage 2>&1 | tee appimage.log
+          if grep -q 'Downloading runtime file' appimage.log; then
+            echo "::error::appimagetool downloaded a runtime instead of using $LDAI_RUNTIME_FILE"
+            exit 1
+          fi
           # By its exact name, which linuxdeploy builds from the desktop file's
           # Name and the architecture. It writes it here, beside its own two
           # AppImages, and this used to take whichever *.AppImage sorted first:
@@ -1413,6 +1466,15 @@ jobs:
           pattern: freetunnel-*
           merge-multiple: true
 
+      # The Linux packages carry the GCC runtime libraries (GPL-3.0 with the GCC
+      # Runtime Library Exception), and THIRD_PARTY_NOTICES.md says their source
+      # is on the release, as this file. No release goes out without it.
+      - name: Require the GCC runtime's source
+        run: |
+          test -s artifacts/gcc-runtime-source.tar \
+            || { echo "::error::the Linux build handed over no gcc-runtime-source.tar"; exit 1; }
+          tar -tvf artifacts/gcc-runtime-source.tar
+
       # Publish SHA256 checksums so users can verify the (unsigned) downloads.
       # Names match the release asset names (basenames), which is what GitHub
       # exposes once the nested artifact folders are flattened.
@@ -1525,6 +1587,9 @@ jobs:
             echo "  \"More info\" → \"Run anyway\"."
             echo
             echo "Verify your download against \`SHA256SUMS.txt\` (signed as \`SHA256SUMS.txt.sig\`)."
+            echo
+            echo "\`gcc-runtime-source.tar\` is the source of the GCC runtime libraries in the Linux"
+            echo "packages (see THIRD_PARTY_NOTICES.md); you do not need it to install FreeTunnel."
             if [ -n "$prev" ]; then
               echo
               echo "**Every commit in this release**: ${{ github.server_url }}/${{ github.repository }}/compare/$prev...${GITHUB_REF_NAME}"
@@ -1541,6 +1606,7 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*-Setup.exe
             artifacts/**/*.AppImage
+            artifacts/gcc-runtime-source.tar
             artifacts/SHA256SUMS.txt
             artifacts/SHA256SUMS.txt.sig
           body_path: notes.md

@@ -1,6 +1,7 @@
 NSIS (the installer's and uninstaller's runtime: exehead, LZMA, MUI2, nsExec)
 Version: 3.13
 Source: https://github.com/nsis-dev/nsis/tree/v313 (https://nsis.sourceforge.io/)
+LZMA module source: https://github.com/nsis-dev/nsis/tree/v313/Source/7zip
 License: Zlib AND CPL-1.0 (LZMA module, with the linking exception at the end)
 
 [nsis-dev/nsis@v313: COPYING]

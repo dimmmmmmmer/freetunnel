@@ -1,6 +1,7 @@
-libuv (with AdGuard's patches)
-Version: 1.41.0
+libuv
+Version: 1.41.0, with the patches of AdGuard's conan recipe
 Source: https://github.com/libuv/libuv/tree/v1.41.0
+Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/libuv
 License: MIT AND BSD-2-Clause AND BSD-3-Clause AND ISC
 Besides libuv's LICENSE, the notices of the bundled parts it names. android-ifaddrs
 and pthread-fixes.c are compiled for Android only; stdint-msvc2008.h is for old
