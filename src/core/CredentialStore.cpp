@@ -344,6 +344,13 @@ QString CredentialStore::keyForConfigPath(const QString &absoluteConfigPath)
     return QFileInfo(absoluteConfigPath).absoluteFilePath();
 }
 
+QString CredentialStore::keyForConfigAuthKey(const QString &absoluteConfigPath)
+{
+    // Not under keyForSubscription()'s prefix, nor any path's: an absolute path
+    // starts with a separator or a drive letter.
+    return QStringLiteral("client-random-auth-key/") + QFileInfo(absoluteConfigPath).absoluteFilePath();
+}
+
 QString CredentialStore::keyForSubscription(const QString &sourceId)
 {
     return QStringLiteral("subscription/") + sourceId;
@@ -615,13 +622,20 @@ bool migrateConfigPassword(const QString &configPath)
     const QString abs = QFileInfo(configPath).absoluteFilePath();
     const QString key = CredentialStore::keyForConfigPath(abs);
     ConfigToml c = parseConfigToml(readConfigText(abs));
-    if (c.password.isEmpty())
+    if (c.password.isEmpty() && c.clientRandomAuthKey.isEmpty())
         return true;
 
-    if (!CredentialStore::storePassword(key, c.password))
+    if (!c.password.isEmpty() && !CredentialStore::storePassword(key, c.password))
+        return false;
+    // The second secret of the config, stored the same way before the file loses
+    // it. A key that is already stored is not what the file holds any more, and
+    // is not read back: the file's is the newer, as the password's is.
+    if (!c.clientRandomAuthKey.isEmpty()
+        && !CredentialStore::storePassword(CredentialStore::keyForConfigAuthKey(abs), c.clientRandomAuthKey))
         return false;
 
     c.password.clear();
+    c.clientRandomAuthKey.clear();
     return writeConfigText(abs, buildConfigToml(c));
 }
 
@@ -635,6 +649,8 @@ QString buildConnectConfigToml(const QString &configPath, const QString &logLeve
         c.password = CredentialStore::loadPassword(CredentialStore::keyForConfigPath(abs));
     if (c.password.isEmpty())
         return QString();
+    if (c.clientRandomAuthKey.isEmpty())
+        c.clientRandomAuthKey = CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(abs));
     return buildConfigToml(c, logLevel);
 }
 

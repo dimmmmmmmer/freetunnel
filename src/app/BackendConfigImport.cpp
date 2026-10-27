@@ -99,7 +99,9 @@ bool Backend::importFile(const QString &path)
         if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
         else if (importErr == QLatin1String("authkey"))
-            emit errorOccurred(freetunnel::newerCoreRefusal());
+            emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
+                                       .arg(QCoreApplication::translate("DeepLink",
+                                                                        "malformed client_random_auth_key value")));
         else if (importErr == QLatin1String("certificate"))
             emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
                                        .arg(QCoreApplication::translate("DeepLink", "malformed certificate")));
@@ -210,9 +212,18 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
         // read-back to "restore later": reading another build's keychain entry
         // can block on an authorization prompt, and a passwordless replace is
         // the hostile case anyway — losing that password is the correct outcome.)
-        if (freetunnel::parseConfigToml(prepared.tomlContent).password.isEmpty()) {
+        const freetunnel::ConfigToml incoming = freetunnel::parseConfigToml(prepared.tomlContent);
+        if (incoming.password.isEmpty()) {
             freetunnel::CredentialStore::deletePassword(
                     freetunnel::CredentialStore::keyForConfigPath(target));
+        }
+        // The auth key is the same: the server before it checked this key, and the
+        // one the link names may check another or none. A link without one must
+        // not hand the old provider's key to its server, nor keep a key that its
+        // server does not ask for. A key the link carries overwrites it below.
+        if (incoming.clientRandomAuthKey.isEmpty()) {
+            freetunnel::CredentialStore::deletePassword(
+                    freetunnel::CredentialStore::keyForConfigAuthKey(target));
         }
     }
 

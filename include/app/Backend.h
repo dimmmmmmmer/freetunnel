@@ -397,9 +397,11 @@ private:
         QString oldPath;
         QString target;
         QString password;
+        QString authKey;
         QString tomlBody;
         QString editContent;
         QString editPassword;
+        QString editAuthKey;
         QString editProfile;
         bool editingSnapshot = false;
         int editIndex = -1;
@@ -407,7 +409,8 @@ private:
     void emitCreateConfigError(const QString &parseErr);
     std::optional<int> editIndexForSave(const QVariantMap &f); // createConfig()'s row, or nothing if gone
     bool writeCreatedConfig(const QString &target, const QString &tomlBody,
-                            const QString &password, const QString &previousPassword);
+                            const QString &password, const QString &previousPassword,
+                            const QString &authKey, const QString &previousAuthKey);
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);
@@ -441,7 +444,8 @@ private:
     void flushHeldSubscriptionUpdates();
     void forgetSubscription(const QString &path);
     bool keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
-                                     freetunnel::ConfigToml *ct, QString *password) const;
+                                     const QString &storedAuthKey, freetunnel::ConfigToml *ct, QString *password,
+                                     QString *authKey) const;
     void noteSubscriptionNotApplied(const QString &path, const QString &code);
     void logSubscription(const QString &path, const QString &line, const QString &detail);
     SubscriptionController *m_subscriptions = nullptr;

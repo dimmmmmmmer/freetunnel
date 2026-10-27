@@ -77,6 +77,9 @@ QString changeSummary(const QList<freetunnel::SubscriptionChange> &changes)
         case SubscriptionField::ClientRandom:
             parts << QStringLiteral("client_random");
             break;
+        case SubscriptionField::AuthKey:
+            parts << QStringLiteral("client_random_auth_key");
+            break;
         }
     }
     return parts.join(QStringLiteral(", "));
@@ -89,7 +92,8 @@ std::optional<PreparedImport> serverOfDocument(const freetunnel::SubscriptionDoc
             freetunnel::applySubscription({}, {}, document, freetunnel::SubscriptionApplyMode::Creation);
     if (!isUsableServer(made.config))
         return std::nullopt;
-    std::optional<PreparedImport> out = freetunnel::prepareSubscriptionImport(made.config, made.password);
+    std::optional<PreparedImport> out =
+            freetunnel::prepareSubscriptionImport(made.config, made.password, made.clientRandomAuthKey);
     if (out)
         out->certificateExtraIgnored = out->certificateExtraIgnored || document.extraPemIgnored;
     return out;
@@ -383,10 +387,16 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     }
     m_subscriptions->setBusy(path, true);
     const auto done = qScopeGuard([this, path]() { m_subscriptions->setBusy(path, false); });
-    const freetunnel::ConfigToml current = freetunnel::parseConfigToml(readText(path));
+    freetunnel::ConfigToml current = freetunnel::parseConfigToml(readText(path));
     QString password = freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path));
     if (password.isEmpty())
         password = current.password;
+    // The key the config has now is the store's, as its password is; applySubscription()
+    // reads it from `current`.
+    const QString storedAuthKey =
+            freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(path));
+    if (!storedAuthKey.isEmpty())
+        current.clientRandomAuthKey = storedAuthKey;
     if (!m_subscriptions->isLinked(path))
         return;
     const freetunnel::SubscriptionApplied next = freetunnel::applySubscription(
@@ -417,7 +427,8 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     // A failure on either leaves both as they were (saveConfigWithPassword).
     QString saveErr;
     if (!freetunnel::backend_config::saveConfigWithPassword(path, freetunnel::buildConfigToml(next.config).toUtf8(),
-                                                            next.password, password, &saveErr)) {
+                                                            next.password, password, next.clientRandomAuthKey,
+                                                            current.clientRandomAuthKey, &saveErr)) {
         const QString code = QStringLiteral("not_saved");
         return noteSubscriptionNotApplied(path, code);
     }
@@ -509,7 +520,8 @@ void Backend::forgetSubscription(const QString &path)
 // refresh does not write the old server back. The password stays the form's
 // when the store gives none, rather than none.
 bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
-                                          freetunnel::ConfigToml *ct, QString *password) const
+                                          const QString &storedAuthKey, freetunnel::ConfigToml *ct, QString *password,
+                                          QString *authKey) const
 {
     if (!m_settings.subscriptions_enabled || path.isEmpty() || !m_subscriptions->isLinked(path))
         return false;
@@ -522,6 +534,9 @@ bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fi
     ct->clientRandom = file.clientRandom;
     if (!storedPassword.isEmpty())
         *password = storedPassword;
+    // The key goes with the server, so a form opened before a refresh does not
+    // write the old one back, or clear the new one: the store's, or none.
+    *authKey = storedAuthKey;
     return true;
 }
 

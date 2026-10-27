@@ -26,11 +26,11 @@ private slots:
     void importsAVersion2Link();
     void importsTheServerOfASubscriptionLinkWithoutTheAddress();
     void refusesASubscriptionOnlyLink();
-    void refusesAServerThatNeedsAnAuthKey();
+    void importsAServerThatNeedsAnAuthKey();
     void aDamagedLinkIsSaidToBeDamaged();
     void aSubscriptionLinkNeedsEveryServerField_data();
     void aSubscriptionLinkNeedsEveryServerField();
-    void anAuthKeyIsRefusedBeforeAMissingServer();
+    void anAuthKeyDoesNotMakeASubscriptionOnlyLinkImportable();
     void importsASelfSignedSubscriptionLink();
     void importsALinkWithTagsItDoesNotKnow();
     void aTwoVersionLinkIsRefusedForTheNewer();
@@ -46,6 +46,7 @@ private slots:
     void anEndpointExportKeepsOnlyItsCertificates();
     void anEndpointExportIsRefusedAsALinkIs();
     void anEndpointExportsLinkGivesTheSameConfig();
+    void anEndpointExportWithAnAuthKeyKeepsItInItsLink();
     void everyExportAskedAboutCanBeAnswered();
 };
 
@@ -123,7 +124,7 @@ void TestConfigImport::rejectsInvalidLink() {
 
 void TestConfigImport::importsAVersion2Link() {
     QString err;
-    LinkRefusal why = LinkRefusal::NeedsNewerCore; // anything but what it will say
+    LinkRefusal why = LinkRefusal::SubscriptionOnly; // anything but what it will say
     const auto out = prepareDeepLinkImport(v2::kPlain, &err, &why);
     QVERIFY2(out.has_value(), qPrintable(err));
     QCOMPARE(why, LinkRefusal::Damaged); // set even on success, so it is never stale
@@ -175,25 +176,45 @@ void TestConfigImport::refusesASubscriptionOnlyLink() {
     QCOMPARE(why, LinkRefusal::SubscriptionOnly);
 }
 
-// The core FreeTunnel runs cannot compute the client random an auth-key server
-// checks, and is turned away at the handshake with no way to say why.
-void TestConfigImport::refusesAServerThatNeedsAnAuthKey() {
+// The core FreeTunnel runs derives the client random an auth-key server checks
+// from the key (core 1.3), so such a server is imported with its key. It is in
+// the TOML the import writes, for migrateConfigPassword to move to the credential
+// store with the password, and nowhere else the user can see.
+void TestConfigImport::importsAServerThatNeedsAnAuthKey() {
     QString err;
-    LinkRefusal why = LinkRefusal::Damaged;
-    QVERIFY(!prepareDeepLinkImport(v2::kAuthKey, &err, &why).has_value());
-    QCOMPARE(why, LinkRefusal::NeedsNewerCore);
-    QCOMPARE(err, newerCoreRefusal());
-    QVERIFY2(err.contains(QStringLiteral("newer TrustTunnel core")), qPrintable(err));
-    QVERIFY2(!err.contains(QStringLiteral("aabbccdd")), qPrintable(err));
+    LinkRefusal why = LinkRefusal::SubscriptionOnly;
+    const auto out = prepareDeepLinkImport(v2::kAuthKey, &err, &why);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(why, LinkRefusal::Damaged);
+    QCOMPARE(parseConfigToml(out->tomlContent).clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QVERIFY2(out->tomlContent.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")),
+             qPrintable(out->tomlContent));
+    QCOMPARE(out->link, v2::kAuthKey);
 
     // A key with the first and last digit of each range, which the parser takes.
-    why = LinkRefusal::Damaged;
     const QString edges = v2::linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
                                                {0x02, "1.2.3.4:443"}, {0x05, "alice"}, {0x06, "secret"},
                                                {0x0F, "09afAF"}});
-    QVERIFY(!prepareDeepLinkImport(edges, &err, &why).has_value());
-    QCOMPARE(why, LinkRefusal::NeedsNewerCore);
-    QCOMPARE(err, newerCoreRefusal());
+    const auto kept = prepareDeepLinkImport(edges, &err);
+    QVERIFY2(kept.has_value(), qPrintable(err));
+    QCOMPARE(parseConfigToml(kept->tomlContent).clientRandomAuthKey, QStringLiteral("09afAF"));
+
+    // A key that is not whole bytes of hex is damage, which the parser says.
+    for (const QByteArray &bad : {QByteArray("abc"), QByteArray("zz"), QByteArray("aabb ")}) {
+        why = LinkRefusal::SubscriptionOnly;
+        const QString link = v2::linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "vpn.example.com"},
+                                                  {0x02, "1.2.3.4:443"}, {0x05, "alice"}, {0x06, "secret"},
+                                                  {0x0F, bad}});
+        QVERIFY(!prepareDeepLinkImport(link, &err, &why).has_value());
+        QCOMPARE(why, LinkRefusal::Damaged);
+        QCOMPARE(err, QStringLiteral("malformed client_random_auth_key value"));
+    }
+
+    // The key is the config's own, and an empty one is none: nothing is written.
+    const auto plain = prepareDeepLinkImport(v2::kEmptyAuthKey, &err);
+    QVERIFY2(plain.has_value(), qPrintable(err));
+    QVERIFY2(!plain->tomlContent.contains(QStringLiteral("client_random_auth_key")),
+             qPrintable(plain->tomlContent));
 }
 
 // What the parser refuses keeps its own message, which the caller puts after
@@ -254,18 +275,18 @@ void TestConfigImport::aSubscriptionLinkNeedsEveryServerField() {
     QVERIFY(out->subscriptionNotKept);
 }
 
-// The auth key is the last word on a link: a server that checks one turns this
-// core away, and a subscription would hand out the same server. So a link with
-// an auth key and no server says the core is too old, not that subscriptions
-// are missing, which would send its user to wait for the wrong thing.
-void TestConfigImport::anAuthKeyIsRefusedBeforeAMissingServer() {
+// An auth key is the server's key, not a server: a link with one and a
+// subscription address and nothing else still names no server to connect to, and
+// is refused as subscription-only, with the key nowhere in the message.
+void TestConfigImport::anAuthKeyDoesNotMakeASubscriptionOnlyLinkImportable() {
     QString err;
     LinkRefusal why = LinkRefusal::Damaged;
     const QString link = v2::linkFromRecords(
             {{0x00, QByteArray(1, 2)}, {0x0E, v2::kSubscription.toUtf8()}, {0x0F, "aabbccdd"}});
     QVERIFY(!prepareDeepLinkImport(link, &err, &why).has_value());
-    QCOMPARE(why, LinkRefusal::NeedsNewerCore);
-    QCOMPARE(err, newerCoreRefusal());
+    QCOMPARE(why, LinkRefusal::SubscriptionOnly);
+    QCOMPARE(err, subscriptionOnlyRefusal());
+    QVERIFY2(!err.contains(QStringLiteral("aabbccdd")), qPrintable(err));
 }
 
 // The common export of a self-signed server with subscriptions on.
@@ -380,7 +401,7 @@ void TestConfigImport::anEndpointExportImportsAsTheLinkWithItsServerDoes() {
     endpoint_export::Fields f;
     f.subscriptionUrl.clear();
     QString err;
-    LinkRefusal why = LinkRefusal::NeedsNewerCore; // anything but what it will say
+    LinkRefusal why = LinkRefusal::SubscriptionOnly; // anything but what it will say
     auto out = importExport(f, QStringLiteral("exported"), &err, &why);
     QVERIFY2(out.has_value(), qPrintable(err));
     QCOMPARE(why, LinkRefusal::Damaged); // set even on success, so it is never stale
@@ -511,10 +532,18 @@ void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
     const QString keyOnly = endpoint_export::multiline(certs::keyPem());
     QList<Case> cases;
     endpoint_export::Fields f;
-    f.clientRandomAuthKey = QStringLiteral("aabbccdd");
-    cases.append({"an auth key", f, LinkRefusal::NeedsNewerCore, newerCoreRefusal()});
+    // A key the core cannot decode is damage, as a link's is, and said before the
+    // certificate is looked at.
+    f.clientRandomAuthKey = QStringLiteral("abc");
+    cases.append({"an odd auth key", f, LinkRefusal::Damaged,
+                  QStringLiteral("malformed client_random_auth_key value")});
+    f.clientRandomAuthKey = QStringLiteral("zzzz");
     f.certificate = keyOnly;
-    cases.append({"an auth key before a key alone", f, LinkRefusal::NeedsNewerCore, newerCoreRefusal()});
+    cases.append({"a bad auth key before a key alone", f, LinkRefusal::Damaged,
+                  QStringLiteral("malformed client_random_auth_key value")});
+    // A good one is no reason to refuse anything, and is not said to be.
+    f.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    cases.append({"an auth key and a key alone", f, LinkRefusal::Damaged, QStringLiteral("malformed certificate")});
     f = endpoint_export::Fields();
     f.password.clear();
     cases.append({"a subscription and no password", f, LinkRefusal::SubscriptionOnly, subscriptionOnlyRefusal()});
@@ -548,7 +577,7 @@ void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
     cases.append({"text alone", f, LinkRefusal::Damaged, QStringLiteral("malformed certificate")});
     for (const Case &c : cases) {
         QString err;
-        LinkRefusal why = c.why == LinkRefusal::Damaged ? LinkRefusal::NeedsNewerCore : LinkRefusal::Damaged;
+        LinkRefusal why = c.why == LinkRefusal::Damaged ? LinkRefusal::SubscriptionOnly : LinkRefusal::Damaged;
         QVERIFY2(!importExport(c.fields, QStringLiteral("exported"), &err, &why).has_value(), c.what);
         QVERIFY2(why == c.why, c.what);
         QVERIFY2(err == c.message, qPrintable(QString::fromLatin1(c.what) + QStringLiteral(": ") + err));
@@ -557,7 +586,7 @@ void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
 
     // What is not an export at all names no server it can read.
     QString err;
-    LinkRefusal why = LinkRefusal::NeedsNewerCore;
+    LinkRefusal why = LinkRefusal::SubscriptionOnly;
     QVERIFY(!prepareEndpointExportImport(QStringLiteral("[endpoint]\n") + endpoint_export::text(),
                                          QStringLiteral("exported"), &err, &why)
                      .has_value());
@@ -576,6 +605,31 @@ void TestConfigImport::anEndpointExportIsRefusedAsALinkIs() {
     f.password.clear();
     out = importExport(f, QStringLiteral("exported"), &err);
     QVERIFY2(out.has_value(), qPrintable(err));
+}
+
+// The key goes with the server wherever the server goes: into the config, and
+// into the link the file's question is answered with, which is version 2 for it
+// (an older FreeTunnel cannot connect to the server without the key either).
+void TestConfigImport::anEndpointExportWithAnAuthKeyKeepsItInItsLink() {
+    endpoint_export::Fields f;
+    f.subscriptionUrl.clear();
+    f.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    QString err;
+    const auto out = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(out.has_value(), qPrintable(err));
+    QCOMPARE(parseConfigToml(out->tomlContent).clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    const auto link = parseDeepLink(out->link, &err);
+    QVERIFY2(link.has_value(), qPrintable(err));
+    QCOMPARE(link->version, 2);
+    QCOMPARE(link->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(prepareDeepLinkImport(out->link, &err)->tomlContent, out->tomlContent);
+
+    // Without one the link stays version 1, as before.
+    f.clientRandomAuthKey.clear();
+    const auto plain = importExport(f, QStringLiteral("exported"), &err);
+    QVERIFY2(plain.has_value(), qPrintable(err));
+    QCOMPARE(parseDeepLink(plain->link)->version, 1);
+    QVERIFY(parseDeepLink(plain->link)->clientRandomAuthKey.isEmpty());
 }
 
 // The link a file's question is answered with makes the same config again, under

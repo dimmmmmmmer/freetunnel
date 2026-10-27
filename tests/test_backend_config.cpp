@@ -83,6 +83,17 @@ private slots:
     void aPasswordTheStoreRefusesIsExplainedInItsTerms();
     void aRefusedPasswordSaysWhatToDoAboutTheKeyring();
 
+    // The client random auth key (TrustTunnel 1.3), a second secret beside the password.
+    void theEditorStoresTheAuthKeyBesideThePassword();
+    void theEditorRefusesAnAuthKeyThatIsNotHex();
+    void clearingTheAuthKeyTakesItOutOfTheStore();
+    void renamingCarriesTheAuthKeyToTheNewPath();
+    void removeConfigForgetsTheAuthKey();
+    void aShareLinkCarriesTheAuthKeyAsVersion2();
+    void aTomlExportCarriesTheAuthKey();
+    void aFailedCommitPutsThePreviousAuthKeyBack();
+    void anAuthKeyTheStoreRefusesLeavesTheConfigAndThePasswordAlone();
+
 private:
     // A complete, valid create form; individual cases override what they exercise.
     static QVariantMap form(const QString &name, const QString &password);
@@ -133,6 +144,8 @@ void TestBackendConfig::cleanup()
     for (const QFileInfo &fi : QDir(dir).entryInfoList({QStringLiteral("*.toml")}, QDir::Files)) {
         freetunnel::CredentialStore::deletePassword(
                 freetunnel::CredentialStore::keyForConfigPath(fi.absoluteFilePath()));
+        freetunnel::CredentialStore::deletePassword(
+                freetunnel::CredentialStore::keyForConfigAuthKey(fi.absoluteFilePath()));
     }
 }
 
@@ -284,7 +297,8 @@ void TestBackendConfig::aFailedSaveLeavesTheExistingConfigIntact()
     QVERIFY(QDir().mkpath(blocked));
     QString err;
     QVERIFY(!freetunnel::backend_config::saveConfigWithPassword(
-            blocked, QByteArrayLiteral("body\n"), QStringLiteral("pw"), QString(), &err));
+            blocked, QByteArrayLiteral("body\n"), QStringLiteral("pw"), QString(), QString(), QString(),
+            &err));
     QCOMPARE(err, QStringLiteral("write"));
 
     // The untouched config next to it is still exactly what it was.
@@ -360,7 +374,7 @@ void TestBackendConfig::aFailedCommitPutsThePreviousPasswordBack()
     QString err;
     const bool saved = freetunnel::backend_config::saveConfigWithPassword(
             target, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QStringLiteral("old-pass"),
-            &err);
+            QString(), QString(), &err);
     QVERIFY2(swapped, "the file was not swapped out between staging and commit");
     QVERIFY2(staged, "the file was swapped out before the body was staged");
     QVERIFY(!saved);
@@ -381,7 +395,8 @@ void TestBackendConfig::aFailedCommitPutsThePreviousPasswordBack()
         swapped = QDir().mkdir(fresh);
     });
     QVERIFY(!freetunnel::backend_config::saveConfigWithPassword(
-            fresh, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QString(), &err));
+            fresh, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QString(), QString(), QString(),
+            &err));
     QVERIFY(swapped);
     QVERIFY2(staged, "the new file was blocked before the body was staged");
     QVERIFY2(CredentialStore::loadPassword(freshKey).isEmpty(),
@@ -393,9 +408,10 @@ namespace {
 // Runs `act` in the credential store's local event loop that comes after the
 // first `calls` of them. Every store call on this thread turns a local event loop
 // until its worker is done (see withoutFreezingTheUi), and a plain queued call
-// runs in the first one. In createConfig() that is the edit snapshot's lookup of
-// the old password, before the body is staged: a directory put in place there
-// fails the save at open, before the store is touched. A worker's end reaches its
+// runs in the first one. In createConfig() those are the edit snapshot's lookups
+// of the old password and the old auth key, before the body is staged: a
+// directory put in place there fails the save at open, before the store is
+// touched. A worker's end reaches its
 // loop as a queued call to QEventLoop::quit, so those are counted and `act` is
 // queued behind the last; no event loop turns between two store calls, so it
 // runs in the next one.
@@ -451,7 +467,7 @@ void TestBackendConfig::aFailedEditSaveKeepsTheStoredPassword()
     edit[QStringLiteral("name")] = QStringLiteral("Beta");
     edit[QStringLiteral("password")] = QStringLiteral("new-pass");
     {
-        AfterCredentialCalls block(1, [&] {
+        AfterCredentialCalls block(2, [&] {
             staged = bodyIsStaged(renamed);
             swapped = QDir().mkdir(renamed);
         });
@@ -469,7 +485,7 @@ void TestBackendConfig::aFailedEditSaveKeepsTheStoredPassword()
     staged = false;
     swapped = false;
     {
-        AfterCredentialCalls swap(1, [&] {
+        AfterCredentialCalls swap(2, [&] {
             staged = bodyIsStaged(path);
             swapped = QFile::remove(path) && QDir().mkdir(path);
         });
@@ -760,6 +776,264 @@ void TestBackendConfig::theEditorChecksEveryAddress()
     QCOMPARE(errors.count(), 5);
     QCOMPARE(errors.last().at(0).toString(), QStringLiteral("Address must be host:port, e.g. 1.2.3.4:443"));
     QCOMPARE(backend.configs(), QStringList{QStringLiteral("Two")});
+}
+
+// ---- the client random auth key ---------------------------------------------
+
+// Core 1.3 derives the TLS client random from this key, and the server turns away
+// a client without it. It is a secret in the way the password is (whoever holds it
+// passes the server's gate, which defeats its point), so it is kept where the
+// password is and not in the config file, which is copied and attached to support
+// threads. It comes back into the editor, and goes to the core with the password.
+void TestBackendConfig::theEditorStoresTheAuthKeyBesideThePassword()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral(" aabbccdd ");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    QVERIFY(!path.isEmpty());
+
+    const QString onDisk = readAll(path);
+    QVERIFY2(!onDisk.contains(QStringLiteral("aabbccdd")), qPrintable(onDisk));
+    QVERIFY2(!onDisk.contains(QStringLiteral("client_random_auth_key")), qPrintable(onDisk));
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)), QStringLiteral("aabbccdd"));
+    // The password's entry is not the key's, and vice versa.
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path)), QStringLiteral("hunter2"));
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("authKey")).toString(), QStringLiteral("aabbccdd"));
+
+    const QString toml = freetunnel::buildConnectConfigToml(path);
+    QVERIFY2(toml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(toml));
+
+    // An edit that leaves it alone keeps it, with the form's other changes.
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("username")] = QStringLiteral("bob");
+    QVERIFY(backend.createConfig(edit));
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)), QStringLiteral("aabbccdd"));
+    QVERIFY2(!readAll(path).contains(QStringLiteral("aabbccdd")), qPrintable(readAll(path)));
+
+    // A config made without one has no entry for it.
+    QVERIFY(backend.createConfig(form(QStringLiteral("Plain"), QStringLiteral("p"))));
+    const QString plain = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("Plain.toml"));
+    QVERIFY(QFileInfo::exists(plain));
+    QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(plain)).isEmpty());
+}
+
+// The core quietly connects without a key it cannot decode, and a server that
+// checks one then turns the client away with nothing to say why: refused here.
+void TestBackendConfig::theEditorRefusesAnAuthKeyThatIsNotHex()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    for (const QString &bad : {QStringLiteral("abc"), QStringLiteral("zz"), QStringLiteral("aa bb")}) {
+        QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+        f[QStringLiteral("authKey")] = bad;
+        QVERIFY2(!backend.createConfig(f), qPrintable(bad));
+        QVERIFY2(errors.last().at(0).toString().contains(QStringLiteral("auth key")),
+                 qPrintable(errors.last().at(0).toString()));
+    }
+    QVERIFY(backend.configs().isEmpty());
+}
+
+// The key is not the config's for ever: a server that stops checking one, or a
+// config pointed at another, must not go on sending the old.
+void TestBackendConfig::clearingTheAuthKeyTakesItOutOfTheStore()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString entry = CredentialStore::keyForConfigAuthKey(path);
+    QCOMPARE(CredentialStore::loadPassword(entry), QStringLiteral("aabbccdd"));
+
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("authKey")] = QString();
+    QVERIFY(backend.createConfig(edit));
+    QVERIFY2(CredentialStore::loadPassword(entry).isEmpty(), "the removed key stayed in the store");
+    QVERIFY(!freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key")));
+    QVERIFY(backend.configFields(0).value(QStringLiteral("authKey")).toString().isEmpty());
+}
+
+void TestBackendConfig::renamingCarriesTheAuthKeyToTheNewPath()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString oldPath = pathFor(backend, 0);
+
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("name")] = QStringLiteral("Renamed");
+    QVERIFY(backend.createConfig(edit));
+    const QString newPath = pathFor(backend, 0);
+    QVERIFY(newPath != oldPath);
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(newPath)),
+             QStringLiteral("aabbccdd"));
+    QVERIFY2(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(oldPath)).isEmpty(),
+             "the old path's key entry was left behind");
+    QCOMPARE(backend.configFields(0).value(QStringLiteral("authKey")).toString(), QStringLiteral("aabbccdd"));
+}
+
+void TestBackendConfig::removeConfigForgetsTheAuthKey()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString entry = CredentialStore::keyForConfigAuthKey(path);
+    QCOMPARE(CredentialStore::loadPassword(entry), QStringLiteral("aabbccdd"));
+
+    backend.removeConfig(0);
+    QVERIFY2(CredentialStore::loadPassword(entry).isEmpty(), "the key outlived the config it belonged to");
+}
+
+// A link without the key cannot connect to a server that checks one, so the link
+// of such a config carries it, as version 2, the version that has a tag for it. A
+// config without a key stays version 1, which older clients still read.
+void TestBackendConfig::aShareLinkCarriesTheAuthKeyAsVersion2()
+{
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    QString err;
+    const auto keyed = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(keyed.has_value(), qPrintable(err));
+    QCOMPARE(keyed->version, 2);
+    QCOMPARE(keyed->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(keyed->password, QStringLiteral("hunter2"));
+
+    // And it imports as the same config, key included.
+    const auto prepared = freetunnel::prepareDeepLinkImport(backend.configDeepLink(0), &err);
+    QVERIFY2(prepared.has_value(), qPrintable(err));
+    QCOMPARE(freetunnel::parseConfigToml(prepared->tomlContent).clientRandomAuthKey, QStringLiteral("aabbccdd"));
+
+    QVERIFY(backend.createConfig(form(QStringLiteral("Plain"), QStringLiteral("p"))));
+    const int plainIndex = backend.configs().indexOf(QStringLiteral("Plain"));
+    QVERIFY(plainIndex >= 0);
+    const auto plain = freetunnel::parseDeepLink(backend.configDeepLink(plainIndex), &err);
+    QVERIFY2(plain.has_value(), qPrintable(err));
+    QCOMPARE(plain->version, 1);
+    QVERIFY(plain->clientRandomAuthKey.isEmpty());
+}
+
+// An export is made to be handed on whole, as the password is: with the key.
+void TestBackendConfig::aTomlExportCarriesTheAuthKey()
+{
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString dest = QDir(m_home.path()).filePath(QStringLiteral("exported-key.toml"));
+    QFile::remove(dest);
+    QVERIFY(backend.exportConfigToml(0, dest));
+    const QString exported = readAll(dest);
+    assertOwnerOnly(dest);
+    QFile::remove(dest);
+    const freetunnel::ConfigToml c = freetunnel::parseConfigToml(exported);
+    QCOMPARE(c.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(c.password, QStringLiteral("hunter2"));
+}
+
+// As for the password: a commit that fails puts the store back to what the config
+// on disk goes with, key included.
+void TestBackendConfig::aFailedCommitPutsThePreviousAuthKeyBack()
+{
+    using freetunnel::CredentialStore;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString target = QDir(dir).filePath(QStringLiteral("keyed-commit.toml"));
+    QVERIFY(freetunnel::backend_config::writeConfigFile(target, QByteArrayLiteral("original\n")));
+    const QString passwordEntry = CredentialStore::keyForConfigPath(target);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(target);
+    QVERIFY(CredentialStore::storePassword(passwordEntry, QStringLiteral("old-pass")));
+    QVERIFY(CredentialStore::storePassword(keyEntry, QStringLiteral("0102")));
+    auto tidy = qScopeGuard([&] {
+        CredentialStore::deletePassword(passwordEntry);
+        CredentialStore::deletePassword(keyEntry);
+        QDir().rmdir(target);
+        QFile::remove(target);
+    });
+
+    bool staged = false;
+    bool swapped = false;
+    QTimer::singleShot(0, this, [&] {
+        staged = bodyIsStaged(target);
+        swapped = QFile::remove(target) && QDir().mkdir(target);
+    });
+    QString err;
+    const bool saved = freetunnel::backend_config::saveConfigWithPassword(
+            target, QByteArrayLiteral("new\n"), QStringLiteral("new-pass"), QStringLiteral("old-pass"),
+            QStringLiteral("aabb"), QStringLiteral("0102"), &err);
+    QVERIFY2(swapped, "the file was not swapped out between staging and commit");
+    QVERIFY2(staged, "the file was swapped out before the body was staged");
+    QVERIFY(!saved);
+    QCOMPARE(err, QStringLiteral("write"));
+    QCOMPARE(CredentialStore::loadPassword(passwordEntry), QStringLiteral("old-pass"));
+    QCOMPARE(CredentialStore::loadPassword(keyEntry), QStringLiteral("0102"));
+
+    // A key removed by the save comes back too.
+    QVERIFY(QDir().rmdir(target));
+    QVERIFY(freetunnel::backend_config::writeConfigFile(target, QByteArrayLiteral("original\n")));
+    staged = false;
+    swapped = false;
+    QTimer::singleShot(0, this, [&] {
+        staged = bodyIsStaged(target);
+        swapped = QFile::remove(target) && QDir().mkdir(target);
+    });
+    QVERIFY(!freetunnel::backend_config::saveConfigWithPassword(
+            target, QByteArrayLiteral("new\n"), QStringLiteral("old-pass"), QStringLiteral("old-pass"), QString(),
+            QStringLiteral("0102"), &err));
+    QVERIFY(swapped);
+    QCOMPARE(CredentialStore::loadPassword(keyEntry), QStringLiteral("0102"));
+}
+
+// The store takes the password and refuses the key: neither is kept, and the
+// config on disk is the one it was. (A store that refuses is a locked keyring or a
+// denied Keychain prompt; a test environment's is scripted to.)
+void TestBackendConfig::anAuthKeyTheStoreRefusesLeavesTheConfigAndThePasswordAlone()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("old-pass"));
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString before = readAll(path);
+
+    // The key's own item is the one the store refuses, as a Keychain prompt for a
+    // new item that is denied does; the password's item is there and works, so
+    // the save can put it back.
+    QVariantMap edit = editorForm(backend, 0);
+    edit[QStringLiteral("password")] = QStringLiteral("new-pass");
+    edit[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    edit[QStringLiteral("username")] = QStringLiteral("bob");
+    int stores = 0;
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    CredentialStore::setCallHookForTest([&](const char *call, const QString &key) {
+        if (QLatin1String(call) != QLatin1String("store"))
+            return;
+        if (key == keyEntry) {
+            ++stores;
+            qputenv("FT_TEST_KEYRING", "locked");
+        } else if (stores > 0) {
+            qunsetenv("FT_TEST_KEYRING");
+        }
+    });
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    const bool saved = backend.createConfig(edit);
+    CredentialStore::setCallHookForTest(nullptr);
+    qunsetenv("FT_TEST_KEYRING");
+    QVERIFY2(stores >= 1, "the key was never offered to the store");
+    QVERIFY(!saved);
+    QCOMPARE(readAll(path), before);
+    QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path)), QStringLiteral("old-pass"));
+    QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)).isEmpty());
+    QVERIFY2(!errors.isEmpty(), "the user was told nothing");
 }
 
 QTEST_MAIN(TestBackendConfig)

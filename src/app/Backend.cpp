@@ -166,6 +166,20 @@ bool Backend::isInternalVpnError(const QString &m) const
 
 namespace {
 
+// The core's words for a server that turned the username and password away
+// contain "auth" or "credential". So do its words about the client random auth
+// key (core 1.3: "Failed to derive client_random from auth key", when the
+// handshake has no server name to bind the key to), and telling the user to
+// check their password for that would send them the wrong way.
+bool sayCredentialsWereRefused(const QString &lower)
+{
+    if (lower.contains(QLatin1String("auth key")) || lower.contains(QLatin1String("auth_key"))
+        || lower.contains(QLatin1String("client_random"))) {
+        return false;
+    }
+    return lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"));
+}
+
 QString classifyVpnErrorMessage(const QString &lower)
 {
     // Helper lifecycle messages are already written for humans — and phrases
@@ -182,7 +196,7 @@ QString classifyVpnErrorMessage(const QString &lower)
     if (lower.contains(QLatin1String("timeout")) || lower.contains(QLatin1String("timed out"))) {
         return QCoreApplication::translate("Backend", "Server isn't responding (timed out).");
     }
-    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"))) {
+    if (sayCredentialsWereRefused(lower)) {
         return QCoreApplication::translate("Backend",
                                            "Authentication failed — check the username and password.");
     }
@@ -196,7 +210,7 @@ QString classifyVpnErrorMessage(const QString &lower)
 QString friendlyConnectFailure(const QString &reason)
 {
     const QString lower = reason.toLower();
-    if (lower.contains(QLatin1String("auth")) || lower.contains(QLatin1String("credential"))) {
+    if (sayCredentialsWereRefused(lower)) {
         return QCoreApplication::translate("Backend",
                                            "Authentication failed — check the username and password.");
     }
@@ -537,6 +551,7 @@ void Backend::removeConfig(int index) {
     if (path == m_activePath && (m_connected || m_connecting))
         disconnectVpn();
     freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(path));
+    freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigAuthKey(path));
     forgetSubscription(path); // and its subscription's address, which also holds the password
     // Remove the TOML itself when we own it (imported/created configs live in
     // the app config dir) — a "deleted" server shouldn't stay recoverable on

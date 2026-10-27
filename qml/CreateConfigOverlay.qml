@@ -67,7 +67,7 @@ Item {
         // rebuild the same string, so tryClose() would drop real edits silently.
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
-                    protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
+                    protocol, fDns.text, fSni.text, fRandom.text, fAuthKey.text, fCert.text, ipv6,
                     skipVerification, antiDpi, splitProfile].join("\u001f")
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
@@ -81,6 +81,7 @@ Item {
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""
                 fPass.text = f.password || ""; fDns.text = f.dns || ""
                 fSni.text = f.customSni || ""; fRandom.text = f.clientRandom || ""
+                fAuthKey.text = f.authKey || ""
                 fCert.text = f.certificate || ""
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
@@ -158,6 +159,15 @@ Item {
                 Row { width: parent.width; spacing: 10
                     Field { id: fSni; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Custom SNI"); width: (parent.width - 10) / 2 }
                     Field { id: fRandom; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Client random (hex)"); width: (parent.width - 10) / 2 }
+                }
+                // The key a server checks the TLS client random against (TrustTunnel
+                // 1.3). Masked like the password, and kept where the password is.
+                Column { width: parent.width; spacing: 4
+                    Field { id: fAuthKey; objectName: "authKeyField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Auth key (hex)"); password: true }
+                    Text { objectName: "authKeyHint"; width: parent.width; wrapMode: Text.WordWrap; color: theme.textFaint; font.pixelSize: 12
+                           text: (fAuthKey.text.length > 0 && fRandom.text.length > 0)
+                                 ? qsTr("Client random is not used while an auth key is set")
+                                 : qsTr("Kept in the system's credential store, like the password") }
                 }
                 Column { width: parent.width; spacing: 4
                     Text { text: qsTr("Split profile"); color: theme.textDim; font.pixelSize: 13 }
@@ -247,6 +257,7 @@ Item {
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
+                                authKey: fAuthKey.text,
                                 allowIpv6: cform.ipv6, skipVerification: cform.skipVerification,
                                 antiDpi: cform.antiDpi, certificate: fCert.text,
                                 splitProfile: cform.splitProfile, editIndex: shell.editIndex,

@@ -282,6 +282,7 @@ const QStringList &knownEndpointKeys()
             QStringLiteral("hostname"),     QStringLiteral("addresses"),
             QStringLiteral("username"),     QStringLiteral("password"),
             QStringLiteral("client_random"), QStringLiteral("custom_sni"),
+            QStringLiteral("client_random_auth_key"),
             // Written by 1.2.2 and earlier, never read by the core: merged into
             // client_random on load (see parseConfigToml), and not carried over.
             QStringLiteral("client_random_mask"),

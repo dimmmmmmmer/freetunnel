@@ -1027,6 +1027,12 @@ void TestIntegrationBackendVpn::aFailureBeforeTheSessionCameUpIsSaidInTheUsersTe
                                  << QStringLiteral("Authentication failed — check the username and password.");
     QTest::newRow("no answer") << QStringLiteral("Connection failed: endpoint timed out (~30s)")
                                << QStringLiteral("Server isn't responding (timed out).");
+    // Core 1.3 words a failure of the client random auth key with "auth" in it, which
+    // is not a wrong password and must not be told as one.
+    QTest::newRow("auth key failure keeps its reason")
+            << QStringLiteral("Connection failed: Failed to derive client_random from auth key")
+            << QStringLiteral("Couldn't connect to the server: Failed to derive client_random "
+                              "from auth key");
     // Windows with no network at all, which is retried until there is one.
     QTest::newRow("no network")
             << QStringLiteral("set_system_dns() failed: Couldn't detect active network interface")

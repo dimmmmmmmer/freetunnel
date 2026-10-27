@@ -83,6 +83,17 @@ void restorePassword(const QString &target, const QString &previous)
         freetunnel::CredentialStore::storePassword(key, previous);
 }
 
+// The same for the auth key, which a save touched only when it changed anything
+// (see storeConfigAuthKey), so a save that did not is not put back either.
+void restoreAuthKey(const QString &target, const QString &previous)
+{
+    const QString key = freetunnel::CredentialStore::keyForConfigAuthKey(target);
+    if (previous.isEmpty())
+        freetunnel::CredentialStore::deletePassword(key);
+    else
+        freetunnel::CredentialStore::storePassword(key, previous);
+}
+
 } // namespace
 
 bool writeConfigFile(const QString &target, const QByteArray &body)
@@ -107,8 +118,26 @@ bool storeConfigPassword(const QString &target, const QString &password)
     return freetunnel::CredentialStore::loadPassword(key) == password;
 }
 
+bool storeConfigAuthKey(const QString &target, const QString &authKey, const QString &previousAuthKey)
+{
+    const QString key = freetunnel::CredentialStore::keyForConfigAuthKey(target);
+    if (authKey.isEmpty()) {
+        // A config without a key has no entry to touch, and costs the store
+        // nothing. One that had a key and has none now must lose it: left in the
+        // store, it would be sent to whatever server the config names next.
+        if (previousAuthKey.isEmpty())
+            return true;
+        freetunnel::CredentialStore::deletePassword(key);
+        return freetunnel::CredentialStore::loadPassword(key).isEmpty();
+    }
+    freetunnel::CredentialStore::storePassword(key, authKey);
+    // The value, not just "something is there", as for the password.
+    return freetunnel::CredentialStore::loadPassword(key) == authKey;
+}
+
 bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
-                            const QString &previousPassword, QString *errOut)
+                            const QString &previousPassword, const QString &authKey,
+                            const QString &previousAuthKey, QString *errOut)
 {
     // Editing a config saves over the ORIGINAL file (ownerConfigPathForSave reuses
     // oldPath when the name is unchanged). The old order — truncate the file, then
@@ -129,17 +158,39 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
             *errOut = QStringLiteral("password");
         return false;
     }
+    if (!storeConfigAuthKey(target, authKey, previousAuthKey)) {
+        // Both secrets or neither: the password is already in, and the config on
+        // disk is the old one, which goes with the old password.
+        restorePassword(target, previousPassword);
+        restoreAuthKey(target, previousAuthKey);
+        file.cancelWriting();
+        if (errOut)
+            *errOut = QStringLiteral("authkey");
+        return false;
+    }
     if (!file.commit()) {
         // The other way round from the case above, and as bad: the store holds the
         // new password while the file is still the old config, perhaps with
         // another username, and every connect fails until the next good save.
         // Put the store back to what the file on disk goes with.
         restorePassword(target, previousPassword);
+        if (!authKey.isEmpty() || !previousAuthKey.isEmpty())
+            restoreAuthKey(target, previousAuthKey);
         if (errOut)
             *errOut = QStringLiteral("write");
         return false;
     }
     return true;
+}
+
+QString authKeyNotStoredMessage()
+{
+    // One wording for every store: the cause is the same as for the password, and
+    // said there in the terms of each, but a key has no length limit worth
+    // naming, and this is the rarer message.
+    return QCoreApplication::translate("Backend",
+                                       "Could not store the auth key in the system's credential store. If it "
+                                       "asked for access or to be unlocked, allow that and try again.");
 }
 
 QString passwordNotStoredMessage(bool storeIsThere)
@@ -205,10 +256,11 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
             *contentOut = content;
         return false;
     }
-    // A server that checks the auth key turns this core away at the TLS
-    // handshake. Imported, the config would fail every connect with nothing to
-    // say why; the empty key the endpoint's export always writes is no key.
-    if (!freetunnel::endpointClientRandomAuthKey(content).isEmpty()) {
+    // The core drops a key it cannot decode and connects without it, and a server
+    // that checks one then turns the client away with nothing to say why, so a
+    // key that is not whole bytes of hex is refused here. The empty key the
+    // endpoint's export always writes is no key.
+    if (!freetunnel::isValidClientRandomAuthKey(freetunnel::endpointClientRandomAuthKey(content))) {
         if (errOut)
             *errOut = QStringLiteral("authkey");
         return false;

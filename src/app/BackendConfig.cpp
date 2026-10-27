@@ -165,6 +165,19 @@ void Backend::pingConfigs()
         pingConfigAtIndex(i);
 }
 
+namespace {
+
+// The config's client random auth key: the credential store's, or failing that
+// the one the file still holds inline (a config kept elsewhere, not yet moved).
+QString storedAuthKey(const QString &configPath, const freetunnel::ConfigToml &c)
+{
+    const QString stored = freetunnel::CredentialStore::loadPassword(
+            freetunnel::CredentialStore::keyForConfigAuthKey(configPath));
+    return stored.isEmpty() ? c.clientRandomAuthKey : stored;
+}
+
+} // namespace
+
 QVariantMap Backend::configFields(int index) const
 {
     QVariantMap f;
@@ -188,6 +201,7 @@ QVariantMap Backend::configFields(int index) const
     f[QStringLiteral("dns")] = c.dns;
     f[QStringLiteral("customSni")] = c.customSni;
     f[QStringLiteral("clientRandom")] = c.clientRandom;
+    f[QStringLiteral("authKey")] = storedAuthKey(configPath, c);
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("skipVerification")] = c.skipVerification;
     f[QStringLiteral("antiDpi")] = c.antiDpi;
@@ -229,6 +243,10 @@ QString Backend::configDeepLink(int index) const
     dl.upstreamProtocol = c.protocol == QLatin1String("http3")
             ? freetunnel::UpstreamProtocol::Http3 : freetunnel::UpstreamProtocol::Http2;
     dl.clientRandomPrefix = c.clientRandom;
+    // The link of a server that checks an auth key has to carry it: without it the
+    // link cannot connect. It then is version 2 (encodeDeepLink), which FreeTunnel
+    // 1.2.3 and earlier and TrustTunnel's clients up to 1.1.11 refuse.
+    dl.clientRandomAuthKey = storedAuthKey(path, c);
     dl.name = nameForPath(path);
     for (const QString &d : freetunnel::splitDnsList(c.dns))
         dl.dnsUpstreams << d.trimmed();
@@ -247,6 +265,7 @@ bool Backend::exportConfigToml(int index, const QString &fileUrl) const
     if (c.password.isEmpty())
         c.password = freetunnel::CredentialStore::loadPassword(
                 freetunnel::CredentialStore::keyForConfigPath(src));
+    c.clientRandomAuthKey = storedAuthKey(src, c);
     const QString dest = fileUrl.startsWith(QLatin1String("file:"))
             ? QUrl(fileUrl).toLocalFile() : fileUrl;
     if (dest.isEmpty())
@@ -254,7 +273,7 @@ bool Backend::exportConfigToml(int index, const QString &fileUrl) const
     // The certificates alone, as for the link above: an export is made to be
     // handed on too.
     c.certificate = freetunnel::certificatesOnly(c.certificate);
-    // The export carries the password in cleartext into a user-chosen directory
+    // The export carries the password (and the auth key) in cleartext into a user-chosen directory
     // (~/Downloads and friends): writeConfigFile makes it owner-only before the
     // first byte lands, instead of chmod'ing a world-readable file afterwards.
     return freetunnel::backend_config::writeConfigFile(dest,
