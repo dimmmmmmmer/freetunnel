@@ -3890,8 +3890,9 @@ void TestQmlUi::aDoubleClickThatOpensTheAddMenuLeavesItOpen()
 namespace {
 
 // A click on one of the window's own buttons, by the name the window agent finds
-// it by. False if it is not on screen to be clicked, which proves nothing.
-bool clickWindowButton(QQuickWindow *window, const char *objectName)
+// it by. False if it is not on screen to be clicked, which proves nothing. Its
+// callers skip on macOS, so there nothing uses it.
+[[maybe_unused]] bool clickWindowButton(QQuickWindow *window, const char *objectName)
 {
     auto *button = window->findChild<QQuickItem *>(QLatin1String(objectName));
     if (!button || !button->isVisible())
