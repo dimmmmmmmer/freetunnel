@@ -68,6 +68,7 @@ private slots:
     void noConnectConfigIsBuiltWhenASecretCannotBeRead();
     void migrationTouchesNothingWhenTheOldPasswordCannotBeRead();
     void migrationOfOneSecretNeedsNoRead();
+    void migrationPutsTheOldPasswordBackWhenTheKeyIsRefused();
     void migrateStripsPassword();
     void migrateMovesTheAuthKeyToo();
     void keepsTheEventLoopRunningWhileItWaits();
@@ -507,6 +508,55 @@ void TestCredentialStore::migrationOfOneSecretNeedsNoRead()
     CredentialStore::setReadFailureForTest({});
     QVERIFY(parsed(path).password.isEmpty());
     QCOMPARE(CredentialStore::lookup(passwordEntry).value, QStringLiteral("only-pw"));
+}
+
+// The one refusal that comes after something was written: the password lands, and
+// then the key is refused (a denied Keychain prompt for an item that is there). What
+// the password's entry held goes back, and an entry that held nothing is deleted
+// again, so a config the caller keeps does not find the new password at its path.
+void TestCredentialStore::migrationPutsTheOldPasswordBackWhenTheKeyIsRefused()
+{
+    const QString path = configFile(QStringLiteral("migrate-refused"), QStringLiteral("new-pw"), QStringLiteral("aabb"));
+    const QString passwordEntry = CredentialStore::keyForConfigPath(path);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    const bool hadKeyringVariable = qEnvironmentVariableIsSet("FT_TEST_KEYRING");
+    const QByteArray keyringBefore = qgetenv("FT_TEST_KEYRING");
+    const auto putKeyringBack = [&] {
+        if (hadKeyringVariable)
+            qputenv("FT_TEST_KEYRING", keyringBefore);
+        else
+            qunsetenv("FT_TEST_KEYRING");
+    };
+    const auto restore = qScopeGuard(putKeyringBack);
+    // The key's own entry is the one the store refuses; every other works.
+    int keyStores = 0;
+    CredentialStore::setCallHookForTest([&](const char *call, const QString &key) {
+        if (QLatin1String(call) != QLatin1String("store"))
+            return;
+        if (key == keyEntry) {
+            ++keyStores;
+            qputenv("FT_TEST_KEYRING", "locked");
+        } else {
+            putKeyringBack();
+        }
+    });
+    const QString before = readText(path);
+
+    QVERIFY(CredentialStore::storePassword(passwordEntry, QStringLiteral("old-pw")));
+    SecretRefused refused = SecretRefused::None;
+    QVERIFY(!migrateConfigPassword(path, &refused));
+    QVERIFY(refused == SecretRefused::AuthKey);
+    QVERIFY2(keyStores >= 1, "the key was never offered to the store");
+    putKeyringBack();
+    QCOMPARE(CredentialStore::lookup(passwordEntry).value, QStringLiteral("old-pw")); // put back
+    QVERIFY(CredentialStore::lookup(keyEntry).notFound());
+    QCOMPARE(readText(path), before);
+
+    // And one that held none is not left holding the new password.
+    QVERIFY(CredentialStore::deletePassword(passwordEntry));
+    QVERIFY(!migrateConfigPassword(path, &refused));
+    putKeyringBack();
+    QVERIFY2(CredentialStore::lookup(passwordEntry).notFound(), "the new password was left in the store");
 }
 
 void TestCredentialStore::migrateStripsPassword()
