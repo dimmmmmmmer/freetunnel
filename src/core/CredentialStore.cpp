@@ -828,6 +828,30 @@ static bool writeConfigText(const QString &path, const QString &toml)
     return f.commit();
 }
 
+// The password entry's value before the migration overwrites it, kept so that a
+// refused key can put it back. A store that cannot be read is not an empty one:
+// the migration stops before writing, and the file keeps both secrets until the
+// store can be read.
+static bool previousPasswordFor(const QString &entry, QString *previous, SecretRefused *refused)
+{
+    const StoredSecret stored = CredentialStore::lookup(entry);
+    if (stored.failed()) {
+        if (refused)
+            *refused = SecretRefused::Password;
+        return false;
+    }
+    *previous = stored.value;
+    return true;
+}
+
+static void restorePreviousPassword(const QString &entry, const QString &previous)
+{
+    if (previous.isEmpty())
+        CredentialStore::deletePassword(entry);
+    else
+        CredentialStore::storePassword(entry, previous);
+}
+
 bool migrateConfigPassword(const QString &configPath, SecretRefused *refused)
 {
     if (refused)
@@ -847,19 +871,12 @@ bool migrateConfigPassword(const QString &configPath, SecretRefused *refused)
     // nothing written by the time its only store can fail.
     const bool both = !c.password.isEmpty() && !c.clientRandomAuthKey.isEmpty();
     QString previousPassword;
-    if (both) {
-        // An entry that cannot be read is not an empty one: the password stored
-        // next would overwrite it, and the key's refusal would then delete it
-        // for want of anything to put back. Nothing is touched; the file keeps
-        // both secrets, and is migrated when the store can be read.
-        const StoredSecret previous = CredentialStore::lookup(passwordEntry);
-        if (previous.failed()) {
-            if (refused)
-                *refused = SecretRefused::Password;
-            return false;
-        }
-        previousPassword = previous.value;
-    }
+    // An entry that cannot be read is not an empty one: the password stored next
+    // would overwrite it, and the key's refusal would then delete it for want of
+    // anything to put back. Nothing is touched; the file keeps both secrets, and
+    // is migrated when the store can be read.
+    if (both && !previousPasswordFor(passwordEntry, &previousPassword, refused))
+        return false;
 
     if (!c.password.isEmpty() && !CredentialStore::storePassword(passwordEntry, c.password)) {
         if (refused)
@@ -870,12 +887,8 @@ bool migrateConfigPassword(const QString &configPath, SecretRefused *refused)
     // it. A key that is already stored is not what the file holds any more, and
     // is not read back: the file's is the newer, as the password's is.
     if (!c.clientRandomAuthKey.isEmpty() && !CredentialStore::storePassword(authKeyEntry, c.clientRandomAuthKey)) {
-        if (both) {
-            if (previousPassword.isEmpty())
-                CredentialStore::deletePassword(passwordEntry);
-            else
-                CredentialStore::storePassword(passwordEntry, previousPassword);
-        }
+        if (both)
+            restorePreviousPassword(passwordEntry, previousPassword);
         if (refused)
             *refused = SecretRefused::AuthKey;
         return false;
