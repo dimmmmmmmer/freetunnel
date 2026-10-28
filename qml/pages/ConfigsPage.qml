@@ -35,19 +35,19 @@ Item {
         if (v !== "link") return
         const row = rowOf(cfgRoot.exportPath)
         if (row < 0) return
+        // The backend says why it could not, once (errorOccurred), so this speaks
+        // for success alone; a toast of its own here covered the real reason.
         var lnk = backend.configDeepLink(row)
         if (lnk && lnk.length > 0) {
             backend.copyToClipboard(lnk)
             shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully"))
-        } else {
-            shell.showToast(qsTr("Couldn’t build deep-link"))
         }
     }
     function exportToml(fileUrl) {
         const row = rowOf(cfgRoot.exportPath)
         if (row < 0) return
-        shell.showToast(backend.exportConfigToml(row, fileUrl)
-                        ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
+        if (backend.exportConfigToml(row, fileUrl))
+            shell.showToast(qsTr("Config exported — the file contains the password"))
     }
     function deleteConfirmed() {
         const row = rowOf(cfgRoot.deletePath)
