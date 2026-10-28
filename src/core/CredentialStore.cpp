@@ -298,9 +298,14 @@ QString firstStderrLine(QProcess &p)
 }
 
 // secret-tool's answer, or nothing when there is no secret-tool to ask. Its exit
-// code 1 is both "no such item" and "could not ask" (no session bus, a locked
-// keyring that was not unlocked); the second says why on stderr first, and the
-// first prints nothing, which is how secretServiceAvailable() tells them apart too.
+// code 1 is both "no such item" and "could not ask". With no session bus it says
+// why on stderr first, and an item that is not there prints nothing, which is how
+// secretServiceAvailable() tells them apart too. A locked keyring is the third
+// thing, and not told apart: when the unlock prompt is dismissed, secret-tool gets
+// no password and no error, and exits 1 without a word, as for an item that is not
+// there; killed while the prompt is still up, it is "did not answer in time". So a
+// silent exit 1 is not proof that nothing is stored, and secretToolSearch() asks
+// the question this one cannot.
 // Not started, timed out, crashed, or any other exit: could not ask.
 std::optional<StoredSecret> secretToolLookup(const QString &key)
 {
@@ -338,6 +343,50 @@ std::optional<StoredSecret> secretToolLookup(const QString &key)
     }
     out.detail = QStringLiteral("secret-tool exit %1: %2").arg(p.exitCode()).arg(why);
     return out;
+}
+
+// Whether secret-tool can list an item stored for this entry: `search --all`, which
+// without --unlock cannot raise a prompt and so names a locked item too (it prints
+// the item, and says on stderr that it cannot get the secret). Used where libsecret
+// cannot do the same search itself: a build without libsecret, or with one before
+// 0.19. Exit 0 with nothing printed is "no such item", as `lookup`'s exit 1 is, and
+// output is an item. Anything else, such as a secret-tool before `search`, a
+// timeout or a crash, is no answer: empty. What it prints holds the secret of an
+// item that is not locked; it is looked at for being there and never kept or logged.
+std::optional<StoredSecret> secretToolSearch(const QString &key)
+{
+    const QString tool = secretToolPath();
+    if (tool.isEmpty())
+        return std::nullopt;
+    QProcess p;
+    p.start(tool, {QStringLiteral("search"), QStringLiteral("--all"), QStringLiteral("service"),
+                   credentialServiceName(), QStringLiteral("account"), key});
+    if (!p.waitForStarted(3000))
+        return std::nullopt;
+    if (!p.waitForFinished(5000)) {
+        p.kill();
+        p.waitForFinished(1000);
+        return std::nullopt;
+    }
+    if (p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0)
+        return std::nullopt;
+    StoredSecret out; // NotFound
+    if (!p.readAllStandardOutput().trimmed().isEmpty()) {
+        out.status = SecretStatus::Error;
+        out.detail = QStringLiteral("secret-tool lists an item for this entry that its lookup did not return");
+    }
+    return out;
+}
+
+// LinuxLookupSources::secretToolItems: libsecret's search where there is one,
+// secret-tool's otherwise.
+std::optional<StoredSecret> secretToolItemsLookup(const QString &key)
+{
+#if defined(FT_HAVE_LIBSECRET)
+    if (const std::optional<StoredSecret> viaLibsecret = libsecretToolItemsLookup(key))
+        return viaLibsecret;
+#endif
+    return secretToolSearch(key);
 }
 
 bool secretServiceClear(const QString &key)
@@ -412,6 +461,16 @@ static StoredSecret lookupLinux(const QString &key)
         sources.secretTool = secretToolLookup(key);
         inOsStore = sources.secretTool && sources.secretTool->found();
     }
+    // Neither returned it. A locked item whose prompt was dismissed is not
+    // returned by either, and secret-tool's silence is the same as for an item
+    // that is not there; so, unless the answer is an error already, ask whether
+    // an item secret-tool stored for it is there.
+    if (!inOsStore) {
+        const std::optional<StoredSecret> &decider =
+                sources.libsecret ? sources.libsecret : sources.secretTool;
+        if (!(decider && decider->failed()))
+            sources.secretToolItems = secretToolItemsLookup(key);
+    }
     if (!inOsStore)
         sources.legacyFile = legacyFileLookup(key);
 
@@ -463,6 +522,14 @@ StoredSecret combineLinuxLookup(const LinuxLookupSources &sources)
         // has moved into the OS store.
         fromFile.fromLegacyFile = !sources.insecureFallbackBuild;
         return fromFile;
+    }
+    // An item secret-tool stored is there, and neither lookup returned it (locked,
+    // its prompt dismissed): not absent, whatever they said.
+    if (sources.secretToolItems && sources.secretToolItems->failed()) {
+        StoredSecret out;
+        out.status = SecretStatus::Error;
+        out.detail = sources.secretToolItems->detail;
+        return out;
     }
     // Nobody holds it. libsecret says whether that is so, or whether it could not
     // look; secret-tool says it only when libsecret is not there, so that a

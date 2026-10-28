@@ -56,6 +56,7 @@ private slots:
     void storeLoadDelete();
     void anEntryThatIsNotThereIsNotFound();
     void theLinuxSourcesAddUp();
+    void anItemSecretToolStoredThatNothingReturnedIsNotAbsent();
     void aReadFailureIsAnErrorForTheChosenEntriesOnly();
     void anErrorIsLoggedWithoutItsValue();
     void aConfigsInlineSecretsAreUsedWithoutAskingTheStore();
@@ -227,6 +228,53 @@ void TestCredentialStore::theLinuxSourcesAddUp()
         QVERIFY2(got.status == c.want, c.name);
         QVERIFY2(got.value == c.value, c.name);
         QVERIFY2(got.fromLegacyFile == c.legacy, c.name);
+        if (!c.detail.isEmpty())
+            QVERIFY2(got.detail == c.detail, c.name);
+    }
+}
+
+// A locked item whose prompt was dismissed is returned by neither libsecret nor
+// secret-tool, and secret-tool's silence is the same as for no item. The search that
+// can tell them apart says the item is there: that wins over "not found" from the
+// sources that looked, and over secret-tool's own failure (a timeout while the
+// prompt is up), and loses to any source that has the entry.
+void TestCredentialStore::anItemSecretToolStoredThatNothingReturnedIsNotAbsent()
+{
+    struct Case {
+        const char *name;
+        std::optional<StoredSecret> libsecret;
+        std::optional<StoredSecret> tool;
+        std::optional<StoredSecret> items;
+        StoredSecret file;
+        bool fallback;
+        SecretStatus want;
+        QString value;
+        QString detail;
+    };
+    const std::optional<StoredSecret> noSource;
+    const QList<Case> cases = {
+        {"libsecret and secret-tool say no, an item is there", notFound(), notFound(), failed("i"), notFound(), false, SecretStatus::Error, {}, "i"},
+        {"secret-tool timed out, an item is there", notFound(), failed("t"), failed("i"), notFound(), false, SecretStatus::Error, {}, "i"},
+        {"secret-tool is not installed, an item is there", notFound(), noSource, failed("i"), notFound(), false, SecretStatus::Error, {}, "i"},
+        {"no libsecret, secret-tool says no, an item is there", noSource, notFound(), failed("i"), notFound(), false, SecretStatus::Error, {}, "i"},
+        {"with the fallback, an item is there", noSource, notFound(), failed("i"), notFound(), true, SecretStatus::Error, {}, "i"},
+        {"no item is there", notFound(), notFound(), notFound(), notFound(), false, SecretStatus::NotFound, {}, {}},
+        {"no item is there, secret-tool failed", notFound(), failed("t"), notFound(), notFound(), false, SecretStatus::NotFound, {}, {}},
+        {"the search could not be made", notFound(), notFound(), noSource, notFound(), false, SecretStatus::NotFound, {}, {}},
+        {"libsecret has the entry, an item is there too", foundAs("a"), notFound(), failed("i"), notFound(), false, SecretStatus::Found, "a", {}},
+        {"secret-tool has the entry, an item is there too", notFound(), foundAs("b"), failed("i"), notFound(), false, SecretStatus::Found, "b", {}},
+        {"only the legacy file has it, an item is there too", notFound(), notFound(), failed("i"), foundAs("c"), false, SecretStatus::Found, "c", {}},
+    };
+    for (const Case &c : cases) {
+        LinuxLookupSources in;
+        in.libsecret = c.libsecret;
+        in.secretTool = c.tool;
+        in.secretToolItems = c.items;
+        in.legacyFile = c.file;
+        in.insecureFallbackBuild = c.fallback;
+        const StoredSecret got = combineLinuxLookup(in);
+        QVERIFY2(got.status == c.want, c.name);
+        QVERIFY2(got.value == c.value, c.name);
         if (!c.detail.isEmpty())
             QVERIFY2(got.detail == c.detail, c.name);
     }

@@ -73,6 +73,26 @@ QString describeGError(GError *error)
 #endif
 #endif
 
+#if defined(FT_LIBSECRET_CAN_SEARCH)
+// The attributes secret-tool stores an item under: service and account, with no
+// schema of ours (a name to match would be the one thing they do not have).
+// Search-only: nothing is stored with it.
+const SecretSchema &secretToolSchema()
+{
+    static const QByteArray name = credentialServiceName().toUtf8();
+    static const SecretSchema schema = [] {
+        SecretSchema s{};
+        s.name = name.constData();
+        s.flags = SECRET_SCHEMA_DONT_MATCH_NAME;
+        s.attributes[0] = {"service", SECRET_SCHEMA_ATTRIBUTE_STRING};
+        s.attributes[1] = {"account", SECRET_SCHEMA_ATTRIBUTE_STRING};
+        s.attributes[2] = {nullptr, SecretSchemaAttributeType(0)};
+        return s;
+    }();
+    return schema;
+}
+#endif
+
 // libsecret gives NULL without an error both for an item that is not there and for
 // one that is there and locked, when the prompt to unlock it was dismissed. A
 // search that is not allowed to unlock anything cannot prompt, and still sees a
@@ -122,6 +142,32 @@ StoredSecret libsecretLookup(const QString &key)
     out.value = QString::fromUtf8(pw);
     secret_password_free(pw);
     return out;
+}
+
+std::optional<StoredSecret> libsecretToolItemsLookup(const QString &key)
+{
+#if defined(FT_LIBSECRET_CAN_SEARCH)
+    StoredSecret out; // NotFound
+    const QByteArray service = credentialServiceName().toUtf8();
+    GError *error = nullptr;
+    GList *matches = secret_password_search_sync(&secretToolSchema(), SECRET_SEARCH_ALL, nullptr,
+                                                 &error, "service", service.constData(), "account",
+                                                 key.toUtf8().constData(), nullptr);
+    if (error) {
+        out.status = SecretStatus::Error;
+        out.detail = describeGError(error) + QStringLiteral(" (looking for an item secret-tool stored)");
+        return out;
+    }
+    if (matches) {
+        out.status = SecretStatus::Error;
+        out.detail = QStringLiteral("libsecret: an item secret-tool stored is there and could not be read");
+        g_list_free_full(matches, g_object_unref);
+    }
+    return out;
+#else
+    Q_UNUSED(key);
+    return std::nullopt;
+#endif
 }
 
 bool libsecretClear(const QString &key)
