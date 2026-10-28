@@ -355,12 +355,20 @@ bool Backend::startSubscriptionRefresh(const QString &path, bool manual)
 {
     if (m_subscriptions->isFetching(path) || m_subscriptions->isBusy(path))
         return false;
-    const QString url = m_subscriptions->address(path);
+    const freetunnel::StoredSecret address = m_subscriptions->address(path);
+    const QString &url = address.value;
     // Asked of the credential store, which runs an event loop meanwhile.
     if (!m_subscriptions->isLinked(path) || m_subscriptions->isFetching(path))
         return false;
+    if (address.failed()) {
+        // The store could not be asked, which is not the same as the address being
+        // gone: a locked keyring may be open next time, and is tried again as what
+        // may pass is.
+        noteSubscriptionNotApplied(path, QStringLiteral("keyring"));
+        return false;
+    }
     if (url.isEmpty()) {
-        // A locked keyring answers nothing, and may be open next time.
+        // An entry emptied by hand, or never there: tried again soon all the same.
         m_subscriptions->noteFailure(path, QStringLiteral("no_address"),
                                      freetunnel::SubscriptionRefreshPolicy::Backoff);
         return false;
@@ -396,17 +404,19 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     m_subscriptions->setBusy(path, true);
     const auto done = qScopeGuard([this, path]() { m_subscriptions->setBusy(path, false); });
     freetunnel::ConfigToml current = freetunnel::parseConfigToml(readText(path));
-    QString password = freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path));
-    if (password.isEmpty())
-        password = current.password;
-    // The key the config has now is the store's, as its password is; applySubscription()
-    // reads it from `current`.
-    const QString storedAuthKey =
-            freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigAuthKey(path));
-    if (!storedAuthKey.isEmpty())
-        current.clientRandomAuthKey = storedAuthKey;
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(path, current);
     if (!m_subscriptions->isLinked(path))
         return;
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        // Nothing is written: the secrets a failed save puts back are the ones just
+        // not read, so an empty password or key here would let that restore delete
+        // the stored ones, and a save without them would drop the key.
+        return noteSubscriptionNotApplied(path, QStringLiteral("keyring"));
+    }
+    const QString &password = secrets.password;
+    // The key the config has now is the file's or the store's, as its password is;
+    // applySubscription() reads it from `current`.
+    current.clientRandomAuthKey = secrets.authKey;
     const freetunnel::SubscriptionApplied next = freetunnel::applySubscription(
             current, password, update.document, freetunnel::SubscriptionApplyMode::Refresh);
     if (!isUsableServer(next.config)) {
