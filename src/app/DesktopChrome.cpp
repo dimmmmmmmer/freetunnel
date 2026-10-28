@@ -96,6 +96,10 @@ DesktopChrome::DesktopChrome(QObject *parent)
 #ifndef Q_OS_MACOS
     m_layout.right = drawnButtons();
 #endif
+#ifdef Q_OS_LINUX
+    m_iconified = x11WindowIconified;
+    m_trayHost = [] { return trayHostRegistered(); };
+#endif
 }
 
 void DesktopChrome::followDesktop()
@@ -171,6 +175,32 @@ void minimizeWindow(QWindow *window)
         window->setWindowStates(window->windowStates() | Qt::WindowMinimized);
 }
 
+void minimizeWindowChecked(QWindow *window, const IconifiedProbe &probe, int checkMs,
+                           std::function<void(bool honoured)> done)
+{
+    if (!window)
+        return;
+    minimizeWindow(window);
+    // The window is the timer's context, so a window destroyed in the meantime takes
+    // the check with it; the guard is for one that is only hidden or deleted later.
+    QPointer<QWindow> guard(window);
+    QTimer::singleShot(checkMs, window, [guard, probe, done = std::move(done)]() {
+        if (!guard)
+            return;
+        if (!(guard->windowStates() & Qt::WindowMinimized)) {
+            done(true); // restored since: nothing stuck, nothing to put right
+            return;
+        }
+        const std::optional<bool> iconified = probe ? probe(guard) : std::nullopt;
+        if (!iconified.has_value() || *iconified) {
+            done(true);
+            return;
+        }
+        guard->setWindowStates(guard->windowStates() & ~Qt::WindowMinimized);
+        done(false);
+    });
+}
+
 void hideWindowToTray(QWindow *window)
 {
     if (!window)
@@ -205,7 +235,44 @@ void DesktopChrome::bringToFront(QObject *window)
 
 void DesktopChrome::minimize(QObject *window)
 {
-    minimizeWindow(qobject_cast<QWindow *>(window));
+    auto *target = qobject_cast<QWindow *>(window);
+    if (!target)
+        return;
+    if (!m_iconified) {
+        // Nothing to ask (Windows, macOS): the system does what it was asked.
+        minimizeWindow(target);
+        emit minimizeSettled(target, true);
+        return;
+    }
+    // On the display server this window can be asked about, minimising is a request
+    // to be checked on; see minimizeWindowChecked().
+    QPointer<DesktopChrome> self(this);
+    minimizeWindowChecked(target, m_iconified, kMinimizeCheckMs,
+                          [self, guard = QPointer<QWindow>(target)](bool honoured) {
+                              if (self && guard)
+                                  emit self->minimizeSettled(guard, honoured);
+                          });
+}
+
+bool DesktopChrome::hasTray(QObject *trayIcon) const
+{
+    return trayIcon && trayIcon->property("available").toBool();
+}
+
+bool DesktopChrome::trayCanHoldWindow(QObject *trayIcon) const
+{
+    if (!hasTray(trayIcon))
+        return false;
+    return !m_trayHost || m_trayHost().value_or(true);
+}
+
+bool DesktopChrome::minimizeCanBeChecked() const
+{
+#ifdef Q_OS_LINUX
+    return runsOnX11();
+#else
+    return false;
+#endif
 }
 
 void DesktopChrome::hideToTray(QObject *window)

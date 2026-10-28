@@ -73,16 +73,41 @@ Window {
     // retargeted to hide natively (installMacWindowCloseToTray); on Linux and
     // Windows the custom ✕ minimizes (keeps the taskbar entry and the VPN
     // running). So a close event that reaches this handler is usually a real
-    // quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4.
+    // quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Windows).
     //
-    // The exception is a desktop with no system tray, where ✕ does quit. See the
-    // ✕ itself, below.
+    // The exceptions are a desktop with no system tray, where ✕ does quit (see the
+    // ✕ itself, below), and Linux on an X server with one, where the window
+    // manager's own way of closing a window does what ✕ does. Alt+F4, a taskbar's
+    // Close and Hyprland's killactive and closewindow all arrive here as this same
+    // close event, and they mean "close this window", which for this application is
+    // ✕. Quitting is Ctrl+Q and the tray's Quit.
+    //
+    // There is no telling such a close from the one a desktop sends every window to
+    // log out. Qt 6 on Linux has no session manager to ask (isSavingSession() is
+    // only true inside an XSMP save, which the Qt this is built with cannot take
+    // part in), and no signal that every desktop sends ahead of a logout is known.
+    // So a desktop that logs out by asking each window to close is refused here like
+    // anybody else, and has to end the process itself.
+    //
+    // Only on an X server, XWayland included. On native Wayland a minimise cannot be
+    // checked (see onMinimizeSettled), so on a compositor with none, such as sway,
+    // the window would not go anywhere and the close would do nothing: it keeps
+    // quitting there, as it always did.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
         if (shuttingDown || backend.applicationClosingDown())
             return
+        if (win.closeActsLikeTitleBarClose()) {
+            close.accepted = false
+            win.closeFromTitleBar()
+            return
+        }
         backend.quitApplication()
+    }
+    function closeActsLikeTitleBarClose() {
+        return Qt.platform.os === "linux" && desktop.minimizeCanBeChecked()
+               && desktop.hasTray(win.tray)
     }
 
     Connections {
@@ -162,6 +187,25 @@ Window {
                 return
             trayMaker.active = false
             trayMaker.active = true
+        }
+        // The answer to a minimise, which on X11 comes a moment after it. Only a
+        // close cares: a minimise the window manager ignored has nothing to put
+        // right but the state, which DesktopChrome has already done.
+        function onMinimizeSettled(window, honoured) {
+            if (window !== win)
+                return
+            const wasClose = win.closeWaitingOnMinimize
+            win.closeWaitingOnMinimize = false
+            if (honoured || !wasClose)
+                return
+            // The window is still there: this window manager has no minimise (Hyprland,
+            // sway). The close means "out of the way, still running", so hide it —
+            // if what the tray offers can really bring it back, and otherwise quit,
+            // as with no tray at all.
+            if (desktop.trayCanHoldWindow(win.tray))
+                desktop.hideToTray(win)
+            else
+                backend.quitApplication()
         }
     }
     Instantiator {
@@ -490,14 +534,24 @@ Window {
     // Minimising there can put the window somewhere with nothing to bring it back
     // from. Close quits instead, which is what it means anyway when nothing else is
     // holding the application open.
+    //
+    // And unless the window manager has no minimise to give: Hyprland and sway take
+    // the request and drop it, and the window stays where it is. DesktopChrome finds
+    // that out a moment after, and then the window is hidden to the tray instead —
+    // which is only for a ✕, never for the minimise button, because hiding is not
+    // what that was asked for. See onMinimizeSettled.
     function toggleMaximized() {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
+    // Set from the ✕ until the answer to its minimise comes.
+    property bool closeWaitingOnMinimize: false
     function closeFromTitleBar() {
-        if (win.tray && win.tray.available)
+        if (desktop.hasTray(win.tray)) {
+            win.closeWaitingOnMinimize = true
             desktop.minimize(win)
-        else
+        } else {
             backend.quitApplication()
+        }
     }
     WindowControls {
         id: controlsRight
@@ -883,7 +937,10 @@ Window {
                            text: modelData.t
                            color: modelData.v === selectPopup.value ? theme.accent : theme.text
                            font.pixelSize: 14 }
+                    // Sized like the name beside it: with no size it took the system's
+                    // default, which differs from one system to the next.
                     Text { visible: modelData.v === selectPopup.value; text: "✓"; color: theme.accent
+                           font.pixelSize: 14
                            anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
                     MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true; enabled: selectPopup.open
                                 onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(modelData.v) } }

@@ -72,6 +72,11 @@ compare link at the bottom of its release notes.
   asks before adding it, as it does for a tt:// link. The config takes the
   name the file gives, or the file's own name, and leaves the subscription
   address out.
+- **The window uses the Inter font on Windows, macOS and Linux** in place of
+  the system's font. FreeTunnel ships the font itself, so text, Russian
+  included, looks the same everywhere. The tray menu, file dialogs and
+  notifications are drawn by the system and keep its font. The log and the
+  certificate box stay fixed-width.
 
 ### Fixed
 
@@ -105,6 +110,15 @@ compare link at the bottom of its release notes.
 - **Windows, macOS and Linux: a config file whose multi-line text has an
   escaped quote (`\"`) in it is read correctly.** Before, `\"""` was taken for
   the end of the text, and the settings after it could be misread or missed.
+- **Linux: ✕ and the desktop's own close (Alt+F4, Hyprland's killactive and
+  closewindow) now send FreeTunnel to the tray, where there is one, instead of
+  doing nothing or quitting.**
+  Hyprland and sway can't minimize: there the window hides, and the tray icon
+  brings it back. If the bar that holds the tray (waybar) is not running, ✕
+  quits, as with no tray.
+  A desktop that logs out by asking every window to close is refused like
+  Alt+F4 is, and has to end FreeTunnel itself.
+  Force-killing it (forcekillactive, xkill) still ends FreeTunnel and the VPN.
 - **Windows, macOS and Linux: a locked or unreachable keyring no longer makes a
   connect, link or export go on without your password or auth key.**
 

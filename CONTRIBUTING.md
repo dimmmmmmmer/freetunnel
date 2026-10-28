@@ -500,6 +500,10 @@ it no longer finds. Its comments say why, and what to do about each.
   include;
 - the upstream ref, the boringssl recipe, linuxdeploy and the Linux build
   container are pinned;
+- the Inter font files in `assets/fonts/inter` (the apps' typeface, a binary
+  nobody reads in review) match their `SHA256SUMS`, with no other font file
+  beside them, and `licenses/common/Inter-OFL-1.1.txt` is the license text
+  that `SOURCE` pins. `SOURCE` says where they come from and how to bump them;
 - `QT_VER` / `CONAN_VER` agree across workflows, and no leg takes Homebrew's
   Qt instead of `QT_VER`'s;
 - the vendored patches are applied as a directory, with `--fuzz=0`.

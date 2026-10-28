@@ -21,9 +21,11 @@
 
 #include <xcb/xcb.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <string_view>
+#include <vector>
 
 namespace freetunnel {
 
@@ -129,6 +131,38 @@ void watchTrayHost(DesktopChrome *desktop, const QDBusConnection &bus)
                                             QDBusServiceWatcher::WatchForRegistration, desktop);
     QObject::connect(watcher, &QDBusServiceWatcher::serviceRegistered, desktop,
                      &DesktopChrome::trayHostAppeared);
+}
+
+std::optional<bool> trayHostRegistered()
+{
+    return trayHostRegistered(QDBusConnection::sessionBus());
+}
+
+std::optional<bool> trayHostRegistered(const QDBusConnection &bus)
+{
+    if (!bus.isConnected())
+        return std::nullopt;
+    QDBusMessage call = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.StatusNotifierWatcher"), QStringLiteral("/StatusNotifierWatcher"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+    call << QStringLiteral("org.kde.StatusNotifierWatcher")
+         << QStringLiteral("IsStatusNotifierHostRegistered");
+    const QDBusMessage reply = bus.call(call, QDBus::Block, kTrayHostTimeoutMs);
+    // No watcher on the bus is an answer, and the answer is no: Qt decides that it
+    // has a tray once, when the icon is made, so a bar that has gone since (it
+    // crashed, or a key bound to restart it ran) leaves an icon that still says
+    // `available` with nothing behind it. The other errors, a timeout or a watcher
+    // without the property, say nothing about whether a host is there.
+    if (reply.type() == QDBusMessage::ErrorMessage
+        && (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.ServiceUnknown")
+            || reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.NameHasNoOwner")))
+        return false;
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty())
+        return std::nullopt;
+    const QVariant value = unwrapped(reply.arguments().constFirst());
+    if (value.metaType() != QMetaType::fromType<bool>())
+        return std::nullopt;
+    return value.toBool();
 }
 
 void watchPortalSettings(DesktopChrome *desktop, const QDBusConnection &bus)
@@ -323,6 +357,67 @@ bool activateX11Window(QWindow *window)
                    reinterpret_cast<const char *>(&event));
     xcb_flush(c);
     return true;
+}
+
+namespace {
+
+// The values of a window property, empty if it has none, and nothing at all if the
+// server refused the question (no such window, or the connection is gone).
+template <typename T>
+std::optional<std::vector<T>> propertyValues(xcb_connection_t *c, xcb_window_t window,
+                                             xcb_atom_t property, xcb_atom_t type, uint32_t maxItems)
+{
+    if (property == XCB_ATOM_NONE)
+        return std::nullopt;
+    xcb_get_property_reply_t *reply =
+            xcb_get_property_reply(c, xcb_get_property(c, 0, window, property, type, 0, maxItems), nullptr);
+    if (!reply)
+        return std::nullopt;
+    const auto *values = static_cast<const T *>(xcb_get_property_value(reply));
+    const int count = xcb_get_property_value_length(reply) / static_cast<int>(sizeof(T));
+    std::vector<T> out(values, values + count);
+    std::free(reply);
+    return out;
+}
+
+} // namespace
+
+std::optional<bool> windowIconified(xcb_connection_t *c, std::uint32_t window)
+{
+    if (!c || xcb_connection_has_error(c) != 0)
+        return std::nullopt;
+    // ICCCM: WM_STATE is { state, icon window }, and IconicState is 3.
+    const xcb_atom_t wmState = internAtom(c, "WM_STATE");
+    const auto icccm = propertyValues<uint32_t>(c, window, wmState, wmState, 2);
+    // EWMH: _NET_WM_STATE is the list of states the window is in.
+    const auto ewmh = propertyValues<xcb_atom_t>(c, window, internAtom(c, "_NET_WM_STATE"),
+                                                 XCB_ATOM_ATOM, 64);
+    if (!icccm && !ewmh)
+        return std::nullopt;
+    constexpr uint32_t kIconicState = 3;
+    if (icccm && !icccm->empty() && icccm->front() == kIconicState)
+        return true;
+    const xcb_atom_t hidden = internAtom(c, "_NET_WM_STATE_HIDDEN");
+    return ewmh && hidden != XCB_ATOM_NONE
+            && std::find(ewmh->begin(), ewmh->end(), hidden) != ewmh->end();
+}
+
+bool runsOnX11()
+{
+    // By the platform's name, not by whether it offers an X connection: Qt's
+    // offscreen platform offers one too when there is a DISPLAY (for GL), and its
+    // window ids are counters, not X windows.
+    return qGuiApp && QGuiApplication::platformName() == QLatin1String("xcb");
+}
+
+std::optional<bool> x11WindowIconified(QWindow *window)
+{
+    if (!runsOnX11() || !window)
+        return std::nullopt; // native Wayland, offscreen, or not a GUI application
+    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+    if (!x11)
+        return std::nullopt;
+    return windowIconified(x11->connection(), static_cast<std::uint32_t>(window->winId()));
 }
 
 } // namespace freetunnel

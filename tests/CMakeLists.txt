@@ -187,6 +187,7 @@ set(APP_STARTUP_TEST_SOURCES
     helper_ipc_mock_server.h
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
+    ../src/app/AppFont.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
@@ -228,13 +229,14 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/vpn/vpn_helper_client.cpp
     ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
+    ../include/app/AppFont.h
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
     ${FT_MAC_GLUE_SOURCES}
 )
-add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc)
+add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc ../assets/fonts/fonts.qrc)
 target_include_directories(test_app_startup PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
@@ -257,6 +259,7 @@ add_test(NAME app_startup COMMAND test_app_startup -o ${CMAKE_CURRENT_BINARY_DIR
 set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
+    ../src/app/AppFont.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
@@ -298,6 +301,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/vpn/vpn_helper_client.cpp
     ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
+    ../include/app/AppFont.h
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
@@ -603,10 +607,13 @@ add_executable(test_qml_ui
     ui/MockShell.cpp
     ui/MockDesktop.h
     ui/UiTheme.cpp
+    ../src/app/AppFont.cpp
+    ../include/app/AppFont.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../qml.qrc
     ../assets/app.qrc
+    ../assets/fonts/fonts.qrc
     ../i18n/i18n.qrc
 )
 target_include_directories(test_qml_ui PRIVATE . ui ../include)
@@ -620,6 +627,29 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
+
+# The Inter font (assets/fonts): that Qt's font database gives back each of its two
+# weights as the file it came from, that every character the interface draws is in
+# it, and that the QML asks for no weight or family that is not. The first of those
+# differs from one font database to another, so on Windows it runs on the real
+# platform plugin, whose DirectWrite is what users have, over the offscreen one
+# run-ctest.sh sets (there it is FreeType's, which no user has). Linux and macOS
+# offscreen use fontconfig and Core Text, the databases of their desktops.
+get_filename_component(FT_I18N_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../i18n" ABSOLUTE)
+add_executable(test_app_font
+    test_app_font.cpp
+    ../src/app/AppFont.cpp
+    ../include/app/AppFont.h
+    ../assets/fonts/fonts.qrc
+    ../qml.qrc
+)
+target_include_directories(test_app_font PRIVATE ../include)
+target_compile_definitions(test_app_font PRIVATE FT_I18N_DIR="${FT_I18N_DIR}")
+target_link_libraries(test_app_font PRIVATE Qt6::Gui Qt6::Test)
+add_test(NAME app_font COMMAND test_app_font -o ${CMAKE_CURRENT_BINARY_DIR}/report-app_font.txt,txt)
+if(WIN32)
+    set_tests_properties(app_font PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=windows")
+endif()
 
 # The Windows window chrome (src/app/WindowsChrome.cpp) on the one platform it runs
 # on, and on the real Windows platform plugin: under offscreen, which the rest of

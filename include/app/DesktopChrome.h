@@ -6,6 +6,10 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <functional>
+#include <optional>
+#include <utility>
+
 class QWindow;
 
 namespace freetunnel {
@@ -36,6 +40,34 @@ void bringWindowForward(QWindow *window);
 // maximised state off first: the window visibly shrank to normal size before
 // going, and came back at it.
 void minimizeWindow(QWindow *window);
+
+// Whether the window manager has actually iconified the window: yes, no, or empty
+// when that cannot be told (native Wayland, no server to ask).
+using IconifiedProbe = std::function<std::optional<bool>(QWindow *)>;
+
+// Whether a host is registered for the tray icons on the session bus: yes, no, or
+// empty when that cannot be told.
+using TrayHostProbe = std::function<std::optional<bool>()>;
+
+// How long the window manager gets to act on a minimise before it is asked
+// whether it did. A request that is honoured shows within a few milliseconds; this
+// is the margin for a window manager that is busy, and the pause the user sees
+// where it was not.
+constexpr int kMinimizeCheckMs = 300;
+
+// minimizeWindow(), and then, checkMs later, a look at whether the window manager
+// did it. It may not have: asking an X11 window manager to minimise is a request,
+// and Hyprland and sway, which have no minimise, drop it without a word. Qt cannot
+// tell. It records Minimized whatever happens, and with that state stuck it sends
+// nothing for the next minimise either, so the close button did nothing for good.
+//
+// So when the probe says no, the window is taken out of the Minimized state Qt
+// holds it in, and done(false) says the window is still on screen. Otherwise
+// done(true): the window manager did it, or cannot be asked, or the window was
+// restored in the meantime and there is nothing to put right. Called once, unless
+// the window is destroyed first.
+void minimizeWindowChecked(QWindow *window, const IconifiedProbe &probe, int checkMs,
+                           std::function<void(bool honoured)> done);
 
 // Hide the window to the tray (the menu bar on macOS). On macOS a full-screen
 // window leaves full screen first, and is hidden once AppKit says it has:
@@ -109,18 +141,49 @@ public:
     Q_INVOKABLE bool showWindowMenu(QObject *window);
 
     // bringWindowForward(), minimizeWindow() and hideWindowToTray(), for the QML.
+    //
+    // minimize() on Linux is minimizeWindowChecked(), and says what came of it
+    // through minimizeSettled() a moment later; on Windows and macOS it is
+    // minimizeWindow() and minimizeSettled(window, true) at once.
     Q_INVOKABLE void bringToFront(QObject *window);
     Q_INVOKABLE void minimize(QObject *window);
     Q_INVOKABLE void hideToTray(QObject *window);
 
+    // Whether the tray icon has a tray to sit in: its `available`, which Qt works
+    // out when the icon is made. A function of the icon, not a property of this, so
+    // that the QML tests can say what a desktop with a tray would answer.
+    Q_INVOKABLE bool hasTray(QObject *trayIcon) const;
+    // Whether a window hidden for the tray can be got back from it, now: a tray, and
+    // on Linux a host for it. Qt's `available` was true when the icon was made, and
+    // says nothing of a bar that has left the bus since or that owns a
+    // StatusNotifierWatcher and shows no icons. So the host is asked, each time; where
+    // it cannot be (a timeout), Qt's word stands.
+    Q_INVOKABLE bool trayCanHoldWindow(QObject *trayIcon) const;
+    // Whether minimize() can be checked on this display server, which on Linux means
+    // an X server (XWayland included). Where it cannot, a window manager that drops
+    // the request cannot be told from one that honoured it, and a close that waits
+    // on the answer would wait for ever.
+    Q_INVOKABLE bool minimizeCanBeChecked() const;
+
     // For tests: apply a setting as if the portal had just reported it.
     void applySetting(const QString &ns, const QString &key, const QVariant &value);
+
+    // For tests: who is asked whether a minimise was honoured, and whether a tray
+    // host is there. On Linux they start as the real X server and the real session
+    // bus; elsewhere there is nothing to ask (an empty probe), and a minimise is
+    // taken as honoured, a tray as holding.
+    void setIconifiedProbe(IconifiedProbe probe) { m_iconified = std::move(probe); }
+    void setTrayHostProbe(TrayHostProbe probe) { m_trayHost = std::move(probe); }
 
 signals:
     void changed();
     // Linux: a tray host registered after start, so a tray icon made before it
     // should be made again. See watchTrayHost().
     void trayHostAppeared();
+    // What came of a minimize(): honoured, or the window manager did nothing and the
+    // window is still on screen, no longer marked minimised. See
+    // minimizeWindowChecked().
+    void minimizeSettled(QObject *window, bool honoured);
 
 private:
     // The org.gnome.desktop.wm.preferences keys; whether one changed anything.
@@ -132,6 +195,8 @@ private:
     QString m_middleClick = QStringLiteral("none");
     QString m_rightClick = QStringLiteral("menu");
     Qt::ColorScheme m_colorScheme = Qt::ColorScheme::Unknown;
+    IconifiedProbe m_iconified;
+    TrayHostProbe m_trayHost;
 };
 
 } // namespace freetunnel

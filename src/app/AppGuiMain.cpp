@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include "app/AppFont.h"
 #include "app/Backend.h"
 #include "app/MacWindow.h"
 #if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)
@@ -274,6 +275,14 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     setupMacApplicationQuit(backend);
 #endif
     step("lifecycle");
+
+    // Before the engine loads anything, so the first frame and every TextMetrics
+    // are already set in Inter. Not before the forward check: a launch that only
+    // hands a command to the running instance has no use for the fonts. The app
+    // runs in the system's font if they cannot be loaded, so the result is not
+    // acted on (useInterFont() says why in the log).
+    useInterFont();
+    step("font");
 
     createDesktopAndEngine(out);
 #if defined(Q_OS_WIN) && defined(FT_HAVE_QWINDOWKIT)

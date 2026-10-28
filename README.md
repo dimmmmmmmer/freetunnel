@@ -113,11 +113,24 @@ Closing the window keeps FreeTunnel and the VPN running:
 
 | Platform | Closing the window |
 | --- | --- |
-| Windows, Linux | ✕ minimizes the window to the taskbar. |
+| Windows | ✕ minimizes the window to the taskbar. Alt+F4 quits. |
+| Linux | ✕ minimizes the window to the taskbar, and so does the desktop's own close: Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`. |
+| Linux, on a window manager with no minimize, such as Hyprland or sway | The window hides to the tray instead. The tray icon (or a second launch) brings it back. |
 | macOS | The red button (or ⌘W) hides it. The menu-bar icon or the Dock brings it back. |
-| A Linux desktop with no system tray, such as GNOME without an AppIndicator extension | ✕ quits, since nothing would be left to bring the window back from. |
+| A Linux desktop with no system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
 
-To quit, choose **Quit** in the tray menu (or press ⌘Q on macOS).
+To quit, choose **Quit** in the tray menu (or press Ctrl+Q, or ⌘Q on macOS).
+
+On Linux the desktop's own close is the same request however it is sent, so a
+desktop that logs out by asking every window to close gets the answer Alt+F4
+does: FreeTunnel stays open, and the desktop has to end it. Choose **Quit**
+first if a logout waits on it. And it applies on X11 and XWayland, which is what
+the AppImage and the `.deb` run on; a build run natively on Wayland still quits
+on it.
+
+Force-killing the window, with Hyprland's `forcekillactive` or `killwindow`,
+`hyprctl kill` or `xkill`, ends FreeTunnel, and the VPN with it. No program can
+catch that.
 
 ## Importing a configuration
 
