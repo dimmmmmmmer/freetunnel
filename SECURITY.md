@@ -134,9 +134,11 @@ entry that is not there.
 - A **share link** or an **export** is not made at all. A link without the key
   would be version 1 and could not connect.
 - A **subscription** refresh is tried again later, and writes nothing.
-- A config whose password is in its own file, or in the legacy password file on
-  a machine with no keyring, never had a key in the store, so it connects, is
-  shared and is exported as before.
+- A config whose password is in the legacy password file, or in its own file on a
+  machine with no keyring at all, never had a key in the store, so it connects,
+  is shared and is exported as before. A password in its own file beside a
+  keyring that is there is not that: the key may be in the keyring, so a keyring
+  that cannot be read stops the config the same way.
 - The single-instance token is the exception: it falls back to its owner-only
   file, so a second launch still finds the first.
 

@@ -85,6 +85,7 @@ private slots:
     void aPasswordTheStoreCannotReadStopsTheConnect();
     void aConfigWithNoPasswordSaysSoAndNotThatItCouldNotBeRead();
     void aConfigKeptOutsideTheStoreConnectsWhateverTheStoreSays();
+    void aPasswordInTheFileBesideAStoreThatCannotBeReadStopsTheConnect();
     void anUpdateHeldForAConnectThatCouldNotReadItsKeyIsApplied();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
@@ -2105,6 +2106,7 @@ void TestIntegrationBackendVpn::aConfigWithNoPasswordSaysSoAndNotThatItCouldNotB
 // A Linux machine with no keyring keeps its configs' passwords in the files, so a
 // key the store cannot be asked for is not a key it lost: the config never had one
 // there. It connects, as it did before the store could say it could not be asked.
+// (With a store that is there, it does not: the next case.)
 void TestIntegrationBackendVpn::aConfigKeptOutsideTheStoreConnectsWhateverTheStoreSays()
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -2137,6 +2139,50 @@ void TestIntegrationBackendVpn::aConfigKeptOutsideTheStoreConnectsWhateverTheSto
     QVERIFY(readConfig(path).contains(QStringLiteral("inline-secret"))); // still where it was
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// A password in the file says nothing about the key when there is a store to hold it.
+// Another client's config can have it put back beside a key the store keeps, and a
+// store that refuses to take it out again is one that cannot be asked for the key:
+// connecting without it would be turned away by the server with nothing to say why.
+void TestIntegrationBackendVpn::aPasswordInTheFileBesideAStoreThatCannotBeReadStopsTheConnect()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    TestConfigs configs;
+    const QString path = QDir(base).filePath(QStringLiteral("file-password-stored-key.toml"));
+    freetunnel::ConfigToml cfg;
+    cfg.hostname = QStringLiteral("file-password.example");
+    cfg.addresses = QStringLiteral("203.0.113.51:443");
+    cfg.username = QStringLiteral("user");
+    cfg.password = QStringLiteral("inline-secret");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(freetunnel::buildConfigToml(cfg).toUtf8());
+    file.close();
+    configs.paths << path;
+    configs.install();
+    const QString keyEntry = freetunnel::CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(freetunnel::CredentialStore::storePassword(keyEntry, QStringLiteral("aabbccdd")));
+    MockHelperEnv env(QStringLiteral("backend-filepw-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    qputenv("FT_TEST_KEYRING", "locked"); // there, and it will not take the password out of the file
+    failReadsOnTheWorkerFor({keyEntry});
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    const QString said = freetunnel::backend_config::authKeyNotReadMessage();
+    QVERIFY2(anyErrorIs(errors, said), qPrintable(errors.at(0).at(0).toString()));
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.connected());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QVERIFY2(env.lastConnectConfig().isEmpty(), "the helper was given a config without the key");
+    QVERIFY(readConfig(path).contains(QStringLiteral("inline-secret"))); // still where it was
     backend.prepareQuit();
 }
 

@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QThread>
 #include <QTemporaryFile>
@@ -31,6 +32,28 @@ StoredSecret secret(SecretStatus status, const QString &value = QString(), bool 
 StoredSecret foundAs(const QString &value) { return secret(SecretStatus::Found, value); }
 StoredSecret notFound() { return secret(SecretStatus::NotFound); }
 StoredSecret failed(const QString &why = QStringLiteral("could not ask")) { return secret(SecretStatus::Error, QString(), false, why); }
+
+// FT_TEST_KEYRING for the length of a case, and as it was after: a run on a machine
+// with no keyring sets it for the whole process (see CONTRIBUTING.md), so a case
+// must not leave it unset for the ones after.
+class KeyringEnv {
+public:
+    KeyringEnv() : m_wasSet(qEnvironmentVariableIsSet("FT_TEST_KEYRING")), m_before(qgetenv("FT_TEST_KEYRING")) {}
+    ~KeyringEnv()
+    {
+        if (m_wasSet)
+            qputenv("FT_TEST_KEYRING", m_before);
+        else
+            qunsetenv("FT_TEST_KEYRING");
+    }
+    KeyringEnv(const KeyringEnv &) = delete;
+    KeyringEnv &operator=(const KeyringEnv &) = delete;
+    static void set(const char *what) { qputenv("FT_TEST_KEYRING", what); }
+
+private:
+    bool m_wasSet;
+    QByteArray m_before;
+};
 
 // Warnings the store logged, to say what they carry (and what they never do).
 QStringList g_logged;
@@ -60,6 +83,7 @@ private slots:
     void aReadFailureIsAnErrorForTheChosenEntriesOnly();
     void anErrorIsLoggedWithoutItsValue();
     void aConfigsInlineSecretsAreUsedWithoutAskingTheStore();
+    void anInlinePasswordBesideAStoreThatCannotBeReadHasAnUnreadableKey();
     void aStoredPasswordWithAKeyThatCannotBeReadIsUnreadable();
     void aPasswordFromTheLegacyFileHasNoKeyInTheStore();
     void aStoredPasswordWithNoKeyIsAConfigWithoutOne();
@@ -337,11 +361,13 @@ void TestCredentialStore::anErrorIsLoggedWithoutItsValue()
 }
 
 // The file's own copy of a secret is the one in use, and no store is asked for it.
-// A password in the file and a key that cannot be read (a Linux machine with no
-// keyring, whose configs keep their password in the file) is a config that
-// connects, as it always has.
+// A password in the file and a key that cannot be read, on a machine with no store
+// at all (a Linux machine with no keyring, whose configs keep their password in the
+// file), is a config that connects, as it always has.
 void TestCredentialStore::aConfigsInlineSecretsAreUsedWithoutAskingTheStore()
 {
+    const KeyringEnv keyring;
+    KeyringEnv::set("absent");
     const QString path = configFile(QStringLiteral("inline"), QStringLiteral("file-pw"));
     QStringList asked;
     CredentialStore::setCallHookForTest([&asked](const char *call, const QString &key) {
@@ -366,6 +392,49 @@ void TestCredentialStore::aConfigsInlineSecretsAreUsedWithoutAskingTheStore()
     QCOMPARE(bothSecrets.authKey, QStringLiteral("aabb"));
     QVERIFY(bothSecrets.unreadable == SecretUnreadable::None);
     QVERIFY2(asked.isEmpty(), qPrintable(asked.join(QLatin1Char(' '))));
+}
+
+// A password in the file does not say the config keeps its secrets outside a store
+// that is there. Something can put it back beside a key the store holds (a user
+// adding `password =` to a config that another client reads), and a store that
+// refuses is then what keeps the migration from stripping it again. The key it
+// cannot be asked for may be in it, and a connect, a link or an export without it
+// would be one the server turns away. Only a machine with no store at all is
+// spared, as above.
+void TestCredentialStore::anInlinePasswordBesideAStoreThatCannotBeReadHasAnUnreadableKey()
+{
+    using Problem = ConnectConfig::Problem;
+    const KeyringEnv keyring;
+    const QString path = configFile(QStringLiteral("inline-stored-key"), QStringLiteral("file-pw"));
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(CredentialStore::storePassword(keyEntry, QStringLiteral("aabbccdd")));
+
+    // A store that is there and refuses to take the password out of the file.
+    KeyringEnv::set("locked");
+    CredentialStore::setReadFailureForTest([&](const QString &key) { return key == keyEntry; });
+    const ConfigSecrets secrets = readConfigSecrets(path, parsed(path));
+    QVERIFY2(secrets.unreadable == SecretUnreadable::AuthKey,
+             "a key that cannot be read beside a store that is there was taken for none");
+    QVERIFY2(secrets.authKey.isEmpty(), "a failed read handed out a key");
+    const ConnectConfig built = buildConnectConfig(path);
+    QVERIFY2(built.problem == Problem::AuthKeyUnreadable, "a connect went ahead without the key");
+    QVERIFY(built.toml.isEmpty());
+    QVERIFY2(parsed(path).password == QStringLiteral("file-pw"), "the password left the file though the store refused it");
+
+    // Readable again, the same config connects with the key it has.
+    CredentialStore::setReadFailureForTest({});
+    const ConnectConfig whole = buildConnectConfig(path);
+    QVERIFY(whole.problem == Problem::None);
+    QCOMPARE(parseConfigToml(whole.toml).clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QVERIFY(whole.toml.contains(QStringLiteral("file-pw")));
+
+    // And with no store at all, which cannot hold one, it is a config without a key.
+    KeyringEnv::set("absent");
+    CredentialStore::setReadFailureForTest([&](const QString &key) { return key == keyEntry; });
+    const ConfigSecrets keyless = readConfigSecrets(path, parsed(path));
+    QVERIFY(keyless.unreadable == SecretUnreadable::None);
+    QCOMPARE(keyless.password, QStringLiteral("file-pw"));
+    QVERIFY(keyless.authKey.isEmpty());
 }
 
 // The store is where a config keeps its secrets when its password is there; a key

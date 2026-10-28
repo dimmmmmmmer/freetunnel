@@ -192,12 +192,15 @@ struct ConfigToml;
 // asked, and:
 //  - the password: found, or none (""), or unreadable (stops there);
 //  - the auth key: found, or none (""), or, when the store could not be asked,
-//    unreadable if the store is where this config keeps its secrets. That is so
-//    when the file holds no password of its own and the password did not come from
-//    the legacy file (ConfigSecrets, StoredSecret::fromLegacyFile): every path that
-//    puts a secret in the store puts both or neither. Otherwise the config keeps
-//    its secrets elsewhere, was never given a key there, and is read as one
-//    without (a keyless config on a Linux machine with no keyring still connects).
+//    unreadable if the store is where this config keeps its secrets: every path
+//    that puts a secret in the store puts both or neither. It is not when the
+//    password came from the legacy file (StoredSecret::fromLegacyFile), or is in the
+//    config's own file and there is no credential store at all to ask
+//    (secureStorageAvailable() is false: a Linux machine with no keyring). Such a
+//    config keeps its secrets elsewhere, was never given a key in a store, and is
+//    read as one without, so a keyless config on a machine with no keyring still
+//    connects. A password in the file beside a store that is there but cannot be
+//    read is not that: the key may be in it, and is unreadable.
 // c is the config's parsed file.
 ConfigSecrets readConfigSecrets(const QString &configPath, const ConfigToml &c);
 
