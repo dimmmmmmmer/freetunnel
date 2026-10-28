@@ -206,8 +206,11 @@ fresh
 check
 refused "an -rc on page 1 and nothing stable on page 2" "tagged v1\.3\.0-rc\.2, not"
 
-# Not vX.Y.Z, so not a release: each of these alone on the pin.
-for near in v1.3.0.1 1.3.0 v1.3 v1.3.0- release-1.3.0 V1.3.0 vv1.3.0 v1.3.0+build.5 v1.3.x v1..0 v1.3.0.rc2 v-1.3.0 v1.3.0-0 latest; do
+# Not vX.Y.Z, so not a release: each of these alone on the pin. The last four
+# have three digit groups, and a character other than a dot, or no separator
+# at all, between them: they match the stable pattern when its dots are
+# unescaped and no other way.
+for near in v1.3.0.1 1.3.0 v1.3 v1.3.0- release-1.3.0 V1.3.0 vv1.3.0 v1.3.0+build.5 v1.3.x v1..0 v1.3.0.rc2 v-1.3.0 v1.3.0-0 latest v1-3-0 v1_3_0 v1.300 v1x3y0; do
   fresh
   page "$(tag "$near" "$SHA")" > "$TMP/f/tags.1.json"
   check

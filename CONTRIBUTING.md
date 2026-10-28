@@ -479,6 +479,10 @@ TrustTunnelClient tagged `vX.Y.Z`: the `Core pin is a stable release` job
 refuses the tag (`scripts/check-core-pin-release.sh`, see
 [Releasing](#release-procedure)).
 
+"Stable" means the tag's name. The check does not ask whether upstream
+published a GitHub Release for the tag, or marked it a pre-release: a commit
+tagged `vX.Y.Z` passes even if upstream never made a Release page for it.
+
 ### Pinned dependencies
 
 [`scripts/check-pinned-deps.sh`](scripts/check-pinned-deps.sh) is CI-enforced

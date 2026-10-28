@@ -15,6 +15,11 @@
 # lightweight and annotated alike, so it compares with the pin as it is. One
 # stable tag is enough: a commit can carry both v1.3.0-rc.2 and v1.3.0.
 #
+# "Stable" is a rule about the tag's name, nothing more: upstream does not
+# publish a GitHub Release for every vX.Y.Z tag (v1.1.4, v1.1.6, v1.1.8 and
+# v1.1.9 have none), and this check does not ask for one. A pin on such a tag
+# passes; a release's prerelease flag is not read.
+#
 # Stricter than "not an -rc or -beta" on purpose. A commit with no tag is not a
 # release either, and neither is one whose only tags are not of the form
 # vX.Y.Z. Whatever cannot be shown to be a stable release is refused. So is an
