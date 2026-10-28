@@ -38,6 +38,32 @@ check "linuxdeploy checksum" 'sha256sum -c -' .github/workflows/build.yml
 # The Linux release is compiled inside this image; a tag can be repointed.
 check "Linux build container digest pin" 'container: ubuntu:[0-9.]+@sha256:[0-9a-f]{64}$' .github/workflows/build.yml
 
+# The Inter typeface in assets/fonts/inter. Fonts are binaries nobody reads in
+# review, so: SOURCE pins the release (version, tag commit, the zip's size and
+# SHA-256) and the license text, SHA256SUMS pins each font file, and no other
+# font sits there unlisted. licenses/common/Inter-OFL-1.1.txt must be the
+# release's LICENSE.txt, unchanged.
+inter=assets/fonts/inter
+check "Inter version" '^version=[0-9]+(\.[0-9]+)+$' "$inter/SOURCE"
+check "Inter release commit" '^tag_commit=[0-9a-f]{40}$' "$inter/SOURCE"
+check "Inter release zip SHA-256" '^zip_sha256=[0-9a-f]{64}$' "$inter/SOURCE"
+check "Inter license SHA-256" '^license_sha256=[0-9a-f]{64}$' "$inter/SOURCE"
+if ! (cd "$inter" && sha256sum -c --strict --quiet SHA256SUMS > /dev/null 2>&1); then
+  echo "pinned-deps: a font in $inter does not match $inter/SHA256SUMS" >&2
+  fail=1
+fi
+for font in "$inter"/*.ttf; do
+  if ! grep -qE "^[0-9a-f]{64}  ${font##*/}\$" "$inter/SHA256SUMS"; then
+    echo "pinned-deps: $font is not listed in $inter/SHA256SUMS" >&2
+    fail=1
+  fi
+done
+inter_license="$(sed -nE 's/^license_sha256=([0-9a-f]{64})$/\1/p' "$inter/SOURCE")"
+if [[ "$(sha256sum licenses/common/Inter-OFL-1.1.txt | cut -d' ' -f1)" != "$inter_license" ]]; then
+  echo "pinned-deps: licenses/common/Inter-OFL-1.1.txt is not the license text pinned in $inter/SOURCE" >&2
+  fail=1
+fi
+
 # Third-party GitHub Actions must be pinned to full commit SHAs. Validate every
 # `uses:` reference in the workflows directly (a tag or branch is mutable —
 # supply-chain risk). Checking the workflows themselves, instead of keeping a

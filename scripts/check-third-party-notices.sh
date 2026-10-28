@@ -2,9 +2,9 @@
 # THIRD_PARTY_NOTICES.md against the repository: every license text it links is
 # in licenses/ and every file in licenses/ is linked from it, and the pinned
 # versions of what the downloads contain are the ones it names. So a bump of
-# Qt, the core, QHotkey, QWindowKit, Wintun, NSIS or an Android dependency that
-# leaves the notices behind fails here, rather than shipping notices for
-# something else.
+# Qt, the core, QHotkey, QWindowKit, Wintun, NSIS, Inter or an Android
+# dependency that leaves the notices behind fails here, rather than shipping
+# notices for something else.
 #
 # It checks names, not licenses: a bump still needs someone to read the new
 # version's license and update the entry and its text.
@@ -62,6 +62,10 @@ need "the Wintun version (.github/workflows/build.yml)" \
   "Wintun $(sed -nE 's/.*wintun-([0-9][0-9.]*[0-9])\.zip.*/\1/p' .github/workflows/build.yml | head -n 1)"
 need "the NSIS version (.github/workflows/build.yml)" \
   "NSIS $(sed -nE "s/.*nsis = '([^']+)'.*/\1/p" .github/workflows/build.yml | head -n 1)"
+need "the Inter version (assets/fonts/inter/SOURCE)" \
+  "Inter $(sed -nE 's/^version=([0-9.]+)$/\1/p' assets/fonts/inter/SOURCE)"
+need "the Inter release commit (assets/fonts/inter/SOURCE)" \
+  "$(sed -nE 's/^tag_commit=([0-9a-f]{40})$/\1/p' assets/fonts/inter/SOURCE)"
 
 # Android: every Maven coordinate the app's build implements, and the AAR.
 coordinates="$(sed -nE "s/^[[:space:]]*implementation[[:space:]]+'([^']+)'.*/\1/p" android/app/build.gradle)"

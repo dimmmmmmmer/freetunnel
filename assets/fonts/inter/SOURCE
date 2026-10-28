@@ -1,0 +1,50 @@
+# Where the Inter files in this directory come from. Read by
+# scripts/check-pinned-deps.sh and scripts/check-third-party-notices.sh, so keep
+# the keys as they are: one key=value per line.
+#
+# Inter is the typeface of FreeTunnel's desktop and Android apps (SIL Open Font
+# License 1.1, the text is licenses/common/Inter-OFL-1.1.txt). Both apps use
+# exactly these two files: Regular (400) for all text and Medium (500) where the
+# interface sets font.weight: Font.Medium. No other weight, no italic.
+#
+# The files are the hinted static TrueType fonts from the release zip
+# (extras/ttf/, made with ttfautohint), byte for byte under their upstream
+# names, not the variable font: hinting is what keeps 11-15 px text crisp on
+# Windows, and one file per weight behaves the same in Qt's three font
+# databases and in Android's resources.
+#
+# To bump Inter: download the new release zip into an empty directory outside
+# the repository, check its size and SHA-256 as described below, extract only
+# the three members named here, never run anything from it, update this file,
+# SHA256SUMS, licenses/common/Inter-OFL-1.1.txt and THIRD_PARTY_NOTICES.md.
+
+name=Inter
+version=4.1
+license=OFL-1.1
+
+# The release: github.com/rsms/inter, tag v4.1, published 2024-11-16 by rsms.
+tag=v4.1
+tag_commit=e3a3d4c57d5ecc01453a575621882a384c1995a3
+zip_url=https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+zip_size=33707794
+
+# GitHub publishes no digest for this asset (the API says "digest": null: it was
+# uploaded before GitHub computed them), and upstream publishes no checksum file.
+# This hash is the one two independent packagers record for that exact URL, and
+# it is what the download matched on 2026-10-28:
+#   Homebrew/homebrew-cask, commit 5974020a34148a304cfc72f5ba1a4b2a77a21c03
+#     (Casks/font/font-i/font-inter.rb, "font-inter 4.1", 2024-11-16);
+#   Arch Linux, package inter-font 4.1-1 (PKGBUILD, sha256sums).
+zip_sha256=9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e
+
+# The three members taken from the zip. SHA256SUMS holds the two fonts'
+# SHA-256; the license is checked below.
+member_regular=extras/ttf/Inter-Regular.ttf
+member_medium=extras/ttf/Inter-Medium.ttf
+member_license=LICENSE.txt
+
+# LICENSE.txt in the zip is the file of the same name at tag v4.1 (git blob
+# 9b2ca37b3ffc77391d8b2ebef4a974ef32bf46ea, 4380 bytes), and
+# licenses/common/Inter-OFL-1.1.txt is that file unchanged. It names no Reserved
+# Font Name.
+license_sha256=262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a
