@@ -1063,7 +1063,7 @@
     </message>
     <message>
         <source>Kill switch</source>
-        <translation>Аварийное отключение</translation>
+        <translation>Kill switch</translation>
     </message>
     <message>
         <source>Replace the excluded routes with the defaults?</source>
@@ -1083,7 +1083,7 @@
     </message>
     <message>
         <source>the config decides which ports bypass the kill switch</source>
-        <translation>какие порты идут в обход аварийного отключения, решает конфиг</translation>
+        <translation>какие порты идут в обход kill switch, решает конфиг</translation>
     </message>
 </context>
 <context>
