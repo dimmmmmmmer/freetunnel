@@ -232,6 +232,9 @@ private slots:
     void anUpdateHeldForAConnectThatEndsBeforeTheHelperIsApplied();
     void aConfigUnlinkedWhileItsPasswordIsReadIsNotWritten();
     void aMissingAddressIsTriedAgainSoon();
+    void anAddressTheStoreCannotReadIsTriedAgainSoon();
+    void anUpdateIsNotAppliedWhenASecretCannotBeRead();
+    void anAddressThatCannotBeReadBackIsNotKept();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser_data();
     void aServerThatOffersNoUpdatesIsAskedOnlyByTheUser();
     void failuresThatMayPassBackOffThenWaitTheInterval();
@@ -823,7 +826,7 @@ void TestBackendSubscription::anotherSubscriptionsServerOfTheSameNameSaysWhatItR
     QVERIFY(rig.backend->confirmDeepLinkImport(asked.last().at(1).toString(), true));
     QCOMPARE(rig.backend->configs().size(), 1);
     QVERIFY(rig.record(path) && rig.record(path)->sourceId != source);
-    QCOMPARE(rig.subs()->address(path), otherUrl);
+    QCOMPARE(rig.subs()->address(path).value, otherUrl);
     QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForSubscription(source)), QString());
 }
 
@@ -846,7 +849,7 @@ void TestBackendSubscription::aRenameKeepsTheLink()
     QVERIFY(!rig.subs()->isLinked(path));
     QVERIFY(rig.subs()->isLinked(renamed));
     QCOMPARE(rig.record(renamed)->sourceId, source);
-    QCOMPARE(rig.subs()->address(renamed), v2::kSubscription);
+    QCOMPARE(rig.subs()->address(renamed).value, v2::kSubscription);
     QVERIFY(freetunnel::loadSubscriptions().contains(renamed));
     QVERIFY(rig.backend->refreshSubscription(renamed));
     QCOMPARE(rig.network.requests().last().url, v2::kSubscription);
@@ -879,7 +882,7 @@ void TestBackendSubscription::aRenameTheListCannotRecordKeepsTheLinkWhereTheList
     }
     Rig rig;
     QVERIFY(rig.subs()->isLinked(path));
-    QCOMPARE(rig.subs()->address(path), v2::kSubscription);
+    QCOMPARE(rig.subs()->address(path).value, v2::kSubscription);
     QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForSubscription(source)), v2::kSubscription);
 }
 
@@ -1470,6 +1473,95 @@ void TestBackendSubscription::aMissingAddressIsTriedAgainSoon()
     QCOMPARE(rig.record(path)->failures, 1);
     QCOMPARE(rig.record(path)->nextAttemptAt, rig.clock + 10 * 60);
     QVERIFY(rig.record(path)->autoRefresh);
+}
+
+// A keyring that cannot be asked for the address is not one that lost it: the
+// refresh is noted as "keyring" and tried again soon, as a missing one is, and the
+// link and its address are left where they are.
+void TestBackendSubscription::anAddressTheStoreCannotReadIsTriedAgainSoon()
+{
+    Rig rig;
+    const QString path =
+            linkThroughImport(rig, v2::kSubscriptionOnly, subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    const QString addressEntry = CredentialStore::keyForSubscription(rig.record(path)->sourceId);
+    const int fetches = rig.network.fetches();
+    CredentialStore::setReadFailureForTest([addressEntry](const QString &k) { return k == addressEntry; });
+    const auto unhook = qScopeGuard([]() { CredentialStore::setReadFailureForTest({}); });
+
+    QVERIFY(!rig.backend->refreshSubscription(path));
+    QCOMPARE(rig.network.fetches(), fetches);
+    QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("keyring"));
+    QCOMPARE(rig.record(path)->failures, 1);
+    QCOMPARE(rig.record(path)->nextAttemptAt, rig.clock + 10 * 60);
+    QVERIFY(rig.record(path)->autoRefresh);
+    QVERIFY(rig.subs()->isLinked(path));
+
+    // And once it can be asked, the address is where it was.
+    CredentialStore::setReadFailureForTest({});
+    QCOMPARE(rig.subs()->address(path).value, v2::kSubscription);
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QCOMPARE(rig.network.fetches(), fetches + 1);
+}
+
+// The password or the key it would keep or put back cannot be read: nothing is
+// written, and the stored ones are not touched. An empty one in its place would
+// let a save's restore delete them, or a save without them drop the key.
+void TestBackendSubscription::anUpdateIsNotAppliedWhenASecretCannotBeRead()
+{
+    Rig rig;
+    const QString path = linkThroughImport(rig, keyedSubscriptionLink(QStringLiteral("aabbccdd")),
+                                           subscriptionDocument("vpn.example.com", "203.0.113.7:443"));
+    QVERIFY(!path.isEmpty());
+    const QString toml = readText(path);
+    const QString passwordEntry = CredentialStore::keyForConfigPath(path);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    const auto unhook = qScopeGuard([]() { CredentialStore::setReadFailureForTest({}); });
+
+    for (const QString &unreadable : {keyEntry, passwordEntry}) {
+        rig.clock += 3600;
+        CredentialStore::setReadFailureForTest([unreadable](const QString &k) { return k == unreadable; });
+        const int failures = rig.record(path)->failures;
+        QVERIFY(rig.backend->refreshSubscription(path));
+        QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
+                subscriptionDocument("vpn.example.com", "203.0.113.9:443", QStringLiteral("n3w")))));
+        CredentialStore::setReadFailureForTest({});
+
+        QCOMPARE(readText(path), toml);
+        QCOMPARE(passwordOf(path), QStringLiteral("s3cret"));
+        QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+        QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("keyring"));
+        QCOMPARE(rig.record(path)->failures, failures + 1);
+        QCOMPARE(rig.record(path)->nextAttemptAt, rig.clock + (failures == 0 ? 10 * 60 : 30 * 60));
+    }
+
+    // Readable again, the same update goes through, keeping the key.
+    rig.clock += 3 * 3600;
+    QVERIFY(rig.backend->refreshSubscription(path));
+    QVERIFY(rig.network.answer(FakeSubscriptionNetwork::document(
+            subscriptionDocument("vpn.example.com", "203.0.113.9:443", QStringLiteral("n3w")))));
+    QVERIFY(readText(path).contains(QStringLiteral("203.0.113.9:443")));
+    QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
+    QCOMPARE(rig.record(path)->lastStatus, QStringLiteral("ok"));
+}
+
+// A subscription's address that the store took and cannot read back is not stored:
+// the entry made for it is taken out again, and nothing is linked.
+void TestBackendSubscription::anAddressThatCannotBeReadBackIsNotKept()
+{
+    Rig rig;
+    CredentialStore::setReadFailureForTest([](const QString &k) { return k.startsWith(QLatin1String("subscription/")); });
+    const auto unhook = qScopeGuard([]() { CredentialStore::setReadFailureForTest({}); });
+    QVERIFY(rig.subs()->storeAddress(v2::kSubscription).isEmpty());
+    CredentialStore::setReadFailureForTest({});
+    QCOMPARE(rig.subs()->storedAddressesForTest().size(), 1);
+    QVERIFY2(CredentialStore::lookup(CredentialStore::keyForSubscription(rig.subs()->storedAddressesForTest().constFirst()))
+                     .notFound(),
+             "an address nobody was told of was left in the store");
+    // And with the store answering, it is stored.
+    const QString source = rig.subs()->storeAddress(v2::kSubscription);
+    QVERIFY(!source.isEmpty());
+    rig.subs()->deleteAddress(source);
 }
 
 // 403, 404, 405 and 407 are a server offering no updates, 401 credentials it

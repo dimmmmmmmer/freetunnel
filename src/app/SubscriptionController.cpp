@@ -11,6 +11,7 @@
 #include "core/CredentialStore.h"
 
 using freetunnel::CredentialStore;
+using freetunnel::StoredSecret;
 using freetunnel::SubscriptionRecord;
 using freetunnel::SubscriptionRefreshPolicy;
 
@@ -89,8 +90,12 @@ QString SubscriptionController::storeAddress(const QString &url)
 #ifdef FT_ENABLE_TEST_HOOKS
     m_storedForTest.append(sourceId);
 #endif
-    if (CredentialStore::storePassword(key, url) && CredentialStore::loadPassword(key) == url)
-        return sourceId;
+    if (CredentialStore::storePassword(key, url)) {
+        // The value read back, not just something there, and not a read that failed.
+        const StoredSecret stored = CredentialStore::lookup(key);
+        if (stored.found() && stored.value == url)
+            return sourceId;
+    }
     CredentialStore::deletePassword(key);
     return QString();
 }
@@ -111,12 +116,12 @@ void SubscriptionController::dropAddressUnlessShared(const QString &sourceId)
         deleteAddress(sourceId);
 }
 
-QString SubscriptionController::address(const QString &path) const
+StoredSecret SubscriptionController::address(const QString &path) const
 {
     const auto it = m_records.constFind(path);
     if (it == m_records.constEnd())
-        return QString();
-    return CredentialStore::loadPassword(CredentialStore::keyForSubscription(it->sourceId));
+        return StoredSecret();
+    return CredentialStore::lookup(CredentialStore::keyForSubscription(it->sourceId));
 }
 
 bool SubscriptionController::link(const QString &path, const QString &sourceId, const SubscriptionImport &import,
