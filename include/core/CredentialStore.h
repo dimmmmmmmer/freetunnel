@@ -61,6 +61,18 @@ struct LinuxLookupSources {
     // this build, secret-tool is not installed).
     std::optional<StoredSecret> libsecret;
     std::optional<StoredSecret> secretTool;
+    // Whether an item that secret-tool stored for the entry (attributes service and
+    // account, which libsecret's own schema does not match: how every password of
+    // 1.0.0 was kept, and every one of a build with no libsecret) is there though
+    // neither lookup returned it. Asked only when neither held the entry, by a
+    // search that cannot prompt, so a locked item is seen. A locked item whose
+    // unlock prompt was dismissed is not returned by libsecret, and secret-tool
+    // exits 1 without a word for it, which reads the same as an item that is not
+    // there; and a secret-tool killed while the prompt is still up says nothing.
+    // NotFound: none is there. Error: one is, or the question could not be put
+    // (never Found). Empty: nothing could be asked, because libsecret here cannot
+    // search (before 0.19) and there is no secret-tool to do it.
+    std::optional<StoredSecret> secretToolItems;
     // The file older builds kept passwords in. Read rather than asked, so it only
     // ever answers Found or NotFound.
     StoredSecret legacyFile;
@@ -71,6 +83,9 @@ struct LinuxLookupSources {
 // How the Linux sources add up to one answer. Pure, so that every platform tests
 // it:
 //  - A source that holds the entry wins; the OS ones before the file.
+//  - An item that secret-tool stored and nothing returned (secretToolItems is an
+//    Error) is an error, whatever the sources that looked for it said: it is
+//    there, and was not read.
 //  - Otherwise libsecret decides when it is linked, and secret-tool when it is
 //    not, so a failing secret-tool never turns a clean libsecret "not found" into
 //    an error, and a failing libsecret is an error whatever secret-tool says

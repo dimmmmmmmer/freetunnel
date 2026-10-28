@@ -118,7 +118,14 @@ Asking the store for an entry has three answers: it is there, it is not, and the
 store could not be asked (a locked keyring, a Keychain prompt that was denied or
 closed, Credential Manager failing, no Secret Service running). The third is
 never read as the second, because a config would then go on without a secret it
-has:
+has. On Linux that takes a search that cannot prompt: a Secret Service answers a
+dismissed unlock prompt the same way as an entry that is not there, so a locked
+item is looked for, by libsecret and by `secret-tool`, before "not there" is
+believed. Two cases it cannot tell apart: a libsecret older than 0.19, which
+cannot search (only what `secret-tool` stored is looked for, and only if
+`secret-tool` is installed), and a Secret Service that leaves locked items out of
+a search. There a locked keyring whose prompt was dismissed still reads as an
+entry that is not there.
 
 - A **connect** stops and says which secret could not be read. The helper is
   never given a config without the password or auth key the config has.
