@@ -218,6 +218,8 @@ public:
     int createConfigCalls = 0;
     QVariantMap lastCreateConfig;
     Q_INVOKABLE QVariantMap configFields(int index) const;
+    // Set, the editor is told the config's secret could not be read (see Backend::configFields).
+    QString configSecretError;
     Q_INVOKABLE QString configDeepLink(int index) const
     {
         lastDeepLinkRow = index;

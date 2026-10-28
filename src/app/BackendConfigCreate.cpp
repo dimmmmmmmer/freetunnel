@@ -27,6 +27,10 @@ struct EditSnapshot {
     QString authKey; // the config's client random auth key, as the store holds it
     QString profile;
     bool active = false;
+    // The store could not be asked for one of the two. They are what a failed save
+    // puts back and a rename moves, so an edit made without knowing them could
+    // delete a secret it never read (the key behind the old name, or over it).
+    freetunnel::SecretUnreadable unreadable = freetunnel::SecretUnreadable::None;
 };
 
 EditSnapshot snapshotForEdit(int editIndex, const QStringList &paths, const AppSettings &settings)
@@ -39,10 +43,22 @@ EditSnapshot snapshotForEdit(int editIndex, const QStringList &paths, const AppS
     QFile of(snap.oldPath);
     if (of.open(QIODevice::ReadOnly | QIODevice::Text))
         snap.content = QString::fromUtf8(of.readAll());
-    snap.password = freetunnel::CredentialStore::loadPassword(
+    // The store's copies only, not readConfigSecrets()'s: these are the values a
+    // save puts back and a rename moves, and they are what the store holds.
+    const freetunnel::StoredSecret password = freetunnel::CredentialStore::lookup(
             freetunnel::CredentialStore::keyForConfigPath(snap.oldPath));
-    snap.authKey = freetunnel::CredentialStore::loadPassword(
+    if (password.failed()) {
+        snap.unreadable = freetunnel::SecretUnreadable::Password;
+        return snap;
+    }
+    const freetunnel::StoredSecret authKey = freetunnel::CredentialStore::lookup(
             freetunnel::CredentialStore::keyForConfigAuthKey(snap.oldPath));
+    if (authKey.failed()) {
+        snap.unreadable = freetunnel::SecretUnreadable::AuthKey;
+        return snap;
+    }
+    snap.password = password.value;
+    snap.authKey = authKey.value;
     snap.profile = settings.config_profiles.value(snap.oldPath);
     if (snap.profile.isEmpty() || !settings.profiles.contains(snap.profile))
         snap.profile = QStringLiteral("Default");
@@ -326,6 +342,12 @@ bool Backend::createConfig(const QVariantMap &f)
         return false;
     const int editIndex = *resolvedIndex;
     const EditSnapshot edit = snapshotForEdit(editIndex, m_paths, m_settings);
+    if (edit.unreadable != freetunnel::SecretUnreadable::None) {
+        // Before anything is written, deleted or moved: with the old secrets unknown
+        // a failed save could not put them back, and a rename would drop them.
+        reportSecretNotRead(edit.unreadable);
+        return false;
+    }
     const QString &oldPath = edit.oldPath;
     if (nameTooLongForANewFile(parsed.safeName, oldPath)) {
         emitCreateConfigError(QStringLiteral("name_too_long"));

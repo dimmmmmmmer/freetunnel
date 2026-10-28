@@ -155,6 +155,7 @@ private slots:
     void theHotkeyFieldFillStaysOpaque();
     void footerLinksUnderlineLikeTheOthers();
     void theEditorsBackArrowTakesANearMiss();
+    void theEditorClosesWithOneToastWhenASecretCannotBeRead();
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
@@ -3750,6 +3751,31 @@ void TestQmlUi::theEditorsBackArrowTakesANearMiss()
     QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
                       glyph->mapToScene(QPointF(-4, glyph->height() / 2)).toPoint());
     QCOMPARE(m_shell.overlay(), QString());
+    delete root;
+}
+
+// The editor of a config whose password or auth key the credential store could not
+// be asked for is not shown: a form made without the secret looks complete, and
+// saving it writes the config over without it. The window says why, once, and goes
+// back to the list. (The toast is the editor's alone: Backend::configFields() does
+// not also report it, which test_backend_config checks.)
+void TestQmlUi::theEditorClosesWithOneToastWhenASecretCannotBeRead()
+{
+    const auto restore = qScopeGuard([this] {
+        m_backend.configSecretError.clear();
+        m_shell.setEditIndex(-1);
+        m_shell.setOverlay(QString());
+    });
+    const QString said = QStringLiteral("Could not read the auth key from the system's credential store.");
+    m_backend.configSecretError = said;
+    m_shell.toasts.clear();
+    m_shell.setEditIndex(0);
+    m_shell.setOverlay(QStringLiteral("create"));
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QTRY_COMPARE(m_shell.overlay(), QString());
+    QCOMPARE(m_shell.editIndex(), -1);
+    QCOMPARE(m_shell.toasts, QStringList{said});
     delete root;
 }
 

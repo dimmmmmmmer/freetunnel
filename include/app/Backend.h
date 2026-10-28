@@ -167,7 +167,10 @@ public:
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
-    Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
+    // Parse a config for editing. With a secret the credential store could not be
+    // asked for, only {path, secretError: the message}: the editor shows it and
+    // closes, as a form made without the secret would save over the config.
+    Q_INVOKABLE QVariantMap configFields(int index);
     // Export: a shareable tt:// deep link, or a full .toml written to disk
     // (both carry the password — pulled from the OS keychain).
     Q_INVOKABLE QString configDeepLink(int index) const;
