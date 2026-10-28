@@ -108,8 +108,6 @@ public:
     // store could not be asked; see SecretStatus. Every Error is logged
     // (freetunnel.credentialstore), without a value.
     static StoredSecret lookup(const QString &key);
-    // TRANSITIONAL: what lookup() says with the difference thrown away.
-    static QString loadPassword(const QString &key) { return lookup(key).value; }
     static bool deletePassword(const QString &key);
 
 #if defined(FT_ENABLE_TEST_HOOKS)
@@ -133,6 +131,11 @@ public:
     // file (StoredSecret::fromLegacyFile) on a build that has the insecure fallback.
     using LookupOverrideForTest = std::function<std::optional<StoredSecret>(const QString &key)>;
     static void setLookupOverrideForTest(LookupOverrideForTest hook);
+    // Tests only: what an entry holds, for the tests that read one back and do not
+    // care whether it was not there or could not be asked: empty for both. Absent
+    // from a release build on purpose, so that no caller of the app can go on
+    // treating the two alike; they use lookup().
+    static QString loadPassword(const QString &key) { return lookup(key).value; }
 #endif
 };
 
