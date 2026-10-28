@@ -83,6 +83,7 @@ private slots:
     // A secret the credential store could not be asked for.
     void aKeyTheStoreCannotReadStopsTheConnect();
     void aPasswordTheStoreCannotReadStopsTheConnect();
+    void aConfigWithNoPasswordSaysSoAndNotThatItCouldNotBeRead();
     void aConfigKeptOutsideTheStoreConnectsWhateverTheStoreSays();
     void anUpdateHeldForAConnectThatCouldNotReadItsKeyIsApplied();
     void exportRoundTrips();
@@ -2071,6 +2072,33 @@ void TestIntegrationBackendVpn::aPasswordTheStoreCannotReadStopsTheConnect()
     QTest::qWait(300);
     QCOMPARE(env.server.connectCount(), 0);
     QVERIFY(backend.logText().contains(said));
+    backend.prepareQuit();
+}
+
+// A password that is not there is not one that could not be read, and says so in
+// its own words: the fix is to edit the config, not to unlock anything.
+void TestIntegrationBackendVpn::aConfigWithNoPasswordSaysSoAndNotThatItCouldNotBeRead()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("nopassword")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    QVERIFY(freetunnel::CredentialStore::deletePassword(path)); // the helper function stored one
+    QVERIFY(freetunnel::CredentialStore::lookup(path).notFound());
+    MockHelperEnv env(QStringLiteral("backend-nopassword-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("Config has no password — edit it and try again"));
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.connected());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QCOMPARE(errors.count(), 1);
     backend.prepareQuit();
 }
 
