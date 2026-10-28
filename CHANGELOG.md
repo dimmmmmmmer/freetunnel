@@ -89,6 +89,8 @@ compare link at the bottom of its release notes.
   A desktop that logs out by asking every window to close is refused like
   Alt+F4 is, and has to end FreeTunnel itself.
   Force-killing it (forcekillactive, xkill) still ends FreeTunnel and the VPN.
+- **Linux: Show FreeTunnel in the tray now brings an open window forward on
+  Hyprland and sway.** Before, it did nothing if the window was out of focus.
 
 ## 1.2.3
 

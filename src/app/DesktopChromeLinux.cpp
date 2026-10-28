@@ -402,6 +402,22 @@ std::optional<bool> windowIconified(xcb_connection_t *c, std::uint32_t window)
             && std::find(ewmh->begin(), ewmh->end(), hidden) != ewmh->end();
 }
 
+std::optional<bool> windowWithdrawn(xcb_connection_t *c, std::uint32_t window)
+{
+    if (!c || xcb_connection_has_error(c) != 0)
+        return std::nullopt;
+    // ICCCM 4.1.3.1: WM_STATE is { state, icon window }, and WithdrawnState is 0. A
+    // window manager sets it to NormalState or IconicState when it manages the
+    // window, and to WithdrawnState (or removes it, as Hyprland does) when the window
+    // is unmapped, which ICCCM 4.1.4 has it do before the window is mapped again.
+    const xcb_atom_t wmState = internAtom(c, "WM_STATE");
+    const auto state = propertyValues<uint32_t>(c, window, wmState, wmState, 2);
+    if (!state)
+        return std::nullopt;
+    constexpr uint32_t kWithdrawnState = 0;
+    return state->empty() || state->front() == kWithdrawnState;
+}
+
 bool runsOnX11()
 {
     // By the platform's name, not by whether it offers an X connection: Qt's
@@ -418,6 +434,16 @@ std::optional<bool> x11WindowIconified(QWindow *window)
     if (!x11)
         return std::nullopt;
     return windowIconified(x11->connection(), static_cast<std::uint32_t>(window->winId()));
+}
+
+std::optional<bool> x11WindowWithdrawn(QWindow *window)
+{
+    if (!runsOnX11() || !window)
+        return std::nullopt; // native Wayland, offscreen, or not a GUI application
+    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+    if (!x11)
+        return std::nullopt;
+    return windowWithdrawn(x11->connection(), static_cast<std::uint32_t>(window->winId()));
 }
 
 } // namespace freetunnel

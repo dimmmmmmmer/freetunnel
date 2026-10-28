@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "app/DesktopChrome.h"
 
+#include <QDeadlineTimer>
 #include <QGuiApplication>
 #include <QPointer>
 #include <QTimer>
@@ -149,10 +150,26 @@ void DesktopChrome::applySetting(const QString &ns, const QString &key, const QV
         emit changed();
 }
 
-void bringWindowForward(QWindow *window)
+namespace {
+
+// The bring-forward a window is on, counted per window: a request that finds a
+// newer one on the window has been overtaken, and its check or its wait ends.
+constexpr const char *kBringGeneration = "freetunnelBringGeneration";
+
+quint64 bringGenerationOf(const QWindow *window)
 {
-    if (!window)
-        return;
+    return window->property(kBringGeneration).toULongLong();
+}
+
+void settled(const std::function<void(bool)> &done, bool remapped)
+{
+    if (done)
+        done(remapped);
+}
+
+// What bringWindowForward() has always done, once.
+void bringWindowForwardOnce(QWindow *window)
+{
 #ifdef Q_OS_MACOS
     unhideMacApplication();
 #endif
@@ -167,6 +184,94 @@ void bringWindowForward(QWindow *window)
         return;
 #endif
     window->requestActivate();
+}
+
+// Wait for the window manager to have withdrawn the window (asked now, and then
+// every pollMs until the deadline), and then map it again. A window manager that
+// cannot be asked is not waited for. Ends without a word when the window is gone,
+// and with done(false) when a newer request has taken the window over.
+void remapWhenWithdrawn(const QPointer<QWindow> &window, quint64 request,
+                        const WithdrawnProbe &withdrawn, int pollMs, QDeadlineTimer deadline,
+                        const std::function<void(bool)> &done)
+{
+    if (!window)
+        return;
+    if (bringGenerationOf(window) != request) {
+        settled(done, false);
+        return;
+    }
+    const std::optional<bool> gone = withdrawn ? withdrawn(window) : std::nullopt;
+    if (gone.has_value() && !*gone && !deadline.hasExpired()) {
+        QTimer::singleShot(pollMs, window.data(), [window, request, withdrawn, pollMs, deadline, done]() {
+            remapWhenWithdrawn(window, request, withdrawn, pollMs, deadline, done);
+        });
+        return;
+    }
+    bringWindowForwardOnce(window);
+    settled(done, true);
+}
+
+} // namespace
+
+void bringWindowForward(QWindow *window)
+{
+    if (!window)
+        return;
+#ifdef Q_OS_LINUX
+    // On an X server, XWayland included, the window manager may take the request
+    // and do nothing with it; see bringWindowForwardChecked(). Native Wayland and
+    // everywhere else, the request is all there is.
+    if (runsOnX11()) {
+        bringWindowForwardChecked(window, {}, x11WindowWithdrawn, kActivateCheckMs);
+        return;
+    }
+#endif
+    bringWindowForwardOnce(window);
+}
+
+void bringWindowForwardChecked(QWindow *window, const ActiveProbe &active,
+                               const WithdrawnProbe &withdrawn, int checkMs,
+                               std::function<void(bool remapped)> done, int pollMs, int waitMs)
+{
+    if (!window)
+        return;
+    const quint64 request = bringGenerationOf(window) + 1;
+    window->setProperty(kBringGeneration, request);
+    if (!window->isVisible()) {
+        bringWindowForwardOnce(window); // mapped, and a new map is what gets the focus
+        settled(done, false);
+        return;
+    }
+    // Whether the window was active at any moment from now on: the focus may come
+    // and go again before the look, and a window the user has since moved on from is
+    // not one the request failed for. Watched from before the request is made.
+    auto wasActive = std::make_shared<bool>(false);
+    const QMetaObject::Connection watch =
+            QObject::connect(window, &QWindow::activeChanged, window, [wasActive, window]() {
+                if (window->isActive())
+                    *wasActive = true;
+            });
+    bringWindowForwardOnce(window);
+    // The window is the timer's context, so a window destroyed in the meantime takes
+    // the check with it; the guard is for one that is only hidden or deleted later.
+    QPointer<QWindow> guard(window);
+    QTimer::singleShot(checkMs, window,
+                       [guard, request, watch, wasActive, active, withdrawn, pollMs, waitMs,
+                        done = std::move(done)]() {
+        QObject::disconnect(watch);
+        if (!guard)
+            return;
+        // In the order of what each costs; the probe, which may ask the server, last.
+        const bool overtaken = bringGenerationOf(guard) != request;
+        const bool away = !guard->isVisible(); // hidden since, by the X: leave it
+        if (overtaken || away || *wasActive || (active ? active(guard) : guard->isActive())) {
+            settled(done, false);
+            return;
+        }
+        // hide() sends the window manager an UnmapNotify, and it withdraws the window.
+        guard->hide();
+        remapWhenWithdrawn(guard, request, withdrawn, pollMs, QDeadlineTimer(waitMs), done);
+    });
 }
 
 void minimizeWindow(QWindow *window)

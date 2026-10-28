@@ -59,6 +59,7 @@ private slots:
     void theTrayHostIsAskedNotAssumed();
     void aBarThatLeftTheBusIsNoPlaceToHideTheWindow();
     void aWindowIsIconifiedWhenItsWindowManagerSaysSo();
+    void aWindowIsWithdrawnWhenItsWindowManagerSaysSoOrHasNeverSeenIt();
     // Last: it is the one test that points this process's session bus somewhere.
     void followingTheDesktopReadsTheSessionBus();
 #endif
@@ -802,6 +803,50 @@ void TestDesktopChrome::aWindowIsIconifiedWhenItsWindowManagerSaysSo()
     // Nothing to ask about is not an answer of "no".
     QCOMPARE(saying(freetunnel::windowIconified(c, xcb_generate_id(c))), QStringLiteral("cannot tell"));
     QCOMPARE(saying(freetunnel::windowIconified(nullptr, window)), QStringLiteral("cannot tell"));
+}
+
+// A window that has been unmapped is withdrawn by its window manager before it is
+// mapped again (ICCCM 4.1.4): WM_STATE goes to WithdrawnState, or the property is
+// removed, which is what Hyprland does. One it still manages says Normal or
+// Iconic. Set by hand on a private X server, as above.
+void TestDesktopChrome::aWindowIsWithdrawnWhenItsWindowManagerSaysSoOrHasNeverSeenIt()
+{
+    PrivateXServer server;
+    if (!server.start())
+        QSKIP("no Xvfb to run a private X server on");
+    xcb_connection_t *c = xcb_connect(server.display.toUtf8().constData(), nullptr);
+    const auto disconnect = qScopeGuard([c] { xcb_disconnect(c); });
+    QVERIFY2(xcb_connection_has_error(c) == 0, "could not connect to the private X server");
+    const xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+    const xcb_window_t window = xcb_generate_id(c);
+    xcb_create_window(c, XCB_COPY_FROM_PARENT, window, screen->root, 0, 0, 10, 10, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, 0, nullptr);
+    const xcb_atom_t wmState = atomOf(c, "WM_STATE");
+    QVERIFY(wmState != XCB_ATOM_NONE);
+
+    const auto setWmState = [&](uint32_t state) {
+        const uint32_t value[2] = {state, XCB_WINDOW_NONE};
+        xcb_change_property(c, XCB_PROP_MODE_REPLACE, window, wmState, wmState, 32, 2, value);
+    };
+    const auto words = [](const std::optional<bool> &withdrawn) {
+        return !withdrawn ? QStringLiteral("cannot tell")
+                          : (*withdrawn ? QStringLiteral("withdrawn") : QStringLiteral("not withdrawn"));
+    };
+    const auto now = [&] { return words(freetunnel::windowWithdrawn(c, window)); };
+
+    QCOMPARE(now(), QStringLiteral("withdrawn")); // no window manager has seen it
+    setWmState(1);                                // NormalState
+    QCOMPARE(now(), QStringLiteral("not withdrawn"));
+    setWmState(0);                                // WithdrawnState
+    QCOMPARE(now(), QStringLiteral("withdrawn"));
+    setWmState(3);                                // IconicState: still managed, and on the screen as an icon
+    QCOMPARE(now(), QStringLiteral("not withdrawn"));
+    xcb_delete_property(c, window, wmState);      // what Hyprland does when the window is unmapped
+    QCOMPARE(now(), QStringLiteral("withdrawn"));
+
+    // Nothing to ask about is not an answer of "gone".
+    QCOMPARE(words(freetunnel::windowWithdrawn(c, xcb_generate_id(c))), QStringLiteral("cannot tell"));
+    QCOMPARE(words(freetunnel::windowWithdrawn(nullptr, window)), QStringLiteral("cannot tell"));
 }
 
 // What the app itself calls: followDesktop(), on the session bus.

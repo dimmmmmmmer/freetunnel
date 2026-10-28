@@ -128,6 +128,12 @@ first if a logout waits on it. And it applies on X11 and XWayland, which is what
 the AppImage and the `.deb` run on; a build run natively on Wayland still quits
 on it.
 
+On Hyprland and sway, **Show FreeTunnel** (and the tray icon) brings a window that
+is open but not in focus to the workspace you are on, and the window may blink once
+as it does. To switch to the window's workspace instead, turn on Hyprland's
+`misc:focus_on_activate`, or its `focus_on_activate` window rule for FreeTunnel
+alone.
+
 Force-killing the window, with Hyprland's `forcekillactive` or `killwindow`,
 `hyprctl kill` or `xkill`, ends FreeTunnel, and the VPN with it. No program can
 catch that.
