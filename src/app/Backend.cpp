@@ -377,7 +377,7 @@ void Backend::reloadConfigs() {
     emit configsChanged();
 }
 
-// toggle / shouldSkipConnectAttempt / logConnectAttempt / failConnectNoPassword /
+// toggle / shouldSkipConnectAttempt / logConnectAttempt / failConnectWithoutSecrets /
 // connectVpn / startConnectAttempt / buildConnectTomlAsync / onConnectTomlReady /
 // disconnectVpn live in BackendConnect.cpp.
 

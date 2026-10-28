@@ -61,8 +61,13 @@ QString describeGError(GError *error)
     return text;
 }
 
-// secret_password_search_sync() with SECRET_SEARCH_ALL needs libsecret 0.19.
-#if defined(SECRET_CHECK_VERSION)
+// secret_password_search_sync() with SECRET_SEARCH_ALL needs libsecret 0.19: the
+// header's SECRET_CHECK_VERSION says so, and so does the build's own check of the
+// version pkg-config found (FT_LIBSECRET_HAS_SEARCH, cmake/FreetunnelDeps.cmake),
+// for a header that does not pull the macro in.
+#if defined(FT_LIBSECRET_HAS_SEARCH)
+#define FT_LIBSECRET_CAN_SEARCH 1
+#elif defined(SECRET_CHECK_VERSION)
 #if SECRET_CHECK_VERSION(0, 19, 0)
 #define FT_LIBSECRET_CAN_SEARCH 1
 #endif
