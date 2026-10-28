@@ -88,6 +88,7 @@ private slots:
     void aReadBackThatCannotBeAnsweredIsNotAConfirmation();
     void aShareLinkIsNotMadeWhenASecretCannotBeRead();
     void aShareLinkOfAConfigWithNoKeyIsStillVersion1();
+    void aShareLinkOrExportOfAPasswordInTheFileStillNeedsItsStoredKey();
     void anExportIsNotWrittenWhenASecretCannotBeRead();
     void aFailedLinkOrExportSaysSoItself();
 
@@ -2018,8 +2019,33 @@ void TestBackendConfig::aShareLinkIsNotMadeWhenASecretCannotBeRead()
     QCOMPARE(errors.count(), 0);
 }
 
+namespace {
+
+// FT_TEST_KEYRING for the length of a case, and as it was after.
+class KeyringEnv {
+public:
+    KeyringEnv() : m_wasSet(qEnvironmentVariableIsSet("FT_TEST_KEYRING")), m_before(qgetenv("FT_TEST_KEYRING")) {}
+    ~KeyringEnv()
+    {
+        if (m_wasSet)
+            qputenv("FT_TEST_KEYRING", m_before);
+        else
+            qunsetenv("FT_TEST_KEYRING");
+    }
+    KeyringEnv(const KeyringEnv &) = delete;
+    KeyringEnv &operator=(const KeyringEnv &) = delete;
+    static void set(const char *what) { qputenv("FT_TEST_KEYRING", what); }
+
+private:
+    bool m_wasSet;
+    QByteArray m_before;
+};
+
+} // namespace
+
 // A config that never had a key is not held to account for the store's saying it
-// cannot be asked: one whose password is in its file keeps its secrets there.
+// cannot be asked: one whose password is in its file, on a machine with no store
+// to keep it in, keeps its secrets there.
 void TestBackendConfig::aShareLinkOfAConfigWithNoKeyIsStillVersion1()
 {
     using freetunnel::CredentialStore;
@@ -2038,6 +2064,8 @@ void TestBackendConfig::aShareLinkOfAConfigWithNoKeyIsStillVersion1()
 
     // The password in the file, as on a machine with no keyring: the store cannot
     // be asked for anything, and the link is made from the file.
+    const KeyringEnv keyring;
+    KeyringEnv::set("absent");
     CredentialStore::deletePassword(CredentialStore::keyForConfigPath(path));
     freetunnel::ConfigToml c = freetunnel::parseConfigToml(readAll(path));
     c.password = QStringLiteral("in-the-file");
@@ -2048,6 +2076,52 @@ void TestBackendConfig::aShareLinkOfAConfigWithNoKeyIsStillVersion1()
     QCOMPARE(dl->password, QStringLiteral("in-the-file"));
     QVERIFY(dl->clientRandomAuthKey.isEmpty());
     QCOMPARE(dl->version, freetunnel::kDeepLinkWriteVersion);
+    QCOMPARE(errors.count(), 0);
+}
+
+// The same config with a store that is there is not one without a key. A password
+// can come back into a config's file (added for another client that reads it) while
+// the key stays in the store, and a store that refuses to take the password out
+// again is also one that cannot be asked for the key: a link or an export without it
+// would be one that cannot connect.
+void TestBackendConfig::aShareLinkOrExportOfAPasswordInTheFileStillNeedsItsStoredKey()
+{
+    using freetunnel::CredentialStore;
+    const KeyringEnv keyring;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    freetunnel::ConfigToml c = freetunnel::parseConfigToml(readAll(path));
+    c.password = QStringLiteral("in-the-file");
+    QVERIFY(freetunnel::backend_config::writeConfigFile(path, freetunnel::buildConfigToml(c).toUtf8()));
+    QCOMPARE(CredentialStore::lookup(keyEntry).value, QStringLiteral("aabbccdd"));
+    const QString dest = QDir(m_home.path()).filePath(QStringLiteral("export-inline-password.toml"));
+    QFile::remove(dest);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    // A store that is there, refuses to take the password out of the file, and
+    // cannot be asked for the key.
+    KeyringEnv::set("locked");
+    CredentialStore::setReadFailureForTest([keyEntry](const QString &k) { return k == keyEntry; });
+    QVERIFY2(backend.configDeepLink(0).isEmpty(), "a link without the stored key was made");
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), freetunnel::backend_config::authKeyNotReadMessage());
+    QVERIFY2(!backend.exportConfigToml(0, dest), "a file without the stored key was written");
+    QVERIFY(!QFileInfo::exists(dest));
+    QCOMPARE(errors.count(), 1);
+    errors.clear();
+
+    // Readable again: both, the password from the file and the key from the store.
+    CredentialStore::setReadFailureForTest({});
+    QString err;
+    const auto dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->password, QStringLiteral("in-the-file"));
+    QCOMPARE(dl->clientRandomAuthKey, QStringLiteral("aabbccdd"));
     QCOMPARE(errors.count(), 0);
 }
 

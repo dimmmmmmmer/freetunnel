@@ -920,10 +920,19 @@ ConfigSecrets readConfigSecrets(const QString &configPath, const ConfigToml &c)
     // puts both or neither (migrateConfigPassword(), saveConfigWithPassword(), an
     // import that is refused when the migration is), and a legacy file still on disk
     // means no store write for the config ever succeeded, as storing deletes it.
-    // A config whose password is in its file, or was in the legacy file, never had
-    // a key stored, so one that cannot be read is one that is not there.
-    const bool storeIsHome = c.password.isEmpty() && !passwordFromLegacyFile;
-    if (storeIsHome) {
+    // A config whose password was in the legacy file never had a key stored, so one
+    // that cannot be read is one that is not there.
+    //
+    // A password in the config's own file is not the same. It is there because
+    // nothing could take it out (no store to take it), or because something put it
+    // back, such as a user adding `password =` to a config that another client reads
+    // while its key stays in the store, and the migration that would strip it again
+    // was refused by a store that is there. So it says the store has no key only
+    // where there is no store at all: a Linux machine with no Secret Service.
+    // Where there is one, a key it cannot read may be in it.
+    const bool keptOutsideTheStore = passwordFromLegacyFile
+            || (!c.password.isEmpty() && !CredentialStore::secureStorageAvailable());
+    if (!keptOutsideTheStore) {
         out.unreadable = SecretUnreadable::AuthKey;
         return out;
     }
