@@ -89,6 +89,8 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     main.cpp
     src/app/AppStartup.cpp
     src/app/AppGuiMain.cpp
+    src/app/AppFont.cpp
+    include/app/AppFont.h
     include/app/AppStartup.h
     src/app/PlatformAutoStart.cpp
     include/app/PlatformAutoStart.h
@@ -176,6 +178,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/vpn/vpn_helper_server.cpp
     include/vpn/vpn_helper_server.h
     assets/app.qrc
+    assets/fonts/fonts.qrc
     qml.qrc
     i18n/i18n.qrc
     ${APP_ICON_RC}

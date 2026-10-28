@@ -9,11 +9,14 @@
 #include <QDir>
 #include <QEvent>
 #include <QFileOpenEvent>
+#include <QFontInfo>
 #include <QGuiApplication>
 #include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QSettings>
 #include <QWindow>
 #include <QSignalSpy>
@@ -441,6 +444,25 @@ void TestAppStartup::sendInstanceMessage(const QString &socketName, const QByteA
     QVERIFY2(sendFromAnotherThread(socketName, {{0, msg}}), "the listener never took the message");
 }
 
+// The first Text under `item` that names no font family, depth first: one that does
+// (the caption icons, in the font they have) says nothing about the application's.
+// By the items' own children: the window's contents are items of the scene, which
+// findChildren() does not follow.
+// (Unused on macOS, where the wiring test skips before it gets there.)
+[[maybe_unused]] static QQuickItem *firstTextWithoutFamilyIn(QQuickItem *item)
+{
+    if (item->inherits("QQuickText")
+        && !(item->property("font").value<QFont>().resolveMask()
+                & (QFont::FamilyResolved | QFont::FamiliesResolved)))
+        return item;
+    const QList<QQuickItem *> children = item->childItems();
+    for (QQuickItem *child : children) {
+        if (QQuickItem *found = firstTextWithoutFamilyIn(child))
+            return found;
+    }
+    return nullptr;
+}
+
 // The entry point was the one file no test compiled, and both macOS defects found
 // in it were about what ran before what — a Dock handler registered at a moment
 // that looked early and was not, and window setup that needs a window to exist.
@@ -511,9 +533,10 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
             QStringLiteral("branding"),      QStringLiteral("forward-check"),
             QStringLiteral("instance-server"), QStringLiteral("url-filter"),
             QStringLiteral("backend"),       QStringLiteral("lifecycle"),
-            QStringLiteral("qml-loaded"),    QStringLiteral("language"),
-            QStringLiteral("mac-window"),    QStringLiteral("deferred-control"),
-            QStringLiteral("dock-reopen"),   QStringLiteral("instance-wired")};
+            QStringLiteral("font"),          QStringLiteral("qml-loaded"),
+            QStringLiteral("language"),      QStringLiteral("mac-window"),
+            QStringLiteral("deferred-control"), QStringLiteral("dock-reopen"),
+            QStringLiteral("instance-wired")};
     QCOMPARE(startup.trace, expected);
 
     // Two orderings the rest of the file depends on, stated so a future edit that
@@ -524,6 +547,19 @@ void TestAppStartup::guiWiringBuildsTheAppInAKnownOrder()
     // and the listener must not accept commands before the Backend can serve them.
     QVERIFY(startup.trace.indexOf(QStringLiteral("backend"))
             < startup.trace.indexOf(QStringLiteral("instance-wired")));
+
+    // The font is in before the QML is loaded (so the first frame, and every text
+    // measured while it loads, is already set in it), and what the window draws is
+    // Inter although no QML names it: the first Text found asks for no family.
+    QVERIFY(startup.trace.indexOf(QStringLiteral("font"))
+            < startup.trace.indexOf(QStringLiteral("qml-loaded")));
+    QCOMPARE(QGuiApplication::font().family(), QStringLiteral("Inter"));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(startup.win);
+    QVERIFY(quickWindow != nullptr);
+    QQuickItem *firstText = firstTextWithoutFamilyIn(quickWindow->contentItem());
+    QVERIFY2(firstText != nullptr, "the window has no Text that names no family");
+    QCOMPARE(QFontInfo(firstText->property("font").value<QFont>()).family(),
+             QStringLiteral("Inter"));
 
     // The listener is the one that checks a peer as it accepts it
     // (newInstanceServer()). A plain QLocalServer checks it only once the

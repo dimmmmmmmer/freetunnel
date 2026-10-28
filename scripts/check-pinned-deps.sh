@@ -58,6 +58,20 @@ for font in "$inter"/*.ttf; do
     fail=1
   fi
 done
+# The desktop compiles in those files and no others (assets/fonts/fonts.qrc),
+# and the Android build reads the same ones through SHA256SUMS.
+while read -r _ name; do
+  if ! grep -qF "<file alias=\"$name\">inter/$name</file>" assets/fonts/fonts.qrc; then
+    echo "pinned-deps: $name is in $inter/SHA256SUMS but not in assets/fonts/fonts.qrc" >&2
+    fail=1
+  fi
+done < "$inter/SHA256SUMS"
+while read -r name; do
+  if ! grep -qE "^[0-9a-f]{64}  ${name}\$" "$inter/SHA256SUMS"; then
+    echo "pinned-deps: assets/fonts/fonts.qrc names $name, which is not in $inter/SHA256SUMS" >&2
+    fail=1
+  fi
+done < <(grep -oE 'inter/[^<]+\.ttf' assets/fonts/fonts.qrc | sed 's|^inter/||')
 inter_license="$(sed -nE 's/^license_sha256=([0-9a-f]{64})$/\1/p' "$inter/SOURCE")"
 if [[ "$(sha256sum licenses/common/Inter-OFL-1.1.txt | cut -d' ' -f1)" != "$inter_license" ]]; then
   echo "pinned-deps: licenses/common/Inter-OFL-1.1.txt is not the license text pinned in $inter/SOURCE" >&2

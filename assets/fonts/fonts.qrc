@@ -1,0 +1,10 @@
+<RCC>
+    <!-- Inter 4.1, SIL OFL 1.1: see inter/SOURCE for where the files come from and
+         inter/SHA256SUMS for what they must be. Regular is the default weight for
+         all text, Medium is for font.weight: Font.Medium. Nothing else is
+         bundled, and the QML uses no other weight (tests/test_app_font.cpp). -->
+    <qresource prefix="/fonts">
+        <file alias="Inter-Regular.ttf">inter/Inter-Regular.ttf</file>
+        <file alias="Inter-Medium.ttf">inter/Inter-Medium.ttf</file>
+    </qresource>
+</RCC>

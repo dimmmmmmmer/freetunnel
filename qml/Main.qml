@@ -937,7 +937,10 @@ Window {
                            text: modelData.t
                            color: modelData.v === selectPopup.value ? theme.accent : theme.text
                            font.pixelSize: 14 }
+                    // Sized like the name beside it: with no size it took the system's
+                    // default, which differs from one system to the next.
                     Text { visible: modelData.v === selectPopup.value; text: "✓"; color: theme.accent
+                           font.pixelSize: 14
                            anchors.right: parent.right; rightPadding: 12; anchors.verticalCenter: parent.verticalCenter }
                     MouseArea { id: spMa; anchors.fill: parent; hoverEnabled: true; enabled: selectPopup.open
                                 onClicked: { selectPopup.open = false; if (selectPopup.cb) selectPopup.cb(modelData.v) } }

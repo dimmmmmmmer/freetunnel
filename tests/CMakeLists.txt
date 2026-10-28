@@ -187,6 +187,7 @@ set(APP_STARTUP_TEST_SOURCES
     helper_ipc_mock_server.h
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
+    ../src/app/AppFont.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
@@ -228,13 +229,14 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/vpn/vpn_helper_client.cpp
     ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
+    ../include/app/AppFont.h
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
     ../include/vpn/vpn_helper_client.h
     ${FT_MAC_GLUE_SOURCES}
 )
-add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc)
+add_executable(test_app_startup ${APP_STARTUP_TEST_SOURCES} ../i18n/i18n.qrc ../qml.qrc ../assets/fonts/fonts.qrc)
 target_include_directories(test_app_startup PRIVATE
     . ../include ../include/app ../include/core ../include/vpn)
 target_compile_definitions(test_app_startup PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
@@ -257,6 +259,7 @@ add_test(NAME app_startup COMMAND test_app_startup -o ${CMAKE_CURRENT_BINARY_DIR
 set(BACKEND_IMPORT_TEST_SOURCES
     ../src/app/AppStartup.cpp
     ../src/app/AppGuiMain.cpp
+    ../src/app/AppFont.cpp
     ../src/app/Backend.cpp
     ../src/app/BackendConnect.cpp
     ../src/app/BackendHotkeys.cpp
@@ -298,6 +301,7 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/vpn/vpn_helper_client.cpp
     ../src/vpn/vpn_helper_elevation.cpp
     ../src/core/AppImagePath.cpp
+    ../include/app/AppFont.h
     ../include/app/AppStartup.h
     ../include/app/Backend.h
     ../include/core/UpdateChecker.h
