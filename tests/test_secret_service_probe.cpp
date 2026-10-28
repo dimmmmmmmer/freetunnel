@@ -12,6 +12,7 @@
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QCryptographicHash>
 #include <QDBusMessage>
 #include <QDir>
 #include <QFile>
@@ -56,6 +57,9 @@ private slots:
     void aRunningKeyringIsFound();
     void aKeyringTheBusCanStartIsFound();
     void aKeyringThatWillNotStartIsNotThere();
+    void aBareBusCannotBeAskedForAnEntry();
+    void aKeyringThatClaimsTheNameAndLeavesCannotBeAsked();
+    void aLegacyFileWithNoKeyringIsFoundAndSaysSo();
 
 private:
     // Have the bus offer a keyring started by @p exec, or none for an empty one.
@@ -77,6 +81,11 @@ void TestSecretServiceProbe::initTestCase()
         QSKIP("no dbus-daemon to run a private session bus on");
     }
     QVERIFY(m_dir.isValid());
+    // The legacy password files of the last case live under the app's config
+    // folder, which test mode keeps away from the real one.
+    QCoreApplication::setOrganizationName(QStringLiteral("FreeTunnelTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("SecretServiceProbeTest"));
+    QStandardPaths::setTestModeEnabled(true);
     QVERIFY(QDir(m_dir.path()).mkpath(QStringLiteral("services")));
     const QString config = m_dir.filePath(QStringLiteral("bus.conf"));
     QFile file(config);
@@ -192,6 +201,71 @@ void TestSecretServiceProbe::aKeyringThatWillNotStartIsNotThere()
     QVERIFY(offerKeyring(fails));
     QVERIFY2(!secretServiceOnSessionBus(), "a keyring that cannot start was taken for one");
     QVERIFY(!CredentialStore::secureStorageAvailable());
+}
+
+// Whether a store that cannot be asked is told apart from one that holds nothing:
+// a build with the insecure fallback keeps its passwords in the file and answers
+// from it, so the cases below are about the builds that are shipped.
+static bool buildHasTheInsecureFallback()
+{
+#if defined(FT_ALLOW_INSECURE_CREDENTIAL_FALLBACK)
+    return true;
+#else
+    return false;
+#endif
+}
+
+// The bus is there and nothing on it keeps secrets. Asked for an entry, the answer
+// is not "nothing is stored": a config's auth key may be in a keyring that is not
+// running, and reading its absence as no key would connect without it.
+void TestSecretServiceProbe::aBareBusCannotBeAskedForAnEntry()
+{
+    if (buildHasTheInsecureFallback())
+        QSKIP("a build with the insecure fallback is answered by its file");
+    QVERIFY(offerKeyring(QString()));
+    const StoredSecret answer = CredentialStore::lookup(QStringLiteral("/tmp/ft-probe-bare-bus.toml"));
+    QVERIFY2(answer.failed(), "a bus with no keyring was taken for a keyring that holds nothing");
+    QVERIFY(answer.value.isEmpty());
+}
+
+// A keyring that takes the name and is gone before it answers anything: the
+// name was there, and the store still cannot be asked.
+void TestSecretServiceProbe::aKeyringThatClaimsTheNameAndLeavesCannotBeAsked()
+{
+    if (buildHasTheInsecureFallback())
+        QSKIP("a build with the insecure fallback is answered by its file");
+    QVERIFY(offerKeyring(QCoreApplication::applicationFilePath() + QLatin1Char(' ')
+                         + QLatin1String(kBeAKeyring)));
+    const StoredSecret answer = CredentialStore::lookup(QStringLiteral("/tmp/ft-probe-keyring-leaves.toml"));
+    QVERIFY2(answer.failed(), "a keyring that left was taken for one that holds nothing");
+    QTRY_VERIFY(!QDBusConnection::sessionBus().interface()->isServiceRegistered(kSecrets));
+}
+
+// A password an older build left in its 0600 file, and no keyring to move it into:
+// it is read, and said to be from the file, which is how a config that keeps its
+// secrets there is told from one that keeps them in a store.
+void TestSecretServiceProbe::aLegacyFileWithNoKeyringIsFoundAndSaysSo()
+{
+    if (buildHasTheInsecureFallback())
+        QSKIP("a build with the insecure fallback never calls its file legacy");
+    QVERIFY(offerKeyring(QString()));
+    const QString key = QStringLiteral("/tmp/ft-probe-legacy.toml");
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+            + QStringLiteral("/credentials");
+    QVERIFY(QDir().mkpath(dir));
+    const QString file = QDir(dir).filePath(QString::fromLatin1(
+            QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex()));
+    QFile legacy(file);
+    QVERIFY(legacy.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    legacy.write("legacy-password");
+    legacy.close();
+    const auto remove = qScopeGuard([&] { QFile::remove(file); });
+
+    const StoredSecret answer = CredentialStore::lookup(key);
+    QVERIFY2(answer.found(), "a password in the legacy file was not found with no keyring around");
+    QCOMPARE(answer.value, QStringLiteral("legacy-password"));
+    QVERIFY(answer.fromLegacyFile);
+    QVERIFY2(QFile::exists(file), "the file went though nothing took its password");
 }
 
 int main(int argc, char *argv[])
