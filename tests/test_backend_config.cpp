@@ -86,6 +86,10 @@ private slots:
     void theEditorIsNotOpenedOnASecretTheStoreCannotRead();
     void anEditSavedWhileASecretCannotBeReadChangesNothing();
     void aReadBackThatCannotBeAnsweredIsNotAConfirmation();
+    void aShareLinkIsNotMadeWhenASecretCannotBeRead();
+    void aShareLinkOfAConfigWithNoKeyIsStillVersion1();
+    void anExportIsNotWrittenWhenASecretCannotBeRead();
+    void aFailedLinkOrExportSaysSoItself();
 
     // The client random auth key (TrustTunnel 1.3), a second secret beside the password.
     void theEditorStoresTheAuthKeyBesideThePassword();
@@ -1971,6 +1975,137 @@ void TestBackendConfig::aReadBackThatCannotBeAnsweredIsNotAConfirmation()
     QVERIFY(storeConfigAuthKey(target, QStringLiteral("eeff"), QString()));
     QVERIFY(storeConfigAuthKey(target, QString(), QStringLiteral("eeff")));
     QVERIFY(CredentialStore::lookup(keyEntry).notFound());
+}
+
+// A link made when the store could not be asked for the key came out as version 1,
+// without it: it looks like the config's link, imports fine, and cannot connect to
+// a server that checks one. So there is no link when either secret could not be
+// read, and the user is told why.
+void TestBackendConfig::aShareLinkIsNotMadeWhenASecretCannotBeRead()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    CredentialStore::setReadFailureForTest(
+            [key = CredentialStore::keyForConfigAuthKey(path)](const QString &k) { return k == key; });
+    QVERIFY2(backend.configDeepLink(0).isEmpty(), "a link without the key was made");
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), freetunnel::backend_config::authKeyNotReadMessage());
+    QVERIFY(backend.logText().contains(freetunnel::backend_config::authKeyNotReadMessage()));
+
+    CredentialStore::setReadFailureForTest(
+            [key = CredentialStore::keyForConfigPath(path)](const QString &k) { return k == key; });
+    QVERIFY(backend.configDeepLink(0).isEmpty());
+    QCOMPARE(errors.count(), 1);
+    const QString said = errors.takeFirst().at(0).toString();
+    QVERIFY2(said == freetunnel::backend_config::passwordNotReadMessage(true)
+                     || said == freetunnel::backend_config::passwordNotReadMessage(false),
+             qPrintable(said));
+
+    // Readable again, the link carries both, as version 2.
+    CredentialStore::setReadFailureForTest({});
+    QString err;
+    const auto dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->password, QStringLiteral("hunter2"));
+    QCOMPARE(dl->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(errors.count(), 0);
+}
+
+// A config that never had a key is not held to account for the store's saying it
+// cannot be asked: one whose password is in its file keeps its secrets there.
+void TestBackendConfig::aShareLinkOfAConfigWithNoKeyIsStillVersion1()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("hunter2"))));
+    const QString path = pathFor(backend, 0);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    // Stored password, and no key entry: the store answers, and says there is none.
+    QString err;
+    auto dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QVERIFY(dl->clientRandomAuthKey.isEmpty());
+    QCOMPARE(dl->version, freetunnel::kDeepLinkWriteVersion);
+
+    // The password in the file, as on a machine with no keyring: the store cannot
+    // be asked for anything, and the link is made from the file.
+    CredentialStore::deletePassword(CredentialStore::keyForConfigPath(path));
+    freetunnel::ConfigToml c = freetunnel::parseConfigToml(readAll(path));
+    c.password = QStringLiteral("in-the-file");
+    QVERIFY(freetunnel::backend_config::writeConfigFile(path, freetunnel::buildConfigToml(c).toUtf8()));
+    CredentialStore::setReadFailureForTest([](const QString &) { return true; });
+    dl = freetunnel::parseDeepLink(backend.configDeepLink(0), &err);
+    QVERIFY2(dl.has_value(), qPrintable(err));
+    QCOMPARE(dl->password, QStringLiteral("in-the-file"));
+    QVERIFY(dl->clientRandomAuthKey.isEmpty());
+    QCOMPARE(dl->version, freetunnel::kDeepLinkWriteVersion);
+    QCOMPARE(errors.count(), 0);
+}
+
+void TestBackendConfig::anExportIsNotWrittenWhenASecretCannotBeRead()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString dest = QDir(m_home.path()).filePath(QStringLiteral("export-unreadable.toml"));
+    QFile::remove(dest);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+
+    for (const QString &unreadable : {CredentialStore::keyForConfigAuthKey(path), CredentialStore::keyForConfigPath(path)}) {
+        CredentialStore::setReadFailureForTest([unreadable](const QString &k) { return k == unreadable; });
+        QVERIFY(!backend.exportConfigToml(0, dest));
+        QVERIFY2(!QFileInfo::exists(dest), "a config that cannot connect was exported");
+        QCOMPARE(errors.count(), 1);
+        errors.clear();
+    }
+
+    CredentialStore::setReadFailureForTest({});
+    QVERIFY(backend.exportConfigToml(0, dest));
+    const freetunnel::ConfigToml out = freetunnel::parseConfigToml(readAll(dest));
+    QCOMPARE(out.password, QStringLiteral("hunter2"));
+    QCOMPARE(out.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QCOMPARE(errors.count(), 0);
+}
+
+// The window used to say it when a link or an export failed, whatever the reason,
+// over the reason. Backend says it now, once, with the existing words.
+void TestBackendConfig::aFailedLinkOrExportSaysSoItself()
+{
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QVERIFY(backend.configDeepLink(4).isEmpty());
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), QStringLiteral("Couldn’t build deep-link"));
+    QVERIFY(!backend.exportConfigToml(4, QDir(m_home.path()).filePath(QStringLiteral("no.toml"))));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), QStringLiteral("Export failed"));
+
+    QVERIFY(backend.createConfig(form(QStringLiteral("Alpha"), QStringLiteral("a"))));
+    errors.clear();
+    QVERIFY(!backend.exportConfigToml(0, QString())); // no destination
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), QStringLiteral("Export failed"));
+    // A destination that cannot be written.
+    QVERIFY(!backend.exportConfigToml(0, QDir(m_home.path()).filePath(QStringLiteral("no-such-folder/x.toml"))));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), QStringLiteral("Export failed"));
+    // And success is silent: the window thanks the user for it.
+    QVERIFY(backend.exportConfigToml(0, QDir(m_home.path()).filePath(QStringLiteral("fine.toml"))));
+    QVERIFY(!backend.configDeepLink(0).isEmpty());
+    QCOMPARE(errors.count(), 0);
 }
 
 void TestBackendConfig::aRefusedPasswordSaysWhatToDoAboutTheKeyring()

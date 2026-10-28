@@ -89,6 +89,7 @@ private slots:
     void aTrayHostThatAppearsLateGetsAnIcon();
     void theEmptyConfigsPageOffersToAdd();
     void configActionsFollowTheConfigNotTheRow();
+    void aLinkOrExportThatFailsAddsNoToastOfItsOwn();
     void theExportDialogOffersTheWholeName();
     void aLongHostnameWrapsInsideTheConfirm();
     void aClickInsideTheConfirmCardDoesNotCancelIt();
@@ -1781,6 +1782,40 @@ void TestQmlUi::configActionsFollowTheConfigNotTheRow()
     QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
     QCOMPARE(m_backend.lastDeepLinkRow, -1);
     QCOMPARE(m_shell.lastToast(), QStringLiteral("That configuration is no longer there."));
+    delete root;
+}
+
+// A link or an export that fails says why through the backend, once: a toast of the
+// page's own on top of it replaced the reason (a secret the credential store could
+// not be asked for) with a generic line. The page speaks for success alone.
+void TestQmlUi::aLinkOrExportThatFailsAddsNoToastOfItsOwn()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] {
+        m_backend.setConfigs(saved);
+        m_backend.linkFails = false;
+        m_backend.exportFails = false;
+    });
+    m_backend.setConfigs({QStringLiteral("Alpha")});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    root->setProperty("exportPath", m_backend.configPath(0));
+
+    m_shell.toasts.clear();
+    m_backend.linkFails = true;
+    m_backend.exportFails = true;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QVERIFY2(m_shell.toasts.isEmpty(), qPrintable(m_shell.toasts.join(QLatin1Char('|'))));
+
+    m_backend.linkFails = false;
+    m_backend.exportFails = false;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_shell.toasts.size(), 1);
+    QVERIFY(m_shell.toasts.at(0).startsWith(QLatin1String("Deep-link copied")));
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QCOMPARE(m_shell.toasts.size(), 2);
+    QVERIFY(m_shell.toasts.at(1).startsWith(QLatin1String("Config exported")));
     delete root;
 }
 

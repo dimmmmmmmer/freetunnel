@@ -469,6 +469,14 @@
         <source>Could not read the auth key from the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
         <translation>Не удалось прочитать ключ авторизации из системного хранилища учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
     </message>
+    <message>
+        <source>Couldn’t build deep-link</source>
+        <translation>Не удалось собрать deep-link</translation>
+    </message>
+    <message>
+        <source>Export failed</source>
+        <translation>Не удалось экспортировать</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -536,16 +544,8 @@
         <translation>Скопировать deep-link</translation>
     </message>
     <message>
-        <source>Couldn’t build deep-link</source>
-        <translation>Не удалось собрать deep-link</translation>
-    </message>
-    <message>
         <source>Export config</source>
         <translation>Экспорт конфига</translation>
-    </message>
-    <message>
-        <source>Export failed</source>
-        <translation>Не удалось экспортировать</translation>
     </message>
     <message>
         <source>Deep-link copied — it contains the password, share it carefully</source>

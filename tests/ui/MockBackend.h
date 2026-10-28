@@ -220,18 +220,22 @@ public:
     Q_INVOKABLE QVariantMap configFields(int index) const;
     // Set, the editor is told the config's secret could not be read (see Backend::configFields).
     QString configSecretError;
-    Q_INVOKABLE QString configDeepLink(int index) const
+    // Set, the link and the export fail as the real ones do: with nothing to show for
+    // it, the reason being the backend's to give (errorOccurred).
+    bool linkFails = false;
+    bool exportFails = false;
+    Q_INVOKABLE QString configDeepLink(int index)
     {
         lastDeepLinkRow = index;
-        return QStringLiteral("tt://?mock");
+        return linkFails ? QString() : QStringLiteral("tt://?mock");
     }
-    Q_INVOKABLE bool exportConfigToml(int index, const QString &) const
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &)
     {
         lastExportRow = index;
-        return true;
+        return !exportFails;
     }
-    mutable int lastDeepLinkRow = -1;
-    mutable int lastExportRow = -1;
+    int lastDeepLinkRow = -1;
+    int lastExportRow = -1;
     Q_INVOKABLE void clearLogs() { m_logModel.clear(); }
     void appendLog(const QString &msg) { m_logModel.append(QStringLiteral("12:00:01"), QStringLiteral("INFO"), msg); }
     Q_INVOKABLE void openLogFolder() {}

@@ -172,8 +172,10 @@ public:
     // closes, as a form made without the secret would save over the config.
     Q_INVOKABLE QVariantMap configFields(int index);
     // Export: a shareable tt:// deep link, or a full .toml written to disk
-    // (both carry the password — pulled from the OS keychain).
-    Q_INVOKABLE QString configDeepLink(int index) const;
+    // (both carry the password — pulled from the OS keychain). Each says why by
+    // errorOccurred() when it fails, so the window shows only what succeeded; and
+    // neither is made at all when a secret the config has could not be read.
+    Q_INVOKABLE QString configDeepLink(int index);
     // A row's config file, and back. An action that outlives its row — a menu, a
     // save dialog, a confirmation — remembers the file: an import prepends to the
     // list and every row below moves.
@@ -182,7 +184,7 @@ public:
     {
         return path.isEmpty() ? -1 : static_cast<int>(m_paths.indexOf(path));
     }
-    Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl);
 
     QObject *logModel() { return &m_logModel; }
     Q_INVOKABLE void clearLogs();
