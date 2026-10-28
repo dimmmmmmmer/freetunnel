@@ -112,6 +112,31 @@ When no Secret Service is available (no GNOME Keyring or KWallet bridge):
   (0600) file, `instance-auth`, until a start finds a store to keep it in.
 - The app deletes that file when it quits.
 
+### A store that cannot be read
+
+Asking the store for an entry has three answers: it is there, it is not, and the
+store could not be asked (a locked keyring, a Keychain prompt that was denied or
+closed, Credential Manager failing, no Secret Service running). The third is
+never read as the second, because a config would then go on without a secret it
+has:
+
+- A **connect** stops and says which secret could not be read. The helper is
+  never given a config without the password or auth key the config has.
+- The **editor** does not open that config, and a save made from a form opened
+  before is refused. A rename cannot drop a secret that was never read.
+- A **share link** or an **export** is not made at all. A link without the key
+  would be version 1 and could not connect.
+- A **subscription** refresh is tried again later, and writes nothing.
+- A config whose password is in its own file, or in the legacy password file on
+  a machine with no keyring, never had a key in the store, so it connects, is
+  shared and is exported as before.
+- The single-instance token is the exception: it falls back to its owner-only
+  file, so a second launch still finds the first.
+
+Every such failure is logged under the `freetunnel.credentialstore` category
+with what the OS said, the kind of entry and the config's file name, never a
+value.
+
 ### Password files from older builds
 
 - Older builds wrote password files (0600, under `credentials/`).
