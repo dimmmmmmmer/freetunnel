@@ -37,6 +37,12 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
 QString passwordNotStoredMessage(bool storeIsThere);
 // The same when it was the auth key the store refused ("authkey").
 QString authKeyNotStoredMessage();
+// What to tell the user when the store could not be asked for the password (a
+// connect, the editor, a link or an export that needs it), worded as
+// passwordNotStoredMessage() is, for the store this platform has.
+QString passwordNotReadMessage(bool storeIsThere);
+// And when it was the auth key it could not be asked for.
+QString authKeyNotReadMessage();
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target);
 // *errOut: "read"|"invalid"|"authkey" (a client_random_auth_key that is not whole bytes of hex)|
 // "tlsprofile" (an [endpoint] tls_profile the core has no name for; *contentOut is set)|
