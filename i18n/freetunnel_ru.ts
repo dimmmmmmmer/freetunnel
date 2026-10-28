@@ -351,7 +351,7 @@
     </message>
     <message>
         <source>Could not store the VPN password in your keyring. If it asked to be unlocked, unlock it and try again.</source>
-        <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
+        <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если система просила разблокировать хранилище, разблокируйте его и повторите попытку.</translation>
     </message>
     <message>
         <source>Not a valid domain or subnet: %1. “*.” and a leading dot go only before a domain name; enter an address or subnet without them.</source>
@@ -443,7 +443,7 @@
     </message>
     <message>
         <source>Could not store the auth key in the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
-        <translation>Не удалось сохранить ключ авторизации в системном хранилище учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
+        <translation>Не удалось сохранить ключ авторизации в системном хранилище учётных данных. Если система запрашивала доступ или разблокировку, разрешите их и повторите попытку.</translation>
     </message>
     <message>
         <source>Not a valid TrustTunnel config: tls_profile &quot;%1&quot; is not one TrustTunnel knows</source>
@@ -459,7 +459,7 @@
     </message>
     <message>
         <source>Could not read the VPN password from your keyring. If it asked to be unlocked, unlock it and try again.</source>
-        <translation>Не удалось прочитать пароль VPN из хранилища паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
+        <translation>Не удалось прочитать пароль VPN из хранилища паролей. Если система просила разблокировать хранилище, разблокируйте его и повторите попытку.</translation>
     </message>
     <message>
         <source>Could not read the VPN password: secure credential storage is unavailable. Install gnome-keyring or KWallet, then try again.</source>
@@ -467,7 +467,7 @@
     </message>
     <message>
         <source>Could not read the auth key from the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
-        <translation>Не удалось прочитать ключ авторизации из системного хранилища учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
+        <translation>Не удалось прочитать ключ авторизации из системного хранилища учётных данных. Если система запрашивала доступ или разблокировку, разрешите их и повторите попытку.</translation>
     </message>
     <message>
         <source>Couldn’t build deep-link</source>

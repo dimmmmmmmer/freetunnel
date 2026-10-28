@@ -119,8 +119,9 @@ compare link at the bottom of its release notes.
   A desktop that logs out by asking every window to close is refused like
   Alt+F4 is, and has to end FreeTunnel itself.
   Force-killing it (forcekillactive, xkill) still ends FreeTunnel and the VPN.
-- **Windows, macOS and Linux: a locked or unreachable keyring no longer makes a
-  connect, link or export go on without your password or auth key.**
+- **A password store that is locked or can't be reached no longer lets a
+  connect, share link or export go ahead without your password or auth key.**
+  FreeTunnel says it couldn't read it, so you can unlock the store and retry.
 
 ## 1.2.3
 
