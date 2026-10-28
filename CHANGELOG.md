@@ -105,6 +105,8 @@ compare link at the bottom of its release notes.
 - **Windows, macOS and Linux: a config file whose multi-line text has an
   escaped quote (`\"`) in it is read correctly.** Before, `\"""` was taken for
   the end of the text, and the settings after it could be misread or missed.
+- **Windows, macOS and Linux: a locked or unreachable keyring no longer makes a
+  connect, link or export go on without your password or auth key.**
 
 ## 1.2.3
 

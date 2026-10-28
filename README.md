@@ -134,7 +134,9 @@ exports with `--format toml`, imported from file (see
 Passwords stay in the OS credential store: Keychain on macOS, Credential Manager
 on Windows, libsecret on Linux. So does the client random auth key that a
 TrustTunnel 1.3 server may ask for, which a link, a config file and an endpoint's
-export can carry and the config editor has a field for.
+export can carry and the config editor has a field for. When the store cannot be
+read, as with a locked keyring, FreeTunnel says so and does not connect, share or
+export without them.
 
 ## Split tunnelling
 

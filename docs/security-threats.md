@@ -520,6 +520,13 @@ Service, is in [SECURITY.md](../SECURITY.md#credential-storage).
   config file and the link are the only places it could leak from, and whoever
   holds it passes the server's gate, which a prober could use to tell the
   server from any other.
+- **Threat:** a secret the credential store could not be asked for being taken
+  for one that is not there, so that a connect, a link or an export goes on
+  without it, or a save writes over it.
+- **Mitigation:** a lookup answers found, not found or could not be asked, and
+  the third stops the connect, the editor, the link, the export and a
+  subscription update, each saying why
+  ([SECURITY.md](../SECURITY.md#a-store-that-cannot-be-read)).
 - **Residual risk:**
   - password files older builds wrote stay on disk until the app next reads
     each one with secure storage available

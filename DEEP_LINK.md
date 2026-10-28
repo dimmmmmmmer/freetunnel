@@ -227,6 +227,11 @@ Android app for now, refuse it.
   client random; the config editor says so.
 - A config replaced by a link or a file that brings no key loses the key it had,
   so one provider's key is not sent to another's server.
+- A share link or export is made from the file's own copy of the password and key
+  when it has one, and from the credential store otherwise. When the store
+  cannot be read for a secret the config keeps there, there is no link or export
+  and FreeTunnel says why; a link without the key would be version 1 and could
+  not connect.
 
 ### Versions
 
