@@ -76,6 +76,15 @@ Item {
         Component.onCompleted: {
             if (editing) {
                 var f = backend.configFields(shell.editIndex)
+                if (f.secretError) {
+                    // The password or the auth key could not be read from the
+                    // credential store. A form opened without it looks complete,
+                    // and saving it would write the config over without the
+                    // secret, so there is no form: the reason, and back.
+                    shell.showToast(f.secretError)
+                    Qt.callLater(close)
+                    return
+                }
                 cform.editPath = f.path || ""
                 fName.text = f.name || ""; fHost.text = f.hostname || ""
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""

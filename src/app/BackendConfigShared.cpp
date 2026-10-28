@@ -116,7 +116,8 @@ bool storeConfigPassword(const QString &target, const QString &password)
     // proves nothing: a store that rejected the write would look like success and
     // the config would be committed with a stale credential, failing to connect
     // with no indication why.
-    return freetunnel::CredentialStore::loadPassword(key) == password;
+    const freetunnel::StoredSecret stored = freetunnel::CredentialStore::lookup(key);
+    return stored.found() && stored.value == password;
 }
 
 bool storeConfigAuthKey(const QString &target, const QString &authKey, const QString &previousAuthKey)
@@ -129,11 +130,15 @@ bool storeConfigAuthKey(const QString &target, const QString &authKey, const QSt
         if (previousAuthKey.isEmpty())
             return true;
         freetunnel::CredentialStore::deletePassword(key);
-        return freetunnel::CredentialStore::loadPassword(key).isEmpty();
+        // Gone is "not found": a store that cannot be asked has not said the key is
+        // gone, and a key left behind would be sent to whatever server the config
+        // names next.
+        return freetunnel::CredentialStore::lookup(key).notFound();
     }
     freetunnel::CredentialStore::storePassword(key, authKey);
     // The value, not just "something is there", as for the password.
-    return freetunnel::CredentialStore::loadPassword(key) == authKey;
+    const freetunnel::StoredSecret stored = freetunnel::CredentialStore::lookup(key);
+    return stored.found() && stored.value == authKey;
 }
 
 void dropLeftoverAuthKey(const QString &target)

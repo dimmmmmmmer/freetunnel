@@ -178,7 +178,7 @@ QString storedAuthKey(const QString &configPath, const freetunnel::ConfigToml &c
 
 } // namespace
 
-QVariantMap Backend::configFields(int index) const
+QVariantMap Backend::configFields(int index)
 {
     QVariantMap f;
     if (index < 0 || index >= m_paths.size())
@@ -188,20 +188,26 @@ QVariantMap Backend::configFields(int index) const
         return f;
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
     const QString configPath = m_paths.at(index);
-    QString password = freetunnel::CredentialStore::loadPassword(
-            freetunnel::CredentialStore::keyForConfigPath(configPath));
-    if (password.isEmpty())
-        password = c.password;
+    // The file's own copy of a secret first, then the store's (readConfigSecrets).
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(configPath, c);
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        // Nothing of the config goes with this: a form opened without the secret
+        // looks complete, and saving it writes the config over without it. The
+        // editor says why and closes.
+        f[QStringLiteral("path")] = configPath;
+        f[QStringLiteral("secretError")] = noteSecretNotRead(secrets.unreadable);
+        return f;
+    }
     f[QStringLiteral("name")] = nameForPath(configPath);
     f[QStringLiteral("hostname")] = c.hostname;
     f[QStringLiteral("addresses")] = c.addresses;
     f[QStringLiteral("username")] = c.username;
-    f[QStringLiteral("password")] = password;
+    f[QStringLiteral("password")] = secrets.password;
     f[QStringLiteral("protocol")] = c.protocol;
     f[QStringLiteral("dns")] = c.dns;
     f[QStringLiteral("customSni")] = c.customSni;
     f[QStringLiteral("clientRandom")] = c.clientRandom;
-    f[QStringLiteral("authKey")] = storedAuthKey(configPath, c);
+    f[QStringLiteral("authKey")] = secrets.authKey;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("skipVerification")] = c.skipVerification;
     f[QStringLiteral("antiDpi")] = c.antiDpi;

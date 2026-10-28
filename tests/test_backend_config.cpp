@@ -83,6 +83,9 @@ private slots:
     void aPasswordTheStoreRefusesIsExplainedInItsTerms();
     void aRefusedPasswordSaysWhatToDoAboutTheKeyring();
     void aSecretTheStoreCannotReadIsExplainedInItsTerms();
+    void theEditorIsNotOpenedOnASecretTheStoreCannotRead();
+    void anEditSavedWhileASecretCannotBeReadChangesNothing();
+    void aReadBackThatCannotBeAnsweredIsNotAConfirmation();
 
     // The client random auth key (TrustTunnel 1.3), a second secret beside the password.
     void theEditorStoresTheAuthKeyBesideThePassword();
@@ -102,7 +105,7 @@ private:
     static QVariantMap form(const QString &name, const QString &password);
     // The form as the editor sends it back for row `index`: every field it was
     // opened with, plus which config it is saving.
-    static QVariantMap editorForm(const Backend &backend, int index);
+    static QVariantMap editorForm(Backend &backend, int index);
     static QString readAll(const QString &path);
     QString pathFor(const Backend &backend, int index) const;
     static void assertOwnerOnly(const QString &path);
@@ -165,7 +168,7 @@ QVariantMap TestBackendConfig::form(const QString &name, const QString &password
     return f;
 }
 
-QVariantMap TestBackendConfig::editorForm(const Backend &backend, int index)
+QVariantMap TestBackendConfig::editorForm(Backend &backend, int index)
 {
     QVariantMap f = backend.configFields(index);
     f[QStringLiteral("editIndex")] = index;
@@ -1845,6 +1848,129 @@ void TestBackendConfig::aSecretTheStoreCannotReadIsExplainedInItsTerms()
     const QString key = authKeyNotReadMessage();
     QVERIFY2(key.startsWith(QLatin1String("Could not read the auth key")), qPrintable(key));
     QVERIFY(key != freetunnel::backend_config::authKeyNotStoredMessage());
+}
+
+// The editor opens a config on what the file and the store hold. A form made when
+// the store could not be asked for one of the two would look complete, and saving
+// it would write the config over without the secret. So there is no form: the
+// path, and why. (The window shows the toast and closes.)
+void TestBackendConfig::theEditorIsNotOpenedOnASecretTheStoreCannotRead()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+
+    QSignalSpy toasts(&backend, &Backend::errorOccurred);
+    CredentialStore::setReadFailureForTest(
+            [key = CredentialStore::keyForConfigAuthKey(path)](const QString &k) { return k == key; });
+    QVariantMap opened = backend.configFields(0);
+    // The editor's own toast says it; a second one from here would overwrite it.
+    QCOMPARE(toasts.count(), 0);
+    QCOMPARE(opened.keys(), (QStringList{QStringLiteral("path"), QStringLiteral("secretError")}));
+    QCOMPARE(opened.value(QStringLiteral("path")).toString(), path);
+    QCOMPARE(opened.value(QStringLiteral("secretError")).toString(),
+             freetunnel::backend_config::authKeyNotReadMessage());
+    QVERIFY2(backend.logText().contains(freetunnel::backend_config::authKeyNotReadMessage()),
+             "the log does not say why the editor did not open");
+
+    CredentialStore::setReadFailureForTest(
+            [key = CredentialStore::keyForConfigPath(path)](const QString &k) { return k == key; });
+    opened = backend.configFields(0);
+    QCOMPARE(opened.keys(), (QStringList{QStringLiteral("path"), QStringLiteral("secretError")}));
+    const QString said = opened.value(QStringLiteral("secretError")).toString();
+    QVERIFY2(said == freetunnel::backend_config::passwordNotReadMessage(true)
+                     || said == freetunnel::backend_config::passwordNotReadMessage(false),
+             qPrintable(said));
+
+    // Readable again, the same config opens whole.
+    CredentialStore::setReadFailureForTest({});
+    opened = backend.configFields(0);
+    QVERIFY(!opened.contains(QStringLiteral("secretError")));
+    QCOMPARE(opened.value(QStringLiteral("password")).toString(), QStringLiteral("hunter2"));
+    QCOMPARE(opened.value(QStringLiteral("authKey")).toString(), QStringLiteral("aabbccdd"));
+}
+
+// A form made before the store went away is saved after: nothing is written,
+// deleted or moved, because the secrets a failed save puts back and a rename
+// carries over are the ones the save could not read.
+void TestBackendConfig::anEditSavedWhileASecretCannotBeReadChangesNothing()
+{
+    using freetunnel::CredentialStore;
+    Backend backend;
+    QVariantMap f = form(QStringLiteral("Alpha"), QStringLiteral("hunter2"));
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
+    QVERIFY(backend.createConfig(f));
+    const QString path = pathFor(backend, 0);
+    const QString passwordEntry = CredentialStore::keyForConfigPath(path);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(path);
+    const QString before = readAll(path);
+    const auto reset = qScopeGuard([] { CredentialStore::setReadFailureForTest({}); });
+
+    for (const QString &unreadable : {keyEntry, passwordEntry}) {
+        for (const bool rename : {false, true}) {
+            QVariantMap edit = editorForm(backend, 0);
+            edit[QStringLiteral("username")] = QStringLiteral("bob");
+            edit[QStringLiteral("password")] = QStringLiteral("new-pass");
+            edit[QStringLiteral("authKey")] = QStringLiteral("11223344");
+            if (rename)
+                edit[QStringLiteral("name")] = QStringLiteral("Renamed");
+            CredentialStore::setReadFailureForTest([unreadable](const QString &k) { return k == unreadable; });
+            QSignalSpy errors(&backend, &Backend::errorOccurred);
+            QVERIFY(!backend.createConfig(edit));
+            CredentialStore::setReadFailureForTest({});
+
+            QVERIFY2(!errors.isEmpty(), "the user was told nothing");
+            QCOMPARE(readAll(path), before);
+            QCOMPARE(backend.configs(), QStringList{QStringLiteral("Alpha")});
+            QCOMPARE(CredentialStore::lookup(passwordEntry).value, QStringLiteral("hunter2"));
+            QCOMPARE(CredentialStore::lookup(keyEntry).value, QStringLiteral("aabbccdd"));
+            // Nothing under the new name either: no file, and no entries left there.
+            const QString renamed = QFileInfo(path).dir().filePath(QStringLiteral("Renamed.toml"));
+            QVERIFY(!QFileInfo::exists(renamed));
+            QVERIFY(CredentialStore::lookup(CredentialStore::keyForConfigPath(renamed)).notFound());
+            QVERIFY(CredentialStore::lookup(CredentialStore::keyForConfigAuthKey(renamed)).notFound());
+        }
+    }
+}
+
+// The read-backs that decide whether a save took: a value that could not be read
+// back is not a value that was stored, and a key that could not be asked for is
+// not one that is gone.
+void TestBackendConfig::aReadBackThatCannotBeAnsweredIsNotAConfirmation()
+{
+    using freetunnel::CredentialStore;
+    using freetunnel::backend_config::storeConfigAuthKey;
+    using freetunnel::backend_config::storeConfigPassword;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    const QString target = QDir(dir).filePath(QStringLiteral("readback.toml"));
+    const QString passwordEntry = CredentialStore::keyForConfigPath(target);
+    const QString keyEntry = CredentialStore::keyForConfigAuthKey(target);
+    const auto cleanUp = qScopeGuard([&] {
+        CredentialStore::setReadFailureForTest({});
+        CredentialStore::deletePassword(passwordEntry);
+        CredentialStore::deletePassword(keyEntry);
+    });
+
+    QVERIFY(storeConfigPassword(target, QStringLiteral("pw")));
+    QVERIFY(storeConfigAuthKey(target, QStringLiteral("aabb"), QString()));
+
+    CredentialStore::setReadFailureForTest([&](const QString &k) { return k == passwordEntry || k == keyEntry; });
+    QVERIFY2(!storeConfigPassword(target, QStringLiteral("pw2")), "an unreadable entry confirmed the password");
+    QVERIFY2(!storeConfigAuthKey(target, QStringLiteral("ccdd"), QStringLiteral("aabb")),
+             "an unreadable entry confirmed the key");
+    // Deleted, but the store will not say so: the key may be there still.
+    QVERIFY2(!storeConfigAuthKey(target, QString(), QStringLiteral("ccdd")),
+             "a key that could not be asked for was taken for deleted");
+    CredentialStore::setReadFailureForTest({});
+
+    // And once it can be asked, the same delete is confirmed.
+    QVERIFY(storeConfigAuthKey(target, QStringLiteral("eeff"), QString()));
+    QVERIFY(storeConfigAuthKey(target, QString(), QStringLiteral("eeff")));
+    QVERIFY(CredentialStore::lookup(keyEntry).notFound());
 }
 
 void TestBackendConfig::aRefusedPasswordSaysWhatToDoAboutTheKeyring()
