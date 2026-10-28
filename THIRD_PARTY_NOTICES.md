@@ -6,8 +6,8 @@ licensed under their own terms. This file names each of those components, says
 which downloads contain it, and points to the license texts, which are in
 [licenses/](licenses/):
 
-- `licenses/common/`: components in every download (the VPN core's libraries and
-  the Inter typeface).
+- `licenses/common/`: components in every download (the VPN core's libraries),
+  and the license of the Inter typeface, which the desktop downloads contain.
 - `licenses/desktop/`: components in the Windows, macOS and Linux downloads.
 - `licenses/android/`: components in the Android app.
 
@@ -89,7 +89,6 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   crates](#rust-crates-in-the-trusttunnel-native-library).
 - [Java and Kotlin libraries](#java-and-kotlin-libraries).
 - [An icon derived from Feather](#feather-icons-in-the-android-app).
-- [The Inter typeface](#inter).
 
 ## The VPN core and its libraries
 
@@ -338,12 +337,11 @@ Windows only.
 ### Inter
 
 The text of FreeTunnel's windows and screens is set in Inter, in the desktop
-apps and in the Android app: its Regular and Medium weights, as the hinted
-static TrueType files of the official release, unmodified. The desktop builds
-compile them into FreeTunnel; the Android app carries them as font resources.
-The exceptions are text the operating system draws itself (the tray menu, file
-dialogs, notifications) and the log and configuration text, which are set in
-the system's monospace font. The files and their checksums are in
+apps: its Regular and Medium weights, as the hinted static TrueType files of
+the official release, unmodified, compiled into FreeTunnel. The exceptions are
+text the operating system draws itself (the tray menu, file dialogs,
+notifications) and the log and configuration text, which are set in the
+system's monospace font. The files and their checksums are in
 [assets/fonts/inter/](assets/fonts/inter/), with the release they come from in
 `SOURCE`.
 
@@ -820,9 +818,9 @@ provided.
 ## License texts
 
 Under [licenses/common/](licenses/common/): brotli, chromium-tldregistry,
-cxxopts, fmt, http-parser, klib, ldns, libevent, libsodium, libuv, llhttp,
-lwip, magic_enum, MPL-2.0, nghttp2, nghttp3, ngtcp2, nlohmann-json,
-pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
+cxxopts, fmt, http-parser, Inter-OFL-1.1, klib, ldns, libevent, libsodium,
+libuv, llhttp, lwip, magic_enum, MPL-2.0, nghttp2, nghttp3, ngtcp2,
+nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
 
 Under [licenses/desktop/](licenses/desktop/): AFL-2.1, AppImage-runtime,
 Detours, Feather-Lucide-icons, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1,
