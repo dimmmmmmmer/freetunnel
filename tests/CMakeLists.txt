@@ -607,10 +607,13 @@ add_executable(test_qml_ui
     ui/MockShell.cpp
     ui/MockDesktop.h
     ui/UiTheme.cpp
+    ../src/app/AppFont.cpp
+    ../include/app/AppFont.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../qml.qrc
     ../assets/app.qrc
+    ../assets/fonts/fonts.qrc
     ../i18n/i18n.qrc
 )
 target_include_directories(test_qml_ui PRIVATE . ui ../include)

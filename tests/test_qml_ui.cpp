@@ -22,6 +22,7 @@
 #include <QPointer>
 #include <QScopeGuard>
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QStandardPaths>
@@ -41,6 +42,7 @@
 
 #include "ui/MockBackend.h"
 #include "ui/MockDesktop.h"
+#include "app/AppFont.h"
 #include "app/DesktopChrome.h"
 #include "ui/MockShell.h"
 #include "ui/UiTheme.h"
@@ -215,6 +217,13 @@ void collectQmlErrors(QtMsgType type, const QMessageLogContext &ctx, const QStri
 
 void TestQmlUi::initTestCase()
 {
+    // The font the app ships, not whichever the machine has: every test that
+    // measures a text, here and in widestLine(), measures Inter, on all three CI
+    // systems alike. The fit tests below were laid out against fonts that differ
+    // from one system to the next, and a result that depends on the runner's
+    // fonts is a result for that runner.
+    QVERIFY2(freetunnel::useInterFont(), "the Inter font did not load");
+    QCOMPARE(QFontInfo(QGuiApplication::font()).family(), QStringLiteral("Inter"));
     // Icons load through backend.readBundledText — no QML XHR file access needed.
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
     m_engine.rootContext()->setContextProperty(QStringLiteral("desktop"), &m_desktop);
@@ -2226,8 +2235,11 @@ void TestQmlUi::theActiveConfigNameUsesTheRoomItHas()
 void TestQmlUi::theConnectedConfigKeepsRoomForItsName()
 {
     const QString name = QStringLiteral("Home server");
-    if (widestLine(name, 14, QFont::Medium) > 95)
-        QSKIP("this font draws the name wider than the proportional fonts the row is laid out for");
+    // The font is the app's own, so this is known, not a thing to skip on: the row
+    // is laid out for a name about this wide, and a font that draws it wider than
+    // that has to be answered by making the row fit it, not by not testing.
+    const qreal drawn = widestLine(name, 14, QFont::Medium);
+    QVERIFY2(drawn <= 95, qPrintable(QStringLiteral("Inter draws the name %1 px wide").arg(drawn)));
     const QStringList saved = m_backend.configs();
     const auto restore = qScopeGuard([this, saved] {
         m_backend.setConnected(false);
@@ -2757,7 +2769,7 @@ namespace {
 
 // How many pixel rows of an area have something drawn on them, in a frame
 // rendered the way the window renders one. Anything visibly off the background
-// counts, so the box glyphs Windows CI falls back to count as well as real ones.
+// counts, so a box drawn for a glyph the font lacks counts as well as a real one.
 // Lines of text leave the gaps between them bare: about three rows in five are
 // drawn on, and none at all when the log is blank.
 int inkedRows(QQuickWindow &window, QQuickItem *area, int *rows)
@@ -3074,7 +3086,8 @@ void TestQmlUi::headingLinksStayOnANarrowPage_data()
 
 // A link beside a section heading that did not fill kept its full width however
 // little room there was, and ran off the page: with the fonts the Windows tests
-// get, «Restore defaults» sat past the right edge of a 400 px window.
+// then got (none, so a box as wide as the font size for every letter), «Restore
+// defaults» sat past the right edge of a 400 px window.
 void TestQmlUi::headingLinksStayOnANarrowPage()
 {
     QFETCH(QString, page);
@@ -3114,27 +3127,40 @@ void TestQmlUi::headingLinksStayOnANarrowPage()
 void TestQmlUi::russianFitsAtTheDefaultWidth_data()
 {
     QTest::addColumn<QString>("page");
-    QTest::newRow("Settings") << QStringLiteral("pages/SettingsPage.qml");
-    QTest::newRow("Split") << QStringLiteral("pages/SplitPage.qml");
-    QTest::newRow("Logs") << QStringLiteral("pages/LogsPage.qml");
-    QTest::newRow("Configs") << QStringLiteral("pages/ConfigsPage.qml");
-    QTest::newRow("config editor") << QStringLiteral("CreateConfigOverlay.qml");
+    QTest::addColumn<QString>("font");
+    const QList<QPair<QString, QString>> pages{
+            {QStringLiteral("Settings"), QStringLiteral("pages/SettingsPage.qml")},
+            {QStringLiteral("Split"), QStringLiteral("pages/SplitPage.qml")},
+            {QStringLiteral("Logs"), QStringLiteral("pages/LogsPage.qml")},
+            {QStringLiteral("Configs"), QStringLiteral("pages/ConfigsPage.qml")},
+            {QStringLiteral("config editor"), QStringLiteral("CreateConfigOverlay.qml")}};
+    for (const QString &font : {QStringLiteral("Inter"), QStringLiteral("DejaVu Sans")}) {
+        for (const auto &[name, page] : pages)
+            QTest::newRow(qPrintable(name + QStringLiteral(", ") + font)) << page << font;
+    }
 }
 
 // Russian runs longer than English, and at the default 400 px window labels,
 // links and input hints were cut, among them the "then Enter" that is the only
-// hint that Enter adds a rule. Measured with DejaVu Sans, the widest of the
-// usual Linux fonts and the one this was found with.
+// hint that Enter adds a rule. Measured with Inter, the font the app ships and
+// so the one that always runs, and with DejaVu Sans where it is installed: the
+// widest of the usual Linux fonts and the one this was found with, which is
+// wider than Inter and so the stricter of the two.
 void TestQmlUi::russianFitsAtTheDefaultWidth()
 {
     QFETCH(QString, page);
-    if (!QFontDatabase::families().contains(QStringLiteral("DejaVu Sans")))
-        QSKIP("DejaVu Sans is not installed");
+    QFETCH(QString, font);
+    const bool inter = font == QLatin1String("Inter");
+    if (!inter && !QFontDatabase::families().contains(font))
+        QSKIP("this font is not installed");
     const QFont savedFont = QGuiApplication::font();
     QTranslator russian;
     QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
     QCoreApplication::installTranslator(&russian);
-    QGuiApplication::setFont(QFont(QStringLiteral("DejaVu Sans")));
+    if (inter)
+        QVERIFY(freetunnel::useInterFont()); // the app font, whatever an earlier test left
+    else
+        QGuiApplication::setFont(QFont(font));
     m_engine.retranslate();
     const auto restore = qScopeGuard([this, &russian, savedFont] {
         QCoreApplication::removeTranslator(&russian);
@@ -3736,8 +3762,9 @@ void TestQmlUi::footerLinksUnderlineLikeTheOthers()
                                  QStringLiteral("TrustTunnel core ") + m_backend.coreVersion()}) {
         QQuickItem *link = textIn(page, label);
         QVERIFY2(link, qPrintable(label));
-        // The footer is clipped where the page is too narrow for it, as with the
-        // fonts the Windows tests get, and a link past the edge cannot be pointed at.
+        // The footer is clipped where the page is too narrow for it, as it was with
+        // the fonts the Windows tests used to get, and a link past the edge cannot
+        // be pointed at.
         if (sceneRect(link).right() > page->width())
             continue;
         QTest::mouseMove(&window, centreOf(link));
