@@ -1020,7 +1020,7 @@ void TestBackendSubscription::aKeyedLinkKeepsItsKeyThroughTheFetch()
     QVERIFY(!path.isEmpty());
     QVERIFY(rig.subs()->isLinked(path));
     QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
-    const QString connect = freetunnel::buildConnectConfigToml(path);
+    const QString connect = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(connect.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(connect));
     QVERIFY(!readText(path).contains(QStringLiteral("aabbccdd")));
 
@@ -1059,7 +1059,7 @@ void TestBackendSubscription::aRefreshThatSaysNothingOfTheKeyLeavesItInTheStore(
     QVERIFY2(!updated.last().at(1).toString().contains(QStringLiteral("auth_key")),
              qPrintable(updated.last().at(1).toString()));
     QCOMPARE(authKeyOf(path), QStringLiteral("aabbccdd"));
-    QVERIFY(freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"")));
+    QVERIFY(freetunnel::buildConnectConfig(path).toml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"")));
 
     // And one that changes nothing.
     rig.clock += 3600;

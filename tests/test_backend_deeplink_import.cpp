@@ -679,7 +679,7 @@ void TestBackendDeepLinkImport::aServerThatNeedsAnAuthKeyIsImportedWithItsKeyInT
     QCOMPARE(freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path)),
              QStringLiteral("secret"));
     // And it goes to the core with the password, in the connect TOML only.
-    const QString connectToml = freetunnel::buildConnectConfigToml(path);
+    const QString connectToml = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(connectToml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")),
              qPrintable(connectToml));
     QVERIFY(connectToml.contains(QStringLiteral("password = \"secret\"")));
@@ -715,7 +715,7 @@ void TestBackendDeepLinkImport::aLinkWithoutAKeyReplacingOneWithAKeyDropsTheOldK
     QVERIFY(backend.confirmDeepLinkImport(named(QByteArray()), true));
     QVERIFY2(freetunnel::CredentialStore::loadPassword(keyEntry).isEmpty(),
              "the old server's key stayed in the store for the new server");
-    QVERIFY(!freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key")));
+    QVERIFY(!freetunnel::buildConnectConfig(path).toml.contains(QStringLiteral("client_random_auth_key")));
 }
 
 // A version this client does not read is still said to be a link problem.
@@ -1435,7 +1435,7 @@ void TestBackendDeepLinkImport::aNewConfigDoesNotTakeAKeyLeftAtItsPath()
     QCOMPARE(imported.count(), 1);
     QCOMPARE(pathOfImported(imported), path);
     QVERIFY2(CredentialStore::loadPassword(keyEntry).isEmpty(), "the leftover key was kept for the new config");
-    const QString connect = freetunnel::buildConnectConfigToml(path);
+    const QString connect = freetunnel::buildConnectConfig(path).toml;
     QVERIFY(connect.contains(QStringLiteral("link-pass")));
     QVERIFY2(!connect.contains(QStringLiteral("client_random_auth_key")), qPrintable(connect));
 
@@ -1449,7 +1449,7 @@ void TestBackendDeepLinkImport::aNewConfigDoesNotTakeAKeyLeftAtItsPath()
     QFile::remove(source);
     QVERIFY(QFileInfo::exists(filePath));
     QVERIFY2(CredentialStore::loadPassword(fileKeyEntry).isEmpty(), "the leftover key was kept for the new file");
-    QVERIFY(!freetunnel::buildConnectConfigToml(filePath).contains(QStringLiteral("client_random_auth_key")));
+    QVERIFY(!freetunnel::buildConnectConfig(filePath).toml.contains(QStringLiteral("client_random_auth_key")));
 }
 
 QTEST_MAIN(TestBackendDeepLinkImport)

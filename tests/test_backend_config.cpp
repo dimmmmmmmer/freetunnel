@@ -805,7 +805,7 @@ void TestBackendConfig::theEditorStoresTheAuthKeyBesideThePassword()
     QCOMPARE(CredentialStore::loadPassword(CredentialStore::keyForConfigPath(path)), QStringLiteral("hunter2"));
     QCOMPARE(backend.configFields(0).value(QStringLiteral("authKey")).toString(), QStringLiteral("aabbccdd"));
 
-    const QString toml = freetunnel::buildConnectConfigToml(path);
+    const QString toml = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(toml.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(toml));
 
     // An edit that leaves it alone keeps it, with the form's other changes.
@@ -836,7 +836,7 @@ void TestBackendConfig::theCoreIsNotHandedAClientRandomItWouldIgnore()
     QVERIFY(backend.createConfig(f));
     const QString path = pathFor(backend, 0);
 
-    const QString connect = freetunnel::buildConnectConfigToml(path);
+    const QString connect = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(connect.contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"\n")), qPrintable(connect));
     QVERIFY2(connect.contains(QStringLiteral("client_random = \"\"\n")), qPrintable(connect));
     QVERIFY2(!connect.contains(QStringLiteral("deadbeef")), qPrintable(connect));
@@ -851,7 +851,7 @@ void TestBackendConfig::theCoreIsNotHandedAClientRandomItWouldIgnore()
     edit[QStringLiteral("authKey")] = QString();
     QVERIFY(backend.createConfig(edit));
     QVERIFY(CredentialStore::loadPassword(CredentialStore::keyForConfigAuthKey(path)).isEmpty());
-    const QString without = freetunnel::buildConnectConfigToml(path);
+    const QString without = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(without.contains(QStringLiteral("client_random = \"deadbeef/ffff0000\"\n")), qPrintable(without));
     QVERIFY(!without.contains(QStringLiteral("client_random_auth_key")));
 }
@@ -879,7 +879,7 @@ void TestBackendConfig::aNewConfigDoesNotTakeAKeyLeftAtItsPath()
     QVERIFY(backend.createConfig(form(QStringLiteral("Stale"), QStringLiteral("other-pass"))));
     QCOMPARE(pathFor(backend, 0), path);
     QVERIFY2(CredentialStore::loadPassword(entry).isEmpty(), "the new config took the old one's key");
-    const QString connect = freetunnel::buildConnectConfigToml(path);
+    const QString connect = freetunnel::buildConnectConfig(path).toml;
     QVERIFY(connect.contains(QStringLiteral("other-pass")));
     QVERIFY2(!connect.contains(QStringLiteral("client_random_auth_key")), qPrintable(connect));
     QVERIFY(backend.configFields(0).value(QStringLiteral("authKey")).toString().isEmpty());
@@ -925,7 +925,7 @@ void TestBackendConfig::clearingTheAuthKeyTakesItOutOfTheStore()
     edit[QStringLiteral("authKey")] = QString();
     QVERIFY(backend.createConfig(edit));
     QVERIFY2(CredentialStore::loadPassword(entry).isEmpty(), "the removed key stayed in the store");
-    QVERIFY(!freetunnel::buildConnectConfigToml(path).contains(QStringLiteral("client_random_auth_key")));
+    QVERIFY(!freetunnel::buildConnectConfig(path).toml.contains(QStringLiteral("client_random_auth_key")));
     QVERIFY(backend.configFields(0).value(QStringLiteral("authKey")).toString().isEmpty());
 }
 
@@ -1254,7 +1254,7 @@ void TestBackendConfig::anEditKeepsPostQuantumOff()
         QVERIFY2(saved.contains(QStringLiteral("post_quantum_group_enabled = false")),
                  qPrintable(QStringLiteral("the editor turned post-quantum back on:\n") + saved));
         QVERIFY2(!freetunnel::parseConfigToml(saved).postQuantum, qPrintable(saved));
-        QVERIFY2(freetunnel::buildConnectConfigToml(path).contains(
+        QVERIFY2(freetunnel::buildConnectConfig(path).toml.contains(
                          QStringLiteral("post_quantum_group_enabled = false")),
                  "the connection turned post-quantum back on");
     }
@@ -1303,7 +1303,7 @@ void TestBackendConfig::aProxyListenerIsNotKeptBesideTheTunnel()
     saveStoredConfigs({path});
 
     // It connects as it is, without being opened...
-    const QString connect = freetunnel::buildConnectConfigToml(path);
+    const QString connect = freetunnel::buildConnectConfig(path).toml;
     QVERIFY2(connect.contains(QStringLiteral("hunter2")), "no password to connect with");
     QVERIFY2(oneListener(connect), qPrintable(connect));
     // ...and a save from the editor writes it as the core takes it.
