@@ -253,6 +253,7 @@ the update-signature tests would skip the path every release takes.
 | --- | --- |
 | `windows_chrome` | On Windows only |
 | `release_ci_gate` | On Linux only; needs jq |
+| `core_pin_release` | On Linux only; needs jq |
 | `desktop_changes` | On Linux only; needs jq |
 | `release_signature` | On Linux only; needs openssl |
 | `android_release_tag` | On Linux only |
@@ -280,9 +281,9 @@ What the suites cover:
 - The Backend's own units (logs, settings, config, split tunnel, updates)
 - The window chrome on Linux and Windows
 - QML UI tests and the QML/Backend property parity
-- The release job's CI gate and signature check; the desktop CI's
-  Android-only gate; the Android release's tag, signer and already-published
-  checks and its signing script
+- The release job's CI gate and signature check; the check that the core pin
+  is a stable release; the desktop CI's Android-only gate; the Android
+  release's tag, signer and already-published checks and its signing script
 - Integration tests: config workflow, Backend + mock VPN, single instance,
   helper client, UpdateChecker end-to-end against a mock HTTP server
 
@@ -311,12 +312,13 @@ bash scripts/coverage-upstream-report.sh
 
 | Workflow | What it runs | When |
 | --- | --- | --- |
-| `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows. A `v*` tag publishes only once Tests and Security have passed on the same commit | Pushes to `main`, pull requests, `v*` tags |
+| `.github/workflows/build.yml` | Release builds (HTTP/3 enabled), Linux/macOS/Windows. A `v*` tag publishes only once Tests and Security have passed on the same commit, and only if the core pin is a stable release | Pushes to `main`, pull requests, `v*` tags |
 | `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows) through `scripts/run-ctest.sh`; Linux coverage + ASan+UBSan ([details](#coverage-and-sanitizers)) | Pushes to `main`, pull requests, `v*` tags, and weekly (Mon) |
 | `.github/workflows/security.yml` | The checks below | Pushes to `main`, pull requests, `v*` tags, and weekly (Mon) |
 
 - **On a `v*` tag** the release waits for Tests and Security to pass on the
-  tagged commit.
+  tagged commit, and is refused outright, within a minute of the push, when the
+  core pin is not a stable release (`Core pin is a stable release`).
 - **The weekly run** (Mondays) means a quiet `main` still gets sampled.
 
 Security's checks:
@@ -470,6 +472,13 @@ file rather than carrying a SHA of their own.
 The script fails, too, on a read it cannot place in a table and on a listed key
 it no longer finds. Its comments say why, and what to do about each.
 
+A pin on a pre-release (`-rc`, `-beta`, `-alpha`), or on a commit upstream has
+not tagged, builds, tests and merges as usual, so a new core can be tried on
+`main`. But no `v*` tag publishes until the pin moves to a commit
+TrustTunnelClient tagged `vX.Y.Z`: the `Core pin is a stable release` job
+refuses the tag (`scripts/check-core-pin-release.sh`, see
+[Releasing](#release-procedure)).
+
 ### Pinned dependencies
 
 [`scripts/check-pinned-deps.sh`](scripts/check-pinned-deps.sh) is CI-enforced
@@ -522,7 +531,10 @@ the desktop's `v*` release.
      [Writing release notes](#writing-release-notes)).
 2. **Merge it once CI is green:** every required check passes and the branch is
    up to date with `main`.
-3. **Tag the release commit on `main` and push the tag:**
+3. **Tag the release commit on `main` and push the tag.** Before you do, run
+   `bash scripts/check-core-pin-release.sh` on that commit. It asks GitHub,
+   with your own `gh` login, the question the release job asks, and says
+   whether the core pinned in `scripts/upstream_ref.txt` is a stable release.
 
    ```bash
    git tag -a vX.Y.Z -m "FreeTunnel X.Y.Z"
@@ -531,6 +543,10 @@ the desktop's `v*` release.
 
 4. **Let the release job publish.** The tag runs Build, Tests and Security. The
    Build workflow's `Publish release` job then:
+   - does not start unless the `Core pin is a stable release` job passed. That
+     job refuses the tag, within a minute of the push, unless
+     `scripts/upstream_ref.txt` is a commit that TrustTunnelClient tagged
+     `vX.Y.Z` (`scripts/check-core-pin-release.sh`);
    - waits until Tests and Security have passed on this very commit
      (`scripts/check-release-ci.sh`; runs from pull requests do not count);
    - writes `SHA256SUMS.txt` and signs it with `ED25519_SIGNING_KEY` (see
@@ -550,7 +566,12 @@ The release stops, and publishes nothing, when:
 - the `ED25519_SIGNING_KEY` secret is not set;
 - the signature does not verify against the key in `ReleaseSigning.h`, as when
   the secret no longer matches it;
-- Tests or Security has no passing run on the commit.
+- Tests or Security has no passing run on the commit;
+- the core pin is an `-rc`, `-beta` or `-alpha`, or a commit TrustTunnelClient
+  has not tagged `vX.Y.Z`. The run turns red within a minute of the push, with
+  the reason at the top. Move the pin to a stable tag in a pull request (see
+  [Bumping the upstream core](#bumping-the-upstream-core)), then tag the new
+  release commit.
 
 ### Writing release notes
 

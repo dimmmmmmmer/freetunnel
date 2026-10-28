@@ -90,6 +90,40 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash scripts/check-desktop-changes.sh
 
+  # A v* release ships the core it was built with, which is the commit in
+  # scripts/upstream_ref.txt, so that commit has to be a stable TrustTunnelClient
+  # release: tagged vX.Y.Z there, not an -rc, a -beta, or nothing. A pin on a
+  # pre-release builds, tests and merges like any other; it only cannot be
+  # released (scripts/check-core-pin-release.sh says why and what to do).
+  #
+  # A job of its own, not a first step of `release`, which starts only after the
+  # hour-long build matrix: this one starts with `changes` and turns the tag's
+  # run red, with the reason at the top of it, within seconds of the push.
+  # `release` needs it, so a refused tag checksums, signs and publishes nothing.
+  # `build` does not, so a pull request's or main's jobs and the required checks'
+  # names stay as they were, and the legs of a refused tag still build. Tags only:
+  # nothing else is released. It needs bash, gh and jq, which any runner image
+  # has, so `ubuntu-latest` moving to a new Ubuntu changes nothing here.
+  core-pin:
+    name: Core pin is a stable release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: |
+            /scripts/check-core-pin-release.sh
+            /scripts/upstream_ref.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Pin is a commit TrustTunnelClient tagged vX.Y.Z
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-core-pin-release.sh
+
   # Rasterize the bundle icons (.icns/.ico/.png) from the neutral logo.svg on
   # Linux (where rsvg/icnsutils/ImageMagick are reliable) and share them with
   # every platform build, so the dock/taskbar/Finder icons match the in-app
@@ -1426,7 +1460,10 @@ jobs:
 
   release:
     name: Publish release
-    needs: build
+    # core-pin refuses a tag whose core is not a stable release. The `if` below
+    # has no status function, so a failed need skips this job: nothing is
+    # checksummed, signed or published.
+    needs: [build, core-pin]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -1449,7 +1486,7 @@ jobs:
             /include/core/ReleaseSigning.h
           sparse-checkout-cone-mode: false
 
-      # `needs: build` covers this workflow only. The unit tests, the sanitizers
+      # `needs` covers this workflow only. The unit tests, the sanitizers
       # and the static analysis are in Tests and Security, which are separate runs
       # that a tag used to publish past, finished or not, green or not. Nothing is
       # signed or published until both have passed on this very commit; it waits
