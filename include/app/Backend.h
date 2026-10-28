@@ -24,6 +24,7 @@ class QHostAddress;
 
 #include "app/LogModel.h"
 #include "core/AppSettings.h"
+#include "core/CredentialStore.h"
 #include "vpn/vpn_helper_client.h"
 
 class QHotkey;
@@ -336,6 +337,11 @@ signals:
 private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reportPasswordNotStored(); // a save or import the credential store refused
+    // A config's secret the credential store could not be asked for. Asks the store
+    // again (the banner and the wording depend on whether it is there), logs, and
+    // returns what to tell the user; reportSecretNotRead() tells them with a toast.
+    QString noteSecretNotRead(freetunnel::SecretUnreadable which);
+    void reportSecretNotRead(freetunnel::SecretUnreadable which);
     void resolveSquirrelUpdaterRules(); // rules an earlier version stored for Update.exe
     void reloadConfigs();
     void persistSettings();
@@ -458,8 +464,8 @@ public:
 private:
     std::atomic<QThread *> m_lastTomlBuildThread{nullptr};
 #endif
-    void onConnectTomlReady(quint64 generation, const QString &toml);
-    void failConnectNoPassword();
+    void onConnectTomlReady(quint64 generation, const freetunnel::ConnectConfig &config);
+    void failConnectWithoutSecrets(freetunnel::ConnectConfig::Problem problem);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

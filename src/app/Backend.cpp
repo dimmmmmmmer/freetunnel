@@ -461,6 +461,26 @@ void Backend::reportPasswordNotStored()
             !m_credentialStoreMissing.value_or(false)));
 }
 
+// A secret the credential store could not be asked for: a connect, the editor, a
+// link or an export has stopped for want of it. Asked again first, as above, so
+// that the wording and the banner match what the store is now. The line in the log
+// is the message the user is shown, since the detail (an OSStatus, a Win32 code, a
+// GError) is the credential store's own, and logged there.
+QString Backend::noteSecretNotRead(freetunnel::SecretUnreadable which)
+{
+    recheckCredentialStorage();
+    const QString message = which == freetunnel::SecretUnreadable::AuthKey
+            ? freetunnel::backend_config::authKeyNotReadMessage()
+            : freetunnel::backend_config::passwordNotReadMessage(!m_credentialStoreMissing.value_or(false));
+    appendLog(QStringLiteral("WARN"), message);
+    return message;
+}
+
+void Backend::reportSecretNotRead(freetunnel::SecretUnreadable which)
+{
+    emit errorOccurred(noteSecretNotRead(which));
+}
+
 void Backend::retranslate()
 {
     // Called once a new translator is in (AppGuiMain). QML's qsTr bindings follow

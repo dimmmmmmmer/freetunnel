@@ -449,6 +449,26 @@
         <source>Not a valid TrustTunnel config: tls_profile &quot;%1&quot; is not one TrustTunnel knows</source>
         <translation>Это не похоже на конфиг TrustTunnel: TrustTunnel не знает значение tls_profile «%1»</translation>
     </message>
+    <message>
+        <source>Could not read the VPN password from the Keychain. If macOS asked for access to the Keychain, allow it and try again.</source>
+        <translation>Не удалось прочитать пароль VPN из Связки ключей. Если macOS запрашивала доступ к Связке ключей, разрешите его и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password from Windows Credential Manager. Try again.</source>
+        <translation>Не удалось прочитать пароль VPN из диспетчера учётных данных Windows. Повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password from your keyring. If it asked to be unlocked, unlock it and try again.</source>
+        <translation>Не удалось прочитать пароль VPN из хранилища паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password: secure credential storage is unavailable. Install gnome-keyring or KWallet, then try again.</source>
+        <translation>Не удалось прочитать пароль VPN: безопасное хранилище паролей недоступно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the auth key from the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
+        <translation>Не удалось прочитать ключ авторизации из системного хранилища учётных данных. Если оно запрашивало доступ или разблокировку, разрешите это и повторите попытку.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>

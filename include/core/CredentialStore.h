@@ -203,12 +203,6 @@ struct ConnectConfig {
 // logLevel sets the core's verbosity ("warn" by default; "info" for debug logs).
 ConnectConfig buildConnectConfig(const QString &configPath,
                                  const QString &logLevel = QStringLiteral("warn"));
-// TRANSITIONAL: the connect config without the reason there is none.
-inline QString buildConnectConfigToml(const QString &configPath,
-                                      const QString &logLevel = QStringLiteral("warn"))
-{
-    return buildConnectConfig(configPath, logLevel).toml;
-}
 // Delete any leftover materialized configs (crash leftovers from versions that
 // wrote password-injected temp files) — call at startup.
 void sweepStaleMaterializedConfigs();

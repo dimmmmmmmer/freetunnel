@@ -231,6 +231,41 @@ QString passwordNotStoredMessage(bool storeIsThere)
 #endif
 }
 
+QString passwordNotReadMessage(bool storeIsThere)
+{
+    // The same four cases as passwordNotStoredMessage(), for a read. A store that
+    // is there and could not be read from was locked (Linux), asked the user and
+    // was refused (macOS), or was not reachable (Windows).
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password from the Keychain. If macOS "
+                                       "asked for access to the Keychain, allow it and try again.");
+#elif defined(Q_OS_WIN)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password from Windows Credential "
+                                       "Manager. Try again.");
+#else
+    if (storeIsThere) {
+        return QCoreApplication::translate("Backend",
+                                           "Could not read the VPN password from your keyring. If it "
+                                           "asked to be unlocked, unlock it and try again.");
+    }
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password: secure credential storage is "
+                                       "unavailable. Install gnome-keyring or KWallet, then try again.");
+#endif
+}
+
+QString authKeyNotReadMessage()
+{
+    // One wording for every store, as for authKeyNotStoredMessage().
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the auth key from the system's credential store. If "
+                                       "it asked for access or to be unlocked, allow that and try again.");
+}
+
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target)
 {
     const int storedIdx = oldPath.isEmpty() ? -1 : stored.indexOf(oldPath);

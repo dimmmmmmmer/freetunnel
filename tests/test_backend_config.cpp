@@ -82,6 +82,7 @@ private slots:
     void aRefusedPasswordIsExplainedForThisPlatform();
     void aPasswordTheStoreRefusesIsExplainedInItsTerms();
     void aRefusedPasswordSaysWhatToDoAboutTheKeyring();
+    void aSecretTheStoreCannotReadIsExplainedInItsTerms();
 
     // The client random auth key (TrustTunnel 1.3), a second secret beside the password.
     void theEditorStoresTheAuthKeyBesideThePassword();
@@ -1816,6 +1817,36 @@ void TestBackendConfig::aPasswordTheStoreRefusesIsExplainedInItsTerms()
 // startup. FT_TEST_KEYRING stands in for the two stores no test can have on
 // demand: one that is not there, and one that is there and refuses, as a locked
 // keyring does once its unlock prompt is dismissed.
+// What the user is told when the store cannot be asked is said in the terms of the
+// store the platform has, as what it refused to take is, and is not that message:
+// a read that failed is not a password that was not saved.
+void TestBackendConfig::aSecretTheStoreCannotReadIsExplainedInItsTerms()
+{
+    using freetunnel::backend_config::authKeyNotReadMessage;
+    using freetunnel::backend_config::passwordNotReadMessage;
+    for (const bool storeIsThere : {true, false}) {
+        const QString message = passwordNotReadMessage(storeIsThere);
+        QVERIFY2(message.startsWith(QLatin1String("Could not read the VPN password")), qPrintable(message));
+        QVERIFY2(message != freetunnel::backend_config::passwordNotStoredMessage(storeIsThere), qPrintable(message));
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+        if (storeIsThere) {
+            QVERIFY2(message.contains(QLatin1String("unlock")) && !message.contains(QLatin1String("gnome-keyring")),
+                     qPrintable(message));
+        } else {
+            QVERIFY2(message.contains(QLatin1String("unavailable")) && message.contains(QLatin1String("gnome-keyring")),
+                     qPrintable(message));
+        }
+#elif defined(Q_OS_MACOS)
+        QVERIFY2(message.contains(QLatin1String("Keychain")), qPrintable(message));
+#else
+        QVERIFY2(message.contains(QLatin1String("Credential Manager")), qPrintable(message));
+#endif
+    }
+    const QString key = authKeyNotReadMessage();
+    QVERIFY2(key.startsWith(QLatin1String("Could not read the auth key")), qPrintable(key));
+    QVERIFY(key != freetunnel::backend_config::authKeyNotStoredMessage());
+}
+
 void TestBackendConfig::aRefusedPasswordSaysWhatToDoAboutTheKeyring()
 {
     const auto unset = qScopeGuard([] { qunsetenv("FT_TEST_KEYRING"); });
