@@ -13,6 +13,7 @@
 #include <QGuiApplication>
 #include <QRawFont>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSet>
 #include <QXmlStreamReader>
 
@@ -37,6 +38,8 @@ private slots:
     void textThatNamesNoFamilyGetsInter();
     void eachWeightIsItsOwnFile_data();
     void eachWeightIsItsOwnFile();
+    void whatTheSystemFontSaysOfItsStyleAndWeightIsNotKept_data();
+    void whatTheSystemFontSaysOfItsStyleAndWeightIsNotKept();
     void loadingAgainAddsNothing();
     void everyCharacterTheInterfaceDrawsIsInTheFont();
     void theFixedPitchPlacesStayFixedPitch_data();
@@ -206,11 +209,12 @@ void TestAppFont::eachWeightIsItsOwnFile_data()
                             << QStringLiteral(":/fonts/Inter-Regular.ttf");
 }
 
-void TestAppFont::eachWeightIsItsOwnFile()
+namespace {
+
+// Qt's width of `weight` against the width of the file meant to draw it and of the
+// other one. Called in a test function, for the application font as it is then.
+void verifyWeightIsItsOwnFile(int weight, const QString &file, const QString &otherFile)
 {
-    QFETCH(int, weight);
-    QFETCH(QString, file);
-    QFETCH(QString, otherFile);
     const qreal mine = widthInFile(file);
     const qreal other = widthInFile(otherFile);
     QVERIFY2(mine > 0 && other > 0, "a font file could not be read");
@@ -221,6 +225,69 @@ void TestAppFont::eachWeightIsItsOwnFile()
     QVERIFY2(std::abs(drawn - mine) < gap / 2,
              qPrintable(QStringLiteral("Qt draws weight %1 %2 px wide; its file %3 px, the other weight's %4 px")
                                 .arg(weight).arg(drawn).arg(mine).arg(other)));
+}
+
+} // namespace
+
+void TestAppFont::eachWeightIsItsOwnFile()
+{
+    QFETCH(int, weight);
+    QFETCH(QString, file);
+    QFETCH(QString, otherFile);
+    verifyWeightIsItsOwnFile(weight, file, otherFile);
+}
+
+// useInterFont() starts from the system's font, for the size it picked for this
+// display, and Qt matches a font's style name before its weight. KDE writes the
+// style of the font it was given, usually "Regular", into the font of every
+// application, and a Text asking for Font.Medium would then be drawn in the Regular
+// file, with Qt still reporting weight 500. A system weight other than the Regular
+// is passed to every text that asks for none, and from DemiBold up Qt makes a bold
+// from the Medium. So the family and the size are the system's, and nothing else.
+void TestAppFont::whatTheSystemFontSaysOfItsStyleAndWeightIsNotKept_data()
+{
+    QTest::addColumn<QString>("styleName");
+    QTest::addColumn<int>("weight");
+    QTest::addColumn<bool>("italic");
+    QTest::newRow("style name Regular") << QStringLiteral("Regular") << int(QFont::Normal) << false;
+    QTest::newRow("style name Regular, DemiBold") << QStringLiteral("Regular") << int(QFont::DemiBold) << false;
+    QTest::newRow("DemiBold") << QString() << int(QFont::DemiBold) << false;
+    QTest::newRow("Bold") << QString() << int(QFont::Bold) << false;
+    QTest::newRow("italic") << QStringLiteral("Italic") << int(QFont::Normal) << true;
+}
+
+void TestAppFont::whatTheSystemFontSaysOfItsStyleAndWeightIsNotKept()
+{
+    QFETCH(QString, styleName);
+    QFETCH(int, weight);
+    QFETCH(bool, italic);
+
+    const QFont before = QGuiApplication::font();
+    const auto restore = qScopeGuard([&before] { QGuiApplication::setFont(before); });
+
+    QFont system = before;
+    system.setFamilies({QStringLiteral("DejaVu Sans")});
+    system.setPointSizeF(13.5);
+    system.setStyleName(styleName);
+    system.setWeight(QFont::Weight(weight));
+    system.setItalic(italic);
+    QGuiApplication::setFont(system);
+
+    QVERIFY(freetunnel::useInterFont()); // it applies the font on every call
+    const QFont applied = QGuiApplication::font();
+    QCOMPARE(applied.family(), QStringLiteral("Inter"));
+    QCOMPARE(applied.pointSizeF(), 13.5); // the size is the system's
+    QVERIFY2(applied.styleName().isEmpty(),
+             qPrintable(QStringLiteral("style name %1 kept").arg(applied.styleName())));
+    QCOMPARE(int(applied.weight()), int(QFont::Normal));
+    QVERIFY(!applied.italic());
+
+    verifyWeightIsItsOwnFile(QFont::Normal, QStringLiteral(":/fonts/Inter-Regular.ttf"),
+                             QStringLiteral(":/fonts/Inter-Medium.ttf"));
+    if (QTest::currentTestFailed())
+        return;
+    verifyWeightIsItsOwnFile(QFont::Medium, QStringLiteral(":/fonts/Inter-Medium.ttf"),
+                             QStringLiteral(":/fonts/Inter-Regular.ttf"));
 }
 
 // useInterFont() is called by the wiring of every start and by tests; a font added

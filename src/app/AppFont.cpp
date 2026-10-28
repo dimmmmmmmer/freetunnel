@@ -39,10 +39,16 @@ bool useInterFont()
     static const bool loaded = loadInterFaces();
     if (!loaded)
         return false;
-    // The system's font with only its family changed, so that the size it picked
-    // for this display and the rest of its settings stay.
+    // The system's font for the size it picked for this display, and nothing else
+    // of it. Its style name goes: Qt matches that before the weight, and a KDE font
+    // that says "Regular" would draw every Font.Medium in the Regular file. Its
+    // weight and slant go, as every text that asks for none would take them, and a
+    // weight from DemiBold up is a bold made from the Medium.
     QFont font = QGuiApplication::font();
     font.setFamilies({QStringLiteral("Inter")});
+    font.setStyleName(QString());
+    font.setWeight(QFont::Normal);
+    font.setItalic(false);
     QGuiApplication::setFont(font);
     return true;
 }

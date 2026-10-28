@@ -12,7 +12,8 @@ namespace freetunnel {
 //
 // Call it before the QML engine loads anything, so that the first frame and every
 // TextMetrics are already set in Inter. The size stays the system's own: only
-// text that names none depends on it.
+// text that names none depends on it. Its style name, weight and slant do not:
+// they belong to the system's face, not to Inter's two.
 //
 // The font is looks, not function: if either file cannot be loaded this says so
 // in the log, leaves the system's font alone and returns false, and the app runs.
