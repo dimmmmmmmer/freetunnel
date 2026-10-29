@@ -70,10 +70,10 @@ Window {
     flags: (isMac || windowsAgent) ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
     // The window's own ✕ normally never quits: on macOS the red traffic-light is
-    // retargeted to hide natively (installMacWindowCloseToTray); on Linux and
-    // Windows the custom ✕ minimizes (keeps the taskbar entry and the VPN
-    // running). So a close event that reaches this handler is usually a real
-    // quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Windows).
+    // retargeted to hide natively (installMacWindowCloseToTray); on Windows the
+    // custom ✕ minimizes; on Linux on an X server with a usable tray it hides the
+    // window to the tray at once. So a close event that reaches this handler is
+    // usually a real quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Windows).
     //
     // The exceptions are a desktop with no system tray, where ✕ does quit (see the
     // ✕ itself, below), and Linux on an X server with one, where the window
@@ -89,10 +89,8 @@ Window {
     // So a desktop that logs out by asking each window to close is refused here like
     // anybody else, and has to end the process itself.
     //
-    // Only on an X server, XWayland included. On native Wayland a minimise cannot be
-    // checked (see onMinimizeSettled), so on a compositor with none, such as sway,
-    // the window would not go anywhere and the close would do nothing: it keeps
-    // quitting there, as it always did.
+    // Only on an X server, XWayland included. On native Wayland there is no such
+    // close to tell from a quit, so it keeps quitting there, as it always did.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
@@ -187,25 +185,6 @@ Window {
                 return
             trayMaker.active = false
             trayMaker.active = true
-        }
-        // The answer to a minimise, which on X11 comes a moment after it. Only a
-        // close cares: a minimise the window manager ignored has nothing to put
-        // right but the state, which DesktopChrome has already done.
-        function onMinimizeSettled(window, honoured) {
-            if (window !== win)
-                return
-            const wasClose = win.closeWaitingOnMinimize
-            win.closeWaitingOnMinimize = false
-            if (honoured || !wasClose)
-                return
-            // The window is still there: this window manager has no minimise (Hyprland,
-            // sway). The close means "out of the way, still running", so hide it —
-            // if what the tray offers can really bring it back, and otherwise quit,
-            // as with no tray at all.
-            if (desktop.trayCanHoldWindow(win.tray))
-                desktop.hideToTray(win)
-            else
-                backend.quitApplication()
         }
     }
     Instantiator {
@@ -521,33 +500,34 @@ Window {
     // traffic lights. On Linux the layout comes from the desktop's button-layout
     // setting, so a group can be empty — or both, on a layout with no buttons.
     //
-    // Close minimises to the taskbar/dock (Linux and Windows alike) rather than
-    // hiding. A hidden window vanishes from the taskbar entirely, which is
-    // disorienting (and on Linux/GNOME a hidden window can't be reliably brought
-    // back). Minimising keeps the entry and the VPN running.
+    // Close hides to the tray on Linux/X11 when a tray can hold the window: the
+    // window must not vanish into a taskbar with nothing to bring it back, and the
+    // tray is what brings it back. The hide is immediate, not a minimise followed
+    // by a check: Hyprland and sway have no minimise, and waiting to find that out
+    // left the X looking stuck for 300 ms on every close.
     //
-    // Unless there is no tray to minimise alongside. Qt.labs.platform shows a tray
-    // icon through a StatusNotifier host or not at all — it has no other
-    // implementation available to this application, which does not link Qt
-    // Widgets — so on GNOME without an AppIndicator extension, or on a plain window
-    // manager, there is no icon, no tray menu and therefore no «Quit» in it.
-    // Minimising there can put the window somewhere with nothing to bring it back
-    // from. Close quits instead, which is what it means anyway when nothing else is
-    // holding the application open.
-    //
-    // And unless the window manager has no minimise to give: Hyprland and sway take
-    // the request and drop it, and the window stays where it is. DesktopChrome finds
-    // that out a moment after, and then the window is hidden to the tray instead —
-    // which is only for a ✕, never for the minimise button, because hiding is not
-    // what that was asked for. See onMinimizeSettled.
+    // On Windows the ✕ still minimises to the taskbar, which keeps the entry and
+    // the VPN running. On Linux without a usable tray — GNOME without an
+    // AppIndicator extension, a plain window manager, or a bar that owns no host —
+    // there is no tray icon, no tray menu and therefore no «Quit» in it. Close
+    // quits there, which is what it means anyway when nothing else is holding the
+    // application open. Native Wayland keeps quitting too: there is no X server to
+    // tell a close from a logout.
     function toggleMaximized() {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
-    // Set from the ✕ until the answer to its minimise comes.
-    property bool closeWaitingOnMinimize: false
     function closeFromTitleBar() {
+        // On an X server with a usable tray, closing is a hide, at once: no
+        // minimise to ask for, and nothing to wait for. The same test as the
+        // minimise check is what tells this is an X server.
+        if (Qt.platform.os === "linux" && desktop.minimizeCanBeChecked()) {
+            if (desktop.trayCanHoldWindow(win.tray))
+                desktop.hideToTray(win)
+            else
+                backend.quitApplication()
+            return
+        }
         if (desktop.hasTray(win.tray)) {
-            win.closeWaitingOnMinimize = true
             desktop.minimize(win)
         } else {
             backend.quitApplication()

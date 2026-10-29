@@ -159,8 +159,7 @@ private slots:
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
-    void theCloseButtonMinimisesWhenThereIsATray();
-    void aWindowManagerWithNoMinimiseHidesTheWindowToTheTray();
+    void theCloseButtonAndATray();
     void aTrayWithNoHostIsNotAPlaceToHideTheWindow();
     void theMinimiseButtonNeverHidesOrQuits();
     void aWindowManagersCloseIsTheCloseButton();
@@ -3930,10 +3929,10 @@ namespace {
 
 } // namespace
 
-// ✕ with a tray asks for a minimise and does nothing else yet. What comes of the
-// minimise is a moment away on X11, and a window manager that did it has nothing
-// further to be done: the window is where the user can get it back from.
-void TestQmlUi::theCloseButtonMinimisesWhenThereIsATray()
+// ✕ with a usable tray follows the platform: on Linux/X11 it hides the window to
+// the tray at once, with no minimise to ask for and nothing to wait for; Windows
+// still minimises, as it always did.
+void TestQmlUi::theCloseButtonAndATray()
 {
 #ifdef Q_OS_MACOS
     QSKIP("macOS draws its own traffic lights");
@@ -3950,64 +3949,25 @@ void TestQmlUi::theCloseButtonMinimisesWhenThereIsATray()
     const int hides = m_desktop.hideRequests;
 
     QVERIFY2(clickWindowButton(window, "windowCloseButton"), "the window's own close button");
-    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
-    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
-    QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(root->property("closeWaitingOnMinimize").toBool(), "the ✕ waits for the answer");
-
-    emit m_desktop.minimizeSettled(window, true);
-    QVERIFY2(!root->property("closeWaitingOnMinimize").toBool(), "and is done with it");
-    QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(!m_backend.applicationClosingDown(), "a window manager that minimised has nothing left to do");
-    delete root;
-#endif
-}
-
-// Hyprland and sway have no minimise. They take the request and do nothing, the
-// window stays on screen, and the ✕ did nothing at all, again and again. Once
-// the window is seen to be still there it goes to the tray instead.
-void TestQmlUi::aWindowManagerWithNoMinimiseHidesTheWindowToTheTray()
-{
-#ifdef Q_OS_MACOS
-    QSKIP("macOS draws its own traffic lights");
+#ifdef Q_OS_LINUX
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
 #else
-    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
-    m_backend.resetShutdown();
-    m_desktop.useTray(true);
-    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
-    QObject *root = createMainWindow(m_engine);
-    QVERIFY(root);
-    auto *window = exposed(root);
-    QVERIFY(window);
-    const int hides = m_desktop.hideRequests;
-
-    QVERIFY(clickWindowButton(window, "windowCloseButton"));
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
     QCOMPARE(m_desktop.hideRequests, hides);
-
-    // Somebody else's answer is not ours.
-    QWindow other;
-    emit m_desktop.minimizeSettled(&other, false);
-    QCOMPARE(m_desktop.hideRequests, hides);
-
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QVERIFY2(!m_backend.applicationClosingDown(), "hidden to the tray, not quit");
-
-    // The next answer to a minimise nobody closed with is not another hide.
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
+#endif
+    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
     delete root;
 #endif
 }
 
 // Qt's tray.available is that a StatusNotifierWatcher is on the bus. A bar can own
 // one and show no icons, and a window hidden to that has nothing to bring it back.
-// Then it is the same as having no tray at all: ✕ quits.
+// On Linux/X11 that is the same as having no tray at all: ✕ quits. Other platforms
+// do not consult the host on this path.
 void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
 {
-#ifdef Q_OS_MACOS
-    QSKIP("macOS draws its own traffic lights");
-#else
+#ifdef Q_OS_LINUX
     const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
     m_backend.resetShutdown();
     m_desktop.useTray(true, false);
@@ -4019,11 +3979,11 @@ void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
     const int hides = m_desktop.hideRequests;
 
     QVERIFY(clickWindowButton(window, "windowCloseButton"));
-    QVERIFY(!m_backend.applicationClosingDown());
-    emit m_desktop.minimizeSettled(window, false);
     QCOMPARE(m_desktop.hideRequests, hides);
     QVERIFY2(m_backend.applicationClosingDown(), "nowhere to hide it, so it quits");
     delete root;
+#else
+    QSKIP("the tray host check is part of the X11 close path");
 #endif
 }
 
@@ -4048,7 +4008,6 @@ void TestQmlUi::theMinimiseButtonNeverHidesOrQuits()
 
     QVERIFY(clickWindowButton(window, "windowMinButton"));
     QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
-    QVERIFY(!root->property("closeWaitingOnMinimize").toBool());
     emit m_desktop.minimizeSettled(window, false);
     QCOMPARE(m_desktop.hideRequests, hides);
     QVERIFY(!m_backend.applicationClosingDown());
@@ -4079,12 +4038,10 @@ void TestQmlUi::aWindowManagersCloseIsTheCloseButton()
 
     window->close();
 #ifdef Q_OS_LINUX
-    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
     QVERIFY2(!m_backend.applicationClosingDown(), "a close from the window manager must not quit");
     QVERIFY2(window->isVisible(), "and must not close the window either: it is refused");
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QVERIFY(!m_backend.applicationClosingDown());
 #else
     QCOMPARE(m_desktop.minimizeRequests, minimises);
     QCOMPARE(m_desktop.hideRequests, hides);

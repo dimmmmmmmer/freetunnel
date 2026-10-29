@@ -81,11 +81,10 @@ compare link at the bottom of its release notes.
   escaped quote (`\"`) in it is read correctly.** Before, `\"""` was taken for
   the end of the text, and the settings after it could be misread or missed.
 - **Linux: ✕ and the desktop's own close (Alt+F4, Hyprland's killactive and
-  closewindow) now send FreeTunnel to the tray, where there is one, instead of
-  doing nothing or quitting.**
-  Hyprland and sway can't minimize: there the window hides, and the tray icon
-  brings it back. If the bar that holds the tray (waybar) is not running, ✕
-  quits, as with no tray.
+  closewindow) now hide the window to the tray immediately, where there is a
+  usable one, instead of doing nothing or quitting.**
+  The minimize button still minimizes. If the bar that holds the tray (waybar)
+  is not running, ✕ quits, as with no tray.
   A desktop that logs out by asking every window to close is refused like
   Alt+F4 is, and has to end FreeTunnel itself.
   Force-killing it (forcekillactive, xkill) still ends FreeTunnel and the VPN.

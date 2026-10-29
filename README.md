@@ -114,10 +114,9 @@ Closing the window keeps FreeTunnel and the VPN running:
 | Platform | Closing the window |
 | --- | --- |
 | Windows | ✕ minimizes the window to the taskbar. Alt+F4 quits. |
-| Linux | ✕ minimizes the window to the taskbar, and so does the desktop's own close: Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`. |
-| Linux, on a window manager with no minimize, such as Hyprland or sway | The window hides to the tray instead. The tray icon (or a second launch) brings it back. |
+| Linux (X11/XWayland) with a usable tray | ✕ and the desktop's own close (Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`) hide the window to the tray immediately. The minimize button still minimizes. |
 | macOS | The red button (or ⌘W) hides it. The menu-bar icon or the Dock brings it back. |
-| A Linux desktop with no system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
+| A Linux desktop with no usable system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
 
 To quit, choose **Quit** in the tray menu (or press Ctrl+Q, or ⌘Q on macOS).
 
