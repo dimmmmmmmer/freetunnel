@@ -57,7 +57,6 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["text_copy", "LogsPage", "Copy"]
 ["text_log_copied", "LogsPage", "Log copied"]
 ["text_subscription_links_are_not_supported_yet", "ConfigImport", "Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive."]
-["text_this_server_needs_a_newer_trusttunnel_core", "ConfigImport", "This server needs a newer TrustTunnel core than this version of FreeTunnel uses."]
 ["update_check", "SettingsPage", "Check for updates"]
 ["update_checking", "Backend", "Checking…"]
 ["update_available", "Backend", "Version %1 is available"]
@@ -132,8 +131,8 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["export_deep_link", "ConfigsPage", "Copy deep-link"]
 ["config_exported", "ConfigsPage", "Config exported — the file contains the password"]
 ["deep_link_copied", "ConfigsPage", "Deep-link copied — it contains the password, share it carefully"]
-["deep_link_failed", "ConfigsPage", "Couldn’t build deep-link"]
-["export_failed", "ConfigsPage", "Export failed"]
+["deep_link_failed", "Backend", "Couldn’t build deep-link"]
+["export_failed", "Backend", "Export failed"]
 ["config_gone", "ConfigsPage", "That configuration is no longer there."]
 ["settings_language", "SettingsPage", "Language"]
 ["settings_connect_on_startup", "SettingsPage", "Connect on startup"]
@@ -259,6 +258,8 @@ text_the_link_is_damaged
 text_the_link_contains_invalid_text
 text_the_link_contains_an_invalid_certificate
 text_the_link_contains_an_invalid_subscription_address
+## This refusal is Android-only: Android bundles TrustTunnel 1.1.7, while desktop core 1.3 supports client-random auth keys; Android refuses these rather than importing an unusable configuration.
+text_this_server_needs_a_newer_trusttunnel_core
 text_the_configuration_contains_an_invalid_certificate
 text_the_configuration_is_missing_required_server_settings
 text_storage_is_unavailable_saved_data_has_been_preserved
