@@ -116,7 +116,7 @@ jobs:
 
       - name: Install Qt (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: linux
@@ -140,7 +140,7 @@ jobs:
       # could not reach them.
       - name: Install Qt (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: mac
@@ -156,7 +156,7 @@ jobs:
 
       - name: Install Qt (Windows)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: windows
@@ -214,7 +214,7 @@ jobs:
           pip install "conan==${CONAN_VER}"
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: linux
@@ -283,7 +283,7 @@ jobs:
             dbus-x11 gnome-keyring libxcb1-dev
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: linux

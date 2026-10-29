@@ -166,7 +166,7 @@ jobs:
             libxcb1-dev
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: linux
@@ -210,7 +210,7 @@ jobs:
       # CONTRIBUTING tells developers to use. i18n-update.sh takes the tools from
       # $QT_ROOT_DIR, set here.
       - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
           host: linux
