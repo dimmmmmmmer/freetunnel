@@ -26,6 +26,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #elif defined(Q_OS_WIN)
@@ -753,16 +754,40 @@ void TestIntegrationSingleInstance::aBusyInstanceOfOursThatCatchesUpIsHandedTheL
     QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/ftsi-XXXXXX"));
     QVERIFY(dir.isValid());
     const QString own = dir.filePath(QStringLiteral("own"));
-    QVERIFY(leaveStaleSocketFile(own));
+    sockaddr_un addr{};
+    QVERIFY(unixSocketAddress(own, &addr));
+    const int listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    QVERIFY(listener >= 0);
+    auto closeListener = qScopeGuard([&]() { ::close(listener); });
+    QVERIFY(::bind(listener, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+    QVERIFY(QFile::setPermissions(own, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+
+    // A bound but not-yet-listening socket refuses connections without
+    // removing its pathname. This models the refusal while an instance catches
+    // up, and avoids a ServerNotFoundError gap in the fixture.
+    const int probe = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    QVERIFY(probe >= 0);
+    const int probeResult = ::connect(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+    const int probeError = errno;
+    ::close(probe);
+    QCOMPARE(probeResult, -1);
+    QCOMPARE(probeError, ECONNREFUSED);
+
+    struct stat beforeListen{};
+    QVERIFY(::stat(QFile::encodeName(own).constData(), &beforeListen) == 0);
     QObject instance;
     QVERIFY(freetunnel::claimInstanceName(&instance, own));
 
     QLocalServer server;
     server.setSocketOptions(QLocalServer::UserAccessOption);
     wireCollector(server);
-    QTimer::singleShot(300, this, [&server, own]() {
-        QFile::remove(own);
-        QVERIFY(server.listen(own));
+    bool adopted = false;
+    QTimer::singleShot(300, &server, [&server, listener, &adopted, &closeListener]() {
+        if (::listen(listener, 1) != 0)
+            return;
+        adopted = server.listen(listener);
+        if (adopted)
+            closeListener.dismiss();
     });
     ForwardResult sent = ForwardResult::NoInstance;
     std::thread sender([&]() {
@@ -770,6 +795,10 @@ void TestIntegrationSingleInstance::aBusyInstanceOfOursThatCatchesUpIsHandedTheL
     });
     const Received got = readOne(server, 3000);
     sender.join();
+    QVERIFY(adopted);
+    struct stat afterListen{};
+    QVERIFY(::stat(QFile::encodeName(own).constData(), &afterListen) == 0);
+    QCOMPARE(afterListen.st_ino, beforeListen.st_ino);
     QCOMPARE(sent, ForwardResult::Forwarded);
     QVERIFY(got.got);
     QCOMPARE(got.payload, QStringLiteral("freetunnel://toggle"));
