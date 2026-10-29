@@ -1,0 +1,4 @@
+<!-- Made by scripts/android-icons-from-svg.py: the desktop draws ✓ as a character of Inter (SettingsPage.qml: the update tick; Main.qml: the select popup's), and this is its outline in Inter-Regular.ttf at 14 px. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="9.6318dp" android:height="7.0273dp" android:viewportWidth="9.6318" android:viewportHeight="7.0273">
+    <path android:pathData="M0,3.6367 L0.7998,2.8164 L3.4043,5.373 L8.8047,0 L9.6318,0.8135 L3.4043,7.0273 L0,3.6367 Z" android:fillColor="#ffffff"/>
+</vector>

@@ -124,6 +124,18 @@ class UpdatePolicyTest {
             UpdatePolicy.rawPublicKey(Base64.getEncoder().encodeToString(pair.public.encoded.copyOf(43)))
         }
     }
+    @Test fun theCheckOnLaunchIsDueOnceEvery12Hours() {
+        val hour = 3_600_000L
+        val now = 1_800_000_000_000L
+        assertTrue("none was made yet", UpdatePolicy.launchCheckDue(0L, now))
+        assertFalse("just now", UpdatePolicy.launchCheckDue(now, now))
+        assertFalse("11 hours 59 minutes ago", UpdatePolicy.launchCheckDue(now - 12 * hour + 60_000L, now))
+        assertTrue("12 hours ago", UpdatePolicy.launchCheckDue(now - 12 * hour, now))
+        assertTrue("a day ago", UpdatePolicy.launchCheckDue(now - 24 * hour, now))
+        assertTrue("a clock set back is no reason to wait", UpdatePolicy.launchCheckDue(now + hour, now))
+        assertEquals(12 * hour, UpdatePolicy.LAUNCH_CHECK_INTERVAL_MS)
+    }
+
     @Test fun rateLimitDetection() {
         assertTrue(UpdatePolicy.rateLimited(429, null, null))
         assertTrue(UpdatePolicy.rateLimited(403, "0", null))

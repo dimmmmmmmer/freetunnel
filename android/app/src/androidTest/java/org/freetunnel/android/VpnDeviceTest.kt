@@ -69,8 +69,24 @@ class VpnDeviceTest {
         oldPreferences = prefs.all
         prefs.edit().clear().putBoolean("logging", false).commit()
     }
+    // A service that is up and not on its way out. A stop sent to one that is going, or to none, makes a new one for the moment it takes to be
+    // told (startForegroundService), and its onCreate cancels alert 49, which a test that comes next may have just posted.
+    private fun serviceIsUp(): Boolean {
+        val owner = serviceOwner() ?: return false
+        return !(runCatching { serviceField("destroyed").getBoolean(owner) }.getOrDefault(false))
+    }
+    // Returns once no service has been there for this long.
+    private fun noServiceFor(quietMs: Long) {
+        val deadline = SystemClock.elapsedRealtime() + 30_000
+        var since = SystemClock.elapsedRealtime()
+        while (SystemClock.elapsedRealtime() - since < quietMs) {
+            if (serviceOwner() != null) since = SystemClock.elapsedRealtime()
+            if (SystemClock.elapsedRealtime() > deadline) fail("A service is still there: ${snapshot()}")
+            SystemClock.sleep(50)
+        }
+    }
     @After fun cleanup() {
-        if (serviceOwner() != null) FreeTunnelVpnService.stop(context)
+        if (serviceIsUp()) FreeTunnelVpnService.stop(context)
         eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
         val editor = prefs.edit().clear()
         oldPreferences.forEach { (key, value) -> when (value) {
@@ -166,11 +182,27 @@ class VpnDeviceTest {
         assertEquals(json, ConfigStore.read(isolated))
         isolated.edit().clear().commit()
     }
+    private fun splitStore() = SplitPrefs(prefs)
+    private fun profiles() = SplitStore.load(splitStore(), null)
+    // The rules of a plan's TOML, the destinations the core is told about.
+    private fun exclusions(toml: String): List<Any> = org.tomlj.Toml.parse(toml).getArray("exclusions")!!.toList()
+
     @Test fun staleAppRulesFallBackToFullVpnWithWarning() {
-        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true)
-            .putStringSet("apps", setOf("not.installed.package", context.packageName)).commit()
-        val plan = RoutingConfig.prepare(context, source)
+        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        SplitStore.edit(splitStore(), null) { p -> p.addApp("Default", "not.installed.package"); p.addApp("Default", context.packageName) }
+        val plan = RoutingConfig.prepare(context, source, "Default")
         assertTrue(plan.apps.isEmpty()); assertFalse(plan.allowApps); assertNotNull(plan.warning)
+        // The profile keeps the application that is gone, which is how it can be taken out of the list.
+        assertTrue(profiles().apps("Default").contains("not.installed.package"))
+    }
+    @Test fun anotherProfilesApplicationsDoNotCountForAConfig() {
+        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        val other = context.packageManager.getInstalledApplications(0).map { it.packageName }.first { it != context.packageName }
+        SplitStore.edit(splitStore(), null) { p -> p.add("Work"); p.addApp("Work", other) }
+        val used = RoutingConfig.prepare(context, source, "Work")
+        assertEquals(listOf(other), used.apps); assertTrue(used.allowApps)
+        val unused = RoutingConfig.prepare(context, source, "Default")
+        assertTrue("Default lists none", unused.apps.isEmpty()); assertNotNull("so Through VPN has nothing", unused.warning)
     }
     @Test fun replacesTunWithoutDisconnectedStateAndBlocksUnsupportedIpv6() {
         assertNull("Grant ACTIVATE_VPN before running device tests", VpnService.prepare(context))
@@ -366,6 +398,94 @@ class VpnDeviceTest {
         assertNull(serviceOwner())
     }
 
+    // The desktop sends an error to its tray only while its window is not in view (Main.qml, errorsGoToTray) and never puts a system message
+    // over its own open window. The alert of a blocked connection is posted without a sound or a pop-over while the app is on the screen, whose
+    // Home already says it and offers Reconnect, and alerts as before when it is not.
+    @Test fun theBlockedAlertDoesNotPopOverTheOpenApp() {
+        FreeTunnelVpnService.setAppVisible(true)
+        try {
+            FreeTunnelVpnService.start(context, source)
+            eventually { network() != null && nativeClient() != null }
+            inject(nativeClient()!!, 0)
+            eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
+            assertEquals("Silent while the app is on the screen", "silent", alertKind())
+        } finally {
+            FreeTunnelVpnService.setAppVisible(false)
+            FreeTunnelVpnService.stop(context)
+            eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
+            eventually { alert(49) == null && serviceOwner() == null }
+        }
+    }
+
+    // A failure that ends the connection (the config is refused, say) is a notice in the shade, which alerts when the app is away. While the app
+    // is on the screen it is silent, and the reason is sent to the app, which says it in its toast as the desktop's window does (Main.qml:
+    // toast.show, with the tray told as well only when the window is not in view); with the app away nothing is sent.
+    @Test fun aFailureIsSentToTheOpenAppAndAlertsOnlyWhenTheAppIsAway() {
+        fun kind() = alert(48)?.notification?.let {
+            if (it.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY) "silent" else "alerting"
+        } ?: "none"
+        fun gone() = eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
+        val reasons = ConcurrentLinkedQueue<String>()
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) { intent.getStringExtra(FreeTunnelVpnService.EXTRA_REASON)?.let { reasons.add(it) } }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter(FreeTunnelVpnService.ACTION_FAILURE),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        try {
+            FreeTunnelVpnService.setAppVisible(true)
+            FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
+            eventually { alert(48) != null && reasons.isNotEmpty() }
+            assertEquals("Silent while the app is on the screen", "silent", kind())
+            assertEquals("and the app is told what the notice says", alert(48)!!.notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString(),
+                reasons.first())
+            gone()
+            context.getSystemService(android.app.NotificationManager::class.java).cancel(48)
+            reasons.clear()
+            FreeTunnelVpnService.setAppVisible(false)
+            FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
+            eventually { alert(48) != null }
+            SystemClock.sleep(500)
+            assertEquals("It alerts when the app is away", "alerting", kind())
+            assertTrue("and tells no app: $reasons", reasons.isEmpty())
+        } finally {
+            context.unregisterReceiver(receiver)
+            FreeTunnelVpnService.setAppVisible(false)
+            FreeTunnelVpnService.stop(context)
+            gone()
+        }
+    }
+
+    // The time Home shows under the logo counts from when the connection last became connected: nothing before the first 2, a repeated 2 changes
+    // nothing, the next 2 after the core recovered starts again, as the desktop restarts its timer, and a stop clears it.
+    @Test fun theSessionStartIsWhenTheConnectionLastCameUp() = withSink { config ->
+        assertEquals("No session before a connection", 0L, FreeTunnelVpnService.sessionStart())
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        awaitWorker()
+        val first = nativeClient()!!
+        assertEquals("Connecting is no session", 0L, FreeTunnelVpnService.sessionStart())
+        val before = SystemClock.elapsedRealtime()
+        reportConnected(first)
+        val started = FreeTunnelVpnService.sessionStart()
+        assertTrue("A 2 starts it: $started after $before", started >= before && started <= SystemClock.elapsedRealtime())
+        // The same 2 again is not a new connection.
+        SystemClock.sleep(50)
+        inject(first, 2)
+        awaitWorker()
+        assertEquals(started, FreeTunnelVpnService.sessionStart())
+        // The core recovering is not connected; its next 2 is a new connection.
+        inject(first, 3)
+        awaitWorker()
+        assertEquals("Recovering is not a session", 0L, FreeTunnelVpnService.sessionStart())
+        SystemClock.sleep(20)
+        inject(first, 2)
+        awaitWorker()
+        assertTrue("A new 2 starts it again", FreeTunnelVpnService.sessionStart() > started)
+        FreeTunnelVpnService.stop(context)
+        eventually { FreeTunnelVpnService.state(context) == 0 }
+        assertEquals("A stop clears it", 0L, FreeTunnelVpnService.sessionStart())
+    }
+
     @Test fun fatalDisconnectReconnectsAutomaticallyOnTheKeptTun() = withSink { config ->
         prefs.edit().putBoolean("logging", true).commit()
         log.delete()
@@ -385,6 +505,9 @@ class VpnDeviceTest {
                 assertEquals("The first alert of an episode alerts", android.app.Notification.GROUP_ALERT_ALL,
                     blocked.notification.groupAlertBehavior)
                 eventually { logged(lostReason) == 1 }
+                // The line is the desktop's: date and time, a level (a warning here, traffic is blocked) and the message, with tabs between.
+                val warning = log.readLines().first { lostReason in it }
+                assertTrue(warning, Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\tWARN\t" + Regex.escape(lostReason) + ".*").matches(warning))
                 // The first delay is about 1 s.
                 val second = nextClient(first)
                 // Neither the attempt nor the core's own Connecting may show.
@@ -408,6 +531,7 @@ class VpnDeviceTest {
                 assertEquals("Attempts must not broadcast: $states", broadcasts, states.size)
                 reportConnected(third)
                 assertEquals(1, logged("Reconnected automatically"))
+                assertTrue("at INFO", "\tINFO\tReconnected automatically" in log.readLines().first { "Reconnected automatically" in it })
             }
             assertEquals("The TUN must stay up through the attempts", 0, gaps)
             assertEquals(name, tunName())
@@ -511,6 +635,9 @@ class VpnDeviceTest {
         // What a process killed while blocked leaves behind: alert 49 and no service.
         val manager = context.getSystemService(android.app.NotificationManager::class.java)
         manager.createNotificationChannel(android.app.NotificationChannel("stale-alert-test", "Test", android.app.NotificationManager.IMPORTANCE_LOW))
+        // The test before this one may have a service on its way (see serviceIsUp), whose start cancels alert 49 and which was seen to
+        // do so to this alert: the process has none when the alert of a killed one is left behind.
+        noServiceFor(1_500)
         manager.notify(49, android.app.Notification.Builder(context, "stale-alert-test").setSmallIcon(android.R.drawable.ic_dialog_alert).build())
         eventually { alert(49) != null }
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
@@ -522,41 +649,48 @@ class VpnDeviceTest {
         }
     }
 
-    @Test fun blockedHomeScreenOffersReconnect() = withSink { config ->
+    // The desktop's Home has no control to reconnect now: while its tunnel reconnects it says Connecting… and the logo is the one control.
+    // Here the service reconnects by itself with its backoff (the next try is far off, so that only a tap could end this), Home says
+    // the same, keeps the alert of the live episode, and a tap on the logo disconnects, as it does a tunnel that is up or connecting.
+    @Test fun blockedHomeScreenSaysConnectingHasNoReconnectAndTheLogoDisconnects() = withSink { config ->
         FreeTunnelVpnService.start(context, config)
         eventually { network() != null && tunName() != null && nativeClient() != null }
-        // Only the button may start the next connection here.
         useBackoff(ReconnectBackoff(600_000, 600_000))
         inject(nativeClient()!!, 0)
         eventually { FreeTunnelVpnService.state(context) == 6 && alert(49) != null }
-        val name = tunName()
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-        fun reconnectButton(): android.widget.Button? {
-            var found: android.widget.Button? = null
-            instrumentation.runOnMainSync { found = activity.window.decorView.findViewWithTag("home:reconnect") }
+        fun home(tag: String): android.view.View? {
+            var found: android.view.View? = null
+            instrumentation.runOnMainSync { found = activity.window.decorView.findViewWithTag(tag) }
             return found
         }
-        val (states, receiver) = recordStates()
         try {
             instrumentation.waitForIdleSync()
             // Long enough for a cancel from onResume to take effect.
             SystemClock.sleep(500)
             assertNotNull("Opening the app must keep the alert of a live episode", alert(49))
-            val button = reconnectButton()
-            assertNotNull("State 6 must offer Reconnect on the home screen", button)
-            assertEquals(context.getString(R.string.vpn_reconnect), button!!.text.toString())
-            val gaps = tunGaps {
-                instrumentation.runOnMainSync { assertTrue(button.performClick()) }
-                // An explicit Reconnect establishes a new TUN. Android hands the
-                // same VPN network over to it, so the interface is what changes.
-                eventually { tunName().let { it != null && it != name } }
-                eventually { reconnectButton() == null }
+            val status = home("home:status") as android.widget.TextView?
+            assertNotNull("State 6 shows the line under the logo", status)
+            assertEquals("and it says what the desktop's Home says while it reconnects",
+                context.getString(R.string.text_connecting), status!!.text.toString())
+            var extras = -1
+            instrumentation.runOnMainSync {
+                val page = MainActivity::class.java.getDeclaredField("pageRoot").apply { isAccessible = true }.get(activity) as android.view.ViewGroup
+                // A link that is a control of its own. The selector's name is a Ui.LinkText too, inside the selector, which is the control
+                // (focusable and clicked; the name is neither), so it does not count.
+                fun count(view: android.view.View): Int =
+                    (if (view.isShown && (view is android.widget.Button || view is Ui.LinkText && (view.isFocusable || view.isClickable))) 1 else 0) +
+                    (if (view is android.view.ViewGroup) (0 until view.childCount).sumOf { count(view.getChildAt(it)) } else 0)
+                extras = count(page)
             }
-            assertEquals("The explicit Reconnect must hand over without a gap", 0, gaps)
-            assertNotEquals(0, FreeTunnelVpnService.state(context))
-            assertFalse("Reconnect must never publish disconnected", states.contains(0))
+            assertEquals("Home has no link or button of its own to reconnect now", 0, extras)
+            // The logo disconnects: the tunnel is released and the alert goes with the episode.
+            val logo = home("home:toggle")
+            assertNotNull(logo)
+            instrumentation.runOnMainSync { assertTrue(logo!!.performClick()) }
+            eventually { FreeTunnelVpnService.state(context) == 0 }
+            eventually { alert(49) == null }
         } finally {
-            context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }
         }
     }
@@ -577,13 +711,38 @@ class VpnDeviceTest {
         eventually { network() == null }
     }
 
+    // 1.0.0's one list of domains becomes Default's, and the rules an older preview let be saved that the core cannot use are
+    // dropped from it, once, with the notice, as they were from the one list.
     @Test fun legacyRulesAreMigratedWithoutBreakingAlwaysOnPreparation() {
         prefs.edit().putBoolean("split_enabled", true)
             .putStringSet("domains", setOf("intranet", "example.com:443", "example.com", "10.0.0.0/8")).commit()
-        val plan = RoutingConfig.prepare(context, source)
+        val plan = RoutingConfig.prepare(context, source, "Default")
+        assertEquals(listOf("10.0.0.0/8", "example.com"), profiles().domains("Default"))
+        assertEquals(listOf("10.0.0.0/8", "example.com"), exclusions(plan.toml))
+        // The old list, which 1.0.0 reads, is the same.
         assertEquals(setOf("example.com", "10.0.0.0/8"), prefs.getStringSet("domains", emptySet()))
         assertTrue(prefs.getBoolean("rules_migrated", false))
         NativeConfigValidator.validate(context, plan.toml)
+    }
+    @Test fun legacyRulesOfAnotherProfileAreDroppedWhenThatProfileIsUsed() {
+        prefs.edit().putBoolean("split_enabled", true).putString(SplitStore.KEY,
+            """{"profiles":[{"name":"Default","domains":["home.example"]},{"name":"Work","domains":["bad:1","work.example"]}]}""").commit()
+        val plan = RoutingConfig.prepare(context, source, "Default")
+        assertEquals(listOf("home.example"), exclusions(plan.toml))
+        assertFalse("Default had nothing to drop", prefs.getBoolean("rules_migrated", false))
+        assertEquals(listOf("bad:1", "work.example"), profiles().domains("Work"))
+        val work = RoutingConfig.prepare(context, source, "Work")
+        assertEquals(listOf("work.example"), exclusions(work.toml))
+        assertTrue(prefs.getBoolean("rules_migrated", false))
+        assertEquals(listOf("work.example"), profiles().domains("Work"))
+        NativeConfigValidator.validate(context, work.toml)
+    }
+    // A new installation is not made by the VPN: with nothing saved, the service is given no recommended list, and builds from what there is.
+    @Test fun theServiceNeverMakesANewInstallationsDefaults() {
+        val plan = RoutingConfig.prepare(context, source, "Default")
+        assertTrue(exclusions(plan.toml).isEmpty())
+        assertFalse("split tunnelling is not turned on behind the app's back", prefs.contains("split_enabled"))
+        assertTrue(profiles().domains("Default").isEmpty())
     }
 
     @Test fun validationUsesPrivateIsolatedProcessAndExitsAfterEachRequest() {
@@ -611,17 +770,27 @@ class VpnDeviceTest {
                 MainActivity::class.java.getDeclaredMethod("editConfig", Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(activity, 0)
             }
             instrumentation.waitForIdleSync()
-            fun click(buttonId: Int) {
+            // The editor is an overlay of the activity's own window, its buttons found by their tags.
+            fun click(key: String) {
                 instrumentation.runOnMainSync {
-                    val button = android.view.inspector.WindowInspector.getGlobalWindowViews()
-                        .mapNotNull { it.findViewById<android.widget.Button>(buttonId) }.lastOrNull()
-                    assertNotNull("Dialog action must exist", button)
+                    val button = activity.window.decorView.findViewWithTag<android.view.View?>(key)
+                    assertNotNull("The editor's $key must exist", button)
                     assertTrue(button!!.performClick())
                 }
                 instrumentation.waitForIdleSync()
             }
-            click(android.R.id.button1)
-            click(android.R.id.button2)
+            // Save of an editor in which nothing changed writes nothing and closes it (as the desktop's does), so the form is changed first. Save
+            // then starts a check, which waits behind the gate; Cancel asks whether to discard what was changed, and Discard closes the editor,
+            // and the check with it. The question takes no answer for the first 400 ms.
+            instrumentation.runOnMainSync {
+                val host = activity.window.decorView.findViewWithTag<android.widget.EditText?>("editor:host")
+                assertNotNull("The editor's editor:host must exist", host)
+                host!!.setText("other.example.com")
+            }
+            click("editor:save")
+            click("editor:cancel")
+            android.os.SystemClock.sleep(500)
+            click("confirm:ok")
             instrumentation.runOnMainSync {
                 val configs = MainActivity::class.java.getDeclaredField("configs").apply { isAccessible = true }.get(activity) as MutableList<*>
                 configs.removeAt(0)
@@ -658,75 +827,154 @@ class VpnDeviceTest {
         instrumentation.runOnMainSync { try { block() } catch (t: Throwable) { failure = t } }
         failure?.let { throw it }
     }
-    // Opens one of MainActivity's dialogs on the main thread, hands check the dialog's
-    // window and the view MainActivity put in it, and closes the dialog with Cancel.
-    private fun inDialog(start: () -> Unit, check: (android.view.View, android.view.ViewGroup) -> Unit) {
+    // Opens one of MainActivity's overlays on the main thread, hands check the overlay's layer in the activity's own window,
+    // and closes it with Back (until the keyboard is away and the overlay with it), which asks nothing of an editor in which nothing was typed.
+    private fun inOverlay(activity: MainActivity, name: String, start: () -> Unit, check: (android.view.ViewGroup) -> Unit) {
         onMain { start() }
         instrumentation.waitForIdleSync()
         onMain {
-            val window = android.view.inspector.WindowInspector.getGlobalWindowViews()
-                .last { it.findViewById<android.view.View>(android.R.id.custom) != null }
-            try { check(window, window.findViewById<android.view.ViewGroup>(android.R.id.custom)) }
-            finally { window.findViewById<android.widget.Button>(android.R.id.button2)?.performClick() }
+            val layer = activity.window.decorView.findViewWithTag<android.view.ViewGroup?>("overlay:$name")
+            assertNotNull("The $name must be an overlay of the activity's window", layer)
+            check(layer!!)
         }
-        instrumentation.waitForIdleSync()
+        // With the soft keyboard up, which the app picker puts up on a phone (the CI emulator has no hardware keyboard), the first Back only
+        // takes the keyboard away, as for any app: Back is sent until the overlay is gone, three times at most.
+        repeat(3) {
+            var open = false
+            onMain { open = activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name") != null }
+            if (!open) return@repeat
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            instrumentation.waitForIdleSync()
+        }
+        onMain { assertNull("Back must close the $name", activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name")) }
     }
 
+    // The editor holds the password, and the server and the user name with it: a keyboard is asked not to go full screen in landscape (its
+    // own copy of the text would be outside FLAG_SECURE), not to copy the text into one if it does, and not to learn from it.
     @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
-    @Test fun editorKeepsTheTomlOutOfTheKeyboardsFullScreenView() {
+    @Test fun editorKeepsItsFieldsOutOfTheKeyboardsFullScreenView() {
         withMainActivity { activity ->
-            inDialog({ privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) }) { _, content ->
-                val toml = descendants(content).filterIsInstance<android.widget.EditText>()
-                    .single { it.inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0 }
-                // What a keyboard is given when the field takes focus.
-                val info = android.view.inputmethod.EditorInfo()
-                assertNotNull(toml.onCreateInputConnection(info))
-                assertTrue("The keyboard must be asked not to go full screen",
-                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN != 0)
-                assertTrue("The TOML must not be copied into a full-screen keyboard",
-                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
-                assertTrue("The keyboard must be asked not to learn from the TOML",
-                    info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
+            inOverlay(activity, "editor", { privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) }) { content ->
+                val fields = descendants(content).filterIsInstance<android.widget.EditText>().toList()
+                assertTrue("The editor's fields: ${fields.map { it.tag }}", fields.size >= 9)
+                assertTrue("including the password", fields.any { it.tag == "editor:password" })
+                for (field in fields) {
+                    // What a keyboard is given when the field takes focus.
+                    val info = android.view.inputmethod.EditorInfo()
+                    assertNotNull(field.onCreateInputConnection(info))
+                    assertTrue("${field.tag}: the keyboard must be asked not to go full screen",
+                        info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN != 0)
+                    assertTrue("${field.tag}: the text must not be copied into a full-screen keyboard",
+                        info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
+                    assertTrue("${field.tag}: the keyboard must be asked not to learn from it",
+                        info.imeOptions and android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
+                }
             }
         }
     }
 
-    // The light theme colours only the activity. AlertDialog.Builder(this) keeps
-    // Theme.Material's dark dialog in both themes, so the text, hints and check boxes
-    // MainActivity puts in a dialog have to be light in both.
+    // The fill a control rests on, when it has one that covers: the colour its own text is read against.
+    private fun restFill(view: android.view.View): Int? {
+        val states = view.background as? android.graphics.drawable.StateListDrawable ?: return null
+        states.setState(intArrayOf())
+        val drawable = states.current as? android.graphics.drawable.GradientDrawable ?: return null
+        val color = drawable.color?.defaultColor ?: return null
+        return if (android.graphics.Color.alpha(color) == 255) color else null
+    }
+
+    // Every overlay is drawn in the theme's own colours on its own card, which is the theme's bg in the theme in use: what is in
+    // it has to read against that, in both themes. Text takes its colour from the theme's tokens and is at least 4.5:1 against what
+    // it is on (3 on the desktop's red button, which is white on #e06a6a in its dark theme); the desktop's textFaint, which is what
+    // its placeholders and an application's package are in, is lighter by design, and is held to what its own palette gives:
+    // 3.2 dark and 2.3 light on the card, 3.4 and 1.9 on a field.
     @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
-    @Test fun dialogTextIsReadableInBothThemes() {
+    @Test fun overlayTextIsReadableAgainstTheOverlaysOwnBackgroundInBothThemes() {
+        val profiles = org.json.JSONArray().put(org.json.JSONObject().put("name", "Profile A").put("toml", source))
+        assertTrue(ConfigStore.write(prefs, profiles.toString()))
         withMainActivity { activity ->
-            val dialogs = listOf<() -> Unit>(
-                { privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) },
-                { privateMethod("appPicker").invoke(activity) })
+            val overlays = listOf("editor" to { privateMethod("editConfig", Int::class.javaPrimitiveType).invoke(activity, -1) },
+                "picker" to { privateMethod("appPicker").invoke(activity) },
+                "confirm" to { privateMethod("confirmRemove", Int::class.javaPrimitiveType).invoke(activity, 0) })
             for (dark in listOf(false, true)) {
+                val theme = Theme.of(dark)
+                val which = if (dark) "dark" else "light"
+                // The setting, then a render(), which is what makes a theme the one the controls are drawn in.
                 onMain {
-                    MainActivity::class.java.getDeclaredField("dark").apply { isAccessible = true }.setBoolean(activity, dark)
+                    MainActivity::class.java.getDeclaredField("themeMode").apply { isAccessible = true }.set(activity, which)
+                    privateMethod("render").invoke(activity)
                 }
-                for (start in dialogs) inDialog(start) { window, content ->
-                    val attributes = window.context.obtainStyledAttributes(intArrayOf(android.R.attr.colorBackground))
-                    val background = try { attributes.getColor(0, android.graphics.Color.TRANSPARENT) } finally { attributes.recycle() }
-                    assertTrue("Dialogs are expected to stay dark in both themes",
-                        androidx.core.graphics.ColorUtils.calculateLuminance(background) < 0.2)
-                    val texts = descendants(content).filterIsInstance<android.widget.TextView>().filter { it.isShown }.toList()
-                    assertFalse("The dialog shows no text to check", texts.isEmpty())
+                val tokens = listOf(theme.text, theme.textDim, theme.textFaint, theme.accent, theme.accentText, theme.danger, theme.onDanger)
+                for ((name, start) in overlays) inOverlay(activity, name, { start() }) { layer ->
+                    val card = layer.getChildAt(1)
+                    val background = (card.background as android.graphics.drawable.GradientDrawable).color!!.defaultColor
+                    assertEquals("The $name's own background is the theme's bg, in the $which theme", theme.bg, background)
+                    val texts = descendants(layer).filterIsInstance<android.widget.TextView>().filter { it.isShown }.toList()
+                    assertFalse("The $name shows no text to check", texts.isEmpty())
                     for (text in texts) {
-                        val where = "\"${text.hint ?: text.text}\" in the ${if (dark) "dark" else "light"} theme"
-                        val contrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentTextColor, background)
-                        assertTrue("$where: contrast $contrast", contrast >= 4.5)
-                        // Hints are drawn lighter on purpose, and an empty editor shows only
-                        // its hints. 3:1 is the minimum for them and for the check boxes.
-                        if (text.hint != null) {
-                            val hintContrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentHintTextColor, background)
-                            assertTrue("$where: hint contrast $hintContrast", hintContrast >= 3.0)
+                        val where = "\"${text.hint ?: text.text}\" in the $name, in the $which theme"
+                        val fill = restFill(text)
+                        val under = fill ?: background
+                        val color = text.currentTextColor
+                        assertTrue("$where: ${Integer.toHexString(color)} is no colour of this theme", color in tokens)
+                        val floor = when {
+                            color == theme.textFaint -> if (dark) 3.2 else 2.3
+                            fill != null && color == theme.onDanger -> 3.0
+                            else -> 4.5
                         }
-                        val tint = (text as? android.widget.CompoundButton)?.buttonTintList ?: continue
-                        val boxContrast = androidx.core.graphics.ColorUtils.calculateContrast(tint.defaultColor, background)
-                        assertTrue("$where: check box contrast $boxContrast", boxContrast >= 3.0)
+                        val contrast = androidx.core.graphics.ColorUtils.calculateContrast(color, under)
+                        assertTrue("$where: contrast $contrast", contrast >= floor)
+                        if (text.hint != null) {
+                            assertEquals("$where: its hint is textFaint", theme.textFaint, text.currentHintTextColor)
+                            val hintContrast = androidx.core.graphics.ColorUtils.calculateContrast(text.currentHintTextColor, fill ?: background)
+                            assertTrue("$where: hint contrast $hintContrast", hintContrast >= if (dark) 3.4 else 1.9)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // Receive from phone takes several texts to a session. The VPN runs the config "Home"; the first text has that name, so the TV offers Replace, and a
+    // second waits behind it. Answering Replace builds the VPN again on the new text, though the second text's check starts the moment the first is
+    // answered: a check of a text to add is not what makes that rebuild stale (it was one number for both, and the later check dropped the
+    // earlier answer, which left the VPN on the old server while the list showed the new). The second is then asked about, not lost.
+    @Test fun replacingTheRunningConfigRebuildsTheVpnWhileTheNextTextIsChecked() = withSink { config ->
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val saved = org.json.JSONArray().put(org.json.JSONObject().put("name", "Home").put("toml", config))
+        assertTrue(ConfigStore.write(prefs, saved.toString()))
+        FreeTunnelVpnService.start(context, config)
+        eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1350 } == true && nativeClient() != null && FreeTunnelVpnService.state(context) != 0 }
+        withMainActivity { activity ->
+            fun onScreen(key: String): Boolean {
+                var found = false
+                onMain { found = activity.window.decorView.findViewWithTag<android.view.View?>(key) != null }
+                return found
+            }
+            fun message(): String? {
+                var shown: String? = null
+                onMain { shown = activity.window.decorView.findViewWithTag<android.widget.TextView?>("confirm:message")?.text?.toString() }
+                return shown
+            }
+            val queue = MainActivity::class.java.getDeclaredField("receivedTexts").apply { isAccessible = true }.get(activity) as ReceivedQueue
+            onMain {
+                // The activity read the state when it was made; the receiver that keeps it is told of changes as they come.
+                MainActivity::class.java.getDeclaredField("vpnState").apply { isAccessible = true }.setInt(activity, FreeTunnelVpnService.state(context))
+                queue.waiting().addAndGet(2)
+                queue.add(config.replace("1350", "1300"), "Home", "192.0.2.9")
+                queue.add(config.replace("1350", "1250"), "Second", "192.0.2.9")
+                privateMethod("processReceived").invoke(activity)
+            }
+            eventually { message()?.contains(context.getString(R.string.import_exists, "Home")) == true }
+            // The red Replace takes no click for its first 400 ms.
+            SystemClock.sleep(600)
+            onMain { assertTrue(activity.window.decorView.findViewWithTag<android.view.View>("confirm:ok").performClick()) }
+            eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1300 } == true }
+            assertTrue("The list shows the replacement", ConfigStore.read(prefs).contains("1300"))
+            // And the second text, which was checked while the VPN was being built again, is asked about.
+            eventually { message()?.contains(context.getString(R.string.import_question_file)) == true }
+            assertTrue(onScreen("confirm:cancel"))
+            onMain { activity.window.decorView.findViewWithTag<android.view.View>("confirm:cancel").performClick() }
+            eventually { !onScreen("confirm:cancel") }
         }
     }
 
@@ -743,7 +991,8 @@ class VpnDeviceTest {
             context.startForegroundService(Intent(context, FreeTunnelVpnService::class.java))
             val cm = context.getSystemService(ConnectivityManager::class.java)
             eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1200 } == true }
-            assertNotEquals(0, FreeTunnelVpnService.state(context))
+            // The tunnel is up before the core is made and the state says connecting: the one is read, then the other is waited for.
+            eventually { FreeTunnelVpnService.state(context) != 0 }
         } finally {
             FreeTunnelVpnService.stop(context)
             sink.close(); accepting.join(500); sockets.forEach { it.close() }
@@ -810,6 +1059,64 @@ class VpnDeviceTest {
         (FreeTunnelVpnService::class.java.getDeclaredField("worker").apply { isAccessible = true }.get(owner)
             as java.util.concurrent.ExecutorService).submit {}.get(30, java.util.concurrent.TimeUnit.SECONDS)
     }
+    // The app, the tile and Android's Always-on run the config the app has selected, and each builds the session from the rules of the
+    // split profile that config uses: here "Work", where the other config uses Default.
+    private fun activePlanToml(): String {
+        val plan = serviceField("activePlan").get(serviceOwner()) as RoutingConfig.Plan
+        return plan.toml
+    }
+    @Test fun theTileAndAlwaysOnRunTheProfileOfTheSelectedConfig() = withSink { config ->
+        val saved = org.json.JSONArray()
+            .put(org.json.JSONObject().put("name", "Home").put("toml", source))
+            .put(org.json.JSONObject().put("name", "Office").put("toml", config).put("profile", "Work"))
+        assertTrue(ConfigStore.write(prefs, saved.toString()))
+        prefs.edit().putInt("active", 1).putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { p ->
+            p.addDomains("Default", "home-only.example")
+            p.add("Work"); p.addDomains("Work", "work-only.example")
+        }
+        // The tile and the consent screen: the selected config, with its profile.
+        val selected = SavedProfile.selected(prefs)
+        assertEquals("Work", selected.profile)
+        assertEquals(listOf("work-only.example"), exclusions(RoutingConfig.prepare(context, selected.toml, selected.profile).toml))
+        FreeTunnelVpnService.start(context, selected.toml, selected.profile)
+        eventually { network() != null && nativeClient() != null }
+        assertEquals(listOf("work-only.example"), exclusions(activePlanToml()))
+        FreeTunnelVpnService.stop(context)
+        eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
+        // Always-on: Android starts the service with nothing in the start but the service's own action.
+        context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java))
+        eventually { network() != null && nativeClient() != null }
+        assertEquals("Always-on builds with the profile of the selected config", listOf("work-only.example"), exclusions(activePlanToml()))
+        FreeTunnelVpnService.stop(context)
+        eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
+        // With the other config selected, the same two starts use Default.
+        prefs.edit().putInt("active", 0).commit()
+        val home = SavedProfile.selected(prefs)
+        assertEquals("Default", home.profile)
+        context.startForegroundService(Intent(VpnService.SERVICE_INTERFACE).setClass(context, FreeTunnelVpnService::class.java))
+        eventually { network() != null && nativeClient() != null }
+        assertEquals(listOf("home-only.example"), exclusions(activePlanToml()))
+    }
+    // A start that says nothing of a profile, as every start in these tests does, uses the selected config's.
+    @Test fun aStartWithoutAProfileUsesTheSelectedConfigs() = withSink { config ->
+        val saved = org.json.JSONArray().put(org.json.JSONObject().put("name", "Office").put("toml", config).put("profile", "Work"))
+        assertTrue(ConfigStore.write(prefs, saved.toString()))
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { p -> p.addDomains("Default", "home-only.example"); p.add("Work"); p.addDomains("Work", "work-only.example") }
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        assertEquals(listOf("work-only.example"), exclusions(activePlanToml()))
+    }
+    @Test fun aProfileThatIsGoneIsDefaultForTheService() = withSink { config ->
+        val saved = org.json.JSONArray().put(org.json.JSONObject().put("name", "Office").put("toml", config).put("profile", "Deleted"))
+        assertTrue(ConfigStore.write(prefs, saved.toString()))
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { p -> p.addDomains("Default", "home-only.example") }
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        assertEquals(listOf("home-only.example"), exclusions(activePlanToml()))
+    }
     @Test fun resumeAndAlwaysOnStartLeaveRunningClientAlone() {
         val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
         val sockets = ConcurrentLinkedQueue<Socket>()
@@ -848,5 +1155,35 @@ class VpnDeviceTest {
         FreeTunnelVpnService.start(context, source.replace("has_ipv6 = false", "has_ipv6 = false\nclient_random = \"abcd/\""))
         eventually { context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == 48 } }
         eventually { network() == null && FreeTunnelVpnService.state(context) == 0 }
+    }
+
+    // Each connection the core reports is a line of the log at INFO, as the desktop logs its connection info: one line, whatever the core
+    // sends, written in the format the Logs page reads; and with logging off nothing is written.
+    @Test fun theCoresConnectionInfoIsLoggedAtInfoAndOnlyWithLoggingOn() = withSink { config ->
+        prefs.edit().putBoolean("logging", true).commit()
+        log.delete()
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        awaitWorker()
+        val client = nativeClient()!!
+        val info = client.javaClass.getDeclaredMethod("onConnectionInfo", String::class.java).apply { isAccessible = true }
+        try {
+            info.invoke(client, "tunnel example.test")
+            eventually { logged("tunnel example.test") == 1 }
+            val line = log.readLines().first { "tunnel example.test" in it }
+            assertTrue(line, Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\tINFO\ttunnel example\\.test").matches(line))
+            // A message of several lines is one line of the log, and cannot pass for a second entry.
+            info.invoke(client, "bypass a.test\nERROR\tforged")
+            eventually { logged("bypass a.test") == 1 }
+            assertEquals(1, logged("bypass a.test ERROR forged"))
+            prefs.edit().putBoolean("logging", false).commit()
+            info.invoke(client, "tunnel off.test")
+            SystemClock.sleep(300)
+            assertEquals("nothing is written with logging off", 0, logged("off.test"))
+        } finally {
+            FreeTunnelVpnService.stop(context)
+            eventually { FreeTunnelVpnService.state(context) == 0 }
+            log.delete()
+        }
     }
 }

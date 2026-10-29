@@ -1,9 +1,17 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
+        <!-- Inter Regular, the typeface of both apps (res/font: the build copies assets/fonts/inter there). Every view Ui builds is given its
+             face by Fonts, the one place the code gets Inter and Medium from; this is for text that nothing sets. -->
+        <item name="android:fontFamily">@font/inter_regular</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">#181818</item>
         <item name="android:navigationBarColor">#181818</item>
         <item name="android:windowActionModeOverlay">true</item>
+        <!-- The system's teal is in no palette of the app. A text cursor and the handles of a selection take a neutral grey, and a cursor
+             with no drawable of its own is a line in the text colour, as the desktop's is; Ui.field sets a drawable of the same look on
+             Android 10 and later, which is a dp wide. -->
+        <item name="android:colorAccent">#8A8A8A</item>
+        <item name="android:colorControlActivated">#8A8A8A</item>
+        <item name="android:textCursorDrawable">@null</item>
     </style>
 </resources>

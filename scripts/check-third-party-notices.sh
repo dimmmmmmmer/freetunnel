@@ -80,8 +80,9 @@ while IFS= read -r coordinate; do
   [ -n "$coordinate" ] || continue
   need "an Android dependency (android/app/build.gradle)" "$coordinate"
 done <<< "$coordinates"
+# (its name is the one line `def coreAar = '...'`, from which build.gradle also reads the core's version)
 need "the TrustTunnel AAR (android/app/build.gradle)" \
-  "$(sed -nE "s/.*files\('libs\/([^']+\.aar)'\).*/\1/p" android/app/build.gradle | head -n 1)"
+  "$(sed -nE "s/^def coreAar = '([^']+\.aar)'.*/\1/p" android/app/build.gradle | head -n 1)"
 
 if [ "$fail" -ne 0 ]; then
   echo "third-party-notices: update $notices (and licenses/) for the change" >&2

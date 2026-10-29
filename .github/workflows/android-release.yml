@@ -234,6 +234,8 @@ jobs:
         run: ./gradlew --no-daemon :app:assembleRelease
       - name: The APK carries the third-party notices
         run: bash scripts/check-apk-notices.sh android/app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: The APK carries the shared data and the fonts
+        run: bash scripts/check-apk-data.sh android/app/build/outputs/apk/release/app-release-unsigned.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-release-unsigned

@@ -26,21 +26,26 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A one-time web page on the local network that takes a link or a TOML file from a
- * phone's browser, for a TV, which has no camera to scan a QR code and no keyboard
- * to type a link. The TV shows a QR code of url(); the page there sends the text
- * back, pasted or as a file. Plain JDK, so the JVM tests drive it with real sockets.
+ * A web page on the local network that takes links and TOML files from a phone's
+ * browser, for a TV, which has no camera to scan a QR code and no keyboard to type a
+ * link. The TV shows a QR code of url(); the page there sends the text back, pasted
+ * or as a file, as many times as the phone likes. Plain JDK, so the JVM tests drive
+ * it with real sockets.
  *
  * <p>Browsers give a page on a local http:// address no way to encrypt, so the text
- * crosses the local network in the clear, once. What limits that: it binds only to
- * the TV's private-network address, for 5 minutes, takes one text and stops, and
- * stops after 3 sends with a wrong code. The code is in the URL and sent back with
- * the text, so another page in the phone's browser cannot send one without it. A
- * GET shows the same page whatever its path, so only a send tests a code. The TV
- * then shows what it received, with the sender's address, and asks before adding it.
- * Nothing here is logged: the text holds the VPN password.
+ * crosses the local network in the clear. What limits that: it binds only to the
+ * TV's private-network address, for 5 minutes from when it opens, however many texts
+ * come, and stops after 3 sends with a wrong code, which add up over the whole time.
+ * It takes at most MAX_WAITING texts that the TV has not answered yet, and sends
+ * after that get a page that says to wait, which is no strike. The code is in the
+ * URL and sent back with the text, so another page in the phone's browser cannot
+ * send one without it. A GET shows the same page whatever its path, so only a send
+ * tests a code. The TV then shows each text it received, one at a time, with the
+ * sender's address, and asks before adding it. Nothing here is logged: the text
+ * holds the VPN password.
  */
 final class LinkReceiver {
     static final long LIFETIME_MS = 300_000;
@@ -51,6 +56,10 @@ final class LinkReceiver {
     static final int MAX_HEADER_BYTES = 8192;
     static final int MAX_BODY_BYTES = 512 * 1024;
     static final int MAX_WRONG_CODES = 3;
+    // Texts taken and not yet answered on the TV, the one it shows included. At most this
+    // many are held in memory, MAX_BODY_BYTES each. A send to the right code while that
+    // many wait is turned away with the busy page, and is no strike.
+    static final int MAX_WAITING = 10;
     static final int CODE_LENGTH = 8;
     // Crockford's base32: no I, L or O, easily taken for 1 and 0 on a TV across the
     // room, and no U. 8 of them are 40 bits.
@@ -58,15 +67,22 @@ final class LinkReceiver {
 
     enum Stop { TIMEOUT, LOCKED_OUT, FAILED }
 
-    /** Called on the receiver's own thread, at most once, and never after stop(). */
+    /** Called on the receiver's own thread. */
     interface Listener {
-        /** fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted or has none. */
+        /**
+         * A text came in, as many times as the phone sends one while the receiver is open,
+         * and never after stop() has returned, nor after it was called, but for a text already being handed over.
+         * Each one holds a place in the waiting count
+         * that the receiver was given, which the owner gives back when the TV has answered it.
+         * fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted or has none.
+         */
         void received(String text, String fileName, String sender);
+        /** The receiver closed itself, once, and then it takes nothing more; not after stop(). */
         void stopped(Stop reason);
     }
 
-    /** What handle() did with one request. */
-    enum Kind { SERVED, REFUSED, WRONG_CODE, RECEIVED }
+    /** What handle() did with one request. BUSY is a right code with MAX_WAITING texts waiting: no text, no strike. */
+    enum Kind { SERVED, REFUSED, BUSY, WRONG_CODE, RECEIVED }
     static final class Outcome {
         final Kind kind;
         final String text;
@@ -87,6 +103,7 @@ final class LinkReceiver {
         final String sent;
         final String retry;
         final String tooLarge;
+        final String busy;
         final String wrongCode;
         final String lockedOut;
 
@@ -97,8 +114,13 @@ final class LinkReceiver {
         // retry text, and one too large to take, such as a photo chosen by mistake,
         // under the too-large text. No accept attribute: a phone's picker may not
         // know a .toml file's type, and would grey it out.
+        //
+        // The receiver goes on after a text, so the page that says it was sent, and the
+        // one that says the TV has too many waiting, are the form again under their notice:
+        // the phone sends the next one from there. A wrong code and the stop after the
+        // last one are a notice only: the form on them would post to the same wrong address.
         Pages(String lang, String title, String prompt, String file, String send, String note,
-              String sent, String retry, String tooLarge, String wrongCode, String lockedOut) {
+              String sent, String retry, String tooLarge, String busy, String wrongCode, String lockedOut) {
             String fields = "<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"
                     + "<label for=\"link\">" + escape(prompt) + "</label>"
                     + "<textarea id=\"link\" name=\"link\" autocomplete=\"off\" autocapitalize=\"off\""
@@ -106,28 +128,99 @@ final class LinkReceiver {
                     + "<label for=\"file\">" + escape(file) + "</label>"
                     + "<input type=\"file\" id=\"file\" name=\"file\">"
                     + "<button type=\"submit\">" + escape(send) + "</button></form>"
-                    + "<p>" + escape(note) + "</p>";
+                    + "<p class=\"note\">" + escape(note) + "</p>";
             form = page(lang, title, fields);
-            this.sent = page(lang, title, "<p>" + escape(sent) + "</p>");
-            this.retry = page(lang, title, "<p>" + escape(retry) + "</p>" + fields);
-            this.tooLarge = page(lang, title, "<p>" + escape(tooLarge) + "</p>" + fields);
-            this.wrongCode = page(lang, title, "<p>" + escape(wrongCode) + "</p>");
-            this.lockedOut = page(lang, title, "<p>" + escape(lockedOut) + "</p>");
+            this.sent = page(lang, title, notice("ok", sent) + fields);
+            this.retry = page(lang, title, notice("warn", retry) + fields);
+            this.tooLarge = page(lang, title, notice("warn", tooLarge) + fields);
+            this.busy = page(lang, title, notice("warn", busy) + fields);
+            this.wrongCode = page(lang, title, notice("warn", wrongCode));
+            this.lockedOut = page(lang, title, notice("warn", lockedOut));
+        }
+
+        // A message above the form, on the desktop's notice box: "ok" is green, "warn" amber.
+        private static String notice(String kind, String text) {
+            return "<p class=\"notice " + kind + "\" role=\"" + (kind.equals("ok") ? "status" : "alert") + "\">" + escape(text) + "</p>";
         }
 
         // No script, no image and nothing loaded from anywhere, which the CSP also
-        // enforces. The browser picks light or dark colours itself.
+        // enforces: the page is its own style, and the browser's own font.
         private static String page(String lang, String title, String body) {
             return "<!doctype html><html lang=\"" + escape(lang) + "\"><head><meta charset=\"utf-8\">"
                     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-                    + "<title>" + escape(title) + "</title><style>"
-                    + ":root{color-scheme:light dark}body{font:16px/1.4 system-ui,sans-serif;margin:0 auto;padding:16px;max-width:40em}"
-                    + "label,textarea,input,button{display:block;width:100%;box-sizing:border-box}"
-                    + "textarea{min-height:12em;margin:8px 0 12px;font:14px monospace}"
-                    + "input{margin:8px 0 16px}"
-                    + "button{padding:12px;font-size:16px}"
-                    + "</style></head><body><h1>" + escape(title) + "</h1>" + body + "</body></html>";
+                    + "<meta name=\"color-scheme\" content=\"light dark\">"
+                    + "<title>" + escape(title) + "</title><style>" + STYLE + "</style></head><body><main><h1>"
+                    + escape(title) + "</h1>" + body + "</main></body></html>";
         }
+
+        private static final String FONT = "system-ui,-apple-system,Segoe UI,Roboto,sans-serif";
+        private static final String STYLE = style(Theme.LIGHT, Theme.DARK);
+
+        // The app's own look, which is the desktop's (Theme.java holds its colours, and a test holds
+        // those to qml/Main.qml): custom properties on :root for the light theme, the dark ones when
+        // the phone is in dark mode, and the editor card's parts: a title 15 in Medium, as every card's is, a label 13 in textDim over a
+        // box in inputBg with a 1 px inputBorder, radius 8, that takes an accent border where it has the
+        // focus; a neutral button, 32 high, for the file's, and a primary one, as wide as its label and at the right, to send; the notice
+        // on infoBg, 12; and the page's 18 margins. Nothing has a pressed or a tapped look beyond its hover, as the desktop's have none.
+        // The text box is the desktop's certificate box (the only monospace one it has) in everything but its size: inset 8 on every side,
+        // and 10 under it, where the desktop's form has 10 between a field and the next label. Its text is 16 px monospace where the
+        // desktop's is 12: a browser on an iPhone zooms the page in on any field under 16 px when it takes the focus, and the page must
+        // not jump about under a finger. The viewport is not locked with a maximum-scale instead, which would take pinch-zoom from Android's
+        // Chrome. The file field's own words ("Choose File", "No file chosen") are the browser's, in its language: a custom
+        // button in the app's words needs a script to say which file is chosen, and the page has none, which its CSP and its test forbid.
+        private static String style(Theme light, Theme dark) {
+            String fileButton = "height:32px;min-width:76px;margin:0 12px 0 0;padding:0 13px;border:0;border-radius:8px;"
+                    + "background:var(--surface);color:var(--text);font:14px " + FONT + ";cursor:pointer";
+            String fileHover = "background:var(--surface-hover)";
+            return ":root{color-scheme:light dark;" + tokens(light) + "}"
+                    + "@media (prefers-color-scheme:dark){:root{" + tokens(dark) + "}}"
+                    + "*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}"
+                    + "body{margin:0;background:var(--bg);color:var(--text);font:16px/1.25 " + FONT + ";-webkit-text-size-adjust:100%}"
+                    + "main{max-width:32em;margin:0 auto;padding:18px 18px 32px}"
+                    + "h1{margin:0 0 14px;font-size:15px;font-weight:500;line-height:1.2}"
+                    + ".notice{margin:0 0 16px;padding:8px 10px;border-radius:8px;background:var(--info);font-size:12px;line-height:1.2}"
+                    + ".ok{color:var(--success)}"
+                    + ".warn{color:var(--warn)}"
+                    + "label{display:block;margin:0 0 4px;font-size:13px;line-height:1.2;color:var(--dim)}"
+                    + "textarea{display:block;width:100%;min-height:150px;margin:0 0 10px;padding:8px;"
+                    + "border:1px solid var(--input-border);border-radius:8px;background:var(--input-bg);color:var(--text);"
+                    + "font:16px/1.4 ui-monospace,Menlo,Consolas,monospace;resize:none;outline:none;"
+                    + "-webkit-appearance:none;appearance:none}"
+                    + "textarea:focus{border-color:var(--accent)}"
+                    + "input[type=file]{display:block;width:100%;margin:0 0 16px;font:14px " + FONT + ";color:var(--dim)}"
+                    // The two names for the same button, each in a rule of its own: a browser that does
+                    // not know one drops the whole rule it is in.
+                    + "input[type=file]::file-selector-button{" + fileButton + "}"
+                    + "input[type=file]::file-selector-button:hover{" + fileHover + "}"
+                    + "input[type=file]::-webkit-file-upload-button{" + fileButton + "}"
+                    + "input[type=file]::-webkit-file-upload-button:hover{" + fileHover + "}"
+                    // The file field's own focus is its button's hover look, not the browser's ring around the field.
+                    + "input[type=file]:focus-visible{outline:none}"
+                    + "input[type=file]:focus-visible::file-selector-button{" + fileHover + "}"
+                    + "input[type=file]:focus-visible::-webkit-file-upload-button{" + fileHover + "}"
+                    // The desktop's primary button: 32 high, radius 8, 14 in the normal weight, as wide as its label and 88 at least, and at
+                    // the right of its row.
+                    + "button{display:block;margin-left:auto;min-width:88px;height:32px;padding:0 13px;border:0;border-radius:8px;"
+                    + "background:var(--accent);color:var(--accent-text);font:400 14px " + FONT + ";cursor:pointer;"
+                    + "-webkit-appearance:none;appearance:none}"
+                    + "button:hover{background:var(--accent-hover)}"
+                    // The desktop has no ring anywhere: where the focus is, a control takes the look it has under the pointer, and the
+                    // text box its accent border. A rule of its own, since a browser that does not know :focus-visible drops the rule.
+                    + "button:focus-visible{outline:none;background:var(--accent-hover)}"
+                    + ".note{margin:14px 0 0;font-size:13px;line-height:1.25;color:var(--faint)}";
+        }
+
+        private static String tokens(Theme t) {
+            return "--bg:" + hex(t.bg) + ";--surface:" + hex(t.surface) + ";--surface-hover:" + hex(t.surfaceHover)
+                    + ";--input-bg:" + hex(t.inputBg) + ";--input-border:" + hex(t.inputBorder)
+                    + ";--text:" + hex(t.text) + ";--dim:" + hex(t.textDim) + ";--faint:" + hex(t.textFaint)
+                    + ";--accent:" + hex(t.accent) + ";--accent-hover:" + hex(t.primaryHover) + ";--accent-text:" + hex(t.accentText)
+                    + ";--success:" + hex(t.success) + ";--warn:" + hex(t.warn)
+                    + ";--info:rgba(" + (t.infoBg >> 16 & 0xFF) + "," + (t.infoBg >> 8 & 0xFF) + "," + (t.infoBg & 0xFF) + ","
+                    + String.format(Locale.ROOT, "%.2f", (t.infoBg >>> 24) / 255.0) + ")";
+        }
+
+        private static String hex(int argb) { return String.format(Locale.ROOT, "#%06x", argb & 0xFFFFFF); }
     }
 
     /** A QR code as pixels, black on white: side by side of them, row by row. */
@@ -145,21 +238,34 @@ final class LinkReceiver {
     private final int firstByteTimeoutMs;
     private final int readTimeoutMs;
     private final int connectionDeadlineMs;
+    private final AtomicInteger waiting;
     private final AtomicBoolean stopped = new AtomicBoolean();
+    // Held while a text is handed to the listener, and by stop() while it takes effect, so that
+    // no text is handed over once stop() has returned.
+    private final Object delivery = new Object();
+    // Set by stop() before it waits for a text that is being handed over: Java's monitors are not fair, and the serving thread, let go
+    // of the lock by that text, could otherwise take the next connection and hand its text over before the waiting stop() got in.
+    // From the call of stop(), no text is handed over but the one already being, and the receiver says nothing more of itself.
+    private volatile boolean stopRequested;
     private volatile Socket current;
     private Thread thread;
 
-    /** Binds to address, which must be a private-network IPv4 address (see pickAddress), on a port the system picks. */
-    LinkReceiver(InetAddress address, String code, Pages pages) throws IOException {
-        this(lanOnly(address), code, pages, LIFETIME_MS, FIRST_BYTE_TIMEOUT_MS, READ_TIMEOUT_MS, CONNECTION_DEADLINE_MS);
+    /**
+     * Binds to address, which must be a private-network IPv4 address (see pickAddress), on a port the system picks.
+     * waiting counts the texts taken and not yet answered, over this receiver and any other that shares it:
+     * the receiver adds one for each text it takes, and whoever it hands the text to takes it off once the TV has answered.
+     */
+    LinkReceiver(InetAddress address, String code, Pages pages, AtomicInteger waiting) throws IOException {
+        this(lanOnly(address), code, pages, waiting, LIFETIME_MS, FIRST_BYTE_TIMEOUT_MS, READ_TIMEOUT_MS, CONNECTION_DEADLINE_MS);
     }
 
     // For tests: any address, loopback too, and shorter times.
-    LinkReceiver(InetAddress address, String code, Pages pages, long lifetimeMs, int firstByteTimeoutMs,
+    LinkReceiver(InetAddress address, String code, Pages pages, AtomicInteger waiting, long lifetimeMs, int firstByteTimeoutMs,
                  int readTimeoutMs, int connectionDeadlineMs) throws IOException {
         this.code = normalizeCode(code);
         if (this.code.length() != CODE_LENGTH || !inAlphabet(this.code)) throw new IllegalArgumentException("Not a receiver code");
         this.pages = pages;
+        this.waiting = waiting;
         this.lifetimeMs = lifetimeMs;
         this.firstByteTimeoutMs = firstByteTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
@@ -227,7 +333,7 @@ final class LinkReceiver {
         return new Qr(side, pixels);
     }
 
-    /** Serves requests on a thread of its own until a text arrives, the time is up, or stop(). */
+    /** Serves requests on a thread of its own until the time is up, too many wrong codes come, or stop(). */
     synchronized void start(Listener listener) {
         if (thread != null) throw new IllegalStateException("Already started");
         thread = new Thread(() -> serve(listener), "freetunnel-receiver");
@@ -235,9 +341,16 @@ final class LinkReceiver {
         thread.start();
     }
 
-    /** Closes the port. Idempotent, and the listener hears nothing more. */
+    /**
+     * Closes the port. Idempotent, and the listener hears nothing more: a text that is being
+     * handed over finishes first, and none is handed over after this is called, let alone after it returns.
+     */
     void stop() {
-        if (stopped.compareAndSet(false, true)) closeAll();
+        stopRequested = true;
+        synchronized (delivery) {
+            if (!stopped.compareAndSet(false, true)) return;
+        }
+        closeAll();
     }
 
     private void closeAll() {
@@ -246,45 +359,48 @@ final class LinkReceiver {
         if (client != null) try { client.close(); } catch (IOException ignored) { }
     }
 
-    // True for the one caller that stops it, and only if stop() did not come first.
+    // True for the one caller that stops it, and only if stop() did not come first (nor was called and is waiting its turn).
     private boolean stopSelf() {
-        if (!stopped.compareAndSet(false, true)) return false;
+        if (stopRequested || !stopped.compareAndSet(false, true)) return false;
         closeAll();
         return true;
     }
 
-    // One connection at a time: a phone sends a page request, then the text.
+    // One connection at a time: a phone sends a page request, then the text. It goes on after a
+    // text, until the time is up, which is counted from here and no sends extend, or the wrong
+    // codes, which are counted over all of it, reach MAX_WRONG_CODES.
     private void serve(Listener listener) {
         long end = System.nanoTime() + lifetimeMs * 1_000_000;
         int wrongCodes = 0;
         try {
-            while (!stopped.get()) {
+            while (!stopped.get() && !stopRequested) {
                 long left = (end - System.nanoTime()) / 1_000_000;
                 if (left <= 0) { if (stopSelf()) listener.stopped(Stop.TIMEOUT); return; }
                 server.setSoTimeout((int) Math.min(left, Integer.MAX_VALUE));
                 Socket client;
                 try { client = server.accept(); }
                 catch (SocketTimeoutException timeUp) { continue; }
-                Outcome outcome;
+                Outcome outcome = null;
                 String sender = client.getInetAddress().getHostAddress();
                 current = client;
                 try (Socket open = client) {
-                    if (stopped.get()) return;
+                    if (stopped.get() || stopRequested) return;
                     long deadline = System.nanoTime() + connectionDeadlineMs * 1_000_000L;
                     InputStream in = new BufferedInputStream(new DeadlineInput(open, firstByteTimeoutMs, readTimeoutMs, deadline));
                     OutputStream out = open.getOutputStream();
-                    outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES);
+                    outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES, waiting);
                     out.flush();
                     if (outcome.bodyUnread) drain(open, deadline);
                 } catch (IOException slowOrGone) {
-                    // Too slow, or gone before the end: the next connection may be the phone.
-                    continue;
+                    // Too slow, or gone before the end: the next connection may be the phone. A text that
+                    // handle() took still counts, as its answer does, whatever became of the answer.
+                    if (outcome == null) continue;
                 } finally {
                     current = null;
                 }
                 if (outcome.kind == Kind.RECEIVED) {
-                    if (stopSelf()) listener.received(outcome.text, outcome.fileName, sender);
-                    return;
+                    deliver(listener, outcome, sender);
+                    continue;
                 }
                 if (outcome.kind == Kind.WRONG_CODE && ++wrongCodes >= MAX_WRONG_CODES) {
                     if (stopSelf()) listener.stopped(Stop.LOCKED_OUT);
@@ -294,6 +410,17 @@ final class LinkReceiver {
         } catch (IOException failed) {
             // A close by stop() lands here too; stopSelf() tells the two apart.
             if (stopSelf()) listener.stopped(Stop.FAILED);
+        }
+    }
+
+    // Hands a text taken to the listener, unless stop() came first, or was called while an earlier
+    // text was being handed over, when it is not taken after all: the place it holds in the waiting
+    // count is given back, and the phone, which was told it was sent, has sent it to a TV that
+    // stopped listening a moment before.
+    private void deliver(Listener listener, Outcome outcome, String sender) {
+        synchronized (delivery) {
+            if (stopped.get() || stopRequested) { waiting.decrementAndGet(); return; }
+            listener.received(outcome.text, outcome.fileName, sender);
         }
     }
 
@@ -358,10 +485,12 @@ final class LinkReceiver {
      * is the text: the page's multipart form with the link field or a file in its
      * file field, or a link= form field as the page sent before it took files.
      * lastStrike shows the page that says the receiver stopped instead of the
-     * wrong-code page.
+     * wrong-code page. waiting is the count of texts taken and not yet answered: with
+     * MAX_WAITING of them, a send to the right code gets the busy page and is taken
+     * no further, and a text that is taken adds one to it before it is answered.
      */
     static Outcome handle(InputStream in, OutputStream out, String code, String host, Pages pages,
-                          boolean lastStrike) throws IOException {
+                          boolean lastStrike, AtomicInteger waiting) throws IOException {
         byte[] head = readHead(in);
         if (head == null) return new Outcome(Kind.REFUSED, null);
         if (head.length == 0) return refuse(out, 431, "Request Header Fields Too Large");
@@ -407,18 +536,37 @@ final class LinkReceiver {
             answer(out, 404, "Not Found", lastStrike ? pages.lockedOut : pages.wrongCode);
             return new Outcome(Kind.WRONG_CODE, null);
         }
-        if (boundary != null) return multipartSend(out, body, boundary, pages);
+        // Right code, and no room: whatever the form holds, nothing can be taken now. It is no strike,
+        // and the page is the form again, for when the TV has answered what it has.
+        if (waiting.get() >= MAX_WAITING) return busy(out, pages);
+        if (boundary != null) return multipartSend(out, body, boundary, pages, waiting);
         String text = formField(body, "link");
         if (text == null || text.trim().isEmpty()) return refuse(out, 400, "Bad Request");
+        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()));
+    }
+
+    // Takes a text: a place for it in the waiting count, then the page that says it was sent. The count is
+    // checked above too, but another receiver that shares it may have filled the last place since.
+    private static Outcome take(OutputStream out, Pages pages, AtomicInteger waiting, Outcome received) {
+        for (int count = waiting.get(); ; count = waiting.get()) {
+            if (count >= MAX_WAITING) return busy(out, pages);
+            if (waiting.compareAndSet(count, count + 1)) break;
+        }
         answer(out, 200, "OK", pages.sent);
-        return new Outcome(Kind.RECEIVED, text.trim());
+        return received;
+    }
+
+    private static Outcome busy(OutputStream out, Pages pages) {
+        answer(out, 503, "Service Unavailable", pages.busy);
+        return new Outcome(Kind.BUSY, null);
     }
 
     // The page's own form, to the right code. What no browser sends is refused as
     // any such request is. A send with no text and no file, both, or a file that is
     // not UTF-8 text gets the form again under the retry text, and the receiver
     // goes on waiting: the phone can fix it.
-    private static Outcome multipartSend(OutputStream out, byte[] body, String boundary, Pages pages) throws IOException {
+    private static Outcome multipartSend(OutputStream out, byte[] body, String boundary, Pages pages,
+                                         AtomicInteger waiting) throws IOException {
         Field[] fields = multipart(body, boundary);
         if (fields == null) return refuse(out, 400, "Bad Request");
         String text = fields[0] == null ? "" : utf8(body, fields[0].from, fields[0].to);
@@ -430,9 +578,8 @@ final class LinkReceiver {
             answer(out, 400, "Bad Request", pages.retry);
             return new Outcome(Kind.REFUSED, null);
         }
-        answer(out, 200, "OK", pages.sent);
-        if (!text.trim().isEmpty()) return new Outcome(Kind.RECEIVED, text.trim());
-        return new Outcome(Kind.RECEIVED, file.trim(), fileName(fields[1].fileName));
+        if (!text.trim().isEmpty()) return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()));
+        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, file.trim(), fileName(fields[1].fileName)));
     }
 
     // Where a field's content is in the body, and the file name it came with: null

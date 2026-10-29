@@ -1,0 +1,4 @@
+<!-- Made by scripts/android-icons-from-svg.py: the desktop draws ↓ as a character of Inter (HomePage.qml: the speed tile), and this is its outline in Inter-Regular.ttf at 14 px. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="8.9141dp" android:height="10.3496dp" android:viewportWidth="8.9141" android:viewportHeight="10.3496">
+    <path android:pathData="M8.9141,5.8926 L4.457,10.3496 L0,5.8926 L0.793,5.0996 L2.2285,6.542 Q2.6797,6.9932 3.1821,7.5947 Q3.6846,8.1963 4.0811,8.709 Q4.0059,8.3193 3.9478,7.9263 Q3.8896,7.5332 3.8896,7.1367 L3.8896,0 L5.0244,0 L5.0244,7.1367 Q5.0244,7.5332 4.9663,7.9263 Q4.9082,8.3193 4.833,8.709 Q5.2295,8.1963 5.7319,7.5947 Q6.2344,6.9932 6.6855,6.542 L8.1211,5.0996 L8.9141,5.8926 Z" android:fillColor="#ffffff"/>
+</vector>

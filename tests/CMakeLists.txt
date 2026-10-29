@@ -132,6 +132,11 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FreetunnelDeps.cmake)
 
+# data/ is shared with the Android app: the lists the app has compiled in (AppSettings.cpp
+# includes what this generates, from a directory this puts on the include path of
+# every target below).
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/SharedData.cmake)
+
 # macOS SDKs may ship AGL.framework without a linkable binary; Qt still requests it.
 if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
     set_property(
@@ -439,6 +444,14 @@ add_executable(test_appsettings
     ../src/core/BypassRules.cpp
 )
 target_include_directories(test_appsettings PRIVATE ../include ../include/core)
+# The file the list is compiled from, which the test reads for itself.
+get_filename_component(FT_RECOMMENDED_RUSSIA_FILE
+    "${CMAKE_CURRENT_LIST_DIR}/../data/split/recommended-russia.txt" ABSOLUTE)
+get_filename_component(FT_DEFAULT_EXCLUDED_ROUTES_FILE
+    "${CMAKE_CURRENT_LIST_DIR}/../data/split/default-excluded-routes.txt" ABSOLUTE)
+target_compile_definitions(test_appsettings PRIVATE
+    FT_RECOMMENDED_RUSSIA_FILE="${FT_RECOMMENDED_RUSSIA_FILE}"
+    FT_DEFAULT_EXCLUDED_ROUTES_FILE="${FT_DEFAULT_EXCLUDED_ROUTES_FILE}")
 target_link_libraries(test_appsettings PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME appsettings COMMAND test_appsettings -o ${CMAKE_CURRENT_BINARY_DIR}/report-appsettings.txt,txt)
 
@@ -1187,6 +1200,9 @@ endif ()
 # The same job's check that the signature it makes verifies against the key in
 # include/core/ReleaseSigning.h (scripts/verify-release-signature.sh) is tested
 # the same way, with throwaway keys, and on Linux only for the same reasons.
+# So is the check, in a job the release job needs, that the core pinned in
+# scripts/upstream_ref.txt is a stable TrustTunnelClient release
+# (scripts/check-core-pin-release.sh), against a stand-in gh again.
 # So is the desktop CI's question whether a pull request touches anything but
 # Android's files (scripts/check-desktop-changes.sh), whose false skips the
 # work of every desktop check. And so are the Android release's checks of its
@@ -1213,10 +1229,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if (FT_BASH AND FT_JQ)
         add_test(NAME release_ci_gate
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_ci_gate.sh)
+        add_test(NAME core_pin_release
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_core_pin_release.sh)
         add_test(NAME desktop_changes
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_desktop_changes.sh)
     else ()
-        message(STATUS "release_ci_gate and desktop_changes not built: they need bash and jq")
+        message(STATUS "release_ci_gate, core_pin_release and desktop_changes not built: they need bash and jq")
     endif ()
     if (FT_BASH AND FT_OPENSSL_CLI)
         add_test(NAME release_signature

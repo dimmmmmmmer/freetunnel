@@ -78,4 +78,14 @@ std::optional<bool> x11WindowIconified(QWindow *window);
 // The same for a window on a given connection, for tests: a private X server.
 std::optional<bool> windowIconified(xcb_connection_t *connection, std::uint32_t window);
 
+// Whether the X11 window manager has withdrawn the window, which is what it does
+// once the window is unmapped: ICCCM's WM_STATE says WithdrawnState, or is gone
+// (Hyprland removes it). A window is waited on for that before it is mapped again
+// (ICCCM 4.1.4): mapped earlier, it is taken for the window that was already there
+// and nothing new happens. Empty on native Wayland, offscreen, with no window, or
+// when the server cannot be asked; the caller reads that as "do not wait".
+std::optional<bool> x11WindowWithdrawn(QWindow *window);
+// The same for a window on a given connection, for tests: a private X server.
+std::optional<bool> windowWithdrawn(xcb_connection_t *connection, std::uint32_t window);
+
 } // namespace freetunnel

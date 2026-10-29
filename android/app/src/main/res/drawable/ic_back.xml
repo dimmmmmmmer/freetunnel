@@ -1,0 +1,4 @@
+<!-- Made by scripts/android-icons-from-svg.py: the desktop draws ← as a character of Inter (AppPickerOverlay.qml and CreateConfigOverlay.qml: the card's back arrow), and this is its outline in Inter-Regular.ttf at 20 px. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="14.6094dp" android:height="12.7344dp" android:viewportWidth="14.6094" android:viewportHeight="12.7344">
+    <path android:pathData="M6.3672,12.7344 L0,6.3672 L6.3672,0 L7.5,1.1328 L5.4395,3.1836 Q4.7949,3.8281 3.9355,4.5459 Q3.0762,5.2637 2.3438,5.8301 Q2.9004,5.7227 3.4619,5.6396 Q4.0234,5.5566 4.5898,5.5566 L14.6094,5.5566 L14.6094,7.1777 L4.5898,7.1777 Q4.0234,7.1777 3.4619,7.0947 Q2.9004,7.0117 2.3438,6.9043 Q3.0762,7.4707 3.9355,8.1885 Q4.7949,8.9062 5.4395,9.5508 L7.5,11.6016 L6.3672,12.7344 Z" android:fillColor="#ffffff"/>
+</vector>

@@ -2,6 +2,7 @@ package org.freetunnel.android;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
@@ -29,7 +30,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 // The receiver a TV opens for Receive from phone: what one request gets (handle(),
@@ -40,11 +43,13 @@ public final class LinkReceiverTest {
     private static final String HOST = "192.168.1.23:41234";
     private static final String LINK = "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz";
     private static final LinkReceiver.Pages PAGES = new LinkReceiver.Pages("en", "Send to the TV", "Paste a link",
-            "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Too large", "Wrong code", "Stopped");
+            "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Too large", "Wait", "Wrong code", "Stopped");
     private static final String CSP =
             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
     private final List<LinkReceiver> opened = new ArrayList<>();
+    // The TV's count of texts it has taken and not answered, which the receivers in a test share.
+    private final AtomicInteger waiting = new AtomicInteger();
 
     @After public void stopReceivers() {
         for (LinkReceiver receiver : opened) receiver.stop();
@@ -67,10 +72,16 @@ public final class LinkReceiverTest {
         return exchange(request.getBytes(StandardCharsets.UTF_8), lastStrike);
     }
     private static Exchange exchange(byte[] request, boolean lastStrike) throws IOException {
+        return exchange(request, lastStrike, new AtomicInteger());
+    }
+    private static Exchange exchange(byte[] request, boolean lastStrike, AtomicInteger waiting) throws IOException {
         ByteArrayInputStream in = new ByteArrayInputStream(request);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        LinkReceiver.Outcome outcome = LinkReceiver.handle(in, out, CODE, HOST, PAGES, lastStrike);
+        LinkReceiver.Outcome outcome = LinkReceiver.handle(in, out, CODE, HOST, PAGES, lastStrike, waiting);
         return new Exchange(outcome, new String(out.toByteArray(), StandardCharsets.UTF_8), in.available());
+    }
+    private static Exchange exchange(String request, AtomicInteger waiting) throws IOException {
+        return exchange(request.getBytes(StandardCharsets.UTF_8), false, waiting);
     }
     private static Exchange exchange(String request) throws IOException { return exchange(request, false); }
 
@@ -188,7 +199,7 @@ public final class LinkReceiverTest {
         assertEquals("0111ABCD", LinkReceiver.normalizeCode("oIl1-abcd"));
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         LinkReceiver.Outcome outcome = LinkReceiver.handle(new ByteArrayInputStream(
-                post("/o1il-abcd", form(LINK)).getBytes(StandardCharsets.UTF_8)), out, "0111ABCD", HOST, PAGES, false);
+                post("/o1il-abcd", form(LINK)).getBytes(StandardCharsets.UTF_8)), out, "0111ABCD", HOST, PAGES, false, new AtomicInteger());
         assertSame(LinkReceiver.Kind.RECEIVED, outcome.kind);
     }
 
@@ -584,11 +595,14 @@ public final class LinkReceiverTest {
                 "GET / HTTP/1.1\r\nHost: " + HOST + "\r\nX: " + "x".repeat(LinkReceiver.MAX_HEADER_BYTES) + "\r\n\r\n",
                 new String(multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))), StandardCharsets.UTF_8),
                 new String(multipartPost("/K7QM4XHD", pageForm("", "", new byte[0])), StandardCharsets.UTF_8),
-                post("/K7QM4XHD", HOST, type, "x".repeat(LinkReceiver.MAX_BODY_BYTES + 1))};
+                post("/K7QM4XHD", HOST, type, "x".repeat(LinkReceiver.MAX_BODY_BYTES + 1)),
+                // The right code with no room.
+                post("/K7QM4XHD", form(LINK))};
         List<String> statuses = new ArrayList<>();
         List<String> types = new ArrayList<>();
         for (String request : requests) {
-            Exchange exchange = exchange(request);
+            // The last one finds MAX_WAITING texts waiting, the others none.
+            Exchange exchange = exchange(request, new AtomicInteger(request == requests[requests.length - 1] ? LinkReceiver.MAX_WAITING : 0));
             statuses.add(exchange.status().substring(9, 12));
             List<String> headers = Arrays.asList(exchange.response.substring(0, exchange.response.indexOf("\r\n\r\n")).split("\r\n"));
             for (String expected : new String[]{"Connection: close", "Cache-Control: no-store", "Referrer-Policy: no-referrer",
@@ -597,24 +611,28 @@ public final class LinkReceiverTest {
                 assertTrue(exchange.status() + " lacks " + expected, headers.contains(expected));
             types.add(headers.get(1));
         }
-        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431", "200", "400", "413"), statuses);
+        assertEquals(Arrays.asList("200", "200", "404", "400", "411", "501", "415", "405", "431", "200", "400", "413", "503"), statuses);
         // The pages are HTML, which nosniff makes the browser take at its word; the refusals are plain text.
         String html = "Content-Type: text/html; charset=utf-8";
         String plain = "Content-Type: text/plain; charset=utf-8";
-        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html, html), types);
+        assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html, html, html), types);
     }
 
     @Test public void thePagesLoadNothingAndEscapeTheirText() {
         String hostile = "<script>alert(\"x\")</script> & 'y'";
         LinkReceiver.Pages pages = new LinkReceiver.Pages("en\"><script>", hostile, hostile, hostile, hostile, hostile, hostile,
-                hostile, hostile, hostile, hostile);
+                hostile, hostile, hostile, hostile, hostile);
         String escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;";
-        for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.tooLarge, pages.wrongCode, pages.lockedOut}) {
+        for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.tooLarge, pages.busy, pages.wrongCode, pages.lockedOut}) {
             assertFalse(page, page.contains("<script"));
             assertTrue(page, page.contains(escaped));
             assertTrue(page, page.startsWith("<!doctype html><html lang=\"en&quot;&gt;&lt;script&gt;\">"));
-            for (String outside : new String[]{"src=", "href=", "http:", "https:", "url(", "@import", "action="})
+            // Nothing loaded from anywhere, and no script: the page is its own style, which the CSP allows
+            // and nothing else.
+            for (String outside : new String[]{"src=", "href=", "http:", "https:", "url(", "@import", "action=", "<script", "<link",
+                    "<img", "<iframe", "onload", "onclick", "javascript:", "data:"})
                 assertFalse(outside + " in " + page, page.toLowerCase(java.util.Locale.ROOT).contains(outside));
+            assertEquals(page, 1, page.split("<style>", -1).length - 1);
         }
         // It posts back to its own address, which carries the code, a pasted text or a
         // file, so neither field is required.
@@ -624,12 +642,94 @@ public final class LinkReceiverTest {
         assertFalse(PAGES.form.contains("required"));
         // Any file: a browser may not know a .toml file's type and grey it out.
         assertFalse(PAGES.form.contains("accept="));
-        // The retry page is the form again, under its text.
-        String form = PAGES.form.substring(PAGES.form.indexOf("<form"));
-        assertTrue(PAGES.retry.endsWith("<p>Paste or choose one</p>" + form));
-        assertTrue(PAGES.tooLarge.endsWith("<p>Too large</p>" + form));
+        // The phone sends the next one from the page that says the last was sent, and from the
+        // pages that say what to fix or wait for: each is the form again, with its note, under its own notice.
+        String form = PAGES.form.substring(PAGES.form.indexOf("<form"), PAGES.form.indexOf("</main>"));
+        assertTrue(form.endsWith("<p class=\"note\">The TV asks first</p>"));
+        assertTrue(PAGES.sent.contains("<p class=\"notice ok\" role=\"status\">Sent</p>" + form));
+        assertTrue(PAGES.retry.contains("<p class=\"notice warn\" role=\"alert\">Paste or choose one</p>" + form));
+        assertTrue(PAGES.tooLarge.contains("<p class=\"notice warn\" role=\"alert\">Too large</p>" + form));
+        assertTrue(PAGES.busy.contains("<p class=\"notice warn\" role=\"alert\">Wait</p>" + form));
+        // A wrong code and the stop after the last one are a notice and no form, which would post to the same wrong address.
+        for (String page : new String[]{PAGES.wrongCode, PAGES.lockedOut}) {
+            assertTrue(page, page.contains("<p class=\"notice warn\" role=\"alert\">"));
+            assertFalse(page, page.contains("<form"));
+        }
+        assertFalse(PAGES.form.contains("class=\"notice"));
+        assertTrue(PAGES.form.contains("<h1>Send to the TV</h1>"));
         assertEquals("a&amp;b", LinkReceiver.escape("a&b"));
     }
+
+    @Test public void thePagesAreInTheAppsDesign() {
+        String page = PAGES.form;
+        String css = page.substring(page.indexOf("<style>") + 7, page.indexOf("</style>"));
+        // Light on :root, the desktop's dark tokens when the phone is in dark mode, both from Theme.java,
+        // which a test holds to qml/Main.qml.
+        assertTrue(css.startsWith(":root{color-scheme:light dark;--bg:#ececec;"));
+        int dark = css.indexOf("@media (prefers-color-scheme:dark){:root{");
+        assertTrue(dark > 0);
+        String light = css.substring(0, dark);
+        String night = css.substring(dark, css.indexOf("}}", dark));
+        for (Theme[] pair : new Theme[][]{{Theme.LIGHT}, {Theme.DARK}}) {
+            Theme t = pair[0];
+            String scope = t.dark ? night : light;
+            String[][] tokens = {{"--bg", hex(t.bg)}, {"--surface", hex(t.surface)}, {"--surface-hover", hex(t.surfaceHover)},
+                    {"--input-bg", hex(t.inputBg)}, {"--input-border", hex(t.inputBorder)}, {"--text", hex(t.text)},
+                    {"--dim", hex(t.textDim)}, {"--faint", hex(t.textFaint)}, {"--accent", hex(t.accent)},
+                    {"--accent-hover", hex(t.primaryHover)}, {"--accent-text", hex(t.accentText)},
+                    {"--success", hex(t.success)}, {"--warn", hex(t.warn)}};
+            for (String[] token : tokens) assertTrue(token[0] + " " + token[1], scope.contains(token[0] + ":" + token[1] + ";") || scope.contains(token[0] + ":" + token[1] + "}"));
+        }
+        assertTrue(light.contains("--info:rgba(79,79,79,0.12)"));
+        assertTrue(night.contains("--info:rgba(176,176,176,0.16)"));
+        // The desktop's neutral greys: nothing else is a colour in the rules.
+        assertFalse("A colour is a token", css.substring(dark + night.length()).matches("(?s).*#[0-9a-f]{3,6}.*"));
+        // Type: the system's, the title 15 at weight 500 as every card's is, labels 13 in textDim, set as tight as a Qt Text is.
+        assertTrue(css.contains("font:16px/1.25 system-ui,-apple-system,Segoe UI,Roboto,sans-serif"));
+        assertTrue(css.contains("h1{margin:0 0 14px;font-size:15px;font-weight:500;line-height:1.2}"));
+        assertTrue(css.contains("label{display:block;margin:0 0 4px;font-size:13px;line-height:1.2;color:var(--dim)}"));
+        // The page's margins are the pages' 18, and a tap leaves no highlight, which the desktop's controls have none of either.
+        assertTrue(css.contains("main{max-width:32em;margin:0 auto;padding:18px 18px 32px}"));
+        assertTrue(css.contains("*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}"));
+        // The text box is the desktop's certificate box but for its size: inputBg, a 1 px inputBorder, radius 8, 150 high, inset 8 on every
+        // side (its Flickable's margins) with 10 under it (the form's spacing between a field and the next label), no grip to resize it
+        // by, and an accent border, no outline, where it has the focus. Its text is monospace 16, where the desktop's is 12, so that an
+        // iPhone does not zoom in on it (Safari does on any field under 16 px). The file field under it keeps its 16: 10 and the button row's 6.
+        assertTrue(css.contains("textarea{display:block;width:100%;min-height:150px;margin:0 0 10px;padding:8px;"
+                + "border:1px solid var(--input-border);border-radius:8px;background:var(--input-bg);color:var(--text);"
+                + "font:16px/1.4 ui-monospace,Menlo,Consolas,monospace;resize:none;"));
+        assertTrue(css.contains("outline:none"));
+        assertTrue(css.contains("textarea:focus{border-color:var(--accent)}"));
+        // The file field, 14 px in the page's font and in textDim, with the browser's button as the neutral one: surface, radius 8, 32 high
+        // and 13 padded as the desktop's buttons are, in a rule of its own for each of its two names.
+        assertTrue(css.contains("input[type=file]{display:block;width:100%;margin:0 0 16px;font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--dim)}"));
+        for (String name : new String[]{"::file-selector-button", "::-webkit-file-upload-button"})
+            assertTrue(name, css.contains("input[type=file]" + name + "{height:32px;min-width:76px;margin:0 12px 0 0;padding:0 13px;border:0;"
+                    + "border-radius:8px;background:var(--surface);color:var(--text);font:14px "));
+        assertFalse("One rule for each name: a browser drops a rule it half knows", css.contains("::file-selector-button,"));
+        // The button: the desktop's primary one, accent, accentText, radius 8, 32 high, 14 in the normal weight, as wide as its label
+        // and 88 at least, at the right of its row, and no border.
+        assertTrue(css.contains("button{display:block;margin-left:auto;min-width:88px;height:32px;padding:0 13px;border:0;border-radius:8px;"
+                + "background:var(--accent);color:var(--accent-text);font:400 14px system-ui"));
+        assertFalse("Not the width of the page", css.contains("button{display:block;width:100%"));
+        // The desktop has no focus ring: where the focus is, the button takes its hover look and the file field's button its own,
+        // each in a rule of its own, and no rule draws an outline but to take the browser's away.
+        assertTrue(css.contains("button:hover{background:var(--accent-hover)}"));
+        assertTrue(css.contains("button:focus-visible{outline:none;background:var(--accent-hover)}"));
+        assertTrue(css.contains("input[type=file]:focus-visible{outline:none}"));
+        for (String name : new String[]{"::file-selector-button", "::-webkit-file-upload-button"})
+            assertTrue(name, css.contains("input[type=file]:focus-visible" + name + "{background:var(--surface-hover)}"));
+        assertFalse("No ring", css.matches("(?s).*outline:\\s*[0-9].*"));
+        assertFalse("No ring", css.contains("outline-offset"));
+        // Notices on infoBg, radius 8: warn and success. Notes 13 in textFaint.
+        assertTrue(css.contains(".notice{margin:0 0 16px;padding:8px 10px;border-radius:8px;background:var(--info);font-size:12px;line-height:1.2}"));
+        assertTrue(css.contains(".ok{color:var(--success)}"));
+        assertTrue(css.contains(".warn{color:var(--warn)}"));
+        assertTrue(css.contains(".note{margin:14px 0 0;font-size:13px;line-height:1.25;color:var(--faint)}"));
+        // And the browser is told both themes are the page's.
+        assertTrue(page.contains("<meta name=\"color-scheme\" content=\"light dark\">"));
+    }
+    private static String hex(int argb) { return String.format(java.util.Locale.ROOT, "#%06x", argb & 0xFFFFFF); }
 
     // A SecureRandom that answers 0, 1, 2 ... and records the bounds it was asked for.
     private static final class Counting extends SecureRandom {
@@ -663,8 +763,8 @@ public final class LinkReceiverTest {
         assertNull("IPv6 only", LinkReceiver.pickAddress(addresses("fe80::1", "fd00::1", "fec0::1", "2001:db8::1", "::ffff:8.8.8.8")));
         assertNull(LinkReceiver.pickAddress(new ArrayList<>()));
         // The receiver itself refuses any other address, and a code it never makes.
-        assertThrows(IllegalArgumentException.class, () -> new LinkReceiver(address("127.0.0.1"), CODE, PAGES));
-        assertThrows(IllegalArgumentException.class, () -> new LinkReceiver(address("8.8.8.8"), CODE, PAGES));
+        assertThrows(IllegalArgumentException.class, () -> new LinkReceiver(address("127.0.0.1"), CODE, PAGES, new AtomicInteger()));
+        assertThrows(IllegalArgumentException.class, () -> new LinkReceiver(address("8.8.8.8"), CODE, PAGES, new AtomicInteger()));
         for (String code : new String[]{"K7QM4XH", "K7QM4XHDD", "K7QM4XHU", "K7QM 4XH"})
             assertThrows(code, IllegalArgumentException.class, () -> loopback(code, 60_000, 1_000, 2_000));
     }
@@ -706,7 +806,11 @@ public final class LinkReceiverTest {
         return loopback(code, lifetimeMs, readTimeoutMs, readTimeoutMs, deadlineMs);
     }
     private LinkReceiver loopback(String code, long lifetimeMs, int firstByteMs, int readTimeoutMs, int deadlineMs) throws IOException {
-        LinkReceiver receiver = new LinkReceiver(InetAddress.getLoopbackAddress(), code, PAGES, lifetimeMs, firstByteMs,
+        return loopback(code, waiting, lifetimeMs, firstByteMs, readTimeoutMs, deadlineMs);
+    }
+    private LinkReceiver loopback(String code, AtomicInteger waiting, long lifetimeMs, int firstByteMs, int readTimeoutMs,
+                                  int deadlineMs) throws IOException {
+        LinkReceiver receiver = new LinkReceiver(InetAddress.getLoopbackAddress(), code, PAGES, waiting, lifetimeMs, firstByteMs,
                 readTimeoutMs, deadlineMs);
         opened.add(receiver);
         return receiver;
@@ -766,18 +870,237 @@ public final class LinkReceiverTest {
         fail("The port must be closed");
     }
 
-    @Test public void oneTextIsReceivedAndThenThePortCloses() throws Exception {
+    // The page's own multipart send of a file, to the right code, over a real socket.
+    private static String sendFile(int port, String fileName, String content) throws IOException {
+        return send(port, multipartPost("/K7QM-4XHD", "127.0.0.1:" + port, "multipart/form-data; boundary=" + BOUNDARY,
+                pageForm("", fileName, utf8(content))));
+    }
+    private static String get(int port, String path) throws IOException {
+        return send(port, "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\n\r\n");
+    }
+
+    @Test public void severalTextsAreReceivedAndThePortStaysOpen() throws Exception {
         LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
         int port = port(receiver);
         assertEquals("http://127.0.0.1:" + port + "/K7QM-4XHD", receiver.url());
         BlockingQueue<String> events = start(receiver);
-        assertTrue(send(port, "GET /K7QM-4XHD HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\n\r\n").endsWith(PAGES.form));
+        assertTrue(get(port, "/K7QM-4XHD").endsWith(PAGES.form));
+        // A pasted link, a file, and another pasted text, in turn: each answered with the page that says it
+        // was sent, which is the form again for the next, and each handed over in the order it came.
         assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
         assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertEquals(1, waiting.get());
+        assertTrue(sendFile(port, "home.toml", TOML).endsWith(PAGES.sent));
+        assertEquals("received " + TOML.trim() + " as home.toml from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertTrue(send(port, loopbackPost(port, "/K7QM4XHD", form("a b"))).endsWith(PAGES.sent));
+        assertEquals("received a b from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertEquals("Each text holds a place until the TV has answered it", 3, waiting.get());
+        // Still open: the page is served, and nothing was reported but the texts.
+        assertTrue(get(port, "/").endsWith(PAGES.form));
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+        // A text that is turned away, or a wrong code, takes no place.
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", "link=")).startsWith("HTTP/1.1 400 "));
+        assertEquals(3, waiting.get());
+        // Closed by the owner: the port, and the callbacks, stop.
+        receiver.stop();
         assertClosed(port);
-        assertNull("Exactly one callback", events.poll(300, TimeUnit.MILLISECONDS));
+        assertNull("Exactly the three callbacks", events.poll(300, TimeUnit.MILLISECONDS));
         receiver.stop();
         assertNull(events.poll(100, TimeUnit.MILLISECONDS));
+    }
+
+    @Test public void theBusyPageIsNoStrikeAndAFreedPlaceLetsTheNextSendIn() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        for (int i = 0; i < LinkReceiver.MAX_WAITING; i++) {
+            assertTrue("send " + i, send(port, loopbackPost(port, "/K7QM-4XHD", form("text " + i))).endsWith(PAGES.sent));
+            assertEquals("received text " + i + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        }
+        assertEquals(LinkReceiver.MAX_WAITING, waiting.get());
+        // Ten wait, and the TV answers none: the next sends, as many as the phone likes, are told to wait,
+        // as a link, a file or a form with nothing in it. Not a one of them is a strike, and none is handed over.
+        for (int i = 0; i < 2 * LinkReceiver.MAX_WRONG_CODES; i++) {
+            String busy = i % 3 == 0 ? send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK)))
+                    : i % 3 == 1 ? sendFile(port, "home.toml", TOML) : send(port, loopbackPost(port, "/K7QM-4XHD", "link="));
+            assertTrue(busy, busy.startsWith("HTTP/1.1 503 Service Unavailable\r\n") && busy.endsWith(PAGES.busy));
+        }
+        assertEquals(LinkReceiver.MAX_WAITING, waiting.get());
+        assertNull("No callback, and not locked out", events.poll(300, TimeUnit.MILLISECONDS));
+        // A wrong code is a strike all the same: it gets the wrong-code page, and the busy page no way to tell it.
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHE", form(LINK))).endsWith(PAGES.wrongCode));
+        // Someone who just looks at the page, and a photo, which is turned away before the code is known, are no different.
+        assertTrue(get(port, "/K7QM-4XHD").endsWith(PAGES.form));
+        // The TV answers one: that place is the next text's.
+        waiting.decrementAndGet();
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("text 10"))).endsWith(PAGES.sent));
+        assertEquals("received text 10 from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertEquals(LinkReceiver.MAX_WAITING, waiting.get());
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("text 11"))).endsWith(PAGES.busy));
+        // Two answered, two places, the third send is turned away again.
+        waiting.addAndGet(-2);
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("text 12"))).endsWith(PAGES.sent));
+        assertTrue(sendFile(port, "home.toml", TOML).endsWith(PAGES.sent));
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("text 14"))).endsWith(PAGES.busy));
+        assertEquals("received text 12 from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertEquals("received " + TOML.trim() + " as home.toml from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+    }
+
+    @Test public void theLimitIsTheCountThatIsSharedNotTheReceivers() throws Exception {
+        // Texts still waiting from an earlier session count in the next one's: the places are the TV's.
+        AtomicInteger shared = new AtomicInteger(LinkReceiver.MAX_WAITING - 1);
+        LinkReceiver receiver = loopback(CODE, shared, 60_000, 2_000, 2_000, 5_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.sent));
+        assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertEquals(LinkReceiver.MAX_WAITING, shared.get());
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form(LINK))).endsWith(PAGES.busy));
+        assertEquals(LinkReceiver.MAX_WAITING, shared.get());
+        assertEquals("The test's own count was never given", 0, waiting.get());
+    }
+
+    @Test public void theBusyAnswerIsMadeBeforeAnyTextIsTakenAndATextIsTakenOnlyOnce() throws IOException {
+        // At the level of one request. Nine wait: this one takes the last place.
+        AtomicInteger count = new AtomicInteger(LinkReceiver.MAX_WAITING - 1);
+        Exchange last = exchange(post("/K7QM4XHD", form(LINK)), count);
+        assertEquals("HTTP/1.1 200 OK", last.status());
+        assertEquals(PAGES.sent, last.body());
+        assertSame(LinkReceiver.Kind.RECEIVED, last.outcome.kind);
+        assertEquals(LinkReceiver.MAX_WAITING, count.get());
+        // Ten wait: every send to the right code is told so, whatever it holds, and takes nothing.
+        for (byte[] request : new byte[][]{utf8(post("/K7QM4XHD", form(LINK))), utf8(post("/K7QM4XHD", "link=")),
+                utf8(post("/K7QM4XHD", "garbage")), multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))),
+                multipartPost("/K7QM4XHD", pageForm("", "", new byte[0])), multipartPost("/K7QM4XHD", pageForm(LINK, "home.toml", utf8(TOML)))}) {
+            String what = new String(request, StandardCharsets.UTF_8);
+            Exchange busy = exchange(request, false, count);
+            assertEquals(what, "HTTP/1.1 503 Service Unavailable", busy.status());
+            assertEquals(what, PAGES.busy, busy.body());
+            assertSame(what, LinkReceiver.Kind.BUSY, busy.outcome.kind);
+            assertNull(what, busy.outcome.text);
+            assertFalse(what, busy.outcome.bodyUnread);
+            assertEquals("The body is read first, so the browser gets the page", 0, busy.unread);
+            assertEquals(what, LinkReceiver.MAX_WAITING, count.get());
+        }
+        // A wrong code is a wrong code, full or not, and it is the last strike's page on the last strike.
+        Exchange wrong = exchange(post("/K7QM-4XHE", form(LINK)), count);
+        assertSame(LinkReceiver.Kind.WRONG_CODE, wrong.outcome.kind);
+        assertEquals(PAGES.wrongCode, wrong.body());
+        assertEquals(PAGES.lockedOut, exchange(post("/K7QM-4XHE", form(LINK)).getBytes(StandardCharsets.UTF_8), true, count).body());
+        // A GET shows the form, and a photo too large to take gets its own page: neither asks for a code or a place.
+        assertEquals(PAGES.form, exchange(get("/"), count).body());
+        Exchange photo = exchange(post("/K7QM4XHD", HOST, "Content-Type: application/x-www-form-urlencoded\r\n", "x").replace(
+                "Content-Length: 1", "Content-Length: 12345678"), count);
+        assertEquals(PAGES.tooLarge, photo.body());
+        assertSame(LinkReceiver.Kind.REFUSED, photo.outcome.kind);
+        assertEquals(LinkReceiver.MAX_WAITING, count.get());
+        // A text the TV answered gives its place to the next, and a request that is turned away for another reason takes none.
+        count.decrementAndGet();
+        assertSame(LinkReceiver.Kind.REFUSED, exchange(post("/K7QM4XHD", "link="), count).outcome.kind);
+        assertEquals(LinkReceiver.MAX_WAITING - 1, count.get());
+        assertSame(LinkReceiver.Kind.RECEIVED, exchange(multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))), false, count).outcome.kind);
+        assertEquals(LinkReceiver.MAX_WAITING, count.get());
+    }
+
+    @Test public void theLimitIsTenAndTheBusyTextSaysSo() throws Exception {
+        // The phone is told the number in words, in each language, and nothing but this test ties the words to
+        // the constant: a change to one has to be a change to the other.
+        assertEquals(10, LinkReceiver.MAX_WAITING);
+        java.io.File res = null;
+        for (String dir : new String[]{"src/main/res", "app/src/main/res", "android/app/src/main/res"})
+            if (new java.io.File(dir, "values/strings.xml").isFile()) res = new java.io.File(dir);
+        assertNotNull("The resources are found from the module's directory", res);
+        for (String values : new String[]{"values", "values-ru"}) {
+            String xml = new String(java.nio.file.Files.readAllBytes(new java.io.File(res, values + "/strings.xml").toPath()), StandardCharsets.UTF_8);
+            java.util.regex.Matcher busy = java.util.regex.Pattern.compile("<string name=\"receive_page_busy\">([^<]*)</string>").matcher(xml);
+            assertTrue(values, busy.find());
+            assertTrue(values + ": " + busy.group(1), busy.group(1).matches(".*\\b" + LinkReceiver.MAX_WAITING + "\\b.*"));
+        }
+    }
+
+    // The time and the strikes are said in words too (the timeout notices, the lockout notice, the README and the
+    // release notes), and every other test counts with the constants, so that a change to one of them alone passes them all.
+    // (The TV's card says neither: it has two short sentences, and the warnings are on the phone's page, which the next test holds.)
+    @Test public void theTimeIsFiveMinutesAndThreeWrongCodesStopItAsTheTextsSay() throws Exception {
+        assertEquals(5 * 60 * 1000L, LinkReceiver.LIFETIME_MS);
+        assertEquals(3, LinkReceiver.MAX_WRONG_CODES);
+        java.io.File res = null;
+        for (String dir : new String[]{"src/main/res", "app/src/main/res", "android/app/src/main/res"})
+            if (new java.io.File(dir, "values/strings.xml").isFile()) res = new java.io.File(dir);
+        assertNotNull("The resources are found from the module's directory", res);
+        for (String values : new String[]{"values", "values-ru"}) {
+            String xml = new String(java.nio.file.Files.readAllBytes(new java.io.File(res, values + "/strings.xml").toPath()), StandardCharsets.UTF_8);
+            // "5 minutes" and "5 минут", "3 times" and "3 раза".
+            String minutes = values.equals("values") ? "5 minutes" : "5 \u043C\u0438\u043D\u0443\u0442";
+            String times = values.equals("values") ? "3 times" : "3 \u0440\u0430\u0437\u0430";
+            for (String name : new String[]{"text_receive_timed_out", "text_receive_timed_out_after_texts"}) {
+                java.util.regex.Matcher text = java.util.regex.Pattern.compile("<string name=\"" + name + "\">([^<]*)</string>").matcher(xml);
+                assertTrue(values + " " + name, text.find());
+                assertTrue(values + " " + name + ": " + text.group(1), text.group(1).contains(minutes));
+            }
+            java.util.regex.Matcher locked = java.util.regex.Pattern.compile("<string name=\"text_receive_locked_out\">([^<]*)</string>").matcher(xml);
+            assertTrue(values, locked.find());
+            assertTrue(values + ": " + locked.group(1), locked.group(1).contains(times));
+        }
+    }
+
+    // The card on the TV is two short sentences and keeps the warning about the network out of it: the page the phone opens says that
+    // the text crosses the network unencrypted, and to send it only over one that is trusted, in each language.
+    @Test public void thePhonesPageSaysTheTextCrossesTheNetworkUnencrypted() throws Exception {
+        java.io.File res = null;
+        for (String dir : new String[]{"src/main/res", "app/src/main/res", "android/app/src/main/res"})
+            if (new java.io.File(dir, "values/strings.xml").isFile()) res = new java.io.File(dir);
+        assertNotNull("The resources are found from the module's directory", res);
+        for (String values : new String[]{"values", "values-ru"}) {
+            String xml = new String(java.nio.file.Files.readAllBytes(new java.io.File(res, values + "/strings.xml").toPath()), StandardCharsets.UTF_8);
+            java.util.regex.Matcher note = java.util.regex.Pattern.compile("<string name=\"receive_page_note\">([^<]*)</string>").matcher(xml);
+            assertTrue(values, note.find());
+            String unencrypted = values.equals("values") ? "unencrypted" : "\u0431\u0435\u0437 \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F";
+            String trusted = values.equals("values") ? "network you trust" : "\u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0439 \u0441\u0435\u0442\u0438";
+            assertTrue(values + ": " + note.group(1), note.group(1).contains(unencrypted) && note.group(1).contains(trusted));
+            // And the card's own hint is no paragraph: two sentences, with neither the warning nor the tip about the phone's VPN.
+            java.util.regex.Matcher hint = java.util.regex.Pattern.compile("<string name=\"text_receive_hint\">([^<]*)</string>").matcher(xml);
+            assertTrue(values, hint.find());
+            assertTrue(values + ": " + hint.group(1), hint.group(1).split("(?<=[.!?])\\s+").length <= 2 && hint.group(1).length() <= 160);
+        }
+    }
+
+    @Test public void aTextTakesItsPlaceAtomicallyAndNeverTheEleventh() throws Exception {
+        // Another receiver that shares the count may fill the last place after this one looked: taking it is a
+        // compare-and-set, which the last place goes to one of them by. The step is private; called as handle() calls it.
+        java.lang.reflect.Method take = LinkReceiver.class.getDeclaredMethod("take", java.io.OutputStream.class, LinkReceiver.Pages.class,
+                AtomicInteger.class, LinkReceiver.Outcome.class);
+        take.setAccessible(true);
+        LinkReceiver.Outcome text = new LinkReceiver.Outcome(LinkReceiver.Kind.RECEIVED, LINK);
+        AtomicInteger count = new AtomicInteger(LinkReceiver.MAX_WAITING - 1);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        assertSame(text, take.invoke(null, out, PAGES, count, text));
+        assertTrue(new String(out.toByteArray(), StandardCharsets.UTF_8).startsWith("HTTP/1.1 200 OK"));
+        assertEquals(LinkReceiver.MAX_WAITING, count.get());
+        out.reset();
+        LinkReceiver.Outcome turnedAway = (LinkReceiver.Outcome) take.invoke(null, out, PAGES, count, text);
+        assertSame(LinkReceiver.Kind.BUSY, turnedAway.kind);
+        assertTrue(new String(out.toByteArray(), StandardCharsets.UTF_8).startsWith("HTTP/1.1 503 Service Unavailable"));
+        assertEquals(LinkReceiver.MAX_WAITING, count.get());
+    }
+
+    @Test public void aRefusedSendTakesNoPlace() throws IOException {
+        AtomicInteger count = new AtomicInteger();
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0x0d};
+        for (byte[] form : new byte[][]{pageForm("", "", new byte[0]), pageForm(LINK, "home.toml", utf8(TOML)),
+                pageForm("", "photo.png", png)})
+            assertSame(LinkReceiver.Kind.REFUSED, exchange(multipartPost("/K7QM4XHD", form), false, count).outcome.kind);
+        assertSame(LinkReceiver.Kind.WRONG_CODE, exchange(multipartPost("/K7QM-4XHE", pageForm("", "home.toml", utf8(TOML))), false, count).outcome.kind);
+        assertSame(LinkReceiver.Kind.REFUSED, exchange(post("/K7QM4XHD", "link=%zz"), count).outcome.kind);
+        assertEquals(0, count.get());
+        // And a taken text takes exactly one, a pasted one and a file alike.
+        exchange(post("/K7QM4XHD", form(LINK)), count);
+        assertEquals(1, count.get());
+        exchange(multipartPost("/K7QM4XHD", pageForm("", "home.toml", utf8(TOML))), false, count);
+        assertEquals(2, count.get());
+        exchange(multipartPost("/K7QM4XHD", pageForm(LINK, "", new byte[0])), false, count);
+        assertEquals(3, count.get());
     }
 
     @Test public void threeWrongCodesStopIt() throws Exception {
@@ -795,6 +1118,113 @@ public final class LinkReceiverTest {
         assertEquals("stopped LOCKED_OUT", events.poll(5, TimeUnit.SECONDS));
         assertClosed(port);
         assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+    }
+
+    @Test public void wrongCodesAddUpOverTheSendsBetweenThem() throws Exception {
+        // Three wrong codes stop it however many texts come between them: a good send does not wipe the slate.
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        BlockingQueue<String> events = start(receiver);
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHE", form(LINK))).endsWith(PAGES.wrongCode));
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("one"))).endsWith(PAGES.sent));
+        assertEquals("received one from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHF", form(LINK))).endsWith(PAGES.wrongCode));
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("two"))).endsWith(PAGES.sent));
+        assertEquals("received two from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+        assertNull("Two strikes: still open", events.poll(200, TimeUnit.MILLISECONDS));
+        // The third is the last: it says the TV stopped, and then it has.
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHG", form(LINK))).endsWith(PAGES.lockedOut));
+        assertEquals("stopped LOCKED_OUT", events.poll(5, TimeUnit.SECONDS));
+        assertClosed(port);
+        assertNull("Nothing after it", events.poll(300, TimeUnit.MILLISECONDS));
+        // The texts that came before it were taken, and are the TV's to answer.
+        assertEquals(2, waiting.get());
+    }
+
+    @Test public void theTimeIsCountedFromTheOpeningAndNoSendExtendsIt() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 1_500, 2_000, 5_000);
+        int port = port(receiver);
+        long opened = System.nanoTime();
+        BlockingQueue<String> events = start(receiver);
+        // A text every 300 ms, well inside the time: each is taken, and the end comes when it was always going to.
+        int sent = 0;
+        String stopped = null;
+        while (stopped == null) {
+            long elapsed = (System.nanoTime() - opened) / 1_000_000;
+            if (elapsed < 1_000) {
+                assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("text " + sent))).endsWith(PAGES.sent));
+                assertEquals("received text " + sent + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
+                sent++;
+                Thread.sleep(300);
+            } else {
+                stopped = events.poll(5, TimeUnit.SECONDS);
+            }
+        }
+        long ms = (System.nanoTime() - opened) / 1_000_000;
+        assertTrue("Sent " + sent, sent >= 3);
+        assertEquals("stopped TIMEOUT", stopped);
+        assertTrue("Stopped after " + ms + " ms, at its 1.5 s and not later for the sends", ms >= 1_400 && ms < 2_100);
+        assertClosed(port);
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+    }
+
+    @Test public void aTextTakenJustBeforeStopIsNotHandedOverAndItsPlaceIsGivenBack() throws Exception {
+        // stop() comes after a text is taken and before it is handed over, which no socket can be timed to
+        // do: the phone has had its answer, but the listener hears nothing, and the place the text took is
+        // given back, as no one will answer it. The step is private, so it is called as serve() does.
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        List<String> heard = new ArrayList<>();
+        LinkReceiver.Listener listener = new LinkReceiver.Listener() {
+            @Override public void received(String text, String fileName, String sender) { heard.add(text); }
+            @Override public void stopped(LinkReceiver.Stop reason) { heard.add("stopped " + reason); }
+        };
+        java.lang.reflect.Method deliver = LinkReceiver.class.getDeclaredMethod("deliver", LinkReceiver.Listener.class,
+                LinkReceiver.Outcome.class, String.class);
+        deliver.setAccessible(true);
+        LinkReceiver.Outcome taken = new LinkReceiver.Outcome(LinkReceiver.Kind.RECEIVED, LINK);
+        waiting.set(1);
+        deliver.invoke(receiver, listener, taken, "127.0.0.1");
+        assertEquals(Arrays.asList(LINK), heard);
+        assertEquals("Handed over, the place is the TV's until it answers", 1, waiting.get());
+        receiver.stop();
+        waiting.set(2);
+        deliver.invoke(receiver, listener, taken, "127.0.0.1");
+        assertEquals("Nothing after stop()", Arrays.asList(LINK), heard);
+        assertEquals("and the place is given back", 1, waiting.get());
+    }
+
+    @Test public void stopWaitsForATextThatIsBeingHandedOverAndThenNoMoreAreHandedOver() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        List<String> texts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        receiver.start(new LinkReceiver.Listener() {
+            @Override public void received(String text, String fileName, String sender) {
+                texts.add(text);
+                inside.countDown();
+                try { release.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+            }
+            @Override public void stopped(LinkReceiver.Stop reason) { texts.add("stopped " + reason); }
+        });
+        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("one"))).endsWith(PAGES.sent));
+        assertTrue(inside.await(5, TimeUnit.SECONDS));
+        // A second text is on its way while the first is being handed over, and the owner stops the receiver.
+        Thread phone = new Thread(() -> {
+            try { send(port, loopbackPost(port, "/K7QM-4XHD", form("two"))); } catch (IOException gone) { /* stopped */ }
+        });
+        phone.start();
+        Thread owner = new Thread(receiver::stop);
+        owner.start();
+        owner.join(300);
+        assertTrue("stop() waits for the text it would otherwise overtake", owner.isAlive());
+        release.countDown();
+        owner.join(5_000);
+        assertFalse(owner.isAlive());
+        phone.join(5_000);
+        assertClosed(port);
+        Thread.sleep(300);
+        assertEquals("Only the one that was being handed over", Arrays.asList("one"), texts);
     }
 
     // A whole send made by a client that leaves at once, without reading the answer:
@@ -838,6 +1268,9 @@ public final class LinkReceiverTest {
             holder.shutdownOutput();
             assertEquals("received " + LINK + " from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
         }
+        // The text is taken, and the receiver goes on.
+        assertTrue(get(port, "/").endsWith(PAGES.form));
+        receiver.stop();
         assertClosed(port);
     }
 
@@ -853,8 +1286,12 @@ public final class LinkReceiverTest {
         assertTrue(send(port, multipartPost("/K7QM-4XHD", host, type, pageForm("", "home.toml", concat(BOM, utf8(TOML)))))
                 .endsWith(PAGES.sent));
         assertEquals("received " + TOML.trim() + " as home.toml from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
-        assertClosed(port);
+        // And the form comes again, for the next file.
+        assertTrue(send(port, multipartPost("/K7QM-4XHD", host, type, pageForm("", "link.txt", utf8(LINK + "\n")))).endsWith(PAGES.sent));
+        assertEquals("received " + LINK + " as link.txt from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
         assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+        receiver.stop();
+        assertClosed(port);
     }
 
     @Test public void aFileIsReceivedThoughItsSenderLeavesBeforeTheAnswer() throws Exception {
@@ -868,6 +1305,8 @@ public final class LinkReceiverTest {
             holder.shutdownOutput();
             assertEquals("received " + LINK + " as link.txt from 127.0.0.1", events.poll(5, TimeUnit.SECONDS));
         }
+        assertTrue(get(port, "/").endsWith(PAGES.form));
+        receiver.stop();
         assertClosed(port);
     }
 

@@ -50,4 +50,20 @@ public final class ShownTextTest {
             {lock.repeat(80), lock.repeat(80)}, {lock.repeat(81), lock.repeat(79) + "…"},
             {"\u2028\u202E".repeat(100) + "y".repeat(80), "y".repeat(80)}});
     }
+
+    // qml/Main.qml's elideMiddle(s, n): a name that fits is kept; a longer one keeps both its ends,
+    // the head one longer when n - 1 is odd, and an ellipsis between. The delete confirmation uses 36.
+    @Test public void aLongNameKeepsBothEndsWhenItIsElidedInTheMiddle() {
+        assertEquals("short", ShownText.elideMiddle("short", 36));
+        assertEquals("x".repeat(36), ShownText.elideMiddle("x".repeat(36), 36));
+        // n = 36 keeps 35: 18 before the ellipsis and 17 after it.
+        assertEquals("a".repeat(18) + "…" + "c".repeat(17), ShownText.elideMiddle("a".repeat(18) + "b".repeat(10) + "c".repeat(17), 36));
+        assertEquals(36, ShownText.elideMiddle("x".repeat(500), 36).length());
+        // n = 6 keeps 5: 3 and 2.
+        assertEquals("abc…ij", ShownText.elideMiddle("abcdefghij", 6));
+        assertEquals("…", ShownText.elideMiddle("abc", 1));
+        // An emoji counts once, and is never cut in half.
+        String lock = "\uD83D\uDD12";
+        assertEquals(lock.repeat(18) + "…" + lock.repeat(17), ShownText.elideMiddle(lock.repeat(60), 36));
+    }
 }

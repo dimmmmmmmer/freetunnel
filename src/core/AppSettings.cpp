@@ -20,12 +20,12 @@ static QString legacyTmpLogPath() {
 
 QStringList defaultExcludedRoutes() {
     // Private / special-use IPv4 ranges that should never be tunnelled
-    // (RFC1918 / CGNAT / link-local / etc.).
+    // (RFC1918 / CGNAT / link-local / etc.). They are in
+    // data/split/default-excluded-routes.txt, one file for this and the Android
+    // app, and cmake/SharedData.cmake turns that into the include file below.
     return {
-        QStringLiteral("10.0.0.0/8"),       QStringLiteral("100.64.0.0/10"),
-        QStringLiteral("169.254.0.0/16"),   QStringLiteral("172.16.0.0/12"),
-        QStringLiteral("192.0.0.0/24"),     QStringLiteral("192.168.0.0/16"),
-        QStringLiteral("255.255.255.255/32")};
+#include "default_excluded_routes.inc"
+    };
 }
 
 // A route of every address of its kind, such as 0.0.0.0/0 or ::/0. Excluded, it
@@ -41,48 +41,11 @@ static bool isEveryAddressRoute(const QString &route) {
 
 QStringList recommendedRussiaDomains() {
     // RU services that TrustTunnel's DOMAIN_FILTER accepts (no TLD-only *.ru / .ru).
+    // They are in data/split/recommended-russia.txt, one file for this and the Android
+    // app, and cmake/SharedData.cmake turns that into the include file below.
     return sanitizedBypassRules({
-        QStringLiteral("yandex.ru"), QStringLiteral("*.yandex.ru"), QStringLiteral("ya.ru"),
-        QStringLiteral("*.ya.ru"), QStringLiteral("yastatic.net"), QStringLiteral("*.yastatic.net"),
-        QStringLiteral("yandex.net"), QStringLiteral("*.yandex.net"),
-        QStringLiteral("vk.com"), QStringLiteral("*.vk.com"), QStringLiteral("vk.ru"),
-        QStringLiteral("*.vk.ru"), QStringLiteral("vkontakte.ru"), QStringLiteral("*.vkontakte.ru"),
-        QStringLiteral("mail.ru"), QStringLiteral("*.mail.ru"), QStringLiteral("list.ru"),
-        QStringLiteral("*.list.ru"), QStringLiteral("bk.ru"), QStringLiteral("*.bk.ru"),
-        QStringLiteral("inbox.ru"), QStringLiteral("*.inbox.ru"),
-        QStringLiteral("ok.ru"), QStringLiteral("*.ok.ru"),
-        QStringLiteral("rambler.ru"), QStringLiteral("*.rambler.ru"), QStringLiteral("lenta.ru"),
-        QStringLiteral("*.lenta.ru"), QStringLiteral("ria.ru"), QStringLiteral("*.ria.ru"),
-        QStringLiteral("tass.ru"), QStringLiteral("*.tass.ru"),
-        QStringLiteral("gosuslugi.ru"), QStringLiteral("*.gosuslugi.ru"), QStringLiteral("mos.ru"),
-        QStringLiteral("*.mos.ru"), QStringLiteral("api.mos.ru"), QStringLiteral("parking.mos.ru"),
-        QStringLiteral("avito.ru"), QStringLiteral("*.avito.ru"), QStringLiteral("cian.ru"),
-        QStringLiteral("*.cian.ru"),
-        QStringLiteral("ozon.ru"), QStringLiteral("*.ozon.ru"), QStringLiteral("wildberries.ru"),
-        QStringLiteral("*.wildberries.ru"),
-        QStringLiteral("nalog.gov.ru"), QStringLiteral("*.nalog.gov.ru"), QStringLiteral("*.gov.ru"),
-        QStringLiteral("pfr.gov.ru"), QStringLiteral("*.pfr.gov.ru"), QStringLiteral("fss.ru"),
-        QStringLiteral("*.fss.ru"), QStringLiteral("rosreestr.gov.ru"), QStringLiteral("*.rosreestr.gov.ru"),
-        QStringLiteral("gibdd.ru"), QStringLiteral("*.gibdd.ru"), QStringLiteral("мвд.рф"),
-        QStringLiteral("*.мвд.рф"),
-        QStringLiteral("cbr.ru"), QStringLiteral("*.cbr.ru"), QStringLiteral("minfin.gov.ru"),
-        QStringLiteral("*.minfin.gov.ru"),
-        QStringLiteral("government.ru"), QStringLiteral("*.government.ru"), QStringLiteral("kremlin.ru"),
-        QStringLiteral("*.kremlin.ru"),
-        QStringLiteral("rospotrebnadzor.ru"), QStringLiteral("*.rospotrebnadzor.ru"),
-        QStringLiteral("tbank.ru"), QStringLiteral("*.tbank.ru"), QStringLiteral("tinkoff.ru"),
-        QStringLiteral("*.tinkoff.ru"), QStringLiteral("tinkoff.com"), QStringLiteral("*.tinkoff.com"),
-        QStringLiteral("sberbank.ru"), QStringLiteral("*.sberbank.ru"), QStringLiteral("sber.ru"),
-        QStringLiteral("*.sber.ru"),
-        QStringLiteral("vtb.ru"), QStringLiteral("*.vtb.ru"),
-        QStringLiteral("alfabank.ru"), QStringLiteral("*.alfabank.ru"), QStringLiteral("alfabank.com"),
-        QStringLiteral("*.alfabank.com"),
-        QStringLiteral("raiffeisen.ru"), QStringLiteral("*.raiffeisen.ru"),
-        QStringLiteral("gazprombank.ru"), QStringLiteral("*.gazprombank.ru"),
-        QStringLiteral("open.ru"), QStringLiteral("*.open.ru"),
-        QStringLiteral("psbank.ru"), QStringLiteral("*.psbank.ru"),
-        QStringLiteral("rosselkhozbank.ru"), QStringLiteral("*.rosselkhozbank.ru"),
-        QStringLiteral("sovcombank.ru"), QStringLiteral("*.sovcombank.ru")});
+#include "recommended_russia.inc"
+    });
 }
 
 static QStringList domainsForProfileName(const QSettings &s, const QString &n,

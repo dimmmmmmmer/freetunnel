@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The languages of the app (Settings > Language), which Android 13 and up lists in its own per-app language setting: the
+     two the strings are written in (res/values, English, and res/values-ru). -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="ru" />
+</locale-config>

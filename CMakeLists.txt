@@ -90,6 +90,10 @@ if (NOT FREETUNNEL_CORE_REF)
     set(FREETUNNEL_CORE_REF "unknown")
 endif()
 
+# Data the Android app uses as well (data/): turned into include files here, put
+# on the include path of the targets below.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/SharedData.cmake)
+
 set(APP_ICON_RC)
 if (WIN32)
     set(APP_ICON_PATH "${CMAKE_CURRENT_LIST_DIR}/assets/logo.ico")

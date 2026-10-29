@@ -9,8 +9,11 @@ import static org.freetunnel.android.CertificateVectors.PKCS8_DER;
 import static org.freetunnel.android.CertificateVectors.SEC1_DER;
 import static org.freetunnel.android.CertificateVectors.concat;
 import static org.freetunnel.android.CertificateVectors.hex;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -778,5 +781,203 @@ public final class DeepLinkImportTest {
         // Keys a link has no field for are left out, as unknown link tags are.
         String toml = exported(NO_CERTIFICATE + "tls_profile = \"chrome\"\nloglevel = \"trace\"\n").toml;
         assertEquals(DeepLinkImport.parse(V2_FULL).toml, toml);
+    }
+
+    // ---- Writing a link: the desktop's encodeDeepLink, byte for byte ----
+
+    // What tests/test_deeplink.cpp's encodesTheLinksTheAndroidAppPins writes for the same two servers. The
+    // desktop and this app share these two strings: a change to either encoder that changes them fails
+    // that test there and this one here.
+    static final String GOLDEN_FULL = "tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20CCzEuMi4zLjQ6NDQzAhFbMjAwMTpkYjg6OjFdOjQ0MwUHcHJlbWl1bQYKczNjcmV0UGFzcwQBAAcBAQoBAQMLZXhhbXBsZS5vcmcJAQILDWRlYWRiZWVmL2ZmZmYMCU15IFNlcnZlcg0eBzEuMS4xLjEVdGxzOi8vZG5zLmV4YW1wbGUuY29t";
+    static final String GOLDEN_PLAIN = "tt://?AAEBARVmcmFua2Z1cnQuZXhhbXBsZS5jb20CEDIwMy4wLjExMy4xMDo0NDMFBHVzZXIGBHBhc3MMD0RFIMK3IEZyYW5rZnVydA";
+
+    private static DeepLinkImport.Link fullLink() {
+        DeepLinkImport.Link in = new DeepLinkImport.Link();
+        in.hostname = "vpn.example.com";
+        in.addresses.add("1.2.3.4:443");
+        in.addresses.add("[2001:db8::1]:443");
+        in.customSni = "example.org";
+        in.hasIpv6 = false;
+        in.username = "premium";
+        in.password = "s3cretPass";
+        in.skipVerification = true;
+        in.protocol = 2;
+        in.antiDpi = true;
+        in.clientRandom = "deadbeef/ffff";
+        in.name = "My Server";
+        in.dnsUpstreams.add("1.1.1.1");
+        in.dnsUpstreams.add("tls://dns.example.com");
+        return in;
+    }
+
+    private static DeepLinkImport.Link plainLink() {
+        DeepLinkImport.Link in = new DeepLinkImport.Link();
+        in.hostname = "frankfurt.example.com";
+        in.addresses.add("203.0.113.10:443");
+        in.username = "user";
+        in.password = "pass";
+        in.name = "DE \u00b7 Frankfurt";
+        return in;
+    }
+
+    @Test public void writesTheLinksTheDesktopWritesByteForByte() {
+        assertEquals(GOLDEN_FULL, DeepLinkImport.encode(fullLink()));
+        assertEquals(GOLDEN_PLAIN, DeepLinkImport.encode(plainLink()));
+    }
+
+    @Test public void aLinkItWritesIsReadBackAsTheSameServer() throws Exception {
+        DeepLinkImport.Imported back = DeepLinkImport.parse(DeepLinkImport.encode(fullLink()));
+        assertEquals("My Server", back.name);
+        String toml = back.toml;
+        assertTrue(toml, toml.contains("hostname = \"vpn.example.com\"\n"));
+        assertTrue(toml, toml.contains("addresses = [\"1.2.3.4:443\", \"[2001:db8::1]:443\"]\n"));
+        assertTrue(toml, toml.contains("username = \"premium\"\n"));
+        assertTrue(toml, toml.contains("password = \"s3cretPass\"\n"));
+        assertTrue(toml, toml.contains("custom_sni = \"example.org\"\n"));
+        assertTrue(toml, toml.contains("has_ipv6 = false\n"));
+        assertTrue(toml, toml.contains("skip_verification = true\n"));
+        assertTrue(toml, toml.contains("upstream_protocol = \"http3\"\n"));
+        assertTrue(toml, toml.contains("anti_dpi = true\n"));
+        assertTrue(toml, toml.contains("client_random = \"deadbeef/ffff\"\n"));
+        assertTrue(toml, toml.contains("dns_upstreams = [\"1.1.1.1\", \"tls://dns.example.com\"]\n"));
+        // And the plain one, whose defaults are not in the link.
+        DeepLinkImport.Imported plain = DeepLinkImport.parse(DeepLinkImport.encode(plainLink()));
+        assertEquals("DE \u00b7 Frankfurt", plain.name);
+        assertTrue(plain.toml, plain.toml.contains("has_ipv6 = true\n"));
+        assertTrue(plain.toml, plain.toml.contains("upstream_protocol = \"http2\"\n"));
+    }
+
+    private static byte[] payload(String link) {
+        return Base64.getUrlDecoder().decode(link.substring("tt://?".length()));
+    }
+
+    @Test public void itIsVersion1AndNeverCarriesASubscriptionOrAnAuthKey() {
+        byte[] bytes = payload(DeepLinkImport.encode(fullLink()));
+        // Tag 0, length 1, version 1: what FreeTunnel 1.2.3 and TrustTunnel's clients up to 1.1.11 read.
+        assertArrayEquals(new byte[]{0, 1, 1}, Arrays.copyOf(bytes, 3));
+        for (String link : new String[]{GOLDEN_FULL, GOLDEN_PLAIN}) {
+            int pos = 0;
+            byte[] p = payload(link);
+            while (pos < p.length) {
+                int tag = p[pos++] & 0xff;
+                int length = p[pos++] & 0xff;
+                if ((length & 0xc0) == 0x40) length = (length & 0x3f) << 8 | (p[pos++] & 0xff);
+                assertTrue("Tag " + tag, tag != 0x0E && tag != 0x0F);
+                pos += length;
+            }
+        }
+    }
+
+    @Test public void whatIsTheDefaultIsLeftOutAndNothingElse() {
+        DeepLinkImport.Link in = plainLink();
+        in.name = "";
+        String bare = DeepLinkImport.encode(in);
+        // No flag, no SNI, no certificate, no protocol, no client random, no name, no DNS: the five required
+        // tags and the version.
+        assertEquals(tags(bare).toString(), java.util.Arrays.asList(0, 1, 2, 5, 6), tags(bare));
+        in.hasIpv6 = false; in.skipVerification = true; in.antiDpi = true; in.protocol = 2;
+        in.customSni = "s.example"; in.clientRandom = "aabb"; in.name = "N"; in.dnsUpstreams.add("1.1.1.1");
+        assertEquals(java.util.Arrays.asList(0, 1, 2, 5, 6, 4, 7, 10, 3, 9, 11, 12, 13), tags(DeepLinkImport.encode(in)));
+    }
+
+    private static java.util.List<Integer> tags(String link) {
+        java.util.List<Integer> out = new java.util.ArrayList<>();
+        byte[] p = payload(link);
+        int pos = 0;
+        while (pos < p.length) {
+            out.add(p[pos++] & 0xff);
+            int length = p[pos++] & 0xff;
+            if ((length & 0xc0) == 0x40) length = (length & 0x3f) << 8 | (p[pos++] & 0xff);
+            else if ((length & 0xc0) == 0x80) { length = (length & 0x3f) << 24 | (p[pos++] & 0xff) << 16 | (p[pos++] & 0xff) << 8 | (p[pos++] & 0xff); }
+            pos += length;
+        }
+        return out;
+    }
+
+    @Test public void aClientRandomIsWrittenAsTheCoreReadsIt() {
+        DeepLinkImport.Link in = plainLink();
+        // The core strips every trailing slash, and an empty prefix leaves it nothing to mask.
+        String[][] rows = {{"aabb", "aabb"}, {" aabb/ccdd ", "aabb/ccdd"}, {"aabb//", "aabb"}, {"/ccdd", ""}, {"", ""},
+            // Not hex at all: not written, rather than a link an importer refuses.
+            {"xyz", ""}, {"aab", ""},
+            // A mask the core cannot read: the prefix alone is what it uses.
+            {"deadbeef/fff", "deadbeef"}, {"deadbeef/zz", "deadbeef"}};
+        for (String[] row : rows) {
+            in.clientRandom = row[0];
+            DeepLinkImport.Imported back;
+            try { back = DeepLinkImport.parse(DeepLinkImport.encode(in)); } catch (DeepLinkImport.ParseException e) { throw new AssertionError(row[0], e); }
+            assertTrue("\"" + row[0] + "\" gives " + back.toml, back.toml.contains("client_random = \"" + row[1] + "\"\n"));
+        }
+    }
+
+    @Test public void onlyTheCertificatesGoIntoALink() throws Exception {
+        DeepLinkImport.Link in = plainLink();
+        in.certificate = CHAIN_DER;
+        byte[] bytes = payload(DeepLinkImport.encode(in));
+        // The chain, whole, as tag 0x08: a link made to be handed on holds nothing else.
+        assertTrue(Arrays.toString(tags(DeepLinkImport.encode(in)).toArray()), tags(DeepLinkImport.encode(in)).contains(8));
+        DeepLinkImport.Imported back = DeepLinkImport.parse(DeepLinkImport.encode(in));
+        assertTrue(back.toml, back.toml.contains("certificate = \"\"\"\n" + CHAIN_PEM + "\"\"\"\n"));
+        assertFalse(back.certificateIgnored);
+        assertTrue(bytes.length > CHAIN_DER.length);
+    }
+
+    @Test public void valuesPastSixtyThreeBytesUseTheLongerLengths() throws Exception {
+        DeepLinkImport.Link in = plainLink();
+        StringBuilder long1 = new StringBuilder();
+        for (int i = 0; i < 300; i++) long1.append('a');
+        in.name = long1.toString().substring(0, 70);
+        in.customSni = long1.toString();
+        DeepLinkImport.Imported back = DeepLinkImport.parse(DeepLinkImport.encode(in));
+        assertEquals(in.name, back.name);
+        assertTrue(back.toml.contains("custom_sni = \"" + in.customSni + "\""));
+        // A certificate field over 16383 bytes takes a four-byte length.
+        byte[] big = CertificateVectors.certShaped(20_000);
+        in.certificate = big;
+        assertEquals(java.util.Arrays.asList(0, 1, 2, 5, 6, 3, 8, 12), tags(DeepLinkImport.encode(in)));
+    }
+
+    // ---- A stored config to its link (reads the TOML with tomlj, as the app does) ----
+
+    @Test public void aStoredConfigGivesTheLinkItWasImportedFrom() throws Exception {
+        for (String link : new String[]{GOLDEN_FULL, GOLDEN_PLAIN}) {
+            DeepLinkImport.Imported imported = DeepLinkImport.parse(link);
+            TomlParseResult stored = Toml.parse(imported.toml);
+            assertFalse(stored.errors().toString(), stored.hasErrors());
+            DeepLinkImport.Link back = DeepLinkImport.linkOf(imported.name, stored);
+            assertEquals(link, DeepLinkImport.encode(back));
+        }
+    }
+
+    @Test public void aStoredConfigGivesItsCertificatesAloneAndTheNameItIsListedBy() throws Exception {
+        String keyed = DeepLinkImport.parse(GOLDEN_PLAIN).toml.replace("certificate = \"\"",
+                "certificate = \"\"\"\n" + LEAF_PEM + CertificateVectors.keyPem() + "\"\"\"");
+        TomlParseResult stored = Toml.parse(keyed);
+        DeepLinkImport.Link link = DeepLinkImport.linkOf("  Work VPN ", stored);
+        assertEquals("Work VPN", link.name);
+        assertArrayEquals(LEAF_DER, link.certificate);
+        DeepLinkImport.Imported back = DeepLinkImport.parse(DeepLinkImport.encode(link));
+        assertEquals("Work VPN", back.name);
+        assertFalse(back.certificateIgnored);
+        assertFalse(back.toml.contains(Base64.getEncoder().encodeToString(PKCS8_DER)));
+    }
+
+    @Test public void aConfigThatNamesNoServerGivesNoLink() throws Exception {
+        String plain = DeepLinkImport.parse(GOLDEN_PLAIN).toml;
+        assertNotNull(DeepLinkImport.linkOf("x", Toml.parse(plain)));
+        assertNull("No [endpoint]", DeepLinkImport.linkOf("x", Toml.parse("loglevel = \"info\"\n")));
+        for (String key : new String[]{"hostname", "addresses", "username", "password"}) {
+            String without = plain.replaceAll("(?m)^" + key + " = .*\\n", "");
+            assertNull(key, DeepLinkImport.linkOf("x", Toml.parse(without)));
+        }
+        assertNull(DeepLinkImport.linkOf("x", null));
+    }
+
+    @Test public void dnsServersKeptAtTheTopOfAFileAreFoundToo() throws Exception {
+        String plain = DeepLinkImport.parse(GOLDEN_PLAIN).toml;
+        TomlParseResult atTheTop = Toml.parse("dns_upstreams = [\"9.9.9.9\"]\n" + plain.replace("dns_upstreams = []\n", ""));
+        assertEquals(java.util.Arrays.asList("9.9.9.9"), DeepLinkImport.linkOf("x", atTheTop).dnsUpstreams);
+        TomlParseResult both = Toml.parse("dns_upstreams = [\"9.9.9.9\"]\n" + plain.replace("dns_upstreams = []", "dns_upstreams = [\"8.8.8.8\"]"));
+        assertEquals("The endpoint's own wins", java.util.Arrays.asList("8.8.8.8"), DeepLinkImport.linkOf("x", both).dnsUpstreams);
     }
 }

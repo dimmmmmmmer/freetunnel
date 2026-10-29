@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A TV has no touch: its remote's OK is what the lines of Settings answer to, and the words say so. The same strings as in values/, for a
+     device whose UI mode is television. -->
+<resources>
+    <string name="update_ready">Version %1$s is verified. Press OK on this line to install it. If Android asks, allow installs from FreeTunnel, then press OK on this line again.</string>
+    <string name="update_installing_again">Waiting for Android installation confirmation… If its window closed, press OK on this line to start it again.</string>
+    <string name="update_allow_installs">Allow FreeTunnel to install apps in Android’s settings (on some TVs: Security &amp; restrictions › Unknown sources), then press OK on the update line in Settings again.</string>
+</resources>

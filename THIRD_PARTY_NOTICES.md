@@ -6,8 +6,8 @@ licensed under their own terms. This file names each of those components, says
 which downloads contain it, and points to the license texts, which are in
 [licenses/](licenses/):
 
-- `licenses/common/`: components in every download (the VPN core's libraries),
-  and the license of the Inter typeface, which the desktop downloads contain.
+- `licenses/common/`: components in every download (the VPN core's libraries and
+  the Inter typeface).
 - `licenses/desktop/`: components in the Windows, macOS and Linux downloads.
 - `licenses/android/`: components in the Android app.
 
@@ -28,8 +28,10 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 - Linux AppImage: in `usr/share/doc/freetunnel/` inside the image (run it with
   `--appimage-extract` to unpack it), with `appimage-runtime.txt`, and the
   system libraries' copyright files in `usr/share/doc/<package>/`.
-- Android: Settings, About, Open-source licenses; the files are in the APK's
-  `assets/`.
+- Android: in the APK's `assets/`: `assets/THIRD_PARTY_NOTICES.md`,
+  `assets/LICENSE` and `assets/licenses/` (without the desktop's texts). Unzip
+  the APK to read them. As on the desktop, they are files, not a screen of the
+  app. They are also in the repository.
 
 ## What each download contains
 
@@ -88,7 +90,8 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries) and [Rust
   crates](#rust-crates-in-the-trusttunnel-native-library).
 - [Java and Kotlin libraries](#java-and-kotlin-libraries).
-- [An icon derived from Feather](#feather-icons-in-the-android-app).
+- [Icons derived from Feather and Lucide](#feather-and-lucide-icons-in-the-android-app).
+- [The Inter typeface](#inter).
 
 ## The VPN core and its libraries
 
@@ -354,13 +357,18 @@ Windows only.
 ### Inter
 
 The text of FreeTunnel's windows and screens is set in Inter, in the desktop
-apps: its Regular and Medium weights, as the hinted static TrueType files of
-the official release, unmodified, compiled into FreeTunnel. The exceptions are
-text the operating system draws itself (the tray menu, file dialogs,
-notifications) and the log and configuration text, which are set in the
-system's monospace font. The files and their checksums are in
+apps and in the Android app: its Regular and Medium weights, as the hinted
+static TrueType files of the official release, unmodified. The desktop builds
+compile them into FreeTunnel; the Android app carries them as font resources.
+The exceptions are text the operating system draws itself (the tray menu, file
+dialogs, notifications) and the log and configuration text, which are set in
+the system's monospace font. The files and their checksums are in
 [assets/fonts/inter/](assets/fonts/inter/), with the release they come from in
-`SOURCE`.
+`SOURCE`. The Android app also draws four characters of its screens (✓ ↓ ↑ ←)
+as vector drawables, `res/drawable/ic_check.xml`, `ic_arrow_down.xml`,
+`ic_arrow_up.xml` and `ic_back.xml`, which `scripts/android-icons-from-svg.py`
+makes from the outlines of those glyphs in `Inter-Regular.ttf`, so that they are
+the desktop's shapes; they are covered by the same license.
 
 - Version: Inter 4.1 (tag v4.1, commit e3a3d4c57d5ecc01453a575621882a384c1995a3):
   `Inter-Regular.ttf` and `Inter-Medium.ttf` from `Inter-4.1.zip`
@@ -449,11 +457,12 @@ Windows only: the frameless window's shadow, corners and snap layouts.
 
 Five of the interface's icons (`assets/icons/settings.svg`, `export.svg`,
 `close.svg` and `connection.svg` from Feather, `edit.svg` from Lucide) are
-derived from these icon sets. The Android app's Configurations icon comes from
-Feather too: see [Feather icons in the Android app](#feather-icons-in-the-android-app).
+derived from these icon sets. The Android app draws the same icons: see
+[Feather and Lucide icons in the Android
+app](#feather-and-lucide-icons-in-the-android-app).
 
 - License: MIT (Feather) AND ISC (Lucide),
-  [licenses/desktop/Feather-Lucide-icons.txt](licenses/desktop/Feather-Lucide-icons.txt)
+  [licenses/common/Feather-Lucide-icons.txt](licenses/common/Feather-Lucide-icons.txt)
 - Copyright: Copyright (c) 2013-2023 Cole Bemis; Copyright (c) Lucide Icons and
   Contributors
 - Source: <https://github.com/feathericons/feather>, <https://github.com/lucide-icons/lucide>
@@ -801,14 +810,23 @@ Dependencies of AndroidX.
 - Copyright: Copyright The Guava Authors; Copyright The JSpecify Authors
 - Source: <https://github.com/google/guava>, <https://github.com/jspecify/jspecify/tree/v1.0.0>
 
-### Feather icons in the Android app
+### Feather and Lucide icons in the Android app
 
-The Configurations tab's icon (`res/drawable/ic_servers.xml`) is derived from
-Feather's `server` icon.
+The Android app draws the desktop's icons from vector drawables
+(`res/drawable/ic_*.xml`), which `scripts/android-icons-from-svg.py` makes from
+the desktop's `assets/icons/*.svg` and `assets/logo.svg`:
 
-- License: MIT, [licenses/android/Feather-icons.txt](licenses/android/Feather-icons.txt)
-- Copyright: Copyright (c) 2013-2023 Cole Bemis
-- Source: <https://github.com/feathericons/feather>
+- `ic_settings`, `ic_export`, `ic_close` and `ic_connection` are derived from
+  Feather's `settings`, `upload`, `x` and `server` icons (MIT).
+- `ic_edit` is derived from Lucide's `pencil` icon (ISC).
+- `ic_network`, `ic_log`, `ic_ping` (the speedometer), `ic_logo` and the plus
+  signs are FreeTunnel's own.
+
+- License: MIT (Feather) AND ISC (Lucide),
+  [licenses/common/Feather-Lucide-icons.txt](licenses/common/Feather-Lucide-icons.txt)
+- Copyright: Copyright (c) 2013-2023 Cole Bemis; Copyright (c) Lucide Icons and
+  Contributors
+- Source: <https://github.com/feathericons/feather>, <https://github.com/lucide-icons/lucide>
 
 ## Source code of the LGPL and GPL components
 
@@ -835,15 +853,15 @@ provided.
 ## License texts
 
 Under [licenses/common/](licenses/common/): brotli, chromium-tldregistry,
-cxxopts, fmt, http-parser, Inter-OFL-1.1, klib, ldns, libevent, libsodium,
-libuv, llhttp, lwip, magic_enum, MPL-2.0, nghttp2, nghttp3, ngtcp2,
-nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
+cxxopts, Feather-Lucide-icons, fmt, http-parser, Inter-OFL-1.1, klib, ldns,
+libevent, libsodium, libuv, llhttp, lwip, magic_enum, MPL-2.0, nghttp2, nghttp3,
+ngtcp2, nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
 
 Under [licenses/desktop/](licenses/desktop/): AFL-2.1, AppImage-runtime,
-Detours, Feather-Lucide-icons, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1,
-LGPL-3.0, Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
+Detours, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1, LGPL-3.0,
+Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
 Qt-6.8.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
-checker-qual, EPL-1.0, Feather-icons, ktoml, NOTICE-files, qrcodegen, slf4j,
+checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, slf4j,
 ThreeTen-Backport, winnow.

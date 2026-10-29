@@ -24,6 +24,22 @@ final class ShownText {
     }
 
     /**
+     * text cut to n characters by dropping the middle, with an ellipsis in its place, so
+     * that both ends of a long name stay in sight inside quoted text: qml/Main.qml's
+     * elideMiddle(s, n), which the desktop's delete confirmations use with 36.
+     */
+    static String elideMiddle(String text, int n) {
+        int length = text.codePointCount(0, text.length());
+        if (length <= n) return text;
+        if (n <= 1) return "…";
+        int keep = n - 1;
+        int head = (keep + 1) / 2;
+        int tail = keep / 2;
+        return text.substring(0, text.offsetByCodePoints(0, head)) + "…"
+                + text.substring(text.offsetByCodePoints(0, length - tail));
+    }
+
+    /**
      * text without control, format (such as the ones that reverse or hide text), line
      * or paragraph separator characters, with any other space as an ordinary one, and
      * without letters that draw nothing. A character keeps at most two combining marks,

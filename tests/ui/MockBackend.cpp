@@ -47,6 +47,10 @@ void MockBackend::setDisconnecting(bool v)
     if (m_disconnecting == v)
         return;
     m_disconnecting = v;
+    // As Backend::applyVpnClientState has it: a connection that is going down is no longer connected
+    // (its logo is at 0.7, not at full strength).
+    if (v)
+        m_connected = false;
     emit stateChanged();
 }
 

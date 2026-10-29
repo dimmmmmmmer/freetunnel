@@ -1,0 +1,23 @@
+# Excluded routes a new installation starts with, and that "Restore defaults" in Settings puts
+# back: private and special-use IPv4 ranges (RFC 1918, carrier-grade NAT, link-local and so on)
+# that should never be tunnelled. They go to the core's listener.tun.excluded_routes, next to
+# whatever the config itself excludes.
+#
+# One subnet per line, UTF-8 without a byte order mark, in the order they are listed. Blank lines
+# and lines that begin with # are ignored; a subnet has no comment after it. A subnet is an IP
+# address with a prefix length (10.0.0.0/8). Never a /0, which is every address: excluded, it
+# would take all of its traffic out of the tunnel, and both apps refuse one.
+#
+# One file for both apps, as data/split/recommended-russia.txt is. The desktop app has it compiled
+# in (cmake/SharedData.cmake writes the include file that src/core/AppSettings.cpp reads), and
+# the Android app has it copied into its assets (android/app/build.gradle). tests/test_appsettings.cpp
+# and android/app/src/test/.../ExcludedRoutesTest.java check that each uses these lines and no
+# others, and that every one of them is a subnet the app takes.
+
+10.0.0.0/8
+100.64.0.0/10
+169.254.0.0/16
+172.16.0.0/12
+192.0.0.0/24
+192.168.0.0/16
+255.255.255.255/32

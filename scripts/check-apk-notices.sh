@@ -2,8 +2,8 @@
 # Fail unless an APK carries the third-party notices as this commit has them:
 # THIRD_PARTY_NOTICES.md, LICENSE and every license text under licenses/common
 # and licenses/android, as assets with the same paths and the same bytes, and
-# none of licenses/desktop. android/app/build.gradle copies them in, and
-# Settings, About, Open-source licenses shows them.
+# none of licenses/desktop. android/app/build.gradle copies them in. The app
+# has no screen for them: as on the desktop, they are files, here in the APK.
 #
 # usage: check-apk-notices.sh <apk>
 set -euo pipefail

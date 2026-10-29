@@ -29,6 +29,16 @@ object UpdatePolicy {
     fun classify(error: Throwable, otherwise: Failure): Failure =
         (error as? Refused)?.failure ?: if (otherwise != Failure.INSTALLER && error is IOException) Failure.NETWORK else otherwise
 
+    /** The longest the app goes between two automatic checks on launch (check-on-launch below). */
+    const val LAUNCH_CHECK_INTERVAL_MS = 12L * 60 * 60 * 1000
+
+    /**
+     * Whether an automatic check on launch is due: none was made yet, or the last was at least 12 hours ago. A last time in the
+     * future (the clock was set back) is no reason to wait, and the check made then puts the right time in its place.
+     */
+    fun launchCheckDue(lastMs: Long, nowMs: Long): Boolean =
+        lastMs <= 0 || nowMs < lastMs || nowMs - lastMs >= LAUNCH_CHECK_INTERVAL_MS
+
     // GitHub's primary limit answers 403 with X-RateLimit-Remaining: 0, its
     // secondary limits 403 or 429 with Retry-After. Other 403s are not limits.
     fun rateLimited(status: Int, remaining: String?, retryAfter: String?): Boolean =

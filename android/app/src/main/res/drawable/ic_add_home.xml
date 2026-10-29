@@ -1,0 +1,4 @@
+<!-- Made by scripts/android-icons-from-svg.py: the desktop draws this plus as two rectangles, 10 by 1.6 in a 14 box. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="14dp" android:height="14dp" android:viewportWidth="14" android:viewportHeight="14">
+    <path android:pathData="M2.8,6.2 H11.2 A0.8,0.8 0 0 1 12,7 V7 A0.8,0.8 0 0 1 11.2,7.8 H2.8 A0.8,0.8 0 0 1 2,7 V7 A0.8,0.8 0 0 1 2.8,6.2 Z M7,2 H7 A0.8,0.8 0 0 1 7.8,2.8 V11.2 A0.8,0.8 0 0 1 7,12 H7 A0.8,0.8 0 0 1 6.2,11.2 V2.8 A0.8,0.8 0 0 1 7,2 Z" android:fillColor="#ffffff"/>
+</vector>

@@ -11,6 +11,9 @@ import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
 
 public final class QuickTileService extends TileService {
+    // The tile's words are in the app's language, which Android 8 to 12 only knows from this (AppLocale).
+    @Override protected void attachBaseContext(Context base) { super.attachBaseContext(AppLocale.wrap(base)); }
+
     @Override public void onStartListening() {
         super.onStartListening();
         Tile tile = getQsTile();
@@ -43,7 +46,8 @@ public final class QuickTileService extends TileService {
         }
         if (VpnService.prepare(this) == null) {
             try {
-                FreeTunnelVpnService.start(this, SavedProfile.selected(getSharedPreferences("freetunnel", MODE_PRIVATE)));
+                SavedProfile.Choice selected = SavedProfile.selected(getSharedPreferences("freetunnel", MODE_PRIVATE));
+                FreeTunnelVpnService.start(this, selected.toml, selected.profile);
             } catch (Exception e) {
                 Toast.makeText(this, getString(R.string.text_open_the_app_and_check_the_configuration), Toast.LENGTH_LONG).show();
             }

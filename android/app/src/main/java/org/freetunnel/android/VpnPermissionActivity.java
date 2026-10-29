@@ -9,6 +9,9 @@ import android.widget.Toast;
 
 /** Private tile consent entry. Exported launcher never accepts control extras. */
 public final class VpnPermissionActivity extends Activity {
+    // Its notices are in the app's language, which Android 8 to 12 only knows from this (AppLocale).
+    @Override protected void attachBaseContext(android.content.Context base) { super.attachBaseContext(AppLocale.wrap(base)); }
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) return;
@@ -27,7 +30,8 @@ public final class VpnPermissionActivity extends Activity {
     }
     private void startVpn() {
         try {
-            FreeTunnelVpnService.start(this, SavedProfile.selected(getSharedPreferences("freetunnel", MODE_PRIVATE)));
+            SavedProfile.Choice selected = SavedProfile.selected(getSharedPreferences("freetunnel", MODE_PRIVATE));
+            FreeTunnelVpnService.start(this, selected.toml, selected.profile);
         } catch (Exception e) {
             Toast.makeText(this, getString(R.string.text_open_the_app_and_check_the_saved_configuration), Toast.LENGTH_LONG).show();
         }

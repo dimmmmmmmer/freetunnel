@@ -34,7 +34,11 @@ class FreeTunnelVpnService : VpnService() {
         const val ACTION_STOP = "org.freetunnel.android.STOP_VPN"
         const val ACTION_STATE = "org.freetunnel.android.VPN_STATE"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_PROFILE = "profile"
         const val EXTRA_STATE = "state"
+        /** Broadcast to the app, while it is on the screen, with the reason a connection ended in failure (see showFailure). */
+        const val ACTION_FAILURE = "org.freetunnel.android.VPN_FAILURE"
+        const val EXTRA_REASON = "reason"
         private const val CHANNEL = "freetunnel_vpn"
         private const val FAILURE_CHANNEL = "freetunnel_vpn_failure"
         private const val NOTIFICATION_ID = 47
@@ -52,15 +56,34 @@ class FreeTunnelVpnService : VpnService() {
         private val RETRY = Any()
         @Volatile private var currentState = 0
         @Volatile private var owner: FreeTunnelVpnService? = null
+        // When the connection last came up, on SystemClock.elapsedRealtime(), or 0 while it is not up: the time
+        // Home shows beside the logo. The desktop restarts it each time it becomes connected (applyVpnClientState),
+        // so this does too. It is not connectedAt, which keeps a session going across the core's own recovery for
+        // the backoff, and which nothing outside the service should have to understand.
+        @Volatile private var sessionStartedAt = 0L
+        // Whether the app is on the screen, from its onResume to its onPause. The desktop sends an error to its tray only while its window is not
+        // in view (Main.qml, errorsGoToTray), and never puts a system message over its own open window: the app's own screen says what went
+        // wrong (the line under the logo, the Reconnect link under it), and a pop-over covered its nav bar. While it is, the alerts below are
+        // posted without a sound or a heads-up, and are still in the shade; with the app away they alert as before.
+        @Volatile private var appVisible = false
 
+        @JvmStatic fun setAppVisible(visible: Boolean) { appVisible = visible }
         @JvmStatic fun state(context: Context): Int = currentState
-        @JvmStatic fun start(context: Context, source: String) {
+        /** SystemClock.elapsedRealtime() at the moment the connection last became connected, or 0 where it is not. */
+        @JvmStatic fun sessionStart(): Long = sessionStartedAt
+        /**
+         * Starts the VPN on this config. [profile] is the split profile it uses; without one, it is the profile of the
+         * config the app has selected, which is the config this is wherever the app starts it.
+         */
+        @JvmStatic @JvmOverloads fun start(context: Context, source: String, profile: String? = null) {
             val intent = Intent(context, FreeTunnelVpnService::class.java).setAction(ACTION_START).putExtra(EXTRA_CONFIG, source)
+            if (profile != null) intent.putExtra(EXTRA_PROFILE, profile)
             context.startForegroundService(intent)
         }
         @JvmStatic fun stop(context: Context) { send(context, ACTION_STOP) }
         // The same request as the notification's Reconnect: with no config it
-        // reconnects the profile in use.
+        // reconnects the profile in use. Nothing in the app's screens sends it (the desktop's Home has no such
+        // control, and the service reconnects by itself); device tests do.
         @JvmStatic fun reconnect(context: Context) { send(context, ACTION_START) }
         // A process killed while blocked leaves its alert behind, and only the
         // service's next onCreate would clear it. The state lives in this
@@ -78,6 +101,9 @@ class FreeTunnelVpnService : VpnService() {
         }
     }
 
+    // Its notifications speak the app's language, which Android 8 to 12 only knows from this (AppLocale).
+    override fun attachBaseContext(base: Context) { super.attachBaseContext(AppLocale.wrap(base)) }
+
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "freetunnel-vpn") }
     private val prefs by lazy { getSharedPreferences("freetunnel", MODE_PRIVATE) }
     private var client: VpnClient? = null
@@ -87,6 +113,8 @@ class FreeTunnelVpnService : VpnService() {
     private var establishedThisRequest = false
     private var keepBlocked = true
     private var activeSource: String? = null
+    // The split profile activeSource runs with.
+    private var activeProfile: String? = null
     // Automatic recovery while the kill switch blocks traffic. retainedTun was
     // built from activePlan; blocked lasts from a fatal failure until the core
     // reports 2 or the TUN is closed.
@@ -103,7 +131,11 @@ class FreeTunnelVpnService : VpnService() {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var permissionEpoch = 0L
     @Volatile private var destroyed = false
+    // The id of the latest start, recorded by onStartCommand once that start has been answered with startForeground.
     @Volatile private var latestStartId = 0
+    // The id of the start whose task the worker ran last, which is what the worker ends the service with. A start that is
+    // newer is still to be served, so ending the service with this id fails and leaves that start its service. Worker only.
+    private var servedStartId = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -133,15 +165,21 @@ class FreeTunnelVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every start is a startForegroundService (send, start, the tile, the receiver, the notification's actions, Android's
+        // Always-on), and the system wants startForeground for each one, whatever its action: a stop, a start that will be refused,
+        // a start with nothing to run. Nothing goes before it. A new start may arrive after stopForeground but before onDestroy,
+        // when onCreate is not called again, so every start acknowledges itself here.
+        startForeground(NOTIFICATION_ID, notification(stateText()))
+        // Recorded only now. A service that is ended with stopSelfResult(the id of the latest start) while that start still owes its
+        // startForeground fails the app with ForegroundServiceDidNotStartInTimeException ("Bringing down service while still waiting
+        // for start foreground"), and the worker, in the middle of a failure, may read this id the moment it is recorded.
         latestStartId = startId
         // A disconnect also cancels the reconnect planned for after an update.
         if (intent?.action == ACTION_STOP) prefs.edit { remove(RESUME_AFTER_UPDATE) }
-        // A new start may arrive after stopForeground but before onDestroy.
-        // onCreate is not called again in that window; acknowledge every FGS start.
-        startForeground(NOTIFICATION_ID, notification(stateText()))
         val epoch = permissionEpoch
         execute {
             if (destroyed || startId != latestStartId || epoch != permissionEpoch) return@execute
+            servedStartId = startId
             if (intent?.action == ACTION_STOP) {
                 close()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -166,15 +204,23 @@ class FreeTunnelVpnService : VpnService() {
             val previous = client
             establishedThisRequest = false
             try {
-                val source = intent?.getStringExtra(EXTRA_CONFIG) ?: activeSource ?: SavedProfile.selected(prefs)
-                val plan = RoutingConfig.prepare(this, source)
+                val given = intent?.getStringExtra(EXTRA_CONFIG)
+                // A start with no config in it runs the one the app has selected, with the split profile that config
+                // uses: Android's Always-on, a restart of a killed service, and the notification's Reconnect when
+                // nothing runs yet. The tile and the app say which they start, and the profile with it.
+                val saved = if (given == null && activeSource == null) SavedProfile.selected(prefs) else null
+                val source = given ?: activeSource ?: saved?.toml ?: error("No configuration")
+                val profile = intent?.getStringExtra(EXTRA_PROFILE) ?: saved?.profile
+                    ?: (if (given == null) activeProfile else null) ?: SavedProfile.profile(prefs)
+                val plan = RoutingConfig.prepare(this, source, profile)
                 check(VpnService.prepare(this) == null) { "VPN permission is required" }
                 replace(plan, startId, epoch)
                 activeSource = source
+                activeProfile = profile
             } catch (error: Throwable) {
                 if (!destroyed && startId == latestStartId && epoch == permissionEpoch) {
                     if (retainedTun != null && client === previous && !establishedThisRequest) {
-                        logEvent("VPN settings rejected: ${error.javaClass.simpleName}")
+                        logEvent("VPN settings rejected: ${error.javaClass.simpleName}", LogLines.WARN)
                         publishState(currentState)
                         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(stateText()))
                         getSystemService(NotificationManager::class.java).notify(FAILURE_ID,
@@ -183,7 +229,7 @@ class FreeTunnelVpnService : VpnService() {
                                 .setContentIntent(openApp()).setAutoCancel(true).build())
                         return@execute
                     }
-                    logEvent("VPN start failed: ${error.javaClass.simpleName}")
+                    logEvent("VPN start failed: ${error.javaClass.simpleName}", LogLines.ERROR)
                     fail(getString(R.string.text_could_not_start_vpn))
                 }
             }
@@ -221,7 +267,8 @@ class FreeTunnelVpnService : VpnService() {
         val listener = object : VpnClientListener {
             override fun protectSocket(socket: Int) = protect(socket)
             override fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?) = verifier.verifyCertificate(certificate, rawChain)
-            override fun onConnectionInfo(info: String) = Unit
+            // Each connection the core makes, as the desktop logs them (Backend: connectionInfo): at INFO, when logging is on.
+            override fun onConnectionInfo(info: String) = logEvent(info)
             override fun onStateChanged(state: Int) = execute {
                 if (destroyed || token != generation) return@execute
                 when {
@@ -304,6 +351,7 @@ class FreeTunnelVpnService : VpnService() {
         blocked = false
         attempts = 0
         activeSource = null
+        activeProfile = null
         getSystemService(NotificationManager::class.java).cancel(BLOCKED_ID)
         if (publish) publishState(0)
     }
@@ -333,14 +381,15 @@ class FreeTunnelVpnService : VpnService() {
                 showBlocked(reason, silent = continued)
             }
             // Once per reason and episode: retries every 30 s would otherwise
-            // push everything else out of the 200-line log.
-            if (loggedReasons.add(reason)) logEvent("$reason; kill switch keeps traffic blocked, reconnecting automatically")
+            // push everything else out of the log.
+            if (loggedReasons.add(reason)) logEvent("$reason; kill switch keeps traffic blocked, reconnecting automatically", LogLines.WARN)
             scheduleRetry(backoff.next())
         } else {
             close()
             showFailure(reason)
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelfResult(latestStartId)
+            // Not the latest start: one that is newer than the one served last has asked for its own turn, and it keeps the service.
+            stopSelfResult(servedStartId)
         }
     }
 
@@ -427,28 +476,35 @@ class FreeTunnelVpnService : VpnService() {
 
     private fun publishState(state: Int) {
         if (owner !== this) return
+        // The state that was current before this one is what tells a new connection from a repeat of the same one.
+        if (state == 2 && currentState != 2) sessionStartedAt = SystemClock.elapsedRealtime()
+        else if (state != 2) sessionStartedAt = 0L
         currentState = state
         sendBroadcast(Intent(ACTION_STATE).setPackage(packageName))
         QuickTileService.refresh(this)
     }
 
     private fun showFailure(reason: String) {
-        logEvent(reason)
+        logEvent(reason, LogLines.ERROR)
+        // The desktop says an error as a toast in its window whenever the window is in view, and tells the tray as well only when it is not
+        // (Main.qml: toast.show(msg), then errorsGoToTray). While the app is on the screen the notice below is silent, and Home has nothing to
+        // say of a failure but that the VPN is off, so the reason goes to the app, which says it in its own toast. Away, the notice alerts.
+        if (appVisible) sendBroadcast(Intent(ACTION_FAILURE).setPackage(packageName).putExtra(EXTRA_REASON, reason))
         getSystemService(NotificationManager::class.java).notify(FAILURE_ID,
             NotificationCompat.Builder(this, FAILURE_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(getString(R.string.text_vpn_disconnected)).setContentText(reason)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.vpn_failure_details, reason)))
-                .setContentIntent(openApp()).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build())
+                .setContentIntent(openApp()).setAutoCancel(true).setSilent(appVisible).setPriority(NotificationCompat.PRIORITY_HIGH).build())
     }
 
-    // Posted once per blocked episode, silently when it carries one on. Its
+    // Posted once per blocked episode, silently when it carries one on or while the app is on the screen. Its
     // actions are the ongoing notification's own PendingIntents.
     private fun showBlocked(reason: String, silent: Boolean) {
         getSystemService(NotificationManager::class.java).notify(BLOCKED_ID,
             NotificationCompat.Builder(this, FAILURE_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(getString(R.string.vpn_blocked_title)).setContentText(reason)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.vpn_blocked_details, reason)))
-                .setContentIntent(openApp()).setAutoCancel(true).setOnlyAlertOnce(true).setSilent(silent)
+                .setContentIntent(openApp()).setAutoCancel(true).setOnlyAlertOnce(true).setSilent(silent || appVisible)
                 .setCategory(NotificationCompat.CATEGORY_ERROR).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .addAction(0, getString(R.string.vpn_reconnect), serviceAction(ACTION_START, 1))
                 .addAction(0, getString(R.string.text_disconnect_vpn), serviceAction(ACTION_STOP, 2)).build())
@@ -475,12 +531,14 @@ class FreeTunnelVpnService : VpnService() {
     private fun serviceAction(action: String, request: Int) = PendingIntent.getForegroundService(this, request,
         Intent(this, FreeTunnelVpnService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-    private fun logEvent(message: String) {
+    // A line of the log the Logs page shows, "yyyy-MM-dd HH:mm:ss<TAB>LEVEL<TAB>message" as the desktop writes it
+    // (LogLines), when logging is on. Called from this service's worker and from the core's own threads, which is what
+    // LogFile's lock is for; a failure to write is never a failure to connect.
+    private fun logEvent(message: String, level: String = LogLines.INFO) {
         if (!prefs.getBoolean("logging", true)) return
         runCatching {
-            val file = File(filesDir, "freetunnel.log")
-            val old = if (file.exists()) file.readLines().takeLast(199) else emptyList()
-            file.writeText((old + "${System.currentTimeMillis()} $message").joinToString("\n", postfix = "\n"))
+            LogFile.append(File(filesDir, LogFile.NAME),
+                LogLines.entry(System.currentTimeMillis(), java.time.ZoneId.systemDefault(), level, message))
         }
     }
 }

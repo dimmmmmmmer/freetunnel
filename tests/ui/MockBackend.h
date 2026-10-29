@@ -362,7 +362,8 @@ private:
     bool m_connecting = false;
     bool m_disconnecting = false;
     QString m_confirmLog;
-    QString m_sessionTime = QStringLiteral("0:00:01");
+    // The hours are two digits, as Backend::sessionTime writes them.
+    QString m_sessionTime = QStringLiteral("00:00:01");
     QString m_downSpeed = QStringLiteral("1.2");
     QString m_upSpeed = QStringLiteral("0.4");
     QString m_activeConfig = QStringLiteral("Test Config");

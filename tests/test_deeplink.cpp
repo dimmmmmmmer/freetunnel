@@ -51,6 +51,7 @@ private slots:
     void ourOwnLinksStayVersion1();
     void ourLinkWithAnAuthKeyIsVersion2();
     void theTomlHoldsTheAuthKeyAndNeverTheSubscription();
+    void encodesTheLinksTheAndroidAppPins();
     void readsASelfSignedVersion2Link();
     void aVersion2LinkIgnoresTagsItDoesNotDefine();
     void everyVersionRecordCounts();
@@ -998,6 +999,38 @@ void TestDeepLink::ourLinkWithAnAuthKeyIsVersion2()
     const QList<quint64> tags = tagsOf(encodeDeepLink(c));
     QCOMPARE(tags.last(), quint64(0x0F));
     QCOMPARE(tags.count(0x0F), 1);
+}
+
+// The Android app writes the same share links (DeepLinkImport.encode in android/), and its test
+// pins these two strings, byte for byte. They are what this encoder writes for the two servers
+// below, so that a change to either encoder that changes the bytes fails a test on both sides.
+void TestDeepLink::encodesTheLinksTheAndroidAppPins()
+{
+    DeepLinkConfig full;
+    full.hostname = "vpn.example.com";
+    full.addresses = {"1.2.3.4:443", "[2001:db8::1]:443"};
+    full.customSni = "example.org";
+    full.hasIpv6 = false;
+    full.username = "premium";
+    full.password = "s3cretPass";
+    full.skipVerification = true;
+    full.upstreamProtocol = UpstreamProtocol::Http3;
+    full.antiDpi = true;
+    full.clientRandomPrefix = "deadbeef/ffff";
+    full.name = "My Server";
+    full.dnsUpstreams = {"1.1.1.1", "tls://dns.example.com"};
+    QCOMPARE(encodeDeepLink(full),
+             QStringLiteral("tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20CCzEuMi4zLjQ6NDQzAhFbMjAwMTpkYjg6OjFdOjQ0MwUHcHJlbWl1bQYKczNjcmV0"
+                            "UGFzcwQBAAcBAQoBAQMLZXhhbXBsZS5vcmcJAQILDWRlYWRiZWVmL2ZmZmYMCU15IFNlcnZlcg0eBzEuMS4xLjEVdGxzOi8vZG5zLmV4YW1wbGUuY29t"));
+
+    DeepLinkConfig plain;
+    plain.hostname = "frankfurt.example.com";
+    plain.addresses = {"203.0.113.10:443"};
+    plain.username = "user";
+    plain.password = "pass";
+    plain.name = QStringLiteral("DE \u00b7 Frankfurt");
+    QCOMPARE(encodeDeepLink(plain),
+             QStringLiteral("tt://?AAEBARVmcmFua2Z1cnQuZXhhbXBsZS5jb20CEDIwMy4wLjExMy4xMDo0NDMFBHVzZXIGBHBhc3MMD0RFIMK3IEZyYW5rZnVydA"));
 }
 
 // The subscription address carries the VPN password in plain text; what a link

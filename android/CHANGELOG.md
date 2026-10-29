@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep split-tunnelling edits intact and report a save failure when Android
+  storage refuses to persist a change.
+
 ## 1.0.0
 
 The first official FreeTunnel for Android: a TrustTunnel VPN client for phones,
@@ -22,14 +25,15 @@ needs Android 8.0 or later.
   with a remote. **Receive from phone** shows a QR code on the TV; a phone,
   tablet or laptop on the same network opens it in a browser and sends a link
   or a TOML file.
-- Updates come from this project's GitHub releases. Settings checks for them
-  and verifies each one before Android is asked to install it.
+- Updates come from this project's GitHub releases. The app checks for them on
+  its own when it starts, at most every 12 hours, and Settings checks when you
+  ask. Each is verified before Android is asked to install it.
 - A Quick Settings tile, Android's Always-on VPN, and English and Russian.
 
 ### Security
 
-- Profiles are encrypted with a key kept in Android Keystore, and are left out
-  of backups and device transfer.
+- Server configurations are encrypted with a key kept in Android Keystore, and
+  are left out of backups and device transfer.
 - The configuration editor hides the password, blocks screenshots and screen
   recording, and asks the keyboard neither to learn from what is typed there
   nor to show its own copy of it.
@@ -41,8 +45,8 @@ needs Android 8.0 or later.
 - Installing an update while the VPN is on asks first, because Android turns
   the VPN off while it replaces the app. FreeTunnel reconnects after the
   update, unless you disconnected in the meantime.
-- Receive from phone listens only on the home network, for one link and at
-  most 5 minutes, behind a one-time code, and stops after 3 wrong codes. The
+- Receive from phone listens only on the home network, for at most
+  5 minutes, behind a one-time code, and stops after 3 wrong codes. The
   link crosses the network unencrypted, so use it on a network you trust. The
   TV shows which address sent the link, and adds nothing until you confirm.
 
@@ -54,5 +58,3 @@ needs Android 8.0 or later.
   VPN password, is not kept.
 - Servers that need a client random auth key are refused, with a message: they
   need TrustTunnel core 1.3.
-- Checking for updates when the app starts is off by default. It can be turned
-  on in Settings.

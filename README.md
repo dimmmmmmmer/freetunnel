@@ -114,10 +114,9 @@ Closing the window keeps FreeTunnel and the VPN running:
 | Platform | Closing the window |
 | --- | --- |
 | Windows | ✕ minimizes the window to the taskbar. Alt+F4 quits. |
-| Linux | ✕ minimizes the window to the taskbar, and so does the desktop's own close: Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`. |
-| Linux, on a window manager with no minimize, such as Hyprland or sway | The window hides to the tray instead. The tray icon (or a second launch) brings it back. |
+| Linux (X11/XWayland) with a usable tray | ✕ and the desktop's own close (Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`) hide the window to the tray immediately. The minimize button still minimizes. |
 | macOS | The red button (or ⌘W) hides it. The menu-bar icon or the Dock brings it back. |
-| A Linux desktop with no system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
+| A Linux desktop with no usable system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
 
 To quit, choose **Quit** in the tray menu (or press Ctrl+Q, or ⌘Q on macOS).
 
@@ -127,6 +126,12 @@ does: FreeTunnel stays open, and the desktop has to end it. Choose **Quit**
 first if a logout waits on it. And it applies on X11 and XWayland, which is what
 the AppImage and the `.deb` run on; a build run natively on Wayland still quits
 on it.
+
+On Hyprland and sway, **Show FreeTunnel** (and the tray icon) brings a window that
+is open but not in focus to the workspace you are on, and the window may blink once
+as it does. To switch to the window's workspace instead, turn on Hyprland's
+`misc:focus_on_activate`, or its `focus_on_activate` window rule for FreeTunnel
+alone.
 
 Force-killing the window, with Hyprland's `forcekillactive` or `killwindow`,
 `hyprctl kill` or `xkill`, ends FreeTunnel, and the VPN with it. No program can

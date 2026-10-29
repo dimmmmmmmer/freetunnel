@@ -1,10 +1,20 @@
 name: Android
 on:
+  # qml/**, assets/icons/** and assets/logo.svg are the desktop's palette and icons,
+  # which the Android app copies: tests/test_android_theme_matches_desktop.sh and
+  # tests/test_android_icons.sh read them, so a change to them runs this too. So does
+  # i18n/freetunnel_ru.ts, whose texts and translations the app's strings are held to
+  # (tests/test_android_strings_match_desktop.sh).
+  # data/** holds the lists both apps read (Recommended for Russia): the app copies them
+  # into its assets, and its unit tests check every line, so a change to one runs this too.
+  # assets/fonts/** holds Inter, the typeface of both apps: the build copies the two files
+  # into the app's font resources (and fails on one that is not the one SHA256SUMS pins),
+  # and scripts/check-apk-data.sh looks for the same bytes in the APK.
   push:
     branches: [main]
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', 'scripts/check-apk-data.sh', 'scripts/android-icons-from-svg.py', 'scripts/check-android-device-tests.py', 'qml/**', 'assets/icons/**', 'assets/logo.svg', 'i18n/freetunnel_ru.ts', 'data/**', 'assets/fonts/**', '.github/workflows/android.yml']
   pull_request:
-    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', '.github/workflows/android.yml']
+    paths: ['include/core/ReleaseSigning.h', 'android/**', 'scripts/prepare-trusttunnel-android.sh', 'scripts/build-android-release.sh', 'scripts/sign-android-release.sh', 'scripts/check-android-signer.sh', 'scripts/check-android-release-tag.sh', 'scripts/check-android-release-unpublished.sh', 'tests/test_android_*.sh', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'licenses/**', 'scripts/check-apk-notices.sh', 'scripts/check-apk-data.sh', 'scripts/android-icons-from-svg.py', 'scripts/check-android-device-tests.py', 'qml/**', 'assets/icons/**', 'assets/logo.svg', 'i18n/freetunnel_ru.ts', 'data/**', 'assets/fonts/**', '.github/workflows/android.yml']
   workflow_dispatch:
   # android-release.yml runs this whole workflow on the tagged commit, and signs
   # nothing until it has passed there.
@@ -51,8 +61,17 @@ jobs:
       - run: bash tests/test_android_sign_release.sh
       - run: bash tests/test_android_release_unpublished.sh
       - run: bash tests/test_android_tv_dialogs.sh
+      # The desktop's colours, icons and words, which the app has to keep.
+      - run: bash tests/test_android_theme_matches_desktop.sh
+      - run: bash tests/test_android_icons.sh
+      - run: bash tests/test_android_strings_match_desktop.sh
+      - run: bash tests/test_android_apk_data.sh
+      # Inter, the desktop's typeface, in Regular and Medium and nothing else.
+      - run: bash tests/test_android_fonts.sh
+      # The device tests reach into the app by name; this reads both sides, in seconds, instead of the emulator legs half an hour in.
+      - run: bash tests/test_android_device_tests.sh
       - run: scripts/prepare-trusttunnel-android.sh
-      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
+      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
       # What TV launchers and app stores read once the AAR's manifest is merged in,
       # which lint doesn't see.
@@ -60,6 +79,9 @@ jobs:
       # The third-party notices, in both APKs, as this commit has them.
       - run: bash scripts/check-apk-notices.sh android/app/build/outputs/apk/debug/app-debug.apk
       - run: bash scripts/check-apk-notices.sh android/app/build/outputs/apk/release/app-release-unsigned.apk
+      # And the list both apps share, copied in from data/ by the build, and the Inter fonts, from assets/fonts/.
+      - run: bash scripts/check-apk-data.sh android/app/build/outputs/apk/debug/app-debug.apk
+      - run: bash scripts/check-apk-data.sh android/app/build/outputs/apk/release/app-release-unsigned.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-ci-builds
@@ -81,7 +103,7 @@ jobs:
             target: default
             arch: x86_64
             profile: pixel_2
-            timeout: 25
+            timeout: 40
             artifact: android-device-results
           # Google publishes no Android TV image for API 35. If the TrustTunnel
           # AAR's x86 library fails on this 32-bit image, API 36's android-tv
@@ -91,7 +113,7 @@ jobs:
             target: android-tv
             arch: x86
             profile: tv_1080p
-            timeout: 30
+            timeout: 45
             artifact: android-tv-device-results
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -128,22 +150,38 @@ jobs:
           # The one test of Install update without the install permission runs first,
           # alone: taking the permission away later would stop the app, and the
           # tests with it. am instrument exits 0 on a failed test, hence the grep.
+          # UiTourDeviceTest saves a picture of every screen. Android Gradle Plugin copies what a test writes to
+          # additionalTestOutputDir into android/app/build/outputs/connected_android_test_additional_output; the test also
+          # writes every file to /data/local/tmp/uitour, which is pulled here, still on the line of the Gradle run and keeping
+          # its exit status, if Gradle copied no picture. (Gradle makes the folders of its output before the run, so an empty
+          # folder is no sign that it copied anything: the test is for a picture.) A run whose process crashes says only "Process
+          # crashed" in Gradle's output, so the device's warnings and its crash buffer are saved after it (the buffer made 16 MB first).
+          # A freshly booted phone image can have the launcher not respond, and the "isn't responding" dialog it puts up has the input
+          # focus for minutes (CI run 10, phone leg: the clipboard was refused to the app, and a remote's OK did not reach it).
+          # hide_error_dialogs keeps every such dialog down.
           script: |
             ./android/gradlew -p android --no-daemon :app:installDebug :app:installDebugAndroidTest
+            adb logcat -G 16M || true
+            adb shell settings put global hide_error_dialogs 1
             adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
             adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
             adb shell am instrument -w -e withoutInstallPermission true -e class org.freetunnel.android.TvDeviceTest#installWithoutThePermissionKeepsTheUpdateReady org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner | tee /dev/stderr | grep -q 'OK (1 test)'
             adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
             if [ "${{ matrix.target }}" = android-tv ]; then adb shell pm list features | grep -qx 'feature:android.software.leanback'; fi
             if [ "${{ matrix.target }}" = android-tv ]; then mkdir -p android/app/build/reports/tv-screens && adb shell monkey -p org.freetunnel.android -c android.intent.category.LEANBACK_LAUNCHER 1 && sleep 5 && adb exec-out screencap -p > android/app/build/reports/tv-screens/app.png && adb shell input keyevent KEYCODE_HOME && sleep 3 && adb exec-out screencap -p > android/app/build/reports/tv-screens/launcher.png; fi
-            ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+            status=0; ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')" || status=$?; if [ -z "$(find android/app/build/outputs/connected_android_test_additional_output -type f -name '*.png' 2>/dev/null | head -n 1)" ]; then adb pull /data/local/tmp/uitour android/app/build/reports/uitour || true; fi; mkdir -p android/app/build/reports/logcat; adb logcat -d -v threadtime '*:W' > android/app/build/reports/logcat/warnings.txt || true; adb logcat -d -b crash -v threadtime > android/app/build/reports/logcat/crash.txt || true; exit $status
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: ${{ matrix.artifact }}
+          # The UI tour's pictures (UiTourDeviceTest): Gradle's copy of the test's additional output, or, if it
+          # copied nothing, what the script pulled from the device.
           path: |
             android/app/build/reports/androidTests/
             android/app/build/reports/tv-screens/
+            android/app/build/outputs/connected_android_test_additional_output/
+            android/app/build/reports/uitour/
+            android/app/build/reports/logcat/
   release-signing:
     name: Release signing, with a throwaway key
     # What android-release.yml's build and sign jobs do, with real Build

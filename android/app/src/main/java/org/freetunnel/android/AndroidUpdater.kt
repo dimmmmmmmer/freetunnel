@@ -16,7 +16,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import android.widget.Toast
 import org.json.JSONArray
 import java.io.File
 import java.io.IOException
@@ -27,12 +26,15 @@ import java.net.SocketTimeoutException
 import java.net.URI
 import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.function.IntConsumer
 
 /** Process-local UI state; all network, hashing and session writes use one worker. */
 object AndroidUpdater {
     enum class State { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, READY, INSTALLING, ERROR }
     /** Which install session a result delivered to InstallResultActivity belongs to. */
     const val EXTRA_SESSION = "org.freetunnel.android.extra.SESSION"
+    /** The preference holding when the last automatic check on launch was made, in wall-clock milliseconds. */
+    const val LAST_LAUNCH_CHECK = "update_last_launch_check"
     // Overall backstops for a transfer that trickles; each read also has its own
     // 30 s timeout. Generous, because a release's limits stay with its users.
     private const val PAGE_DEADLINE = 120_000L
@@ -42,6 +44,8 @@ object AndroidUpdater {
     @Volatile var progress = 0; private set
     /** Why the last attempt failed, for the ERROR text. */
     @Volatile var failure: UpdatePolicy.Failure? = null; private set
+    /** The ERROR is a check's, which Settings words as the desktop does ("Update check failed: ..."); a download's or an install's is said as it is. */
+    @Volatile var failedCheck = false; private set
     /** The session went to Android: INSTALLING then ends with its result, or recoverInstall. */
     @Volatile var committed = false; private set
     private var observer: Runnable? = null
@@ -51,17 +55,20 @@ object AndroidUpdater {
     @Volatile private var expectedDigest: ByteArray? = null
     @Volatile private var verifiedVersionCode = 0L
     @Volatile private var sessionId = -1
-    @Volatile private var cancelled = false
+    // A check's request is with the worker; and it is a silent one (checkOnLaunch), of which nothing is said until a click on the line
+    // makes it a visible one. Both are changed under lock, so that the answer and the click do not pass each other.
+    private val lock = Any()
+    @Volatile private var checking = false
+    @Volatile private var silent = false
     @Volatile private var officialBuild: Boolean? = null
     // A var only so that device tests can pin the debug certificate.
     @Volatile private var certificatePin = BuildConfig.RELEASE_CERTIFICATE_SHA256
 
-    private class Cancelled : Exception("Download cancelled")
-
     fun observe(callback: Runnable?) { observer = callback }
     private fun publish(value: State) { state = value; main.post { observer?.run() } }
-    private fun failed(error: Throwable, otherwise: UpdatePolicy.Failure) {
+    private fun failed(error: Throwable, otherwise: UpdatePolicy.Failure, duringCheck: Boolean = false) {
         failure = UpdatePolicy.classify(error, otherwise)
+        failedCheck = duringCheck
         publish(State.ERROR)
     }
     private fun busy() = state in listOf(State.CHECKING, State.DOWNLOADING, State.INSTALLING)
@@ -120,12 +127,42 @@ object AndroidUpdater {
     private fun versionCode(info: PackageInfo): Long =
         if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
 
-    fun check(context: Context) {
+    /** The Settings line's check, and Retry: said as it goes (Checking…), answered either way, and never throttled. */
+    fun check(context: Context) { startCheck(context, quiet = false) }
+
+    /**
+     * The check the desktop makes 1.2 s after it starts (Backend.cpp, checkForUpdates(false)): silent. It says nothing while it runs
+     * and nothing if it fails or finds nothing; only an update it finds shows, on the Settings tile's dot and in the line. At most
+     * once every 12 hours (UpdatePolicy.launchCheckDue), whatever the attempt ends with, because this app's activity starts far more
+     * often than a desktop program does and everyone behind one VPN exit shares GitHub's unauthenticated limit. Only in an official
+     * build, and not over a check, a download, an install or an update that is already found.
+     */
+    fun checkOnLaunch(context: Context) {
+        val app = context.applicationContext
+        if (checking || (state != State.IDLE && state != State.CURRENT) || !official(app)) return
+        val preferences = app.getSharedPreferences("freetunnel", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (!UpdatePolicy.launchCheckDue(preferences.getLong(LAST_LAUNCH_CHECK, 0L), now)) return
+        preferences.edit { putLong(LAST_LAUNCH_CHECK, now) }
+        startCheck(app, quiet = true)
+    }
+
+    private fun startCheck(context: Context, quiet: Boolean) {
         // A launch check in READY would delete the verified APK, so it waits.
         if (busy() || state == State.READY || !official(context)) return
-        failure = null
-        cancelled = false
-        publish(State.CHECKING)
+        synchronized(lock) {
+            if (checking) {
+                // A silent one is under way, and a click on the line makes it the one that is said: its answer is shown when it comes.
+                if (!quiet && silent) { silent = false; failure = null; publish(State.CHECKING) }
+                return
+            }
+            checking = true
+            silent = quiet
+        }
+        if (!quiet) {
+            failure = null
+            publish(State.CHECKING)
+        }
         worker.execute {
             runCatching {
                 verifiedFile?.delete(); verifiedFile = null; expectedDigest = null
@@ -146,9 +183,17 @@ object AndroidUpdater {
                     if (array.length() < 100) break
                     check(page < 10) { "Release history is too large" }
                 }
-                release = UpdatePolicy.select(candidates, BuildConfig.VERSION_NAME)
-                publish(if (release == null) State.CURRENT else State.AVAILABLE)
-            }.onFailure { release = null; failed(it, UpdatePolicy.Failure.NETWORK) }
+                val found = UpdatePolicy.select(candidates, BuildConfig.VERSION_NAME)
+                val said = synchronized(lock) { checking = false; !silent }
+                // Silent, a check that finds nothing leaves the line as it was.
+                if (said || found != null) {
+                    release = found
+                    publish(if (found == null) State.CURRENT else State.AVAILABLE)
+                }
+            }.onFailure {
+                val said = synchronized(lock) { checking = false; !silent }
+                if (said) { release = null; failed(it, UpdatePolicy.Failure.NETWORK, duringCheck = true) }
+            }
         }
     }
 
@@ -157,7 +202,6 @@ object AndroidUpdater {
         if (busy() || !official(activity)) return
         val app = activity.applicationContext
         progress = 0
-        cancelled = false
         failure = null
         publish(State.DOWNLOADING)
         worker.execute {
@@ -195,18 +239,13 @@ object AndroidUpdater {
                 publish(State.READY)
             }.onFailure {
                 output?.delete(); verifiedFile = null; expectedDigest = null
-                // A cancel that lands while a read is blocked, as in a stalled
-                // download, ends with that read's timeout instead of Cancelled.
-                if (it is Cancelled || cancelled) publish(State.AVAILABLE) else failed(it, UpdatePolicy.Failure.VERIFICATION)
+                failed(it, UpdatePolicy.Failure.VERIFICATION)
             }
         }
     }
 
-    /** Stops a download at its next chunk, or when a blocked read times out; the release stays available. */
-    fun cancel() { if (state == State.DOWNLOADING) cancelled = true }
-
+    // A transfer cannot be stopped from the app, as the desktop's cannot; the deadline ends one that trickles.
     private fun stopIfOverdue(deadline: Long) {
-        if (cancelled) throw Cancelled()
         if (SystemClock.elapsedRealtime() > deadline) throw SocketTimeoutException("Update transfer took too long")
     }
 
@@ -229,14 +268,19 @@ object AndroidUpdater {
         if (total <= 0 || (size >= 0 && total != size)) throw IOException("Incomplete APK")
     }
 
-    fun install(activity: Activity) {
+    /**
+     * Installs the verified update. [notice] says, with a string resource, what the user must be told where
+     * Android has no screen to say it: the app shows it as its own toast. Nothing is shown without it.
+     */
+    @JvmOverloads
+    fun install(activity: Activity, notice: IntConsumer? = null) {
         // From INSTALLING only once the session went to Android and its dialog may be lost.
         if (state != State.READY && !(state == State.INSTALLING && committed)) return
         if (!activity.packageManager.canRequestPackageInstalls()) {
             // Some TV and OEM builds have no such screen; the toast says where to look.
             runCatching {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${activity.packageName}".toUri()))
-            }.onFailure { Toast.makeText(activity, R.string.update_allow_installs, Toast.LENGTH_LONG).show() }
+            }.onFailure { notice?.accept(R.string.update_allow_installs) }
             return
         }
         val file = verifiedFile
@@ -346,7 +390,7 @@ object AndroidUpdater {
             PackageInstaller.STATUS_SUCCESS -> { discardDownload(); publish(State.CURRENT) }
             // The user cancelled Android's dialog: the verified APK stays for another try.
             PackageInstaller.STATUS_FAILURE_ABORTED -> publish(State.READY)
-            else -> { discardDownload(); failure = UpdatePolicy.Failure.INSTALLER; publish(State.ERROR) }
+            else -> { discardDownload(); failure = UpdatePolicy.Failure.INSTALLER; failedCheck = false; publish(State.ERROR) }
         }
     }
 

@@ -28,11 +28,17 @@ struct ButtonLayout {
 // On X11 that difference decides it. Qt asks the window manager to activate the
 // window with the time of the last X event the app received, which is older than
 // the click on the panel that led here; Mutter reads such a request as focus
-// stealing, refuses it and only flags the window for attention — it stays
-// minimised, which is where our own close button leaves it. So there it is asked
-// with the current server time instead, as a request made on the user's behalf.
+// stealing, refuses it and only flags the window for attention. So there it is
+// asked with the current server time instead, as a request made on the user's
+// behalf.
 // A window minimised from maximised also comes back maximised, which show() —
 // showNormal() in Qt 6 — would not do.
+//
+// On X11 that is still a request, and a window manager may answer it with a flag
+// on the window and nothing else. Hyprland does by default (misc:focus_on_activate
+// is off): a window that is mapped but not in focus, on another workspace or
+// behind a full-screen one, stays where it is. So there the request is checked on,
+// and mapped again if it came to nothing; see bringWindowForwardChecked().
 void bringWindowForward(QWindow *window);
 
 // Minimise, keeping maximised. QWindow::showMinimized() replaces the window's
@@ -68,6 +74,52 @@ constexpr int kMinimizeCheckMs = 300;
 // the window is destroyed first.
 void minimizeWindowChecked(QWindow *window, const IconifiedProbe &probe, int checkMs,
                            std::function<void(bool honoured)> done);
+
+// Whether the window is the one the user is working in. Empty means
+// QWindow::isActive().
+using ActiveProbe = std::function<bool(QWindow *)>;
+
+// Whether the window manager has withdrawn the window, which is what it does once
+// the window is unmapped: yes, no, or empty when that cannot be told (native
+// Wayland, no server to ask).
+using WithdrawnProbe = std::function<std::optional<bool>(QWindow *)>;
+
+// How long the window manager gets to act on a bring-forward before it is asked
+// whether it did: the same margin as kMinimizeCheckMs. One that honours the request
+// has the window in focus within a few milliseconds.
+constexpr int kActivateCheckMs = 300;
+// And how a window that was unmapped to be mapped again is waited for: ICCCM 4.1.4
+// has the window manager withdraw it first, and a window mapped before that is
+// taken for the old one. Asked every kWithdrawPollMs, for at most kWithdrawWaitMs.
+constexpr int kWithdrawPollMs = 20;
+constexpr int kWithdrawWaitMs = 500;
+
+// bringWindowForward(), and then, checkMs later, a look at whether the window
+// manager gave the window focus. It may not have: asking an X11 window manager to
+// activate a window is a request, and Hyprland, whose default is to flag the window
+// as wanting attention, and sway, whose XWayland default is the same, answer it
+// that way for a window that is mapped and not in focus. Nothing visibly happens,
+// and Qt cannot tell.
+//
+// What they do give focus to is a window that is newly mapped. So when the window
+// is still on screen, was not active at any moment since the request, and is not
+// active now, it is unmapped, waited for until the window manager has withdrawn it
+// (the probe; at most waitMs, asked every pollMs), and brought forward once more.
+// A window manager that would refuse that too is not asked again: one remap per
+// request, never a loop.
+//
+// A window that was hidden is only brought forward: that already maps it, and a
+// window manager that refuses focus to a new map would refuse it again. A window
+// hidden in the meantime (the X) is left hidden, and a newer request makes the
+// check of an older one moot.
+//
+// done(true) says the window was taken off the screen and put back; done(false)
+// that it was not, for whatever reason. Called once per request, unless the window
+// is destroyed first.
+void bringWindowForwardChecked(QWindow *window, const ActiveProbe &active,
+                               const WithdrawnProbe &withdrawn, int checkMs,
+                               std::function<void(bool remapped)> done = {},
+                               int pollMs = kWithdrawPollMs, int waitMs = kWithdrawWaitMs);
 
 // Hide the window to the tray (the menu bar on macOS). On macOS a full-screen
 // window leaves full screen first, and is hidden once AppKit says it has:

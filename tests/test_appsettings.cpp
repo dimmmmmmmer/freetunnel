@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QScopeGuard>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -19,6 +20,8 @@ class TestAppSettings : public QObject {
 private slots:
     void initTestCase();
     void defaultsWhenEmpty();
+    void theRecommendedListIsExactlyTheSharedFile();
+    void theDefaultExcludedRoutesAreExactlyTheSharedFile();
     void roundTrip();
     void profilesPreserveOrder();
     void theInsecureTmpLogPathIsMigratedOnLoad();
@@ -59,6 +62,53 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
     QCOMPARE(s.hotkey_disconnect, QStringLiteral("Ctrl+Shift+D"));
     QVERIFY(s.last_config_path.isEmpty());
+}
+
+// data/split/recommended-russia.txt is the one list, for this app and the Android one. The
+// app has it compiled in (cmake/SharedData.cmake), and what it hands out has to be what
+// the file says: every rule in it, in its order, and nothing else. Read here the way the
+// Android test reads it: a line is a rule unless it is blank or begins with #.
+void TestAppSettings::theRecommendedListIsExactlyTheSharedFile() {
+    QFile file(QString::fromUtf8(FT_RECOMMENDED_RUSSIA_FILE));
+    QVERIFY2(file.open(QIODevice::ReadOnly), "the shared list can not be read");
+    const QByteArray bytes = file.readAll();
+    QVERIFY2(!bytes.startsWith("\xEF\xBB\xBF"), "the shared list has a byte order mark");
+    QStringList expected;
+    for (const QString &raw : QString::fromUtf8(bytes).split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (!line.isEmpty() && !line.startsWith(QLatin1Char('#')))
+            expected << line;
+    }
+    QVERIFY2(expected.size() > 50, "the shared list is nearly empty");
+    QCOMPARE(recommendedRussiaDomains(), expected);
+    // Nothing in it is one the app would drop, nor a rule twice: sanitizing it changes nothing.
+    QCOMPARE(sanitizedBypassRules(expected), expected);
+    // The Cyrillic domain is in it as typed, and is in the list the app hands out.
+    QVERIFY(expected.contains(QStringLiteral("мвд.рф")));
+}
+
+// data/split/default-excluded-routes.txt is the other shared list: the excluded routes a new
+// installation starts with and "Restore defaults" puts back, one file for this app and the
+// Android one. Held to the same rule as the list above: what the app hands out is the file's
+// lines, in its order, and nothing else.
+void TestAppSettings::theDefaultExcludedRoutesAreExactlyTheSharedFile() {
+    QFile file(QString::fromUtf8(FT_DEFAULT_EXCLUDED_ROUTES_FILE));
+    QVERIFY2(file.open(QIODevice::ReadOnly), "the shared routes can not be read");
+    const QByteArray bytes = file.readAll();
+    QVERIFY2(!bytes.startsWith("\xEF\xBB\xBF"), "the shared routes have a byte order mark");
+    QStringList expected;
+    for (const QString &raw : QString::fromUtf8(bytes).split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (!line.isEmpty() && !line.startsWith(QLatin1Char('#')))
+            expected << line;
+    }
+    QVERIFY2(expected.size() >= 7, "the shared routes are nearly empty");
+    QCOMPARE(defaultExcludedRoutes(), expected);
+    // None is a /0, which every excluded route of it would be refused for, and none is twice.
+    for (const QString &route : expected) {
+        QVERIFY2(!route.endsWith(QStringLiteral("/0")), qPrintable(route));
+        QCOMPARE(expected.count(route), 1);
+    }
 }
 
 void TestAppSettings::roundTrip() {

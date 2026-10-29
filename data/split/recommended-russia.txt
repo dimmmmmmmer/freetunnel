@@ -1,0 +1,112 @@
+# Recommended for Russia: services that are better reached directly than through a
+# tunnel. The Split page adds them to the profile being edited with "Recommended for
+# Russia", and a new installation starts with them in its Default profile.
+#
+# One rule per line, UTF-8 without a byte order mark, in the order they are added.
+# Blank lines and lines that begin with # are ignored; a rule has no comment after it.
+# A rule is what the Split page accepts: a name, or *.name for the name and everything
+# under it. Never a top-level domain alone (*.ru): the core's domain filter refuses it.
+#
+# One file for both apps. The desktop app has it compiled in (cmake/SharedData.cmake
+# writes the include file that src/core/AppSettings.cpp reads), and the Android app has
+# it copied into its assets (android/app/build.gradle). tests/test_appsettings.cpp and
+# android/app/src/test/.../RussiaListTest.java check that each uses these lines and no
+# others, and that every one of them is a rule the app takes.
+
+yandex.ru
+*.yandex.ru
+ya.ru
+*.ya.ru
+yastatic.net
+*.yastatic.net
+yandex.net
+*.yandex.net
+vk.com
+*.vk.com
+vk.ru
+*.vk.ru
+vkontakte.ru
+*.vkontakte.ru
+mail.ru
+*.mail.ru
+list.ru
+*.list.ru
+bk.ru
+*.bk.ru
+inbox.ru
+*.inbox.ru
+ok.ru
+*.ok.ru
+rambler.ru
+*.rambler.ru
+lenta.ru
+*.lenta.ru
+ria.ru
+*.ria.ru
+tass.ru
+*.tass.ru
+gosuslugi.ru
+*.gosuslugi.ru
+mos.ru
+*.mos.ru
+api.mos.ru
+parking.mos.ru
+avito.ru
+*.avito.ru
+cian.ru
+*.cian.ru
+ozon.ru
+*.ozon.ru
+wildberries.ru
+*.wildberries.ru
+nalog.gov.ru
+*.nalog.gov.ru
+*.gov.ru
+pfr.gov.ru
+*.pfr.gov.ru
+fss.ru
+*.fss.ru
+rosreestr.gov.ru
+*.rosreestr.gov.ru
+gibdd.ru
+*.gibdd.ru
+мвд.рф
+*.мвд.рф
+cbr.ru
+*.cbr.ru
+minfin.gov.ru
+*.minfin.gov.ru
+government.ru
+*.government.ru
+kremlin.ru
+*.kremlin.ru
+rospotrebnadzor.ru
+*.rospotrebnadzor.ru
+tbank.ru
+*.tbank.ru
+tinkoff.ru
+*.tinkoff.ru
+tinkoff.com
+*.tinkoff.com
+sberbank.ru
+*.sberbank.ru
+sber.ru
+*.sber.ru
+vtb.ru
+*.vtb.ru
+alfabank.ru
+*.alfabank.ru
+alfabank.com
+*.alfabank.com
+raiffeisen.ru
+*.raiffeisen.ru
+gazprombank.ru
+*.gazprombank.ru
+open.ru
+*.open.ru
+psbank.ru
+*.psbank.ru
+rosselkhozbank.ru
+*.rosselkhozbank.ru
+sovcombank.ru
+*.sovcombank.ru

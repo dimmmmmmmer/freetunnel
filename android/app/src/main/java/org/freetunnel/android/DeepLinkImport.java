@@ -3,6 +3,7 @@ package org.freetunnel.android;
 import org.tomlj.TomlArray;
 import org.tomlj.TomlTable;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -11,10 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Decodes TrustTunnel's version 0-2 QUIC-varint TLV share links, and reads the TOML
- * file a TrustTunnel endpoint exports by the same rules.
+ * file a TrustTunnel endpoint exports by the same rules. It also writes a share link for
+ * a config, as the desktop does (encodeDeepLink in src/core/DeepLink.cpp): version 1, no
+ * subscription address and no auth key, so that older readers take it.
  */
 final class DeepLinkImport {
     private static final int MAX_LINK_CHARS = 131072;
@@ -402,7 +406,8 @@ final class DeepLinkImport {
         return out.toString();
     }
 
-    private static String quoted(String text) {
+    /** A TOML basic string: quoted, with a backslash or a quote escaped and the control characters left out. */
+    static String quoted(String text) {
         StringBuilder out = new StringBuilder(text.length() + 2).append('"');
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
@@ -413,6 +418,9 @@ final class DeepLinkImport {
         return out.append('"').toString();
     }
 
+    /** A TOML array of basic strings. */
+    static String listText(List<String> values) { return list(values); }
+
     private static String list(List<String> values) {
         StringBuilder out = new StringBuilder("[");
         for (int i = 0; i < values.size(); i++) {
@@ -422,12 +430,65 @@ final class DeepLinkImport {
         return out.append(']').toString();
     }
 
+    /**
+     * The text of a config for a server with these settings: what a link or an export becomes, and what the editor starts a new config
+     * from. pem is the certificates alone, each ending a line, or empty.
+     */
+    static String configText(String hostname, List<String> addresses, String username, String password, String clientRandom,
+                             List<String> dnsUpstreams, String customSni, boolean hasIpv6, boolean skipVerification, boolean http3,
+                             boolean antiDpi, String pem) {
+        return toToml(fieldsOf(hostname, addresses, username, password, clientRandom, dnsUpstreams, customSni, hasIpv6, skipVerification,
+                http3, antiDpi), pem);
+    }
+
+    /**
+     * The [endpoint] table of that text alone, each key on a line and the last ending one: what the editor puts in place of a file's own
+     * endpoint where it cannot change it in place (ConfigForm).
+     */
+    static String endpointText(String hostname, List<String> addresses, String username, String password, String clientRandom,
+                               List<String> dnsUpstreams, String customSni, boolean hasIpv6, boolean skipVerification, boolean http3,
+                               boolean antiDpi, String pem) {
+        return endpointTable(fieldsOf(hostname, addresses, username, password, clientRandom, dnsUpstreams, customSni, hasIpv6,
+                skipVerification, http3, antiDpi), pem);
+    }
+
+    /** The [listener.tun] table a new config has: the routes of a full tunnel, with the private ranges left out of it. */
+    static String tunnelText() { return TUNNEL; }
+
+    private static Fields fieldsOf(String hostname, List<String> addresses, String username, String password, String clientRandom,
+                                   List<String> dnsUpstreams, String customSni, boolean hasIpv6, boolean skipVerification, boolean http3,
+                                   boolean antiDpi) {
+        Fields f = new Fields();
+        f.hostname = hostname;
+        f.addresses.addAll(addresses);
+        f.username = username;
+        f.password = password;
+        f.clientRandom = clientRandom;
+        f.dnsUpstreams.addAll(dnsUpstreams);
+        f.customSni = customSni;
+        f.hasIpv6 = hasIpv6;
+        f.skipVerification = skipVerification;
+        f.protocol = http3 ? 2 : 1;
+        f.antiDpi = antiDpi;
+        return f;
+    }
+
+    private static final String TUNNEL = "[listener.tun]\nbound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n"
+            + "included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n"
+            + "excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", "
+            + "\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n";
+
     // The PEM is the link's certificates alone, as Certificates.fromDer renders them.
     private static String toToml(Fields f, String pem) {
+        return "loglevel = \"info\"\nvpn_mode = \"general\"\nkillswitch_enabled = true\n"
+                + "post_quantum_group_enabled = true\n"
+                + "\n" + endpointTable(f, pem)
+                + "\n" + TUNNEL;
+    }
+
+    private static String endpointTable(Fields f, String pem) {
         StringBuilder out = new StringBuilder();
-        out.append("loglevel = \"info\"\nvpn_mode = \"general\"\nkillswitch_enabled = true\n");
-        out.append("post_quantum_group_enabled = true\n");
-        out.append("\n[endpoint]\n");
+        out.append("[endpoint]\n");
         out.append("hostname = ").append(quoted(f.hostname)).append('\n');
         out.append("addresses = ").append(list(f.addresses)).append('\n');
         out.append("username = ").append(quoted(f.username)).append('\n');
@@ -441,10 +502,170 @@ final class DeepLinkImport {
         out.append("anti_dpi = ").append(f.antiDpi).append('\n');
         if (pem.isEmpty()) out.append("certificate = \"\"\n");
         else out.append("certificate = \"\"\"\n").append(pem).append("\"\"\"\n");
-        out.append("\n[listener.tun]\nbound_if = \"\"\nmtu_size = 1500\nchange_system_dns = true\n");
-        out.append("included_routes = [\"0.0.0.0/0\", \"2000::/3\"]\n");
-        out.append("excluded_routes = [\"0.0.0.0/8\", \"10.0.0.0/8\", \"169.254.0.0/16\", ");
-        out.append("\"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]\n");
         return out.toString();
+    }
+
+    // ---- Writing a link, the desktop's encodeDeepLink and configDeepLink ----
+
+    /**
+     * What a share link carries: the server, its credentials and the settings the link has
+     * a tag for. Its text is {@link #encode}; {@link #linkOf} reads one out of a stored config.
+     */
+    static final class Link {
+        String hostname = "";
+        final List<String> addresses = new ArrayList<>();
+        String customSni = "";
+        boolean hasIpv6 = true;
+        String username = "";
+        String password = "";
+        boolean skipVerification;
+        /** The certificates, one DER element after another, as tag 0x08 holds them. */
+        byte[] certificate = new byte[0];
+        /** 1 for HTTP/2, 2 for HTTP/3, as tag 0x09 has it. */
+        long protocol = 1;
+        boolean antiDpi;
+        String clientRandom = "";
+        String name = "";
+        final List<String> dnsUpstreams = new ArrayList<>();
+    }
+
+    /** The version this app writes: not the newest it reads, which is MAX_READ_VERSION. See the desktop's kDeepLinkWriteVersion. */
+    static final int WRITE_VERSION = 1;
+
+    private static final Pattern CLIENT_RANDOM = Pattern.compile("(?:[0-9a-fA-F]{2}){1,32}(?:/(?:[0-9a-fA-F]{2}){1,32})?");
+
+    private static void writeVarint(ByteArrayOutputStream out, long v) {
+        if (v <= 63) {
+            out.write((int) v);
+        } else if (v <= 16383) {
+            out.write((int) (0x40 | (v >> 8)));
+            out.write((int) (v & 0xFF));
+        } else if (v <= 1073741823L) {
+            out.write((int) (0x80 | (v >> 24)));
+            out.write((int) ((v >> 16) & 0xFF));
+            out.write((int) ((v >> 8) & 0xFF));
+            out.write((int) (v & 0xFF));
+        } else {
+            out.write((int) (0xC0 | ((v >> 56) & 0x3F)));
+            for (int shift = 48; shift >= 0; shift -= 8) out.write((int) ((v >> shift) & 0xFF));
+        }
+    }
+
+    private static void writeTlv(ByteArrayOutputStream out, int tag, byte[] value) {
+        writeVarint(out, tag);
+        writeVarint(out, value.length);
+        out.write(value, 0, value.length);
+    }
+
+    private static void writeText(ByteArrayOutputStream out, int tag, String value) {
+        writeTlv(out, tag, value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] varintBytes(long v) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeVarint(out, v);
+        return out.toByteArray();
+    }
+
+    // String[]: each as its length, a varint, and its UTF-8 bytes.
+    private static byte[] stringList(List<String> list) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        for (String item : list) {
+            byte[] bytes = item.getBytes(StandardCharsets.UTF_8);
+            writeVarint(out, bytes.length);
+            out.write(bytes, 0, bytes.length);
+        }
+        return out.toByteArray();
+    }
+
+    // QString::trimmed(): the white space Qt knows, which String.trim() does not all cover.
+    private static String trimmed(String text) {
+        int start = 0;
+        int end = text.length();
+        while (start < end && isSpace(text.charAt(start))) start++;
+        while (end > start && isSpace(text.charAt(end - 1))) end--;
+        return text.substring(start, end);
+    }
+
+    private static boolean isSpace(char c) {
+        return Character.isSpaceChar(c) || (c >= 0x09 && c <= 0x0d) || c == 0x85;
+    }
+
+    /** The client random as the core reads it (the desktop's clientRandomForCore). */
+    static String clientRandomForCore(String value) {
+        String v = trimmed(value);
+        while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+        return v.startsWith("/") ? "" : v;
+    }
+
+    static boolean isValidClientRandom(String value) {
+        return value.isEmpty() || CLIENT_RANDOM.matcher(value).matches();
+    }
+
+    // As the core reads it, and not at all when the core could not use it. A mask the core cannot decode
+    // is the exception: the core does without it and sends the prefix, so the prefix alone is what a link
+    // carries (the desktop's clientRandomForLink).
+    private static String clientRandomForLink(String value) {
+        String v = clientRandomForCore(value);
+        if (isValidClientRandom(v)) return v;
+        int slash = v.indexOf('/');
+        String prefix = slash < 0 ? v : v.substring(0, slash);
+        return isValidClientRandom(prefix) ? prefix : "";
+    }
+
+    /**
+     * The link for a server, as the desktop's encodeDeepLink writes it, in this order: the version
+     * (always 1), the host name, each address, the user name and the password; then what differs from the
+     * defaults: IPv6 off, certificate checking skipped, anti-DPI, a custom SNI, the certificates, HTTP/3,
+     * the client random, the name and the DNS servers. Without padding, in the URL-safe alphabet.
+     */
+    static String encode(Link link) {
+        ByteArrayOutputStream p = new ByteArrayOutputStream();
+        writeTlv(p, 0x00, varintBytes(WRITE_VERSION));
+        writeText(p, 0x01, link.hostname);
+        for (String address : link.addresses) writeText(p, 0x02, address);
+        writeText(p, 0x05, link.username);
+        writeText(p, 0x06, link.password);
+        if (!link.hasIpv6) writeTlv(p, 0x04, new byte[]{0});
+        if (link.skipVerification) writeTlv(p, 0x07, new byte[]{1});
+        if (link.antiDpi) writeTlv(p, 0x0A, new byte[]{1});
+        String clientRandom = clientRandomForLink(link.clientRandom);
+        if (!link.customSni.isEmpty()) writeText(p, 0x03, link.customSni);
+        if (link.certificate.length > 0) writeTlv(p, 0x08, link.certificate);
+        if (link.protocol != 1) writeTlv(p, 0x09, varintBytes(link.protocol));
+        if (!clientRandom.isEmpty()) writeText(p, 0x0B, clientRandom);
+        if (!link.name.isEmpty()) writeText(p, 0x0C, link.name);
+        if (!link.dnsUpstreams.isEmpty()) writeTlv(p, 0x0D, stringList(link.dnsUpstreams));
+        return "tt://?" + Base64.getUrlEncoder().withoutPadding().encodeToString(p.toByteArray());
+    }
+
+    /**
+     * What a stored config says about its server, for a link, under the name it is listed by: the
+     * desktop's configDeepLink reads the same things out of a config's file. Only the certificates of the
+     * config's certificate are taken, as a link is made to be handed on. Null where the config does not
+     * name a server a link could carry: no [endpoint], or one without a host name, an address, a user
+     * name or a password, which an importer would refuse.
+     */
+    static Link linkOf(String name, TomlTable root) {
+        TomlTable endpoint = root == null ? null : root.getTable("endpoint");
+        if (endpoint == null) return null;
+        Link link = new Link();
+        link.hostname = string(endpoint, "hostname");
+        link.addresses.addAll(strings(endpoint, "addresses"));
+        link.username = string(endpoint, "username");
+        link.password = string(endpoint, "password");
+        if (link.hostname.isEmpty() || link.addresses.isEmpty() || link.username.isEmpty() || link.password.isEmpty()) return null;
+        link.customSni = string(endpoint, "custom_sni");
+        link.hasIpv6 = flag(endpoint, "has_ipv6", true);
+        link.skipVerification = flag(endpoint, "skip_verification", false);
+        link.antiDpi = flag(endpoint, "anti_dpi", false);
+        link.protocol = "http3".equals(endpoint.get("upstream_protocol")) ? 2 : 1;
+        link.clientRandom = string(endpoint, "client_random");
+        link.certificate = Certificates.fromPem(string(endpoint, "certificate")).der;
+        // Under [endpoint], where this app writes them; a file written by hand may keep them at the top.
+        List<String> dns = strings(endpoint, "dns_upstreams");
+        link.dnsUpstreams.addAll(dns.isEmpty() ? strings(root, "dns_upstreams") : dns);
+        link.name = name == null ? "" : name.trim();
+        return link;
     }
 }

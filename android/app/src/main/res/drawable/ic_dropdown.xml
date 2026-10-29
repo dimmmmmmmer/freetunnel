@@ -1,0 +1,4 @@
+<!-- Made by scripts/android-icons-from-svg.py: the desktop draws ▾ as a character of the system's font, Inter having none, and this is it at the size that font gives it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="8dp" android:height="7dp" android:viewportWidth="8" android:viewportHeight="7">
+    <path android:pathData="M0.25,0 H7.75 L4,7 Z" android:fillColor="#ffffff"/>
+</vector>

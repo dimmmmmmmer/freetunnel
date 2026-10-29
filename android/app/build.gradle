@@ -12,8 +12,16 @@ plugins {
 def appVersion = '1.0.0'
 def appVersionCode = appVersion.tokenize('.').collect { it as int }.with { it[0] * 10000 + it[1] * 100 + it[2] }
 
+// The TrustTunnel core the app is built on: one AAR, pinned by name here and by checksum in verifyPinnedRuntime. Its version
+// is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.7", as the desktop's
+// says which core it carries.
+def coreAar = 'trusttunnel-client-android-1.1.7.aar'
+def coreVersionMatch = coreAar =~ /^trusttunnel-client-android-(\d+(?:\.\d+)*)\.aar$/
+if (!coreVersionMatch.matches()) throw new GradleException("The core AAR's name must be trusttunnel-client-android-<version>.aar, not ${coreAar}")
+def coreVersion = coreVersionMatch.group(1)
+
 dependencies {
-    implementation files('libs/trusttunnel-client-android-1.1.7.aar')
+    implementation files("libs/${coreAar}")
     implementation 'org.slf4j:slf4j-api:1.7.25'
     implementation 'com.github.tony19:logback-android:2.0.0'
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
@@ -27,6 +35,8 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     implementation 'androidx.core:core-ktx:1.16.0'
     testImplementation 'junit:junit:4.13.2'
+    // The platform's org.json is a stub in unit tests (every call throws); SplitProfiles keeps its profiles as JSON.
+    testImplementation 'org.json:json:20231013'
 }
 
 android {
@@ -56,6 +66,7 @@ android {
             throw new GradleException('android/release-certificate.sha256 must be one line of 64 lowercase hex characters')
         }
         buildConfigField 'String', 'RELEASE_CERTIFICATE_SHA256', '\"' + pin + '\"'
+        buildConfigField 'String', 'CORE_VERSION', '\"' + coreVersion + '\"'
     }
     buildFeatures { buildConfig true }
     // Release builds are unsigned. scripts/sign-android-release.sh signs them
@@ -75,9 +86,10 @@ android {
 // The third-party notices, from the repository, into the APK's assets:
 // THIRD_PARTY_NOTICES.md, LICENSE (the Apache License 2.0 that most of the
 // libraries use) and the license texts under licenses/common and
-// licenses/android. Settings, About, Open-source licenses shows them, and
-// scripts/check-apk-notices.sh checks a built APK for them. Copied at build
-// time rather than kept here as a second copy that could fall behind.
+// licenses/android. The app shows them nowhere (the desktop has no screen for
+// its notices either; they are files next to the program, as these are in the
+// APK), and scripts/check-apk-notices.sh checks a built APK for them. Copied at
+// build time rather than kept here as a second copy that could fall behind.
 abstract class CopyThirdPartyNotices extends DefaultTask {
     @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
     abstract RegularFileProperty getNotices()
@@ -112,14 +124,89 @@ def copyThirdPartyNotices = tasks.register('copyThirdPartyNotices', CopyThirdPar
     licenseTexts.set(rootProject.file('../licenses'))
     outputDir.set(layout.buildDirectory.dir('generated/thirdPartyNotices'))
 }
+
+// What the desktop app has compiled in and this one reads: the lists under data/split, into the APK's assets, so that
+// each is one file for both apps. recommended-russia.txt is "Recommended for Russia" (split/recommended-russia.txt);
+// default-excluded-routes.txt is the excluded routes a new installation starts with and that Settings' "Restore
+// defaults" puts back (split/default-excluded-routes.txt). The desktop's cmake/SharedData.cmake reads the same files;
+// RussiaListTest and ExcludedRoutesTest check that every line of them is one this app takes.
+abstract class CopySharedData extends DefaultTask {
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getRecommendedRussia()
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getDefaultExcludedRoutes()
+    @OutputDirectory
+    abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void copy() {
+        def out = outputDir.get().asFile
+        out.deleteDir()
+        def split = new File(out, 'split')
+        split.mkdirs()
+        java.nio.file.Files.copy(recommendedRussia.get().asFile.toPath(), new File(split, 'recommended-russia.txt').toPath())
+        java.nio.file.Files.copy(defaultExcludedRoutes.get().asFile.toPath(), new File(split, 'default-excluded-routes.txt').toPath())
+    }
+}
+def copySharedData = tasks.register('copySharedData', CopySharedData) {
+    recommendedRussia.set(rootProject.file('../data/split/recommended-russia.txt'))
+    defaultExcludedRoutes.set(rootProject.file('../data/split/default-excluded-routes.txt'))
+    outputDir.set(layout.buildDirectory.dir('generated/sharedData'))
+}
+// Inter, the typeface of both apps (SIL OFL 1.1), from assets/fonts/inter into the APK's font resources: res/font/inter_regular.ttf and
+// inter_medium.ttf (a resource's name is lowercase), which Fonts reads and the theme names as android:fontFamily. The desktop compiles the
+// same two files in (assets/fonts/fonts.qrc), so there is one copy of each in the repository. Fonts are binaries nobody reads in review: the
+// build checks each against SHA256SUMS before it copies it, as verifyPinnedRuntime does the AAR, and scripts/check-apk-data.sh checks the
+// APK for the same bytes. Regular (400) is for all text and Medium (500) for what the desktop sets in Font.Medium; no other weight.
+abstract class CopyInterFonts extends DefaultTask {
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getChecksums()
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getRegular()
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getMedium()
+    @OutputDirectory
+    abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void copy() {
+        def sums = [:]
+        checksums.get().asFile.eachLine { line ->
+            def entry = line =~ /^([0-9a-f]{64})  (\S+)$/
+            if (entry.matches()) sums[entry.group(2)] = entry.group(1)
+        }
+        def out = outputDir.get().asFile
+        out.deleteDir()
+        def fonts = new File(out, 'font')
+        fonts.mkdirs()
+        install(regular.get().asFile, 'inter_regular.ttf', sums, fonts)
+        install(medium.get().asFile, 'inter_medium.ttf', sums, fonts)
+    }
+
+    static void install(File source, String name, Map sums, File to) {
+        def want = sums[source.name]
+        if (want == null) throw new GradleException("${source.name} is not in assets/fonts/inter/SHA256SUMS")
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(source.bytes).encodeHex().toString()
+        if (digest != want) throw new GradleException("${source.name} does not match its SHA-256 in assets/fonts/inter/SHA256SUMS")
+        java.nio.file.Files.copy(source.toPath(), new File(to, name).toPath())
+    }
+}
+def copyInterFonts = tasks.register('copyInterFonts', CopyInterFonts) {
+    checksums.set(rootProject.file('../assets/fonts/inter/SHA256SUMS'))
+    regular.set(rootProject.file('../assets/fonts/inter/Inter-Regular.ttf'))
+    medium.set(rootProject.file('../assets/fonts/inter/Inter-Medium.ttf'))
+    outputDir.set(layout.buildDirectory.dir('generated/interFonts'))
+}
 androidComponents {
     onVariants(selector().all()) { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(copyThirdPartyNotices) { it.outputDir }
+        variant.sources.assets?.addGeneratedSourceDirectory(copySharedData) { it.outputDir }
+        variant.sources.res?.addGeneratedSourceDirectory(copyInterFonts) { it.outputDir }
     }
 }
 
 tasks.register('verifyPinnedRuntime') {
-    def artifact = file('libs/trusttunnel-client-android-1.1.7.aar')
+    def artifact = file("libs/${coreAar}")
     inputs.file(artifact)
     doLast {
         if (!artifact.exists()) throw new GradleException('Run ../scripts/prepare-trusttunnel-android.sh first')

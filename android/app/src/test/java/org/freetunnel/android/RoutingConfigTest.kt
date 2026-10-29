@@ -24,8 +24,13 @@ class RoutingConfigTest {
         mtu_size = 1350
     """.trimIndent()
     private fun plan(enabled: Boolean = true, through: Boolean = true, domains: List<String> = emptyList(),
-                     apps: List<String> = emptyList(), kill: Boolean = true, text: String = source) =
-        RoutingConfig.prepare(text, enabled, through, domains, apps, kill)
+                     apps: List<String> = emptyList(), kill: Boolean = true, text: String = source,
+                     excluded: List<String> = emptyList()) =
+        RoutingConfig.prepare(text, enabled, through, domains, apps, kill, excluded)
+    private fun excludedOf(plan: RoutingConfig.Plan) =
+        Toml.parse(plan.toml).getTable("listener.tun")!!.getArray("excluded_routes")!!.toList()
+    private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
+        "192.168.0.0/16", "255.255.255.255/32")
 
     @Test fun appsOnlyUseGeneralAndAndroidAllowlist() {
         val result = plan(apps = listOf("test.browser"))
@@ -534,5 +539,135 @@ class RoutingConfigTest {
                 .replace("\"192.168.0.0/16\"", rules.joinToString(", ") { "\"$it\"" }))
         }
         assertNotNull(plan(enabled = false))
+    }
+
+    // Settings' Excluded routes (ExcludedRoutes) are added to the config's own excluded_routes.
+    @Test fun settingsExcludedRoutesAreAddedAfterTheConfigsOwnAndNeverRepeatedFromThem() {
+        // The config excludes 192.168.0.0/16 itself, which the defaults list as well.
+        assertEquals(listOf("192.168.0.0/16"), excludedOf(plan()))
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12",
+            "192.0.0.0/24", "255.255.255.255/32"), excludedOf(plan(excluded = defaults)))
+        // However the split settings are, and however many times a route is listed.
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8"), excludedOf(plan(enabled = false, excluded = listOf("10.0.0.0/8", "10.0.0.0/8"))))
+    }
+    @Test fun settingsExcludedRoutesGoInWhereTheConfigHasNone() {
+        val none = source.replace("excluded_routes = [\"192.168.0.0/16\"]", "excluded_routes = []")
+        assertEquals(emptyList<String>(), excludedOf(plan(text = none)))
+        assertEquals(defaults, excludedOf(plan(text = none, excluded = defaults)))
+    }
+    @Test fun aRouteOfEveryAddressNeverReachesThePlan() {
+        // Settings refuses to list one, and a saved list that has one anyway is read without it, and so is this.
+        val result = plan(excluded = listOf("0.0.0.0/0", "::/0", "10.0.0.0/8", "1.2.3.4/00"))
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8"), excludedOf(result))
+        assertNotNull(plan(excluded = listOf("::/0")))
+    }
+    @Test fun ipv6RoutesGoInOnlyWhereTheSessionHasIpv6() {
+        val saved = listOf("10.0.0.0/8", "FD00::/8")
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8"), excludedOf(plan(excluded = saved)))
+        val v6 = source.replace("has_ipv6 = false", "has_ipv6 = true")
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8", "fd00::/8"), excludedOf(plan(text = v6, excluded = saved)))
+        // IPv6 is on in the config but there is no IPv6 route to carry it: the same as off.
+        val noV6Route = v6.replace("[\"0.0.0.0/0\", \"::/0\"]", "[\"0.0.0.0/0\"]")
+        assertEquals(listOf("192.168.0.0/16", "10.0.0.0/8"), excludedOf(plan(text = noV6Route, excluded = saved)))
+    }
+    @Test fun savedRoutesThatTogetherCoverAnAddressFamilyAreRefusedLikeTheConfigsOwn() {
+        assertThrows(IllegalArgumentException::class.java) { plan(excluded = listOf("0.0.0.0/1", "128.0.0.0/1")) }
+        // The platform's own exclusions count, as they do for the config.
+        assertThrows(IllegalArgumentException::class.java) { plan(excluded = listOf("0.0.0.0/1", "128.0.0.0/2", "192.0.0.0/3")) }
+        assertNotNull(plan(excluded = listOf("0.0.0.0/2", "128.0.0.0/1")))
+    }
+    @Test fun settingsRoutesKeepTheRestOfTheConfigAsItWas() {
+        val withRoutes = Toml.parse(plan(excluded = defaults).toml)
+        val without = Toml.parse(plan().toml)
+        assertEquals(without.getString("endpoint.password"), withRoutes.getString("endpoint.password"))
+        assertEquals(without.getLong("listener.tun.mtu_size"), withRoutes.getLong("listener.tun.mtu_size"))
+        assertEquals(without.getArray("listener.tun.included_routes")!!.toList(), withRoutes.getArray("listener.tun.included_routes")!!.toList())
+        assertEquals(without.getArray("exclusions")!!.toList(), withRoutes.getArray("exclusions")!!.toList())
+    }
+
+    // The profiles. A session is built with the rules of the profile its config uses, and nothing of the others.
+    private fun profileRules(edit: (SplitProfiles) -> Unit): MemoryBacking {
+        val backing = MemoryBacking()
+        SplitStore.edit(backing, null) { profiles -> edit(profiles) }
+        return backing
+    }
+    private fun planFor(backing: MemoryBacking, profile: String, through: Boolean): RoutingConfig.Plan {
+        val rules = SplitStore.rules(backing, null, profile)
+        return RoutingConfig.prepare(source, true, through, rules.domains, rules.apps, true)
+    }
+    private fun exclusionsOf(plan: RoutingConfig.Plan) = Toml.parse(plan.toml).getArray("exclusions")!!.toList()
+
+    @Test fun theSameConfigGetsTheRulesOfTheProfileItUses() {
+        val backing = profileRules { p ->
+            p.addDomains("Default", "home.example"); p.addApp("Default", "org.home")
+            p.add("Work"); p.addDomains("Work", "work.example *.work.example"); p.addApp("Work", "org.work")
+        }
+        val home = planFor(backing, "Default", false)
+        assertEquals(listOf("intranet.example", "home.example"), exclusionsOf(home))
+        assertEquals(listOf("org.home"), home.apps)
+        val work = planFor(backing, "Work", false)
+        assertEquals(listOf("intranet.example", "work.example", "*.work.example"), exclusionsOf(work))
+        assertEquals(listOf("org.work"), work.apps)
+        // A profile that is gone is Default for whoever used it.
+        val gone = planFor(backing, "Gone", false)
+        assertEquals(exclusionsOf(home), exclusionsOf(gone))
+        assertEquals(home.apps, gone.apps)
+    }
+
+    @Test fun throughVpnIsDecidedByTheRulesOfTheProfileInUseAlone() {
+        val backing = profileRules { p ->
+            p.addDomains("Default", "home.example")
+            p.add("Work"); p.addApp("Work", "org.work")
+            p.add("Empty")
+        }
+        // Destinations only: selective mode. Applications only: the Android allowlist. Neither: the full tunnel, with the warning.
+        val home = planFor(backing, "Default", true)
+        assertEquals("selective", Toml.parse(home.toml).getString("vpn_mode"))
+        assertTrue(home.apps.isEmpty())
+        val work = planFor(backing, "Work", true)
+        assertEquals("general", Toml.parse(work.toml).getString("vpn_mode"))
+        assertTrue(work.allowApps); assertEquals(listOf("org.work"), work.apps)
+        val empty = planFor(backing, "Empty", true)
+        assertEquals("general", Toml.parse(empty.toml).getString("vpn_mode"))
+        assertNotNull(empty.warning)
+        // The applications of one profile and the destinations of another are never added together.
+        assertNull(home.warning); assertNull(work.warning)
+    }
+
+    @Test fun aProfileWithApplicationsAndDomainsStillCannotGoThroughVpnWithBoth() {
+        val backing = profileRules { p -> p.addDomains("Default", "home.example"); p.addApp("Default", "org.home") }
+        val plan = planFor(backing, "Default", true)
+        assertEquals("general", Toml.parse(plan.toml).getString("vpn_mode"))
+        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, plan.warning)
+        assertTrue(plan.apps.isEmpty())
+    }
+
+    @Test fun theOldListsHoldTheRulesOfTheProfileInUseSoGoingBackToTheFirstVersionRoutesTheSame() {
+        val backing = profileRules { p ->
+            p.addDomains("Default", "home.example"); p.addApp("Default", "org.home")
+            p.add("Work"); p.addDomains("Work", "work.example"); p.addApp("Work", "org.work")
+            p.setMirrored("Work")
+        }
+        assertEquals(setOf("work.example"), backing.set("domains"))
+        assertEquals(setOf("org.work"), backing.set("apps"))
+        // What 1.0.0 builds from them is what this builds for that profile.
+        val old = RoutingConfig.prepare(source, true, false, backing.set("domains")!!.toList(), backing.set("apps")!!.toList(), true)
+        val current = planFor(backing, "Work", false)
+        assertEquals(exclusionsOf(current).toSet(), exclusionsOf(old).toSet())
+        assertEquals(current.apps, old.apps)
+        // Editing a profile the selected config does not use leaves them alone.
+        SplitStore.edit(backing, null) { p -> p.addDomains("Default", "more.example") }
+        assertEquals(setOf("work.example"), backing.set("domains"))
+        // And choosing another config moves them.
+        SplitStore.edit(backing, null) { p -> p.setMirrored("Default") }
+        assertEquals(setOf("home.example", "more.example"), backing.set("domains"))
+        assertEquals(setOf("org.home"), backing.set("apps"))
+    }
+
+    @Test fun rulesTheCoreCannotUseNeverReachThePlan() {
+        val backing = MemoryBacking().with("domains", setOf("intranet", "example.com:443", "example.org"))
+        val plan = planFor(backing, "Default", false)
+        assertEquals(listOf("intranet.example", "example.org"), exclusionsOf(plan))
+        assertEquals(true, backing.data["rules_migrated"])
     }
 }

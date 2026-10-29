@@ -162,8 +162,7 @@ private slots:
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
-    void theCloseButtonMinimisesWhenThereIsATray();
-    void aWindowManagerWithNoMinimiseHidesTheWindowToTheTray();
+    void theCloseButtonAndATray();
     void aTrayWithNoHostIsNotAPlaceToHideTheWindow();
     void theMinimiseButtonNeverHidesOrQuits();
     void aWindowManagersCloseIsTheCloseButton();
@@ -175,6 +174,19 @@ private slots:
     void aWindowRestoredOrDestroyedBeforeTheCheckIsNotTouched();
     void theDesktopSaysWhatCameOfAMinimise();
     void theDesktopAsksTheWindowManagerWhetherItMinimised();
+    void aBringForwardThatTookEffectIsLeftAlone();
+    void aBringForwardTheWindowManagerIgnoredMapsTheWindowAgain();
+    void mappingTheWindowAgainKeepsItMaximised();
+    void aWindowThatIsNeverWithdrawnIsMappedAtTheWaitCap();
+    void aWindowManagerThatCannotBeAskedIsNotWaitedFor();
+    void aHiddenWindowIsOnlyMapped();
+    void aWindowHiddenDuringTheCheckStaysHidden();
+    void aWindowThatWasActiveAndMovedOnIsNotMappedAgain();
+    void aWindowActiveWhenRequestedAndMovedOnIsNotMappedAgain();
+    void twoBringForwardsDuringOneCheckMapTheWindowAgainOnce();
+    void aBringForwardDuringTheWaitEndsTheWait();
+    void aBringForwardNeedsNoOneToTellWhatCameOfIt();
+    void aWindowDestroyedDuringTheCheckOrTheWaitIsLeftAlone();
     void theDesktopKnowsWhetherThereIsATray();
     void theDesktopAsksWhetherTheTrayHasAHost();
 
@@ -4043,10 +4055,10 @@ namespace {
 
 } // namespace
 
-// ✕ with a tray asks for a minimise and does nothing else yet. What comes of the
-// minimise is a moment away on X11, and a window manager that did it has nothing
-// further to be done: the window is where the user can get it back from.
-void TestQmlUi::theCloseButtonMinimisesWhenThereIsATray()
+// ✕ with a usable tray follows the platform: on Linux/X11 it hides the window to
+// the tray at once, with no minimise to ask for and nothing to wait for; Windows
+// still minimises, as it always did.
+void TestQmlUi::theCloseButtonAndATray()
 {
 #ifdef Q_OS_MACOS
     QSKIP("macOS draws its own traffic lights");
@@ -4063,64 +4075,25 @@ void TestQmlUi::theCloseButtonMinimisesWhenThereIsATray()
     const int hides = m_desktop.hideRequests;
 
     QVERIFY2(clickWindowButton(window, "windowCloseButton"), "the window's own close button");
-    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
-    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
-    QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(root->property("closeWaitingOnMinimize").toBool(), "the ✕ waits for the answer");
-
-    emit m_desktop.minimizeSettled(window, true);
-    QVERIFY2(!root->property("closeWaitingOnMinimize").toBool(), "and is done with it");
-    QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(!m_backend.applicationClosingDown(), "a window manager that minimised has nothing left to do");
-    delete root;
-#endif
-}
-
-// Hyprland and sway have no minimise. They take the request and do nothing, the
-// window stays on screen, and the ✕ did nothing at all, again and again. Once
-// the window is seen to be still there it goes to the tray instead.
-void TestQmlUi::aWindowManagerWithNoMinimiseHidesTheWindowToTheTray()
-{
-#ifdef Q_OS_MACOS
-    QSKIP("macOS draws its own traffic lights");
+#ifdef Q_OS_LINUX
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
 #else
-    const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
-    m_backend.resetShutdown();
-    m_desktop.useTray(true);
-    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
-    QObject *root = createMainWindow(m_engine);
-    QVERIFY(root);
-    auto *window = exposed(root);
-    QVERIFY(window);
-    const int hides = m_desktop.hideRequests;
-
-    QVERIFY(clickWindowButton(window, "windowCloseButton"));
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
     QCOMPARE(m_desktop.hideRequests, hides);
-
-    // Somebody else's answer is not ours.
-    QWindow other;
-    emit m_desktop.minimizeSettled(&other, false);
-    QCOMPARE(m_desktop.hideRequests, hides);
-
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QVERIFY2(!m_backend.applicationClosingDown(), "hidden to the tray, not quit");
-
-    // The next answer to a minimise nobody closed with is not another hide.
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
+#endif
+    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
     delete root;
 #endif
 }
 
 // Qt's tray.available is that a StatusNotifierWatcher is on the bus. A bar can own
 // one and show no icons, and a window hidden to that has nothing to bring it back.
-// Then it is the same as having no tray at all: ✕ quits.
+// On Linux/X11 that is the same as having no tray at all: ✕ quits. Other platforms
+// do not consult the host on this path.
 void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
 {
-#ifdef Q_OS_MACOS
-    QSKIP("macOS draws its own traffic lights");
-#else
+#ifdef Q_OS_LINUX
     const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
     m_backend.resetShutdown();
     m_desktop.useTray(true, false);
@@ -4132,11 +4105,11 @@ void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
     const int hides = m_desktop.hideRequests;
 
     QVERIFY(clickWindowButton(window, "windowCloseButton"));
-    QVERIFY(!m_backend.applicationClosingDown());
-    emit m_desktop.minimizeSettled(window, false);
     QCOMPARE(m_desktop.hideRequests, hides);
     QVERIFY2(m_backend.applicationClosingDown(), "nowhere to hide it, so it quits");
     delete root;
+#else
+    QSKIP("the tray host check is part of the X11 close path");
 #endif
 }
 
@@ -4161,7 +4134,6 @@ void TestQmlUi::theMinimiseButtonNeverHidesOrQuits()
 
     QVERIFY(clickWindowButton(window, "windowMinButton"));
     QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
-    QVERIFY(!root->property("closeWaitingOnMinimize").toBool());
     emit m_desktop.minimizeSettled(window, false);
     QCOMPARE(m_desktop.hideRequests, hides);
     QVERIFY(!m_backend.applicationClosingDown());
@@ -4192,12 +4164,10 @@ void TestQmlUi::aWindowManagersCloseIsTheCloseButton()
 
     window->close();
 #ifdef Q_OS_LINUX
-    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
     QVERIFY2(!m_backend.applicationClosingDown(), "a close from the window manager must not quit");
     QVERIFY2(window->isVisible(), "and must not close the window either: it is refused");
-    emit m_desktop.minimizeSettled(window, false);
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QVERIFY(!m_backend.applicationClosingDown());
 #else
     QCOMPARE(m_desktop.minimizeRequests, minimises);
     QCOMPARE(m_desktop.hideRequests, hides);
@@ -4481,6 +4451,427 @@ void TestQmlUi::theDesktopAsksTheWindowManagerWhetherItMinimised()
     QCOMPARE(spy.count(), 1);
     QVERIFY(spy.constFirst().at(1).toBool());
     QVERIFY(window.windowStates() & Qt::WindowMinimized);
+}
+
+namespace {
+
+constexpr int kBringCheckMs = 40;
+constexpr int kBringPollMs = 5;
+constexpr int kBringWaitMs = 400;
+
+// What a window manager does with a request to bring a window forward, made up:
+// it gives the window the focus or it does not, and once the window has been
+// unmapped it withdraws it after so many asks, or never, or cannot be asked.
+// Everything it was asked, and everything it was told, is kept for the test to read.
+struct MadeUpWindowManager {
+    bool givesFocus = false;
+    int withdrawsOnAsk = 1; // the ask that answers yes; 0: never
+    bool canBeAsked = true;
+
+    int activeAsked = 0;
+    int withdrawnAsked = 0;
+    bool askedWhileMapped = false; // asked whether a window is withdrawn that was on screen
+    QList<bool> remaps; // what each request said when it was settled
+
+    freetunnel::ActiveProbe active()
+    {
+        return [this](QWindow *) {
+            ++activeAsked;
+            return givesFocus;
+        };
+    }
+
+    freetunnel::WithdrawnProbe withdrawn()
+    {
+        return [this](QWindow *window) -> std::optional<bool> {
+            ++withdrawnAsked;
+            askedWhileMapped = askedWhileMapped || window->isVisible();
+            if (!canBeAsked)
+                return std::nullopt;
+            return withdrawsOnAsk > 0 && withdrawnAsked >= withdrawsOnAsk;
+        };
+    }
+
+    std::function<void(bool)> settle()
+    {
+        return [this](bool remapped) { remaps << remapped; };
+    }
+
+    void bring(QWindow *window, int waitMs = kBringWaitMs, int checkMs = kBringCheckMs)
+    {
+        freetunnel::bringWindowForwardChecked(window, active(), withdrawn(), checkMs, settle(),
+                                              kBringPollMs, waitMs);
+    }
+};
+
+int hidesIn(const QSignalSpy &visibility)
+{
+    int hides = 0;
+    for (const QList<QVariant> &change : visibility)
+        hides += change.constFirst().toBool() ? 0 : 1;
+    return hides;
+}
+
+} // namespace
+
+// Hyprland answers a request to activate a window that is on screen and not in
+// focus with a flag on the window and nothing else; one that does what was asked
+// is not to be touched. The window manager here is made up, so that what is asked
+// of it and what is done to the window can both be read.
+void TestQmlUi::aBringForwardThatTookEffectIsLeftAlone()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.givesFocus = true;
+
+    wm.bring(&window);
+    QCOMPARE(wm.activeAsked, 1); // initial state is recorded before the request
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(!wm.remaps.constFirst());
+    QCOMPARE(wm.activeAsked, 1);
+    QCOMPARE(wm.withdrawnAsked, 0);
+    QCOMPARE(visibility.count(), 0); // not hidden, not shown, not touched
+    QVERIFY(window.isVisible());
+
+    // With no probe of its own the window is asked itself, and a window that was
+    // just shown is the active one.
+    wm.remaps.clear();
+    QTRY_VERIFY(window.isActive());
+    freetunnel::bringWindowForwardChecked(&window, {}, wm.withdrawn(), kBringCheckMs, wm.settle(),
+                                          kBringPollMs, kBringWaitMs);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(!wm.remaps.constFirst());
+    QCOMPARE(wm.withdrawnAsked, 0);
+    QCOMPARE(visibility.count(), 0);
+}
+
+// What Hyprland does give the focus to is a window that has just been mapped. So a
+// window that is on screen and still not in focus after the wait is unmapped, waited
+// for until the window manager has withdrawn it (ICCCM 4.1.4), and mapped again:
+// once, and then it is left to the window manager.
+void TestQmlUi::aBringForwardTheWindowManagerIgnoredMapsTheWindowAgain()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.withdrawsOnAsk = 3;
+
+    wm.bring(&window);
+    QCOMPARE(visibility.count(), 0);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY2(wm.remaps.constFirst(), "the window was taken off the screen and put back");
+    QCOMPARE(wm.activeAsked, 2); // one initial state check, one result check
+    QCOMPARE(wm.withdrawnAsked, 3); // not mapped again before the third ask said it was gone
+    QVERIFY2(!wm.askedWhileMapped, "and asked about while it was unmapped, not before");
+    QCOMPARE(visibility.count(), 2);
+    QCOMPARE(hidesIn(visibility), 1);
+    QVERIFY(window.isVisible());
+
+    // A window manager that ignores that too is not asked again: no loop.
+    QTest::qWait(6 * kBringCheckMs);
+    QCOMPARE(wm.remaps.size(), 1);
+    QCOMPARE(visibility.count(), 2);
+    QCOMPARE(wm.activeAsked, 2);
+}
+
+// The tray's Show must not undo the window being maximised: that is what show()
+// would do, and why bringing it forward uses setVisible().
+void TestQmlUi::mappingTheWindowAgainKeepsItMaximised()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    window.setWindowStates(Qt::WindowMaximized);
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+
+    wm.bring(&window);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(wm.remaps.constFirst());
+    QCOMPARE(hidesIn(visibility), 1);
+    QVERIFY(window.isVisible());
+    QCOMPARE(window.windowStates(), Qt::WindowStates(Qt::WindowMaximized));
+}
+
+// A window manager that never says the window is gone is not waited for for ever.
+void TestQmlUi::aWindowThatIsNeverWithdrawnIsMappedAtTheWaitCap()
+{
+    constexpr int waitMs = 150;
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.withdrawsOnAsk = 0;
+
+    QElapsedTimer clock;
+    clock.start();
+    wm.bring(&window, waitMs);
+    QTRY_VERIFY(!window.isVisible());
+    QTest::qWait(waitMs / 3);
+    QVERIFY2(!window.isVisible(), "still waiting");
+    QVERIFY(wm.remaps.isEmpty());
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(clock.elapsed() >= waitMs);
+    QVERIFY(wm.remaps.constFirst());
+    QVERIFY(window.isVisible());
+    QVERIFY2(wm.withdrawnAsked >= 3, "asked again and again until the cap");
+    QCOMPARE(hidesIn(visibility), 1);
+}
+
+// Nothing to ask is not a reason to wait: the window is mapped again at the first
+// look, with a probe that says it cannot tell and with none at all.
+void TestQmlUi::aWindowManagerThatCannotBeAskedIsNotWaitedFor()
+{
+    constexpr int waitMs = 3000;
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.canBeAsked = false;
+
+    QElapsedTimer clock;
+    clock.start();
+    wm.bring(&window, waitMs);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(clock.elapsed() < waitMs / 2);
+    QVERIFY(wm.remaps.constFirst());
+    QCOMPARE(wm.withdrawnAsked, 1);
+    QCOMPARE(visibility.count(), 2);
+    QVERIFY(window.isVisible());
+
+    wm.remaps.clear();
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), {}, kBringCheckMs, wm.settle(),
+                                          kBringPollMs, waitMs);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(wm.remaps.constFirst());
+    QCOMPARE(visibility.count(), 4);
+    QCOMPARE(wm.withdrawnAsked, 1);
+    QVERIFY(window.isVisible());
+}
+
+// A window that was hidden (to the tray) is mapped by the request itself, which a
+// window manager gives the focus to. Mapping it a second time would only ask the
+// same of it again.
+void TestQmlUi::aHiddenWindowIsOnlyMapped()
+{
+    QWindow window;
+    window.resize(200, 200);
+    MadeUpWindowManager wm;
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+
+    wm.bring(&window);
+    QVERIFY(window.isVisible());
+    QCOMPARE(wm.remaps, QList<bool>{false}); // settled at once: no check was armed
+    QTest::qWait(4 * kBringCheckMs);
+    QCOMPARE(wm.activeAsked, 0); // hidden windows need no activation check
+    QCOMPARE(wm.withdrawnAsked, 0);
+    QCOMPARE(visibility.count(), 1);
+    QCOMPARE(hidesIn(visibility), 0);
+    QCOMPARE(wm.remaps.size(), 1);
+}
+
+// The close button hides the window to the tray, and may do so inside the wait.
+void TestQmlUi::aWindowHiddenDuringTheCheckStaysHidden()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    MadeUpWindowManager wm;
+
+    wm.bring(&window);
+    window.hide();
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(!wm.remaps.constFirst());
+    QTest::qWait(3 * kBringCheckMs);
+    QVERIFY(!window.isVisible());
+    QCOMPARE(visibility.count(), 0);
+    QCOMPARE(wm.activeAsked, 1);
+    QCOMPARE(wm.withdrawnAsked, 0);
+}
+
+// The window manager can have done what was asked and the user moved on before the
+// look: that is not a request that came to nothing, and the window they are
+// working in must not be taken off the screen from under them.
+void TestQmlUi::aWindowThatWasActiveAndMovedOnIsNotMappedAgain()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QWindow other;
+    QVERIFY(shownWindow(other));
+    other.requestActivate();
+    QTRY_VERIFY(other.isActive());
+    QTRY_VERIFY(!window.isActive());
+    MadeUpWindowManager wm; // says the window is not active when asked
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+
+    wm.bring(&window);
+    QTRY_VERIFY(window.isActive()); // the request itself is what gives it the focus here
+    other.requestActivate();
+    QTRY_VERIFY(!window.isActive());
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(!wm.remaps.constFirst());
+    QCOMPARE(wm.activeAsked, 1);
+    QCOMPARE(wm.withdrawnAsked, 0);
+    QCOMPARE(visibility.count(), 0);
+    QVERIFY(window.isVisible());
+}
+
+// The window can already be active when Show is clicked, and the user can move
+// on before the delayed check. That initial active state counts as the request
+// having succeeded even if the activation request causes no activeChanged(true).
+void TestQmlUi::aWindowActiveWhenRequestedAndMovedOnIsNotMappedAgain()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QTRY_VERIFY(window.isActive());
+    QWindow other;
+    QVERIFY(shownWindow(other));
+    other.requestActivate();
+    QTRY_VERIFY(other.isActive());
+    QTRY_VERIFY(!window.isActive());
+
+    // Focus the target, then start the request while it is already active. The
+    // other window takes focus before the check fires.
+    window.requestActivate();
+    QTRY_VERIFY(window.isActive());
+    MadeUpWindowManager wm; // activation is reported as unsuccessful at the check
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    freetunnel::bringWindowForwardChecked(&window, {}, wm.withdrawn(), kBringCheckMs,
+                                          wm.settle(), kBringPollMs, kBringWaitMs);
+    other.requestActivate();
+    QTRY_VERIFY(other.isActive());
+    QTRY_VERIFY(!window.isActive());
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY(!wm.remaps.constFirst());
+    QCOMPARE(wm.activeAsked, 0);
+    QCOMPARE(wm.withdrawnAsked, 0);
+    QCOMPARE(visibility.count(), 0);
+    QVERIFY(window.isVisible());
+}
+
+// The tray menu clicked twice, or the tray and a second launch together: the checks
+// of the first request are the second's to make, and the window is mapped again at
+// most once between them.
+void TestQmlUi::twoBringForwardsDuringOneCheckMapTheWindowAgainOnce()
+{
+    constexpr int checkMs = 3 * kBringCheckMs;
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.withdrawsOnAsk = 1;
+
+    wm.bring(&window, kBringWaitMs, checkMs);
+    // Timed from here, so that it comes before the first check even on a busy machine.
+    QTimer::singleShot(checkMs / 2, &window, [&] { wm.bring(&window, kBringWaitMs, checkMs); });
+    QTRY_COMPARE(wm.remaps.size(), 2);
+    QCOMPARE(wm.remaps, (QList<bool>{false, true})); // the first was overtaken
+    QCOMPARE(hidesIn(visibility), 1);
+    QCOMPARE(wm.activeAsked, 3); // two starts, then the newer request's result
+    QTest::qWait(2 * checkMs);
+    QCOMPARE(hidesIn(visibility), 1);
+    QCOMPARE(wm.remaps.size(), 2);
+    QVERIFY(window.isVisible());
+}
+
+// A request that comes while a window is being waited for maps it itself, being
+// for a window that is not on screen, and the wait is not carried on.
+void TestQmlUi::aBringForwardDuringTheWaitEndsTheWait()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+    wm.withdrawsOnAsk = 0; // it would be waited for until the cap
+
+    wm.bring(&window);
+    QTRY_VERIFY(!window.isVisible());
+    const int askedBefore = wm.withdrawnAsked;
+    MadeUpWindowManager later; // the request that overtakes it
+    later.bring(&window);
+    QVERIFY(window.isVisible());
+    QCOMPARE(later.remaps, QList<bool>{false});
+    QTRY_COMPARE(wm.remaps.size(), 1);
+    QVERIFY2(!wm.remaps.constFirst(), "ended by the newer request, not carried out");
+    QVERIFY(wm.withdrawnAsked <= askedBefore + 1);
+    QTest::qWait(3 * kBringPollMs);
+    QCOMPARE(wm.remaps.size(), 1);
+    QCOMPARE(hidesIn(visibility), 1);
+    QCOMPARE(visibility.count(), 2); // the one hide, and the newer request's map
+}
+
+// The application asks without anyone to tell, and every way a request can end has
+// to be able to end with nobody listening.
+void TestQmlUi::aBringForwardNeedsNoOneToTellWhatCameOfIt()
+{
+    QWindow window;
+    QVERIFY(shownWindow(window));
+    QSignalSpy visibility(&window, &QWindow::visibleChanged);
+    MadeUpWindowManager wm;
+
+    // Ignored: off the screen and back.
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    QTRY_COMPARE(visibility.count(), 2);
+    QVERIFY(window.isVisible());
+
+    // Honoured: left alone.
+    wm.givesFocus = true;
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    QTRY_COMPARE(wm.activeAsked, 3); // includes the initial state of the request
+    QCOMPARE(visibility.count(), 2);
+
+    // Overtaken: the older request ends with nobody to tell, the newer one acts.
+    wm.givesFocus = false;
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    QTRY_COMPARE(visibility.count(), 4);
+    QTest::qWait(3 * kBringCheckMs);
+    QCOMPARE(visibility.count(), 4);
+
+    // Hidden since: left hidden.
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    window.hide();
+    QCOMPARE(visibility.count(), 5);
+    QTest::qWait(3 * kBringCheckMs);
+    QVERIFY(!window.isVisible());
+
+    // And one that was hidden is shown.
+    freetunnel::bringWindowForwardChecked(&window, wm.active(), wm.withdrawn(), kBringCheckMs);
+    QVERIFY(window.isVisible());
+    QCOMPARE(visibility.count(), 6);
+}
+
+// Gone while it is looked at or waited for: nothing is touched, and nothing is said.
+void TestQmlUi::aWindowDestroyedDuringTheCheckOrTheWaitIsLeftAlone()
+{
+    MadeUpWindowManager wm;
+    {
+        auto *gone = new QWindow;
+        QVERIFY(shownWindow(*gone));
+        wm.bring(gone);
+        delete gone;
+        QTest::qWait(4 * kBringCheckMs);
+    }
+    QCOMPARE(wm.activeAsked, 1); // initial state was sampled before it was destroyed
+    {
+        wm.withdrawsOnAsk = 0;
+        auto *gone = new QWindow;
+        QVERIFY(shownWindow(*gone));
+        wm.bring(gone, 200);
+        QTRY_VERIFY(!gone->isVisible()); // in the wait
+        delete gone;
+        const int asked = wm.withdrawnAsked;
+        QTest::qWait(300);
+        QCOMPARE(wm.withdrawnAsked, asked);
+    }
+    QVERIFY(wm.remaps.isEmpty());
+
+    // And no window at all.
+    wm.bring(nullptr);
+    QTest::qWait(3 * kBringCheckMs);
+    QVERIFY(wm.remaps.isEmpty());
 }
 
 // What the QML asks of the tray icon: its own word for whether it has a tray. No

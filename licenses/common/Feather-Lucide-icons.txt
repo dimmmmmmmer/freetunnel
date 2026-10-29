@@ -1,6 +1,8 @@
 Feather and Lucide icons
 settings.svg, export.svg, close.svg and connection.svg in assets/icons are derived from
 Feather's 'settings', 'upload', 'x' and 'server'; edit.svg from Lucide's 'pencil'.
+The Android app's res/drawable/ic_settings.xml, ic_export.xml, ic_close.xml and ic_connection.xml
+are made from those four, and ic_edit.xml from edit.svg.
 Source: https://github.com/feathericons/feather , https://github.com/lucide-icons/lucide
 License: MIT (Feather) AND ISC (Lucide)
 
