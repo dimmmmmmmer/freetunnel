@@ -40,7 +40,7 @@ theirs = [
     "/usr/include/glib-2.0/glib/gtypes.h",
     "/usr/include/openssl/evp.h",
     "/usr/include/xcb/xcb.h",
-    "/opt/Qt/6.8.3/gcc_64/include/QtCore/qobject.h",
+    "/opt/Qt/6.11.2/gcc_64/include/QtCore/qobject.h",
     str(root / "build-tidy/_deps/qhotkey-src/QHotkey/qhotkey.h"),
 ]
 missed = [str(p) for p in ours if not rx.search(str(p))]

@@ -27,7 +27,7 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.8.3'
+  QT_VER: '6.11.2'
 
 # Least privilege by default: no job needs to write to the repo except the
 # release job, which asks for contents: write explicitly. Without this the
