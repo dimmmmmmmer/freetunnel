@@ -52,7 +52,7 @@ Item {
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
                            text: qsTr("Minimize to tray"); color: theme.text; font.pixelSize: 14 }
                     Text { Layout.fillWidth: true; elide: Text.ElideRight
-                           text: qsTr("the ✕ hides the window to the tray instead of the taskbar")
+                           text: qsTr("the close button hides the window to the tray")
                            color: theme.textFaint; font.pixelSize: 12 }
                 }
                 Toggle { objectName: "minimizeToTrayToggle"; accent: theme.accent; offColor: theme.toggleOff
