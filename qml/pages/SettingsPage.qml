@@ -38,6 +38,8 @@ Item {
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
                        text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
+            Sep { objectName: "minimizeToTraySep"; theme: settingsRoot.theme
+                  visible: Qt.platform.os === "windows" }
             // The ✕ hides the window to the tray instead of minimising it to the
             // taskbar. Windows alone: Linux already hides to the tray on close, and
             // macOS hides from its own red button, so the switch would do nothing

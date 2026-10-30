@@ -47,13 +47,10 @@ compare link at the bottom of its release notes.
   included, looks the same everywhere. The tray menu, file dialogs and
   notifications are drawn by the system and keep its font. The log and the
   certificate box stay fixed-width.
-- **Windows: "Minimize to tray" in Settings makes the ✕ hide the window to the
-  tray rather than minimise it to the taskbar**, so a click on the tray icon —
-  or **Show FreeTunnel** in its menu — brings the window back while the VPN
-  keeps running. It is off by default, and the ✕ minimises as before until it
-  is turned on. The minimize button always minimizes. Linux already hides to
-  the tray on close and macOS hides from its own red button, so the switch is
-  Windows-only.
+- **Windows: "Minimize to tray" in Settings makes ✕ hide the window to the
+  tray while the VPN keeps running.** The tray icon or **Show FreeTunnel**
+  brings it back. The setting is off by default. The minimize button still
+  minimizes, Alt+F4 still quits, and ✕ quits if no system tray is available.
 
 ### Fixed
 

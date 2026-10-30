@@ -119,8 +119,8 @@ Closing the window keeps FreeTunnel and the VPN running:
 | A Linux desktop with no usable system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
 
 A window hidden to the tray comes back from the tray icon, or from **Show
-FreeTunnel** in its menu. On Windows, with a tray present, ✕ still quits when
-there is no tray to hide to.
+FreeTunnel** in its menu. On Windows, ✕ quits if no system tray is available, even with
+**Minimize to tray** enabled.
 
 To quit, choose **Quit** in the tray menu (or press Ctrl+Q, or ⌘Q on macOS).
 
