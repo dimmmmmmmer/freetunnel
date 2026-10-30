@@ -71,6 +71,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(bool loggingEnabled READ loggingEnabled WRITE setLoggingEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool verboseLogs READ verboseLogs WRITE setVerboseLogs NOTIFY settingsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY settingsChanged)
+    Q_PROPERTY(bool minimizeToTray READ minimizeToTray WRITE setMinimizeToTray NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList pings READ pings NOTIFY pingsChanged)
     Q_PROPERTY(QString credentialStorageWarning READ credentialStorageWarning NOTIFY
                        credentialStorageChanged)
@@ -200,6 +201,8 @@ public:
     QString logPath() const;
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v);
+    bool minimizeToTray() const { return m_minimizeToTray; }
+    void setMinimizeToTray(bool v);
     QVariantList pings() const { return m_pings; }
 
     int toggleCount() const { return m_toggleCount; }
@@ -400,6 +403,7 @@ private:
     QString m_hotkeyConnect;
     QString m_hotkeyDisconnect;
     bool m_autoStart = false;
+    bool m_minimizeToTray = false;
     QVariantList m_pings = {QStringLiteral("42 ms"), QStringLiteral("—")};
     QString m_credentialStorageWarning;
     bool m_shutdownPrepared = false;
