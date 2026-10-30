@@ -112,7 +112,15 @@ check_one_value() {
 }
 
 check_one_value QT_VER
+check_one_value AQT_SOURCE
 check_one_value CONAN_VER
+
+while read -r line; do
+  if ! [[ "$line" =~ aqtinstall.git@[0-9a-f]{40}\' ]]; then
+    echo "pinned-deps: aqt source must use a full commit SHA: $line" >&2
+    fail=1
+  fi
+done < <(grep -rh '^  AQT_SOURCE:' .github/workflows)
 
 # ...and that nothing reintroduces a literal alongside the declaration.
 while read -r line; do
