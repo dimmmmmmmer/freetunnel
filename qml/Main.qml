@@ -528,7 +528,13 @@ Window {
             return
         }
         if (desktop.hasTray(win.tray)) {
-            desktop.minimize(win)
+            // Windows: the ✕ minimises to the taskbar, or hides to the tray when
+            // the user has asked it to. Hiding is the same call Linux makes; the
+            // window comes back from the tray icon or its «Show FreeTunnel».
+            if (backend.minimizeToTray)
+                desktop.hideToTray(win)
+            else
+                desktop.minimize(win)
         } else {
             backend.quitApplication()
         }

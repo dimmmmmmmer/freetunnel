@@ -125,6 +125,7 @@ private slots:
     void theUpdateLineDoesWhatItOffers();
     void restoringDefaultRoutesAsksFirst();
     void theKillSwitchPortsSwitchIsBoundToItsSetting();
+    void theMinimizeToTraySwitchIsBoundToItsSetting();
     void theThroughVpnNoticeNamesTheConfigAndItsProfile();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
@@ -160,6 +161,7 @@ private slots:
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
     void theCloseButtonAndATray();
+    void theCloseButtonHidesToTheTrayWhenAsked();
     void aTrayWithNoHostIsNotAPlaceToHideTheWindow();
     void theMinimiseButtonNeverHidesOrQuits();
     void aWindowManagersCloseIsTheCloseButton();
@@ -3021,6 +3023,41 @@ void TestQmlUi::theKillSwitchPortsSwitchIsBoundToItsSetting()
     delete root;
 }
 
+// The switch that makes the ✕ hide the window to the tray rather than minimise it
+// to the taskbar. Bound both ways to its setting, and shown only on Windows, the
+// one platform whose ✕ the switch changes.
+void TestQmlUi::theMinimizeToTraySwitchIsBoundToItsSetting()
+{
+    const auto restore = qScopeGuard([this] { m_backend.setMinimizeToTray(false); });
+    QObject *root = loadPage("pages/SettingsPage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 1400));
+    auto *row = root->findChild<QQuickItem *>(QStringLiteral("minimizeToTrayRow"));
+    auto *toggle = root->findChild<QQuickItem *>(QStringLiteral("minimizeToTrayToggle"));
+    QVERIFY(row && toggle);
+#ifdef Q_OS_WIN
+    QVERIFY(row->isVisible());
+#else
+    QVERIFY2(!row->isVisible(), "a switch for the Windows close path alone");
+#endif
+
+    QCOMPARE(toggle->property("checked").toBool(), false);
+    m_backend.setMinimizeToTray(true);
+    QCOMPARE(toggle->property("checked").toBool(), true);
+    m_backend.setMinimizeToTray(false);
+    QCOMPARE(toggle->property("checked").toBool(), false);
+
+#ifdef Q_OS_WIN
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(toggle));
+#else
+    // Hidden here, so there is nothing to click; this is what a click emits.
+    QVERIFY(QMetaObject::invokeMethod(toggle, "toggled", Q_ARG(bool, true)));
+#endif
+    QVERIFY2(m_backend.minimizeToTray(), "the switch never reached the setting");
+    delete root;
+}
+
 // What leaks is the active config's profile, which need not be the one on the
 // page: "add a rule" under a profile that already had rules sent the user adding
 // rules that could not change anything.
@@ -3970,6 +4007,43 @@ void TestQmlUi::theCloseButtonAndATray()
     QCOMPARE(m_desktop.hideRequests, hides);
 #endif
     QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
+    delete root;
+#endif
+}
+
+// The "Minimize to tray" switch: on Windows the ✕ hides the window to the tray
+// instead of minimising it to the taskbar. Linux already hides on close, so the
+// switch changes nothing there and the test stays out of its way.
+void TestQmlUi::theCloseButtonHidesToTheTrayWhenAsked()
+{
+#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+    QSKIP("the switch is Windows-only; Linux already hides and macOS draws its own button");
+#else
+    const auto restore = qScopeGuard([this] {
+        m_backend.setMinimizeToTray(false);
+        m_desktop.useRealTray();
+        m_backend.resetShutdown();
+    });
+    m_backend.resetShutdown();
+    m_backend.setMinimizeToTray(true);
+    m_desktop.useTray(true);
+    m_desktop.setLayout({}, {QStringLiteral("minimize"), QStringLiteral("maximize"), QStringLiteral("close")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = exposed(root);
+    QVERIFY(window);
+    const int minimises = m_desktop.minimizeRequests;
+    const int hides = m_desktop.hideRequests;
+
+    QVERIFY2(clickWindowButton(window, "windowCloseButton"), "the window's own close button");
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
+    QCOMPARE(m_desktop.minimizeRequests, minimises);
+    QVERIFY2(!m_backend.applicationClosingDown(), "with a tray to go to, the window must not quit");
+
+    // The minimise button is not the ✕: it still minimises.
+    QVERIFY(clickWindowButton(window, "windowMinButton"));
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QCOMPARE(m_desktop.hideRequests, hides + 1);
     delete root;
 #endif
 }

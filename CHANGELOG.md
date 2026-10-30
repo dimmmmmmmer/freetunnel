@@ -16,6 +16,8 @@ compare link at the bottom of its release notes.
   certificates.
 - Windows: a link or command no longer gets lost while FreeTunnel is busy, and
   installing no longer stops on a file still in use.
+- Windows: the ✕ can hide the window to the tray instead of minimising it to
+  the taskbar, so the VPN keeps running with the window out of the way.
 - Linux: launches and links reach FreeTunnel after an AppImage update, and from
   outside the desktop session.
 
@@ -45,6 +47,13 @@ compare link at the bottom of its release notes.
   included, looks the same everywhere. The tray menu, file dialogs and
   notifications are drawn by the system and keep its font. The log and the
   certificate box stay fixed-width.
+- **Windows: "Minimize to tray" in Settings makes the ✕ hide the window to the
+  tray rather than minimise it to the taskbar**, so a click on the tray icon —
+  or **Show FreeTunnel** in its menu — brings the window back while the VPN
+  keeps running. It is off by default, and the ✕ minimises as before until it
+  is turned on. The minimize button always minimizes. Linux already hides to
+  the tray on close and macOS hides from its own red button, so the switch is
+  Windows-only.
 
 ### Fixed
 

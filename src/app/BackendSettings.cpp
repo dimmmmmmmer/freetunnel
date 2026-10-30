@@ -57,6 +57,10 @@ void Backend::setAutoConnect(bool v) {
     if (m_settings.auto_connect_on_start == v) return;
     m_settings.auto_connect_on_start = v; persistSettings(); emit settingsChanged();
 }
+void Backend::setMinimizeToTray(bool v) {
+    if (m_settings.minimize_to_tray == v) return;
+    m_settings.minimize_to_tray = v; persistSettings(); emit settingsChanged();
+}
 void Backend::setKillSwitch(bool v) {
     if (m_settings.killswitch_enabled == v) return;
     m_settings.killswitch_enabled = v; persistSettings();
