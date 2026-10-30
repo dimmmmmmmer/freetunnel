@@ -126,11 +126,11 @@ killswitch_enabled = false
 hostname = "endpoint.test"
 addresses = ["127.0.0.1:${ENDPOINT_PORT}"]
 username = "$FT_SMOKE_TEST_USER"
-password = "$FT_SMOKE_TEST_PASSWORD"
 skip_verification = true
 upstream_protocol = "http2"
 tls_profile = "default"
 EOF2
+  printf 'password = "%s"\n' "$FT_SMOKE_TEST_PASSWORD" >> "$FT_SMOKE_DIR/client.toml"
   if [[ "$mode" == correct ]]; then
     printf 'client_random_auth_key = "%s"\n' "$TEST_AUTH_KEY" >> "$FT_SMOKE_DIR/client.toml"
   elif [[ "$mode" == wrong ]]; then
