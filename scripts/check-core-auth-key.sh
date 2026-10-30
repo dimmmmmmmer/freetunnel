@@ -50,7 +50,7 @@ fi
 FT_SMOKE_DIR="$(mktemp -d /tmp/ft-auth-key-smoke.XXXXXX)"
 TEST_AUTH_KEY="00112233445566778899aabbccddeeff"
 FT_SMOKE_TEST_USER="local-test"
-FT_SMOKE_TEST_PASSWORD="local-test-only"
+FT_SMOKE_TEST_PASSWORD="$(openssl rand -hex 24)"
 FT_SMOKE_ENDPOINT_PID=""
 FT_SMOKE_CLIENT_PID=""
 FT_SMOKE_HTTP_PID=""
@@ -98,11 +98,8 @@ hostname = "endpoint.test"
 cert_chain_path = "cert.pem"
 private_key_path = "key.pem"
 EOF2
-cat > "$FT_SMOKE_DIR/credentials.toml" <<EOF2
-[[client]]
-username = "$FT_SMOKE_TEST_USER"
-password = "$FT_SMOKE_TEST_PASSWORD"
-EOF2
+printf '[[client]]\nusername = "%s"\npassword = "%s"\n' \
+  "$FT_SMOKE_TEST_USER" "$FT_SMOKE_TEST_PASSWORD" > "$FT_SMOKE_DIR/credentials.toml"
 cat > "$FT_SMOKE_DIR/rules.toml" <<EOF2
 [[rule]]
 client_random_auth_key = "$TEST_AUTH_KEY"
