@@ -46,7 +46,7 @@ Get the build for your platform from
 | **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
 | **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
-| **Linux** (portable, most distros with glibc 2.31 or newer: Ubuntu 20.04+, Debian 11+, RHEL 9, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
+| **Linux** (portable, most distros with glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
 
 ## Android preview
 
@@ -380,3 +380,8 @@ lists them with their license texts, which are in [licenses/](licenses/), and
 every download carries both. When a dependency changes, so must the notices; for
 the pinned ones, `scripts/check-third-party-notices.sh` fails until they name the
 new version.
+
+### macOS compatibility
+
+The next desktop release requires macOS 13 or newer. It bundles Qt 6.11.2
+to correct handling of refused local TCP connections on macOS 15.8.
