@@ -390,17 +390,20 @@ the comparison. What differs on purpose, and is not to be changed to match it:
 The TV shows a QR code and an address such as
 `http://192.168.1.23:41234/K7QM-4XHD`. A phone, tablet or laptop on the same
 network opens it, with its camera or by typing the address into a browser, and
-pastes a `tt://` link or a TOML file into the page there, or picks the file
-itself: a TOML file, or a text file that holds a link. No app is needed on it.
+pastes one or more `tt://` links (one per line) or a TOML configuration, or
+selects multiple TOML/text files. No app is needed on it.
 The page is the app's own look, light or dark as the phone is, and after each
-send it says so and shows the form again, so the phone can send another. The
+send it shows a short-lived “Sent” message. Invalid configurations are rejected
+before acknowledging delivery. A partial failure lists each result and retries
+only failed items. The
 TV shows each text it received, one at a time in the order they were sent,
 with the address it came from, and adds it only once you confirm, as for any
 other import; the card stays open under the question, with "Received: N" in
 its corner, until you close it. The card has no button: its ← and Back close
 it, as the desktop's cards that have a ← are closed, and a remote's first stop
-on it is that arrow. Its hint is two short sentences (the warning about the
-network is on the phone's page and below). A TOML file without a name of its own is named
+on it is that arrow. New imports focus Add on TV; replacing an existing config
+still requires choosing the action. The empty counter row is reserved to keep
+the card from moving when a transfer arrives. A TOML file without a name of its own is named
 after its file, as one picked on the TV is; a link names itself. If choosing a
 file does nothing, as in the browser some QR code scanner apps open pages in,
 open the address in Chrome or Safari instead.
@@ -419,7 +422,8 @@ open the address in Chrome or Safari instead.
   3 sends with a wrong code, counted over all the sends of the session, stop
   it. Every address shows the same page, so only a send tests a code.
 - A send is a form post of at most 512 KiB, a file included, that names the
-  TV's address as its host. The page loads nothing and runs no script, and
+  TV's address as its host. The page loads no external resources; its hash-authorized inline script
+  sends each selected item separately to the same TV address, and
   nothing about a transfer is logged. A send with nothing in it, with both
   pasted text and a file, with a file that is not UTF-8 text, or over 512 KiB,
   such as a photo chosen by mistake, shows the page again with a note; it is

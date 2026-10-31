@@ -1,110 +1,13 @@
 # Changelog
 
-What changed for people using FreeTunnel. The release notes for each version are
-built from the section below it, so this file is the description of the release —
-write it before tagging. For the full commit history of a release, follow the
-compare link at the bottom of its release notes.
+## 1.2.4
 
-## 1.3.0
-
-### Highlights
-
-- Links and config files from TrustTunnel 1.3 servers are read, and so is the
-  TOML file a TrustTunnel endpoint exports.
-- A 1.3 config's subscription address, which holds the VPN password, is no
-  longer kept in plain text, and a config's certificate keeps only its
-  certificates.
-- Windows: a link or command no longer gets lost while FreeTunnel is busy, and
-  installing no longer stops on a file still in use.
-- Windows: the ✕ can hide the window to the tray instead of minimising it to
-  the taskbar, so the VPN keeps running with the window out of the way.
-- Linux: launches and links reach FreeTunnel after an AppImage update, and from
-  outside the desktop session.
-
-### Security
-
-- **Windows, macOS and Linux: a TrustTunnel 1.3 config's subscription address,
-  which holds the VPN password, is no longer kept in plain text.** Importing
-  the config file leaves it out of the copy FreeTunnel stores. A config
-  imported by 1.2.3 or earlier loses it the next time FreeTunnel starts.
-- **Windows, macOS and Linux: a config's certificate keeps only its
-  certificates.** Anything else pasted or imported with them is ignored: it is
-  never stored or shared, and the import or the editor says so. This applies to
-  tt:// links, config files and the config editor; a stored config loses it the
-  next time FreeTunnel starts. A certificate with no certificate in it is
-  refused, and so is a link whose certificate is damaged.
-
-### Changed
-
-- **Linux downloads now require glibc 2.35 or newer**, such as Ubuntu 22.04+
-  or Debian 12+, as part of the shared Qt 6.12.0 update.
-
-- **macOS now requires version 14.4 or newer.** The bundled Qt runtime on all desktop platforms is updated
-  to 6.12.0 to correctly handle refused local connections on macOS 15.8,
-  including connections to the VPN helper.
-
-- **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
-  exports.** That file (`--format toml`) has the server's keys but no
-  `[endpoint]` table, and was refused as not a valid config. FreeTunnel now
-  asks before adding it, as it does for a tt:// link. The config takes the
-  name the file gives, or the file's own name, and leaves the subscription
-  address out.
-- **The window uses the Inter font on Windows, macOS and Linux** in place of
-  the system's font. FreeTunnel ships the font itself, so text, Russian
-  included, looks the same everywhere. The tray menu, file dialogs and
-  notifications are drawn by the system and keep its font. The log and the
-  certificate box stay fixed-width.
-- **Windows: "Minimize to tray" in Settings makes ✕ hide the window to the
-  tray while the VPN keeps running.** The tray icon or **Show FreeTunnel**
-  brings it back. The setting is off by default. The minimize button still
-  minimizes, Alt+F4 still quits, and ✕ quits if no system tray is available.
-
-### Fixed
-
-- **Windows, macOS and Linux: tt:// links from TrustTunnel 1.3 servers are no
-  longer refused as an unsupported version.**
-  - Subscriptions aren't supported yet. A subscription link that also carries
-    its server adds that server, which won't update itself; one without is
-    refused, and says so.
-  - A server that needs a client random auth key is refused, link or file: it
-    needs a newer TrustTunnel core than this version uses.
-- **Windows: installing no longer stops on "Error opening file for writing",
-  and uninstalling no longer leaves files behind, when FreeTunnel is slow to
-  close.** After closing it by force at ten seconds, both now wait up to about
-  five seconds more for it to exit.
-- **Linux: after the AppImage updates itself, launches and freetunnel:// or
-  tt:// links reach the new FreeTunnel instead of doing nothing until a
-  restart.** Updating from 1.2.3 is covered too. If one launch or link still
-  does nothing, open it again: the next one works.
-- **Linux: a command run from outside the desktop session reaches the
-  FreeTunnel already open instead of starting a second copy.** Since 1.2.3,
-  `freetunnel freetunnel://toggle` and other launches from cron, over ssh,
-  after `su -` or by a hotkey program started outside the session opened one.
-- **Windows: a tt:// link or freetunnel:// command no longer does nothing when
-  FreeTunnel is busy for a few seconds, for example while it starts.** The
-  launch that carries it now waits up to ten seconds for FreeTunnel to take it.
-  If FreeTunnel does not take it in that time, the launch closes without acting
-  on it: open the link again. A link opened just as FreeTunnel quits now starts
-  FreeTunnel again. FreeTunnel no longer drops a message that has already
-  arrived because a timeout ran first.
-- **The Logs page no longer goes blank after the window comes back from the
-  tray or many lines arrive at once.** Before, the lines came back only once
-  the log was scrolled or another page was opened.
-- **Windows, macOS and Linux: a config file whose multi-line text has an
-  escaped quote (`\"`) in it is read correctly.** Before, `\"""` was taken for
-  the end of the text, and the settings after it could be misread or missed.
-- **Linux: ✕ and the desktop's own close (Alt+F4, Hyprland's killactive and
-  closewindow) now hide the window to the tray immediately, where there is a
-  usable one, instead of doing nothing or quitting.**
-  The minimize button still minimizes. If the bar that holds the tray (waybar)
-  is not running, ✕ quits, as with no tray.
-  A desktop that logs out by asking every window to close is refused like
-  Alt+F4 is, and has to end FreeTunnel itself.
-  Force-killing it (forcekillactive, xkill) still ends FreeTunnel and the VPN.
-- **Linux: Show FreeTunnel in the tray now brings an open window forward on
-  Hyprland and sway.** Before, it did nothing if the window was out of focus.
-- **Linux: Show FreeTunnel no longer remaps an already-active window after you
-  switch focus away during the activation check.**
+- Fixed tray behavior, slow responses and connection handling on desktop.
+- Improved importing links and configuration files, including newer server formats.
+- Added Android and Android TV apps, with easy transfer of links and files from a phone.
+- Improved Russian labels and protected sensitive configuration data.
+- Desktop now requires macOS 14.4+ or Linux with glibc 2.35+ (Ubuntu 22.04+, Debian 12+).
+- VPN core versions are unchanged.
 
 ## 1.2.3
 

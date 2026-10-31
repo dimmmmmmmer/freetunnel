@@ -1846,7 +1846,7 @@ class TvDeviceTest {
             val card = root(a).findViewWithTag<View>("overlay:receive")
             assertTrue("The address is on the card, to type", descendants(card).any { view -> view is TextView && view.text.toString() == url })
             // No button: the arrow closes it. The hint is two short sentences, centred as the address is, with no warning in it, and the
-            // empty count takes no room below the hint before the first transfer.
+            // card reserves the count line so transfers do not move it.
             assertEquals("The card has no button", 0, descendants(card).filterIsInstance<Button>().count())
             assertNull("and no Close", card.findViewWithTag<View?>("receive:close"))
             assertFocusLook(card.findViewWithTag<View>("receive:back"), "The back arrow", theme(a))
@@ -1855,7 +1855,7 @@ class TvDeviceTest {
             val addressView = descendants(card).filterIsInstance<TextView>().single { it.text.toString() == url }
             assertEquals("as the address is", Gravity.CENTER_HORIZONTAL, addressView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK)
             assertEquals("The count is centred too", Gravity.CENTER, card.findViewWithTag<TextView>("receive:count").gravity)
-            assertEquals("No empty count row below the hint", View.GONE, card.findViewWithTag<TextView>("receive:count").visibility)
+            assertTrue("The count line is reserved before the first transfer", card.findViewWithTag<TextView>("receive:count").height > 0)
             assertTrue("The screen stays on while the card is open", a.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
             // The QR code: square, black on white, a whole number of pixels a module,
             // with the quiet zone and the top left finder pattern where they belong.
@@ -1878,6 +1878,10 @@ class TvDeviceTest {
         val wrong = sendWrongCode(url)
         assertTrue(wrong, wrong.startsWith("HTTP/1.1 404 "))
         assertSame(opened, receiver(a))
+        val invalid = sendText(url, "tt://invalid")
+        assertTrue(invalid, invalid.startsWith("HTTP/1.1 422 "))
+        assertEquals("Rejected input holds no confirmation slot", 0, placesHeld(a))
+        assertNull(confirmMessage(a))
         assertSent(http(url) { h, path -> formPost(h, path, link) })
         // And it goes on: the port stays open, and the card with it, and the screen stays on, while the TV asks.
         assertSame(opened, receiver(a))
@@ -1896,6 +1900,7 @@ class TvDeviceTest {
         eventually("The confirmation must name the server and \"$from\"", 30_000) {
             confirmMessage(a)?.let { it.contains("vpn.example.com") && it.contains(from) } == true
         }
+        if (isTv) eventually("Add is selected for a new phone import") { focusedKey(a) == "confirm:ok" }
         val lines = confirmMessage(a)!!.split("\n")
         assertTrue(lines[0], lines[0].startsWith(context.getString(R.string.import_question_link)))
         assertEquals(context.getString(R.string.import_server, "vpn.example.com"), lines[1])
@@ -2092,7 +2097,7 @@ class TvDeviceTest {
         val url = opened!!.url()
         val page = http(url) { h, _ -> "GET / HTTP/1.1\r\nHost: $h\r\n\r\n" }
         assertTrue(page, page.contains("enctype=\"multipart/form-data\"") &&
-            page.contains("<input type=\"file\" id=\"file\" name=\"file\">") &&
+            page.contains("<input type=\"file\" id=\"file\" name=\"file\" multiple>") &&
             page.contains(LinkReceiver.escape(context.getString(R.string.receive_page_file))))
         // Sent with nothing chosen, the form comes back, and the TV goes on waiting.
         val empty = httpBytes(url) { h, path -> filePost(h, path, "", ByteArray(0)) }

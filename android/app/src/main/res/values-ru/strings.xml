@@ -118,12 +118,12 @@
     <string name="text_from_another_device">С другого устройства</string>
     <string name="text_no_file_picker_receive">На этом телевизоре нет выбора файлов. Используйте «Получить с телефона» или создайте конфигурацию вручную.</string>
     <string name="receive_page_title">Отправка в FreeTunnel</string>
-    <string name="receive_page_prompt">Вставьте ссылку tt:// или TOML-файл TrustTunnel</string>
-    <string name="receive_page_file">Или выберите TOML-файл либо текстовый файл со ссылкой tt://</string>
-    <string name="receive_page_send">Отправить на телевизор</string>
+    <string name="receive_page_prompt">Вставьте ссылки tt:// (каждую с новой строки) или TOML-конфигурацию</string>
+    <string name="receive_page_file">Или выберите TOML-файлы либо текстовые файлы со ссылкой tt://</string>
+    <string name="receive_page_send">Отправить</string>
     <string name="receive_page_note">Телевизор покажет, что получил, и спросит, прежде чем добавить. Текст передаётся по сети без шифрования, поэтому отправляйте его только в доверенной сети.</string>
-    <string name="receive_page_sent">Отправлено. Подтвердите на телевизоре. Ниже можно отправить ещё.</string>
-    <string name="receive_page_retry">Телевизор ничего не принял. Вставьте ссылку или TOML-файл либо выберите файл, но не то и другое сразу, и отправьте снова. Файл должен быть текстом в UTF-8: TOML-файлом или текстовым файлом со ссылкой tt://.</string>
+    <string name="receive_page_sent">Отправлено</string>
+    <string name="receive_page_retry">Не отправлено: неверная ссылка или TOML-конфигурация. Проверьте содержимое и попробуйте снова.</string>
     <string name="receive_page_too_large">Телевизор ничего не принял: это больше 512 КиБ, намного больше ссылки или TOML-файла. Выберите TOML-файл или текстовый файл со ссылкой tt:// и отправьте снова.</string>
     <string name="receive_page_busy">На телевизоре уже 10 ожидают подтверждения. Подтвердите их и отправьте снова.</string>
     <string name="receive_page_wrong_code">Неверный код. Проверьте адрес на экране телевизора и попробуйте ещё раз.</string>
@@ -230,4 +230,5 @@
     <string name="logs_placeholder">"Логи появятся после подключения"</string>
     <string name="logs_auto_scroll">"Авто-прокрутка"</string>
     <string name="text_no_browser">"На этом устройстве нет браузера, чтобы открыть эту ссылку."</string>
+    <string name="receive_page_network">Не удалось подтвердить отправку. Проверьте телевизор перед повторной попыткой.</string>
 </resources>
