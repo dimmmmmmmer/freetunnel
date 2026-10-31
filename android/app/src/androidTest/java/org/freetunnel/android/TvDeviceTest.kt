@@ -1846,7 +1846,7 @@ class TvDeviceTest {
             val card = root(a).findViewWithTag<View>("overlay:receive")
             assertTrue("The address is on the card, to type", descendants(card).any { view -> view is TextView && view.text.toString() == url })
             // No button: the arrow closes it. The hint is two short sentences, centred as the address is, with no warning in it, and the
-            // card holds a line for the count from the start, so that the first text does not make it grow.
+            // empty count takes no room below the hint before the first transfer.
             assertEquals("The card has no button", 0, descendants(card).filterIsInstance<Button>().count())
             assertNull("and no Close", card.findViewWithTag<View?>("receive:close"))
             assertFocusLook(card.findViewWithTag<View>("receive:back"), "The back arrow", theme(a))
@@ -1855,7 +1855,7 @@ class TvDeviceTest {
             val addressView = descendants(card).filterIsInstance<TextView>().single { it.text.toString() == url }
             assertEquals("as the address is", Gravity.CENTER_HORIZONTAL, addressView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK)
             assertEquals("The count is centred too", Gravity.CENTER, card.findViewWithTag<TextView>("receive:count").gravity)
-            assertTrue("The count's line is there before anything has come", card.findViewWithTag<TextView>("receive:count").height > 0)
+            assertEquals("No empty count row below the hint", View.GONE, card.findViewWithTag<TextView>("receive:count").visibility)
             assertTrue("The screen stays on while the card is open", a.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
             // The QR code: square, black on white, a whole number of pixels a module,
             // with the quiet zone and the top left finder pattern where they belong.
@@ -1886,6 +1886,10 @@ class TvDeviceTest {
         // The card's line is set on the main thread, a moment after the answer was written: the receiver hands the text over once the
         // connection is closed.
         eventually("The card counts the first") { receivedLine(a) == context.getString(R.string.text_receive_received, 1) }
+        onMain {
+            assertEquals("The count appears after the first transfer", View.VISIBLE,
+                root(a).findViewWithTag<TextView>("receive:count").visibility)
+        }
         // The TV shows the server and the sender's address, and asks: the desktop's question, the server on its second line
         // and where it was sent from on its third.
         val from = context.getString(R.string.text_nsent_from_s, host).trim()

@@ -2012,14 +2012,15 @@ public final class MainActivity extends Activity {
         TextView hint = label(getString(R.string.text_receive_hint), 13, t.textDim);
         hint.setGravity(Gravity.CENTER_HORIZONTAL);
         box.addView(hint, lp(-1, -2));
-        gap(box, 10);
-        // How many have come, once one has: a line of its own, which is there from the start (empty), so that the card does not change
-        // size, and move, when the first text comes.
+        // Only make room for the count once something has arrived.
         TextView counted = label("", 12, t.textFaint);
+        counted.setVisibility(View.GONE);
         counted.setTag("receive:count");
         counted.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         counted.setGravity(Gravity.CENTER);
-        box.addView(counted, lp(-1, -2));
+        LinearLayout.LayoutParams countLayout = lp(-1, -2);
+        countLayout.topMargin = dp(10);
+        box.addView(counted, countLayout);
         receivedLine = counted;
         ScrollView scroll = new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
@@ -2048,7 +2049,10 @@ public final class MainActivity extends Activity {
                     receivedTexts.add(text, fileName, sender);
                     if (linkReceiver == r) {
                         receivedCount++;
-                        if (receivedLine != null) receivedLine.setText(getString(R.string.text_receive_received, receivedCount));
+                        if (receivedLine != null) {
+                            receivedLine.setText(getString(R.string.text_receive_received, receivedCount));
+                            receivedLine.setVisibility(View.VISIBLE);
+                        }
                     }
                     processReceived();
                 });

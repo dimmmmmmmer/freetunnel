@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Android TV: remove the empty space reserved for the received-item count
+  below the instructions in Receive from phone. Show the count only after a transfer.
+
 - Keep split-tunnelling edits intact and report a save failure when Android
   storage refuses to persist a change.
 
