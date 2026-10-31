@@ -7,7 +7,7 @@
 - Added Android and Android TV apps, with easy transfer of links and files from a phone.
 - Improved Russian labels and protected sensitive configuration data.
 - Desktop now requires macOS 14.4+ or Linux with glibc 2.35+ (Ubuntu 22.04+, Debian 12+).
-- VPN core versions are unchanged.
+- Updated the VPN core to stable TrustTunnel 1.1.11.
 
 ## 1.2.3
 

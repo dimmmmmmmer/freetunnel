@@ -1,6 +1,6 @@
 # FreeTunnel for Android
 
-Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.7**
+Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.11**
 adapter, for phones, tablets and Android TV (Android 8.0 or later). Official
 releases are the `android-X.Y.Z` releases of
 [dimmmmmmmer/freetunnel](https://github.com/dimmmmmmmer/freetunnel), signed with
@@ -148,7 +148,7 @@ Android-only list.
   the only control, so the texts that tell what to do next say "this line", and there is no *Install update* button
   on the screen (that is what a screen reader adds to the line, and the red button of the question). Outside the
   official build the section says it doesn't come from the official channel.
-- The footer, **FreeTunnel 1.0.0 · TrustTunnel core 1.1.7**, each name a link to its page (a toast where there is no
+- The footer, **FreeTunnel 1.2.4 · TrustTunnel core 1.1.11**, each name a link to its page (a toast where there is no
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 
@@ -711,7 +711,7 @@ remote-server, DNS or HTTP/3 coverage.
 ## License
 
 FreeTunnel and TrustTunnel are Apache-2.0. See [LICENSE](../LICENSE) and
-[TrustTunnelClient v1.1.7](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.7).
+[TrustTunnelClient v1.1.11](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.11).
 
 The APK also contains the libraries in the Android section of
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md), under their own
@@ -780,7 +780,7 @@ reason is said in the app's own toast, as the desktop's window does with an erro
 An explicit Reconnect builds a new TUN from the current settings and hands traffic
 over to it.
 
-Each attempt also repeats two costs of the pinned TrustTunnel 1.1.7 core that
+Each attempt also repeats two costs of the pinned TrustTunnel 1.1.11 core that
 used to come once per explicit start. The core resolves a hostname given in
 `addresses` as it starts, for up to 15 s, on the service's single worker, so a
 Disconnect, Reconnect or settings change made during that lookup waits for it to
