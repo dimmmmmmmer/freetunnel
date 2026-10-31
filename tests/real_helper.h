@@ -106,6 +106,23 @@ inline QJsonObject waitForEvent(QTcpSocket &sock, const QString &ev, int timeout
     return {};
 }
 
+// A connected socket alone is not readiness: some macOS Qt versions can
+// report a completed connection before the child has bound its listening port.
+// Require the helper's authenticated challenge, but do not authenticate the GUI
+// side: closing a fully authenticated probe would make the helper quit.
+inline bool answersReadinessProbe(QTcpSocket &socket, const QString &token)
+{
+    const QString nonce = QStringLiteral("test-helper-readiness");
+    socket.write(line({{QStringLiteral("cmd"), QStringLiteral("hello")},
+                       {QStringLiteral("nonce"), nonce}}));
+    socket.flush();
+    const QJsonObject response = QJsonDocument::fromJson(readLineWithin(socket, 500)).object();
+    return response.value(QStringLiteral("ev")).toString() == QLatin1String("challenge")
+            && !response.value(QStringLiteral("nonce")).toString().isEmpty()
+            && vpn_helper::tokensEqual(response.value(QStringLiteral("proof")).toString(),
+                    vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kHelperRole), nonce));
+}
+
 // How many of the lines in `bytes` the helper refuses itself, at once and in
 // order: a connect with no inline config. Only complete lines count, split where
 // the helper splits them, so random bytes with a newline inside are two lines.
@@ -284,7 +301,7 @@ private:
                 return false;
             QTcpSocket probe;
             probe.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
-            if (probe.waitForConnected(100)) {
+            if (probe.waitForConnected(100) && answersReadinessProbe(probe, token)) {
                 probe.abort();
                 return true;
             }
