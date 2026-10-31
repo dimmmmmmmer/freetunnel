@@ -211,7 +211,7 @@ tasks.register('verifyPinnedRuntime') {
     doLast {
         if (!artifact.exists()) throw new GradleException('Run ../scripts/prepare-trusttunnel-android.sh first')
         def digest = java.security.MessageDigest.getInstance('SHA-256').digest(artifact.bytes).encodeHex().toString()
-        if (digest != '5398df61f74610d1d63819059bb596560feb51882e9ca78609df32fc4c7840f7') {
+        if (digest != 'da0886c22a2a1fad1fdd25d8f5d3d85c6ffa89188292bd000d41e885db446eca') {
             throw new GradleException('TrustTunnel AAR checksum mismatch')
         }
     }
