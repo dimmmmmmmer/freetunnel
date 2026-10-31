@@ -38,6 +38,26 @@ Item {
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
                        text: qsTr("Connect on startup"); color: theme.text; font.pixelSize: 14 }
                 Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.autoConnect; onToggled: function(v){ backend.autoConnect = v } } }
+            Sep { objectName: "minimizeToTraySep"; theme: settingsRoot.theme
+                  visible: Qt.platform.os === "windows" }
+            // The ✕ hides the window to the tray instead of minimising it to the
+            // taskbar. Windows alone: Linux already hides to the tray on close, and
+            // macOS hides from its own red button, so the switch would do nothing
+            // there and is not shown.
+            RowLayout { objectName: "minimizeToTrayRow"
+                Layout.fillWidth: true; Layout.preferredHeight: 42
+                visible: Qt.platform.os === "windows"
+                ColumnLayout {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 0
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("Minimize to tray"); color: theme.text; font.pixelSize: 14 }
+                    Text { Layout.fillWidth: true; elide: Text.ElideRight
+                           text: qsTr("the close button hides the window to the tray")
+                           color: theme.textFaint; font.pixelSize: 12 }
+                }
+                Toggle { objectName: "minimizeToTrayToggle"; accent: theme.accent; offColor: theme.toggleOff
+                         checked: backend.minimizeToTray
+                         onToggled: function(v){ backend.minimizeToTray = v } } }
             Item { Layout.preferredHeight: 16 }
             SectionLabel { text: qsTr("Security"); theme: settingsRoot.theme }
             Rectangle {

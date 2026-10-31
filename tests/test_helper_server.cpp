@@ -35,6 +35,7 @@
 
 #include "vpn/vpn_helper_client.h"
 #include "vpn/vpn_helper_protocol.h"
+#include "real_helper.h"
 
 namespace {
 
@@ -195,7 +196,7 @@ bool TestHelperServer::startHelper(quint16 port, const QString &token)
             return false;
         QTcpSocket probe;
         probe.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
-        if (probe.waitForConnected(100)) {
+        if (probe.waitForConnected(100) && realhelper::answersReadinessProbe(probe, token)) {
             probe.abort();
             return true;
         }

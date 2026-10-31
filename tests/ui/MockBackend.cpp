@@ -151,6 +151,14 @@ void MockBackend::setAutoStart(bool v)
     emit settingsChanged();
 }
 
+void MockBackend::setMinimizeToTray(bool v)
+{
+    if (m_minimizeToTray == v)
+        return;
+    m_minimizeToTray = v;
+    emit settingsChanged();
+}
+
 void MockBackend::toggle()
 {
     ++m_toggleCount;

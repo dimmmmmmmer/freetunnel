@@ -39,13 +39,15 @@ env:
   # `conan~=2.12` range was actually resolving to; pinning to 2.12.x instead
   # would have silently downgraded CI by ~19 minor versions.
   CONAN_VER: '2.31.1'
-  # One Qt version per workflow, checked across workflows by
+  # Qt versions are checked across workflows by
   # scripts/check-pinned-deps.sh — a release built against a different Qt than
-  # the one the tests ran on is not the thing that was tested. Exact, not 6.8.*:
+  # the one the tests ran on is not the thing that was tested. Exact, not a floating minor version:
   # the i18n check (security.yml) rebuilds the Russian .qm and compares bytes with
   # the one developers commit, so it needs the very lrelease CONTRIBUTING names.
-  # 6.8.3 is also the last open-source 6.8 release.
-  QT_VER: '6.8.3'
+  # Qt 6.12.0 corrects refused TCP connection handling on macOS 15.8.
+  QT_VER: '6.12.0'
+  # Upstream fix for Qt 6.11's split Windows SDK repositories (not in aqt 3.3.0).
+  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4'
   # Opt JS actions onto Node 24 (silences the Node 20 deprecation warning for
   # actions without a Node 24 release yet, e.g. ilammy/msvc-dev-cmd).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -167,21 +169,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Built INSIDE ubuntu:20.04 (glibc 2.31) so the .deb and the AppImage
-          # run on Ubuntu 20.04+, Debian 11+ and anything newer. The runner only
+          # Built INSIDE ubuntu:22.04 (glibc 2.35) so the .deb and the AppImage
+          # run on Ubuntu 22.04+, Debian 12+ and anything newer. The runner only
           # hosts the container: the compiler, the headers and every system
           # library linuxdeploy bundles come from the image, so the image is
           # what the glibc floor, the cache keys and Python follow. Qt and a
           # modern clang come from aqt/llvm.sh, not the distro's old packages.
           - os: ubuntu-22.04
-            # Pinned by digest; the 20.04 tag is frozen (last pushed 2025-04-09)
-            # and archive.ubuntu.com still serves focal.
-            container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+            # Pinned by digest; the 22.04 tag is resolved to an immutable image digest.
+            container: ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11
             # Names the caches instead of the runner label (see the ccache step).
-            cache_os: ubuntu-20.04
+            cache_os: ubuntu-22.04
             # The highest glibc the payload may need: the container's own.
-            glibc_max: '2.31'
-            # The newest 3.13 that actions/python-versions builds for 20.04.
+            glibc_max: '2.35'
+            # Exact Python version shared with the image's published toolchain.
             python: '3.13.3'
             platform: linux
             qt_host: linux
@@ -219,7 +220,7 @@ jobs:
         if: needs.changes.outputs.desktop == 'false'
         run: echo "Only Android files changed (see the desktop changes job), so the steps below are skipped."
 
-      # ubuntu:20.04 is bare. Without git, actions/checkout falls back to a REST
+      # ubuntu:22.04 is bare. Without git, actions/checkout falls back to a REST
       # tarball with no .git, and the About footer's `git describe` quietly reads
       # "unknown". There is no sudo, curl or patch either, and those are used
       # before "Install dependencies (Linux)" gets to run. Later steps run apt
@@ -233,14 +234,14 @@ jobs:
           echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
           echo 'DEBIAN_FRONTEND=noninteractive' >> "$GITHUB_ENV"
           apt-get -o Acquire::Retries=3 update
-          # libssl1.1 and libsqlite3-0: the focal Python that setup-python installs
+          # libssl3 and libsqlite3-0: the jammy Python that setup-python installs
           # links them (_ssl, _hashlib, _sqlite3); pip and conan need those modules.
           # zstd: actions/cache falls back to gzip without it.
           # file: appimagetool refuses to start without it (the runner image has
           # it; this one does not).
           apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
             git ca-certificates curl gnupg lsb-release software-properties-common \
-            sudo tzdata patch xz-utils zstd binutils file libssl1.1 libsqlite3-0
+            sudo tzdata patch xz-utils zstd binutils file libssl3 libsqlite3-0
           git --version
 
       - name: Checkout client
@@ -342,14 +343,14 @@ jobs:
         shell: bash -e {0}
         run: |
           sudo apt-get update
-          # Modern clang (the core is clang-only; focal's default clang 10 is too old).
+          # Modern clang (the core is clang-only; jammy's default clang 14 is too old).
           # The installer is vendored in this repo rather than fetched from
           # apt.llvm.org: it runs AS ROOT in the job that produces the release
           # binaries, so what it does has to be reviewable in a diff, not whatever
           # upstream is serving today. It is 8 KB of shell — refresh it by opening
           # a PR against scripts/llvm.sh.
           sudo bash client/scripts/llvm.sh 18
-          # gcc-13 libstdc++ headers: older libstdc++ (focal's GCC 9, and gcc-12
+          # gcc-13 libstdc++ headers: older libstdc++ (jammy's GCC 11, and gcc-12
           # when this was built on 22.04) misses some transitive includes the core
           # relies on (e.g. <algorithm>); clang-18 auto-selects the newest GCC,
           # matching what works on ubuntu-24.04.
@@ -361,7 +362,7 @@ jobs:
           done
           sudo apt-get update
           sudo apt-get install -y g++-13
-          # focal also has GCC 9 (clang's own dependency); make sure the headers
+          # jammy also has GCC 11 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
           # clang prints the path through its own directory (/usr/bin/../lib/…),
           # so only the version directory at the end is compared.
@@ -379,7 +380,7 @@ jobs:
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb1-dev libx11-dev libx11-xcb-dev # QHotkey builds against xcb/X11
-          # What the ubuntu-22.04 image had preinstalled and ubuntu:20.04 lacks.
+          # What the ubuntu-22.04 image had preinstalled and ubuntu:22.04 lacks.
           # linuxdeploy stops at the first library it cannot resolve (libQt6Gui
           # needs fontconfig, glib and dbus). Without libsecret-1-dev and
           # pkg-config, FreetunnelDeps.cmake compiles the Secret Service store
@@ -390,7 +391,7 @@ jobs:
             libegl1 libopengl0 libgssapi-krb5-2
           pip install -r upstream/requirements.txt
           pip install "conan==${CONAN_VER}"
-          # Upstream needs CMake >= 3.24 and focal has 3.16. These are the
+          # Upstream needs CMake >= 3.24 and jammy has 3.22. These are the
           # versions the ubuntu-22.04 image carried, as manylinux2014 wheels
           # (glibc 2.17), first on PATH through setup-python's bin.
           pip install "cmake==3.31.6" "ninja==1.13.2"
@@ -415,11 +416,9 @@ jobs:
           echo "DEVELOPER_DIR=$X/Contents/Developer" >> "$GITHUB_ENV"
           DEVELOPER_DIR="$X/Contents/Developer" xcodebuild -version
           echo "SDK: $(DEVELOPER_DIR="$X/Contents/Developer" xcrun --show-sdk-version)"
-          # macOS 12 is the oldest Qt 6.8 supports — its own frameworks are built
-          # for 12 and will not load on 11 — so claiming 11 promised a launch that
-          # could not happen. Set early so conan-built deps and the app share it,
-          # and keep it equal to LSMinimumSystemVersion in macos/Info.plist.in.
-          echo "MACOSX_DEPLOYMENT_TARGET=12.0" >> "$GITHUB_ENV"
+          # Qt 6.12 requires macOS 14.4. Keep dependencies, app and
+          # LSMinimumSystemVersion in macos/Info.plist.in aligned.
+          echo "MACOSX_DEPLOYMENT_TARGET=14.4" >> "$GITHUB_ENV"
           # The runner ships preinstalled aws/azure taps that Homebrew now warns
           # are "not trusted"; we don't use them, so drop them to silence it.
           brew untap aws/tap azure/bicep 2>/dev/null || true
@@ -436,20 +435,19 @@ jobs:
           arch: x64
 
       # Qt via aqt for all platforms: Linux (gcc_64), macOS (universal clang_64),
-      # Windows (MSVC). Keeps the Qt version consistent and lets the Linux
+      # Windows (MSVC). Uses the tested runtime for each platform and lets the Linux
       # .deb bundle a modern Qt regardless of the distro.
       - name: Install Qt (aqt)
         if: needs.changes.outputs.desktop != 'false'
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: ${{ matrix.qt_host }}
           target: desktop
           arch: ${{ matrix.qt_arch }}
           cache: true
-          # Not on Linux: the action's own setup-python (>=3.14) would take the
-          # runner's 22.04 build from the shared tool cache, which cannot run in
-          # the container. aqt uses the job's Python instead.
+          # Linux uses the job's exact Python pin instead of a second setup-python.
           setup-python: ${{ matrix.platform != 'linux' }}
 
       - name: Install dependencies (Windows)
@@ -506,7 +504,7 @@ jobs:
         with:
           # Key includes the OS the objects are built against, so deps/objects
           # built against one glibc are never reused on another (e.g.
-          # ubuntu-22.04 -> ubuntu:20.04). For a container job that is the image
+          # ubuntu:20.04 -> ubuntu:22.04). For a container job that is the image
           # (matrix.cache_os), not the runner label, which stays ubuntu-22.04.
           # The Xcode too, on macOS. ccache compiles through the /usr/bin/c++ xcrun
           # shim, whose bytes do not change when DEVELOPER_DIR does, so without it
@@ -520,7 +518,7 @@ jobs:
           path: ~/.conan2
           # Keyed on the build OS and the Xcode, for the same reasons as ccache.
           # conan's package_id records neither: not glibc (a 22.04 cache would put
-          # glibc-2.35 static libraries into the focal link), and only the
+          # glibc-2.35 static libraries into a 20.04 link), and only the
           # apple-clang major, which is 17 for Xcode 16.4 and 26.3.
           key: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-${{ hashFiles('upstream/conanfile.py') }}
           restore-keys: ${{ matrix.cache_os || matrix.os }}${{ matrix.xcode && format('-xcode{0}', matrix.xcode) || '' }}-${{ matrix.artifact }}-conan2-
@@ -971,14 +969,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
             -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF
             -DBUILD_TRUSTTUNNEL_QT=ON
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
-            # Qt 6.8.3's FindWrapOpenGL links AGL.framework, which Apple removed
-            # from the macOS 26 SDK, so every Qt GUI app fails to link against it
-            # (QTBUG-137687). The fix is in 6.8.4, a commercial-only release; the
-            # open-source 6.8 line ends at 6.8.3. The module only looks for AGL
-            # when this cache variable is unset, so naming OpenGL.framework here
-            # skips the search and links OpenGL a second time instead — harmless.
-            -DWrapOpenGL_AGL="$(xcrun --show-sdk-path)/System/Library/Frameworks/OpenGL.framework")
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR")
 
           # Configure is retried: see the Linux configure comment (boringssl
           # 503 bursts on googlesource.com). Builds themselves are not retried.

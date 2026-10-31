@@ -29,7 +29,9 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.8.3'
+  QT_VER: '6.12.0'
+  # Upstream fix for Qt 6.11's split Windows SDK repositories (not in aqt 3.3.0).
+  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4'
   # Exact pin, same as build.yml: conan drives every native dependency fetch.
   CONAN_VER: '2.31.1'
 
@@ -119,6 +121,7 @@ jobs:
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: linux
           target: desktop
           arch: linux_gcc_64
@@ -143,6 +146,7 @@ jobs:
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: mac
           target: desktop
           arch: clang_64
@@ -159,6 +163,7 @@ jobs:
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: windows
           target: desktop
           arch: win64_msvc2022_64
@@ -217,6 +222,7 @@ jobs:
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: linux
           target: desktop
           arch: linux_gcc_64
@@ -286,6 +292,7 @@ jobs:
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: ${{ env.QT_VER }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           host: linux
           target: desktop
           arch: linux_gcc_64

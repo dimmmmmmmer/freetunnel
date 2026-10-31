@@ -46,7 +46,7 @@ Get the build for your platform from
 | **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
 | **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
 | **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
-| **Linux** (portable, most distros with glibc 2.31 or newer: Ubuntu 20.04+, Debian 11+, RHEL 9, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
+| **Linux** (portable, most distros with glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
 
 ## Android preview
 
@@ -113,10 +113,14 @@ Closing the window keeps FreeTunnel and the VPN running:
 
 | Platform | Closing the window |
 | --- | --- |
-| Windows | ✕ minimizes the window to the taskbar. Alt+F4 quits. |
+| Windows | ✕ minimizes the window to the taskbar. Turn on **Minimize to tray** in Settings and ✕ hides it to the tray instead. Alt+F4 quits. |
 | Linux (X11/XWayland) with a usable tray | ✕ and the desktop's own close (Alt+F4, a taskbar's Close, Hyprland's `killactive` and `closewindow`) hide the window to the tray immediately. The minimize button still minimizes. |
 | macOS | The red button (or ⌘W) hides it. The menu-bar icon or the Dock brings it back. |
 | A Linux desktop with no usable system tray, such as GNOME without an AppIndicator extension, or whose tray bar (waybar, say) is not running | ✕ and the desktop's own close quit, since nothing would be left to bring the window back from. |
+
+A window hidden to the tray comes back from the tray icon, or from **Show
+FreeTunnel** in its menu. On Windows, ✕ quits if no system tray is available, even with
+**Minimize to tray** enabled.
 
 To quit, choose **Quit** in the tray menu (or press Ctrl+Q, or ⌘Q on macOS).
 
@@ -257,7 +261,7 @@ setting is under the kill switch in Settings.
 
 | Section | What is there |
 | --- | --- |
-| **General** | Language (English, Русский), Theme (System, Light, Dark), Launch at system startup, Connect on startup |
+| **General** | Language (English, Русский), Theme (System, Light, Dark), Launch at system startup, Connect on startup; on Windows, Minimize to tray |
 | **Security** | [Kill switch](#kill-switch); on Windows, [Let the VPN config open ports](#windows-ports-a-config-opens) |
 | **Excluded routes** | Subnets that stay outside the tunnel for every config ([details](#excluded-routes)) |
 | **Hotkeys** | Enable, then Toggle VPN, Connect and Disconnect ([details](#global-hotkeys)) |
@@ -376,3 +380,8 @@ lists them with their license texts, which are in [licenses/](licenses/), and
 every download carries both. When a dependency changes, so must the notices; for
 the pinned ones, `scripts/check-third-party-notices.sh` fails until they name the
 new version.
+
+### macOS compatibility
+
+The next desktop release requires macOS 14.4 or newer. It bundles Qt 6.12.0
+to correct handling of refused local TCP connections on macOS 15.8.

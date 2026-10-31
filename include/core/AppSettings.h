@@ -12,6 +12,10 @@ struct AppSettings {
     QString theme_mode = "system";
     QString language = "en";
     bool auto_connect_on_start = false;
+    // Whether the window's ✕ hides it to the tray instead of minimising it to the
+    // taskbar. Windows alone: Linux already hides to the tray on close, and macOS
+    // hides from its own red button.
+    bool minimize_to_tray = false;
     bool killswitch_enabled = true;
     // Whether the VPN config's own killswitch_allow_ports reach the core: the
     // ports the Windows kill switch lets through. Off, the helper drops them like

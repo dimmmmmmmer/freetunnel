@@ -1041,6 +1041,14 @@
         <source>the config decides which ports bypass the kill switch</source>
         <translation>какие порты идут в обход kill switch, решает конфиг</translation>
     </message>
+    <message>
+        <source>Minimize to tray</source>
+        <translation>Сворачивать в трей</translation>
+    </message>
+    <message>
+        <source>the close button hides the window to the tray</source>
+        <translation>кнопка закрытия скрывает окно в трей</translation>
+    </message>
 </context>
 <context>
     <name>SplitPage</name>

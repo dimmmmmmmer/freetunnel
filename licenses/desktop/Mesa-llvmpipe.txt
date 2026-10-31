@@ -1,11 +1,11 @@
 Mesa llvmpipe (opengl32sw.dll, Windows only)
-Prebuilt by The Qt Company and shipped in Qt 6.8.3's Windows binaries; windeployqt
+Prebuilt by The Qt Company and shipped in Qt 6.12.0's Windows binaries; windeployqt
 copies it next to FreeTunnel.exe as a software OpenGL fallback.
 Source: https://gitlab.freedesktop.org/mesa/mesa
 License: MIT AND BSL-1.0, as Qt documents it on its 'Mesa llvmpipe' attribution page
-(https://doc.qt.io/qt-6.8/qt-attribution-llvmpipe.html), reproduced below.
+(https://doc.qt.io/qt-6.12/qt-attribution-llvmpipe.html), reproduced below.
 
-[qt/qtdoc@v6.8.3: doc/src/legal/licenses.qdoc, page qt-attribution-llvmpipe]
+[qt/qtdoc@v6.12.0: doc/src/legal/licenses.qdoc, page qt-attribution-llvmpipe]
 Copyright (C) 1999-2007  Brian Paul   All Rights Reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a

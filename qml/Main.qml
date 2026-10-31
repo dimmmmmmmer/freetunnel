@@ -506,13 +506,14 @@ Window {
     // by a check: Hyprland and sway have no minimise, and waiting to find that out
     // left the X looking stuck for 300 ms on every close.
     //
-    // On Windows the ✕ still minimises to the taskbar, which keeps the entry and
-    // the VPN running. On Linux without a usable tray — GNOME without an
-    // AppIndicator extension, a plain window manager, or a bar that owns no host —
-    // there is no tray icon, no tray menu and therefore no «Quit» in it. Close
-    // quits there, which is what it means anyway when nothing else is holding the
-    // application open. A window-manager close on native Wayland still quits:
-    // there is no X server to distinguish that close from a logout.
+    // On Windows the ✕ minimises to the taskbar by default; the setting above can
+    // hide it to the tray instead. Either way the VPN keeps running. On Linux,
+    // without a usable tray (GNOME without an AppIndicator extension, a plain
+    // window manager, or a bar that owns no host), there is no tray icon, no tray
+    // menu and therefore no «Quit» in it. Close quits there, which is what it
+    // means anyway when nothing else is holding the application open. A
+    // window-manager close on native Wayland still quits: there is no X server to
+    // distinguish that close from a logout.
     function toggleMaximized() {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
@@ -528,7 +529,13 @@ Window {
             return
         }
         if (desktop.hasTray(win.tray)) {
-            desktop.minimize(win)
+            // Windows: the ✕ minimises to the taskbar, or hides to the tray when
+            // the user has asked it to. Hiding is the same call Linux makes; the
+            // window comes back from the tray icon or its «Show FreeTunnel».
+            if (Qt.platform.os === "windows" && backend.minimizeToTray)
+                desktop.hideToTray(win)
+            else
+                desktop.minimize(win)
         } else {
             backend.quitApplication()
         }
