@@ -182,7 +182,7 @@
     <string name="split_profile_name_hint">"имя профиля и Enter"</string>
     <string name="split_profile_delete_question">"Удалить профиль «%1$s»?"</string>
     <string name="split_profile_exists">"Профиль «%1$s» уже существует"</string>
-    <string name="split_recommended">"Сайты РФ"</string>
+    <string name="split_recommended">"Рекомендовано для РФ"</string>
     <string name="split_clear_all">"Очистить"</string>
     <string name="split_clear_domains_question">"Очистить все домены?"</string>
     <string name="split_clear_apps_question">"Очистить список приложений?"</string>
