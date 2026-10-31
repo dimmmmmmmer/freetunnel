@@ -284,7 +284,7 @@ bool applyDeepLinkSubscriptionTlv(const QByteArray &value, DeepLinkConfig &cfg, 
 
 // The client random auth key (tag 0x0F, version 2): whole bytes of hex, as
 // TrustTunnel's own decoder takes it. Empty is no key at all, which is what the
-// endpoint means by one; whether a key can be used is for the import to say.
+// endpoint means by one.
 bool applyDeepLinkAuthKeyTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
 {
     bool ok = value.size() % 2 == 0;
@@ -543,15 +543,19 @@ QByteArray deepLinkCertificates(const QByteArray &der, bool *dropped)
 
 QString encodeDeepLink(const DeepLinkConfig &cfg) {
     QByteArray p;
-    // kDeepLinkWriteVersion, not the newest this client reads (see DeepLink.h).
-    // Leaving subscriptionUrl and clientRandomAuthKey out is what keeps that true.
-    writeTlv(p, 0x00, varintBytes(kDeepLinkWriteVersion));
+    // kDeepLinkWriteVersion, not the newest this client reads (see DeepLink.h),
+    // unless the link carries the auth key, which only version 2 has a tag for.
+    // Leaving subscriptionUrl out is what keeps the rest true.
+    const bool authKey = !cfg.clientRandomAuthKey.isEmpty();
+    writeTlv(p, 0x00, varintBytes(authKey ? kDeepLinkAuthKeyWriteVersion : kDeepLinkWriteVersion));
     writeTlv(p, 0x01, cfg.hostname.toUtf8());
     for (const QString &addr : cfg.addresses)
         writeTlv(p, 0x02, addr.toUtf8());
     writeTlv(p, 0x05, cfg.username.toUtf8());
     writeTlv(p, 0x06, cfg.password.toUtf8());
     writeOptionalDeepLinkTlvs(p, cfg);
+    if (authKey)
+        writeTlv(p, 0x0F, cfg.clientRandomAuthKey.toLatin1());
     return QStringLiteral("tt://?")
             + QString::fromLatin1(p.toBase64(QByteArray::Base64UrlEncoding
                                              | QByteArray::OmitTrailingEquals));
@@ -577,6 +581,11 @@ static QString endpointTomlSection(const DeepLinkConfig &cfg)
     // used to be split here into client_random and a client_random_mask key the
     // core has no such key for, and the mask was lost.
     t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEscape(clientRandomForCore(cfg.clientRandomPrefix)));
+    // Hex, checked when the link was read; the import moves it to the credential
+    // store, as it does the password. Only when there is one: the core takes an
+    // empty key for none, but a config without the line reads as the plain case.
+    if (!cfg.clientRandomAuthKey.isEmpty())
+        t += QStringLiteral("client_random_auth_key = \"%1\"\n").arg(tomlEscape(cfg.clientRandomAuthKey));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEscape(cfg.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(cfg.hasIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(cfg.skipVerification ? "true" : "false");

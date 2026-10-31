@@ -23,6 +23,11 @@ struct ConfigToml {
     QString dns;         // CSV of DNS upstreams
     QString customSni;
     QString clientRandom;
+    // client_random_auth_key (core 1.3), whole bytes of hex; "" is no key. A secret
+    // like the password: the credential store holds it, never the stored config
+    // (migrateConfigPassword moves it out), and buildConfigToml() writes it only
+    // when this is set, which is for the connect path and for an export.
+    QString clientRandomAuthKey;
     QString certificate; // PEM body, optional
     bool allowIpv6 = true;
     bool skipVerification = false; // accept the server's TLS cert without validation
@@ -90,6 +95,22 @@ std::optional<EndpointExport> parseEndpointExport(const QString &toml);
 // it sets none. The endpoint's export always writes the key, as "" when its server
 // does not use one, so empty is the ordinary case and means no key.
 QString endpointClientRandomAuthKey(const QString &toml);
+
+// The tls_profile the config's [endpoint] sets, as written (not trimmed: the core
+// compares it as it is), or empty when it sets none or sets something that is not
+// a string, which the core leaves alone. Core 1.3 refuses the whole config for a
+// name it does not know (include/vpn/trusttunnel_tls_profiles.h), and the config
+// editor has no field for the key, so a file's is kept as it came.
+QString endpointTlsProfile(const QString &toml);
+
+// Whether a client random auth key is one the core can use: empty (no key), or
+// whole bytes in hex. The core decodes the text itself and, when it cannot (an
+// odd digit out, a character that is not hex), quietly connects without a key,
+// which a server that checks one answers by turning the client away with nothing
+// to say why. So a key is checked here, wherever one is accepted, and refused
+// when it is not. No upper bound: the core sets none (it feeds the bytes to an
+// HKDF), and a limit here could turn away a key the server's operator may use.
+bool isValidClientRandomAuthKey(const QString &value);
 
 // Whether one entry of an address list names a host and a port, as "host:port"
 // and "[v6]:port" do: something before its last colon once it is trimmed, and a

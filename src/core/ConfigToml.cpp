@@ -336,6 +336,10 @@ const QStringList &knownEndpointKeys()
             QStringLiteral("hostname"),     QStringLiteral("addresses"),
             QStringLiteral("username"),     QStringLiteral("password"),
             QStringLiteral("client_random"), QStringLiteral("custom_sni"),
+            // A field of ConfigToml since core 1.3 takes it: a secret, kept in the
+            // credential store (migrateConfigPassword), so not carried over as an
+            // unknown key either.
+            QStringLiteral("client_random_auth_key"),
             // Written by 1.2.2 and earlier, never read by the core: merged into
             // client_random on load (see parseConfigToml), and not carried over.
             QStringLiteral("client_random_mask"),
@@ -481,6 +485,9 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     if (!c.password.isEmpty())
         t += QStringLiteral("password = \"%1\"\n").arg(tomlEsc(c.password));
     t += QStringLiteral("client_random = \"%1\"\n").arg(tomlEsc(clientRandomForCore(c.clientRandom)));
+    // Only when there is one: a stored config never has it (see the field).
+    if (!c.clientRandomAuthKey.isEmpty())
+        t += QStringLiteral("client_random_auth_key = \"%1\"\n").arg(tomlEsc(c.clientRandomAuthKey));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEsc(c.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(c.allowIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(c.skipVerification ? "true" : "false");
@@ -793,6 +800,7 @@ ConfigToml parseConfigToml(const QString &toml) {
     c.postQuantum = readBool(root, "post_quantum_group_enabled", true);
     c.customSni = readString(endpoint, "custom_sni");
     c.clientRandom = readClientRandom(endpoint);
+    c.clientRandomAuthKey = readString(endpoint, "client_random_auth_key").trimmed();
     c.allowIpv6 = readBool(endpoint, "has_ipv6", true);
     c.skipVerification = readBool(endpoint, "skip_verification", false);
     c.antiDpi = readBool(endpoint, "anti_dpi", false);
@@ -804,13 +812,19 @@ ConfigToml parseConfigToml(const QString &toml) {
     return c;
 }
 
-// From [endpoint] alone, where the core reads its keys (see valueStart). The key
-// is not a field of ConfigToml: an empty one is carried over as written, like any
-// key this editor does not know, and a config with a real one is not imported.
+// From [endpoint] alone, where the core reads its keys (see valueStart). The same
+// text parseConfigToml() puts in clientRandomAuthKey, for a caller that has only
+// the file and wants to say what it holds before anything is parsed or stored.
 QString endpointClientRandomAuthKey(const QString &toml)
 {
     const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
     return readString(tableBody(tables, QStringLiteral("endpoint")), "client_random_auth_key").trimmed();
+}
+
+QString endpointTlsProfile(const QString &toml)
+{
+    const QList<QPair<QString, QString>> tables = splitTomlTables(toml);
+    return readString(tableBody(tables, QStringLiteral("endpoint")), "tls_profile");
 }
 
 namespace {

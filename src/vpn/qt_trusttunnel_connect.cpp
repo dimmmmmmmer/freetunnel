@@ -303,6 +303,7 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
         }
         applyCoreLogPathToConfigLocked();
         ctx->routing = Routing{m_config->mode, m_config->exclusions};
+        ctx->killSwitch = m_config->killswitch_enabled;
         ctx->config = std::move(*m_config);
         m_config.reset();
     }
@@ -345,7 +346,21 @@ bool QtTrustTunnelClient::applySystemDns(const AttemptPtr &ctx)
 void QtTrustTunnelClient::establishTunnel(const AttemptPtr &ctx)
 {
     ctx->startedAt = std::chrono::steady_clock::now();
-    const auto err = ctx->client->connect(ag::TrustTunnelClient::AutoSetup{});
+    // With the kill switch on, a first connect that fails goes into the core's
+    // recovery loop, as a connection that dropped does, instead of ending the
+    // session after a few attempts. The kill switch lives in this session, so
+    // ending it lifted the block for as long as the app took to build the next
+    // one. Errors the core treats as final (authentication, the server's
+    // certificate) still end it. Without the kill switch the core's default
+    // stays: a session that never came up ends, and the app says so and starts
+    // over. One of the core's transitions under this policy, the network coming
+    // back before the first connect, goes through retry_connect(), which asserts
+    // that the default policy is in use (core/src/vpn_fsm.cpp, as of 1.3.0-rc.2):
+    // harmless where NDEBUG is defined, as in release builds, and an abort in a
+    // build without it.
+    ag::TrustTunnelClient::ConnectOptions options;
+    options.fall_into_recovery = ctx->killSwitch;
+    const auto err = ctx->client->connect(ag::TrustTunnelClient::AutoSetup{}, options);
     if (!err) {
         ctx->outcome = ConnectAttempt::Outcome::Connected;
         return;

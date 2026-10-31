@@ -1,11 +1,11 @@
 tldregistry: Chromium's lookup_string_in_fixed_set
-Version: 2022-12-26 (AdGuard NativeLibsCommon 8.1.52)
-Source: https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/tldregistry
+Version: 2022-12-26 (AdGuard NativeLibsCommon 8.1.54)
+Source: https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/tldregistry
 License: BSD-3-Clause
 The table it searches is built from the Public Suffix List; see MPL-2.0.txt and
 THIRD_PARTY_NOTICES.md.
 
-[AdguardTeam/NativeLibsCommon@58cef252: conan/recipes/tldregistry/chromium/LICENSE]
+[AdguardTeam/NativeLibsCommon@00b38bb2: conan/recipes/tldregistry/chromium/LICENSE]
 // Copyright 2015 The Chromium Authors
 //
 // Redistribution and use in source and binary forms, with or without

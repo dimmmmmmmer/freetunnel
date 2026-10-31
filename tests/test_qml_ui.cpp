@@ -91,6 +91,7 @@ private slots:
     void aTrayHostThatAppearsLateGetsAnIcon();
     void theEmptyConfigsPageOffersToAdd();
     void configActionsFollowTheConfigNotTheRow();
+    void aLinkOrExportThatFailsAddsNoToastOfItsOwn();
     void theExportDialogOffersTheWholeName();
     void aLongHostnameWrapsInsideTheConfirm();
     void aClickInsideTheConfirmCardDoesNotCancelIt();
@@ -114,6 +115,7 @@ private slots:
     void escapeStandsDownForTheEditorsFileDialog();
     void aRefusedCertificateFileKeepsTheField();
     void anUnchangedEditClosesWithoutSaving();
+    void theEditorHasAMaskedAuthKeyFieldThatSavesWithTheForm();
     void pasteImportsOnlyWhileTheConfigsPageIsInFront();
     void tabMovesThroughTheEditorsFields();
     void aToastStaysOffTheEditorsButtons();
@@ -157,6 +159,7 @@ private slots:
     void theHotkeyFieldFillStaysOpaque();
     void footerLinksUnderlineLikeTheOthers();
     void theEditorsBackArrowTakesANearMiss();
+    void theEditorClosesWithOneToastWhenASecretCannotBeRead();
     void thePickerWaitsForTheScanWithoutFreezing();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
@@ -1819,6 +1822,40 @@ void TestQmlUi::configActionsFollowTheConfigNotTheRow()
     QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
     QCOMPARE(m_backend.lastDeepLinkRow, -1);
     QCOMPARE(m_shell.lastToast(), QStringLiteral("That configuration is no longer there."));
+    delete root;
+}
+
+// A link or an export that fails says why through the backend, once: a toast of the
+// page's own on top of it replaced the reason (a secret the credential store could
+// not be asked for) with a generic line. The page speaks for success alone.
+void TestQmlUi::aLinkOrExportThatFailsAddsNoToastOfItsOwn()
+{
+    const QStringList saved = m_backend.configs();
+    const auto restore = qScopeGuard([this, saved] {
+        m_backend.setConfigs(saved);
+        m_backend.linkFails = false;
+        m_backend.exportFails = false;
+    });
+    m_backend.setConfigs({QStringLiteral("Alpha")});
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    root->setProperty("exportPath", m_backend.configPath(0));
+
+    m_shell.toasts.clear();
+    m_backend.linkFails = true;
+    m_backend.exportFails = true;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QVERIFY2(m_shell.toasts.isEmpty(), qPrintable(m_shell.toasts.join(QLatin1Char('|'))));
+
+    m_backend.linkFails = false;
+    m_backend.exportFails = false;
+    QMetaObject::invokeMethod(root, "exportPicked", Q_ARG(QVariant, QStringLiteral("link")));
+    QCOMPARE(m_shell.toasts.size(), 1);
+    QVERIFY(m_shell.toasts.at(0).startsWith(QLatin1String("Deep-link copied")));
+    QMetaObject::invokeMethod(root, "exportToml", Q_ARG(QVariant, QStringLiteral("file:///tmp/x.toml")));
+    QCOMPARE(m_shell.toasts.size(), 2);
+    QVERIFY(m_shell.toasts.at(1).startsWith(QLatin1String("Config exported")));
     delete root;
 }
 
@@ -3849,6 +3886,31 @@ void TestQmlUi::theEditorsBackArrowTakesANearMiss()
     delete root;
 }
 
+// The editor of a config whose password or auth key the credential store could not
+// be asked for is not shown: a form made without the secret looks complete, and
+// saving it writes the config over without it. The window says why, once, and goes
+// back to the list. (The toast is the editor's alone: Backend::configFields() does
+// not also report it, which test_backend_config checks.)
+void TestQmlUi::theEditorClosesWithOneToastWhenASecretCannotBeRead()
+{
+    const auto restore = qScopeGuard([this] {
+        m_backend.configSecretError.clear();
+        m_shell.setEditIndex(-1);
+        m_shell.setOverlay(QString());
+    });
+    const QString said = QStringLiteral("Could not read the auth key from the system's credential store.");
+    m_backend.configSecretError = said;
+    m_shell.toasts.clear();
+    m_shell.setEditIndex(0);
+    m_shell.setOverlay(QStringLiteral("create"));
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QTRY_COMPARE(m_shell.overlay(), QString());
+    QCOMPARE(m_shell.editIndex(), -1);
+    QCOMPARE(m_shell.toasts, QStringList{said});
+    delete root;
+}
+
 // A Save with nothing changed wrote the config's file all the same, in the form
 // the editor writes: the file's comments were gone and its keys in another order.
 // With nothing to save, Save now closes the editor, as Cancel does.
@@ -3891,6 +3953,57 @@ void TestQmlUi::anUnchangedEditClosesWithoutSaving()
     // And a new config is always taken to the backend, which says what is missing.
     saveAfter(-1, QString());
     QCOMPARE(m_backend.createConfigCalls, saves + 2);
+}
+
+// The client random auth key (TrustTunnel 1.3) is a secret like the password, so
+// the field masks it, says where it is kept, and warns that the client random
+// beside it is not used while it is set (the core takes the key first). It is
+// opened with the config's key and saved with the form.
+void TestQmlUi::theEditorHasAMaskedAuthKeyFieldThatSavesWithTheForm()
+{
+    const auto restore = qScopeGuard([this] {
+        m_shell.setEditIndex(-1);
+        m_shell.setOverlay(QString());
+    });
+    m_shell.setEditIndex(0);
+    m_shell.setOverlay(QStringLiteral("create"));
+    QObject *root = loadPage("CreateConfigOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QQuickItem *page = showInWindow(root, window, 400, 900);
+    QVERIFY(page);
+
+    QObject *field = namedIn(page, QStringLiteral("authKeyField"));
+    QVERIFY2(field, "the editor has no auth key field");
+    QObject *input = field->property("input").value<QObject *>();
+    QVERIFY(input);
+    QCOMPARE(input->property("text").toString(), QStringLiteral("aabbccdd")); // the config's own
+    QCOMPARE(input->property("echoMode").toInt(), 2); // TextInput.Password: masked like the password
+    QVERIFY(textIn(page, QStringLiteral("Auth key (hex)")));
+
+    // Where it is kept, until it is set beside a client random.
+    const QString kept = QStringLiteral("Kept in the system's credential store, like the password");
+    const QString unused = QStringLiteral("Client random is not used while an auth key is set");
+    evaluateIn(root, QStringLiteral("fRandom.text = ''"));
+    QVERIFY(textIn(page, kept));
+    QVERIFY(!textIn(page, unused));
+    evaluateIn(root, QStringLiteral("fRandom.text = 'aabb'"));
+    QVERIFY(textIn(page, unused));
+    QVERIFY(!textIn(page, kept));
+    evaluateIn(root, QStringLiteral("fAuthKey.text = ''"));
+    QVERIFY(textIn(page, kept));
+    QVERIFY(!textIn(page, unused));
+
+    // And the form sends it: changed, so that Save has something to save.
+    evaluateIn(root, QStringLiteral("fAuthKey.text = '11223344'"));
+    evaluateIn(root, QStringLiteral("formFlick.contentY = Math.max(0, formFlick.contentHeight - formFlick.height)"));
+    QQuickItem *save = namedIn(page, QStringLiteral("saveButton"));
+    QVERIFY(save);
+    const int saves = m_backend.createConfigCalls;
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(save));
+    QCOMPARE(m_backend.createConfigCalls, saves + 1);
+    QCOMPARE(m_backend.lastCreateConfig.value(QStringLiteral("authKey")).toString(), QStringLiteral("11223344"));
+    delete root;
 }
 
 // The first open of the picker scanned on the UI thread, and on Windows the

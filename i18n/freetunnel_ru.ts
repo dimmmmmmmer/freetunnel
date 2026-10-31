@@ -351,7 +351,7 @@
     </message>
     <message>
         <source>Could not store the VPN password in your keyring. If it asked to be unlocked, unlock it and try again.</source>
-        <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если оно просило его разблокировать, разблокируйте и повторите попытку.</translation>
+        <translation>Не удалось сохранить пароль VPN в хранилище паролей. Если система просила разблокировать хранилище, разблокируйте его и повторите попытку.</translation>
     </message>
     <message>
         <source>Not a valid domain or subnet: %1. “*.” and a leading dot go only before a domain name; enter an address or subnet without them.</source>
@@ -437,16 +437,52 @@
         <source>That import has expired. Start it again.</source>
         <translation>Время на этот импорт истекло. Начните его заново.</translation>
     </message>
+    <message>
+        <source>The auth key must be hexadecimal in whole bytes (an even number of digits)</source>
+        <translation>Ключ авторизации должен быть в hex-формате целыми байтами (чётное число цифр)</translation>
+    </message>
+    <message>
+        <source>Could not store the auth key in the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
+        <translation>Не удалось сохранить ключ авторизации в системном хранилище учётных данных. Если система запрашивала доступ или разблокировку, разрешите их и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Not a valid TrustTunnel config: tls_profile &quot;%1&quot; is not one TrustTunnel knows</source>
+        <translation>Это не похоже на конфиг TrustTunnel: TrustTunnel не знает значение tls_profile «%1»</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password from the Keychain. If macOS asked for access to the Keychain, allow it and try again.</source>
+        <translation>Не удалось прочитать пароль VPN из Связки ключей. Если macOS запрашивала доступ к Связке ключей, разрешите его и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password from Windows Credential Manager. Try again.</source>
+        <translation>Не удалось прочитать пароль VPN из диспетчера учётных данных Windows. Повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password from your keyring. If it asked to be unlocked, unlock it and try again.</source>
+        <translation>Не удалось прочитать пароль VPN из хранилища паролей. Если система просила разблокировать хранилище, разблокируйте его и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the VPN password: secure credential storage is unavailable. Install gnome-keyring or KWallet, then try again.</source>
+        <translation>Не удалось прочитать пароль VPN: безопасное хранилище паролей недоступно. Установите gnome-keyring или KWallet и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Could not read the auth key from the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
+        <translation>Не удалось прочитать ключ авторизации из системного хранилища учётных данных. Если система запрашивала доступ или разблокировку, разрешите их и повторите попытку.</translation>
+    </message>
+    <message>
+        <source>Couldn’t build deep-link</source>
+        <translation>Не удалось собрать deep-link</translation>
+    </message>
+    <message>
+        <source>Export failed</source>
+        <translation>Не удалось экспортировать</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
     <message>
         <source>Subscription links aren&apos;t supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive.</source>
         <translation>Ссылки-подписки пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки.</translation>
-    </message>
-    <message>
-        <source>This server needs a newer TrustTunnel core than this version of FreeTunnel uses.</source>
-        <translation>Этому серверу нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel.</translation>
     </message>
     <message>
         <source>Subscriptions aren&apos;t supported yet: this server won&apos;t update itself, and its subscription address isn&apos;t saved.</source>
@@ -508,16 +544,8 @@
         <translation>Скопировать deep-link</translation>
     </message>
     <message>
-        <source>Couldn’t build deep-link</source>
-        <translation>Не удалось собрать deep-link</translation>
-    </message>
-    <message>
         <source>Export config</source>
         <translation>Экспорт конфига</translation>
-    </message>
-    <message>
-        <source>Export failed</source>
-        <translation>Не удалось экспортировать</translation>
     </message>
     <message>
         <source>Deep-link copied — it contains the password, share it carefully</source>
@@ -648,6 +676,18 @@
     <message>
         <source>Default</source>
         <translation>По умолчанию</translation>
+    </message>
+    <message>
+        <source>Auth key (hex)</source>
+        <translation>Ключ авторизации (hex)</translation>
+    </message>
+    <message>
+        <source>Client random is not used while an auth key is set</source>
+        <translation>Пока задан ключ авторизации, client random не используется</translation>
+    </message>
+    <message>
+        <source>Kept in the system&apos;s credential store, like the password</source>
+        <translation>Хранится в системном хранилище учётных данных, как и пароль</translation>
     </message>
 </context>
 <context>
@@ -901,6 +941,10 @@
     <message>
         <source>Your internet connection is a PPP link (PPPoE or a modem), which the VPN can&apos;t run over on Windows. Connect through a router, Ethernet or Wi-Fi instead.</source>
         <translation>Интернет подключён через PPP (PPPoE или модем), а через такое подключение VPN на Windows работать не может. Подключитесь через роутер, Ethernet или Wi-Fi.</translation>
+    </message>
+    <message>
+        <source>The config&apos;s tls_profile &quot;%1&quot; is not one TrustTunnel knows. Use one of: %2.</source>
+        <translation>TrustTunnel не знает значение tls_profile «%1» в конфиге. Допустимые значения: %2.</translation>
     </message>
 </context>
 <context>
@@ -1186,10 +1230,6 @@
     <message>
         <source>Update FreeTunnel to read this subscription</source>
         <translation>Обновите FreeTunnel, чтобы прочитать эту подписку</translation>
-    </message>
-    <message>
-        <source>This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses</source>
-        <translation>Этой подписке нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel</translation>
     </message>
 </context>
 <context>

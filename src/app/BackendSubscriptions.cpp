@@ -77,19 +77,29 @@ QString changeSummary(const QList<freetunnel::SubscriptionChange> &changes)
         case SubscriptionField::ClientRandom:
             parts << QStringLiteral("client_random");
             break;
+        case SubscriptionField::AuthKey:
+            parts << QStringLiteral("client_random_auth_key");
+            break;
         }
     }
     return parts.join(QStringLiteral(", "));
 }
 
-// The config a document makes, checked as the editor checks one.
-std::optional<PreparedImport> serverOfDocument(const freetunnel::SubscriptionDocument &document)
+// The config a document makes, checked as the editor checks one. `givenAuthKey` is
+// the key the link or export the subscription came with carried: the document has
+// no field for one (SubscriptionDocument::clientRandomAuthKey), so a server that
+// checks a key is not told by it, and the key is the one place it was given.
+std::optional<PreparedImport> serverOfDocument(freetunnel::SubscriptionDocument document,
+                                               const QString &givenAuthKey)
 {
+    if (!document.clientRandomAuthKey)
+        document.clientRandomAuthKey = givenAuthKey;
     const freetunnel::SubscriptionApplied made =
             freetunnel::applySubscription({}, {}, document, freetunnel::SubscriptionApplyMode::Creation);
     if (!isUsableServer(made.config))
         return std::nullopt;
-    std::optional<PreparedImport> out = freetunnel::prepareSubscriptionImport(made.config, made.password);
+    std::optional<PreparedImport> out =
+            freetunnel::prepareSubscriptionImport(made.config, made.password, made.clientRandomAuthKey);
     if (out)
         out->certificateExtraIgnored = out->certificateExtraIgnored || document.extraPemIgnored;
     return out;
@@ -110,8 +120,8 @@ void Backend::startSubscriptions()
 
 // ---- adding a config from a subscription ---------------------------------
 
-// A link with a subscription address and nothing else this version refuses (an
-// auth key, a damaged server). False sends the link on as it would go without
+// A link with a subscription address and nothing else this version refuses (a
+// damaged server, a malformed auth key). False sends the link on as it would go without
 // subscriptions, and what it says about it is said there: so does a subscription
 // that cannot be added, once offerSubscription() has said why, when the link
 // gives a server of its own.
@@ -248,7 +258,9 @@ void Backend::onSubscriptionImportFetched(const QString &token, const freetunnel
     const QString updatesFrom = tr("Updates from %1").arg(import->origin);
     const QString existing = m_subscriptions->pathWithIdentity(import->identity, m_paths);
     if (result.document) {
-        if (std::optional<PreparedImport> fetched = serverOfDocument(*result.document)) {
+        const QString givenAuthKey =
+                import->given ? freetunnel::parseConfigToml(import->given->tomlContent).clientRandomAuthKey : QString();
+        if (std::optional<PreparedImport> fetched = serverOfDocument(*result.document, givenAuthKey)) {
             fetched->link = token;
             fetched->existingPath = existing;
             import->fetched = fetched;
@@ -343,12 +355,20 @@ bool Backend::startSubscriptionRefresh(const QString &path, bool manual)
 {
     if (m_subscriptions->isFetching(path) || m_subscriptions->isBusy(path))
         return false;
-    const QString url = m_subscriptions->address(path);
+    const freetunnel::StoredSecret address = m_subscriptions->address(path);
+    const QString &url = address.value;
     // Asked of the credential store, which runs an event loop meanwhile.
     if (!m_subscriptions->isLinked(path) || m_subscriptions->isFetching(path))
         return false;
+    if (address.failed()) {
+        // The store could not be asked, which is not the same as the address being
+        // gone: a locked keyring may be open next time, and is tried again as what
+        // may pass is.
+        noteSubscriptionNotApplied(path, QStringLiteral("keyring"));
+        return false;
+    }
     if (url.isEmpty()) {
-        // A locked keyring answers nothing, and may be open next time.
+        // An entry emptied by hand, or never there: tried again soon all the same.
         m_subscriptions->noteFailure(path, QStringLiteral("no_address"),
                                      freetunnel::SubscriptionRefreshPolicy::Backoff);
         return false;
@@ -383,12 +403,20 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     }
     m_subscriptions->setBusy(path, true);
     const auto done = qScopeGuard([this, path]() { m_subscriptions->setBusy(path, false); });
-    const freetunnel::ConfigToml current = freetunnel::parseConfigToml(readText(path));
-    QString password = freetunnel::CredentialStore::loadPassword(freetunnel::CredentialStore::keyForConfigPath(path));
-    if (password.isEmpty())
-        password = current.password;
+    freetunnel::ConfigToml current = freetunnel::parseConfigToml(readText(path));
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(path, current);
     if (!m_subscriptions->isLinked(path))
         return;
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        // Nothing is written: the secrets a failed save puts back are the ones just
+        // not read, so an empty password or key here would let that restore delete
+        // the stored ones, and a save without them would drop the key.
+        return noteSubscriptionNotApplied(path, QStringLiteral("keyring"));
+    }
+    const QString &password = secrets.password;
+    // The key the config has now is the file's or the store's, as its password is;
+    // applySubscription() reads it from `current`.
+    current.clientRandomAuthKey = secrets.authKey;
     const freetunnel::SubscriptionApplied next = freetunnel::applySubscription(
             current, password, update.document, freetunnel::SubscriptionApplyMode::Refresh);
     if (!isUsableServer(next.config)) {
@@ -417,7 +445,8 @@ void Backend::applySubscriptionUpdate(const QString &path, const HeldSubscriptio
     // A failure on either leaves both as they were (saveConfigWithPassword).
     QString saveErr;
     if (!freetunnel::backend_config::saveConfigWithPassword(path, freetunnel::buildConfigToml(next.config).toUtf8(),
-                                                            next.password, password, &saveErr)) {
+                                                            next.password, password, next.clientRandomAuthKey,
+                                                            current.clientRandomAuthKey, &saveErr)) {
         const QString code = QStringLiteral("not_saved");
         return noteSubscriptionNotApplied(path, code);
     }
@@ -507,7 +536,9 @@ void Backend::forgetSubscription(const QString &path)
 // A linked config's server is its subscription's: an editor save keeps what
 // the file and the credential store hold for it, so a form opened before a
 // refresh does not write the old server back. The password stays the form's
-// when the store gives none, rather than none.
+// when the store gives none, rather than none. The auth key is not kept: the
+// subscription's format has no field for it, so it is the user's, from the link
+// the config came with, and the editor can change it.
 bool Backend::keepSubscriptionOwnedFields(const QString &path, const QString &fileText, const QString &storedPassword,
                                           freetunnel::ConfigToml *ct, QString *password) const
 {

@@ -94,6 +94,7 @@ QString MockShell::keyName(int key, const QString &text) const
 void MockShell::showToast(const QString &msg)
 {
     m_lastToast = msg;
+    toasts << msg;
 }
 
 QString MockShell::elide(const QString &s, int n) const

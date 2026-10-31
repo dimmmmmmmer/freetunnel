@@ -11,8 +11,9 @@ name: Build
 # HTTP3/QUIC is enabled, so the per-config HTTP/3 transport works in the
 # shipped binaries. The core does QUIC with ngtcp2/nghttp3, built by conan like
 # its other dependencies; it used quiche (Rust) until 1.1.5. No leg installs
-# Rust: the core's one cargo build, setup_wizard, is a dependency of its own
-# tests, never of the FreeTunnel target.
+# Rust: the core's one cargo build, setup_wizard (since 1.3 it also builds the
+# deep-link library that only the core's own trusttunnel_client links), is a
+# dependency of the core's own client and tests, never of the FreeTunnel target.
 #
 # Release binaries are UNSIGNED (no code-signing certs). macOS .app is ad-hoc
 # signed so it launches after the user approves it in Gatekeeper; see the README.
@@ -537,8 +538,8 @@ jobs:
         shell: bash
         run: ./scripts/bootstrap_conan_deps.py
 
-      # Upstream needs a newer boringssl recipe revision than its pinned NLC
-      # carries (see the script header).
+      # Keeps the boringssl recipe the core links the one NLC pins, whichever
+      # NLC the bootstrap exported last (see the script header).
       - name: Export patched boringssl recipe
         if: needs.changes.outputs.desktop != 'false'
         shell: bash

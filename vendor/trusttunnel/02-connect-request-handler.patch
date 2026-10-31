@@ -98,7 +98,7 @@
  TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks)
          : m_config(std::move(config))
          , m_extra_loop(vpn_event_loop_create())
-@@ -510,6 +548,13 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -525,6 +563,13 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
          struct TaskContext {
              VpnConnectionInfo *info;
              Vpn *vpn;
@@ -112,7 +112,7 @@
          };
          auto *task_context = new TaskContext;
          const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
-@@ -518,6 +563,9 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -533,6 +578,9 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
          info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
          task_context->info = info;
          task_context->vpn = m_vpn;
@@ -122,7 +122,7 @@
          vpn_event_loop_submit(m_extra_loop.get(),
                  {
                          .arg = (void *) task_context,
-@@ -525,6 +573,22 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -540,6 +588,22 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
                                  [](void *arg, TaskId) {
                                      auto *context = (TaskContext *) arg;
                                      auto *info = context->info;

@@ -74,7 +74,9 @@ another. Each record:
   fixed-width fields.
 - Unknown tags are ignored, for forward compatibility.
 - FreeTunnel reads format versions up to **2** (`kDeepLinkMaxVersion`) and
-  writes version **1** (`kDeepLinkWriteVersion`); see [Versions](#versions).
+  writes version **1** (`kDeepLinkWriteVersion`), or version **2** for a link
+  that carries a client random auth key (`kDeepLinkAuthKeyWriteVersion`); see
+  [Versions](#versions).
 
 ### Field tags
 
@@ -95,7 +97,7 @@ another. Each record:
 | `0x0C` | Display name | UTF-8 string | no | empty | See [naming](#display-name-tag-0x0c) |
 | `0x0D` | DNS upstreams | string list | no | empty | See [encoding](#dns-upstream-list-tag-0x0d) |
 | `0x0E` | Subscription address | UTF-8 string, `https://` | no | — | Version 2. Not kept, see [rules](#subscription-address-tag-0x0e) |
-| `0x0F` | Client random auth key | UTF-8 hex | no | empty | Version 2. A link with one is refused, see [rules](#client-random-auth-key-tag-0x0f) |
+| `0x0F` | Client random auth key | UTF-8 hex | no | empty | Version 2. Kept in the OS credential store, see [rules](#client-random-auth-key-tag-0x0f) |
 
 \* Unless the link has a subscription address (tag `0x0E`), as the format
 allows from version 2 on.
@@ -208,12 +210,28 @@ credential store, and it is never logged.
 
 A UTF-8 string of whole bytes in hex. The client derives its TLS client random
 from this key, and a server with an auth-key rule turns away a client that does
-not. The TrustTunnel core FreeTunnel uses cannot do that yet.
+not. TrustTunnel's core does this from version 1.3 on, so the desktop FreeTunnel
+that is built on it supports such a server. Older desktop versions, and the
+Android app for now, refuse it.
 
 - An empty value means the server has no key, and the link imports as usual.
-- Any other value, if it is valid hex, is refused: "This server needs a newer
-  TrustTunnel core than this version of FreeTunnel uses."
-- A value that is not whole bytes of hex fails the import as damaged.
+- Any other value, if it is valid hex, is imported with the server. The key is a
+  secret: it goes to the OS credential store, like the password, and is never
+  written to the config file. It is not shown in the question before the import.
+- A value that is not whole bytes of hex fails the import as damaged ("malformed
+  client_random_auth_key value"): the core would drop a key it cannot decode
+  and connect without it, which the server turns away.
+- The key is bound to the server name the client sends (the custom SNI, or else
+  the hostname), so it works only with the server it came with. When a config
+  has both a client random and a key, the core uses the key and ignores the
+  client random; the config editor says so.
+- A config replaced by a link or a file that brings no key loses the key it had,
+  so one provider's key is not sent to another's server.
+- A share link or export is made from the file's own copy of the password and key
+  when it has one, and from the credential store otherwise. When the store
+  cannot be read for a secret the config keeps there, there is no link or export
+  and FreeTunnel says why; a link without the key would be version 1 and could
+  not connect.
 
 ### Versions
 
@@ -221,14 +239,19 @@ not. The TrustTunnel core FreeTunnel uses cannot do that yet.
 | --- | --- | --- |
 | `0` | No version tag | Read |
 | `1` | Tags `0x00`, `0x0C` and `0x0D` | Read and written |
-| `2` | Tags `0x0E` and `0x0F`; the other fields become optional when `0x0E` is there | Read |
+| `2` | Tags `0x0E` and `0x0F`; the other fields become optional when `0x0E` is there | Read; written for a link that carries an auth key (`0x0F`) |
 | `3` and later | — | Refused: "unsupported deep link version" |
 
 - TrustTunnel's endpoint writes version 2 on every link from 1.3.0 on, even a
   link without either new tag.
-- FreeTunnel's own share links stay version 1. They never carry the new tags,
-  and FreeTunnel 1.2.3 and earlier, like TrustTunnel's clients up to 1.1.11,
-  refuse a version 2 link.
+- FreeTunnel's own share links stay version 1 unless the config has a client
+  random auth key. They never carry the subscription address (`0x0E`), and
+  FreeTunnel 1.2.3 and earlier, like TrustTunnel's clients up to 1.1.11, refuse
+  a version 2 link outright. A link made from a config with a key is version 2
+  and carries the key (`0x0F`), because a link without it could not connect to
+  that server anyway. FreeTunnel for Android reads version 2, but its core is
+  1.1.7 for now, and it refuses a server with a key ("This server needs a newer
+  TrustTunnel core than this version of FreeTunnel uses").
 - The version is read before any field, so a link of a newer version is
   refused for its version, not for a field that version may spell differently.
 - Every version record counts, as in TrustTunnel's own decoder. A link with
@@ -257,17 +280,14 @@ Import fails when:
   [tag `0x0B`](#client-random-tag-0x0b));
 - the subscription address is not one FreeTunnel accepts (see
   [tag `0x0E`](#subscription-address-tag-0x0e));
-- the client random auth key is not whole bytes of hex.
+- the client random auth key is not whole bytes of hex (see
+  [tag `0x0F`](#client-random-auth-key-tag-0x0f)).
 
-These links are well formed, and refused with a reason of their own:
+This link is well formed, and refused with a reason of its own:
 
 - a subscription address without a whole server
-  ([tag `0x0E`](#subscription-address-tag-0x0e));
-- a non-empty client random auth key
-  ([tag `0x0F`](#client-random-auth-key-tag-0x0f)).
-
-A link that is both is refused for its auth key: a subscription would hand out
-the same server, which this version cannot connect to either.
+  ([tag `0x0E`](#subscription-address-tag-0x0e)). A client random auth key does
+  not make up for the server: the link is refused all the same.
 
 Unknown tags are not an error: they are ignored.
 
@@ -278,7 +298,8 @@ matching what the in-app create-config form produces.
 
 - **Control characters are stripped** from the string fields, to prevent TOML
   injection from crafted links.
-- **Passwords go to the OS credential store**, not the on-disk TOML.
+- **Passwords go to the OS credential store**, not the on-disk TOML. So does
+  the client random auth key, in an entry of its own.
 - **The display name** names the config and its file (see
   [tag `0x0C`](#display-name-tag-0x0c)).
 - **Every import asks first**, however the link arrives (see
@@ -304,12 +325,16 @@ except `dns_upstreams`, which is at the top level.
 | `0x0C` | Display name | Not a key: the config's name and file name |
 | `0x0D` | DNS upstreams | `dns_upstreams` |
 | `0x0E` | Subscription address | Not written, anywhere |
-| `0x0F` | Client random auth key | Not written: a link with one is not imported |
+| `0x0F` | Client random auth key | `client_random_auth_key`, hex, which the import then moves to the OS credential store |
 
 A TrustTunnel 1.3 config imported from a file is handled the same way:
 
-- An empty `client_random_auth_key`, which the endpoint's export always writes,
-  is kept as it is. A non-empty one refuses the import with the message above.
+- A `client_random_auth_key` is read and moved to the OS credential store, as
+  the password is, and is not in the copy FreeTunnel stores. The endpoint's
+  export always writes the key, as `""` for a server without one, and an empty
+  key is no key. One that is not whole bytes of hex refuses the import ("Not a
+  valid TrustTunnel config: malformed client_random_auth_key value").
+- The file you picked is not changed.
 - A subscription address, as `subscription_url` or as an
   `[endpoint.subscription]` table, is left out of the copy FreeTunnel stores, and
   the notice after the import says so. The file you picked is not changed.
@@ -359,9 +384,10 @@ it from file as it would the link with the same server.
   Anything else in the file is left out, as a link's unknown tags are.
 - **The name.** `name` names the config. The endpoint writes `name = ""` for a
   server it was given no name for, and then the file's name is used.
-- **The link's rules.** A non-empty `client_random_auth_key`, and a
-  subscription address without a whole server, are refused with the link's
-  messages. `subscription_url` is left out, and the question says so. The
+- **The link's rules.** A `client_random_auth_key` that is not whole bytes of
+  hex, and a subscription address without a whole server, are refused with the
+  link's messages. A good key is imported, and carried in the link the question
+  is answered with, which is then version 2. `subscription_url` is left out, and the question says so. The
   certificate keeps only its certificates (see
   [tag `0x08`](#certificate-tag-0x08)). A client random the core cannot use, a
   certificate with no certificate in it, and no address or username without a
@@ -519,7 +545,9 @@ https://trusttunnel.org/qr.html#tt=AAEBAQ92cG4uZXhhbXBsZS5jb20CEDIwMy4wLjExMy4xM
 
 A link as TrustTunnel's endpoint 1.3 exports it for a server without
 subscriptions or an auth key: version 2, then the required fields in the
-endpoint's order.
+endpoint's order. With an auth key, the endpoint adds tag `0x0F` and its hex at
+the end; `tests/deeplink_v2_vectors.h` has that link, and the link FreeTunnel
+writes for the same kind of server.
 
 ```text
 tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz
@@ -566,6 +594,7 @@ That is tag `0x0D`, length 16, then two entries: length 7 and `8.8.8.8`, length
 | Round-trip encode/decode, injection stripping and edge cases | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp` |
 | Version 2 links: what is read, refused and not kept | `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp` |
 | TrustTunnel 1.3 config files: subscription address and auth key | `tests/test_configtoml.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp` |
+| The auth key's storage: the credential store, the editor, share links and exports | `tests/test_credentialstore.cpp`, `tests/test_backend_config.cpp`, `tests/test_qml_ui.cpp` |
 | Certificates: what is kept, from a link, a file, the editor and at start, and what a share link or export carries | `tests/test_configtoml.cpp`, `tests/test_deeplink.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp`, `tests/test_backend_config.cpp`, with the shared vectors in `tests/certificate_vectors.h` |
 | The endpoint's TOML export: how it is told from a config, what it becomes and what is asked | `tests/test_configtoml.cpp`, `tests/test_configimport.cpp`, `tests/test_backend_deeplink_import.cpp`, with the shared text in `tests/endpoint_export_vectors.h` |
 | Control link parser and the link mark | `tests/test_control.cpp` |

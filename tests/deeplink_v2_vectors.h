@@ -68,6 +68,19 @@ inline const QString kAuthKey =
 inline const QString kEmptyAuthKey =
         QStringLiteral("tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQzDwA");
 
+// What FreeTunnel itself writes for a server that checks an auth key: version 2,
+// the required fields in FreeTunnel's order (hostname, address, username,
+// password), then the key last. Encoded by hand, not by the encoder it checks.
+// 00 01 02 | 01 0f vpn.example.com | 02 0b 1.2.3.4:443 | 05 05 alice | 06 06 secret
+// | 0f 08 aabbccdd
+inline const QString kWrittenWithAuthKey = QStringLiteral(
+        "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20CCzEuMi4zLjQ6NDQzBQVhbGljZQYGc2VjcmV0DwhhYWJiY2NkZA");
+
+// The same server without the key, as FreeTunnel writes it: version 1.
+// 00 01 01 | 01 0f vpn.example.com | 02 0b 1.2.3.4:443 | 05 05 alice | 06 06 secret
+inline const QString kWrittenWithoutAuthKey = QStringLiteral(
+        "tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20CCzEuMi4zLjQ6NDQzBQVhbGljZQYGc2VjcmV0");
+
 // Version 3, as in the endpoint's test_decode_rejects_version_3.
 // 00 01 03 | 0e 24 https://vpn.example.com/subscription
 inline const QString kVersion3 = QStringLiteral("tt://?AAEDDiRodHRwczovL3Zwbi5leGFtcGxlLmNvbS9zdWJzY3JpcHRpb24");

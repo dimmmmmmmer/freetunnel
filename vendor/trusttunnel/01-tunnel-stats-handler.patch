@@ -10,7 +10,7 @@
  class TrustTunnelClient {
 
 --- a/trusttunnel/src/client.cpp
-@@ -425,12 +425,18 @@
+@@ -475,12 +475,18 @@
          auto *event = (VpnClientOutputEvent *) data;
          if (m_callbacks.client_output_handler) {
              m_callbacks.client_output_handler(event);

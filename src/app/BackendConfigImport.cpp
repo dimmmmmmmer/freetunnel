@@ -35,13 +35,30 @@ bool Backend::importFromClipboard()
 
 bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bool targetPreExisted)
 {
-    if (!freetunnel::migrateConfigPassword(target)) {
+    // A new config has the key its file brings, which the migration below moves
+    // into the store, or none: not one left at this path by a config that was
+    // called the same. (A replace has dealt with its entry already.)
+    if (!targetPreExisted) {
+        QFile file(target);
+        const QString text = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        if (freetunnel::parseConfigToml(text).clientRandomAuthKey.isEmpty())
+            freetunnel::backend_config::dropLeftoverAuthKey(target);
+    }
+    freetunnel::SecretRefused refused = freetunnel::SecretRefused::None;
+    if (!freetunnel::migrateConfigPassword(target, &refused)) {
         // Only remove what we created. On the replace path this is the user's
         // own config, and deleting it because a keyring was locked is exactly the
         // data loss the create/edit path was fixed for.
         if (!targetPreExisted)
             QFile::remove(target);
-        reportPasswordNotStored();
+        // Said as the editor says it: the password was stored (and has been put
+        // back), and it is the key the store would not take.
+        if (refused == freetunnel::SecretRefused::AuthKey) {
+            recheckCredentialStorage();
+            emit errorOccurred(freetunnel::backend_config::authKeyNotStoredMessage());
+        } else {
+            reportPasswordNotStored();
+        }
         return false;
     }
     QStringList stored = loadStoredConfigs();
@@ -82,6 +99,18 @@ static QString importedFileNotice(const QString &name, bool skipVerification, bo
     return notice + QLatin1Char(' ') + notes.join(QLatin1Char(' '));
 }
 
+// A file's value, to show in a message: cut short, and with anything that is not
+// printable made a space.
+static QString shownValue(QString value)
+{
+    value = value.left(40);
+    for (QChar &ch : value) {
+        if (!ch.isPrint())
+            ch = QLatin1Char(' ');
+    }
+    return value.trimmed();
+}
+
 bool Backend::importFile(const QString &path)
 {
     QString p = path;
@@ -99,7 +128,12 @@ bool Backend::importFile(const QString &path)
         if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
         else if (importErr == QLatin1String("authkey"))
-            emit errorOccurred(freetunnel::newerCoreRefusal());
+            emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
+                                       .arg(QCoreApplication::translate("DeepLink",
+                                                                        "malformed client_random_auth_key value")));
+        else if (importErr == QLatin1String("tlsprofile"))
+            emit errorOccurred(tr("Not a valid TrustTunnel config: tls_profile \"%1\" is not one TrustTunnel knows")
+                                       .arg(shownValue(freetunnel::endpointTlsProfile(content))));
         else if (importErr == QLatin1String("certificate"))
             emit errorOccurred(tr("Not a valid TrustTunnel config: %1")
                                        .arg(QCoreApplication::translate("DeepLink", "malformed certificate")));
@@ -210,9 +244,18 @@ bool Backend::importPreparedDeepLink(const freetunnel::PreparedImport &prepared,
         // read-back to "restore later": reading another build's keychain entry
         // can block on an authorization prompt, and a passwordless replace is
         // the hostile case anyway — losing that password is the correct outcome.)
-        if (freetunnel::parseConfigToml(prepared.tomlContent).password.isEmpty()) {
+        const freetunnel::ConfigToml incoming = freetunnel::parseConfigToml(prepared.tomlContent);
+        if (incoming.password.isEmpty()) {
             freetunnel::CredentialStore::deletePassword(
                     freetunnel::CredentialStore::keyForConfigPath(target));
+        }
+        // The auth key is the same: the server before it checked this key, and the
+        // one the link names may check another or none. A link without one must
+        // not hand the old provider's key to its server, nor keep a key that its
+        // server does not ask for. A key the link carries overwrites it below.
+        if (incoming.clientRandomAuthKey.isEmpty()) {
+            freetunnel::CredentialStore::deletePassword(
+                    freetunnel::CredentialStore::keyForConfigAuthKey(target));
         }
     }
 
