@@ -1,22 +1,22 @@
-Third-party code inside Qt 6.11.2
+Third-party code inside Qt 6.12.0
 ==============================================================================
 
-Attributions and license texts from the Qt 6.11.2 source modules qtbase,
+Attributions and license texts from the Qt 6.12.0 source modules qtbase,
 qtdeclarative, and qtsvg. Includes optional desktop components;
 not every component is present on every platform. Build tools, tests, Android,
 WebAssembly and SQLite are excluded. Each entry retains Qt's usage description.
-Sources: https://github.com/qt/qtbase/tree/v6.11.2, https://github.com/qt/qtdeclarative/tree/v6.11.2, https://github.com/qt/qtsvg/tree/v6.11.2
+Sources: https://github.com/qt/qtbase/tree/v6.12.0, https://github.com/qt/qtdeclarative/tree/v6.12.0, https://github.com/qt/qtsvg/tree/v6.12.0
 
 ==============================================================================
-D3D12 Memory Allocator f128d39b7a95b4235bd228d231646278dc6c24b2
+D3D12 Memory Allocator v3.1.0
 Qt module: qtbase, src/3rdparty/D3D12MemoryAllocator/qt_attribution.json
 Used in: Memory management for the D3D12 backend of QRhi.
 License: MIT
 Copyright:
-Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 [qtbase/src/3rdparty/D3D12MemoryAllocator/LICENSE.txt]
-Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ THE SOFTWARE.
 
 
 ==============================================================================
-Vulkan Memory Allocator 3.2.1
+Vulkan Memory Allocator 3.3.0
 Qt module: qtbase, src/3rdparty/VulkanMemoryAllocator/qt_attribution.json
 Used in: Memory management for the Vulkan backend of QRhi.
 License: MIT
@@ -1315,7 +1315,7 @@ in this Software without prior written authorization from The Open Group.
 
 
 ==============================================================================
-HarfBuzz-NG 14.3.0
+HarfBuzz-NG 14.5.0
 Qt module: qtbase, src/3rdparty/harfbuzz-ng/qt_attribution.json
 Used in: Optionally used in Qt GUI. Configure with -system-harfbuzz to force the use of the system library, or -qt-harfbuzz to link statically to the library that is bundled with your Qt version.
 License: MIT
@@ -2491,7 +2491,7 @@ express Statement of Purpose.
 
 
 ==============================================================================
-PCRE2 10.47
+PCRE2 10.48
 Qt module: qtbase, src/3rdparty/pcre2/qt_attribution.json
 Used in: Used in Qt Core (QRegularExpression).
 License: LicenseRef-BSD-3-Clause-with-PCRE2-Binary-Like-Packages-Exception
@@ -2608,7 +2608,7 @@ PCRE2 independently.
 
 
 ==============================================================================
-PCRE2 - Stack-less Just-In-Time Compiler 10.47
+PCRE2 - Stack-less Just-In-Time Compiler 10.48
 Qt module: qtbase, src/3rdparty/pcre2/qt_attribution.json
 Used in: Used in Qt Core (QRegularExpression).
 License: BSD-2-Clause
@@ -3588,6 +3588,35 @@ Copyright:
 Copyright © 2016 Yong Bakos
 Copyright © 2015 Jason Ekstrand
 Copyright © 2015 Jonas Ådahl
+
+[qtbase/src/3rdparty/wayland/protocols/MIT_LICENSE.txt]
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+==============================================================================
+Wayland Linux Dmabuf V1 Protocol v1, version 5
+Qt module: qtbase, src/3rdparty/wayland/protocols/linux-dmabuf/qt_attribution.json
+Used in: Used in the Qt Wayland Compositor
+License: MIT
+Copyright:
+Copyright © 2014, 2015 Collabora, Ltd.
 
 [qtbase/src/3rdparty/wayland/protocols/MIT_LICENSE.txt]
 Permission is hereby granted, free of charge, to any person obtaining a
@@ -5732,6 +5761,39 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
+XSVG 
+Qt module: qtbase, src/gui/util/qt_attribution.json
+Used in: Used in the Qt GUI library.
+License: HPND-sell-variant
+Copyright:
+Copyright 2002 USC/Information Sciences Institute
+
+[qtbase/src/gui/util/LICENSE.XSVG.txt]
+Copyright  2002 USC/Information Sciences Institute
+
+Permission to use, copy, modify, distribute, and sell this software
+and its documentation for any purpose is hereby granted without
+fee, provided that the above copyright notice appear in all copies
+and that both that copyright notice and this permission notice
+appear in supporting documentation, and that the name of
+Information Sciences Institute not be used in advertising or
+publicity pertaining to distribution of the software without
+specific, written prior permission.  Information Sciences Institute
+makes no representations about the suitability of this software for
+any purpose.  It is provided "as is" without express or implied
+warranty.
+
+INFORMATION SCIENCES INSTITUTE DISCLAIMS ALL WARRANTIES WITH REGARD
+TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL INFORMATION SCIENCES
+INSTITUTE BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL
+DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA
+OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+
+==============================================================================
 Vulkan API Registry 1.4.308
 Qt module: qtbase, src/gui/vulkan/qt_attribution.json
 Used in: Used to dynamically generate the sources for the QVulkan(Device)Functions classes.
@@ -5971,37 +6033,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
-==============================================================================
-XSVG 
-Qt module: qtsvg, src/svg/qt_attribution.json
-Used in: Used in the Qt SVG library.
-License: HPND-sell-variant
-Copyright:
-Copyright 2002 USC/Information Sciences Institute
-
-[qtsvg/src/svg/LICENSE.XSVG.txt]
-Copyright  2002 USC/Information Sciences Institute
-
-Permission to use, copy, modify, distribute, and sell this software
-and its documentation for any purpose is hereby granted without
-fee, provided that the above copyright notice appear in all copies
-and that both that copyright notice and this permission notice
-appear in supporting documentation, and that the name of
-Information Sciences Institute not be used in advertising or
-publicity pertaining to distribution of the software without
-specific, written prior permission.  Information Sciences Institute
-makes no representations about the suitability of this software for
-any purpose.  It is provided "as is" without express or implied
-warranty.
-
-INFORMATION SCIENCES INSTITUTE DISCLAIMS ALL WARRANTIES WITH REGARD
-TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL INFORMATION SCIENCES
-INSTITUTE BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL
-DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA
-OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
-TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-PERFORMANCE OF THIS SOFTWARE.
 

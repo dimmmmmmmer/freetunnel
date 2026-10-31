@@ -78,6 +78,10 @@ bool TlsTestServer::Request::hasHeader(const QByteArray &name) const
 TlsTestServer::TlsTestServer(QObject *parent)
     : QObject(parent)
 {
+    connect(&m_tls, &QSslServer::errorOccurred, this,
+            [](QSslSocket *socket, QAbstractSocket::SocketError error) {
+                qWarning() << "TLS test server:" << error << socket->errorString();
+            });
     connect(&m_front, &QTcpServer::newConnection, this, &TlsTestServer::onFrontConnection);
     connect(&m_tls, &QSslServer::pendingConnectionAvailable, this, &TlsTestServer::onTlsConnection);
 }

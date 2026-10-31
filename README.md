@@ -387,5 +387,5 @@ new version.
 
 ### macOS compatibility
 
-The next desktop release requires macOS 13 or newer. It bundles Qt 6.11.2
+The next desktop release requires macOS 14.4 or newer. It bundles Qt 6.12.0
 to correct handling of refused local TCP connections on macOS 15.8.

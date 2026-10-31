@@ -23,21 +23,21 @@ the [README](README.md).
 ## Quick start for contributors
 
 Most changes can be built and tested without the VPN core. The unit tests are a
-standalone CMake tree in `tests/` that needs Qt, CMake 3.16+ and a C++20
+standalone CMake tree in `tests/` that needs Qt, CMake 3.25+ and a C++20
 compiler, not the upstream tree.
 
 ### Build and run the unit tests
 
 ```bash
-export QT_ROOT_DIR=/path/to/Qt/6.11.2/gcc_64   # or macOS/Windows Qt prefix
+export QT_ROOT_DIR=/path/to/Qt/6.12.0/gcc_64   # or macOS/Windows Qt prefix
 cd tests   # FreeTunnel/tests/ inside an upstream tree
 cmake -S . -B build-tests -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 cmake --build build-tests -j
 QT_QPA_PLATFORM=offscreen bash ../scripts/run-ctest.sh build-tests
 ```
 
-- **Qt:** use 6.11.2, matching CI, releases and translation generation.
-  macOS builds require macOS 13 or newer.
+- **Qt:** use 6.12.0, matching CI, releases and translation generation.
+  macOS builds require macOS 14.4 or newer.
 - **Network:** the first configure fetches QHotkey (and on Windows QWindowKit)
   at their pinned commits, so it needs the network once.
 - **Warnings:** GCC and Clang build the tests with `-Wall -Wextra -Werror`, so a
@@ -103,9 +103,9 @@ this to run the app; the unit tests do not.
 | Tool | Version | Notes |
 | --- | --- | --- |
 | **TrustTunnelClient** upstream checkout | The commit in `scripts/upstream_ref.txt` | [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient) |
-| CMake | 3.24+ | The upstream tree requires it; the unit tests alone configure with 3.16+ |
+| CMake | 3.25+ | Required by the pinned Qt 6.12 runtime, including unit tests |
 | C++ compiler | C++20 | clang recommended for Linux |
-| Qt | 6.8+ (Gui, Qml, Quick, Network, Svg) | CI and releases use 6.11.2, and translation generation needs exactly that (see [Translations (i18n)](#translations-i18n)) |
+| Qt | 6.8+ (Gui, Qml, Quick, Network, Svg) | CI and releases use 6.12.0, and translation generation needs exactly that (see [Translations (i18n)](#translations-i18n)) |
 | Python 3 + Conan | Conan 2.31.1 | For upstream native deps; same pin as CI |
 | Ninja | Any | Recommended |
 
@@ -177,7 +177,7 @@ pip install -r requirements.txt "conan==2.31.1"  # same pin as CI
 From the **upstream root** (not `FreeTunnel/`):
 
 ```bash
-export QT_ROOT_DIR=/path/to/Qt/6.11.2/gcc_64   # or macOS/Windows Qt prefix
+export QT_ROOT_DIR=/path/to/Qt/6.12.0/gcc_64   # or macOS/Windows Qt prefix
 
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -399,11 +399,11 @@ Strings use `qsTr()` in QML and `tr()` in C++. Russian is in
 3. Run the script again to refresh `freetunnel_ru.qm`. The app embeds the
    committed `.qm`, not the `.ts`.
 
-**Use Qt 6.11.2**, the exact version CI pins (`QT_VER` in the workflows):
+**Use Qt 6.12.0**, the exact version CI pins (`QT_VER` in the workflows):
 
 - The script takes Qt's linguist tools from `$QT_ROOT_DIR/bin` when that is
   set, and from PATH otherwise.
-- CI rebuilds the `.ts` and the `.qm` with Qt 6.11.2 and compares the bytes.
+- CI rebuilds the `.ts` and the `.qm` with Qt 6.12.0 and compares the bytes.
   Another Qt's tools, a later patch release included, may write different ones.
 - Both scripts print the tools' versions, and warn when they are not that one.
 

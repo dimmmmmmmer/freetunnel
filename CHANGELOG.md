@@ -70,10 +70,10 @@ compare link at the bottom of its release notes.
     error on every pass of the core's loop, about 20 MB a second.
 
 - **Linux downloads now require glibc 2.35 or newer**, such as Ubuntu 22.04+
-  or Debian 12+, as part of the shared Qt 6.11.2 update.
+  or Debian 12+, as part of the shared Qt 6.12.0 update.
 
-- **macOS now requires version 13 or newer.** The bundled Qt runtime on all desktop platforms is updated
-  to 6.11.2 to correctly handle refused local connections on macOS 15.8,
+- **macOS now requires version 14.4 or newer.** The bundled Qt runtime on all desktop platforms is updated
+  to 6.12.0 to correctly handle refused local connections on macOS 15.8,
   including connections to the VPN helper.
 
 - **Windows, macOS and Linux: import the TOML file a TrustTunnel endpoint
