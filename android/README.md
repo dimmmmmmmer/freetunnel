@@ -268,8 +268,8 @@ TV app's, for example) fills in.
 The banner is [art/tv-banner.svg](art/tv-banner.svg), rendered into
 `app/src/main/res/drawable-xhdpi/banner.png` by
 [scripts/render-android-tv-banner.sh](../scripts/render-android-tv-banner.sh).
-Its font comes from fontconfig, so the PNG is committed: after changing the
-SVG, run the script and commit both.
+The tile shows only the centred logo; the launcher displays the app name below it.
+After changing the SVG, run the script and commit both the SVG and PNG.
 
 ### Dialogs, menus and notices
 

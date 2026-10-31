@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Android TV: centre the logo on the launcher tile without repeating the app name.
+
 - Android TV: remove the empty space reserved for the received-item count
   below the instructions in Receive from phone. Show the count only after a transfer.
 

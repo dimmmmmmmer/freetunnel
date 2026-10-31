@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 # Render android/art/tv-banner.svg into the Android TV launcher banner,
 # android/app/src/main/res/drawable-xhdpi/banner.png: 320x180, opaque RGB.
-# The wordmark's font comes from fontconfig, which differs between machines, so
-# the PNG is committed rather than built. After changing the SVG, rerun this and
-# commit both. Needs DejaVu Sans Bold, and librsvg: rsvg-convert with ImageMagick,
-# as scripts/render-icons.sh uses, or else Python's GObject bindings to it.
+# After changing the SVG, rerun this and commit both. Needs librsvg:
+# rsvg-convert with ImageMagick, as scripts/render-icons.sh uses, or else
+# Python's GObject bindings to it. The artwork has no font dependency.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 svg=$root/android/art/tv-banner.svg
 out=${1:-$root/android/app/src/main/res/drawable-xhdpi/banner.png}
 
-# Without the font, librsvg falls back to another one without a word. The face
-# fontconfig picks is checked, not just a match: DejaVu Sans Condensed Bold also
-# lists DejaVu Sans as its family, and would give a narrower wordmark.
-if ! fc-match -f '%{file}' 'DejaVu Sans:bold' | grep -q '/DejaVuSans-Bold\.ttf$'; then
-  echo "DejaVu Sans Bold is not installed" >&2
-  exit 1
-fi
 if command -v rsvg-convert >/dev/null && command -v convert >/dev/null; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
