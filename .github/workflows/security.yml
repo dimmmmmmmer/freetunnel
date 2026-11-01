@@ -5,6 +5,13 @@ name: Security
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'USER_GUIDE.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**/*.md'
     # Run on the tag as well: a release waits for this workflow to pass on the
     # tagged commit (see the same trigger in tests.yml).
     tags: ['v*']

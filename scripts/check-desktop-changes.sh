@@ -3,8 +3,8 @@
 # desktop=false to $GITHUB_OUTPUT. Run by the "desktop changes" job of Build,
 # Tests and Security.
 #
-# The answer is false only for a pull request every one of whose files is
-# Android's: anything under android/, its workflow and its two scripts. Those
+# The answer is false only for a pull request containing documentation or
+# Android's files: anything under android/, its workflow and its two scripts. Those
 # have their own workflow, android.yml, and nothing in the desktop ones builds
 # or tests them. Prose-only documentation is also excluded. Everything else is true: a push, a tag, a dispatch, the weekly
 # run, and a pull request that touches any other file. So is every doubt: a
@@ -89,7 +89,7 @@ if [[ "$changed" != "$listed" ]]; then
   doubt "the list of #$pr has $listed files and the pull request ${changed:-an unknown number}"
 fi
 
-# The paths that are not Android's.
+# Prose documents and Android-only paths do not need desktop compilation.
 jq -r -s '[.[][] | .filename, (.previous_filename // empty)]
           | map(select((startswith("android/")
                         or . == ".github/workflows/android.yml"

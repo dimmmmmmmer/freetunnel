@@ -23,6 +23,13 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'USER_GUIDE.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**/*.md'
     tags: ['v*']
   pull_request:
   workflow_dispatch:
