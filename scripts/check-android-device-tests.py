@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Checks that the Android device tests still name what the app has.
+"""Checks that the Android device tests still name what the app has.
 
 The device tests (android/app/src/androidTest) run only on an emulator, 25 to 30 minutes
 into Android CI, and they reach into the app by name: a control by its key (the tag that

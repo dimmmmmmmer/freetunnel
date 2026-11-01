@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-The Android app's icons, made from the desktop's.
+"""The Android app's icons, made from the desktop's.
 
 The desktop draws assets/icons/*.svg and assets/logo.svg. The Android app draws the
 same shapes from VectorDrawables, so that an icon is the same icon in both. This writes
