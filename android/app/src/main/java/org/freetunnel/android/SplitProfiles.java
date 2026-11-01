@@ -38,6 +38,7 @@ final class SplitProfiles {
     private final List<String> order = new ArrayList<>();
     private final Map<String, List<String>> domains = new HashMap<>();
     private final Map<String, List<String>> apps = new HashMap<>();
+    private final Map<String, List<GeoDefinition>> geo = new HashMap<>();
     private String edited = DEFAULT;
     private String mirrored = DEFAULT;
 
@@ -45,6 +46,7 @@ final class SplitProfiles {
         order.add(DEFAULT);
         domains.put(DEFAULT, new ArrayList<String>());
         apps.put(DEFAULT, new ArrayList<String>());
+        geo.put(DEFAULT, new ArrayList<GeoDefinition>());
     }
 
     // Starting points.
@@ -123,6 +125,7 @@ final class SplitProfiles {
         order.add(name);
         domains.put(name, new ArrayList<String>());
         apps.put(name, new ArrayList<String>());
+        geo.put(name, new ArrayList<GeoDefinition>());
         edited = name;
         return new NameResult(NameStatus.ADDED, name);
     }
@@ -143,6 +146,7 @@ final class SplitProfiles {
         order.remove(name);
         domains.remove(name);
         apps.remove(name);
+        geo.remove(name);
         if (edited.equals(name)) edited = DEFAULT;
         if (mirrored.equals(name)) mirrored = DEFAULT;
         return true;
@@ -245,6 +249,29 @@ final class SplitProfiles {
         return keys;
     }
 
+    List<GeoDefinition> geoLists(String name) {
+        List<GeoDefinition> lists = geo.get(name);
+        return lists == null ? Collections.emptyList() : Collections.unmodifiableList(lists);
+    }
+
+    boolean putGeoList(String profile, GeoDefinition definition) {
+        List<GeoDefinition> lists = geo.get(profile);
+        if (lists == null || definition == null || !definition.valid()) return false;
+        for (int i = 0; i < lists.size(); ++i) {
+            if (lists.get(i).id.equals(definition.id)) {
+                lists.set(i, definition);
+                return true;
+            }
+        }
+        lists.add(definition);
+        return true;
+    }
+
+    boolean removeGeoList(String profile, String id) {
+        List<GeoDefinition> lists = geo.get(profile);
+        return lists != null && lists.removeIf(list -> list.id.equals(id));
+    }
+
     // Applications.
 
     /** The packages of a profile, in the order they were added. A package that is no longer installed stays until it is removed. */
@@ -320,6 +347,9 @@ final class SplitProfiles {
                 one.put("name", name);
                 one.put("domains", array(domains.get(name)));
                 one.put("apps", array(apps.get(name)));
+                JSONArray geoRows = new JSONArray();
+                for (GeoDefinition list : geoLists(name)) geoRows.put(list.toJson());
+                one.put("geo", geoRows);
                 profiles.put(one);
             }
             JSONObject root = new JSONObject();
@@ -368,10 +398,16 @@ final class SplitProfiles {
                 p.order.add(name);
                 p.domains.put(name, new ArrayList<String>());
                 p.apps.put(name, new ArrayList<String>());
+                p.geo.put(name, new ArrayList<GeoDefinition>());
                 target = name;
             }
             fill(p.domains.get(target), one.optJSONArray("domains"));
             fill(p.apps.get(target), one.optJSONArray("apps"));
+            JSONArray geoRows = one.optJSONArray("geo");
+            if (geoRows != null) {
+                for (int j = 0; j < geoRows.length(); ++j)
+                    p.putGeoList(target, GeoDefinition.fromJson(geoRows.optJSONObject(j)));
+            }
         }
         p.edited = p.effective(root.optString("edit", DEFAULT));
         p.mirrored = p.effective(root.optString("mirror", DEFAULT));
