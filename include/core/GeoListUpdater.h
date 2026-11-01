@@ -24,11 +24,13 @@ signals:
                   const freetunnel::CachedGeoList &list, const QString &error);
 private:
     void request(const QUrl &url);
-    void read();
+    void consumeAvailable();
     void downloaded();
     void finish(const CachedGeoList &list, const QString &error);
     QString m_directory;
     GeoListDefinition m_definition;
+    // Used by request() in the implementation; Codacy checks this header alone.
+    // cppcheck-suppress unusedStructMember
     QNetworkAccessManager *m_manager;
     QNetworkReply *m_reply = nullptr;
     QTimer m_deadline;

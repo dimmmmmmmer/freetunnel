@@ -85,7 +85,7 @@ struct Read {
     QString error;
 };
 
-Read read(const QByteArray &data, const QString &spec, GeoListKind kind,
+Read parseFixture(const QByteArray &data, const QString &spec, GeoListKind kind,
           GeoDirection direction = GeoDirection::ThroughVpn)
 {
     Read r;
@@ -128,7 +128,7 @@ void TestGeoRules::overflowingVarintsAreRejected()
     // Unknown varint field with ten bytes: only bit 0 is legal in byte ten.
     QByteArray data = geosite("x", {domain(2, "example.com")});
     data += key(5, 0) + QByteArray(9, char(0x80)) + QByteArray(1, char(0x02));
-    const Read r = read(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
     QVERIFY(!r.ok);
     QVERIFY(r.entries.empty());
 }
@@ -176,7 +176,7 @@ void TestGeoRules::geositeTakesOneCategoryInEveryCase()
     const QByteArray data = geosite("GOOGLE", {domain(2, "google.com")})
             + geosite("RU-BLOCKED", {domain(2, "blocked.example"), domain(2, "other.example")})
             + geosite("CATEGORY-RU", {domain(2, "ya.ru")});
-    const Read r = read(data, QStringLiteral("https://x.test/geosite.dat#ru-blocked"), GeoListKind::Sites);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#ru-blocked"), GeoListKind::Sites);
     QVERIFY2(r.ok, qPrintable(r.error));
     QCOMPARE(r.stats.entries, 2);
     QVERIFY(has(r, "blocked.example"));
@@ -189,7 +189,7 @@ void TestGeoRules::geositeDomainTypesMapToWhatTheCoreMatches()
 {
     const QByteArray data = geosite("X", {domain(0, "keyword"), domain(1, "^re.*gex$"),
                                           domain(2, "root.example"), domain(3, "full.example")});
-    const Read r = read(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
     QVERIFY2(r.ok, qPrintable(r.error));
     // A root domain is itself and every name under it; a full one only itself.
     QVERIFY(has(r, "root.example"));
@@ -210,7 +210,7 @@ void TestGeoRules::geoipGivesNormalisedSubnets()
     v6[2] = char(0xe9);
     v6[15] = char(0x01); // host bits, cleared by the /20, as is half of 0xe9
     const QByteArray data = geoip("RU", {cidr(v4(5, 3, 7, 9), 24), cidr(v4(1, 1, 1, 1), 32), cidr(v6, 20)});
-    const Read r = read(data, QStringLiteral("https://x.test/geoip.dat#ru"), GeoListKind::Ips);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geoip.dat#ru"), GeoListKind::Ips);
     QVERIFY2(r.ok, qPrintable(r.error));
     QVERIFY(has(r, "5.3.7.0/24"));
     QVERIFY(has(r, "1.1.1.1/32"));
@@ -221,7 +221,7 @@ void TestGeoRules::geoipGivesNormalisedSubnets()
 void TestGeoRules::aMissingCategoryIsAnError()
 {
     const QByteArray data = geosite("GOOGLE", {domain(2, "google.com")});
-    const Read r = read(data, QStringLiteral("https://x.test/geosite.dat#ru-blocked"), GeoListKind::Sites);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#ru-blocked"), GeoListKind::Sites);
     QVERIFY(!r.ok);
     QVERIFY(r.error.contains(QStringLiteral("ru-blocked")));
     QVERIFY(r.entries.empty());
@@ -232,7 +232,7 @@ void TestGeoRules::aMissingCategoryIsAnError()
 void TestGeoRules::anInvertedGeoipCategoryIsRefused()
 {
     const QByteArray data = geoip("NOT-RU", {cidr(v4(5, 3, 7, 0), 24)}, /*reverse=*/true);
-    const Read r = read(data, QStringLiteral("https://x.test/geoip.dat#not-ru"), GeoListKind::Ips);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geoip.dat#not-ru"), GeoListKind::Ips);
     QVERIFY(!r.ok);
     QVERIFY(r.entries.empty());
 }
@@ -269,7 +269,7 @@ void TestGeoRules::unknownFieldsAreSkipped()
     QByteArray body = key(9, 1) + QByteArray(8, 'x') + lenField(1, "X") + key(10, 5) + QByteArray(4, 'y')
             + lenField(2, domain(2, "a.example")) + lenField(11, "resource-hash");
     const QByteArray data = lenField(1, body) + key(2, 0) + varint(5);
-    const Read r = read(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
+    const Read r = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
     QVERIFY2(r.ok, qPrintable(r.error));
     QVERIFY(has(r, "a.example"));
 }
@@ -289,7 +289,7 @@ void TestGeoRules::textListsReadEveryPublishedForm()
                             "198.51.100.77/24\n"
                             "2001:db8::1/48\n"
                             "bad..name\n";
-    const Read r = read(text, QStringLiteral("https://x.test/list.txt"), GeoListKind::Sites);
+    const Read r = parseFixture(text, QStringLiteral("https://x.test/list.txt"), GeoListKind::Sites);
     QVERIFY2(r.ok, qPrintable(r.error));
     QVERIFY(has(r, "blocked.example"));
     QVERIFY(has(r, "*.blocked.example"));
@@ -306,7 +306,7 @@ void TestGeoRules::textListsReadEveryPublishedForm()
 
 void TestGeoRules::internationalNamesBecomeTheirAsciiForm()
 {
-    const Read r = read(QByteArray("domain:пример.рф\nрф\n"), QStringLiteral("https://x.test/l.txt"),
+    const Read r = parseFixture(QByteArray("domain:пример.рф\nрф\n"), QStringLiteral("https://x.test/l.txt"),
                         GeoListKind::Sites);
     QVERIFY2(r.ok, qPrintable(r.error));
     QVERIFY(has(r, "xn--e1afmkfd.xn--p1ai"));
@@ -336,7 +336,7 @@ void TestGeoRules::aListWithNothingUsableIsAnError()
 void TestGeoRules::bypassListsCannotTakeTheWholeInternetOut()
 {
     const QByteArray text = "0.0.0.0/1\n128.0.0.0/1\n10.0.0.0/8\n::/1\n2000::/3\n2a14:e800::/29\n0.0.0.0/0\n";
-    const Read bypass = read(text, QStringLiteral("https://x.test/l.txt"), GeoListKind::Ips,
+    const Read bypass = parseFixture(text, QStringLiteral("https://x.test/l.txt"), GeoListKind::Ips,
                              GeoDirection::Bypass);
     QVERIFY2(bypass.ok, qPrintable(bypass.error));
     QVERIFY(has(bypass, "10.0.0.0/8"));
@@ -349,7 +349,7 @@ void TestGeoRules::bypassListsCannotTakeTheWholeInternetOut()
 
     // Through the tunnel, a wide subnet only sends more through it; /0 still
     // means nothing a list could intend.
-    const Read through = read(text, QStringLiteral("https://x.test/l.txt"), GeoListKind::Ips,
+    const Read through = parseFixture(text, QStringLiteral("https://x.test/l.txt"), GeoListKind::Ips,
                               GeoDirection::ThroughVpn);
     QVERIFY(has(through, "0.0.0.0/1"));
     QVERIFY(!has(through, "0.0.0.0/0"));
@@ -370,7 +370,7 @@ void TestGeoRules::joinedEntriesAreSortedAndUnique()
 void TestGeoRules::invalidFieldNumbersAreRejected()
 {
     const auto data = geosite("x", {domain(2, "example.com")}) + intField(0x20000000, 0);
-    const Read result = read(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
+    const Read result = parseFixture(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
     QVERIFY(!result.ok);
 }
 

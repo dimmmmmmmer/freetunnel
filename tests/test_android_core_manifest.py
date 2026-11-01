@@ -21,6 +21,7 @@ class CoreManifestTest(unittest.TestCase):
         (self.root / 'scripts').mkdir()
         (self.root / 'patch').write_text('reviewed routing patch')
         (self.root / 'scripts/build-trusttunnel-android.sh').write_text('reviewed builder')
+        (self.root / 'scripts/export-patched-boringssl.sh').write_text('pinned recipes')
         self.abis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
         (self.root / 'android/core-source.json').write_text(json.dumps({
             'version': '1.1.11', 'commit': 'a' * 40, 'patches': ['patch'], 'abis': self.abis}))
@@ -54,6 +55,11 @@ class CoreManifestTest(unittest.TestCase):
     def test_builder_change_detected(self):
         before = manifest.expected(self.artifact)
         (self.root / 'scripts/build-trusttunnel-android.sh').write_text('different builder')
+        self.assertNotEqual(before, manifest.expected(self.artifact))
+
+    def test_recipe_change_detected(self):
+        before = manifest.expected(self.artifact)
+        (self.root / 'scripts/export-patched-boringssl.sh').write_text('different recipes')
         self.assertNotEqual(before, manifest.expected(self.artifact))
 
     def test_source_pin_change_detected(self):

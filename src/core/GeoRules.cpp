@@ -1,6 +1,6 @@
-#include <QCoreApplication>
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/GeoRules.h"
+#include <QCoreApplication>
 
 #include <QHostAddress>
 #include <QList>
@@ -118,6 +118,19 @@ std::string_view viewOf(const QByteArray &data)
 // A domain name as the core matches it: lower case, ASCII (an internationalised
 // name in its xn-- form), labels of letters, digits, '-' and '_', no empty one.
 // A single label is allowed: the lists name whole zones (ru, su, xn--p1ai).
+bool validDomainCharacters(const QByteArray &latin)
+{
+    char last = '.';
+    for (const char ch : latin) {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_'
+                || ch == '.';
+        if (!ok || (ch == '.' && last == '.'))
+            return false;
+        last = ch;
+    }
+    return !latin.startsWith('.') && !latin.startsWith('-');
+}
+
 std::optional<std::string> normalisedDomain(QString name)
 {
     name = name.trimmed().toLower();
@@ -139,15 +152,7 @@ std::optional<std::string> normalisedDomain(QString name)
         name = QString::fromLatin1(ace).toLower();
     }
     const QByteArray latin = name.toLatin1();
-    char last = '.';
-    for (const char ch : latin) {
-        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_'
-                || ch == '.';
-        if (!ok || (ch == '.' && last == '.'))
-            return std::nullopt;
-        last = ch;
-    }
-    if (latin.startsWith('.') || latin.startsWith('-'))
+    if (!validDomainCharacters(latin))
         return std::nullopt;
     return std::string(latin.constData(), static_cast<size_t>(latin.size()));
 }
@@ -299,54 +304,51 @@ bool readIpCidr(std::string_view msg, Collector *c)
     return true;
 }
 
-// One GeoSite or GeoIP message: its code (field 1), and if it is the category
-// asked for, its entries (field 2). *matched says whether it was.
-bool readDatEntry(std::string_view msg, const QString &category, GeoListKind kind, Collector *c,
-                  bool *matched, QString *error)
-{
-    // The code comes first in every file seen, but nothing in the format says
-    // so: collect the entries' spans, and read them once the code is known.
-    WireReader r(msg);
+struct DatCategory {
     QString code;
     std::vector<std::string_view> items;
     bool reverse = false;
+};
+
+bool decodeDatCategory(std::string_view msg, GeoListKind kind, DatCategory *category)
+{
+    WireReader r(msg);
     uint32_t field = 0;
     uint32_t wire = 0;
     while (r.next(&field, &wire)) {
-        if (field == 1 && wire == 2) {
-            std::string_view v;
-            if (!r.bytes(&v))
-                return false;
-            code = QString::fromUtf8(v.data(), static_cast<qsizetype>(v.size()));
-        } else if (field == 2 && wire == 2) {
-            std::string_view v;
-            if (!r.bytes(&v))
-                return false;
-            items.push_back(v);
+        if ((field == 1 || field == 2) && wire == 2) {
+            std::string_view value;
+            if (!r.bytes(&value)) return false;
+            if (field == 1)
+                category->code = QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+            else
+                category->items.push_back(value);
         } else if (kind == GeoListKind::Ips && field == 3 && wire == 0) {
-            // GeoIP.reverse_match (inverse_match in V2Ray).
             uint64_t flag = 0;
-            if (!r.varint(&flag))
-                return false;
-            reverse = flag != 0;
+            if (!r.varint(&flag)) return false;
+            category->reverse = flag != 0;
         } else if (!r.skip(wire)) {
             return false;
         }
     }
-    if (r.failed())
-        return false;
-    *matched = code.compare(category, Qt::CaseInsensitive) == 0;
-    if (!*matched)
-        return true;
-    if (reverse) {
-        // "Everything but these": nothing the core can be given as a list.
-        *error = QCoreApplication::translate("GeoRules", "category %1 is an inverted match, which cannot be used").arg(code);
+    return !r.failed();
+}
+
+// Decode all spans first: protobuf does not require the category name to come first.
+bool readDatEntry(std::string_view msg, const QString &category, GeoListKind kind, Collector *c,
+                  bool *matched, QString *error)
+{
+    DatCategory decoded;
+    if (!decodeDatCategory(msg, kind, &decoded)) return false;
+    *matched = decoded.code.compare(category, Qt::CaseInsensitive) == 0;
+    if (!*matched) return true;
+    if (decoded.reverse) {
+        *error = QCoreApplication::translate("GeoRules", "category %1 is an inverted match, which cannot be used").arg(decoded.code);
         return false;
     }
-    for (const std::string_view item : items) {
+    for (const std::string_view item : decoded.items) {
         const bool ok = kind == GeoListKind::Sites ? readSiteDomain(item, c) : readIpCidr(item, c);
-        if (!ok)
-            return false;
+        if (!ok) return false;
     }
     return true;
 }
@@ -432,19 +434,24 @@ void readText(const QByteArray &data, Collector *c)
     }
 }
 
-} // namespace
-
-GeoSource parseGeoSource(const QString &spec, QString *why)
+bool allowedGeoScheme(const QUrl &url)
 {
-    GeoSource out;
-    const QUrl url(spec.trimmed(), QUrl::StrictMode);
     bool https = url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0;
 #ifdef FT_ENABLE_TEST_HOOKS
     // The tests' HTTP server, on the loopback address alone. Compiled out of
     // release builds.
     https = https || (url.scheme() == QLatin1String("http") && url.host() == QLatin1String("127.0.0.1"));
 #endif
-    if (!url.isValid() || !https || url.host().isEmpty()) {
+    return https;
+}
+
+} // namespace
+
+GeoSource parseGeoSource(const QString &spec, QString *why)
+{
+    GeoSource out;
+    const QUrl url(spec.trimmed(), QUrl::StrictMode);
+    if (!url.isValid() || !allowedGeoScheme(url) || url.host().isEmpty()) {
         if (why)
             *why = QCoreApplication::translate("GeoRules", "not an https address");
         return out;

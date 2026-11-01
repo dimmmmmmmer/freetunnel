@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Bind an internally built AAR to the reviewed stable source and local patch.
+"""
+Bind an internally built AAR to the reviewed stable source and local patch.
 
 This is an integrity check, not a signature: CI builds the artifact itself and
 passes it only to jobs in the same workflow run.
@@ -32,6 +33,7 @@ def expected(artifact):
         'version': pin['version'], 'commit': pin['commit'], 'abis': abis,
         'patches': {name: sha256(ROOT / name) for name in pin['patches']},
         'builder': sha256(ROOT / 'scripts/build-trusttunnel-android.sh'),
+        'recipes': sha256(ROOT / 'scripts/export-patched-boringssl.sh'),
         'sha256': sha256(artifact),
     }
 

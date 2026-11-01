@@ -45,6 +45,9 @@ tools.build:jobs=4
 tools.build:compiler_executables={"c": "clang-18", "cpp": "clang++-18"}
 PROFILE
 export CC=clang-18 CXX=clang++-18
+# Upstream's private packages are exported from their pinned public sources.
+(cd "$work/source" && python3 scripts/bootstrap_conan_deps.py)
+bash "$repo_dir/scripts/export-patched-boringssl.sh"
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android --toolchain 1.95
 cargo ndk --version | grep -F '4.1.2'
 printf 'sdk.dir=%s\ncmake.dir=/usr\n' "$ANDROID_HOME" > "$work/source/platform/android/local.properties"

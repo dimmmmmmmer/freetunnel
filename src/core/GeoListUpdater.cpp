@@ -54,10 +54,10 @@ void GeoListUpdater::request(const QUrl &url)
     req.setRawHeader("User-Agent", "FreeTunnel-GeoLists");
     m_reply = m_manager->get(req);
     m_reply->setReadBufferSize(256 * 1024);
-    connect(m_reply, &QNetworkReply::readyRead, this, &GeoListUpdater::read);
+    connect(m_reply, &QNetworkReply::readyRead, this, &GeoListUpdater::consumeAvailable);
     connect(m_reply, &QNetworkReply::finished, this, &GeoListUpdater::downloaded);
 }
-void GeoListUpdater::read()
+void GeoListUpdater::consumeAvailable()
 {
     m_body += m_reply->read(GeoListCache::maxBytes + 1 - m_body.size());
     if (m_body.size() > GeoListCache::maxBytes)
@@ -65,7 +65,7 @@ void GeoListUpdater::read()
 }
 void GeoListUpdater::downloaded()
 {
-    read();
+    consumeAvailable();
     if (!m_reply)
         return;
     const int status = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();

@@ -6,6 +6,8 @@
 namespace freetunnel {
 
 struct CachedGeoList {
+    // Read by BackendSplit and GeoListController in separate translation units.
+    // cppcheck-suppress unusedStructMember
     std::vector<std::string> entries;
     GeoListStats stats;
     qint64 routingBytes = 0; // JSON strings including the routing-tier prefix
