@@ -1,7 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "real_helper.h"
 #include "vpn/vpn_helper_launch.h"
-#include <QTemporaryDir>
+#include <QDir>
+#include <QTemporaryFile>
 #include <windows.h>
 #include <winsvc.h>
 
@@ -41,12 +42,12 @@ void TestHelperService::serviceAuthenticatesAndStops()
         DeleteService(service);
         CloseServiceHandle(service);
     });
-    QTemporaryDir temporary;
-    QVERIFY(temporary.isValid());
     const QString token = QStringLiteral("0123456789abcdef0123456789abcdef");
-    const QString path = temporary.filePath(QStringLiteral(".fthelper-service"));
-    QFile file(path);
-    QVERIFY(file.open(QIODevice::WriteOnly));
+    // Match production's inherited Windows ACLs. QTemporaryDir creates a
+    // private ACL whose child files cannot be read by the LocalSystem service.
+    QTemporaryFile file(QDir::tempPath() + QStringLiteral("/.fthelper-service-XXXXXX"));
+    QVERIFY(file.open());
+    const QString path = file.fileName();
     QCOMPARE(file.write(token.toUtf8()), qint64(32));
     file.close();
     QTcpServer reservation;

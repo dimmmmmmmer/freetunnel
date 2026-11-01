@@ -178,7 +178,7 @@ jobs:
 
       - name: Configure
         if: needs.changes.outputs.desktop != 'false'
-        run: cmake -S tests -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S tests -B build-tests -G Ninja
 
       - name: Build
         if: needs.changes.outputs.desktop != 'false'
