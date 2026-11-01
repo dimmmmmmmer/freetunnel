@@ -139,7 +139,10 @@ def fits(literal, templates, words, app_text):
     """
     Whether a test's key is a shape the app builds.
 
-    A number or a $name in it stands for a number (the first time) or for any word the app uses in a key (a name). A shape that begins with something unknown ("key + ":select"", a row that adds its own part to the key it is given) takes any beginning, so the key's first word is asked for as well, as the start of some key of the app's.
+    A number or a $name in it stands for a number (the first time) or for any word the app uses in a key
+    (a name). A shape that begins with something unknown ("key + ":select"", a row that adds its own part
+    to the key it is given) takes any beginning, so the key's first word is asked for as well, as the
+    start of some key of the app's.
     """
     def one(key):
         for template, open_start in templates:

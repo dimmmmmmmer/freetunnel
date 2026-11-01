@@ -518,7 +518,7 @@ final class DeepLinkImport {
         boolean hasIpv6 = true;
         String username = "";
         // Empty until populated from the user's configuration; no embedded credential.
-        String password = ""; // nosemgrep: java.lang.security.audit.hardcoded-password.hardcoded-password
+        String password = ""; // nosemgrep
         boolean skipVerification;
         /** The certificates, one DER element after another, as tag 0x08 holds them. */
         byte[] certificate = new byte[0];

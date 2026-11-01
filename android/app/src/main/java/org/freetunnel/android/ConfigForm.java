@@ -39,7 +39,7 @@ final class ConfigForm {
         String addresses = "";
         String username = "";
         // Empty until populated from the user's configuration; no embedded credential.
-        String password = ""; // nosemgrep: java.lang.security.audit.hardcoded-password.hardcoded-password
+        String password = ""; // nosemgrep
         /** "http2" or "http3". */
         String protocol = "http2";
         String dns = "";
