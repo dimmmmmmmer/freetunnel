@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""The Android app's icons, made from the desktop's.
+"""The Android app's icons, made from the desktop's."""
+import argparse
+import re
+import struct
+import sys
+from defusedxml import ElementTree as element_tree
+from pathlib import Path
+
+HELP = __doc__ + """
 
 The desktop draws assets/icons/*.svg and assets/logo.svg. The Android app draws the
 same shapes from VectorDrawables, so that an icon is the same icon in both. This writes
@@ -28,12 +36,6 @@ sit on the line as the desktop's do, whatever font a TextView would fall back to
 
 tests/test_android_icons.sh runs --check, with fixtures.
 """
-import argparse
-import re
-import struct
-import sys
-from defusedxml import ElementTree as element_tree
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -262,12 +264,11 @@ def glyph(character, w, h, d, stroke):
 
 
 class Font:
-    """
-    Read TrueType outlines for the bundled Inter glyphs.
+    """Read TrueType outlines for the bundled Inter glyphs."""
+    # Read TrueType outlines for the bundled Inter glyphs.
 
-    Reads cmap (format 4 or 12), loca, glyf and head tables, simple glyphs
-    and translated composites. Unsupported forms are rejected.
-    """
+    # Reads cmap (format 4 or 12), loca, glyf and head tables, simple glyphs and translated composites.
+    # Unsupported forms are rejected.
 
     def __init__(self, path):
         """Read the font tables needed to outline the bundled glyphs."""
@@ -468,7 +469,7 @@ def wanted(assets, res):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail if a drawable differs from what the SVG files give")
     parser.add_argument("--assets", default=str(ROOT / "assets"), help="the directory with icons/, logo.svg and fonts/inter/Inter-Regular.ttf")
     parser.add_argument("--res", default=str(ROOT / "android/app/src/main/res/drawable"), help="the drawable directory")
