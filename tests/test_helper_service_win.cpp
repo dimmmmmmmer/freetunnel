@@ -67,7 +67,12 @@ void TestHelperService::serviceAuthenticatesAndStops()
         socket.abort();
         QTest::qWait(50);
     }
-    QCOMPARE(socket.state(), QAbstractSocket::ConnectedState);
+    SERVICE_STATUS connectionStatus{};
+    QVERIFY(QueryServiceStatus(service, &connectionStatus));
+    const QByteArray diagnostic = QStringLiteral("Service state=%1, Windows exit=%2, helper exit=%3; socket: %4")
+            .arg(connectionStatus.dwCurrentState).arg(connectionStatus.dwWin32ExitCode)
+            .arg(connectionStatus.dwServiceSpecificExitCode).arg(socket.errorString()).toUtf8();
+    QVERIFY2(socket.state() == QAbstractSocket::ConnectedState, diagnostic.constData());
     QVERIFY(realhelper::authenticate(socket, token));
     // A normal GUI disconnect ends the service, without an administrator stop.
     socket.disconnectFromHost();

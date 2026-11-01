@@ -6,7 +6,7 @@
 # The answer is false only for a pull request every one of whose files is
 # Android's: anything under android/, its workflow and its two scripts. Those
 # have their own workflow, android.yml, and nothing in the desktop ones builds
-# or tests them. Everything else is true: a push, a tag, a dispatch, the weekly
+# or tests them. Prose-only documentation is also excluded. Everything else is true: a push, a tag, a dispatch, the weekly
 # run, and a pull request that touches any other file. So is every doubt: a
 # list that cannot be read, an empty one, one that may be incomplete, one that
 # may be of another commit. A wrong true costs a desktop run; a wrong false
@@ -94,7 +94,13 @@ jq -r -s '[.[][] | .filename, (.previous_filename // empty)]
           | map(select((startswith("android/")
                         or . == ".github/workflows/android.yml"
                         or . == "scripts/prepare-trusttunnel-android.sh"
-                        or . == "scripts/build-android-release.sh") | not))
+                        or . == "scripts/build-android-release.sh"
+                        or . == "README.md"
+                        or . == "USER_GUIDE.md"
+                        or . == "CHANGELOG.md"
+                        or . == "CONTRIBUTING.md"
+                        or . == "SECURITY.md"
+                        or (startswith("docs/") and endswith(".md"))) | not))
           | .[]' "$tmp/files.json" > "$tmp/desktop" \
   || doubt "could not sort the files of #$pr"
 desktop_files="$(wc -l < "$tmp/desktop")"
@@ -102,5 +108,5 @@ if [[ "$desktop_files" -gt 0 ]]; then
   decide true "#$pr touches desktop paths ($desktop_files): $(head -n 5 "$tmp/desktop" | paste -sd ' ' -)"
 fi
 
-echo "::notice title=Android-only change::all $listed files of #$pr are Android's, so the desktop jobs report without running"
-decide false "all $listed files of #$pr are Android's"
+echo "::notice title=Android/documentation-only change::all $listed files of #$pr are Android or documentation, so the desktop jobs report without running"
+decide false "all $listed files of #$pr are Android or documentation"
