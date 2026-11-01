@@ -1259,3 +1259,10 @@ add_executable(test_geolistupdater test_geolistupdater.cpp ../src/core/GeoListUp
 target_include_directories(test_geolistupdater PRIVATE ../include)
 target_link_libraries(test_geolistupdater PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME geolistupdater COMMAND test_geolistupdater)
+
+add_executable(test_geolistcontroller test_geolistcontroller.cpp ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h ../src/core/GeoListUpdater.cpp ../include/core/GeoListUpdater.h
+    ../src/core/GeoListCache.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_geolistcontroller PRIVATE ../include)
+target_link_libraries(test_geolistcontroller PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME geolistcontroller COMMAND test_geolistcontroller)
