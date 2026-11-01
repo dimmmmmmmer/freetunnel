@@ -2801,11 +2801,14 @@ public final class MainActivity extends Activity {
             card.setPadding(dp(10), dp(10), dp(10), dp(10));
             card.setBackground(ui.outlined(t().surface, t().border, 10));
             body.addView(card, lp(-1, -2));
+            LinearLayout content = column();
+            content.setPadding(dp(10), 0, dp(10), 0);
+            card.addView(content, lp(-1, -2));
             ToggleView toggle = ui.toggle(list.enabled, false, key + ":enabled");
             toggle.setListener((v, checked) -> editRules(m -> m.putGeoList(m.edited(),
                     new GeoDefinition(list.id, list.name, list.source, list.kind, list.bypass, checked))));
-            card.addView(ui.toggleRow(list.name, null, toggle), ui.focusRowLp());
-            card.addView(ui.dropdown(getString(R.string.geo_route), getString(list.bypass ? R.string.text_bypass_vpn_61
+            content.addView(ui.toggleRow(list.name, null, toggle), ui.focusRowLp());
+            content.addView(ui.dropdown(getString(R.string.geo_route), getString(list.bypass ? R.string.text_bypass_vpn_61
                     : R.string.text_through_vpn_62), key + ":direction", v -> showSelect(key + ":direction",
                     new String[]{getString(R.string.text_through_vpn_62), getString(R.string.text_bypass_vpn_61)},
                     list.bypass ? 1 : 0, index -> editRules(m -> m.putGeoList(m.edited(),
@@ -2815,16 +2818,18 @@ public final class MainActivity extends Activity {
                     ? getString(R.string.geo_not_downloaded) : getString(R.string.geo_entries, state.cached.stats.entries,
                     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
                             .format(new java.util.Date(state.cached.updatedMillis)));
-            card.addView(ui.label(status, 12, t().textDim), lp(-1, -2));
+            content.addView(ui.label(status, 12, t().textDim), lp(-1, -2));
             if (state.cached != null && state.cached.stats.skipped > 0)
-                card.addView(ui.label(getString(R.string.geo_skipped, state.cached.stats.skipped), 12, t().textDim), lp(-1, -2));
-            if (!state.error.isEmpty()) card.addView(ui.notice(getString(R.string.geo_update_failed)), lp(-1, -2));
+                content.addView(ui.label(getString(R.string.geo_skipped, state.cached.stats.skipped), 12, t().textDim), lp(-1, -2));
+            if (!state.error.isEmpty()) content.addView(ui.notice(getString(R.string.geo_update_failed)), lp(-1, -2));
             LinearLayout actions = row();
-            Button update = ui.button(getString(R.string.geo_update), Ui.Kind.NEUTRAL, Ui.F_SECONDARY, key + ":update");
+            Button update = ui.geoAction(getString(R.string.geo_update), key + ":update");
+            update.setEnabled(!state.busy);
+            update.setAlpha(state.busy ? 0.5f : 1f);
             update.setOnClickListener(v -> GeoRepository.get(this).refresh(list, true));
             actions.addView(update, lp(-2, 32));
             actions.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-            Button remove = ui.button(getString(R.string.text_delete), Ui.Kind.NEUTRAL, Ui.F_SECONDARY, key + ":remove");
+            Button remove = ui.geoAction(getString(R.string.text_delete), key + ":remove");
             remove.setOnClickListener(v -> editRules(m -> m.removeGeoList(m.edited(), list.id)));
             actions.addView(remove, lp(-2, 32));
             gap(card, 4); card.addView(actions, lp(-1, -2));
