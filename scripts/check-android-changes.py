@@ -26,7 +26,8 @@ def main():
             try:
                 # Include both sides of renames. A shallow PR merge checkout has
                 # both parents; missing objects fail closed to a full Android run.
-                output = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', base, head])  # nosec B603 - Only validated SHA-1 IDs are variable.
+                # Only validated SHA-1 IDs are variable.
+                output = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', base, head])  # nosec B603
                 paths = output.decode('utf-8').rstrip('\0').split('\0') if output else []
                 run = affected(paths)
             except (subprocess.CalledProcessError, UnicodeError):

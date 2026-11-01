@@ -32,11 +32,13 @@ class AndroidCiTest(unittest.TestCase):
         script = '\n'.join(line[10:] for line in body.splitlines())
         for results in itertools.product(['success', 'failure', 'cancelled', 'skipped'], repeat=3):
             env = dict(os.environ, CHANGES='success', ANDROID='true', BUILD=results[0], DEVICES=results[1], SIGNING=results[2])
-            result = subprocess.run(['bash', '-c', script], env=env, capture_output=True)  # nosec B603 - Command and script come from this repository, not user input.
+            # Command and script come from this repository, not user input.
+            result = subprocess.run(['bash', '-c', script], env=env, capture_output=True)  # nosec B603
             self.assertEqual(all(r == 'success' for r in results), result.returncode == 0, results)
         for changed, expected in [('success', 0), ('failure', 1), ('cancelled', 1)]:
             env = dict(os.environ, CHANGES=changed, ANDROID='false', BUILD='skipped', DEVICES='skipped', SIGNING='skipped')
-            self.assertEqual(expected, subprocess.run(['bash', '-c', script], env=env, capture_output=True).returncode)  # nosec B603 - Command and script come from this repository, not user input.
+            # Command and script come from this repository, not user input.
+            self.assertEqual(expected, subprocess.run(['bash', '-c', script], env=env, capture_output=True).returncode)  # nosec B603
 
     def test_instrumentation_exit_and_result_are_both_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -47,7 +49,8 @@ class AndroidCiTest(unittest.TestCase):
                                          ('FAILURES!!!', '0', False), ('OK (1 test)', '1', False),
                                          ('', '0', False), ('OK (0 tests)', '0', False)]:
                 env = dict(os.environ, PATH=temporary + ':' + os.environ['PATH'], FAKE_OUTPUT=output, FAKE_STATUS=code)
-                result = subprocess.run(['bash', str(ROOT / 'scripts/run-android-permission-test.sh')], env=env, capture_output=True)  # nosec B603 - Command and script come from this repository, not user input.
+                # Command and script come from this repository, not user input.
+                result = subprocess.run(['bash', str(ROOT / 'scripts/run-android-permission-test.sh')], env=env, capture_output=True)  # nosec B603
                 self.assertEqual(passed, result.returncode == 0, (output, code))
                 self.assertIn(output.encode(), result.stdout)
 
