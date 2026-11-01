@@ -1,4 +1,5 @@
-# FreeTunnel
+<!-- markdownlint-disable-next-line MD033 -->
+# <img src="assets/logo.svg" width="48" alt=""/> FreeTunnel
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![Codacy coverage](https://app.codacy.com/project/badge/Coverage/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
@@ -6,9 +7,6 @@
 [![Tests](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml)
 [![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
 [![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-
-<!-- markdownlint-disable-next-line MD033 -->
-<img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
 
 A free, open-source VPN app for Windows, macOS, Linux, Android and Android TV,
 using [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient).
@@ -20,13 +18,12 @@ Get the app from [**Releases**](https://github.com/dimmmmmmmer/freetunnel/releas
 
 | Device | Download |
 | --- | --- |
-| Windows 10/11 | `freetunnel-windows-x86_64-Setup.exe` |
-| Mac — Apple Silicon or Intel, macOS 14.4+ | `freetunnel-macos-universal.dmg` |
-| Linux — Ubuntu 22.04+, Debian 12+ | `freetunnel-linux-x86_64.deb` |
-| Other Linux distributions with glibc 2.35+ | `freetunnel-x86_64.AppImage` |
-| Android phone, tablet or TV — Android 8.0+ | [Android release](https://github.com/dimmmmmmmer/freetunnel/releases?q=android-&expanded=true) |
+| Windows 10/11 | [freetunnel-windows-x86_64-Setup.exe](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-windows-x86_64-Setup.exe) |
+| Mac — Apple Silicon or Intel, macOS 14.4+ | [freetunnel-macos-universal.dmg](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-macos-universal.dmg) |
+| Linux — Ubuntu 22.04+, Debian 12+ | [freetunnel-linux-x86_64.deb](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-linux-x86_64.deb) |
+| Other Linux distributions with glibc 2.35+ | [freetunnel-x86_64.AppImage](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-x86_64.AppImage) |
+| Android phone, tablet or TV — Android 8.0+ | [Download APK](https://github.com/dimmmmmmmer/freetunnel/releases/download/android-1.2.4/freetunnel-android-1.2.4.apk) |
 
-Download `freetunnel-android.apk` from the Android release; older releases include the version in its filename.
 See [what changed](CHANGELOG.md) for release notes.
 
 ## Features
