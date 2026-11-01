@@ -45,7 +45,7 @@ public final class LinkReceiverTest {
     private static final LinkReceiver.Pages PAGES = new LinkReceiver.Pages("en", "Send to the TV", "Paste a link",
             "Or choose a file", "Send", "The TV asks first", "Sent", "Paste or choose one", "Too large", "Wait", "Wrong code", "Stopped");
     private static final String CSP =
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-" + LinkReceiver.Pages.scriptHash() + "'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
     private final List<LinkReceiver> opened = new ArrayList<>();
     // The TV's count of texts it has taken and not answered, which the receivers in a test share.
@@ -618,17 +618,33 @@ public final class LinkReceiverTest {
         assertEquals(Arrays.asList(html, html, html, plain, plain, plain, plain, plain, plain, html, html, html, html), types);
     }
 
+    @Test public void invalidConfigurationIsNotAcknowledgedOrQueued() throws Exception {
+        for (boolean valid : new boolean[]{false, true}) {
+            ByteArrayInputStream in = new ByteArrayInputStream(utf8(post("/" + CODE, form(LINK))));
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            AtomicInteger places = new AtomicInteger();
+            LinkReceiver.Outcome outcome = LinkReceiver.handle(in, out, CODE, HOST, PAGES, false, places,
+                    text -> { assertEquals(LINK, text); return valid; });
+            String response = out.toString("UTF-8");
+            assertTrue(response, response.startsWith(valid ? "HTTP/1.1 200 " : "HTTP/1.1 422 "));
+            assertEquals(valid ? 1 : 0, places.get());
+            assertEquals(valid ? LINK : null, outcome.text);
+        }
+    }
+
     @Test public void thePagesLoadNothingAndEscapeTheirText() {
         String hostile = "<script>alert(\"x\")</script> & 'y'";
         LinkReceiver.Pages pages = new LinkReceiver.Pages("en\"><script>", hostile, hostile, hostile, hostile, hostile, hostile,
                 hostile, hostile, hostile, hostile, hostile);
         String escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;";
         for (String page : new String[]{pages.form, pages.sent, pages.retry, pages.tooLarge, pages.busy, pages.wrongCode, pages.lockedOut}) {
+            String trusted = "<script>" + LinkReceiver.Pages.SCRIPT + "</script>";
+            assertTrue(page.contains(trusted));
+            page = page.replace(trusted, "");
             assertFalse(page, page.contains("<script"));
             assertTrue(page, page.contains(escaped));
             assertTrue(page, page.startsWith("<!doctype html><html lang=\"en&quot;&gt;&lt;script&gt;\">"));
-            // Nothing loaded from anywhere, and no script: the page is its own style, which the CSP allows
-            // and nothing else.
+            // Text cannot inject scripts or external resources beside the trusted inline script.
             for (String outside : new String[]{"src=", "href=", "http:", "https:", "url(", "@import", "action=", "<script", "<link",
                     "<img", "<iframe", "onload", "onclick", "javascript:", "data:"})
                 assertFalse(outside + " in " + page, page.toLowerCase(java.util.Locale.ROOT).contains(outside));
@@ -636,16 +652,16 @@ public final class LinkReceiverTest {
         }
         // It posts back to its own address, which carries the code, a pasted text or a
         // file, so neither field is required.
-        assertTrue(PAGES.form.contains("<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"));
+        assertTrue(PAGES.form.contains("<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\""));
         assertTrue(PAGES.form.contains("<textarea id=\"link\" name=\"link\" autocomplete=\"off\""));
-        assertTrue(PAGES.form.contains("<label for=\"file\">Or choose a file</label><input type=\"file\" id=\"file\" name=\"file\">"));
+        assertTrue(PAGES.form.contains("<label for=\"file\">Or choose a file</label><div class=\"actions\"><input type=\"file\" id=\"file\" name=\"file\" multiple>"));
         assertFalse(PAGES.form.contains("required"));
         // Any file: a browser may not know a .toml file's type and grey it out.
         assertFalse(PAGES.form.contains("accept="));
         // The phone sends the next one from the page that says the last was sent, and from the
         // pages that say what to fix or wait for: each is the form again, with its note, under its own notice.
         String form = PAGES.form.substring(PAGES.form.indexOf("<form"), PAGES.form.indexOf("</main>"));
-        assertTrue(form.endsWith("<p class=\"note\">The TV asks first</p>"));
+        assertFalse(form.contains("The TV asks first"));
         assertTrue(PAGES.sent.contains("<p class=\"notice ok\" role=\"status\">Sent</p>" + form));
         assertTrue(PAGES.retry.contains("<p class=\"notice warn\" role=\"alert\">Paste or choose one</p>" + form));
         assertTrue(PAGES.tooLarge.contains("<p class=\"notice warn\" role=\"alert\">Too large</p>" + form));
@@ -702,7 +718,7 @@ public final class LinkReceiverTest {
         assertTrue(css.contains("textarea:focus{border-color:var(--accent)}"));
         // The file field, 14 px in the page's font and in textDim, with the browser's button as the neutral one: surface, radius 8, 32 high
         // and 13 padded as the desktop's buttons are, in a rule of its own for each of its two names.
-        assertTrue(css.contains("input[type=file]{display:block;width:100%;margin:0 0 16px;font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--dim)}"));
+        assertTrue(css.contains("input[type=file]{display:block;flex:1;min-width:0;width:100%;margin:0;height:32px;font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--dim)}"));
         for (String name : new String[]{"::file-selector-button", "::-webkit-file-upload-button"})
             assertTrue(name, css.contains("input[type=file]" + name + "{height:32px;min-width:76px;margin:0 12px 0 0;padding:0 13px;border:0;"
                     + "border-radius:8px;background:var(--surface);color:var(--text);font:14px "));
@@ -725,7 +741,7 @@ public final class LinkReceiverTest {
         assertTrue(css.contains(".notice{margin:0 0 16px;padding:8px 10px;border-radius:8px;background:var(--info);font-size:12px;line-height:1.2}"));
         assertTrue(css.contains(".ok{color:var(--success)}"));
         assertTrue(css.contains(".warn{color:var(--warn)}"));
-        assertTrue(css.contains(".note{margin:14px 0 0;font-size:13px;line-height:1.25;color:var(--faint)}"));
+        assertTrue(css.contains(".actions{display:flex;align-items:center;gap:12px}"));
         // And the browser is told both themes are the page's.
         assertTrue(page.contains("<meta name=\"color-scheme\" content=\"light dark\">"));
     }
@@ -1070,16 +1086,16 @@ public final class LinkReceiverTest {
         // Another receiver that shares the count may fill the last place after this one looked: taking it is a
         // compare-and-set, which the last place goes to one of them by. The step is private; called as handle() calls it.
         java.lang.reflect.Method take = LinkReceiver.class.getDeclaredMethod("take", java.io.OutputStream.class, LinkReceiver.Pages.class,
-                AtomicInteger.class, LinkReceiver.Outcome.class);
+                AtomicInteger.class, LinkReceiver.Outcome.class, java.util.function.Predicate.class);
         take.setAccessible(true);
         LinkReceiver.Outcome text = new LinkReceiver.Outcome(LinkReceiver.Kind.RECEIVED, LINK);
         AtomicInteger count = new AtomicInteger(LinkReceiver.MAX_WAITING - 1);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        assertSame(text, take.invoke(null, out, PAGES, count, text));
+        assertSame(text, take.invoke(null, out, PAGES, count, text, (java.util.function.Predicate<String>) value -> true));
         assertTrue(new String(out.toByteArray(), StandardCharsets.UTF_8).startsWith("HTTP/1.1 200 OK"));
         assertEquals(LinkReceiver.MAX_WAITING, count.get());
         out.reset();
-        LinkReceiver.Outcome turnedAway = (LinkReceiver.Outcome) take.invoke(null, out, PAGES, count, text);
+        LinkReceiver.Outcome turnedAway = (LinkReceiver.Outcome) take.invoke(null, out, PAGES, count, text, (java.util.function.Predicate<String>) value -> true);
         assertSame(LinkReceiver.Kind.BUSY, turnedAway.kind);
         assertTrue(new String(out.toByteArray(), StandardCharsets.UTF_8).startsWith("HTTP/1.1 503 Service Unavailable"));
         assertEquals(LinkReceiver.MAX_WAITING, count.get());

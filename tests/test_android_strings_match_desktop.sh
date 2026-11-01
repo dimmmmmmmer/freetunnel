@@ -233,6 +233,7 @@ receive_page_prompt
 receive_page_file
 receive_page_send
 receive_page_note
+receive_page_network
 receive_page_sent
 receive_page_retry
 receive_page_too_large

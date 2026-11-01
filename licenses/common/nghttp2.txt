@@ -1,7 +1,7 @@
 nghttp2
 Version: 1.56.0, with the patches of AdGuard's conan recipe
 Source: https://github.com/nghttp2/nghttp2/tree/v1.56.0
-Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/58cef252031e2cc1f540ecaec2952f5f32afa3a1/conan/recipes/nghttp2-1.56.0
+Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/nghttp2-1.56.0
 License: MIT
 
 [nghttp2/nghttp2@v1.56.0: COPYING]

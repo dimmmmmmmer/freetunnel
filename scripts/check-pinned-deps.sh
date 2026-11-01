@@ -17,6 +17,24 @@ check() {
   fi
 }
 
+# The downloader and Gradle independently verify the Android core. They must
+# name the same artifact and digest before the slow Android build starts.
+if ! python3 - <<'PYCHECK'
+from pathlib import Path
+import re
+prepare = Path('scripts/prepare-trusttunnel-android.sh').read_text()
+gradle = Path('android/app/build.gradle').read_text()
+artifact = re.search(r'^artifact="([^"]+)"', prepare, re.M)
+core = re.search(r"^def coreAar = '([^']+)'", gradle, re.M)
+expected = re.search(r'^expected="([0-9a-f]{64})"', prepare, re.M)
+digest = re.search(r"digest != '([0-9a-f]{64})'", gradle)
+if not all((artifact, core, expected, digest)) or artifact[1] != core[1] or expected[1] != digest[1]:
+    raise SystemExit('pinned-deps: Android downloader and Gradle must pin the same core artifact and SHA-256')
+PYCHECK
+then
+  fail=1
+fi
+
 check "upstream ref" '^[0-9a-f]{40}$' scripts/upstream_ref.txt
 check "upstream ref in build workflow" 'UPSTREAM_REF|upstream_ref' .github/workflows/build.yml
 # A tag proves nothing — it can be repointed. Require the full commit SHA.

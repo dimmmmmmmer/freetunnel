@@ -960,6 +960,7 @@ public final class MainActivity extends Activity {
         final Runnable onConfirm;
         final Runnable onAlternate;
         final Runnable onCancel;
+        boolean focusConfirm;
         ConfirmRequest(CharSequence message, CharSequence confirm, CharSequence alternate, Runnable onConfirm, Runnable onAlternate, Runnable onCancel) {
             this.message = message; this.confirm = confirm; this.alternate = alternate;
             this.onConfirm = onConfirm; this.onAlternate = onAlternate; this.onCancel = onCancel;
@@ -974,7 +975,13 @@ public final class MainActivity extends Activity {
     }
     private void showConfirm(CharSequence message, CharSequence confirmLabel, CharSequence alternateLabel,
                              Runnable onConfirm, Runnable onAlternate, Runnable onCancel) {
-        confirmQueue.add(new ConfirmRequest(message, confirmLabel, alternateLabel, onConfirm, onAlternate, onCancel));
+        showConfirm(message, confirmLabel, alternateLabel, onConfirm, onAlternate, onCancel, false);
+    }
+    private void showConfirm(CharSequence message, CharSequence confirmLabel, CharSequence alternateLabel,
+                             Runnable onConfirm, Runnable onAlternate, Runnable onCancel, boolean focusConfirm) {
+        ConfirmRequest request = new ConfirmRequest(message, confirmLabel, alternateLabel, onConfirm, onAlternate, onCancel);
+        request.focusConfirm = focusConfirm;
+        confirmQueue.add(request);
         nextConfirm();
     }
     private void nextConfirm() {
@@ -1060,7 +1067,7 @@ public final class MainActivity extends Activity {
         });
         shown[0] = overlay;
         overlay.width(cardWidth);
-        overlay.defaultKey = "confirm:cancel";
+        overlay.defaultKey = request.focusConfirm ? "confirm:ok" : "confirm:cancel";
         overlay.escape = () -> {
             closeOverlay(overlay);
             if (request.onCancel != null) request.onCancel.run();
@@ -2012,14 +2019,14 @@ public final class MainActivity extends Activity {
         TextView hint = label(getString(R.string.text_receive_hint), 13, t.textDim);
         hint.setGravity(Gravity.CENTER_HORIZONTAL);
         box.addView(hint, lp(-1, -2));
-        gap(box, 10);
-        // How many have come, once one has: a line of its own, which is there from the start (empty), so that the card does not change
-        // size, and move, when the first text comes.
+        // Reserve the count line so incoming items do not move the QR card.
         TextView counted = label("", 12, t.textFaint);
         counted.setTag("receive:count");
         counted.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         counted.setGravity(Gravity.CENTER);
-        box.addView(counted, lp(-1, -2));
+        LinearLayout.LayoutParams countLayout = lp(-1, -2);
+        countLayout.topMargin = dp(10);
+        box.addView(counted, countLayout);
         receivedLine = counted;
         ScrollView scroll = new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
@@ -2042,13 +2049,27 @@ public final class MainActivity extends Activity {
         // These arrive on the receiver's thread. A text it took is the TV's to answer, whether or not its card is
         // still up, unless the app was left in between.
         r.start(new LinkReceiver.Listener() {
+            @Override public boolean accepts(String text) {
+                try {
+                    String source = DeepLinkImport.looksLikeLink(text)
+                            ? DeepLinkImport.parse(text).toml : RoutingConfig.cleanImport(stripBom(text)).getToml();
+                    RoutingConfig.Plan plan = RoutingConfig.prepare(MainActivity.this, source, SplitProfiles.DEFAULT);
+                    NativeConfigValidator.INSTANCE.validate(getApplicationContext(), plan.getToml());
+                    return true;
+                } catch (Exception invalid) {
+                    return false;
+                }
+            }
             @Override public void received(String text, String fileName, String sender) {
                 runOnUiThread(() -> {
                     if (isDestroyed() || generation != receiveGeneration) { receivedTexts.giveBack(); return; }
                     receivedTexts.add(text, fileName, sender);
                     if (linkReceiver == r) {
                         receivedCount++;
-                        if (receivedLine != null) receivedLine.setText(getString(R.string.text_receive_received, receivedCount));
+                        if (receivedLine != null) {
+                            receivedLine.setText(getString(R.string.text_receive_received, receivedCount));
+                            receivedLine.setVisibility(View.VISIBLE);
+                        }
                     }
                     processReceived();
                 });
@@ -2133,7 +2154,7 @@ public final class MainActivity extends Activity {
                 getString(R.string.receive_page_prompt), getString(R.string.receive_page_file), getString(R.string.receive_page_send),
                 getString(R.string.receive_page_note), getString(R.string.receive_page_sent), getString(R.string.receive_page_retry),
                 getString(R.string.receive_page_too_large), getString(R.string.receive_page_busy),
-                getString(R.string.receive_page_wrong_code), getString(R.string.receive_page_locked_out));
+                getString(R.string.receive_page_wrong_code), getString(R.string.receive_page_locked_out), getString(R.string.receive_page_network));
     }
     // A refusal is the desktop's kind of notice, a toast, however long: up to 6 lines, 10 seconds.
     private void refuseImport(int messageResource) {
@@ -2198,7 +2219,7 @@ public final class MainActivity extends Activity {
         final Runnable declined = () -> answered(done, false);
         if (existing == null) {
             showConfirm(message, getString(R.string.import_confirm), null,
-                    () -> { addImported(name, source); answered(done, false); }, null, declined);
+                    () -> { addImported(name, source); answered(done, false); }, null, declined, isTv() && origin != null);
         } else {
             showConfirm(message, getString(R.string.import_replace), getString(R.string.import_add_copy),
                     () -> { replaceImported(existing, name, source); answered(done, false); },

@@ -1602,22 +1602,8 @@ jobs:
                     "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           {
             echo
-            echo "### Installing"
+            echo "[Downloads and installation help](${{ github.server_url }}/${{ github.repository }}/blob/${GITHUB_REF_NAME}/README.md)"
             echo
-            echo "- **Linux**: install the **.deb** on Debian/Ubuntu/Pop!_OS"
-            echo "  (\`sudo apt install ./freetunnel-linux-x86_64.deb\`) — it bundles its own Qt"
-            echo "  and appears in the app menu. Or run the portable **AppImage**"
-            echo "  (\`chmod +x freetunnel-x86_64.AppImage && ./freetunnel-x86_64.AppImage\`)."
-            echo "- **macOS**: open the **.dmg** and drag FreeTunnel to Applications. The app is"
-            echo "  ad-hoc signed but not notarized, so on first launch right-click it → Open"
-            echo "  (or run \`xattr -dr com.apple.quarantine /Applications/FreeTunnel.app\`)."
-            echo "- **Windows**: run the **Setup.exe**. SmartScreen may warn — choose"
-            echo "  \"More info\" → \"Run anyway\"."
-            echo
-            echo "Verify your download against \`SHA256SUMS.txt\` (signed as \`SHA256SUMS.txt.sig\`)."
-            echo
-            echo "\`gcc-runtime-source.tar\` is the source of the GCC runtime libraries in the Linux"
-            echo "packages (see THIRD_PARTY_NOTICES.md); you do not need it to install FreeTunnel."
             if [ -n "$prev" ]; then
               echo
               echo "**Every commit in this release**: ${{ github.server_url }}/${{ github.repository }}/compare/$prev...${GITHUB_REF_NAME}"

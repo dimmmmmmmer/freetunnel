@@ -168,25 +168,10 @@ jobs:
             echo "::error title=No release notes::android/CHANGELOG.md has no '## $VERSION' section. Write what changed for users before tagging."
             exit 1
           fi
-          pin="$(cat android/release-certificate.sha256)"
           {
             echo
-            echo "### Installing"
-            echo
-            echo "- Download \`freetunnel-android-$VERSION.apk\` on your phone and open it. The first"
-            echo "  time, Android asks you to let your browser or file manager install apps"
-            echo "  (**Install unknown apps**): allow it for that app."
-            echo "- Later releases install over this one and keep your profiles. Settings →"
-            echo "  **Check for updates** offers them and verifies them before installing."
-            echo "- A build signed with another key (a fork's release, the 0.x preview, a debug"
-            echo "  build) cannot be updated in place: Android refuses it. Uninstall it first."
-            echo "  That deletes its saved profiles, so keep your configs or links at hand to"
-            echo "  import them again."
-            echo
-            echo "Verify your download against \`SHA256SUMS-android.txt\` (signed as"
-            echo "\`SHA256SUMS-android.txt.sig\`): \`sha256sum -c SHA256SUMS-android.txt\`. The APK is"
-            echo "signed with the certificate whose SHA-256 is \`$pin\`"
-            echo "(\`apksigner verify --print-certs\`)."
+            echo "Download \`freetunnel-android-$VERSION.apk\` for your phone, tablet or Android TV."
+            echo "[Installation help](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)"
           } >> notes.md
           echo "--- release body ---"
           cat notes.md

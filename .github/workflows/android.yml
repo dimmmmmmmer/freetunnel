@@ -56,6 +56,7 @@ jobs:
       # The release workflow's scripts run for real only on an android-* tag,
       # and Tests skips a pull request that changes only Android's files. So
       # their suites run here as well, against this commit's build.gradle.
+      - run: node android/tests/receive-page.mjs
       - run: bash tests/test_android_release_tag.sh
       - run: bash tests/test_android_signer.sh
       - run: bash tests/test_android_sign_release.sh

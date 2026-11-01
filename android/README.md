@@ -1,6 +1,6 @@
 # FreeTunnel for Android
 
-Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.7**
+Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.11**
 adapter, for phones, tablets and Android TV (Android 8.0 or later). Official
 releases are the `android-X.Y.Z` releases of
 [dimmmmmmmer/freetunnel](https://github.com/dimmmmmmmer/freetunnel), signed with
@@ -148,7 +148,7 @@ Android-only list.
   the only control, so the texts that tell what to do next say "this line", and there is no *Install update* button
   on the screen (that is what a screen reader adds to the line, and the red button of the question). Outside the
   official build the section says it doesn't come from the official channel.
-- The footer, **FreeTunnel 1.0.0 · TrustTunnel core 1.1.7**, each name a link to its page (a toast where there is no
+- The footer, **FreeTunnel 1.2.4 · TrustTunnel core 1.1.11**, each name a link to its page (a toast where there is no
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 
@@ -268,8 +268,8 @@ TV app's, for example) fills in.
 The banner is [art/tv-banner.svg](art/tv-banner.svg), rendered into
 `app/src/main/res/drawable-xhdpi/banner.png` by
 [scripts/render-android-tv-banner.sh](../scripts/render-android-tv-banner.sh).
-Its font comes from fontconfig, so the PNG is committed: after changing the
-SVG, run the script and commit both.
+The tile shows only the centred logo; the launcher displays the app name below it.
+After changing the SVG, run the script and commit both the SVG and PNG.
 
 ### Dialogs, menus and notices
 
@@ -390,17 +390,20 @@ the comparison. What differs on purpose, and is not to be changed to match it:
 The TV shows a QR code and an address such as
 `http://192.168.1.23:41234/K7QM-4XHD`. A phone, tablet or laptop on the same
 network opens it, with its camera or by typing the address into a browser, and
-pastes a `tt://` link or a TOML file into the page there, or picks the file
-itself: a TOML file, or a text file that holds a link. No app is needed on it.
+pastes one or more `tt://` links (one per line) or a TOML configuration, or
+selects multiple TOML/text files. No app is needed on it.
 The page is the app's own look, light or dark as the phone is, and after each
-send it says so and shows the form again, so the phone can send another. The
+send it shows a short-lived “Sent” message. Invalid configurations are rejected
+before acknowledging delivery. A partial failure lists each result and retries
+only failed items. The
 TV shows each text it received, one at a time in the order they were sent,
 with the address it came from, and adds it only once you confirm, as for any
 other import; the card stays open under the question, with "Received: N" in
 its corner, until you close it. The card has no button: its ← and Back close
 it, as the desktop's cards that have a ← are closed, and a remote's first stop
-on it is that arrow. Its hint is two short sentences (the warning about the
-network is on the phone's page and below). A TOML file without a name of its own is named
+on it is that arrow. New imports focus Add on TV; replacing an existing config
+still requires choosing the action. The empty counter row is reserved to keep
+the card from moving when a transfer arrives. A TOML file without a name of its own is named
 after its file, as one picked on the TV is; a link names itself. If choosing a
 file does nothing, as in the browser some QR code scanner apps open pages in,
 open the address in Chrome or Safari instead.
@@ -419,7 +422,8 @@ open the address in Chrome or Safari instead.
   3 sends with a wrong code, counted over all the sends of the session, stop
   it. Every address shows the same page, so only a send tests a code.
 - A send is a form post of at most 512 KiB, a file included, that names the
-  TV's address as its host. The page loads nothing and runs no script, and
+  TV's address as its host. The page loads no external resources; its hash-authorized inline script
+  sends each selected item separately to the same TV address, and
   nothing about a transfer is logged. A send with nothing in it, with both
   pasted text and a file, with a file that is not UTF-8 text, or over 512 KiB,
   such as a photo chosen by mistake, shows the page again with a note; it is
@@ -466,7 +470,7 @@ scripts/prepare-trusttunnel-android.sh
 
 The public AAR download needs no GitHub PAT. Its SHA-256 is checked during
 preparation and every build:
-`5398df61f74610d1d63819059bb596560feb51882e9ca78609df32fc4c7840f7`.
+`da0886c22a2a1fad1fdd25d8f5d3d85c6ffa89188292bd000d41e885db446eca`.
 Gradle 8.11.1 wrapper and distribution checksums are pinned too.
 
 Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (debug signing).
@@ -707,7 +711,7 @@ remote-server, DNS or HTTP/3 coverage.
 ## License
 
 FreeTunnel and TrustTunnel are Apache-2.0. See [LICENSE](../LICENSE) and
-[TrustTunnelClient v1.1.7](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.7).
+[TrustTunnelClient v1.1.11](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.11).
 
 The APK also contains the libraries in the Android section of
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md), under their own
@@ -776,7 +780,7 @@ reason is said in the app's own toast, as the desktop's window does with an erro
 An explicit Reconnect builds a new TUN from the current settings and hands traffic
 over to it.
 
-Each attempt also repeats two costs of the pinned TrustTunnel 1.1.7 core that
+Each attempt also repeats two costs of the pinned TrustTunnel 1.1.11 core that
 used to come once per explicit start. The core resolves a hostname given in
 `addresses` as it starts, for up to 15 s, on the service's single worker, so a
 Disconnect, Reconnect or settings change made during that lookup waits for it to

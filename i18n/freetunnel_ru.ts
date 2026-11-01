@@ -1094,7 +1094,7 @@
     </message>
     <message>
         <source>Recommended for Russia</source>
-        <translation>Сайты РФ</translation>
+        <translation>Рекомендовано для РФ</translation>
     </message>
     <message>
         <source>Clear all</source>

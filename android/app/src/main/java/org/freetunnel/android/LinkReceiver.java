@@ -77,6 +77,8 @@ final class LinkReceiver {
          * fileName is the name of the file the text came in, as fileName() leaves it; null when it was pasted or has none.
          */
         void received(String text, String fileName, String sender);
+        /** Validate on the receiver thread before acknowledging or reserving a queue slot. */
+        default boolean accepts(String text) { return true; }
         /** The receiver closed itself, once, and then it takes nothing more; not after stop(). */
         void stopped(Stop reason);
     }
@@ -121,14 +123,20 @@ final class LinkReceiver {
         // last one are a notice only: the form on them would post to the same wrong address.
         Pages(String lang, String title, String prompt, String file, String send, String note,
               String sent, String retry, String tooLarge, String busy, String wrongCode, String lockedOut) {
-            String fields = "<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\">"
+            this(lang, title, prompt, file, send, note, sent, retry, tooLarge, busy, wrongCode, lockedOut, retry);
+        }
+        Pages(String lang, String title, String prompt, String file, String send, String note,
+              String sent, String retry, String tooLarge, String busy, String wrongCode, String lockedOut, String network) {
+            String fields = "<form method=\"post\" enctype=\"multipart/form-data\" accept-charset=\"utf-8\""
+                    + " data-sent=\"" + escape(sent) + "\" data-retry=\"" + escape(retry)
+                    + "\" data-large=\"" + escape(tooLarge) + "\" data-network=\"" + escape(network) + "\">"
                     + "<label for=\"link\">" + escape(prompt) + "</label>"
                     + "<textarea id=\"link\" name=\"link\" autocomplete=\"off\" autocapitalize=\"off\""
                     + " autocorrect=\"off\" spellcheck=\"false\"></textarea>"
                     + "<label for=\"file\">" + escape(file) + "</label>"
-                    + "<input type=\"file\" id=\"file\" name=\"file\">"
-                    + "<button type=\"submit\">" + escape(send) + "</button></form>"
-                    + "<p class=\"note\">" + escape(note) + "</p>";
+                    + "<div class=\"actions\"><input type=\"file\" id=\"file\" name=\"file\" multiple>"
+                    + "<button type=\"submit\">" + escape(send) + "</button></div></form>"
+                    + "<p id=\"result\" role=\"status\" hidden></p><ul id=\"results\" aria-live=\"polite\"></ul>";
             form = page(lang, title, fields);
             this.sent = page(lang, title, notice("ok", sent) + fields);
             this.retry = page(lang, title, notice("warn", retry) + fields);
@@ -143,14 +151,96 @@ final class LinkReceiver {
             return "<p class=\"notice " + kind + "\" role=\"" + (kind.equals("ok") ? "status" : "alert") + "\">" + escape(text) + "</p>";
         }
 
-        // No script, no image and nothing loaded from anywhere, which the CSP also
+        // Only the hash-authorized inline script runs; no external resources load. The CSP also
         // enforces: the page is its own style, and the browser's own font.
         private static String page(String lang, String title, String body) {
             return "<!doctype html><html lang=\"" + escape(lang) + "\"><head><meta charset=\"utf-8\">"
                     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
                     + "<meta name=\"color-scheme\" content=\"light dark\">"
                     + "<title>" + escape(title) + "</title><style>" + STYLE + "</style></head><body><main><h1>"
-                    + escape(title) + "</h1>" + body + "</main></body></html>";
+                    + escape(title) + "</h1>" + body + "</main><script>" + SCRIPT + "</script></body></html>";
+        }
+
+        static final String SCRIPT = String.join("\n",
+                "(() => {",
+                "  const form = document.querySelector('form');",
+                "  if (!form) return;",
+                "  const text = document.getElementById('link');",
+                "  const files = document.getElementById('file');",
+                "  const submit = form.querySelector('button');",
+                "  const result = document.getElementById('result');",
+                "  const details = document.getElementById('results');",
+                "  let timer, pending = null, sending = false;",
+                "  const clear = () => {",
+                "    clearTimeout(timer);",
+                "    document.querySelectorAll('main > .notice').forEach(n => n.remove());",
+                "    result.hidden = true;",
+                "    details.replaceChildren();",
+                "    pending = null;",
+                "  };",
+                "  text.addEventListener('input', clear);",
+                "  files.addEventListener('change', clear);",
+                "  form.addEventListener('submit', async event => {",
+                "    event.preventDefault();",
+                "    if (sending) return;",
+                "    clearTimeout(timer);",
+                "    result.hidden = true;",
+                "    document.querySelectorAll('main > .notice').forEach(n => n.remove());",
+                "    details.replaceChildren();",
+                "    const pasted = text.value.trim();",
+                "    const parts = /^tt:\\/\\//i.test(pasted) ? pasted.split(/\\s+/) : (pasted ? [pasted] : []);",
+                "    const jobs = pending || [...parts.map(value => ({value})), ...Array.from(files.files).map(file => ({file}))];",
+                "    if (!jobs.length) {",
+                "      result.textContent = form.dataset.retry;",
+                "      result.className = 'notice warn'; result.hidden = false; return;",
+                "    }",
+                "    sending = true;",
+                "    submit.disabled = text.disabled = files.disabled = true;",
+                "    const failed = [];",
+                "    try {",
+                "      for (let i = 0; i < jobs.length; i++) {",
+                "        const job = jobs[i];",
+                "        const row = document.createElement('li');",
+                "        const label = job.file ? job.file.name : String(i + 1);",
+                "        row.textContent = label + ' — …'; details.append(row);",
+                "        try {",
+                "          if (job.file && job.file.size > 512 * 1024) throw new Error(form.dataset.large);",
+                "          const data = new FormData();",
+                "          if (job.file) data.append('file', job.file); else data.append('link', job.value);",
+                "          const controller = new AbortController();",
+                "          const timeout = setTimeout(() => controller.abort(), 30000);",
+                "          let response, body;",
+                "          try {",
+                "            response = await fetch(location.pathname, {method: 'POST', body: data, credentials: 'omit', signal: controller.signal});",
+                "            body = await response.text();",
+                "          } finally { clearTimeout(timeout); }",
+                "          const page = new DOMParser().parseFromString(body, 'text/html');",
+                "          if (!response.ok) throw new Error(page.querySelector('.notice')?.textContent || form.dataset.retry);",
+                "          row.textContent = label + ' — ' + form.dataset.sent;",
+                "        } catch (error) {",
+                "          failed.push(job);",
+                "          row.textContent = label + ' — ' + (error instanceof TypeError || error.name === 'AbortError' ? form.dataset.network : error.message);",
+                "          row.className = 'warn';",
+                "        }",
+                "      }",
+                "      pending = failed.length ? failed : null;",
+                "      if (!failed.length) {",
+                "        form.reset(); details.replaceChildren();",
+                "        result.textContent = form.dataset.sent;",
+                "        result.className = 'notice ok'; result.hidden = false;",
+                "        timer = setTimeout(() => { result.hidden = true; }, 4000);",
+                "      }",
+                "    } finally {",
+                "      sending = false;",
+                "      submit.disabled = text.disabled = files.disabled = false;",
+                "    }",
+                "  });",
+                "})();");
+        static String scriptHash() {
+            try {
+                return java.util.Base64.getEncoder().encodeToString(
+                        MessageDigest.getInstance("SHA-256").digest(SCRIPT.getBytes(StandardCharsets.UTF_8)));
+            } catch (java.security.NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
         }
 
         private static final String FONT = "system-ui,-apple-system,Segoe UI,Roboto,sans-serif";
@@ -167,7 +257,7 @@ final class LinkReceiver {
         // desktop's is 12: a browser on an iPhone zooms the page in on any field under 16 px when it takes the focus, and the page must
         // not jump about under a finger. The viewport is not locked with a maximum-scale instead, which would take pinch-zoom from Android's
         // Chrome. The file field's own words ("Choose File", "No file chosen") are the browser's, in its language: a custom
-        // button in the app's words needs a script to say which file is chosen, and the page has none, which its CSP and its test forbid.
+        // button keeps the browser's accessible file-selection behavior and chosen file names.
         private static String style(Theme light, Theme dark) {
             String fileButton = "height:32px;min-width:76px;margin:0 12px 0 0;padding:0 13px;border:0;border-radius:8px;"
                     + "background:var(--surface);color:var(--text);font:14px " + FONT + ";cursor:pointer";
@@ -187,7 +277,7 @@ final class LinkReceiver {
                     + "font:16px/1.4 ui-monospace,Menlo,Consolas,monospace;resize:none;outline:none;"
                     + "-webkit-appearance:none;appearance:none}"
                     + "textarea:focus{border-color:var(--accent)}"
-                    + "input[type=file]{display:block;width:100%;margin:0 0 16px;font:14px " + FONT + ";color:var(--dim)}"
+                    + "input[type=file]{display:block;flex:1;min-width:0;width:100%;margin:0;height:32px;font:14px " + FONT + ";color:var(--dim)}"
                     // The two names for the same button, each in a rule of its own: a browser that does
                     // not know one drops the whole rule it is in.
                     + "input[type=file]::file-selector-button{" + fileButton + "}"
@@ -207,7 +297,10 @@ final class LinkReceiver {
                     // The desktop has no ring anywhere: where the focus is, a control takes the look it has under the pointer, and the
                     // text box its accent border. A rule of its own, since a browser that does not know :focus-visible drops the rule.
                     + "button:focus-visible{outline:none;background:var(--accent-hover)}"
-                    + ".note{margin:14px 0 0;font-size:13px;line-height:1.25;color:var(--faint)}";
+                    + ".actions{display:flex;align-items:center;gap:12px}"
+                    + ".actions button{flex-shrink:0}button:disabled{opacity:.5;cursor:wait}"
+                    + "#results{padding-left:20px;font-size:13px;overflow-wrap:anywhere}"
+                    + "#results:empty{display:none}[hidden]{display:none!important}";
         }
 
         private static String tokens(Theme t) {
@@ -388,7 +481,7 @@ final class LinkReceiver {
                     long deadline = System.nanoTime() + connectionDeadlineMs * 1_000_000L;
                     InputStream in = new BufferedInputStream(new DeadlineInput(open, firstByteTimeoutMs, readTimeoutMs, deadline));
                     OutputStream out = open.getOutputStream();
-                    outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES, waiting);
+                    outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES, waiting, listener::accepts);
                     out.flush();
                     if (outcome.bodyUnread) drain(open, deadline);
                 } catch (IOException slowOrGone) {
@@ -491,6 +584,11 @@ final class LinkReceiver {
      */
     static Outcome handle(InputStream in, OutputStream out, String code, String host, Pages pages,
                           boolean lastStrike, AtomicInteger waiting) throws IOException {
+        return handle(in, out, code, host, pages, lastStrike, waiting, text -> true);
+    }
+
+    static Outcome handle(InputStream in, OutputStream out, String code, String host, Pages pages,
+                          boolean lastStrike, AtomicInteger waiting, java.util.function.Predicate<String> accepts) throws IOException {
         byte[] head = readHead(in);
         if (head == null) return new Outcome(Kind.REFUSED, null);
         if (head.length == 0) return refuse(out, 431, "Request Header Fields Too Large");
@@ -539,15 +637,19 @@ final class LinkReceiver {
         // Right code, and no room: whatever the form holds, nothing can be taken now. It is no strike,
         // and the page is the form again, for when the TV has answered what it has.
         if (waiting.get() >= MAX_WAITING) return busy(out, pages);
-        if (boundary != null) return multipartSend(out, body, boundary, pages, waiting);
+        if (boundary != null) return multipartSend(out, body, boundary, pages, waiting, accepts);
         String text = formField(body, "link");
         if (text == null || text.trim().isEmpty()) return refuse(out, 400, "Bad Request");
-        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()));
+        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()), accepts);
     }
 
     // Takes a text: a place for it in the waiting count, then the page that says it was sent. The count is
     // checked above too, but another receiver that shares it may have filled the last place since.
-    private static Outcome take(OutputStream out, Pages pages, AtomicInteger waiting, Outcome received) {
+    private static Outcome take(OutputStream out, Pages pages, AtomicInteger waiting, Outcome received, java.util.function.Predicate<String> accepts) {
+        if (!accepts.test(received.text)) {
+            answer(out, 422, "Unprocessable Content", pages.retry);
+            return new Outcome(Kind.REFUSED, null);
+        }
         for (int count = waiting.get(); ; count = waiting.get()) {
             if (count >= MAX_WAITING) return busy(out, pages);
             if (waiting.compareAndSet(count, count + 1)) break;
@@ -566,7 +668,7 @@ final class LinkReceiver {
     // not UTF-8 text gets the form again under the retry text, and the receiver
     // goes on waiting: the phone can fix it.
     private static Outcome multipartSend(OutputStream out, byte[] body, String boundary, Pages pages,
-                                         AtomicInteger waiting) throws IOException {
+                                         AtomicInteger waiting, java.util.function.Predicate<String> accepts) throws IOException {
         Field[] fields = multipart(body, boundary);
         if (fields == null) return refuse(out, 400, "Bad Request");
         String text = fields[0] == null ? "" : utf8(body, fields[0].from, fields[0].to);
@@ -578,8 +680,8 @@ final class LinkReceiver {
             answer(out, 400, "Bad Request", pages.retry);
             return new Outcome(Kind.REFUSED, null);
         }
-        if (!text.trim().isEmpty()) return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()));
-        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, file.trim(), fileName(fields[1].fileName)));
+        if (!text.trim().isEmpty()) return take(out, pages, waiting, new Outcome(Kind.RECEIVED, text.trim()), accepts);
+        return take(out, pages, waiting, new Outcome(Kind.RECEIVED, file.trim(), fileName(fields[1].fileName)), accepts);
     }
 
     // Where a field's content is in the body, and the file name it came with: null
@@ -863,7 +965,7 @@ final class LinkReceiver {
                 + "Referrer-Policy: no-referrer\r\n"
                 + "X-Content-Type-Options: nosniff\r\n"
                 + "X-Frame-Options: DENY\r\n"
-                + "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'\r\n"
+                + "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-" + Pages.scriptHash() + "'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'\r\n"
                 + (status == 405 ? "Allow: GET, POST\r\n" : "")
                 + "\r\n";
         // In one write: the body written on its own would wait for the head's

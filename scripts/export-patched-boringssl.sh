@@ -2,8 +2,8 @@
 # Re-export the boringssl conan recipe from a newer NativeLibsCommon on top of
 # the one the upstream bootstrap exported from the pinned NLC.
 #
-# Upstream (v1.1.7) pins native_libs_common/8.1.52 and with it
-# openssl/boring-2026-05-08, and so does dns-libs 2.10.2. NLC's make_ssl.cpp
+# Upstream (v1.1.11) pins native_libs_common/8.1.54 and with it
+# openssl/boring-2026-05-08, and so does dns-libs 2.10.2-6-gc68d7dde. NLC's make_ssl.cpp
 # calls SSL_set_server_padding_request, SSL_set_grease_sigalgs_enabled and
 # SSL_set_extension_order, which only NLC's own boringssl patches declare.
 # AdGuard's own CI resolves the recipe revision from their internal conan
@@ -26,9 +26,9 @@
 # keeps them from degrading back into a movable ref.
 set -euo pipefail
 
-# NativeLibsCommon v8.1.52 — annotated tag v8.1.52 peeled to its commit
-# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.1.52^{}').
-NLC_COMMIT="58cef252031e2cc1f540ecaec2952f5f32afa3a1"
+# NativeLibsCommon v8.1.54 — annotated tag v8.1.54 peeled to its commit
+# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.1.54^{}').
+NLC_COMMIT="00b38bb2a4b206b677ad1f2b901ccb8bb0d60372"
 # Digest of conan/recipes/boringssl at that commit (see recipe_digest below).
 NLC_RECIPE_SHA256="985e54fe4cc407953fbd4840cc108ee84606bd7fe6fe0e88a1b0fc1b8d11bbe5"
 NLC_URL="https://github.com/AdguardTeam/NativeLibsCommon.git"
