@@ -153,6 +153,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/core/InstanceControl.cpp
     include/core/InstanceControl.h
     src/core/ConfigToml.cpp
+    src/core/ConfigTomlSyntax.cpp
     src/core/ConfigTomlValues.cpp
     include/core/ConfigToml.h
     src/core/NetBind.cpp
@@ -163,6 +164,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/core/AppUiUtils.cpp
     include/core/AppUiUtils.h
     src/core/UpdateChecker.cpp
+    src/core/UpdateStaging.cpp
     include/core/UpdateChecker.h
     src/core/VersionCompare.cpp
     include/core/VersionCompare.h

@@ -156,6 +156,7 @@ add_executable(test_deeplink
     test_deeplink.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
@@ -230,9 +231,11 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/UpdateStaging.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
@@ -309,9 +312,11 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/UpdateStaging.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
@@ -436,6 +441,7 @@ add_executable(test_configimport
     ../src/core/ConfigPaths.cpp
     ../src/core/DeepLink.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_configimport PRIVATE ../include ../include/core)
@@ -446,6 +452,7 @@ add_executable(test_subscription
     test_subscription.cpp
     ../src/core/Subscription.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_subscription PRIVATE ../include ../include/core)
@@ -499,6 +506,7 @@ add_executable(test_instance_control
     ../src/core/InstanceControl.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_instance_control PRIVATE ../include ../include/core)
@@ -514,6 +522,7 @@ add_test(NAME instance_control COMMAND test_instance_control -o ${CMAKE_CURRENT_
 add_executable(test_configtoml
     test_configtoml.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_configtoml PRIVATE ../include ../include/core)
@@ -574,6 +583,7 @@ add_executable(test_credentialstore
     test_credentialstore.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_credentialstore PRIVATE ../include ../include/core)
@@ -593,6 +603,7 @@ if(UNIX AND NOT APPLE)
         test_secret_service_probe.cpp
         ../src/core/CredentialStore.cpp
         ../src/core/ConfigToml.cpp
+        ../src/core/ConfigTomlSyntax.cpp
         ../src/core/ConfigTomlValues.cpp
     )
     target_include_directories(test_secret_service_probe PRIVATE ../include ../include/core)
@@ -717,6 +728,7 @@ add_executable(test_integration_config_workflow
     ../src/core/DeepLink.cpp
     ../src/core/ConfigStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
     ../src/core/CredentialStore.cpp
 )
@@ -737,6 +749,7 @@ add_executable(test_integration_single_instance
     ../src/core/InstanceControl.cpp
     ../src/core/CredentialStore.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
 )
 target_include_directories(test_integration_single_instance PRIVATE ../include ../include/core)
@@ -807,9 +820,11 @@ set(BACKEND_TEST_SOURCES
     ../src/core/ConfigPaths.cpp
     ../src/core/ControlCommand.cpp
     ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
     ../src/core/ConfigTomlValues.cpp
     ../src/core/AppUiUtils.cpp
     ../src/core/UpdateChecker.cpp
+    ../src/core/UpdateStaging.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
@@ -849,6 +864,7 @@ add_executable(test_update_checker_e2e
     mock_http_server.cpp
     mock_http_server.h
     ../src/core/UpdateChecker.cpp
+    ../src/core/UpdateStaging.cpp
     ../src/core/AppImagePath.cpp
     ../src/core/VersionCompare.cpp
     ../src/core/ReleaseVerify.cpp
@@ -884,6 +900,7 @@ if(FT_TEST_OPENSSL_CLI)
         ../include/core/SubscriptionFetcher.h
         ../src/core/Subscription.cpp
         ../src/core/ConfigToml.cpp
+        ../src/core/ConfigTomlSyntax.cpp
         ../src/core/ConfigTomlValues.cpp
     )
     target_include_directories(test_subscription_fetcher PRIVATE . ../include ../include/core)
@@ -1155,7 +1172,9 @@ foreach(suite IN ITEMS lifecycle settings fuzz)
 endforeach()
 # A config as the app writes it, for the endpoint keys only the core acts on.
 target_sources(test_helper_server_settings PRIVATE
-    ../src/core/ConfigToml.cpp ../src/core/ConfigTomlValues.cpp)
+    ../src/core/ConfigToml.cpp
+    ../src/core/ConfigTomlSyntax.cpp
+    ../src/core/ConfigTomlValues.cpp)
 
 # Backend's update state machine: the code that ends in launching an installer
 # sat at 2.3% line coverage, and both bugs found in it were found by review.

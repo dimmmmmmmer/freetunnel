@@ -53,6 +53,7 @@ certificate is not an official release or an update compatibility contract.
   3 seconds each, "…" until it answers, then the time or "—" for any failure.
 - The desktop's look: its colours, which `tests/test_android_theme_matches_desktop.sh`
   checks against `qml/Main.qml`, and its icons, which
+  Install its build-time parser with `python3 -m pip install --require-hashes -r scripts/requirements-icons.txt` from the repository root.
   [scripts/android-icons-from-svg.py](../scripts/android-icons-from-svg.py) makes
   from `assets/icons` and `assets/logo.svg` (and the arrows and ticks ✓ ↓ ↑ ← from
   the outlines of those glyphs in Inter, which the desktop draws them in, at its sizes), and its typeface, Inter, which

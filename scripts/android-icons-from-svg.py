@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The Android app's icons, made from the desktop's.
+"""
+The Android app's icons, made from the desktop's.
 
 The desktop draws assets/icons/*.svg and assets/logo.svg. The Android app draws the
 same shapes from VectorDrawables, so that an icon is the same icon in both. This writes
@@ -32,7 +33,7 @@ import argparse
 import re
 import struct
 import sys
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as element_tree
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -174,7 +175,7 @@ def stroke_attrs(svg, element):
 
 
 def icon(svg_path):
-    svg = ET.parse(svg_path).getroot()
+    svg = element_tree.parse(svg_path, forbid_dtd=True).getroot()
     box = svg.get("viewBox").split()
     if box[0] != "0" or box[1] != "0":
         raise SystemExit("%s: a viewBox that does not start at 0 0" % svg_path)
@@ -215,7 +216,7 @@ def icon(svg_path):
 
 def logo(svg_path):
     """The mark as it is: four filled arches in their own greys, never tinted."""
-    svg = ET.parse(svg_path).getroot()
+    svg = element_tree.parse(svg_path, forbid_dtd=True).getroot()
     box = svg.get("viewBox").split()
     paths = ""
     for e in svg.iter():
@@ -262,10 +263,15 @@ def glyph(character, w, h, d, stroke):
 
 
 class Font:
-    """Outlines out of a TrueType file (glyf), with nothing but the standard library: the cmap (format 4 or 12), loca, glyf and head
-    tables, simple glyphs and composites that are only moved. It is for the few glyphs of Inter here and refuses what it does not read."""
+    """
+    Read TrueType outlines for the bundled Inter glyphs.
+
+    Reads cmap (format 4 or 12), loca, glyf and head tables, simple glyphs
+    and translated composites. Unsupported forms are rejected.
+    """
 
     def __init__(self, path):
+        """Read the font tables needed to outline the bundled glyphs."""
         try:
             self.data = Path(path).read_bytes()
         except OSError as error:
@@ -276,7 +282,7 @@ class Font:
         count = struct.unpack(">H", self.data[4:6])[0]
         self.tables = {}
         for i in range(count):
-            tag, _, offset, length = struct.unpack(">4sIII", self.data[12 + 16 * i:28 + 16 * i])
+            tag, _, offset, _length = struct.unpack(">4sIII", self.data[12 + 16 * i:28 + 16 * i])
             self.tables[tag.decode("latin-1")] = offset
         for needed in ("head", "cmap", "loca", "glyf"):
             if needed not in self.tables:
@@ -336,21 +342,7 @@ class Font:
         count = struct.unpack(">h", data[at:at + 2])[0]
         at += 10
         if count < 0:
-            out = []
-            while True:
-                flags, part = struct.unpack(">HH", data[at:at + 4])
-                at += 4
-                if flags & 1:
-                    dx, dy = struct.unpack(">hh", data[at:at + 4])
-                    at += 4
-                else:
-                    dx, dy = struct.unpack(">bb", data[at:at + 2])
-                    at += 2
-                if not flags & 2 or flags & (0x08 | 0x40 | 0x80):
-                    raise SystemExit("%s: glyph %d is a composite this script does not read" % (self.path, glyph))
-                out += [[(x + dx, y + dy, on) for x, y, on in contour] for contour in self.contours(part)]
-                if not flags & 0x20:
-                    return out
+            return self.composite_contours(glyph, at)
         ends = struct.unpack(">%dH" % count, data[at:at + 2 * count])
         at += 2 * count
         at += 2 + struct.unpack(">H", data[at:at + 2])[0]   # the instructions
@@ -363,6 +355,35 @@ class Font:
             if flag & 8:
                 flags += [flag] * data[at]
                 at += 1
+        coordinates = self.point_coordinates(flags, at)
+        out, first = [], 0
+        for last in ends:
+            out.append([(coordinates[0][i], coordinates[1][i], bool(flags[i] & 1)) for i in range(first, last + 1)])
+            first = last + 1
+        return out
+
+    def composite_contours(self, glyph, at):
+        """Read the translated components of a composite glyph."""
+        data = self.data
+        out = []
+        while True:
+            flags, part = struct.unpack(">HH", data[at:at + 4])
+            at += 4
+            if flags & 1:
+                dx, dy = struct.unpack(">hh", data[at:at + 4])
+                at += 4
+            else:
+                dx, dy = struct.unpack(">bb", data[at:at + 2])
+                at += 2
+            if not flags & 2 or flags & (0x08 | 0x40 | 0x80):
+                raise SystemExit("%s: glyph %d is a composite this script does not read" % (self.path, glyph))
+            out += [[(x + dx, y + dy, on) for x, y, on in contour] for contour in self.contours(part)]
+            if not flags & 0x20:
+                return out
+
+    def point_coordinates(self, flags, at):
+        """Decode both delta-encoded axes of a simple glyph."""
+        data = self.data
         coordinates = []
         for short, same_or_positive in ((2, 16), (4, 32)):
             value, axis = 0, []
@@ -376,11 +397,7 @@ class Font:
                     at += 2
                 axis.append(value)
             coordinates.append(axis)
-        out, first = [], 0
-        for last in ends:
-            out.append([(coordinates[0][i], coordinates[1][i], bool(flags[i] & 1)) for i in range(first, last + 1)])
-            first = last + 1
-        return out
+        return coordinates
 
 
 def contour_path(points, place):

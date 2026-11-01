@@ -556,9 +556,14 @@ expect "words that match, quotes, escapes, placeholders and an unfinished string
 
 mutate "$fx/en.xml" '>Hello<' '>Hullo<'; expect "English that differs" fail "English is 'Hullo'"; reset
 mutate "$fx/ru.xml" '>Привет<' '>Приветик<'; expect "Russian that differs" fail "Russian is 'Приветик'"; reset
+# The dollar signs below are Android format placeholders, not shell variables.
+# shellcheck disable=SC2016
 mutate "$fx/ru.xml" 'Загрузка… %1$d%%' 'Загрузка… %1$d'; expect "a percent sign that was dropped" fail "progress: Russian"; reset
+# shellcheck disable=SC2016
 mutate "$fx/en.xml" '%1$d%%' '%1$d%'; expect "a percent sign that is not escaped" fail "progress: the English has a %"; reset
+# shellcheck disable=SC2016
 mutate "$fx/en.xml" '%1$s' '%2$s'; expect "a placeholder with another number" fail "delete: English"; reset
+# shellcheck disable=SC2016
 mutate "$fx/ru.xml" '«%1$s»' '«»'; expect "a placeholder that is missing" fail "delete: Russian"; reset
 mutate "$fx/en.xml" 'Two words ' 'Two words'; expect "a trailing space that is lost" fail "two: English"; reset
 mutate "$fx/en.xml" 'Line one\nline two' 'Line one line two'; expect "a line break that is a space" fail "lines: English"; reset

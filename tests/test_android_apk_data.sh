@@ -34,7 +34,7 @@ check() {
     echo "ok - $name"
   else
     echo "not ok - $name: expected $expect, got $got"
-    sed 's/^/    /' <<<"$out"
+    printf '    %s\n' "${out//$'\n'/$'\n    '}"
     fail=1
   fi
 }
