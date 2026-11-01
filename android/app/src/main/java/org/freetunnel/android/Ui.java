@@ -59,7 +59,7 @@ import android.widget.TextView;
  */
 final class Ui {
     /** What a control's rest, hover and focus look like. */
-    enum Look { TILE, HERO, ROW, MENU_ROW, PILL, LINK, ICON, PLAIN, CHIP, BUTTON, PRIMARY, DANGER, FIELD, SELECT, BOX }
+    enum Look { TILE, HERO, ROW, MENU_ROW, PILL, LINK, ICON, PLAIN, CHIP, BUTTON, GEO_ACTION, PRIMARY, DANGER, FIELD, SELECT, BOX }
     /** The four buttons the desktop has. */
     enum Kind { PRIMARY, SECONDARY, NEUTRAL, DESTRUCTIVE }
     /** The colours of link: accent, text colour, danger, and textFaint (the footer's). */
@@ -381,6 +381,14 @@ final class Ui {
                 if ((flags & F_SECONDARY) != 0) { rest = t.bg; stroke = t.border; hot = t.surface; }
                 else { rest = t.surface; hot = t.surfaceHover; }
                 break;
+            case GEO_ACTION:
+                rest = t.surface;
+                hot = t.surfaceHover;
+                stroke = t.border;
+                focused = t.surfaceHover;
+                focusStroke = t.accent;
+                focusSet = true;
+                break;
             case PRIMARY:
                 rest = t.accent;
                 hot = t.primaryHover;
@@ -520,6 +528,15 @@ final class Ui {
         }
         return key == null ? styled(b, look, flags) : focus(b, key, look, flags);
     }
+    /** Compact outlined action matching the desktop geo-list card. */
+    Button geoAction(CharSequence caption, String key) {
+        Button button = button(caption, Kind.NEUTRAL, 0, null);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        button.setTextColor(t.accent);
+        button.setPadding(dp(10), 0, dp(10), 0);
+        return focus(button, key, Look.GEO_ACTION);
+    }
+
     // A control that is no focus stop: its looks without a key.
     private <T extends View> T styled(T view, Look look, int flags) {
         view.setBackground(background(look, flags));
