@@ -32,6 +32,31 @@ class RoutingConfigTest {
     private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
         "192.168.0.0/16", "255.255.255.255/32")
 
+    @Test fun realWorldSizeGeoPolicyFitsGeneratedConfiguration() {
+        val geo = (0 until 150_000).map { "@2:site$it.example" }
+        val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true, emptyList(), geo)
+        assertNull(result.warning)
+        assertTrue(result.toml.contains("@2:site149999.example"))
+        assertTrue(result.toml.length > 1_048_576)
+    }
+
+    @Test fun generatedFastPathKeepsAdapterSettingsAndRejectsMalformedArrays() {
+        val result = RoutingConfig.prepare(source, true, false, listOf("manual.example"), emptyList(), true,
+            emptyList(), listOf("@2:geo.example"))
+        val settings = RoutingConfig.validateGenerated(result.toml)
+        assertEquals("vpn.example.com", settings.getString("endpoint.hostname"))
+        assertEquals("general", settings.getString("vpn_mode"))
+        assertEquals(0, settings.getArray("exclusions")!!.size())
+        assertFalse(RoutingConfig.adapterSettings(result.toml).contains("@2:geo.example"))
+        for (bad in listOf("[42]", "['@2:geo.example']", "[\"@2:geo.example\",]", "[\"@3:0.0.0.0/0\"]")) {
+            val altered = result.toml.replace(Regex("(?m)^exclusions = .*"), "exclusions = $bad")
+            assertThrows(IllegalArgumentException::class.java) { RoutingConfig.validateGenerated(altered) }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RoutingConfig.validateGenerated("exclusions = []\n" + result.toml)
+        }
+    }
+
     @Test fun geoVpnRulesEnableSelectiveModeAndKeepManualPriority() {
         val result = RoutingConfig.prepare(source, true, true, listOf("manual.example"), emptyList(), true,
             emptyList(), listOf("@2:*.example", "@3:192.0.2.0/24"))

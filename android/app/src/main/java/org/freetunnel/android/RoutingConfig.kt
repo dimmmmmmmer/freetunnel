@@ -60,9 +60,42 @@ object RoutingConfig {
         return parsed
     }
     @JvmStatic fun validate(source: String): TomlTable = validateInternal(source, false)
-    @JvmStatic fun validateGenerated(source: String): TomlTable = validateInternal(source, true)
-    private fun validateInternal(source: String, generated: Boolean): TomlTable {
-        val parsed = parse(source, if (generated) 16_777_216 else 1_048_576)
+    private data class GeneratedParts(val settings: String, val rules: List<String>?)
+
+    // document() writes exclusions as one canonical JSON-compatible string array.
+    // Parsing hundreds of thousands of strings with Tomlj's character-level AST
+    // exhausts a TV's heap. Keep that array out of both Java TOML parsers; the
+    // unchanged full document still goes through native validation and routing.
+    private fun generatedParts(source: String): GeneratedParts {
+        require(source.length <= 16_777_216) { "Generated configuration is too large" }
+        val marker = "exclusions = ["
+        val start = if (source.startsWith(marker)) 0 else source.indexOf("\n" + marker).let { if (it < 0) -1 else it + 1 }
+        if (start < 0) return GeneratedParts(source, null)
+        val firstTable = source.indexOf("\n[")
+        require(firstTable < 0 || start < firstTable) { "Generated exclusions must be at the root" }
+        val end = source.indexOf('\n', start).let { if (it < 0) source.length else it }
+        val array = source.substring(start + "exclusions = ".length, end)
+        val parsed = org.json.JSONArray(array)
+        val rules = (0 until parsed.length()).map { index ->
+            val value = parsed.get(index)
+            require(value is String) { "Destination rules must be strings" }
+            value
+        }
+        // org.json also accepts non-JSON spellings. Only our exact serializer's
+        // output may use this fast path; malformed/duplicate keys still fail.
+        require(rules.joinToString(", ", "[", "]", transform = ::quote) == array) { "Invalid generated exclusions" }
+        return GeneratedParts(source.substring(0, start) + "exclusions = []" + source.substring(end), rules)
+    }
+
+    // Returns validated adapter settings. The destination rules are validated
+    // separately and intentionally absent from the returned Java TOML tree.
+    @JvmStatic fun validateGenerated(source: String): TomlTable {
+        val parts = generatedParts(source)
+        return validateInternal(parts.settings, true, parts.rules)
+    }
+    @JvmStatic fun adapterSettings(source: String): String = generatedParts(source).settings
+    private fun validateInternal(source: String, generated: Boolean, generatedRules: List<String>? = null): TomlTable {
+        val parsed = parse(source)
         val endpoint = parsed.getTable("endpoint")!!
         require(!endpoint.getString("hostname").isNullOrBlank()) { "Укажите endpoint.hostname" }
         require(endpoint.getString("username") != null && endpoint.getString("password") != null) { "Укажите имя пользователя и пароль сервера" }
@@ -74,7 +107,7 @@ object RoutingConfig {
         }) { "Укажите addresses в формате адрес:порт" }
         require(endpoint.getString("upstream_protocol")?.let { it in listOf("http2", "http3") } != false) { "Укажите upstream_protocol: http2 или http3" }
         require(parsed.getString("vpn_mode")?.let { it in listOf("general", "selective") } != false) { "Неизвестный vpn_mode" }
-        val rules = parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
+        val rules = generatedRules ?: parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
         require(generated || rules.none { it.startsWith("@") }) { "Routing priorities are reserved for generated configurations" }
         val plain = rules.map { if (it.length > 3 && it.take(3) in listOf("@0:", "@1:", "@2:", "@3:")) it.drop(3) else it }
         require(plain.none { SplitRules.subnet(it)?.substringAfterLast('/')?.toInt() == 0 }) { "Default routes cannot be destination rules" }

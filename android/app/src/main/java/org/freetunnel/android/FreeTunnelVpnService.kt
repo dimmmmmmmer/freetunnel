@@ -273,7 +273,7 @@ class FreeTunnelVpnService : VpnService() {
     private fun replace(plan: RoutingConfig.Plan, startId: Int, epoch: Long) {
         NativeConfigValidator.validate(this, plan.toml)
         val parsed = RoutingConfig.validateGenerated(plan.toml)
-        val config = VpnServiceConfig.parseToml(plan.toml) ?: error("Invalid adapter configuration")
+        val config = VpnServiceConfig.parseToml(RoutingConfig.adapterSettings(plan.toml)) ?: error("Invalid adapter configuration")
         // Loading Android's CA store can fail, so it happens before the handover.
         val verifier = CertificateVerificator()
         if (destroyed || startId != latestStartId || epoch != permissionEpoch) return

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""
-Bind an internally built AAR to the reviewed stable source and local patch.
-
-This is an integrity check, not a signature: CI builds the artifact itself and
-passes it only to jobs in the same workflow run.
-"""
+"""Bind an internally built AAR to reviewed stable source and local patches."""
+# This is an integrity check, not a signature. CI builds the artifact itself
+# and passes it only to jobs in the same workflow run.
 import hashlib
 import json
 from pathlib import Path
