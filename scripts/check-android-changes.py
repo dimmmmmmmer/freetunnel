@@ -2,7 +2,8 @@
 """Run Android CI for affected PRs; uncertainty always runs the tests."""
 import fnmatch
 import os
-import subprocess
+import re
+import subprocess  # nosec B404 - Git is invoked without a shell, with validated commit IDs.
 
 PATTERNS = (
     'android/*', 'include/core/ReleaseSigning.h', 'THIRD_PARTY_NOTICES.md',
@@ -21,11 +22,11 @@ def main():
     run = True
     if os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
         base, head = os.environ.get('PR_BASE_SHA', ''), os.environ.get('PR_HEAD_SHA', '')
-        if base and head:
+        if all(re.fullmatch(r'[0-9a-fA-F]{40}', sha) for sha in (base, head)):
             try:
                 # Include both sides of renames. A shallow PR merge checkout has
                 # both parents; missing objects fail closed to a full Android run.
-                output = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', base, head])
+                output = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', base, head])  # nosec B603 - Only validated SHA-1 IDs are variable.
                 paths = output.decode('utf-8').rstrip('\0').split('\0') if output else []
                 run = affected(paths)
             except (subprocess.CalledProcessError, UnicodeError):
