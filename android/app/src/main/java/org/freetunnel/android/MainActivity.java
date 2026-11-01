@@ -2785,18 +2785,27 @@ public final class MainActivity extends Activity {
         body.addView(ui.label(getString(R.string.geo_description), 12, t().textDim), lp(-1, -2));
         List<GeoDefinition> presets = GeoPresets.read(this);
         body.addView(ui.dropdown(getString(R.string.geo_add_preset), getString(R.string.geo_choose), "geo:presets", v -> {
-            String[] names = new String[presets.size()];
-            for (int i = 0; i < names.length; i++) names[i] = presets.get(i).name;
-            showSelect("geo:presets", names, -1, index -> addGeoDefinition(presets.get(index), null));
+            String[] names = new String[presets.size() + 1];
+            for (int i = 0; i < presets.size(); i++) names[i] = presets.get(i).name;
+            names[presets.size()] = getString(R.string.geo_add_custom);
+            showSelect("geo:presets", names, -1, index -> {
+                if (index == presets.size()) showGeoForm();
+                else addGeoDefinition(presets.get(index), null);
+            });
         }), lp(-1, -2));
         for (GeoDefinition list : model.geoLists(model.edited())) {
             String key = "geo:" + list.id;
             gap(body, 8);
+            LinearLayout card = column();
+            card.setTag(key + ":card");
+            card.setPadding(dp(10), dp(10), dp(10), dp(10));
+            card.setBackground(ui.outlined(t().surface, t().border, 10));
+            body.addView(card, lp(-1, -2));
             ToggleView toggle = ui.toggle(list.enabled, false, key + ":enabled");
             toggle.setListener((v, checked) -> editRules(m -> m.putGeoList(m.edited(),
                     new GeoDefinition(list.id, list.name, list.source, list.kind, list.bypass, checked))));
-            body.addView(ui.toggleRow(list.name, null, toggle), ui.focusRowLp());
-            body.addView(ui.dropdown(getString(R.string.geo_route), getString(list.bypass ? R.string.text_bypass_vpn_61
+            card.addView(ui.toggleRow(list.name, null, toggle), ui.focusRowLp());
+            card.addView(ui.dropdown(getString(R.string.geo_route), getString(list.bypass ? R.string.text_bypass_vpn_61
                     : R.string.text_through_vpn_62), key + ":direction", v -> showSelect(key + ":direction",
                     new String[]{getString(R.string.text_through_vpn_62), getString(R.string.text_bypass_vpn_61)},
                     list.bypass ? 1 : 0, index -> editRules(m -> m.putGeoList(m.edited(),
@@ -2806,35 +2815,34 @@ public final class MainActivity extends Activity {
                     ? getString(R.string.geo_not_downloaded) : getString(R.string.geo_entries, state.cached.stats.entries,
                     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
                             .format(new java.util.Date(state.cached.updatedMillis)));
-            body.addView(ui.label(status, 12, t().textDim), lp(-1, -2));
+            card.addView(ui.label(status, 12, t().textDim), lp(-1, -2));
             if (state.cached != null && state.cached.stats.skipped > 0)
-                body.addView(ui.label(getString(R.string.geo_skipped, state.cached.stats.skipped), 12, t().textDim), lp(-1, -2));
-            if (!state.error.isEmpty()) body.addView(ui.notice(getString(R.string.geo_update_failed)), lp(-1, -2));
+                card.addView(ui.label(getString(R.string.geo_skipped, state.cached.stats.skipped), 12, t().textDim), lp(-1, -2));
+            if (!state.error.isEmpty()) card.addView(ui.notice(getString(R.string.geo_update_failed)), lp(-1, -2));
             LinearLayout actions = row();
-            Button update = ui.button(getString(R.string.geo_update), Ui.Kind.NEUTRAL, 0, key + ":update");
+            Button update = ui.button(getString(R.string.geo_update), Ui.Kind.NEUTRAL, Ui.F_SECONDARY, key + ":update");
             update.setOnClickListener(v -> GeoRepository.get(this).refresh(list, true));
             actions.addView(update, lp(-2, 32));
-            ui.gapH(actions, 8);
-            Button remove = ui.button(getString(R.string.text_delete), Ui.Kind.NEUTRAL, 0, key + ":remove");
+            actions.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            Button remove = ui.button(getString(R.string.text_delete), Ui.Kind.NEUTRAL, Ui.F_SECONDARY, key + ":remove");
             remove.setOnClickListener(v -> editRules(m -> m.removeGeoList(m.edited(), list.id)));
             actions.addView(remove, lp(-2, 32));
-            gap(body, 4); body.addView(actions, lp(-1, -2));
+            gap(card, 4); card.addView(actions, lp(-1, -2));
         }
         gap(body, 10);
-        Button custom = ui.button(getString(R.string.geo_add_custom), Ui.Kind.NEUTRAL, 0, "geo:custom");
-        custom.setOnClickListener(v -> showGeoForm()); body.addView(custom, lp(-2, 32));
-        ToggleView automatic = ui.toggle(prefs.getBoolean(GeoRepository.AUTO_UPDATE, true), false, "geo:auto");
-        // On narrow screens spatial focus search skips the left-aligned button
-        // between the right-aligned preset and update controls.
-        custom.setId(View.generateViewId());
-        automatic.setId(View.generateViewId());
-        automatic.setNextFocusUpId(custom.getId());
-        custom.setNextFocusDownId(automatic.getId());
-        automatic.setListener((v, checked) -> {
-            prefs.edit().putBoolean(GeoRepository.AUTO_UPDATE, checked).apply();
-            GeoRepository.get(this).refreshEnabled();
-        });
-        body.addView(ui.toggleRow(getString(R.string.geo_auto), null, automatic), ui.focusRowLp());
+        int[] intervals = {1, 2, 5, 24, 0};
+        String[] labels = {getString(R.string.geo_every_hour), getString(R.string.geo_every_2_hours),
+                getString(R.string.geo_every_5_hours), getString(R.string.geo_every_24_hours), getString(R.string.geo_never)};
+        int selected = 3;
+        for (int i = 0; i < intervals.length; i++)
+            if (intervals[i] == GeoRepository.updateHours(prefs)) selected = i;
+        final int current = selected;
+        body.addView(ui.dropdown(getString(R.string.geo_auto), labels[current], "geo:interval", v ->
+                showSelect("geo:interval", labels, current, index -> {
+                    prefs.edit().putInt(GeoRepository.UPDATE_HOURS, intervals[index]).remove(GeoRepository.AUTO_UPDATE).apply();
+                    GeoRepository.get(this).refreshEnabled();
+                    render();
+                })), lp(-1, -2));
     }
 
     private void addGeoDefinition(GeoDefinition definition, Runnable afterSave) {

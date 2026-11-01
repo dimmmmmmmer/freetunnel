@@ -904,10 +904,23 @@ class UiTourDeviceTest {
             scrollPageTo("geo:preview-vpn:enabled")
             shot("geo-lists", "Geo lists with fixture entries: manual-rule priority, VPN/bypass directions and update status")
         }
+        screen("geo-refresh-menu") {
+            goTo(2)
+            scrollPageTo("geo:interval")
+            shot("geo-lists-bottom", "List cards and shared update frequency at the bottom of Split tunnelling")
+            activate("geo:interval")
+            awaitOverlay("select")
+            shot("geo-refresh-menu", "List update frequency: 1, 2, 5 or 24 hours, or never")
+            activate("select:2")
+            eventually("The update interval must be saved") { GeoRepository.updateHours(prefs) == 5 }
+        }
         screen("geo-custom-list") {
             goTo(2)
-            scrollPageTo("geo:custom")
-            activate("geo:custom")
+            scrollPageTo("geo:presets")
+            activate("geo:presets")
+            awaitOverlay("select")
+            shot("geo-add-menu", "Add list menu with presets and a custom source")
+            activate("select:" + GeoPresets.read(context).size)
             awaitOverlay("geoform")
             typeInto("geoform:name", "My sites")
             typeInto("geoform:source", "https://example.org/geosite.dat#category")

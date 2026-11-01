@@ -1,12 +1,20 @@
-<!-- markdownlint-disable-next-line MD033 -->
-# <img src="assets/logo.svg" width="48" alt=""/> FreeTunnel
+<!-- markdownlint-disable MD033 MD041 -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme-title-dark.svg">
+    <img src="docs/images/readme-title-light.svg" width="336" height="76" alt="FreeTunnel">
+  </picture>
+</p>
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Codacy coverage](https://app.codacy.com/project/badge/Coverage/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
-[![latest version](https://img.shields.io/github/v/release/dimmmmmmmer/freetunnel)](https://github.com/dimmmmmmmer/freetunnel/releases)
-[![Tests](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml)
-[![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
-[![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+<p align="center">
+  <a href="https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&amp;utm_medium=referral&amp;utm_content=&amp;utm_campaign=Badge_grade"><img src="https://app.codacy.com/project/badge/Grade/7080586146744b0095656b8eb9c51fff?branch=main" alt="Codacy Badge"></a>
+  <a href="https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&amp;utm_medium=referral&amp;utm_content=&amp;utm_campaign=Badge_coverage"><img src="https://app.codacy.com/project/badge/Coverage/7080586146744b0095656b8eb9c51fff?branch=main" alt="Codacy coverage"></a>
+  <a href="https://github.com/dimmmmmmmer/freetunnel/releases"><img src="https://img.shields.io/github/v/release/dimmmmmmmer/freetunnel" alt="latest version"></a>
+  <a href="https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml"><img src="https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml"><img src="https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg" alt="Security"></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="Apache-2.0 License"></a>
+</p>
+<!-- markdownlint-enable MD033 MD041 -->
 
 A free, open-source VPN app for Windows, macOS, Linux, Android and Android TV,
 using [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient).

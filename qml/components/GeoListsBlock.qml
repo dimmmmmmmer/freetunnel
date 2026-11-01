@@ -49,15 +49,17 @@ ColumnLayout {
     }
     Dropdown {
         Layout.fillWidth: true; shell: geo.shell; theme: geo.theme
-        label: qsTr("Add a ready-made list"); value: ""
+        label: qsTr("Add list"); value: ""
         model: {
             var choices = [{v:"", t:qsTr("Choose…")}]
             var presets = backend.geoPresets
             for (var i = 0; i < presets.length; ++i)
                 choices.push({v:presets[i].id, t:geo.presetName(presets[i])})
+            choices.push({v:"__custom__", t:qsTr("Add your own list")})
             return choices
         }
         onPicked: function(id) {
+            if (id === "__custom__") { geo.customOpen = true; return }
             var presets = backend.geoPresets
             for (var i = 0; i < presets.length; ++i) {
                 var p = presets[i]
@@ -107,9 +109,10 @@ ColumnLayout {
             }
         }
     }
-    Action { text: customOpen ? qsTr("Cancel") : qsTr("Add your own list"); onClicked: customOpen = !customOpen }
     ColumnLayout {
         visible: customOpen; Layout.fillWidth: true; spacing: 8
+        SectionLabel { theme: geo.theme; text: qsTr("Add your own list") }
+        Action { text: qsTr("Cancel"); onClicked: geo.customOpen = false }
         Field { id: customName; Layout.fillWidth: true; label: qsTr("Name"); labelColor: theme.textDim; textColor: theme.text
             fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent }
         Field { id: customSource; Layout.fillWidth: true; label: qsTr("HTTPS address"); placeholder: "https://…/geosite.dat#category"
@@ -126,10 +129,12 @@ ColumnLayout {
             }
         } }
     }
-    RowLayout {
-        Layout.fillWidth: true
-        Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: qsTr("Update lists daily"); color: theme.text; font.pixelSize: 13 }
-        Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: backend.geoAutoUpdate
-            onToggled: function(v) { backend.geoAutoUpdate = v } }
+    Dropdown {
+        shell: geo.shell; theme: geo.theme; label: qsTr("Update lists"); maximumValueWidth: 180
+        value: String(backend.geoUpdateHours)
+        model: [{v:"1", t:qsTr("Every hour")}, {v:"2", t:qsTr("Every 2 hours")},
+                {v:"5", t:qsTr("Every 5 hours")}, {v:"24", t:qsTr("Every 24 hours")},
+                {v:"0", t:qsTr("Never")}]
+        onPicked: function(v) { backend.geoUpdateHours = Number(v) }
     }
 }

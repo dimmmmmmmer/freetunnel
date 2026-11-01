@@ -168,7 +168,8 @@ tunnel and the page says so, rather than send everything around it.
 
 ### Geo lists
 
-In the **Geo lists** block, choose a ready-made list or **Add your own list**.
+In the **Geo lists** block, open **Add list** and choose a ready-made list or
+**Add your own list**.
 Each list has its own **Through VPN / Bypass VPN** choice and can be turned off
 without removing it. Lists belong to the selected split profile. Nothing is
 added until you choose it.
@@ -184,7 +185,8 @@ Manual destination rules win over geo lists. If two geo lists disagree,
 (for example through DNS or TLS); a connection whose hostname cannot be
 identified is matched by its IP address.
 
-Use **Update** to refresh a list, or keep daily updates enabled. Updates run
+Use **Update** to refresh a list, or choose automatic updates every 1, 2, 5 or
+24 hours. Choose **Never** for manual updates only after the initial download. Updates run
 while FreeTunnel is running; opening the app checks for overdue lists. Failed
 downloads keep the last valid copy. The list card shows its last update and
 any error. A list that has never loaded cannot route traffic yet.

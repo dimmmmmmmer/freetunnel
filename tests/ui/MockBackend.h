@@ -49,7 +49,7 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString activeConfigProfile MEMBER m_activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QVariantList geoLists READ getGeoLists NOTIFY splitChanged)
     Q_PROPERTY(QVariantList geoPresets MEMBER geoPresets CONSTANT)
-    Q_PROPERTY(bool geoAutoUpdate MEMBER geoAutoUpdate NOTIFY splitChanged)
+    Q_PROPERTY(int geoUpdateHours MEMBER geoUpdateHours NOTIFY splitChanged)
     Q_PROPERTY(bool geoLimitExceeded READ getGeoLimitExceeded NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
@@ -86,7 +86,7 @@ public:
     QVariantList getGeoLists() const { return geoLists; }
     bool getGeoLimitExceeded() const { return geoLimitExceeded; }
     QVariantList geoPresets;
-    bool geoAutoUpdate = true;
+    int geoUpdateHours = 24;
     bool geoLimitExceeded = false;
     Q_INVOKABLE bool addGeoList(const QString &, const QString &, bool, bool) { return true; }
     Q_INVOKABLE void setGeoListEnabled(const QString &, bool) {}

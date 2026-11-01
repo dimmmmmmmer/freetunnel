@@ -61,7 +61,7 @@ struct AppSettings {
     // Lists belong to the same routing profile as its manual domain/app rules.
     // Empty on upgrade: existing routing is unchanged until a list is added.
     QMap<QString, QList<freetunnel::GeoListDefinition>> profile_geo_lists;
-    bool geo_auto_update = true;
+    int geo_update_hours = 24;
     // Which split profile each config uses (config path -> profile name). A
     // config not listed (or pointing at a deleted profile) uses "Default".
     QMap<QString, QString> config_profiles;

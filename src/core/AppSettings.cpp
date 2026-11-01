@@ -140,7 +140,8 @@ static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
 
 static void loadProfileGeoLists(const QSettings &s, AppSettings &out)
 {
-    out.geo_auto_update = s.value("geo/auto_update", true).toBool();
+    const int hours = s.value("geo/update_hours", s.value("geo/auto_update", true).toBool() ? 24 : 0).toInt();
+    out.geo_update_hours = (hours == 0 || hours == 1 || hours == 2 || hours == 5 || hours == 24) ? hours : 24;
     for (auto profile = out.profiles.cbegin(); profile != out.profiles.cend(); ++profile) {
         QList<freetunnel::GeoListDefinition> lists;
         QStringList ids;
@@ -165,7 +166,8 @@ static void loadProfileGeoLists(const QSettings &s, AppSettings &out)
 
 static void saveProfileGeoLists(QSettings &s, const AppSettings &cfg)
 {
-    s.setValue("geo/auto_update", cfg.geo_auto_update);
+    s.setValue("geo/update_hours", cfg.geo_update_hours);
+    s.remove("geo/auto_update");
     s.remove("geo/profiles");
     for (auto profile = cfg.profiles.cbegin(); profile != cfg.profiles.cend(); ++profile) {
         QVariantList rows;

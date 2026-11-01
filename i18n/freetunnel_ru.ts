@@ -740,8 +740,8 @@
         <translation>Слишком много правил. Отключите часть геосписков. Пока весь трафик идёт через VPN.</translation>
     </message>
     <message>
-        <source>Add a ready-made list</source>
-        <translation>Добавить готовый список</translation>
+        <source>Add list</source>
+        <translation>Добавить список</translation>
     </message>
     <message>
         <source>Choose…</source>
@@ -816,8 +816,28 @@
         <translation>Добавить</translation>
     </message>
     <message>
-        <source>Update lists daily</source>
-        <translation>Обновлять списки ежедневно</translation>
+        <source>Update lists</source>
+        <translation>Обновлять списки</translation>
+    </message>
+    <message>
+        <source>Every hour</source>
+        <translation>Каждый час</translation>
+    </message>
+    <message>
+        <source>Every 2 hours</source>
+        <translation>Каждые 2 часа</translation>
+    </message>
+    <message>
+        <source>Every 5 hours</source>
+        <translation>Каждые 5 часов</translation>
+    </message>
+    <message>
+        <source>Every 24 hours</source>
+        <translation>Каждые 24 часа</translation>
+    </message>
+    <message>
+        <source>Never</source>
+        <translation>Никогда</translation>
     </message>
 </context>
 <context>

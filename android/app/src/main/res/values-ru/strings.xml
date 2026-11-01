@@ -233,7 +233,7 @@
     <string name="receive_page_network">Не удалось подтвердить отправку. Проверьте телевизор перед повторной попыткой.</string>
     <string name="geo_lists">"Геосписки"</string>
     <string name="geo_description">"Готовые группы сайтов и IP-адресов. Ручные правила имеют приоритет."</string>
-    <string name="geo_add_preset">"Добавить готовый список"</string>
+    <string name="geo_add_preset">"Добавить список"</string>
     <string name="geo_choose">"Выбрать…"</string>
     <string name="geo_blocked_sites">"Заблокированные сайты в России"</string>
     <string name="geo_blocked_ips">"Заблокированные IP-адреса в России"</string>
@@ -247,11 +247,16 @@
     <string name="geo_update_failed">"Не удалось обновить список. Проверьте адрес, категорию и подключение. Ранее загруженные правила сохранены."</string>
     <string name="geo_update">"Обновить"</string>
     <string name="geo_add_custom">"Добавить свой список"</string>
-    <string name="geo_auto">"Обновлять списки ежедневно"</string>
+    <string name="geo_auto">"Обновлять списки"</string>
     <string name="geo_duplicate">"Этот геосписок уже есть в профиле"</string>
     <string name="geo_name">"Название"</string>
     <string name="geo_ip_list">"Список IP-адресов"</string>
     <string name="geo_add">"Добавить"</string>
     <string name="geo_bad_source">"Введите название и HTTPS-ссылку на геосписок"</string>
     <string name="geo_limit">"Слишком много правил. Отключите часть геосписков. Пока весь трафик идёт через VPN."</string>
+    <string name="geo_every_hour">"Каждый час"</string>
+    <string name="geo_every_2_hours">"Каждые 2 часа"</string>
+    <string name="geo_every_5_hours">"Каждые 5 часов"</string>
+    <string name="geo_every_24_hours">"Каждые 24 часа"</string>
+    <string name="geo_never">"Никогда"</string>
 </resources>

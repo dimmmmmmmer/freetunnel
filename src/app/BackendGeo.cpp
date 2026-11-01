@@ -24,7 +24,7 @@ void Backend::syncGeoLists()
     if (!m_geoLists) return;
     QList<freetunnel::GeoListDefinition> definitions;
     for (const auto &profile : std::as_const(m_settings.profile_geo_lists)) definitions.append(profile);
-    m_geoLists->setDefinitions(definitions, m_settings.geo_auto_update);
+    m_geoLists->setDefinitions(definitions, m_settings.geo_update_hours);
 }
 QVariantList Backend::geoPresets() const
 {
@@ -61,10 +61,11 @@ bool Backend::geoRulesFit(const QString &profile) const
     return bytes <= 8 * 1024 * 1024;
 }
 bool Backend::geoLimitExceeded() const { return !geoRulesFit(m_settings.active_profile); }
-void Backend::setGeoAutoUpdate(bool enabled)
+void Backend::setGeoUpdateHours(int hours)
 {
-    if (m_settings.geo_auto_update == enabled) return;
-    m_settings.geo_auto_update = enabled;
+    if (hours != 0 && hours != 1 && hours != 2 && hours != 5 && hours != 24) return;
+    if (m_settings.geo_update_hours == hours) return;
+    m_settings.geo_update_hours = hours;
     persistSettings(); syncGeoLists(); emit splitChanged();
 }
 bool Backend::addGeoList(const QString &name, const QString &source, bool ips, bool bypass)

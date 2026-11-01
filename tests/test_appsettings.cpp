@@ -25,6 +25,7 @@ private slots:
     void roundTrip();
     void profilesPreserveOrder();
     void geoListsStayWithTheirProfile();
+    void geoRefreshSettingMigratesAndValidates();
     void theInsecureTmpLogPathIsMigratedOnLoad();
     void theDefaultExcludedRoutesCoverThePrivateRanges();
     void anExcludedRouteOfEveryAddressIsDroppedOnLoad();
@@ -153,7 +154,7 @@ void TestAppSettings::geoListsStayWithTheirProfile() {
     using namespace freetunnel;
     AppSettings in;
     in.profiles.insert("Work", {});
-    in.geo_auto_update = false;
+    in.geo_update_hours = 5;
     in.profile_geo_lists["Work"].append({"custom", "Work sites", "https://example.com/list.txt",
                                        GeoListKind::Sites, GeoDirection::Bypass, true});
     saveAppSettings(in);
@@ -164,10 +165,26 @@ void TestAppSettings::geoListsStayWithTheirProfile() {
     QCOMPARE(list.source, QStringLiteral("https://example.com/list.txt"));
     QCOMPARE(list.direction, GeoDirection::Bypass);
     QVERIFY(list.enabled);
-    QVERIFY(!out.geo_auto_update);
+    QCOMPARE(out.geo_update_hours, 5);
     in.profiles.remove("Work");
     saveAppSettings(in);
     QVERIFY(!loadAppSettings().profile_geo_lists.contains("Work"));
+}
+
+void TestAppSettings::geoRefreshSettingMigratesAndValidates() {
+    QSettings settings;
+    settings.remove("geo/update_hours");
+    settings.setValue("geo/auto_update", false);
+    QCOMPARE(loadAppSettings().geo_update_hours, 0);
+    settings.setValue("geo/auto_update", true);
+    QCOMPARE(loadAppSettings().geo_update_hours, 24);
+    for (int hours : {0, 1, 2, 5, 24}) {
+        settings.setValue("geo/update_hours", hours);
+        QCOMPARE(loadAppSettings().geo_update_hours, hours);
+    }
+    settings.setValue("geo/update_hours", -1);
+    QCOMPARE(loadAppSettings().geo_update_hours, 24);
+    settings.remove("geo");
 }
 
 void TestAppSettings::profilesPreserveOrder() {

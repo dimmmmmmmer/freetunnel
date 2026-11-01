@@ -4,6 +4,10 @@
 #include <memory>
 #include <utility>
 namespace freetunnel {
+bool GeoListController::updateDue(const QDateTime &updated, const QDateTime &now, int hours)
+{
+    return !updated.isValid() || (hours > 0 && updated.secsTo(now) >= qint64(hours) * 3600);
+}
 QString GeoListController::key(const GeoListDefinition &definition)
 {
     return definition.source + QChar(0) + QString::number(int(definition.kind))
@@ -12,7 +16,7 @@ QString GeoListController::key(const GeoListDefinition &definition)
 GeoListController::GeoListController(QString directory, QObject *parent)
     : QObject(parent), m_directory(std::move(directory)), m_updater(m_directory)
 {
-    m_timer.setInterval(60 * 60 * 1000);
+    m_timer.setInterval(5 * 60 * 1000);
     connect(&m_timer, &QTimer::timeout, this, &GeoListController::schedule);
     m_timer.start();
     connect(&m_updater, &GeoListUpdater::finished, this,
@@ -31,7 +35,7 @@ const GeoListState &GeoListController::state(const GeoListDefinition &definition
     const auto found = m_states.constFind(key(definition));
     return found == m_states.cend() ? empty : found.value();
 }
-void GeoListController::setDefinitions(const QList<GeoListDefinition> &definitions, bool automatic)
+void GeoListController::setDefinitions(const QList<GeoListDefinition> &definitions, int updateHours)
 {
     m_definitions.clear();
     for (const auto &definition : definitions) {
@@ -40,7 +44,7 @@ void GeoListController::setDefinitions(const QList<GeoListDefinition> &definitio
         m_definitions[identity] = definition;
         m_definitions[identity].enabled |= enabledElsewhere;
     }
-    m_automatic = automatic;
+    m_updateHours = updateHours;
     schedule();
 }
 void GeoListController::refresh(const GeoListDefinition &definition)
@@ -92,10 +96,10 @@ void GeoListController::pump()
         }
         const bool forced = m_forced.remove(identity);
         const auto now = QDateTime::currentDateTimeUtc();
-        const bool due = !state.list.updated.isValid() || state.list.updated.secsTo(now) >= 86400;
+        const bool due = updateDue(state.list.updated, now, m_updateHours);
         const bool retry = !state.attempted.isValid() || state.attempted.secsTo(now) >= 3600;
         if (!forced && (!definition.enabled || !due || !retry
-                        || (!m_automatic && !state.list.entries.empty()))) continue;
+                        || (m_updateHours == 0 && !state.list.entries.empty()))) continue;
         state.busy = true;
         state.attempted = now;
         m_updater.start(definition);

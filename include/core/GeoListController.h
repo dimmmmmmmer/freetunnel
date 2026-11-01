@@ -19,9 +19,10 @@ class GeoListController : public QObject {
     Q_OBJECT
 public:
     explicit GeoListController(QString directory, QObject *parent = nullptr);
-    void setDefinitions(const QList<GeoListDefinition> &definitions, bool automatic);
+    void setDefinitions(const QList<GeoListDefinition> &definitions, int updateHours);
     void refresh(const GeoListDefinition &definition);
     const GeoListState &state(const GeoListDefinition &definition) const;
+    static bool updateDue(const QDateTime &updated, const QDateTime &now, int hours);
     static QString key(const GeoListDefinition &definition);
 signals:
     void changed();
@@ -36,7 +37,7 @@ private:
     QMap<QString, GeoListState> m_states;
     QStringList m_queue;
     QSet<QString> m_forced;
-    bool m_automatic = true;
+    int m_updateHours = 24;
     bool m_loading = false;
 };
 }

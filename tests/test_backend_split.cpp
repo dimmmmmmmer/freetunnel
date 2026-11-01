@@ -104,7 +104,7 @@ void TestBackendSplit::geoListsBelongToProfilesAndCountAsVpnRules()
     Backend backend;
     QVERIFY(backend.geoLists().isEmpty());
     QCOMPARE(backend.geoPresets().size(), 4);
-    backend.setGeoAutoUpdate(false);
+    backend.setGeoUpdateHours(0);
     backend.clearDomains();
     backend.clearAppRules();
     backend.setSplitEnabled(true);

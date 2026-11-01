@@ -9,6 +9,7 @@ Item {
     property string label: ""
     property var model: []     // [{ v: "...", t: "..." }]
     property string value: ""
+    property real maximumValueWidth: 132
     signal picked(string v)
     Layout.fillWidth: true
     Layout.preferredHeight: 42
@@ -28,12 +29,12 @@ Item {
         // the row past the page margin on narrow windows.
         Item {
             id: ddVal
-            Layout.preferredWidth: Math.min(ddRow.implicitWidth, 132)
-            Layout.maximumWidth: 132
+            Layout.preferredWidth: Math.min(ddRow.implicitWidth, dd.maximumValueWidth)
+            Layout.maximumWidth: dd.maximumValueWidth
             Layout.fillHeight: true
             Row { id: ddRow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                 Text { anchors.verticalCenter: parent.verticalCenter
-                       width: Math.min(implicitWidth, 112); elide: Text.ElideRight
+                       width: Math.min(implicitWidth, dd.maximumValueWidth - 20); elide: Text.ElideRight
                        text: dd.labelFor(dd.value)
                        color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 14 }
                 Shape {

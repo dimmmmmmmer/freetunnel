@@ -18,6 +18,10 @@ import java.util.concurrent.TimeUnit;
 /** Process-wide cache updates shared by the phone/TV screens and the running VPN. */
 final class GeoRepository {
     static final String AUTO_UPDATE = "geo_auto_update";
+    static final String UPDATE_HOURS = "geo_update_hours";
+    static int updateHours(SharedPreferences prefs) {
+        return GeoUpdateSchedule.normalizedHours(prefs.getInt(UPDATE_HOURS, prefs.getBoolean(AUTO_UPDATE, true) ? 24 : 0));
+    }
     interface Listener { void changed(String key, boolean rulesChanged); }
     static final class State {
         final GeoCache.Result cached;
@@ -53,7 +57,7 @@ final class GeoRepository {
         prefs = context.getSharedPreferences("freetunnel", Context.MODE_PRIVATE);
         cache = new GeoCache(directory(context));
         downloader = new GeoDownloader(directory(context));
-        worker.scheduleAtFixedRate(this::refreshEnabled, 0, 1, TimeUnit.HOURS);
+        worker.scheduleAtFixedRate(this::refreshEnabled, 0, 5, TimeUnit.MINUTES);
     }
     void observe(Listener listener) { listeners.add(listener); }
     void removeObserver(Listener listener) { listeners.remove(listener); }
@@ -80,9 +84,9 @@ final class GeoRepository {
             }
             long now = System.currentTimeMillis();
             Long attempted = attempts.get(identity);
-            boolean due = cached == null || now - cached.updatedMillis >= TimeUnit.DAYS.toMillis(1);
+            boolean due = GeoUpdateSchedule.due(cached == null ? -1 : cached.updatedMillis, now, updateHours(prefs));
             boolean retry = attempted == null || now - attempted >= TimeUnit.HOURS.toMillis(1);
-            if (!force && (!due || !retry || (cached != null && !prefs.getBoolean(AUTO_UPDATE, true)))) {
+            if (!force && (!due || !retry)) {
                 queued.remove(identity); return;
             }
             attempts.put(identity, now);

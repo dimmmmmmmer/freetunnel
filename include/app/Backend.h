@@ -73,7 +73,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString activeConfigProfile READ activeConfigProfile NOTIFY splitChanged)
     Q_PROPERTY(QVariantList geoLists READ geoLists NOTIFY splitChanged)
     Q_PROPERTY(QVariantList geoPresets READ geoPresets CONSTANT)
-    Q_PROPERTY(bool geoAutoUpdate READ geoAutoUpdate WRITE setGeoAutoUpdate NOTIFY splitChanged)
+    Q_PROPERTY(int geoUpdateHours READ geoUpdateHours WRITE setGeoUpdateHours NOTIFY splitChanged)
     Q_PROPERTY(bool geoLimitExceeded READ geoLimitExceeded NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
@@ -203,8 +203,8 @@ public:
 
     QVariantList geoLists() const;
     QVariantList geoPresets() const;
-    bool geoAutoUpdate() const { return m_settings.geo_auto_update; }
-    void setGeoAutoUpdate(bool enabled);
+    int geoUpdateHours() const { return m_settings.geo_update_hours; }
+    void setGeoUpdateHours(int hours);
     bool geoLimitExceeded() const;
     Q_INVOKABLE bool addGeoList(const QString &name, const QString &source, bool ips, bool bypass);
     Q_INVOKABLE void setGeoListEnabled(const QString &id, bool enabled);
