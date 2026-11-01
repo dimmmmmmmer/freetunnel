@@ -1,5 +1,15 @@
 # FreeTunnel
 
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![Codacy coverage](https://app.codacy.com/project/badge/Coverage/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
+[![latest version](https://img.shields.io/github/v/release/dimmmmmmmer/freetunnel)](https://github.com/dimmmmmmmer/freetunnel/releases)
+[![Tests](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml)
+[![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
+[![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
+
 A free, open-source VPN app for Windows, macOS, Linux, Android and Android TV,
 using [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient).
 Import your server configuration and connect with one button.
@@ -14,7 +24,19 @@ Get the app from [**Releases**](https://github.com/dimmmmmmmer/freetunnel/releas
 | Mac — Apple Silicon or Intel, macOS 14.4+ | `freetunnel-macos-universal.dmg` |
 | Linux — Ubuntu 22.04+, Debian 12+ | `freetunnel-linux-x86_64.deb` |
 | Other Linux distributions with glibc 2.35+ | `freetunnel-x86_64.AppImage` |
-| Android phone, tablet or TV — Android 8.0+ | `freetunnel-android-1.2.4.apk` |
+| Android phone, tablet or TV — Android 8.0+ | [Android release](https://github.com/dimmmmmmmer/freetunnel/releases?q=android-&expanded=true) |
+
+Download `freetunnel-android.apk` from the Android release; older releases include the version in its filename.
+See [what changed](CHANGELOG.md) for release notes.
+
+## Features
+
+- **Connect with one click:** save multiple server configurations and switch between them.
+- **Easy import:** add `tt://` links or TOML files; send several at once from your phone to Android TV.
+- **Split tunnelling:** choose which apps and sites use the VPN, with a ready-made profile for Russia.
+- **Kill switch:** block traffic if the VPN connection drops.
+- **Desktop shortcuts:** control the VPN from the system tray, global hotkeys or Stream Deck.
+- **Made for your device:** remote-friendly TV controls, light and dark themes, English and Russian, and built-in update checks.
 
 ## Get connected
 

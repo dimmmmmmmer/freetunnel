@@ -170,7 +170,7 @@ jobs:
           fi
           {
             echo
-            echo "Download \`freetunnel-android-$VERSION.apk\` for your phone, tablet or Android TV."
+            echo "Download \`freetunnel-android.apk\` for your phone, tablet or Android TV."
             echo "[Installation help](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)"
           } >> notes.md
           echo "--- release body ---"
@@ -290,7 +290,7 @@ jobs:
           fi
           unset ANDROID_KEYSTORE_BASE64
           bash scripts/sign-android-release.sh unsigned/app-release-unsigned.apk \
-            "dist/freetunnel-android-$VERSION.apk" android/release-certificate.sha256 "$VERSION"
+            "dist/freetunnel-android.apk" android/release-certificate.sha256 "$VERSION"
           ls -la dist
 
       - name: Remove the keystore
@@ -343,15 +343,21 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          apk="freetunnel-android-${VERSION:?}.apk"
+          apk="freetunnel-android.apk"
           shopt -s nullglob dotglob
           got=(*)
           if [ "${#got[@]}" -ne 1 ] || [ "${got[0]}" != "$apk" ]; then
             echo "::error title=Unexpected build output::expected only $apk from the sign job, got: ${got[*]}"
             exit 1
           fi
-          hash="$(sha256sum "$apk" | cut -d' ' -f1)"
-          printf '#version=%s\n%s  %s\n' "$VERSION" "$hash" "$apk" > SHA256SUMS-android.txt
+          # 1.2.4 and earlier discover only the versioned name. Keep an identical
+          # compatibility asset and sign both entries so they can still update.
+          legacy="freetunnel-android-${VERSION:?}.apk"
+          cp "$apk" "$legacy"
+          {
+            printf '#version=%s\n' "$VERSION"
+            sha256sum "$apk" "$legacy"
+          } > SHA256SUMS-android.txt
           sha256sum --strict -c SHA256SUMS-android.txt
           cat SHA256SUMS-android.txt
 
@@ -412,6 +418,7 @@ jobs:
           make_latest: 'false'
           fail_on_unmatched_files: true
           files: |
+            dist/freetunnel-android.apk
             dist/freetunnel-android-${{ needs.check.outputs.version }}.apk
             dist/SHA256SUMS-android.txt
             dist/SHA256SUMS-android.txt.sig

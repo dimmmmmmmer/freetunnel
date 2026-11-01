@@ -61,9 +61,9 @@ object UpdatePolicy {
         return decoded.copyOfRange(12, 44)
     }
     data class Candidate(val tag: String, val draft: Boolean, val prerelease: Boolean, val assets: Map<String, String>)
-    data class Release(val version: String, val apk: String, val manifest: String, val signature: String) {
+    data class Release(val version: String, val apk: String, val manifest: String, val signature: String,
+                       val filename: String = "freetunnel-android-$version.apk") {
         val tag get() = "android-$version"
-        val filename get() = "freetunnel-android-$version.apk"
     }
     private fun version(value: String): List<BigInteger>? =
         if (versionPattern.matches(value)) value.split('.').map(::BigInteger) else null
@@ -85,9 +85,11 @@ object UpdatePolicy {
             val text = candidate.tag.removePrefix("android-")
             val parsed = version(text) ?: return@mapNotNull null
             if (compare(parsed, current) <= 0) return@mapNotNull null
-            val names = listOf("freetunnel-android-$text.apk", "SHA256SUMS-android.txt", "SHA256SUMS-android.txt.sig")
+            val filename = if (candidate.assets.containsKey("freetunnel-android.apk"))
+                "freetunnel-android.apk" else "freetunnel-android-$text.apk"
+            val names = listOf(filename, "SHA256SUMS-android.txt", "SHA256SUMS-android.txt.sig")
             val urls = names.map { name -> candidate.assets[name]?.takeIf { trustedAsset(it, candidate.tag, name) } ?: return@mapNotNull null }
-            Release(text, urls[0], urls[1], urls[2])
+            Release(text, urls[0], urls[1], urls[2], filename)
         }.maxWithOrNull { a, b -> compare(version(a.version)!!, version(b.version)!!) }
     }
 
