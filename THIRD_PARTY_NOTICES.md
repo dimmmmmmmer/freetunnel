@@ -74,8 +74,8 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
 - In `lib/` and `plugins/`: [Qt 6.12.0](#qt) with [the third-party code inside
-  Qt](#third-party-code-inside-qt), [ICU 73](#icu), [Ubuntu 20.04 system
-  libraries](#ubuntu-2004-system-libraries) and [the GCC runtime
+  Qt](#third-party-code-inside-qt), [ICU 73](#icu), [Ubuntu 22.04 system
+  libraries](#ubuntu-2204-system-libraries) and [the GCC runtime
   libraries](#gcc-runtime-libraries).
 - The AppImage only: [the AppImage runtime](#appimage-runtime) at the start of
   the file.
@@ -521,9 +521,9 @@ Qt's Linux binaries come with.
   Unicode, Inc. and others
 - Source: <https://github.com/unicode-org/icu/tree/release-73-2/icu4c>
 
-### Ubuntu 20.04 system libraries
+### Ubuntu 22.04 system libraries
 
-Linux only. The Linux packages are built on Ubuntu 20.04, and they carry the
+Linux only. The Linux packages are built on Ubuntu 22.04, and they carry the
 system libraries Qt and FreeTunnel need that are not part of every Linux
 system, from Ubuntu's packages (linuxdeploy strips their debugging symbols and
 sets the paths they load libraries from). `bundled-system-packages.txt`, next
@@ -575,8 +575,10 @@ version in each package.
   [licenses/desktop/GPL-3.0.txt](licenses/desktop/GPL-3.0.txt) and
   [licenses/desktop/GCC-exception-3.1.txt](licenses/desktop/GCC-exception-3.1.txt)
 - Copyright: Copyright (C) Free Software Foundation, Inc.
-- Source: `gcc-runtime-source.tar`, attached to the same release as the Linux
-  packages on <https://github.com/dimmmmmmmer/freetunnel/releases>. It holds
+- Source: `gcc-runtime-source.tar`, retained in the `freetunnel-linux-x86_64` CI
+  artifact of the matching tagged [Build run](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/build.yml).
+  CI artifacts require a GitHub account to download and have limited retention;
+  this is not a permanent source archive. It holds
   the source package of exactly the version they carry, as the PPA published
   it: unpack it with `tar -xf` and then `dpkg-source -x` on its `.dsc` file.
   The PPA itself keeps only its newest version.
@@ -818,13 +820,13 @@ not changed:
 
 - Qt 6.12.0 (LGPL-3.0, all desktop downloads): the source is at the addresses
   given under [Qt](#qt).
-- The LGPL-licensed Ubuntu 20.04 libraries in the Linux packages:
+- The LGPL-licensed Ubuntu 22.04 libraries in the Linux packages:
   `bundled-system-packages.txt` names each source package and its version, and
   the source of each is at
   `https://launchpad.net/ubuntu/+source/<source package>/<version>`.
 - The GCC runtime libraries in the Linux packages (GPL-3.0 with the GCC Runtime
-  Library Exception): `gcc-runtime-source.tar` on the release the packages come
-  from, as given under [GCC runtime libraries](#gcc-runtime-libraries).
+  Library Exception): `gcc-runtime-source.tar` in the matching Linux CI
+  artifact, with the access and retention limits given under [GCC runtime libraries](#gcc-runtime-libraries).
 - libfuse in the AppImage runtime (LGPL-2.1): `appimage-runtime.txt` in the
   AppImage names the runtime's commit, and the source is at the addresses
   given under [AppImage runtime](#appimage-runtime).
