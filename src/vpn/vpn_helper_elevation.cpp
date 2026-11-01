@@ -1,13 +1,14 @@
 // cppcheck-suppress-file missingIncludeSystem
 // Elevation for VpnHelperClient: starting the helper with administrator rights
-// (pkexec, then sudo, on Linux; osascript on macOS; ShellExecuteEx "runas" on
-// Windows), the command line each of them is handed, and noticing when the
-// prompt was refused. Split out of vpn_helper_client.cpp, which had grown past
+// (pkexec, then sudo, on Linux; osascript on macOS; on Windows the installed
+// helper service, or ShellExecuteEx "runas" where there is none), the command
+// line each of them is handed, and noticing when the prompt was refused. Split out of vpn_helper_client.cpp, which had grown past
 // the point where one file could be read end to end.
 #include "vpn/vpn_helper_client.h"
 #include "vpn/vpn_helper_launch.h"
 
 #include <QCoreApplication>
+#include <QDeadlineTimer>
 #include <QFileInfo>
 #include <QProcess>
 #include <QTcpSocket>
@@ -19,6 +20,10 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
+#include <winsvc.h>
+
+#include <string>
+#include <vector>
 #endif
 
 #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
@@ -128,6 +133,12 @@ QString windowsHelperParameters(quint16 port, const QString &tokenPath)
     return QStringLiteral("--helper --port %1 --token-file \"%2\"").arg(QString::number(port), tokenPath);
 }
 
+QStringList helperServiceArguments(quint16 port, const QString &tokenPath)
+{
+    return {QStringLiteral("--port"), QString::number(port), QStringLiteral("--token-file"),
+            tokenPath};
+}
+
 } // namespace freetunnel
 
 #if defined(Q_OS_MACOS)
@@ -178,12 +189,160 @@ static bool launchWinElevatedHelper(const QString &exe, quint16 port, const QStr
 }
 #endif
 
+#if defined(Q_OS_WIN)
+namespace {
+
+// Closes a service-manager handle when it goes out of scope.
+class ScHandle {
+public:
+    explicit ScHandle(SC_HANDLE h) : m_h(h) {}
+    ~ScHandle()
+    {
+        if (m_h)
+            CloseServiceHandle(m_h);
+    }
+    ScHandle(const ScHandle &) = delete;
+    ScHandle &operator=(const ScHandle &) = delete;
+    SC_HANDLE get() const { return m_h; }
+    explicit operator bool() const { return m_h != nullptr; }
+
+private:
+    SC_HANDLE m_h;
+};
+
+// How long a connect waits for an earlier run of the service to finish taking its
+// tunnel down: the app closed and opened again at once, say. The helper quits as
+// soon as its GUI goes, so this is normally over before it starts. Past it the
+// service is someone else's — another account's session on this machine — and
+// the connect goes through UAC instead, as it did before there was a service.
+constexpr int kServiceBusyWaitMs = 3000;
+
+// *error is GetLastError() as OpenServiceW left it, before closing the manager's
+// handle can change it.
+ScHandle openHelperService(DWORD access, DWORD *error = nullptr)
+{
+    const ScHandle scm(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!scm) {
+        if (error)
+            *error = GetLastError();
+        return ScHandle(nullptr);
+    }
+    const std::wstring name = QString::fromLatin1(freetunnel::kHelperServiceName).toStdWString();
+    SC_HANDLE svc = OpenServiceW(scm.get(), name.c_str(), access);
+    if (!svc && error)
+        *error = GetLastError();
+    return ScHandle(svc);
+}
+
+// The program the service runs: the first word of its command line.
+QString helperServiceProgram(SC_HANDLE svc)
+{
+    DWORD needed = 0;
+    if (QueryServiceConfigW(svc, nullptr, 0, &needed) || GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+        return QString();
+    std::vector<BYTE> buf(needed);
+    auto *cfg = reinterpret_cast<QUERY_SERVICE_CONFIGW *>(buf.data());
+    if (!QueryServiceConfigW(svc, cfg, needed, &needed) || !cfg->lpBinaryPathName)
+        return QString();
+    int argc = 0;
+    LPWSTR *argv = CommandLineToArgvW(cfg->lpBinaryPathName, &argc);
+    if (!argv)
+        return QString();
+    const QString program = argc > 0 ? QString::fromWCharArray(argv[0]) : QString();
+    LocalFree(argv);
+    return program;
+}
+
+bool isSameFile(const QString &a, const QString &b)
+{
+    const QString ca = QFileInfo(a).canonicalFilePath();
+    return !ca.isEmpty() && ca.compare(QFileInfo(b).canonicalFilePath(), Qt::CaseInsensitive) == 0;
+}
+
+bool waitUntilServiceStopped(SC_HANDLE svc, int timeoutMs)
+{
+    const QDeadlineTimer deadline(timeoutMs);
+    for (;;) {
+        SERVICE_STATUS st{};
+        if (!QueryServiceStatus(svc, &st))
+            return false;
+        if (st.dwCurrentState == SERVICE_STOPPED)
+            return true;
+        if (deadline.hasExpired())
+            return false;
+        Sleep(100);
+    }
+}
+
+enum class ServiceStart { Started, NotInstalled, Unusable };
+
+// Start the helper through the service the installer registered, which runs it
+// as LocalSystem with no UAC prompt. It gets the same port and token file a
+// prompted helper gets on its command line, and goes through the same handshake.
+//
+// Only the service of this very install: one registered by another copy of
+// FreeTunnel (an older install elsewhere, while this one runs from a folder of
+// its own) would start a helper this GUI may not speak to. *why says why a
+// service that is there could not be used.
+ServiceStart startHelperService(const QString &exe, quint16 port, const QString &tokenPath,
+                                QString *why)
+{
+    DWORD e = ERROR_SUCCESS;
+    const ScHandle svc =
+            openHelperService(SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG, &e);
+    if (!svc) {
+        if (e == ERROR_SERVICE_DOES_NOT_EXIST)
+            return ServiceStart::NotInstalled;
+        *why = QStringLiteral("could not open it (error %1)").arg(e);
+        return ServiceStart::Unusable;
+    }
+    if (!isSameFile(helperServiceProgram(svc.get()), exe)) {
+        *why = QStringLiteral("it belongs to another copy of FreeTunnel");
+        return ServiceStart::Unusable;
+    }
+    if (!waitUntilServiceStopped(svc.get(), kServiceBusyWaitMs)) {
+        *why = QStringLiteral("it is already running");
+        return ServiceStart::Unusable;
+    }
+    const QStringList args = freetunnel::helperServiceArguments(port, tokenPath);
+    std::vector<std::wstring> wide;
+    wide.reserve(args.size());
+    for (const QString &a : args)
+        wide.push_back(a.toStdWString());
+    std::vector<LPCWSTR> argv;
+    argv.reserve(wide.size());
+    for (const std::wstring &w : wide)
+        argv.push_back(w.c_str());
+    if (!StartServiceW(svc.get(), static_cast<DWORD>(argv.size()), argv.data())) {
+        *why = QStringLiteral("it did not start (error %1)").arg(GetLastError());
+        return ServiceStart::Unusable;
+    }
+    return ServiceStart::Started;
+}
+
+} // namespace
+#endif
+
 bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
     const QString exe = QCoreApplication::applicationFilePath();
 
 #if defined(Q_OS_MACOS)
     return launchMacElevatedHelper(&m_proc, this, exe, port, tokenPath, err);
 #elif defined(Q_OS_WIN)
+    QString why;
+    switch (startHelperService(exe, port, tokenPath, &why)) {
+    case ServiceStart::Started:
+        m_viaService = true;
+        emit connectionInfo(QStringLiteral("Starting the VPN helper service"));
+        return true;
+    case ServiceStart::Unusable:
+        emit connectionInfo(
+                QStringLiteral("VPN helper service not used (%1); asking for administrator rights")
+                        .arg(why));
+        break;
+    case ServiceStart::NotInstalled:
+        break; // a portable or development build: UAC, as it always was
+    }
     return launchWinElevatedHelper(exe, port, tokenPath, err);
 #else
     m_proc = new QProcess(this);
@@ -218,7 +377,8 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
 void VpnHelperClient::watchElevationOutcome()
 {
     if (!m_proc)
-        return; // Windows elevates through ShellExecuteEx, which already says no
+        return; // Windows: the service is watched by helperServiceStoppedEarly, and
+                // ShellExecuteEx already says no
     connect(m_proc, &QProcess::finished, this,
             [this](int code, QProcess::ExitStatus status) {
                 if (!m_starting)
@@ -249,4 +409,31 @@ void VpnHelperClient::watchElevationOutcome()
                 fail(tr("The VPN helper didn't start — authorization was declined, "
                         "or the elevation failed."));
             });
+}
+
+// Whether the helper service this attempt started has stopped again before the
+// GUI reached it. Polled with the connection attempts: the helper runs hidden as
+// LocalSystem, so a helper that gave up at once (a token file it would not read,
+// say) left nothing for the GUI to notice but a port nobody ever opened, and the
+// window sat on "Connecting…" for the full minute.
+bool VpnHelperClient::helperServiceStoppedEarly(QString *why) const
+{
+#if defined(Q_OS_WIN)
+    if (!m_viaService)
+        return false;
+    const ScHandle svc = openHelperService(SERVICE_QUERY_STATUS);
+    SERVICE_STATUS st{};
+    if (!svc || !QueryServiceStatus(svc.get(), &st) || st.dwCurrentState != SERVICE_STOPPED)
+        return false;
+    if (why) {
+        const DWORD code = st.dwWin32ExitCode == ERROR_SERVICE_SPECIFIC_ERROR
+                ? st.dwServiceSpecificExitCode
+                : st.dwWin32ExitCode;
+        *why = QStringLiteral(" (VPN helper service exit code %1)").arg(code);
+    }
+    return true;
+#else
+    Q_UNUSED(why)
+    return false;
+#endif
 }

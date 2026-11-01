@@ -105,6 +105,8 @@ private slots:
     void macScriptStartsTheHelperWithExactlyItsArguments();
     void windowsParametersReachTheHelperAsTheyWereMeant_data();
     void windowsParametersReachTheHelperAsTheyWereMeant();
+    void serviceArgumentsReachTheHelperAsTheyWereMeant_data();
+    void serviceArgumentsReachTheHelperAsTheyWereMeant();
 };
 
 // The AppleScript is unquoted as AppleScript unquotes it and the command inside
@@ -182,6 +184,36 @@ void TestHelperElevation::windowsParametersReachTheHelperAsTheyWereMeant()
 
     const freetunnel::HelperLaunchConfig cfg =
             freetunnel::parseHelperLaunchArgs(QStringList{QStringLiteral("FreeTunnel.exe")} + args);
+    QCOMPARE(cfg.port, port);
+    QCOMPARE(cfg.token, QStringLiteral("0123456789abcdef0123456789abcdef"));
+}
+
+void TestHelperElevation::serviceArgumentsReachTheHelperAsTheyWereMeant_data()
+{
+    windowsParametersReachTheHelperAsTheyWereMeant_data();
+}
+
+// What StartServiceW is handed for the helper service reaches ServiceMain behind
+// the service name, one string to an argument with no command line in between;
+// the helper's parser must find the port and the token in it, and take nothing
+// from the service name it skips.
+void TestHelperElevation::serviceArgumentsReachTheHelperAsTheyWereMeant()
+{
+    QFETCH(QString, folder);
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString dir = root.filePath(folder);
+    QVERIFY(QDir().mkpath(dir));
+    const QString tokenPath = dir + QStringLiteral("/.fthelper-a1B2c3");
+    QVERIFY(writeFile(tokenPath, QByteArrayLiteral("0123456789abcdef0123456789abcdef")));
+    const quint16 port = 61000;
+
+    // No --helper: the service's own command line (--service) says what it is.
+    const QStringList args = freetunnel::helperServiceArguments(port, tokenPath);
+    QCOMPARE(args, expectedArguments(port, tokenPath).mid(1));
+
+    const freetunnel::HelperLaunchConfig cfg = freetunnel::parseHelperLaunchArgs(
+            QStringList{QString::fromLatin1(freetunnel::kHelperServiceName)} + args);
     QCOMPARE(cfg.port, port);
     QCOMPARE(cfg.token, QStringLiteral("0123456789abcdef0123456789abcdef"));
 }
