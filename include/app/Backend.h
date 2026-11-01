@@ -33,6 +33,7 @@ struct HeldSubscriptionUpdate;
 class UpdateChecker;
 
 namespace freetunnel {
+class GeoListController;
 struct ConfigToml;
 struct ControlCommand;
 struct PreparedImport;
@@ -70,6 +71,10 @@ class Backend : public QObject {
     // The split profile the active CONFIG uses. It decides what the tunnel does,
     // and it need not be the one the Split page is showing.
     Q_PROPERTY(QString activeConfigProfile READ activeConfigProfile NOTIFY splitChanged)
+    Q_PROPERTY(QVariantList geoLists READ geoLists NOTIFY splitChanged)
+    Q_PROPERTY(QVariantList geoPresets READ geoPresets CONSTANT)
+    Q_PROPERTY(bool geoAutoUpdate READ geoAutoUpdate WRITE setGeoAutoUpdate NOTIFY splitChanged)
+    Q_PROPERTY(bool geoLimitExceeded READ geoLimitExceeded NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -195,6 +200,17 @@ public:
     // saying why the file was not read.
     Q_INVOKABLE QString readTextFile(const QString &pathOrUrl);
     Q_INVOKABLE QString readBundledText(const QUrl &url) const; // qrc-only (icon recolor)
+
+    QVariantList geoLists() const;
+    QVariantList geoPresets() const;
+    bool geoAutoUpdate() const { return m_settings.geo_auto_update; }
+    void setGeoAutoUpdate(bool enabled);
+    bool geoLimitExceeded() const;
+    Q_INVOKABLE bool addGeoList(const QString &name, const QString &source, bool ips, bool bypass);
+    Q_INVOKABLE void setGeoListEnabled(const QString &id, bool enabled);
+    Q_INVOKABLE void setGeoListDirection(const QString &id, bool bypass);
+    Q_INVOKABLE void removeGeoList(const QString &id);
+    Q_INVOKABLE void refreshGeoList(const QString &id);
 
     bool splitEnabled() const { return m_settings.domain_bypass_enabled; }
     const QStringList &domains() const { return m_settings.domain_bypass_rules; }
@@ -343,6 +359,9 @@ private:
     void reloadConfigs();
     void persistSettings();
     void applySplitRules(bool warnOfLeak = true); // push the active CONFIG's profile rules to the core
+    void startGeoLists();
+    void syncGeoLists();
+    bool geoRulesFit(const QString &profile) const;
     void applyProfileEdit(); // persist, apply and announce an edit to the Split page's profile
     void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
     void startConnectAttempt();   // connectVpn() past its "already busy" check
@@ -464,6 +483,7 @@ private:
 
     VpnHelperClient m_client;
     AppSettings m_settings;
+    freetunnel::GeoListController *m_geoLists = nullptr;
     // Scanned once per Backend when first asked for; see
     // installedApplications() for why this is not a function-local static.
     QVariantList m_installedApps;

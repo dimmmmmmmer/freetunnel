@@ -213,6 +213,13 @@ set(APP_STARTUP_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
@@ -285,6 +292,13 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
@@ -776,6 +790,13 @@ set(BACKEND_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp

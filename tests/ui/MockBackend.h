@@ -47,6 +47,10 @@ class MockBackend : public QObject {
     // rather than a constant.
     Q_PROPERTY(bool selectiveModeWouldLeak READ selectiveModeWouldLeak NOTIFY splitChanged)
     Q_PROPERTY(QString activeConfigProfile MEMBER m_activeConfigProfile NOTIFY splitChanged)
+    Q_PROPERTY(QVariantList geoLists READ getGeoLists NOTIFY splitChanged)
+    Q_PROPERTY(QVariantList geoPresets MEMBER geoPresets CONSTANT)
+    Q_PROPERTY(bool geoAutoUpdate MEMBER geoAutoUpdate NOTIFY splitChanged)
+    Q_PROPERTY(bool geoLimitExceeded READ getGeoLimitExceeded NOTIFY splitChanged)
     Q_PROPERTY(QStringList domains READ domains NOTIFY splitChanged)
     Q_PROPERTY(QStringList excludedRoutes READ excludedRoutes NOTIFY splitChanged)
     Q_PROPERTY(QStringList appRules READ appRules NOTIFY splitChanged)
@@ -78,6 +82,18 @@ class MockBackend : public QObject {
 
 public:
     explicit MockBackend(QObject *parent = nullptr);
+    QVariantList geoLists;
+    QVariantList getGeoLists() const { return geoLists; }
+    bool getGeoLimitExceeded() const { return geoLimitExceeded; }
+    QVariantList geoPresets;
+    bool geoAutoUpdate = true;
+    bool geoLimitExceeded = false;
+    Q_INVOKABLE bool addGeoList(const QString &, const QString &, bool, bool) { return true; }
+    Q_INVOKABLE void setGeoListEnabled(const QString &, bool) {}
+    Q_INVOKABLE void setGeoListDirection(const QString &, bool) {}
+    Q_INVOKABLE void removeGeoList(const QString &) {}
+    Q_INVOKABLE void refreshGeoList(const QString &) {}
+
 
     bool connected() const { return m_connected; }
     void setConnected(bool v);

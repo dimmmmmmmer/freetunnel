@@ -383,6 +383,8 @@ Item {
                 }
                 MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor }
             }
+            Item { Layout.preferredHeight: 20 }
+            GeoListsBlock { Layout.fillWidth: true; backend: splitRoot.backend; shell: splitRoot.shell; theme: splitRoot.theme }
             Item { Layout.preferredHeight: 16 }
         }
     }

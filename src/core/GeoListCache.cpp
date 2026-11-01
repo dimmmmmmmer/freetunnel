@@ -22,7 +22,11 @@ bool parse(const QString &source, GeoListKind kind, GeoDirection direction,
     const auto spec = parseGeoSource(source, error);
     if (!spec.valid())
         return false;
-    return appendGeoEntries(data, spec, kind, direction, &result->entries, &result->stats, error);
+    if (!appendGeoEntries(data, spec, kind, direction, &result->entries, &result->stats, error))
+        return false;
+    for (const auto &entry : result->entries)
+        result->routingBytes += qint64(entry.size()) + 6; // prefix, quotes, comma
+    return true;
 }
 }
 

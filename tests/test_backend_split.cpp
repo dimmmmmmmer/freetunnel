@@ -23,6 +23,7 @@
 #include "core/AppSettings.h"
 #include "core/AppShortcut.h"
 #include "core/InstalledApps.h"
+#include "core/GeoListCache.h"
 
 class TestBackendSplit : public QObject {
     Q_OBJECT
@@ -30,6 +31,7 @@ class TestBackendSplit : public QObject {
 private slots:
     void initTestCase();
     void init();
+    void geoListsBelongToProfilesAndCountAsVpnRules();
 
     void addExcludedRouteAcceptsValidAndRejectsInvalid();
     void addExcludedRouteAcceptsAPastedList();
@@ -89,6 +91,42 @@ void TestBackendSplit::init()
     QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("FreeTunnelTest"),
               QStringLiteral("BackendSplitTest"))
             .clear();
+}
+
+void TestBackendSplit::geoListsBelongToProfilesAndCountAsVpnRules()
+{
+    const QString source = QStringLiteral("https://example.test/geo-sites.txt");
+    freetunnel::CachedGeoList cached; QString error;
+    freetunnel::GeoListCache cache(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                                  + QStringLiteral("/geo"));
+    QVERIFY(cache.store(source, freetunnel::GeoListKind::Sites, freetunnel::GeoDirection::ThroughVpn,
+                         "domain:example.org", &cached, &error));
+    Backend backend;
+    QVERIFY(backend.geoLists().isEmpty());
+    QCOMPARE(backend.geoPresets().size(), 4);
+    backend.setGeoAutoUpdate(false);
+    backend.clearDomains();
+    backend.clearAppRules();
+    backend.setSplitEnabled(true);
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(backend.selectiveModeWouldLeak());
+    QVERIFY(backend.addGeoList(QStringLiteral("Example"), source, false, false));
+    QTRY_VERIFY(!backend.selectiveModeWouldLeak());
+    QCOMPARE(backend.geoLists().size(), 1);
+    QVERIFY(!backend.addGeoList(QStringLiteral("Duplicate"), source, false, false));
+    const auto id = backend.geoLists().first().toMap().value(QStringLiteral("id")).toString();
+    backend.setGeoListEnabled(id, false);
+    QVERIFY(backend.selectiveModeWouldLeak());
+    backend.setGeoListEnabled(id, true);
+    QVERIFY(!backend.selectiveModeWouldLeak());
+    backend.addProfile(QStringLiteral("Other"));
+    backend.selectProfile(QStringLiteral("Other"));
+    QVERIFY(backend.geoLists().isEmpty());
+    backend.selectProfile(QStringLiteral("Default"));
+    QCOMPARE(backend.geoLists().size(), 1);
+    backend.removeGeoList(id);
+    QVERIFY(backend.geoLists().isEmpty());
+    QVERIFY(backend.selectiveModeWouldLeak());
 }
 
 void TestBackendSplit::addExcludedRouteAcceptsValidAndRejectsInvalid()

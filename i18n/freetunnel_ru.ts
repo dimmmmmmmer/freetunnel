@@ -437,6 +437,14 @@
         <source>That import has expired. Start it again.</source>
         <translation>Время на этот импорт истекло. Начните его заново.</translation>
     </message>
+    <message>
+        <source>Enter a name and an HTTPS geo list address</source>
+        <translation>Введите название и HTTPS-ссылку на геосписок</translation>
+    </message>
+    <message>
+        <source>This geo list is already in the profile</source>
+        <translation>Этот геосписок уже есть в профиле</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -699,6 +707,117 @@
     <message>
         <source>malformed certificate</source>
         <translation>повреждён сертификат</translation>
+    </message>
+</context>
+<context>
+    <name>GeoListsBlock</name>
+    <message>
+        <source>Blocked sites in Russia</source>
+        <translation>Заблокированные сайты в России</translation>
+    </message>
+    <message>
+        <source>Blocked IP addresses in Russia</source>
+        <translation>Заблокированные IP-адреса в России</translation>
+    </message>
+    <message>
+        <source>Russian sites</source>
+        <translation>Российские сайты</translation>
+    </message>
+    <message>
+        <source>Russian IP addresses</source>
+        <translation>Российские IP-адреса</translation>
+    </message>
+    <message>
+        <source>Geo lists</source>
+        <translation>Геосписки</translation>
+    </message>
+    <message>
+        <source>Ready-made groups of sites and IP addresses. Your manual rules take priority.</source>
+        <translation>Готовые группы сайтов и IP-адресов. Ручные правила имеют приоритет.</translation>
+    </message>
+    <message>
+        <source>Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit.</source>
+        <translation>Слишком много правил. Отключите часть геосписков. Пока весь трафик идёт через VPN.</translation>
+    </message>
+    <message>
+        <source>Add a ready-made list</source>
+        <translation>Добавить готовый список</translation>
+    </message>
+    <message>
+        <source>Choose…</source>
+        <translation>Выбрать…</translation>
+    </message>
+    <message>
+        <source>Route</source>
+        <translation>Направление</translation>
+    </message>
+    <message>
+        <source>Through VPN</source>
+        <translation>Через VPN</translation>
+    </message>
+    <message>
+        <source>Bypass VPN</source>
+        <translation>Без VPN</translation>
+    </message>
+    <message>
+        <source>Updating…</source>
+        <translation>Обновление…</translation>
+    </message>
+    <message>
+        <source>%1 entries · %2</source>
+        <translation>Записей: %1 · %2</translation>
+    </message>
+    <message>
+        <source>Not downloaded yet</source>
+        <translation>Ещё не загружен</translation>
+    </message>
+    <message>
+        <source>Unsupported entries skipped: %1</source>
+        <translation>Пропущено неподдерживаемых записей: %1</translation>
+    </message>
+    <message>
+        <source>Update</source>
+        <translation>Обновить</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Удалить</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Add your own list</source>
+        <translation>Добавить свой список</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Название</translation>
+    </message>
+    <message>
+        <source>HTTPS address</source>
+        <translation>HTTPS-ссылка</translation>
+    </message>
+    <message>
+        <source>List type</source>
+        <translation>Тип списка</translation>
+    </message>
+    <message>
+        <source>Sites</source>
+        <translation>Сайты</translation>
+    </message>
+    <message>
+        <source>IP addresses</source>
+        <translation>IP-адреса</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Добавить</translation>
+    </message>
+    <message>
+        <source>Update lists daily</source>
+        <translation>Обновлять списки ежедневно</translation>
     </message>
 </context>
 <context>
@@ -1312,6 +1431,25 @@
     <message>
         <source>The process answering on the helper port never finished the handshake — something else may be using that port. Try connecting again.</source>
         <translation>Тот, кто отвечает на порту помощника, не завершил рукопожатие — возможно, порт занят чем-то другим. Попробуйте подключиться ещё раз.</translation>
+    </message>
+</context>
+<context>
+    <name>freetunnel::GeoListUpdater</name>
+    <message>
+        <source>Geo list download timed out</source>
+        <translation>Не удалось дождаться загрузки геосписка</translation>
+    </message>
+    <message>
+        <source>Geo list is too large</source>
+        <translation>Геосписок слишком большой</translation>
+    </message>
+    <message>
+        <source>Geo list server returned an invalid redirect</source>
+        <translation>Сервер геосписка перенаправил на недопустимый адрес</translation>
+    </message>
+    <message>
+        <source>Could not download geo list (HTTP %1)</source>
+        <translation>Не удалось скачать геосписок (HTTP %1)</translation>
     </message>
 </context>
 </TS>

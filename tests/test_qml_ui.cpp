@@ -56,6 +56,7 @@ private slots:
     void homePageLoads();
     void configsPageLoads();
     void splitPageLoads();
+    void geoListsShowStatusAndDirection();
     void splitPageNamesApplicationsTheWayThePickerDoes();
     void typingAProgramNameOffersTheProgram();
     void switchingProfileSwitchesTheApplicationList();
@@ -324,6 +325,26 @@ void TestQmlUi::splitPageLoads()
 {
     QObject *root = loadPage("pages/SplitPage.qml");
     QVERIFY(root);
+    delete root;
+}
+
+void TestQmlUi::geoListsShowStatusAndDirection()
+{
+    m_backend.geoLists = {QVariantMap{
+        {QStringLiteral("id"), QStringLiteral("example")},
+        {QStringLiteral("name"), QStringLiteral("Example sites")},
+        {QStringLiteral("enabled"), true}, {QStringLiteral("bypass"), false},
+        {QStringLiteral("busy"), false}, {QStringLiteral("entries"), 120},
+        {QStringLiteral("skipped"), 0}, {QStringLiteral("updated"), QStringLiteral("01.11.2026 22:00")},
+        {QStringLiteral("error"), QStringLiteral("Last update failed; cached list is available")}}};
+    const auto reset = qScopeGuard([this] { m_backend.geoLists.clear(); });
+    QObject *root = loadPage("components/GeoListsBlock.qml");
+    QVERIFY(root);
+    const auto texts = everyText(root);
+    QVERIFY(texts.contains(QStringLiteral("Example sites")));
+    QVERIFY(texts.contains(QStringLiteral("Through VPN")));
+    QVERIFY(texts.contains(QStringLiteral("120 entries · 01.11.2026 22:00")));
+    QVERIFY(texts.contains(QStringLiteral("Last update failed; cached list is available")));
     delete root;
 }
 

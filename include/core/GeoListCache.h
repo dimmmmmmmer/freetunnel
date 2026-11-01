@@ -8,6 +8,7 @@ namespace freetunnel {
 struct CachedGeoList {
     std::vector<std::string> entries;
     GeoListStats stats;
+    qint64 routingBytes = 0; // JSON strings including the routing-tier prefix
     QDateTime updated;
 };
 
