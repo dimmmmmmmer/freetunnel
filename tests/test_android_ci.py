@@ -40,6 +40,17 @@ class AndroidCiTest(unittest.TestCase):
             # Command and script come from this repository, not user input.
             self.assertEqual(expected, subprocess.run(['bash', '-c', script], env=env, capture_output=True).returncode)  # nosec B603
 
+    def test_core_cache_is_exact_and_disabled_for_releases(self):
+        workflow = (ROOT / '.github/workflows/android.yml').read_text()
+        core = workflow.split('  core:\n', 1)[1].split('  build:\n', 1)[0]
+        self.assertIn('if: inputs.gradle-cache-disabled != true', core)
+        self.assertNotIn('restore-keys:', core)
+        for source in ['android/core-source.json', 'vendor/trusttunnel/*.patch',
+                       'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh',
+                       'scripts/android-core-manifest.py']:
+            self.assertIn(source, core)
+        self.assertIn('      - run: scripts/prepare-trusttunnel-android.sh\n      - uses: actions/upload-artifact', core)
+
     def test_instrumentation_exit_and_result_are_both_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
             adb = Path(temporary) / 'adb'

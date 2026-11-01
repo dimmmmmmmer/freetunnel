@@ -472,9 +472,10 @@ scripts/prepare-trusttunnel-android.sh
 ```
 
 `android/core-source.json` pins the stable source commit and the routing patch.
-Preparation builds all four Android architectures from those sources. CI builds
-the adapter once and passes it to the APK, device-test and signing-check jobs
-in the same run. Every app build verifies the source pin, patch and builder
+Preparation builds all four Android architectures from those sources. CI may
+reuse an adapter only when the source pin, patches and builder inputs match
+exactly; release CI disables that cache and rebuilds from source. The APK,
+device-test and signing-check jobs all use the same prepared artifact. Every app build verifies the source pin, patch and builder
 hashes, ABI inventory and AAR digest against its build manifest. This manifest
 is an integrity record, not an independent signature. No GitHub PAT is needed.
 To rebuild after changing a pin or patch, remove the old AAR and matching JSON

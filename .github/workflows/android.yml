@@ -85,7 +85,16 @@ jobs:
         with:
           cache-provider: basic
           cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        id: core-cache
+        if: inputs.gradle-cache-disabled != true
+        with:
+          path: |
+            android/app/libs/trusttunnel-client-android-*.aar
+            android/app/libs/trusttunnel-client-android-*.json
+          key: android-core-v1-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh', 'scripts/android-core-manifest.py') }}
       - name: Install native build tools
+        if: steps.core-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang-18 g++-13 cmake ninja-build python3-venv pkg-config autoconf automake libtool perl golang
@@ -97,6 +106,8 @@ jobs:
           cargo +1.95 install cargo-ndk --version 4.1.2 --locked
       - run: python3 tests/test_android_core_manifest.py
       - run: scripts/build-trusttunnel-android.sh
+        if: steps.core-cache.outputs.cache-hit != 'true'
+      - run: scripts/prepare-trusttunnel-android.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-patched-core

@@ -8,3 +8,4 @@ app/libs/*.aar
 *.jks
 *.keystore
 .kotlin/
+app/libs/trusttunnel-client-android-*.json
