@@ -38,6 +38,7 @@ check() {
 
 check split/recommended-russia.txt
 check split/default-excluded-routes.txt
+check geo/presets.json
 
 # Every font assets/fonts/inter/SHA256SUMS pins, by its bytes among the APK's res/**/*.ttf.
 fonts_in_apk=""

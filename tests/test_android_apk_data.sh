@@ -16,11 +16,13 @@ command -v python3 > /dev/null || { echo "python3 is needed" >&2; exit 2; }
 fail=0
 # apk <path> [<name in the zip> <file to put there>]...: a zip with those entries, or none.
 apk() {
-  python3 - "$@" <<'PY'
+  python3 - "${GEO_SOURCE-$ROOT/data/geo/presets.json}" "$@" <<'PY'
 import sys, zipfile
-path, rest = sys.argv[1], sys.argv[2:]
+preset, path, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
 with zipfile.ZipFile(path, "w") as z:
     z.writestr("AndroidManifest.xml", "x")
+    if preset:
+        z.write(preset, "assets/geo/presets.json")
     for name, source in zip(rest[0::2], rest[1::2]):
         z.write(source, name)
 PY
@@ -100,6 +102,11 @@ check "an APK with a Medium that has a byte more" fail "$TMP/medium-changed.apk"
 
 apk "$TMP/fonts-as-assets.apk" "${LISTS[@]}" assets/inter_regular.ttf "$REGULAR" assets/inter_medium.ttf "$MEDIUM"
 check "an APK with the fonts as assets, which Resources cannot read" fail "$TMP/fonts-as-assets.apk"
+
+GEO_SOURCE="" apk "$TMP/no-geo.apk" "${LISTS[@]}" "${FONTS[@]}"
+check "an APK without geo presets" fail "$TMP/no-geo.apk"
+GEO_SOURCE="$TMP/short.txt" apk "$TMP/wrong-geo.apk" "${LISTS[@]}" "${FONTS[@]}"
+check "an APK with changed geo presets" fail "$TMP/wrong-geo.apk"
 
 apk "$TMP/none.apk"
 check "an APK with none" fail "$TMP/none.apk"

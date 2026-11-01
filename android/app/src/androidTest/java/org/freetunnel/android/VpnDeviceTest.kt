@@ -114,6 +114,17 @@ class VpnDeviceTest {
         assertThrows(IllegalArgumentException::class.java) { NativeConfigValidator.validate(context, invalid) }
         assertNull(network())
     }
+    @Test fun largeGeoPolicyReachesNativeFactoryWithoutStartingVpn() {
+        val geo = (0 until 150_000).map { "@2:site$it.example" } + "@3:192.0.2.0/24"
+        val plan = RoutingConfig.prepare(source, true, true, listOf("manual.example"), emptyList(), true,
+            emptyList(), geo)
+        assertNull(plan.warning)
+        assertTrue(plan.toml.contains("@0:manual.example"))
+        assertNotNull(VpnServiceConfig.parseToml(RoutingConfig.adapterSettings(plan.toml)))
+        NativeConfigValidator.validate(context, plan.toml)
+        assertNull(network())
+    }
+
     @Test fun adapterAndNativeFactoryPreserveEscapedPasswordsAndPem() {
         val certificate = instrumentation.context.assets.open("test-endpoint.pem").bufferedReader().use { it.readText() }
         val passwords = listOf("ending\\", "ending\"", "ending,", "ending}", "ending#", "mixed\\\",}#\\")
