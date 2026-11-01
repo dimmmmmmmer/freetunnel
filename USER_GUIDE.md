@@ -1,58 +1,23 @@
 # FreeTunnel user guide
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Codacy coverage](https://app.codacy.com/project/badge/Coverage/7080586146744b0095656b8eb9c51fff?branch=main)](https://app.codacy.com/gh/dimmmmmmmer/freetunnel/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
-[![latest version](https://img.shields.io/github/v/release/dimmmmmmmer/freetunnel)](https://github.com/dimmmmmmmer/freetunnel/releases)
-[![Tests](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/tests.yml)
-[![Security](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml/badge.svg)](https://github.com/dimmmmmmmer/freetunnel/actions/workflows/security.yml)
-[![Apache-2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-
-<!-- markdownlint-disable-next-line MD033 -->
-<img src="assets/logo.svg" width="96" align="right" alt="FreeTunnel logo"/>
-
-**FreeTunnel** — a free, open-source desktop VPN client with a modern Qt
-interface, built on the [TrustTunnel](https://github.com/TrustTunnel/TrustTunnelClient)
-core. It wraps TrustTunnel in a lightweight GUI for Windows, macOS and Linux:
-connect with one click, manage configs, split tunnelling, kill switch, system
-tray and global hotkeys.
-
-This page is for people installing and using FreeTunnel. To build it or work on
-it, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Use this guide for installation details, settings and troubleshooting.
+For downloads, supported systems and a quick overview, see the [README](README.md#download).
+The desktop sections below cover Windows, macOS and Linux; phone and TV instructions
+are in [Android and Android TV](#android-and-android-tv).
 
 ## Contents
 
-- [Download](#download)
 - [Install and first launch](#install-and-first-launch)
-- [Quick start](#quick-start)
+- [Android and Android TV](#android-and-android-tv)
 - [System tray and closing the window](#system-tray-and-closing-the-window)
 - [Importing a configuration](#importing-a-configuration)
 - [Split tunnelling](#split-tunnelling)
 - [Kill switch](#kill-switch)
 - [Settings](#settings)
 - [Global hotkeys](#global-hotkeys)
-- [External control](#external-control) (Stream Deck, scripts, links)
+- [External control](#external-control)
 - [Updates](#updates)
-- [Building from source](#building-from-source)
-- [Security](#security)
-- [License](#license)
-
-## Download
-
-Get the build for your platform from
-[**Releases**](https://github.com/dimmmmmmmer/freetunnel/releases/latest):
-
-| Platform | File |
-| --- | --- |
-| **Windows 10/11** | `freetunnel-windows-x86_64-Setup.exe` |
-| **macOS** (Apple Silicon + Intel) | `freetunnel-macos-universal.dmg` |
-| **Linux** (Debian/Ubuntu/Pop!_OS) | `freetunnel-linux-x86_64.deb` |
-| **Linux** (portable, most distros with glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora, Arch…) | `freetunnel-x86_64.AppImage` |
-
-## Android and Android TV
-
-Download the Android APK from [Releases](https://github.com/dimmmmmmmer/freetunnel/releases).
-The same APK supports phones, tablets and Android TV. See [android/README.md](android/README.md)
-for build instructions and detailed Android behavior.
+- [Troubleshooting](#troubleshooting)
 
 ## Install and first launch
 
@@ -64,6 +29,8 @@ warn on first launch.
 If SmartScreen warns: **More info** → **Run anyway**.
 
 ### macOS
+
+Version 1.2.4 requires macOS 14.4 or newer.
 
 Right-click the app → **Open**. Or clear the quarantine flag:
 
@@ -94,14 +61,44 @@ The VPN requires elevated privileges:
 | Windows | A UAC prompt |
 | macOS, Linux | A prompt for an admin password, the first time you connect in a session |
 
-## Quick start
+## Android and Android TV
 
-1. On the **Configs** tab (＋), create a config or import one (see
-   [Importing a configuration](#importing-a-configuration)).
-2. On the home screen, pick a config and click the **logo** to connect /
-   disconnect.
-3. In **Settings**: auto-connect on startup, kill switch, theme, language,
-   hotkeys, and update checks (see [Settings](#settings)).
+### Installation and VPN permission
+
+Install the APK using your browser or file manager. If Android blocks installation,
+allow that app to install unknown apps, then open the APK again. The same APK works
+on phones and TVs. On first connection, approve Android's VPN permission prompt.
+
+### Sending configurations to a TV
+
+1. Open **Configurations → Receive from phone** on the TV.
+2. Keep your phone on the same local network and scan the QR code, or open the displayed address.
+3. Paste one or more `tt://` links separated by spaces or new lines, or select configuration files.
+4. Send them and review each configuration on the TV. **Add** is selected by default.
+
+**Sent** means the item reached the TV; it still needs confirmation there.
+Invalid items show an error. If only some items fail, retry those items rather
+than sending the whole batch again. Keep the receive window open while sending.
+
+### Routing and connection protection
+
+Use the installed-app picker for app rules. Desktop drag-and-drop and hotkeys do
+not apply on Android. Changing app rules may rebuild the Android VPN connection;
+see [Android routing details](android/README.md#split-tunnelling).
+
+For protection while the app is stopped or Android restarts it, enable Android's
+**Always-on VPN** and **Block connections without VPN**, where the device offers
+them. The in-app kill switch protects a running session; it does not replace
+these system settings.
+
+### Updating
+
+Open **Settings → Maintenance → Check for updates**. Android may ask you to allow
+FreeTunnel to install apps before the installer can open. After granting that
+permission, return to FreeTunnel to continue the prepared update.
+
+For platform-specific behavior and technical details, see the
+[Android documentation](android/README.md).
 
 ## System tray and closing the window
 
@@ -264,7 +261,7 @@ setting is under the kill switch in Settings.
 | **Security** | [Kill switch](#kill-switch); on Windows, [Let the VPN config open ports](#windows-ports-a-config-opens) |
 | **Excluded routes** | Subnets that stay outside the tunnel for every config ([details](#excluded-routes)) |
 | **Hotkeys** | Enable, then Toggle VPN, Connect and Disconnect ([details](#global-hotkeys)) |
-| **Logging** | Enable logging (the app and the VPN core share one log file); Verbose logs (full VPN core detail, for debugging) |
+| **Logging** | Enable logging (app events and forwarded core messages appear together); Verbose logs (full VPN core detail, for debugging) |
 | **Maintenance** | Check for updates ([details](#updates)), and the version you run |
 
 ## Global hotkeys
@@ -346,41 +343,23 @@ FreeTunnel looks for a newer release shortly after it starts, and
 Updates are verified with SHA-256 manifests and Ed25519 signatures before
 install. How, and what that guards against: [SECURITY.md](SECURITY.md).
 
-## Building from source
+## Troubleshooting
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local build instructions, tests,
-translations, and Codacy setup.
+- **The TV cannot receive a configuration:** keep the receive window open and check
+  that both devices are on the same local network. Guest Wi-Fi or client isolation
+  can prevent the phone from reaching the TV.
+- **A configuration is rejected:** copy the complete `tt://` link or obtain the
+  original TOML file from your provider. Check the error shown for that item.
+- **The VPN cannot connect:** check the device's date and time, network access and
+  the server details supplied by your provider. Use **Logs** to see the reported error.
+- **An update cannot be verified:** download it again using the official release
+  link in the README. Do not bypass verification.
 
-Builds are fully automated in GitHub Actions. The client links against the C++
-core [`TrustTunnel/TrustTunnelClient`](https://github.com/TrustTunnel/TrustTunnelClient).
+When reporting a problem, include the app version, device/OS, steps to reproduce
+and the relevant error. Remove passwords, authentication keys and private server
+addresses before sharing logs or screenshots.
 
-| Workflow | What it does |
-| --- | --- |
-| [`.github/workflows/build.yml`](.github/workflows/build.yml) | Builds for Windows, macOS and Linux, with HTTP/3 (QUIC) enabled (`DISABLE_HTTP3=OFF`) |
-| [`.github/workflows/tests.yml`](.github/workflows/tests.yml) | Unit tests |
-| [`.github/workflows/security.yml`](.github/workflows/security.yml) | Security checks |
-
-Releases are published automatically on `v*` tags, once Tests and Security have
-passed on the tagged commit.
-
-## Security
-
-[SECURITY.md](SECURITY.md) describes FreeTunnel's security model and known
-limitations, and how to report a vulnerability privately.
-
-## License
-
-[Apache-2.0](LICENSE)
-
-The downloads also contain software by others, under its own licenses: Qt
-(LGPL-3.0), the VPN core's libraries, Wintun on Windows and the bundled system
-libraries on Linux, among others. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-lists them with their license texts, which are in [licenses/](licenses/), and
-every download carries both. When a dependency changes, so must the notices; for
-the pinned ones, `scripts/check-third-party-notices.sh` fails until they name the
-new version.
-
-### macOS compatibility
-
-Desktop version 1.2.4 requires macOS 14.4 or newer. It bundles Qt 6.12.0
-to correct handling of refused local TCP connections on macOS 15.8.
+Report ordinary bugs in [Issues](https://github.com/dimmmmmmmer/freetunnel/issues).
+For private vulnerability reports, use [SECURITY.md](SECURITY.md).
+Build instructions belong in [CONTRIBUTING.md](CONTRIBUTING.md); dependency licenses
+and source information are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

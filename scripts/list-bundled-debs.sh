@@ -58,8 +58,9 @@ mkdir -p "$(dirname "$out")"
   echo "# THIRD_PARTY_NOTICES.md. Each source package is at"
   echo "# https://launchpad.net/ubuntu/+source/<source package>/<source version>,"
   echo "# except the GCC runtime's (libstdc++6, libgcc-s1), from a PPA that keeps"
-  echo "# only its newest version: that is gcc-runtime-source.tar, on the GitHub"
-  echo "# release this bundle comes from."
+  echo "# only its newest version: gcc-runtime-source.tar is retained in the"
+  echo "# matching tagged Build run’s freetunnel-linux-x86_64 CI artifact."
+  echo "# CI artifacts have limited retention and require a GitHub account."
   while IFS= read -r p; do
     # Source is empty when the source package has the binary package's name and
     # version, "name" when only the name differs, and "name (version)" otherwise.
