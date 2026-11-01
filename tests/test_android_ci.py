@@ -30,8 +30,8 @@ class AndroidCiTest(unittest.TestCase):
         start = workflow.index('          test "$CHANGES" = success')
         body = workflow[start:].split('\n\n', 1)[0]
         script = '\n'.join(line[10:] for line in body.splitlines())
-        for results in itertools.product(['success', 'failure', 'cancelled', 'skipped'], repeat=3):
-            env = dict(os.environ, CHANGES='success', ANDROID='true', BUILD=results[0], DEVICES=results[1], SIGNING=results[2])
+        for results in itertools.product(['success', 'failure', 'cancelled', 'skipped'], repeat=4):
+            env = dict(os.environ, CHANGES='success', ANDROID='true', BUILD=results[0], DEVICES=results[1], SIGNING=results[2], CORE=results[3])
             # Command and script come from this repository, not user input.
             result = subprocess.run(['bash', '-c', script], env=env, capture_output=True)  # nosec B603
             self.assertEqual(all(r == 'success' for r in results), result.returncode == 0, results)

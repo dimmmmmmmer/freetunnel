@@ -13,6 +13,7 @@
 #include <functional>
 
 #include <QDirIterator>
+#include <QSysInfo>
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -345,6 +346,41 @@ void TestQmlUi::geoListsShowStatusAndDirection()
     QVERIFY(texts.contains(QStringLiteral("Through VPN")));
     QVERIFY(texts.contains(QStringLiteral("120 entries · 01.11.2026 22:00")));
     QVERIFY(texts.contains(QStringLiteral("Last update failed; cached list is available")));
+    const QString previewDirectory = qEnvironmentVariable("FT_GEO_PREVIEW_DIR");
+    if (!previewDirectory.isEmpty()) {
+        QTranslator russian;
+        QVERIFY(russian.load(QStringLiteral(":/i18n/freetunnel_ru.qm")));
+        QCoreApplication::installTranslator(&russian);
+        const auto removeTranslation = qScopeGuard([&] { QCoreApplication::removeTranslator(&russian); m_engine.retranslate(); });
+        QVariantMap vpn = m_backend.geoLists.first().toMap();
+        vpn[QStringLiteral("name")] = QString::fromUtf8("Заблокированные сайты в России");
+        vpn[QStringLiteral("entries")] = 73515;
+        vpn[QStringLiteral("error")] = QString{};
+        QVariantMap direct = vpn;
+        direct[QStringLiteral("id")] = QStringLiteral("ru");
+        direct[QStringLiteral("name")] = QString::fromUtf8("Российские сайты");
+        direct[QStringLiteral("entries")] = 1145;
+        direct[QStringLiteral("bypass")] = true;
+        m_backend.geoLists = {vpn, direct};
+        emit m_backend.splitChanged();
+        m_engine.retranslate();
+        QQuickWindow window;
+        window.setColor(QColor(QStringLiteral("#181818")));
+        auto *item = qobject_cast<QQuickItem *>(root);
+        QVERIFY(item);
+        item->setParentItem(window.contentItem());
+        item->setX(24); item->setY(24); item->setWidth(432);
+        window.resize(480, 800); window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTest::qWait(100);
+        window.resize(480, int(std::ceil(item->implicitHeight())) + 48);
+        QTest::qWait(100);
+        QVERIFY(QDir().mkpath(previewDirectory));
+        const QImage frame = window.grabWindow();
+        QVERIFY(!frame.isNull());
+        QVERIFY(frame.save(QDir(previewDirectory).filePath(QStringLiteral("geo-desktop-%1.png").arg(QSysInfo::kernelType()))));
+        item->setParentItem(nullptr);
+    }
     delete root;
 }
 

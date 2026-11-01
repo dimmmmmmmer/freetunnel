@@ -233,4 +233,27 @@
     <string name="language_russian" translatable="false">"Русский"</string>
     <string name="text_no_browser">"This device has no browser to open that link."</string>
     <string name="receive_page_network">Could not confirm delivery. Check the TV before trying again.</string>
+    <string name="geo_lists">"Geo lists"</string>
+    <string name="geo_description">"Ready-made groups of sites and IP addresses. Your manual rules take priority."</string>
+    <string name="geo_add_preset">"Add a ready-made list"</string>
+    <string name="geo_choose">"Choose…"</string>
+    <string name="geo_blocked_sites">"Blocked sites in Russia"</string>
+    <string name="geo_blocked_ips">"Blocked IP addresses in Russia"</string>
+    <string name="geo_ru_sites">"Russian sites"</string>
+    <string name="geo_ru_ips">"Russian IP addresses"</string>
+    <string name="geo_route">"Route"</string>
+    <string name="geo_updating">"Updating…"</string>
+    <string name="geo_not_downloaded">"Not downloaded yet"</string>
+    <string name="geo_entries">"%1$d entries · %2$s"</string>
+    <string name="geo_skipped">"Unsupported entries skipped: %1$d"</string>
+    <string name="geo_update_failed">"Could not update this list. Check its address, category and connection. Any previously downloaded rules are still available."</string>
+    <string name="geo_update">"Update"</string>
+    <string name="geo_add_custom">"Add your own list"</string>
+    <string name="geo_auto">"Update lists daily"</string>
+    <string name="geo_duplicate">"This geo list is already in the profile"</string>
+    <string name="geo_name">"Name"</string>
+    <string name="geo_ip_list">"List contains IP addresses"</string>
+    <string name="geo_add">"Add"</string>
+    <string name="geo_bad_source">"Enter a name and an HTTPS geo list address"</string>
+    <string name="geo_limit">"Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."</string>
 </resources>

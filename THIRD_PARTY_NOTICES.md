@@ -98,8 +98,8 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 Every download contains the TrustTunnel VPN core. The desktop builds compile it
 from source and link it statically into FreeTunnel. In the Android app it is
 part of the TrustTunnel Android client's native library
-(`libtrusttunnel_android.so`), built by the TrustTunnel project from the same
-release. Unless noted, each library below is compiled into the core in all
+(`libtrusttunnel_android.so`), built by FreeTunnel from the same stable
+release with its routing-priority patch. Unless noted, each library below is compiled into the core in all
 downloads.
 
 ### TrustTunnel client core
@@ -107,7 +107,8 @@ downloads.
 - Version: TrustTunnelClient 1.1.11, commit
   c0990e174fc75b2e52acd15882c62e69a3022581. The desktop builds apply
   FreeTunnel's changes to it, which are in
-  [vendor/trusttunnel/](vendor/trusttunnel/) in FreeTunnel's source.
+  [vendor/trusttunnel/](vendor/trusttunnel/) in FreeTunnel's source. Android
+  applies the routing-priority patch listed in [android/core-source.json](android/core-source.json).
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
 - Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/c0990e174fc75b2e52acd15882c62e69a3022581>

@@ -15,7 +15,7 @@ object NativeConfigValidator {
 
     fun validate(context: Context, source: String) {
         check(Looper.myLooper() != Looper.getMainLooper()) { "Validate configurations on a worker thread" }
-        RoutingConfig.validate(source)
+        RoutingConfig.validateGenerated(source)
         require(VpnServiceConfig.parseToml(source) != null) { "Android adapter rejected the configuration" }
         val app = context.applicationContext
         synchronized(lock) {

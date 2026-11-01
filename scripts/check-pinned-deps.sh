@@ -17,19 +17,18 @@ check() {
   fi
 }
 
-# The downloader and Gradle independently verify the Android core. They must
-# name the same artifact and digest before the slow Android build starts.
+# Android uses the stable source commit plus a reviewed routing patch.
 if ! python3 - <<'PYCHECK'
+import json, re
 from pathlib import Path
-import re
-prepare = Path('scripts/prepare-trusttunnel-android.sh').read_text()
+pin = json.loads(Path('android/core-source.json').read_text())
+assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
+assert pin['commit'] == Path('scripts/upstream_ref.txt').read_text().strip()
 gradle = Path('android/app/build.gradle').read_text()
-artifact = re.search(r'^artifact="([^"]+)"', prepare, re.M)
-core = re.search(r"^def coreAar = '([^']+)'", gradle, re.M)
-expected = re.search(r'^expected="([0-9a-f]{64})"', prepare, re.M)
-digest = re.search(r"digest != '([0-9a-f]{64})'", gradle)
-if not all((artifact, core, expected, digest)) or artifact[1] != core[1] or expected[1] != digest[1]:
-    raise SystemExit('pinned-deps: Android downloader and Gradle must pin the same core artifact and SHA-256')
+assert "def coreAar = 'trusttunnel-client-android-" + pin['version'] + ".aar'" in gradle
+assert pin['patches'] and all(Path(p).is_file() for p in pin['patches'])
+assert sorted(pin['abis']) == ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+assert "apply from: rootProject.file('verify-core.gradle')" in gradle
 PYCHECK
 then
   fail=1

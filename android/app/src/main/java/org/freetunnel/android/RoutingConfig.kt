@@ -52,15 +52,17 @@ object RoutingConfig {
         }
         writeTable(root, emptyList())
     }
-    private fun parse(source: String): TomlTable {
-        require(source.length <= 1_048_576) { "Конфигурация слишком большая (максимум 1 МБ)" }
+    private fun parse(source: String, limit: Int = 1_048_576): TomlTable {
+        require(source.length <= limit) { "Конфигурация слишком большая (максимум 1 МБ)" }
         val parsed = Toml.parse(source)
         require(!parsed.hasErrors()) { "Ошибка TOML: ${parsed.errors().firstOrNull()?.position()}" }
         require(parsed.getTable("endpoint") != null) { "В конфигурации отсутствует раздел [endpoint]" }
         return parsed
     }
-    @JvmStatic fun validate(source: String): TomlTable {
-        val parsed = parse(source)
+    @JvmStatic fun validate(source: String): TomlTable = validateInternal(source, false)
+    @JvmStatic fun validateGenerated(source: String): TomlTable = validateInternal(source, true)
+    private fun validateInternal(source: String, generated: Boolean): TomlTable {
+        val parsed = parse(source, if (generated) 16_777_216 else 1_048_576)
         val endpoint = parsed.getTable("endpoint")!!
         require(!endpoint.getString("hostname").isNullOrBlank()) { "Укажите endpoint.hostname" }
         require(endpoint.getString("username") != null && endpoint.getString("password") != null) { "Укажите имя пользователя и пароль сервера" }
@@ -73,10 +75,18 @@ object RoutingConfig {
         require(endpoint.getString("upstream_protocol")?.let { it in listOf("http2", "http3") } != false) { "Укажите upstream_protocol: http2 или http3" }
         require(parsed.getString("vpn_mode")?.let { it in listOf("general", "selective") } != false) { "Неизвестный vpn_mode" }
         val rules = parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
-        require(rules.none { SplitRules.subnet(it)?.substringAfterLast('/')?.toInt() == 0 }) { "Default routes cannot be destination rules" }
-        if (parsed.getString("vpn_mode") != "selective") {
-            require(!SplitRules.coversAddressFamily(rules + platformExcludedRoutes)) { "Destination exclusions cover an entire address family" }
+        require(generated || rules.none { it.startsWith("@") }) { "Routing priorities are reserved for generated configurations" }
+        val plain = rules.map { if (it.length > 3 && it.take(3) in listOf("@0:", "@1:", "@2:", "@3:")) it.drop(3) else it }
+        require(plain.none { SplitRules.subnet(it)?.substringAfterLast('/')?.toInt() == 0 }) { "Default routes cannot be destination rules" }
+        val bypass = rules.mapNotNull {
+            when {
+                it.startsWith("@1:") || it.startsWith("@3:") -> it.drop(3)
+                it.startsWith("@0:") || it.startsWith("@2:") -> null
+                parsed.getString("vpn_mode") != "selective" -> it
+                else -> null
+            }
         }
+        require(!SplitRules.coversAddressFamily(bypass + platformExcludedRoutes)) { "Destination exclusions cover an entire address family" }
         val tun = parsed.getTable("listener.tun") ?: error("Missing listener.tun")
         val included = tun.getArray("included_routes") ?: error("Missing included_routes")
         require(included.size() > 0) { "Empty included_routes" }
@@ -233,9 +243,13 @@ object RoutingConfig {
             try { context.packageManager.getApplicationInfo(it, 0); true }
             catch (_: android.content.pm.PackageManager.NameNotFoundException) { false }
         }
+        val geo = if (prefs.getBoolean("split_enabled", false)) rules.geoLists.filter { it.enabled }.flatMap { definition ->
+            val prefix = if (definition.bypass) "@3:" else "@2:"
+            GeoRepository.cachedEntries(context, definition).map { prefix + it }
+        } else emptyList()
         return prepare(source, prefs.getBoolean("split_enabled", false), prefs.getBoolean("through", false),
             rules.domains, apps, prefs.getBoolean("killswitch", true),
-            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)))
+            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo)
     }
 
     /**
@@ -246,7 +260,7 @@ object RoutingConfig {
      */
     @JvmStatic @JvmOverloads fun prepare(source: String, enabled: Boolean, through: Boolean,
                            domains: List<String>, apps: List<String>, killSwitch: Boolean,
-                           excludedRoutes: List<String> = emptyList()): Plan {
+                           excludedRoutes: List<String> = emptyList(), geoRules: List<String> = emptyList()): Plan {
         val parsed = validate(source)
         val originalMode = parsed.getString("vpn_mode") ?: "general"
         val original = parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
@@ -257,9 +271,15 @@ object RoutingConfig {
         var allowApps = enabled && through && selectedApps.isNotEmpty()
         var mode = requestedMode
         var warning: Int? = null
+        val geoTooLarge = geoRules.sumOf { it.length.toLong() + 3 } > 8 * 1024 * 1024
+        val geo = if (enabled && !geoTooLarge) geoRules.distinct() else emptyList()
+        if (enabled && geoTooLarge) {
+            mode = "general"; rules = emptyList(); selectedApps = emptyList(); allowApps = false
+            warning = R.string.geo_limit
+        }
         if (mode == "selective") {
             when {
-                selectedApps.isNotEmpty() && rules.isNotEmpty() -> {
+                selectedApps.isNotEmpty() && (rules.isNotEmpty() || geo.isNotEmpty()) -> {
                     // Android's per-app allowlist intersects with destination routing.
                     // The adapter cannot express a union. Protect all traffic and tell
                     // the user explicitly instead of silently losing either ruleset.
@@ -267,11 +287,16 @@ object RoutingConfig {
                     warning = R.string.text_applications_and_addresses_are_selected_full_vpn_pro
                 }
                 selectedApps.isNotEmpty() -> mode = "general"
-                rules.isEmpty() -> {
+                rules.isEmpty() && geo.none { it.startsWith("@2:") } -> {
                     mode = "general"
                     warning = R.string.text_no_through_vpn_rules_full_vpn_is_enabled
                 }
             }
+        }
+        if (geo.isNotEmpty() && warning != R.string.text_applications_and_addresses_are_selected_full_vpn_pro) {
+            // Keep manual rules' direction even if an empty selective policy fell back to full VPN.
+            val manualPrefix = if (requestedMode == "selective") "@0:" else "@1:"
+            rules = rules.map { manualPrefix + it } + geo
         }
         val root = linkedMapOf<String, Any>()
         parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
@@ -289,7 +314,7 @@ object RoutingConfig {
         // A config saved by an earlier version can still hold a subscription address;
         // the core does nothing with it, so it is not handed the password in it.
         val result = document(root, subscriptionKeys, mapOf(listOf("listener", "tun", "excluded_routes") to excluded))
-        validate(result)
+        validateGenerated(result)
         return Plan(result, selectedApps, allowApps, warning)
     }
 }

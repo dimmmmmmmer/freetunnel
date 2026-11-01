@@ -821,6 +821,45 @@
     </message>
 </context>
 <context>
+    <name>GeoRules</name>
+    <message>
+        <source>category %1 is an inverted match, which cannot be used</source>
+        <translation>Категория %1 использует инвертированное правило, которое не поддерживается</translation>
+    </message>
+    <message>
+        <source>the file is damaged</source>
+        <translation>Файл повреждён</translation>
+    </message>
+    <message>
+        <source>the file is damaged or not a %1 file</source>
+        <translation>Файл повреждён или не имеет формат %1</translation>
+    </message>
+    <message>
+        <source>the file has no category %1</source>
+        <translation>В файле нет категории %1</translation>
+    </message>
+    <message>
+        <source>not an https address</source>
+        <translation>Нужна HTTPS-ссылка</translation>
+    </message>
+    <message>
+        <source>an address with a user name or password</source>
+        <translation>Ссылки с логином или паролем не поддерживаются</translation>
+    </message>
+    <message>
+        <source>a .dat file needs a category after &apos;#&apos;</source>
+        <translation>Для .dat-файла укажите категорию после #</translation>
+    </message>
+    <message>
+        <source>attribute filters (@) are not supported</source>
+        <translation>Фильтры атрибутов (@) не поддерживаются</translation>
+    </message>
+    <message>
+        <source>the list has no entries that can be used</source>
+        <translation>В списке нет поддерживаемых записей</translation>
+    </message>
+</context>
+<context>
     <name>HomePage</name>
     <message>
         <source> MB/s</source>

@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/GeoRules.h"
 
@@ -339,7 +340,7 @@ bool readDatEntry(std::string_view msg, const QString &category, GeoListKind kin
         return true;
     if (reverse) {
         // "Everything but these": nothing the core can be given as a list.
-        *error = QStringLiteral("category %1 is an inverted match, which cannot be used").arg(code);
+        *error = QCoreApplication::translate("GeoRules", "category %1 is an inverted match, which cannot be used").arg(code);
         return false;
     }
     for (const std::string_view item : items) {
@@ -369,18 +370,18 @@ bool readDat(const QByteArray &data, const GeoSource &source, GeoListKind kind, 
         bool matched = false;
         QString why;
         if (!readDatEntry(entry, source.category, kind, c, &matched, &why)) {
-            *error = why.isEmpty() ? QStringLiteral("the file is damaged") : why;
+            *error = why.isEmpty() ? QCoreApplication::translate("GeoRules", "the file is damaged") : why;
             return false;
         }
         found = found || matched;
     }
     if (r.failed()) {
-        *error = QStringLiteral("the file is damaged or not a %1 file")
+        *error = QCoreApplication::translate("GeoRules", "the file is damaged or not a %1 file")
                          .arg(kind == GeoListKind::Sites ? QStringLiteral("geosite") : QStringLiteral("geoip"));
         return false;
     }
     if (!found) {
-        *error = QStringLiteral("the file has no category %1").arg(source.category);
+        *error = QCoreApplication::translate("GeoRules", "the file has no category %1").arg(source.category);
         return false;
     }
     return true;
@@ -445,12 +446,12 @@ GeoSource parseGeoSource(const QString &spec, QString *why)
 #endif
     if (!url.isValid() || !https || url.host().isEmpty()) {
         if (why)
-            *why = QStringLiteral("not an https address");
+            *why = QCoreApplication::translate("GeoRules", "not an https address");
         return out;
     }
     if (!url.userInfo().isEmpty()) {
         if (why)
-            *why = QStringLiteral("an address with a user name or password");
+            *why = QCoreApplication::translate("GeoRules", "an address with a user name or password");
         return out;
     }
     GeoSource candidate;
@@ -459,12 +460,12 @@ GeoSource parseGeoSource(const QString &spec, QString *why)
     candidate.dat = candidate.file.path().endsWith(QLatin1String(".dat"), Qt::CaseInsensitive);
     if (candidate.dat && candidate.category.isEmpty()) {
         if (why)
-            *why = QStringLiteral("a .dat file needs a category after '#'");
+            *why = QCoreApplication::translate("GeoRules", "a .dat file needs a category after '#'");
         return out;
     }
     if (candidate.dat && candidate.category.contains(QLatin1Char('@'))) {
         if (why)
-            *why = QStringLiteral("attribute filters (@) are not supported");
+            *why = QCoreApplication::translate("GeoRules", "attribute filters (@) are not supported");
         return out;
     }
     return candidate;
@@ -487,7 +488,7 @@ bool appendGeoEntries(const QByteArray &data, const GeoSource &source, GeoListKi
     }
     if (c.stats.entries == 0) {
         if (error)
-            *error = QStringLiteral("the list has no entries that can be used");
+            *error = QCoreApplication::translate("GeoRules", "the list has no entries that can be used");
         return false;
     }
     out->insert(out->end(), std::make_move_iterator(c.entries.begin()),

@@ -883,6 +883,36 @@ class UiTourDeviceTest {
             scrollPageToEnd()
             shot("split-after-recommended-scrolled", "Split after Recommended for Russia, scrolled to the end: the applications")
         }
+        screen("geo-lists") {
+            val vpn = GeoDefinition("preview-vpn", act().getString(R.string.geo_blocked_sites),
+                "https://example.invalid/preview-vpn.txt", GeoLists.Kind.SITES, false, true)
+            val direct = GeoDefinition("preview-direct", act().getString(R.string.geo_ru_sites),
+                "https://example.invalid/preview-direct.txt", GeoLists.Kind.SITES, true, true)
+            val cache = GeoCache(GeoRepository.directory(context))
+            cache.store(vpn.source, vpn.kind, vpn.bypass, "domain:example.org\ndomain:example.net".toByteArray())
+            cache.store(direct.source, direct.kind, direct.bypass, "domain:example.ru".toByteArray())
+            SplitStore.edit(SplitPrefs(prefs), null) { profiles ->
+                profiles.select("Default")
+                profiles.putGeoList("Default", vpn)
+                profiles.putGeoList("Default", direct)
+            }
+            GeoRepository.get(context).refreshEnabled()
+            eventually("Geo list cache must load") { GeoRepository.get(context).state(vpn).cached != null
+                    && GeoRepository.get(context).state(direct).cached != null }
+            goTo(2)
+            render()
+            scrollPageTo("geo:preview-vpn:enabled")
+            shot("geo-lists", "Geo lists with fixture entries: manual-rule priority, VPN/bypass directions and update status")
+        }
+        screen("geo-custom-list") {
+            goTo(2)
+            scrollPageTo("geo:custom")
+            activate("geo:custom")
+            awaitOverlay("geoform")
+            typeInto("geoform:name", "My sites")
+            typeInto("geoform:source", "https://example.org/geosite.dat#category")
+            shot("geo-custom-list", "Custom geo-list form: HTTPS source, type and routing direction")
+        }
         screen("split-through-vpn-notice") {
             // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
             prefs.edit().putBoolean("through", true).putBoolean("split_enabled", true).commit()

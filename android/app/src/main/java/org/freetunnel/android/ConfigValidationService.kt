@@ -18,10 +18,19 @@ class ConfigValidationService : Service() {
         Thread({
             val accepted = runCatching {
                 require(input != null)
-                val bytes = ParcelFileDescriptor.AutoCloseInputStream(input).use { it.readBytes() }
-                require(bytes.size <= 4_194_304)
+                val bytes = ParcelFileDescriptor.AutoCloseInputStream(input).use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(16384)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        require(output.size() + count <= 16_777_216)
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
                 val source = bytes.toString(Charsets.UTF_8)
-                RoutingConfig.validate(source)
+                RoutingConfig.validateGenerated(source)
                 val owner = VpnClient(source, null)
                 val create = VpnClient::class.java.getDeclaredMethod("createNative", String::class.java).apply { isAccessible = true }
                 val destroy = VpnClient::class.java.getDeclaredMethod("destroyNative", java.lang.Long.TYPE).apply { isAccessible = true }

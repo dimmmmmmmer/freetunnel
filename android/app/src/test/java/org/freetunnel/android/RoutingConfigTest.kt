@@ -32,6 +32,50 @@ class RoutingConfigTest {
     private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
         "192.168.0.0/16", "255.255.255.255/32")
 
+    @Test fun geoVpnRulesEnableSelectiveModeAndKeepManualPriority() {
+        val result = RoutingConfig.prepare(source, true, true, listOf("manual.example"), emptyList(), true,
+            emptyList(), listOf("@2:*.example", "@3:192.0.2.0/24"))
+        val parsed = Toml.parse(result.toml)
+        assertEquals("selective", parsed.getString("vpn_mode"))
+        assertEquals(listOf("@0:manual.example", "@2:*.example", "@3:192.0.2.0/24"), parsed.getArray("exclusions")!!.toList())
+        val onlyGeo = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true,
+            emptyList(), listOf("@2:example.org"))
+        assertEquals("selective", Toml.parse(onlyGeo.toml).getString("vpn_mode"))
+        assertNull(onlyGeo.warning)
+    }
+    @Test fun manualBypassAndImportedRulesPrecedeGeoVpn() {
+        val result = RoutingConfig.prepare(source, true, false, listOf("manual.example"), emptyList(), true,
+            emptyList(), listOf("@2:*.example"))
+        assertEquals(listOf("@1:intranet.example", "@1:manual.example", "@2:*.example"),
+            Toml.parse(result.toml).getArray("exclusions")!!.toList())
+    }
+    @Test fun geoListsDoNotBypassTheDisabledSplitSwitch() {
+        val result = RoutingConfig.prepare(source, false, true, emptyList(), emptyList(), true,
+            emptyList(), listOf("@3:example.org"))
+        assertEquals(listOf("intranet.example"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
+    }
+    @Test fun appsAndGeoDestinationsKeepAndroidUnionFallback() {
+        val result = RoutingConfig.prepare(source, true, true, emptyList(), listOf("test.browser"), true,
+            emptyList(), listOf("@2:example.org"))
+        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, result.warning)
+        assertEquals("general", Toml.parse(result.toml).getString("vpn_mode"))
+        assertTrue(Toml.parse(result.toml).getArray("exclusions")!!.isEmpty)
+        assertTrue(result.apps.isEmpty())
+    }
+    @Test fun oversizedGeoRulesFallBackToFullTunnel() {
+        val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true,
+            emptyList(), listOf("@2:" + "a".repeat(8 * 1024 * 1024)))
+        assertEquals(R.string.geo_limit, result.warning)
+        assertEquals("general", Toml.parse(result.toml).getString("vpn_mode"))
+        assertTrue(Toml.parse(result.toml).getArray("exclusions")!!.isEmpty)
+    }
+    @Test fun combinedGeoBypassCannotCoverEveryAddress() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RoutingConfig.prepare(source, true, false, emptyList(), emptyList(), true,
+                emptyList(), (0..255).map { "@3:$it.0.0.0/8" })
+        }
+    }
+
     @Test fun appsOnlyUseGeneralAndAndroidAllowlist() {
         val result = plan(apps = listOf("test.browser"))
         assertEquals("general", Toml.parse(result.toml).getString("vpn_mode"))

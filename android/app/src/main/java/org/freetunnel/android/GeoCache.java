@@ -22,10 +22,14 @@ final class GeoCache {
         final List<String> entries;
         final GeoLists.Stats stats;
         final long updatedMillis;
+        final long routingBytes;
         Result(List<String> entries, GeoLists.Stats stats, long updatedMillis) {
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
             this.stats = stats;
             this.updatedMillis = updatedMillis;
+            long bytes = 0;
+            for (String entry : entries) bytes += entry.length() + 6L;
+            this.routingBytes = bytes;
         }
     }
 

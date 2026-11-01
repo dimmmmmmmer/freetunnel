@@ -31,6 +31,7 @@ See [what changed](CHANGELOG.md) for release notes.
 - **Connect with one click:** save multiple server configurations and switch between them.
 - **Easy import:** add `tt://` links or TOML files; send several at once from your phone to Android TV.
 - **Split tunnelling:** choose which apps and sites use the VPN, with a ready-made profile for Russia.
+- **Geo lists:** ready-made site and IP lists or your own HTTPS list; choose VPN or direct access, with manual rules taking priority.
 - **Kill switch:** block traffic if the VPN connection drops.
 - **Desktop shortcuts:** control the VPN from the system tray, global hotkeys or Stream Deck.
 - **Made for your device:** remote-friendly TV controls, light and dark themes, English and Russian, and built-in update checks.
