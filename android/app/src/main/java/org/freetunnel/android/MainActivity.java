@@ -2824,6 +2824,12 @@ public final class MainActivity extends Activity {
         Button custom = ui.button(getString(R.string.geo_add_custom), Ui.Kind.NEUTRAL, 0, "geo:custom");
         custom.setOnClickListener(v -> showGeoForm()); body.addView(custom, lp(-2, 32));
         ToggleView automatic = ui.toggle(prefs.getBoolean(GeoRepository.AUTO_UPDATE, true), false, "geo:auto");
+        // On narrow screens spatial focus search skips the left-aligned button
+        // between the right-aligned preset and update controls.
+        custom.setId(View.generateViewId());
+        automatic.setId(View.generateViewId());
+        automatic.setNextFocusUpId(custom.getId());
+        custom.setNextFocusDownId(automatic.getId());
         automatic.setListener((v, checked) -> {
             prefs.edit().putBoolean(GeoRepository.AUTO_UPDATE, checked).apply();
             GeoRepository.get(this).refreshEnabled();
