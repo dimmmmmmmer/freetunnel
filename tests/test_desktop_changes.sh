@@ -102,8 +102,8 @@ ANDROID=(
 fresh
 files "${ANDROID[@]}"
 gate
-expect "only Android's files" desktop=false "all 5 files of #7 are Android's"
-expect "  says so in an annotation" desktop=false "::notice title=Android-only change::"
+expect "only Android's files" desktop=false "all 5 files of #7 are Android or documentation"
+expect "  says so in an annotation" desktop=false "::notice title=Android/documentation-only change::"
 grep -q -- '--paginate repos/owner/repo/pulls/7/files?per_page=100' "$TMP/f/calls.log" \
   || { echo "FAIL: the files were not asked for page by page:"; cat "$TMP/f/calls.log"; fail=1; }
 grep -qx 'api repos/owner/repo/pulls/7' "$TMP/f/calls.log" \
@@ -123,15 +123,30 @@ gate
 expect "one desktop file among Android's" desktop=true "#7 touches desktop paths \\(1\\): src/core/UpdateChecker.cpp"
 
 # Near misses: each beside Android's files is a desktop change.
-for path in android androidx/x.kt Android/app/build.gradle docs/android/x.md \
+for path in android androidx/x.kt Android/app/build.gradle docs/android/x.cpp \
             .github/workflows/android.yml.orig .github/workflows/tests.yml \
             scripts/build-android-release.sh.bak scripts/check-desktop-changes.sh \
-            .gitignore README.md; do
+            .gitignore README.md.in; do
   fresh
   files "${ANDROID[@]}" "$(file "$path")"
   gate
   expect "$path is not Android's" desktop=true "desktop paths \\(1\\): $path"
 done
+
+for path in README.md USER_GUIDE.md CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/android/x.md; do
+  fresh
+  files "$(file "$path")"
+  gate
+  expect "$path skips desktop work" desktop=false "are Android or documentation"
+done
+fresh
+files "$(file README.md src/main.cpp)"
+gate
+expect "source renamed to documentation still builds" desktop=true "src/main.cpp"
+fresh
+files "$(file README.md)" "$(file src/main.cpp)"
+gate
+expect "documentation mixed with code still builds" desktop=true "src/main.cpp"
 
 fresh
 files "$(file android/app/src/main/cpp/split.cpp src/core/SplitRules.cpp)"
@@ -141,7 +156,7 @@ expect "a desktop file moved into android/" desktop=true "desktop paths \\(1\\):
 fresh
 files "$(file android/app/new.kt android/app/old.kt)" "${ANDROID[@]}"
 gate
-expect "a rename inside android/" desktop=false "all 6 files of #7 are Android's"
+expect "a rename inside android/" desktop=false "all 6 files of #7 are Android or documentation"
 
 # Two pages, the way gh --paginate prints them; the desktop file on the second.
 fresh
@@ -154,7 +169,7 @@ fresh
 { page "${ANDROID[@]}"; page "$(file android/b.kt)"; } > "$TMP/f/files.json"
 pr "$HEAD" 6 > "$TMP/f/pr.json"
 gate
-expect "two pages of Android's files" desktop=false "all 6 files of #7 are Android's"
+expect "two pages of Android's files" desktop=false "all 6 files of #7 are Android or documentation"
 
 fresh
 files

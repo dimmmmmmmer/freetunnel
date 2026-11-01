@@ -1081,6 +1081,19 @@ target_include_directories(freetunnel_test_helper PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(freetunnel_test_helper PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network ft_apps)
+if(WIN32)
+    target_sources(freetunnel_test_helper PRIVATE ../src/vpn/vpn_helper_service_win.cpp)
+    target_link_libraries(freetunnel_test_helper PRIVATE advapi32)
+    add_executable(test_helper_service_win test_helper_service_win.cpp)
+    target_include_directories(test_helper_service_win PRIVATE . ../include)
+    target_compile_definitions(test_helper_service_win PRIVATE
+        FT_TEST_HELPER_BINARY="$<TARGET_FILE:freetunnel_test_helper>")
+    target_link_libraries(test_helper_service_win PRIVATE Qt6::Core Qt6::Network Qt6::Test advapi32)
+    add_dependencies(test_helper_service_win freetunnel_test_helper)
+    add_test(NAME helper_service_win COMMAND test_helper_service_win)
+    set_tests_properties(helper_service_win PROPERTIES RUN_SERIAL TRUE TIMEOUT 90)
+endif()
+
 
 add_executable(test_helper_server
     test_helper_server.cpp

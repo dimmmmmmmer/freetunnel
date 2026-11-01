@@ -3,6 +3,13 @@ on:
   # Always report the required gate. Job-level filtering skips unrelated PRs.
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'USER_GUIDE.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**/*.md'
   pull_request:
   workflow_dispatch:
   # android-release.yml runs this whole workflow on the tagged commit, and signs

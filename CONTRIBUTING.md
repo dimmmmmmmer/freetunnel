@@ -754,3 +754,23 @@ red.
 
 By contributing, you agree that your contributions will be licensed under the
 Apache License 2.0 (see [LICENSE](LICENSE)).
+
+### Stable core monitoring
+
+The Core update workflow checks TrustTunnelClient daily and can also be run
+manually. It opens a PR for a newer stable `vX.Y.Z` tag, checks our patches and
+runs Build, Tests, Security and Android CI. It does not merge or publish a release.
+When using GITHUB_TOKEN, CI is dispatched explicitly; no personal token is needed.
+Actions must be permitted to create pull requests in the repository settings.
+Android's AAR version and checksum still need a separate update, as do notices
+and any compatibility changes described in the generated PR.
+
+### Windows helper service
+
+Installed builds start the demand-start FreeTunnelHelper service on connection.
+Portable builds and installations whose service is unavailable use UAC. The
+service uses the existing helper protocol and stops when the app disconnects
+from it. Interactive accounts can start it but cannot reconfigure or stop it.
+See SECURITY.md and docs/security-threats.md for the implications on shared PCs.
+The Windows CI service lifecycle test uses the real helper with a mock VPN core;
+installer upgrade/removal and real VPN traffic still need a Windows smoke test.

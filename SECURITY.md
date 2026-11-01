@@ -51,7 +51,7 @@ How the helper is elevated:
 
 | Platform | Elevation |
 | --- | --- |
-| Windows | User Account Control |
+| Windows | The `FreeTunnelHelper` service the installer registers, run as LocalSystem and started by the GUI with no prompt; User Account Control where it cannot be used |
 | macOS | An administrator prompt through `osascript` |
 | Linux | pkexec, or sudo where pkexec cannot run |
 
