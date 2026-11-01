@@ -265,7 +265,6 @@ def glyph(character, w, h, d, stroke):
 
 class Font:
     """Read TrueType outlines for the bundled Inter glyphs."""
-    # Read TrueType outlines for the bundled Inter glyphs.
 
     # Reads cmap (format 4 or 12), loca, glyf and head tables, simple glyphs and translated composites.
     # Unsupported forms are rejected.
