@@ -1,0 +1,6 @@
+[
+  {"id":"ru-blocked-sites","name":"Blocked sites in Russia","kind":"sites","direction":"vpn","source":"https://github.com/runetfreedom/russia-blocked-geosite/releases/latest/download/ru-blocked.txt"},
+  {"id":"ru-blocked-ips","name":"Blocked IP addresses in Russia","kind":"ips","direction":"vpn","source":"https://github.com/runetfreedom/russia-blocked-geoip/releases/latest/download/geoip.dat#ru-blocked"},
+  {"id":"ru-sites","name":"Russian sites","kind":"sites","direction":"bypass","source":"https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat#category-ru"},
+  {"id":"ru-ips","name":"Russian IP addresses","kind":"ips","direction":"bypass","source":"https://github.com/runetfreedom/russia-blocked-geoip/releases/latest/download/geoip.dat#ru"}
+]

@@ -1243,3 +1243,8 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(STATUS "release_signature not built: it needs bash and openssl")
     endif ()
 endif ()
+
+add_executable(test_georules test_georules.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_georules PRIVATE ../include)
+target_link_libraries(test_georules PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME georules COMMAND test_georules)
