@@ -1,5 +1,9 @@
 # Android changes
 
+## Unreleased
+
+- Made connection logs on Android and Android TV as readable as on desktop, including saved logs and copied text.
+
 ## 1.2.4
 
 - FreeTunnel for Android phones, tablets and TVs: import your configuration and connect.

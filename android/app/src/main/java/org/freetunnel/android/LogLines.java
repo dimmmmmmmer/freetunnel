@@ -57,7 +57,15 @@ final class LogLines {
     /** One line of the file as the page shows it. */
     static String shown(String line) {
         Matcher written = WRITTEN.matcher(line);
-        return written.matches() ? written.group(1) + " " + written.group(2) + " " + written.group(3) : line;
+        if (!written.matches()) return line;
+        String message = written.group(3);
+        // Older Android versions persisted the core's raw JSON. Normalize only
+        // INFO connection events, retaining their original timestamp and level.
+        if (INFO.equals(written.group(2))) {
+            String formatted = ConnectionLog.format(message);
+            if (!formatted.equals(message)) message = oneLine(formatted);
+        }
+        return written.group(1) + " " + written.group(2) + " " + message;
     }
 
     /** The last {@code maxLines} lines of the file's text, each as {@link #shown}, one to a line, none of them empty. */
