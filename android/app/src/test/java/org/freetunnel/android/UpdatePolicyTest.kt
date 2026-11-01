@@ -35,6 +35,24 @@ class UpdatePolicyTest {
         assertEquals("1.10.0", UpdatePolicy.select(inputs, "1.0.0")!!.version)
         assertNull(UpdatePolicy.select(inputs, "1.10.0"))
     }
+    @Test fun prefersStableApkNameAndVerifiesBothNamesInMigrationManifest() {
+        val legacy = candidate("android-1.2.0")
+        val filename = "freetunnel-android.apk"
+        val url = "https://github.com/${UpdatePolicy.REPOSITORY}/releases/download/${legacy.tag}/$filename"
+        val migration = legacy.copy(assets = legacy.assets + (filename to url))
+        val modern = UpdatePolicy.select(listOf(migration), "1.0.0")!!
+        assertEquals(filename, modern.filename)
+        assertEquals(url, modern.apk)
+        val bytes = "#version=1.2.0\n$hash  $filename\n$hash  ${release.filename}\n".toByteArray()
+        for (selected in listOf(modern, release)) {
+            assertArrayEquals(checksum, UpdatePolicy.verifyManifest(selected, bytes, sign(bytes), rawKey))
+        }
+        val onlyModern = migration.copy(assets = migration.assets - release.filename)
+        assertEquals(modern, UpdatePolicy.select(listOf(onlyModern), "1.0.0"))
+        val foreign = migration.copy(assets = migration.assets + (filename to "https://evil.test/$filename"))
+        assertNull(UpdatePolicy.select(listOf(foreign), "1.0.0"))
+    }
+
     @Test fun rejectsForeignOrAmbiguousAssetUrls() {
         val original = candidate("android-1.2.0")
         val filename = "freetunnel-android-1.2.0.apk"

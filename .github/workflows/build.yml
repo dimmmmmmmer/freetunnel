@@ -761,8 +761,8 @@ jobs:
       # The GPL source of the GCC runtime libraries the bundle carries, which
       # their PPA does not keep (see scripts/archive-gcc-runtime-source.sh).
       # Fetched on every build, so a pull request shows that it still works; a
-      # tag's build hands it to the release, where the source offer in
-      # THIRD_PARTY_NOTICES.md points.
+      # tag's build retains it in the Linux CI artifact for maintainers.
+      # It is not attached to the user-facing release.
       - name: Archive the GCC runtime's source (Linux)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
@@ -1496,7 +1496,7 @@ jobs:
 
       # The Linux packages carry the GCC runtime libraries (GPL-3.0 with the GCC
       # Runtime Library Exception), and THIRD_PARTY_NOTICES.md says their source
-      # is on the release, as this file. No release goes out without it.
+      # is retained in the Linux CI artifact, not the release downloads.
       - name: Require the GCC runtime's source
         run: |
           test -s artifacts/gcc-runtime-source.tar \
@@ -1620,7 +1620,6 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*-Setup.exe
             artifacts/**/*.AppImage
-            artifacts/gcc-runtime-source.tar
             artifacts/SHA256SUMS.txt
             artifacts/SHA256SUMS.txt.sig
           body_path: notes.md
