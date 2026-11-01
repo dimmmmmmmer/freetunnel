@@ -32,6 +32,7 @@ report a vulnerability, is in [SECURITY.md](../SECURITY.md).
 | Other local user, at the single-instance socket | A socket name of each user's own (Linux: in `$XDG_RUNTIME_DIR` or `/run/user/<uid>`), owner-only, peer checked at both ends, so the token and commands never reach another account. Not covered: on Windows, and on Linux without a runtime directory, another account taking the user's socket name first, which makes later launches start further copies | [Single instance](#single-instance-channel) |
 | Other local user, at the helper | Loopback-only helper; AppImage unpacked for root in a directory only root can write. Not covered: an AppImage started with `--appimage-extract-and-run`, which its own runtime first unpacks as the user in `/tmp` (use the .deb) | [Helper](#privileged-helper-and-its-ipc), [AppImage](#appimage-elevation-on-linux) |
 | Same-user malware | Documented limitation; OS credential APIs; the helper reads only a token file and deletes nothing, whoever starts it. Can reach root through the user-owned `.AppImage`, not through the .deb | [Same user](#processes-running-as-the-same-user) |
+| Any account signed in on Windows starts the helper with no prompt, through the helper service | The service can only be started, by interactive users; the helper it runs is the same one, with the same checks, and stops when its GUI goes. Not covered: such an account, administrator or not, can now run a VPN session (and its kill switch) for the whole machine; an administrator can take the right away | [Helper service](#the-helper-service-on-windows) |
 | TOML injection | `tomlEsc()` strips control chars | [Config files](#toml-injection) |
 | Config keys that point the elevated core at a path, interface or port | Helper clears the five such keys (session-cache folder, kill-switch ports, interface name, attach, namespace; the ports kept only if the user turns that on, for every config); tunnel listener only; an upstream bump whose core reads a new key fails `verify_upstream_patch.sh` | [Config files](#config-files-reaching-root) |
 | Operator learns which app opened a flow | Program name kept out of the core decision, local log only | [Per-app rules](#per-application-rules) |
@@ -49,7 +50,9 @@ Any process running as the **same OS user** can:
 - connect to the local control socket if it obtains the token;
 - read the helper inter-process communication (IPC) token file during VPN
   connect;
-- toggle the VPN or import configs.
+- toggle the VPN or import configs;
+- on Windows, start the elevated helper itself with no prompt, through the
+  [helper service](#the-helper-service-on-windows).
 
 It **cannot**:
 
@@ -131,7 +134,9 @@ TrustTunnel core. The GUI talks to it over loopback TCP;
 ### An elevated process outlives the app
 
 - **Mitigation:** the helper quits with the GUI, so that an elevated process
-  never outlives the app that started it.
+  never outlives the app that started it. That holds for the Windows helper
+  service too: it is started on demand, not with Windows, and stops when its
+  helper does.
 - **Residual risk:** the kill switch's block goes with the session the helper
   holds ([kill switch](#kill-switch)).
 
@@ -141,6 +146,52 @@ The helper used to read whatever token file it was named and then delete it, so
 a prompt the user approved could delete any file as root or Administrator. Its
 rules have to hold whoever starts it, because a same-user process can start the
 genuine binary behind the real prompt.
+
+### The helper service on Windows
+
+The installer registers `FreeTunnelHelper`, a service that runs
+`FreeTunnel.exe --service` as LocalSystem and is started on demand, never with
+Windows. The GUI starts it with `StartServiceW`, handing it the same port and
+token file path a prompted helper gets on its command line; from there it is
+the same helper, with the same handshake. Interactive users (`IU`: signed in at
+the machine, in person or by Remote Desktop) may start it and query it, and
+nothing else: not stop it, not reconfigure it. The GUI uses it only when it is
+this install's own service (same executable) and idle, and otherwise asks
+through UAC as before.
+
+- **Threat:** with no prompt in the way, anything running as an interactive
+  user can start the helper: malware running as the user, as on the other
+  platforms behind a prompt, but also another person signed in to the same
+  computer, administrator or not, who before needed an administrator to
+  approve.
+- **Mitigation:** the helper the service runs is the one
+  [a same-user process could already start](#a-same-user-process-starts-the-helper-itself),
+  under the same rules. It takes a port and a token file and nothing more, reads
+  the file only under the conditions given there, deletes nothing, takes its
+  config inline with the risky keys cleared, chooses its own log path, and quits
+  a minute after starting if nobody authenticated. One runs at a time: while
+  one account's helper is up, a connect from another goes through UAC.
+- **Residual risk:**
+  - any interactive account can bring up a VPN session, with its routes and
+    its kill switch, and these act on the whole machine and every account on
+    it. That is the point of the service for a personal computer; on a shared
+    one, an administrator removes the `IU` entry from the service's permissions
+    (remove the IU entry with an administrator’s service-permissions tool), and every connect asks through UAC again;
+  - the token file is now read as LocalSystem on behalf of any interactive
+    user, so the Windows residual risk under
+    [a same-user process starts the helper](#a-same-user-process-starts-the-helper-itself)
+    — a redirected folder leading the helper to a small `.fthelper-…` file the
+    caller could not read — is open to more callers. What leaves the helper is
+    still only a hash over a nonce keyed with the file's contents;
+  - the helper runs as LocalSystem, not as the user: the core's log file goes
+    to the system profile, where the user cannot read it. Its lines still reach
+    the app over IPC and the app's own log, as before.
+- **Why it works this way:** a UAC prompt on every session was the price of
+  starting the helper on demand. A service started on demand keeps the rest:
+  no elevated process before the user connects or after the app closes, and the
+  same helper code on every platform. An always-on service listening for
+  clients, as other VPN clients run, would have needed a new protocol and a new
+  way to tell callers apart; this one reuses the handshake that already does.
 
 ## AppImage elevation on Linux
 

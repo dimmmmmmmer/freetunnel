@@ -20,6 +20,22 @@ Unicode true
 !define PRODUCT_EXE        "FreeTunnel.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 
+; The helper service: FreeTunnel.exe --service, run as LocalSystem and started by
+; the app, with no UAC prompt, when it connects. The name is
+; freetunnel::kHelperServiceName (include/vpn/vpn_helper_launch.h).
+;
+; Who may do what with it (sc sdset):
+;   SY, BA  the defaults: LocalSystem and elevated administrators, everything;
+;   AU      authenticated users may look at it — its state and configuration;
+;   IU      users signed in at this machine (in person or by Remote Desktop) may
+;           also start it. Nothing else: not stop it, not change it. The helper
+;           stops itself when the app that started it goes away.
+; Starting it is the whole of what the app needs. Why that is safe to hand to
+; every interactive user, and what it gives up, is in docs/security-threats.md
+; ("The helper service on Windows").
+!define HELPER_SERVICE      "FreeTunnelHelper"
+!define HELPER_SERVICE_SDDL "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLORC;;;AU)(A;;CCLCSWRPLORC;;;IU)"
+
 ; Version can be overridden from the command line: makensis /DPRODUCT_VERSION=1.0.0
 !ifndef PRODUCT_VERSION
   !define PRODUCT_VERSION "1.0.0"
@@ -187,6 +203,12 @@ FunctionEnd
 ; it goes on all the same, as it did; a stuck process must not block it.
 !macro CLOSE_FREETUNNEL
   DetailPrint "Closing FreeTunnel if it is running..."
+  ; The helper service runs FreeTunnel.exe as LocalSystem, with no window for
+  ; taskkill to close politely. Stopping the service is its polite close: the
+  ; helper takes its tunnel down and exits, and the loop below waits for that
+  ; like for the rest. Nothing to stop on a first install, which is fine.
+  nsExec::Exec 'sc.exe stop "${HELPER_SERVICE}"'
+  Pop $0
   StrCpy $1 0
   closeLoop:
     nsExec::Exec 'taskkill /IM "${PRODUCT_EXE}"'
@@ -302,6 +324,25 @@ Section "Install"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="${PRODUCT_NAME}"'
   nsExec::Exec 'netsh advfirewall firewall add rule name="${PRODUCT_NAME}" dir=out action=allow program="$INSTDIR\${PRODUCT_EXE}" enable=yes profile=any'
 
+  ; The helper service (see HELPER_SERVICE above). Created on a first install;
+  ; on an upgrade it is already there and is pointed at this install instead,
+  ; since the folder may have changed. Either way the permissions are set again.
+  ; Should any of it fail, the app finds no service it can start and asks for
+  ; administrator rights through UAC, as it did before there was one.
+  DetailPrint "Registering the FreeTunnel VPN helper service..."
+  nsExec::ExecToLog 'sc.exe create "${HELPER_SERVICE}" binPath= "\"$INSTDIR\${PRODUCT_EXE}\" --service" type= own start= demand obj= LocalSystem DisplayName= "${PRODUCT_NAME} VPN helper"'
+  Pop $0
+  StrCmp $0 "0" helper_service_created
+    nsExec::ExecToLog 'sc.exe config "${HELPER_SERVICE}" binPath= "\"$INSTDIR\${PRODUCT_EXE}\" --service" type= own start= demand obj= LocalSystem DisplayName= "${PRODUCT_NAME} VPN helper"'
+    Pop $0
+  helper_service_created:
+  nsExec::ExecToLog 'sc.exe description "${HELPER_SERVICE}" "Runs the ${PRODUCT_NAME} VPN tunnel for the ${PRODUCT_NAME} app, which starts it on connect. It stops when the app closes."'
+  Pop $0
+  nsExec::ExecToLog 'sc.exe sdset "${HELPER_SERVICE}" "${HELPER_SERVICE_SDDL}"'
+  Pop $0
+  StrCmp $0 "0" +2
+    DetailPrint "The helper service could not be set up; FreeTunnel will ask for administrator rights on connect."
+
   ; URL protocol handlers: route freetunnel:// and tt:// links to the app
   ; (e.g. freetunnel://toggle, or a tt:// config-import link). --url-handler
   ; tells the app the URL was opened as a link, which any web page can do, and
@@ -327,6 +368,11 @@ Section "Uninstall"
   ; with the tunnel still up and nothing left to close it. First, too: it uses
   ; $0, which holds the answer below.
   !insertmacro CLOSE_FREETUNNEL
+
+  ; The helper service, stopped by CLOSE_FREETUNNEL above. Removed before the
+  ; files it runs.
+  nsExec::Exec 'sc.exe delete "${HELPER_SERVICE}"'
+  Pop $0
 
   ; Is this actually our install directory? The directory page accepts any
   ; existing folder (e.g. D:\Tools), and an unconditional recursive delete there

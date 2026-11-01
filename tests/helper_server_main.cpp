@@ -13,5 +13,9 @@
 
 int main(int argc, char **argv)
 {
+#if defined(Q_OS_WIN)
+    if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QLatin1String("--service"))
+        return runVpnHelperService(argc, argv);
+#endif
     return runVpnHelper(argc, argv);
 }

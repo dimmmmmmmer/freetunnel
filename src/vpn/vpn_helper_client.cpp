@@ -293,6 +293,7 @@ void VpnHelperClient::abortStartup() {
 void VpnHelperClient::resetHelperTransport()
 {
     m_buf.clear();
+    m_viaService = false;
     if (m_sock) {
         m_sock->deleteLater();
         m_sock = nullptr;
@@ -411,6 +412,18 @@ void VpnHelperClient::startHelperConnectRetry()
             m_attempt->stop();
             m_attempt->deleteLater();
             m_attempt = nullptr;
+            return;
+        }
+        // Started through the Windows helper service, which then stopped again:
+        // nothing is coming to this port, so say so now rather than in a minute.
+        QString stoppedWhy;
+        if (helperServiceStoppedEarly(&stoppedWhy)) {
+            m_attempt->stop();
+            m_attempt->deleteLater();
+            m_attempt = nullptr;
+            fail(tr("The VPN helper didn't start — authorization may have been declined, "
+                    "or the elevated helper could not be reached.%1")
+                         .arg(stoppedWhy));
             return;
         }
         // 240 × 250 ms = 60 s. The elevation dialog blocks the helper from even

@@ -6,6 +6,13 @@ name: Tests
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'USER_GUIDE.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**/*.md'
     # A release is published only once this workflow has passed on the tagged
     # commit (scripts/check-release-ci.sh, in the release job). A run on main
     # usually covers it, but not when a later push cancelled that run or the tag
@@ -184,6 +191,10 @@ jobs:
       - name: A second loopback address (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
+
+      - name: Deploy Qt beside the Windows service test helper
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
+        run: windeployqt --no-translations build-tests/freetunnel_test_helper.exe
 
       - name: Test
         if: needs.changes.outputs.desktop != 'false'

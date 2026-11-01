@@ -2,7 +2,8 @@
 #pragma once
 
 // GUI-side proxy for the VPN. Spawns the privileged helper (the same binary run
-// with --helper, elevated once per session) and drives it over loopback TCP.
+// with --helper, elevated once per session; on Windows started through the
+// installed helper service where there is one) and drives it over loopback TCP.
 // Exposes the same signal/slot surface the Backend expects, so the GUI never
 // runs the VPN core (or root) in-process.
 
@@ -96,6 +97,9 @@ private:
     // Fail fast when the elevation prompt is answered with "no", instead of
     // polling a port nothing will ever listen on for a full minute.
     void watchElevationOutcome();
+    // Windows: the helper service this attempt started stopped before the GUI
+    // reached it. False everywhere else, and when no service was used.
+    bool helperServiceStoppedEarly(QString *why) const;
     void wireHelperSocket(bool testHelper);
     void startHelperConnectRetry();
     void abortStartup();
@@ -122,6 +126,8 @@ private:
     SessionSettings sessionSettings() const;
 
     QProcess *m_proc = nullptr;
+    // This attempt's helper was started through the Windows helper service.
+    bool m_viaService = false;
     QTcpSocket *m_sock = nullptr;
     quint16 m_tcpPort = 0;
     QString m_token;
