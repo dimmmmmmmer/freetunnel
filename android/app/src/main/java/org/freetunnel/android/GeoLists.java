@@ -58,11 +58,11 @@ final class GeoLists {
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getHost().isEmpty()
                 || uri.getRawUserInfo() != null) return null;
         String category = uri.getFragment() == null ? "" : uri.getFragment().trim();
-        String file;
-        try {
-            file = new URI(uri.getScheme(), uri.getRawAuthority() == null ? null : uri.getAuthority(), uri.getPath(),
-                    uri.getQuery(), null).toASCIIString();
-        } catch (Exception bad) { return null; }
+        // Keep escaped reserved characters intact: decoding %2F or %26 and
+        // rebuilding the URI can change the requested path or query parameters.
+        String file = uri.toASCIIString();
+        int fragment = file.indexOf('#');
+        if (fragment >= 0) file = file.substring(0, fragment);
         boolean dat = uri.getPath() != null && uri.getPath().toLowerCase(Locale.ROOT).endsWith(".dat");
         if (dat && (category.isEmpty() || category.contains("@"))) return null;
         return new Source(file, category, dat);
@@ -86,7 +86,7 @@ final class GeoLists {
         boolean next() {
             if (pos >= end || failed) return false;
             long key = varint();
-            if (failed || (key >>> 3) == 0 || (key >>> 3) > Integer.MAX_VALUE) return fail();
+            if (failed || (key >>> 3) == 0 || (key >>> 3) > 0x1fffffff) return fail();
             field = (int) (key >>> 3);
             wire = (int) (key & 7);
             return true;

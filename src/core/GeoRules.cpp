@@ -34,7 +34,7 @@ public:
         if (atEnd() || m_failed)
             return false;
         uint64_t key = 0;
-        if (!varint(&key) || key >> 3 == 0 || key >> 3 > UINT32_MAX)
+        if (!varint(&key) || key >> 3 == 0 || key >> 3 > 0x1fffffff)
             return fail();
         *field = static_cast<uint32_t>(key >> 3);
         *wireType = static_cast<uint32_t>(key & 7);

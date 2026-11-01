@@ -116,6 +116,14 @@ public final class GeoListsTest {
         assertNull(GeoLists.parseSource(null));
     }
 
+    @Test public void sourcePreservesEscapedPathAndQuery() {
+        String url = "https://example.com/path%2Fname.dat?key=one%26two%3Dthree";
+        GeoLists.Source source = GeoLists.parseSource(url + "#category-ru");
+        assertNotNull(source);
+        assertEquals(url, source.file);
+        assertEquals("category-ru", source.category);
+    }
+
     // ---------- .dat files ----------
 
     @Test public void geositeTakesOneCategoryInEveryCase() {
@@ -318,6 +326,12 @@ public final class GeoListsTest {
                 GeoLists.join(Arrays.asList("b.example", "*.a.example", "a.example", "b.example")));
         assertEquals("", GeoLists.join(Collections.<String>emptyList()));
         assertEquals(Arrays.asList("*.a.example", "a.example"), GeoLists.lines("*.a.example\na.example\n"));
+    }
+
+    @Test public void invalidFieldNumbersAreRejected() {
+        Read result = read(cat(geosite("x", domain(2, "example.com")), intField(0x20000000, 0)),
+                "https://x.test/geosite.dat#x", GeoLists.Kind.SITES);
+        assertFalse(result.ok());
     }
 
     @Test public void overflowingVarintsAreRejected() {

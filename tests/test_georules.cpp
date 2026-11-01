@@ -115,6 +115,7 @@ private slots:
     void aDamagedDatFileAddsNothing();
     void unknownFieldsAreSkipped();
     void overflowingVarintsAreRejected();
+    void invalidFieldNumbersAreRejected();
     void textListsReadEveryPublishedForm();
     void internationalNamesBecomeTheirAsciiForm();
     void aListWithNothingUsableIsAnError();
@@ -364,6 +365,13 @@ void TestGeoRules::joinedEntriesAreSortedAndUnique()
     const std::string joined = joinGeoEntries({"b.example", "*.a.example", "a.example", "b.example"});
     QCOMPARE(QString::fromStdString(joined), QStringLiteral("*.a.example\na.example\nb.example\n"));
     QCOMPARE(QString::fromStdString(joinGeoEntries({})), QString());
+}
+
+void TestGeoRules::invalidFieldNumbersAreRejected()
+{
+    const auto data = geosite("x", {domain(2, "example.com")}) + intField(0x20000000, 0);
+    const Read result = read(data, QStringLiteral("https://x.test/geosite.dat#x"), GeoListKind::Sites);
+    QVERIFY(!result.ok);
 }
 
 QTEST_MAIN(TestGeoRules)
