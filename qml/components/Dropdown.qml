@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 Item {
     id: dd
@@ -35,8 +36,19 @@ Item {
                        width: Math.min(implicitWidth, 112); elide: Text.ElideRight
                        text: dd.labelFor(dd.value)
                        color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 14 }
-                Text { anchors.verticalCenter: parent.verticalCenter; text: "▾"
-                       color: ddMa.containsMouse ? theme.text : theme.textDim; font.pixelSize: 16 }
+                Shape {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 8; height: 5
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeWidth: 0
+                        fillColor: ddMa.containsMouse ? theme.text : theme.textDim
+                        startX: 0; startY: 0
+                        PathLine { x: 8; y: 0 }
+                        PathLine { x: 4; y: 5 }
+                        PathLine { x: 0; y: 0 }
+                    }
+                }
             }
             MouseArea { id: ddMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: shell.showSelect(ddVal, dd.model, dd.value, function(v){ dd.picked(v) }) }
