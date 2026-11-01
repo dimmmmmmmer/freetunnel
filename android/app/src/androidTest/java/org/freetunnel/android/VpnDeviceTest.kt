@@ -1168,7 +1168,7 @@ class VpnDeviceTest {
         val client = nativeClient()!!
         val info = client.javaClass.getDeclaredMethod("onConnectionInfo", String::class.java).apply { isAccessible = true }
         try {
-            info.invoke(client, "tunnel example.test")
+            info.invoke(client, """{"action":"tunnel","domain":"example.test","dst":"203.0.113.7:443","proto":"TCP"}""")
             eventually { logged("tunnel example.test") == 1 }
             val line = log.readLines().first { "tunnel example.test" in it }
             assertTrue(line, Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\tINFO\ttunnel example\\.test").matches(line))

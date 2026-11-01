@@ -4238,6 +4238,21 @@ class TvDeviceTest {
         })
     }
 
+    @Test fun savedCoreJsonIsReadableOnScreenAndOnTheClipboard() {
+        prefs.edit().putBoolean("logging", true).commit()
+        writeLog("2026-11-01 12:34:56\tINFO\t" +
+            """{"action":"bypass","domain":"","dst":"203.0.113.7:443","proto":"TCP"}""")
+        val a = open()
+        render(a, 4)
+        val expected = "12:34:56 INFO bypass 203.0.113.7:443"
+        assertEquals(expected, shownLogOf(a))
+        click(a, "log:copy")
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        eventually("Copy uses the same compact connection format as the TV screen") {
+            onMain { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() } == expected
+        }
+    }
+
     // Clear and Copy are as wide as their words, with room between them; the box is the surface, radius 8, and fills the page.
     @Test fun clearAndCopyAreLinksAsWideAsTheirWordsAndTheBoxFillsThePage() {
         prefs.edit().putBoolean("logging", true).commit()

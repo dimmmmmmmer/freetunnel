@@ -268,7 +268,7 @@ class FreeTunnelVpnService : VpnService() {
             override fun protectSocket(socket: Int) = protect(socket)
             override fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?) = verifier.verifyCertificate(certificate, rawChain)
             // Each connection the core makes, as the desktop logs them (Backend: connectionInfo): at INFO, when logging is on.
-            override fun onConnectionInfo(info: String) = logEvent(info)
+            override fun onConnectionInfo(info: String) = logEvent(ConnectionLog.format(info))
             override fun onStateChanged(state: Int) = execute {
                 if (destroyed || token != generation) return@execute
                 when {
