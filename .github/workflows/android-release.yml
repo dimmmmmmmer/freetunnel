@@ -412,7 +412,7 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: FreeTunnel for Android ${{ needs.check.outputs.version }}
+          name: Android v${{ needs.check.outputs.version }}
           body_path: notes/notes.md
           prerelease: false
           make_latest: 'false'
