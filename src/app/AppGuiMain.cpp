@@ -234,6 +234,19 @@ static void deliverDeferredControl(GuiStartup *out, Backend &backend, const QStr
         backend.handleControl(controlArg);
 }
 
+static void createGuiBackend(QGuiApplication &app, GuiStartup *out)
+{
+    out->urlFilter = std::make_unique<UrlOpenFilter>();
+    app.installEventFilter(out->urlFilter.get());
+    out->trace << QLatin1String("url-filter");
+
+    out->backend = std::make_unique<Backend>();
+#ifdef Q_OS_MACOS
+    setupMacDockIcon(app, *out->backend);
+#endif
+    out->trace << QLatin1String("backend");
+}
+
 std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv[],
                                       GuiStartup *out)
 {
@@ -258,16 +271,8 @@ std::optional<int> wireGuiApplication(QGuiApplication &app, int argc, char *argv
     out->server = startSingleInstanceServer(app, &instanceToken);
     step("instance-server");
 
-    out->urlFilter = std::make_unique<UrlOpenFilter>();
-    app.installEventFilter(out->urlFilter.get());
-    step("url-filter");
-
-    out->backend = std::make_unique<Backend>();
+    createGuiBackend(app, out);
     Backend &backend = *out->backend;
-#ifdef Q_OS_MACOS
-    setupMacDockIcon(app, backend);
-#endif
-    step("backend");
 
     out->quitFilter.reset(
             wireBackendLifecycle(app, backend, out->appQuitting, out->server, instanceToken));

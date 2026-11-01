@@ -39,6 +39,8 @@ public final class PingProbeTest {
     }
 
     @Test public void aListeningPortAnswersWithTheTimeItTook() throws Exception {
+        // Loopback-only TCP reachability fixture; no credentials or application data are sent.
+        // nosemgrep: java.lang.security.audit.unencrypted-socket.unencrypted-socket
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             long millis = PingProbe.probe("127.0.0.1:" + server.getLocalPort(), PingProbe.TIMEOUT_MS);
             assertTrue("took " + millis, millis >= 0 && millis < 3_000);
@@ -47,6 +49,8 @@ public final class PingProbeTest {
 
     @Test public void everyKindOfFailureIsTheSameResult() throws Exception {
         int closed;
+        // Loopback-only TCP reachability fixture; no credentials or application data are sent.
+        // nosemgrep: java.lang.security.audit.unencrypted-socket.unencrypted-socket
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) { closed = server.getLocalPort(); }
         assertEquals("Connection refused", -1, PingProbe.probe("127.0.0.1:" + closed, PingProbe.TIMEOUT_MS));
         assertEquals("No port", -1, PingProbe.probe("127.0.0.1", PingProbe.TIMEOUT_MS));

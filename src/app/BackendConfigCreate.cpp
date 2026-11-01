@@ -281,6 +281,23 @@ std::optional<int> Backend::editIndexForSave(const QVariantMap &f)
     return editIndex;
 }
 
+bool Backend::writeCreatedConfig(const QString &target, const QString &tomlBody,
+                                 const QString &password, const QString &previousPassword)
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    QString saveErr;
+    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(), password,
+                                                            previousPassword, &saveErr)) {
+        if (saveErr == QLatin1String("password")) {
+            reportPasswordNotStored();
+        } else {
+            emit errorOccurred(tr("Could not write config"));
+        }
+        return false;
+    }
+    return true;
+}
+
 bool Backend::createConfig(const QVariantMap &f)
 {
     ParsedCreateConfig parsed;
@@ -306,18 +323,9 @@ bool Backend::createConfig(const QVariantMap &f)
         parsed.certificateTrimmed = false;
     const QString tomlBody = freetunnel::buildConfigToml(parsed.ct);
 
-    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
     const QString target = freetunnel::ownerConfigPathForSave(parsed.safeName, oldPath);
-    QString saveErr;
-    if (!freetunnel::backend_config::saveConfigWithPassword(target, tomlBody.toUtf8(), parsed.password,
-                                                            passwordStoredFor(target, edit), &saveErr)) {
-        if (saveErr == QLatin1String("password")) {
-            reportPasswordNotStored();
-        } else {
-            emit errorOccurred(tr("Could not write config"));
-        }
+    if (!writeCreatedConfig(target, tomlBody, parsed.password, passwordStoredFor(target, edit)))
         return false;
-    }
     if (!oldPath.isEmpty() && oldPath != target)
         forgetOldPassword(oldPath, target, parsed.password);
 
