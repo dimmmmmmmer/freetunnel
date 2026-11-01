@@ -63,6 +63,29 @@ fresh() {
   python3 "$SCRIPT" --assets "$TMP/assets" --res "$TMP/res" > /dev/null
 }
 
+# Both icon and logo entry points must reject DTD/entity inputs before rendering.
+python3 - "$SCRIPT" "$TMP" <<'PYTEST'
+import importlib.util
+import sys
+from pathlib import Path
+from defusedxml.common import DefusedXmlException
+spec = importlib.util.spec_from_file_location("icon_generator", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for declaration in ('<!DOCTYPE svg [<!ENTITY content "expanded">]>',
+                    '<!DOCTYPE svg SYSTEM "file:///nonexistent-private-file">'):
+    path = Path(sys.argv[2]) / 'unsafe.svg'
+    path.write_text(declaration + '<svg xmlns="http://www.w3.org/2000/svg">&content;</svg>')
+    for parse in (module.icon, module.logo):
+        try:
+            parse(path)
+        except DefusedXmlException:
+            pass
+        else:
+            raise AssertionError('DTD accepted by ' + parse.__name__)
+print('ok - SVG DTD and entity inputs are rejected')
+PYTEST
+
 fresh
 check "drawables made from the SVG files" pass "$TMP/assets" "$TMP/res"
 

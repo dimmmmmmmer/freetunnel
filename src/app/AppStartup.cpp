@@ -322,14 +322,10 @@ void keepInstanceTokenStored(const QLocalServer *server, const QString &instance
         restoreInstanceAuthToken(instanceToken);
 }
 
-// Collect the message without blocking: the old waitForReadyRead(200) loop froze
-// the GUI thread for up to 200 ms per chunk (64 KB worth) while a same-user peer
-// took its time. Buffer on readyRead instead and deliver from the event loop.
-void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &backend,
-                              QWindow *win, const QString &instanceToken)
+static bool acceptInstancePeer(QLocalSocket *c)
 {
     if (!c)
-        return;
+        return false;
     if (!peerIsSameUser(c)) {
         // Loudly. Every rejection path here used to be silent, which is how a
         // dropped control message could look exactly like one that was never sent:
@@ -338,8 +334,19 @@ void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &ba
                  "check (socket state %d)",
                  static_cast<int>(c->state()));
         c->deleteLater();
-        return;
+        return false;
     }
+    return true;
+}
+
+// Collect the message without blocking: the old waitForReadyRead(200) loop froze
+// the GUI thread for up to 200 ms per chunk (64 KB worth) while a same-user peer
+// took its time. Buffer on readyRead instead and deliver from the event loop.
+void handleInstanceConnection(QLocalSocket *c, QLocalServer *server, Backend &backend,
+                              QWindow *win, const QString &instanceToken)
+{
+    if (!acceptInstancePeer(c))
+        return;
     auto buf = std::make_shared<QByteArray>();
     auto delivered = std::make_shared<bool>(false);
     auto *idle = new QTimer(c);

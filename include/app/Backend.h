@@ -406,6 +406,8 @@ private:
     };
     void emitCreateConfigError(const QString &parseErr);
     std::optional<int> editIndexForSave(const QVariantMap &f); // createConfig()'s row, or nothing if gone
+    bool writeCreatedConfig(const QString &target, const QString &tomlBody,
+                            const QString &password, const QString &previousPassword);
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);

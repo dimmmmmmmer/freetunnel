@@ -517,7 +517,8 @@ final class DeepLinkImport {
         String customSni = "";
         boolean hasIpv6 = true;
         String username = "";
-        String password = "";
+        // Empty until populated from the user's configuration; no embedded credential.
+        String password = ""; // nosemgrep
         boolean skipVerification;
         /** The certificates, one DER element after another, as tag 0x08 holds them. */
         byte[] certificate = new byte[0];
