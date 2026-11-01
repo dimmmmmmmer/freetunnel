@@ -78,33 +78,28 @@ ColumnLayout {
                 id: contents
                 anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
                 anchors.margins: 10; spacing: 4
-                ColumnLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.leftMargin: 10; Layout.rightMargin: 10
-                    spacing: 4
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Text { Layout.fillWidth: true; text: card.modelData.name; wrapMode: Text.WordWrap; color: theme.text; font.pixelSize: 14 }
-                        Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: card.modelData.enabled
-                            onToggled: function(v) { backend.setGeoListEnabled(card.modelData.id, v) } }
-                    }
-                    Dropdown {
-                        shell: geo.shell; theme: geo.theme; label: qsTr("Route")
-                        model: [{v:"vpn",t:qsTr("Through VPN")},{v:"bypass",t:qsTr("Bypass VPN")}]
-                        value: card.modelData.bypass ? "bypass" : "vpn"
-                        onPicked: function(v) { backend.setGeoListDirection(card.modelData.id, v === "bypass") }
-                    }
-                    Text {
-                        Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.textDim; font.pixelSize: 12
-                        text: card.modelData.busy ? qsTr("Updating…")
-                            : card.modelData.entries > 0 ? qsTr("%1 entries · %2").arg(card.modelData.entries).arg(card.modelData.updated)
-                            : qsTr("Not downloaded yet")
-                    }
-                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.textDim; font.pixelSize: 12
-                        visible: card.modelData.skipped > 0; text: qsTr("Unsupported entries skipped: %1").arg(card.modelData.skipped) }
-                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.text; font.pixelSize: 12
-                        visible: !!card.modelData.error; text: card.modelData.error || "" }
+                    Text { Layout.fillWidth: true; text: card.modelData.name; wrapMode: Text.WordWrap; color: theme.text; font.pixelSize: 14 }
+                    Toggle { accent: theme.accent; offColor: theme.toggleOff; checked: card.modelData.enabled
+                        onToggled: function(v) { backend.setGeoListEnabled(card.modelData.id, v) } }
                 }
+                Dropdown {
+                    shell: geo.shell; theme: geo.theme; label: qsTr("Route")
+                    model: [{v:"vpn",t:qsTr("Through VPN")},{v:"bypass",t:qsTr("Bypass VPN")}]
+                    value: card.modelData.bypass ? "bypass" : "vpn"
+                    onPicked: function(v) { backend.setGeoListDirection(card.modelData.id, v === "bypass") }
+                }
+                Text {
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.textDim; font.pixelSize: 12
+                    text: card.modelData.busy ? qsTr("Updating…")
+                        : card.modelData.entries > 0 ? qsTr("%1 entries · %2").arg(card.modelData.entries).arg(card.modelData.updated)
+                        : qsTr("Not downloaded yet")
+                }
+                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.textDim; font.pixelSize: 12
+                    visible: card.modelData.skipped > 0; text: qsTr("Unsupported entries skipped: %1").arg(card.modelData.skipped) }
+                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: theme.text; font.pixelSize: 12
+                    visible: !!card.modelData.error; text: card.modelData.error || "" }
                 RowLayout {
                     Action { text: qsTr("Update"); enabled: !card.modelData.busy; opacity: enabled ? 1 : 0.5
                         onClicked: backend.refreshGeoList(card.modelData.id) }
