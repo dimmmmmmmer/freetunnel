@@ -138,10 +138,52 @@ static void loadProfileOrderAndAssignments(const QSettings &s, AppSettings &out)
     loadConfigProfileAssignments(s, out);
 }
 
+static void loadProfileGeoLists(const QSettings &s, AppSettings &out)
+{
+    out.geo_auto_update = s.value("geo/auto_update", true).toBool();
+    for (auto profile = out.profiles.cbegin(); profile != out.profiles.cend(); ++profile) {
+        QList<freetunnel::GeoListDefinition> lists;
+        QStringList ids;
+        for (const QVariant &value : s.value("geo/profiles/" + profile.key()).toList()) {
+            const auto row = value.toMap();
+            const QString id = row.value("id").toString();
+            const QString kind = row.value("kind").toString();
+            const QString direction = row.value("direction").toString();
+            if (id.isEmpty() || ids.contains(id)
+                    || (kind != "sites" && kind != "ips")
+                    || (direction != "vpn" && direction != "bypass"))
+                continue;
+            ids.append(id);
+            lists.append({id, row.value("name").toString(), row.value("source").toString(),
+                          kind == "ips" ? freetunnel::GeoListKind::Ips : freetunnel::GeoListKind::Sites,
+                          direction == "bypass" ? freetunnel::GeoDirection::Bypass : freetunnel::GeoDirection::ThroughVpn,
+                          row.value("enabled", false).toBool()});
+        }
+        out.profile_geo_lists.insert(profile.key(), lists);
+    }
+}
+
+static void saveProfileGeoLists(QSettings &s, const AppSettings &cfg)
+{
+    s.setValue("geo/auto_update", cfg.geo_auto_update);
+    s.remove("geo/profiles");
+    for (auto profile = cfg.profiles.cbegin(); profile != cfg.profiles.cend(); ++profile) {
+        QVariantList rows;
+        for (const auto &list : cfg.profile_geo_lists.value(profile.key())) {
+            rows.append(QVariantMap{{"id", list.id}, {"name", list.name}, {"source", list.source},
+                    {"kind", list.kind == freetunnel::GeoListKind::Ips ? "ips" : "sites"},
+                    {"direction", list.direction == freetunnel::GeoDirection::Bypass ? "bypass" : "vpn"},
+                    {"enabled", list.enabled}});
+        }
+        s.setValue("geo/profiles/" + profile.key(), rows);
+    }
+}
+
 static void loadBypassProfiles(const QSettings &s, AppSettings &out)
 {
     loadProfileMap(s, out);
     loadProfileAppRules(s, out);
+    loadProfileGeoLists(s, out);
     loadProfileOrderAndAssignments(s, out);
 }
 
@@ -227,6 +269,7 @@ void saveAppSettings(const AppSettings &cfg) {
     for (auto it = cfg.config_profiles.constBegin(); it != cfg.config_profiles.constEnd(); ++it)
         cp.insert(it.key(), it.value());
     s.setValue("bypass/config_profiles", cp);
+    saveProfileGeoLists(s, cfg);
     s.setValue("hotkeys/enabled", cfg.hotkeys_enabled);
     s.setValue("hotkeys/opt_in", true); // see loadHotkeys()
     s.setValue("hotkeys/toggle", cfg.hotkey_toggle);

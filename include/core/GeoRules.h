@@ -29,6 +29,15 @@ enum class GeoListKind { Sites, Ips };
 // out most of the internet with it (see isTooWideToBypass).
 enum class GeoDirection { ThroughVpn, Bypass };
 
+struct GeoListDefinition {
+    QString id;
+    QString name;
+    QString source;
+    GeoListKind kind = GeoListKind::Sites;
+    GeoDirection direction = GeoDirection::ThroughVpn;
+    bool enabled = false;
+};
+
 struct GeoSource {
     QUrl file;        // the address, without the fragment
     QString category; // from the fragment; required for a .dat file

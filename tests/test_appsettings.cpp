@@ -24,6 +24,7 @@ private slots:
     void theDefaultExcludedRoutesAreExactlyTheSharedFile();
     void roundTrip();
     void profilesPreserveOrder();
+    void geoListsStayWithTheirProfile();
     void theInsecureTmpLogPathIsMigratedOnLoad();
     void theDefaultExcludedRoutesCoverThePrivateRanges();
     void anExcludedRouteOfEveryAddressIsDroppedOnLoad();
@@ -146,6 +147,27 @@ void TestAppSettings::roundTrip() {
     QCOMPARE(out.hotkey_connect, in.hotkey_connect);
     QCOMPARE(out.hotkey_disconnect, in.hotkey_disconnect);
     QCOMPARE(out.last_config_path, in.last_config_path);
+}
+
+void TestAppSettings::geoListsStayWithTheirProfile() {
+    using namespace freetunnel;
+    AppSettings in;
+    in.profiles.insert("Work", {});
+    in.geo_auto_update = false;
+    in.profile_geo_lists["Work"].append({"custom", "Work sites", "https://example.com/list.txt",
+                                       GeoListKind::Sites, GeoDirection::Bypass, true});
+    saveAppSettings(in);
+    const auto out = loadAppSettings();
+    QVERIFY(out.profile_geo_lists.value("Default").isEmpty());
+    QCOMPARE(out.profile_geo_lists.value("Work").size(), 1);
+    const auto list = out.profile_geo_lists.value("Work").first();
+    QCOMPARE(list.source, QStringLiteral("https://example.com/list.txt"));
+    QCOMPARE(list.direction, GeoDirection::Bypass);
+    QVERIFY(list.enabled);
+    QVERIFY(!out.geo_auto_update);
+    in.profiles.remove("Work");
+    saveAppSettings(in);
+    QVERIFY(!loadAppSettings().profile_geo_lists.contains("Work"));
 }
 
 void TestAppSettings::profilesPreserveOrder() {

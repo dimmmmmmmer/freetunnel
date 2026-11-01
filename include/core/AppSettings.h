@@ -4,6 +4,8 @@
 #include <QString>
 #include <QStringList>
 #include <QMap>
+#include <QList>
+#include "GeoRules.h"
 
 struct AppSettings {
     QString log_path = "";
@@ -56,6 +58,10 @@ struct AppSettings {
     QMap<QString, QStringList> profiles{{"Default", {}}};
     QMap<QString, QStringList> profile_app_rules{{"Default", {}}};
     QStringList profile_order{"Default"};
+    // Lists belong to the same routing profile as its manual domain/app rules.
+    // Empty on upgrade: existing routing is unchanged until a list is added.
+    QMap<QString, QList<freetunnel::GeoListDefinition>> profile_geo_lists;
+    bool geo_auto_update = true;
     // Which split profile each config uses (config path -> profile name). A
     // config not listed (or pointing at a deleted profile) uses "Default".
     QMap<QString, QString> config_profiles;

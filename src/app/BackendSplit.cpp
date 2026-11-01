@@ -411,6 +411,7 @@ void Backend::addProfile(const QString &name) {
     }
     m_settings.profiles.insert(n, {});
     m_settings.profile_app_rules.insert(n, {});
+    m_settings.profile_geo_lists.insert(n, {});
     m_settings.profile_order << n;
     m_settings.active_profile = n; // edit the newly created profile
     m_settings.domain_bypass_rules.clear();
@@ -423,6 +424,7 @@ void Backend::removeProfile(const QString &name) {
     const bool affectedActiveConfig = (activeConfigProfile() == name);
     m_settings.profiles.remove(name);
     m_settings.profile_app_rules.remove(name);
+    m_settings.profile_geo_lists.remove(name);
     m_settings.profile_order.removeAll(name);
     // Any config that used this profile falls back to Default.
     for (auto it = m_settings.config_profiles.begin(); it != m_settings.config_profiles.end(); ++it)
