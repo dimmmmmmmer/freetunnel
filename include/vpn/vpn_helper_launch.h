@@ -57,4 +57,16 @@ QString macHelperElevationScript(const QString &exe, quint16 port, const QString
 // profile folder, whose name may hold spaces.
 QString windowsHelperParameters(quint16 port, const QString &tokenPath);
 
+// The Windows service the installer registers to run the helper as LocalSystem
+// (win/installer.nsi). Started on demand by the GUI, without a UAC prompt; see
+// docs/security-threats.md.
+inline constexpr char kHelperServiceName[] = "FreeTunnelHelper";
+
+// The arguments the GUI hands StartServiceW for the helper service. The service
+// control manager puts the service name in front of them, and ServiceMain passes
+// the result to parseHelperLaunchArgs, which skips that first entry the way it
+// skips the program name on a normal command line. Unlike the ShellExecuteExW
+// parameters these are separate strings, so nothing in them needs quoting.
+QStringList helperServiceArguments(quint16 port, const QString &tokenPath);
+
 } // namespace freetunnel

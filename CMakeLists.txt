@@ -308,13 +308,16 @@ set_target_properties(FreeTunnel PROPERTIES
 
 if (WIN32)
     # The GUI runs as the normal user (asInvoker, the default). Only the helper
-    # process is elevated on demand via ShellExecuteEx "runas", which needs
-    # shell32 for ShellExecuteExW.
+    # process is elevated: through the helper service the installer registers
+    # (src/vpn/vpn_helper_service_win.cpp; advapi32 for the service API), or,
+    # without one, on demand via ShellExecuteEx "runas", which needs shell32 for
+    # ShellExecuteExW.
     # iphlpapi: GetExtendedTcpTable/GetExtendedUdpTable, which is how per-app
     # split tunnelling finds the process behind a connection on Windows.
     # ole32/uuid: IShellLink, which is how a dropped .lnk is followed to its target.
-    target_link_libraries(FreeTunnel PRIVATE shell32 iphlpapi ole32 uuid)
-    target_sources(FreeTunnel PRIVATE src/app/WindowsChrome.cpp include/app/WindowsChrome.h)
+    target_link_libraries(FreeTunnel PRIVATE shell32 advapi32 iphlpapi ole32 uuid)
+    target_sources(FreeTunnel PRIVATE src/app/WindowsChrome.cpp include/app/WindowsChrome.h
+                                      src/vpn/vpn_helper_service_win.cpp)
     target_link_libraries(FreeTunnel PRIVATE QWindowKit::Quick)
     target_compile_definitions(FreeTunnel PRIVATE FT_HAVE_QWINDOWKIT)
 endif()

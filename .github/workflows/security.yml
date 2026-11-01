@@ -138,6 +138,8 @@ jobs:
       # A dependency bump that leaves THIRD_PARTY_NOTICES.md behind fails here.
       - name: The third-party notices name the pinned versions
         run: bash scripts/check-third-party-notices.sh
+      - name: Core update version selection
+        run: bash tests/test_latest_core_release.sh
 
   dependency-review:
     permissions:

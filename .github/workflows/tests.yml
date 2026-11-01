@@ -185,6 +185,10 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
 
+      - name: Deploy Qt beside the Windows service test helper
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
+        run: windeployqt --no-translations build-tests/freetunnel_test_helper.exe
+
       - name: Test
         if: needs.changes.outputs.desktop != 'false'
         env:

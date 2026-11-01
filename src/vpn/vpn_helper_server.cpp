@@ -555,7 +555,29 @@ int unauthenticatedExitMs()
 } // namespace
 
 int runVpnHelper(int argc, char **argv) {
+    return runVpnHelper(argc, argv, VpnHelperRunOptions{});
+}
+
+int runVpnHelper(int argc, char **argv, const VpnHelperRunOptions &options) {
     QCoreApplication app(argc, argv);
+    // Declared after the application, so it is destroyed first: whoever was told
+    // about the application hears that it is going before it goes.
+    struct AppLifetime {
+        const std::function<void(QCoreApplication *)> &notify;
+        AppLifetime(const std::function<void(QCoreApplication *)> &n, QCoreApplication *a)
+            : notify(n)
+        {
+            if (notify)
+                notify(a);
+        }
+        ~AppLifetime()
+        {
+            if (notify)
+                notify(nullptr);
+        }
+        AppLifetime(const AppLifetime &) = delete;
+        AppLifetime &operator=(const AppLifetime &) = delete;
+    } lifetime(options.appLifetime, &app);
 #if defined(Q_OS_UNIX)
     installTerminationHandlers(&app);
 #endif
@@ -566,8 +588,8 @@ int runVpnHelper(int argc, char **argv) {
         return 4;
     }
 #endif
-    const freetunnel::HelperLaunchConfig cfg =
-            freetunnel::parseHelperLaunchArgs(QCoreApplication::arguments());
+    const freetunnel::HelperLaunchConfig cfg = freetunnel::parseHelperLaunchArgs(
+            options.launchArgs.isEmpty() ? QCoreApplication::arguments() : options.launchArgs);
     if (!cfg.ok())
         return 2;
 
