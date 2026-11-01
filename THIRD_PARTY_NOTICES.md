@@ -121,7 +121,8 @@ downloads.
 - Version: 8.1.54, commit 00b38bb2a4b206b677ad1f2b901ccb8bb0d60372
 - License: Apache-2.0
 - Copyright: Copyright 2022 Adguard Software Ltd
-- Source: <https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372>
+- Source, desktop: <https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372>
+- Android uses the same NativeLibsCommon source and version.
 
 ### DnsLibs
 
