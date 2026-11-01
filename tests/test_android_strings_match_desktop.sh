@@ -155,10 +155,39 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["logs_turn_on", "LogsPage", "Turn on"]
 ["logs_placeholder", "LogsPage", "Logs will appear after connecting"]
 ["logs_auto_scroll", "LogsPage", "Auto-scroll"]
+["geo_lists", "GeoListsBlock", "Geo lists"]
+["geo_description", "GeoListsBlock", "Ready-made groups of sites and IP addresses. Your manual rules take priority."]
+["geo_add_preset", "GeoListsBlock", "Add list"]
+["geo_choose", "GeoListsBlock", "Choose…"]
+["geo_blocked_sites", "GeoListsBlock", "Blocked sites in Russia"]
+["geo_blocked_ips", "GeoListsBlock", "Blocked IP addresses in Russia"]
+["geo_ru_sites", "GeoListsBlock", "Russian sites"]
+["geo_ru_ips", "GeoListsBlock", "Russian IP addresses"]
+["geo_route", "GeoListsBlock", "Route"]
+["geo_updating", "GeoListsBlock", "Updating…"]
+["geo_not_downloaded", "GeoListsBlock", "Not downloaded yet"]
+["geo_entries", "GeoListsBlock", "%1 entries · %2"]
+["geo_skipped", "GeoListsBlock", "Unsupported entries skipped: %1"]
+["geo_update", "GeoListsBlock", "Update"]
+["geo_add_custom", "GeoListsBlock", "Add your own list"]
+["geo_auto", "GeoListsBlock", "Update lists"]
+["geo_every_hour", "GeoListsBlock", "Every hour"]
+["geo_every_2_hours", "GeoListsBlock", "Every 2 hours"]
+["geo_every_5_hours", "GeoListsBlock", "Every 5 hours"]
+["geo_every_24_hours", "GeoListsBlock", "Every 24 hours"]
+["geo_never", "GeoListsBlock", "Never"]
+["geo_duplicate", "Backend", "This geo list is already in the profile"]
+["geo_name", "GeoListsBlock", "Name"]
+["geo_add", "GeoListsBlock", "Add"]
+["geo_bad_source", "Backend", "Enter a name and an HTTPS geo list address"]
+["geo_limit", "GeoListsBlock", "Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."]
 TABLE
 
 # Every other string, in groups that each say why the desktop has no such text.
 cat > "$TMP/only.txt" <<'ONLY'
+## Android geo form uses a type switch and a single update-failure notice
+geo_ip_list
+geo_update_failed
 ## Content descriptions of the controls the desktop draws as icons alone (its nav bar and its logo have no words), and of the + chip
 text_home
 text_configurations

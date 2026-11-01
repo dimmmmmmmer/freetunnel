@@ -111,6 +111,13 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/BackendConfigShared.cpp
     src/app/BackendConfigShared.h
     src/app/BackendSplit.cpp
+    src/app/BackendGeo.cpp
+    src/core/GeoRules.cpp
+    src/core/GeoListCache.cpp
+    src/core/GeoListUpdater.cpp
+    include/core/GeoListUpdater.h
+    src/core/GeoListController.cpp
+    include/core/GeoListController.h
     src/app/BackendSubscriptions.cpp
     src/app/SubscriptionController.cpp
     src/app/SubscriptionController.h

@@ -20,6 +20,8 @@ on:
         description: Restore and save no Gradle cache, as for a release
         type: boolean
         default: false
+env:
+  CONAN_VER: '2.31.1'
 permissions:
   contents: read
 concurrency:
@@ -46,13 +48,14 @@ jobs:
   required:
     name: Android CI required
     if: always()
-    needs: [changes, build, device-tests, release-signing]
+    needs: [changes, core, build, device-tests, release-signing]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all relevant Android checks
         env:
           CHANGES: ${{ needs.changes.result }}
           ANDROID: ${{ needs.changes.outputs.android }}
+          CORE: ${{ needs.core.result }}
           BUILD: ${{ needs.build.result }}
           DEVICES: ${{ needs.device-tests.result }}
           SIGNING: ${{ needs.release-signing.result }}
@@ -61,11 +64,60 @@ jobs:
           if [ "$ANDROID" = false ]; then
             echo "No Android changes."
           else
-            test "$BUILD" = success && test "$DEVICES" = success && test "$SIGNING" = success
+            test "$CORE" = success && test "$BUILD" = success && test "$DEVICES" = success && test "$SIGNING" = success
           fi
 
-  build:
+  core:
+    name: Build stable Android core with routing priorities
     needs: changes
+    if: needs.changes.outputs.android != 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        id: core-cache
+        if: inputs.gradle-cache-disabled != true
+        with:
+          path: |
+            android/app/libs/trusttunnel-client-android-*.aar
+            android/app/libs/trusttunnel-client-android-*.json
+          key: android-core-v1-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh', 'scripts/android-core-manifest.py') }}
+      - name: Install native build tools
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-18 g++-13 cmake ninja-build python3-venv pkg-config autoconf automake libtool perl golang
+          python3 -m venv "$RUNNER_TEMP/core-tools"
+          "$RUNNER_TEMP/core-tools/bin/pip" install "conan==${CONAN_VER}"
+          echo "$RUNNER_TEMP/core-tools/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+          rustup toolchain install 1.95 --profile minimal
+          cargo +1.95 install cargo-ndk --version 4.1.2 --locked
+      - run: python3 tests/test_android_core_manifest.py
+      - run: scripts/build-trusttunnel-android.sh
+        if: steps.core-cache.outputs.cache-hit != 'true'
+      - run: scripts/prepare-trusttunnel-android.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-patched-core
+          if-no-files-found: error
+          path: |
+            android/app/libs/trusttunnel-client-android-*.aar
+            android/app/libs/trusttunnel-client-android-*.json
+
+  build:
+    needs: [changes, core]
     if: needs.changes.outputs.android != 'false'
     name: Build, unit tests and lint
     runs-on: ubuntu-24.04
@@ -107,6 +159,10 @@ jobs:
       - run: bash tests/test_android_fonts.sh
       # The device tests reach into the app by name; this reads both sides, in seconds, instead of the emulator legs half an hour in.
       - run: bash tests/test_android_device_tests.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-patched-core
+          path: android/app/libs
       - run: scripts/prepare-trusttunnel-android.sh
       - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleDebug :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
@@ -128,7 +184,7 @@ jobs:
             android/app/build/outputs/bundle/release/*.aab
             android/app/build/reports/
   device-tests:
-    needs: changes
+    needs: [changes, core]
     if: needs.changes.outputs.android != 'false'
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
@@ -169,6 +225,10 @@ jobs:
           cache-provider: basic # see the build job
           cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
       - run: bash -n scripts/build-android-release.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-patched-core
+          path: android/app/libs
       - run: scripts/prepare-trusttunnel-android.sh
       - name: Enable KVM
         run: |
@@ -222,7 +282,7 @@ jobs:
             android/app/build/reports/uitour/
             android/app/build/reports/logcat/
   release-signing:
-    needs: changes
+    needs: [changes, core]
     if: needs.changes.outputs.android != 'false'
     name: Release signing, with a throwaway key
     # What android-release.yml's build and sign jobs do, with real Build
@@ -248,6 +308,10 @@ jobs:
         with:
           cache-provider: basic # see the build job
           cache-disabled: ${{ inputs.gradle-cache-disabled == true }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-patched-core
+          path: android/app/libs
       - run: scripts/prepare-trusttunnel-android.sh
       - name: Build the release APK, unsigned
         working-directory: android

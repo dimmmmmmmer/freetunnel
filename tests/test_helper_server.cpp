@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QHostAddress>
 #include <QElapsedTimer>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
@@ -98,6 +99,8 @@ private slots:
     void cleanup();
 
     void realClientCompletesHandshakeWithRealServer();
+    void authenticatedPeerCanSendGeoSizedRules();
+    void authenticatedPeerCannotExceedSettingsLimit();
     void serverRejectsPeerWithoutTheToken();
     void serverRejectsAuthWithoutHello();
     void serverSurvivesGarbageAndOversizedInput();
@@ -239,6 +242,44 @@ void TestHelperServer::stopHelper()
     }
     delete m_helper;
     m_helper = nullptr;
+}
+
+void TestHelperServer::authenticatedPeerCanSendGeoSizedRules()
+{
+    const QString token = QStringLiteral("geo-sized-rules-token");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, port);
+    QVERIFY(socket.waitForConnected(3000));
+    QVERIFY(realhelper::authenticate(socket, token));
+    QJsonArray domains;
+    for (int i = 0; i < 75000; ++i)
+        domains.append(QStringLiteral("@2:site%1.example.com").arg(i));
+    const auto payload = realhelper::line({{QStringLiteral("cmd"), QStringLiteral("setSplitRouting")},
+                                           {QStringLiteral("domains"), domains}});
+    QVERIFY(payload.size() > vpn_helper::kMaxIpcLineBytes);
+    socket.write(payload);
+    // An error response to this deliberately incomplete connect proves that
+    // the server consumed the full rule list and still handles later commands.
+    socket.write(realhelper::line({{QStringLiteral("cmd"), QStringLiteral("connect")}}));
+    socket.flush();
+    const auto reply = realhelper::waitForEvent(socket, QStringLiteral("error"), 10000);
+    QCOMPARE(reply.value(QStringLiteral("msg")).toString(), QStringLiteral("connect requires inline configToml"));
+}
+
+void TestHelperServer::authenticatedPeerCannotExceedSettingsLimit()
+{
+    const QString token = QStringLiteral("geo-limit-token");
+    quint16 port = 0;
+    QVERIFY(startHelperOnAFreePort(token, &port));
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, port);
+    QVERIFY(socket.waitForConnected(3000));
+    QVERIFY(realhelper::authenticate(socket, token));
+    socket.write(QByteArray(vpn_helper::kMaxAuthedIpcLineBytes + 1, 'x') + '\n');
+    socket.flush();
+    QTRY_COMPARE_WITH_TIMEOUT(socket.state(), QAbstractSocket::UnconnectedState, 10000);
 }
 
 // End-to-end: the production client and the production server agree on the

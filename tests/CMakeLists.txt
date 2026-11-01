@@ -213,6 +213,13 @@ set(APP_STARTUP_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
@@ -285,6 +292,13 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
@@ -776,6 +790,13 @@ set(BACKEND_TEST_SOURCES
     ../include/core/SubscriptionFetcher.h
     ../src/core/SubscriptionStore.cpp
     ../src/app/BackendSplit.cpp
+    ../src/app/BackendGeo.cpp
+    ../src/core/GeoRules.cpp
+    ../src/core/GeoListCache.cpp
+    ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h
+    ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h
     ../src/app/LogModel.cpp
     ../include/app/LogModel.h
     ../src/core/AppSettings.cpp
@@ -1256,3 +1277,26 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(STATUS "release_signature not built: it needs bash and openssl")
     endif ()
 endif ()
+
+add_executable(test_georules test_georules.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_georules PRIVATE ../include)
+target_link_libraries(test_georules PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME georules COMMAND test_georules)
+
+add_executable(test_geolistcache test_geolistcache.cpp ../src/core/GeoListCache.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_geolistcache PRIVATE ../include)
+target_link_libraries(test_geolistcache PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME geolistcache COMMAND test_geolistcache)
+
+add_executable(test_geolistupdater test_geolistupdater.cpp ../src/core/GeoListUpdater.cpp
+    ../include/core/GeoListUpdater.h ../src/core/GeoListCache.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_geolistupdater PRIVATE ../include)
+target_link_libraries(test_geolistupdater PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME geolistupdater COMMAND test_geolistupdater)
+
+add_executable(test_geolistcontroller test_geolistcontroller.cpp ../src/core/GeoListController.cpp
+    ../include/core/GeoListController.h ../src/core/GeoListUpdater.cpp ../include/core/GeoListUpdater.h
+    ../src/core/GeoListCache.cpp ../src/core/GeoRules.cpp)
+target_include_directories(test_geolistcontroller PRIVATE ../include)
+target_link_libraries(test_geolistcontroller PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME geolistcontroller COMMAND test_geolistcontroller)

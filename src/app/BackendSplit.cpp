@@ -4,6 +4,7 @@
 #include "core/AppRules.h"
 #include "core/AppShortcut.h"
 #include "core/InstalledApps.h"
+#include "core/GeoListController.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -371,6 +372,7 @@ void Backend::reapplyIfEditingActiveProfile() {
 // names both whichever profile is shown.
 void Backend::applyProfileEdit() {
     persistSettings();
+    syncGeoLists();
     applySplitRules(/*warnOfLeak=*/m_settings.active_profile == activeConfigProfile());
     reapplyIfEditingActiveProfile();
     emit splitChanged();
@@ -411,6 +413,7 @@ void Backend::addProfile(const QString &name) {
     }
     m_settings.profiles.insert(n, {});
     m_settings.profile_app_rules.insert(n, {});
+    m_settings.profile_geo_lists.insert(n, {});
     m_settings.profile_order << n;
     m_settings.active_profile = n; // edit the newly created profile
     m_settings.domain_bypass_rules.clear();
@@ -423,6 +426,8 @@ void Backend::removeProfile(const QString &name) {
     const bool affectedActiveConfig = (activeConfigProfile() == name);
     m_settings.profiles.remove(name);
     m_settings.profile_app_rules.remove(name);
+    m_settings.profile_geo_lists.remove(name);
+    syncGeoLists();
     m_settings.profile_order.removeAll(name);
     // Any config that used this profile falls back to Default.
     for (auto it = m_settings.config_profiles.begin(); it != m_settings.config_profiles.end(); ++it)
@@ -455,7 +460,8 @@ QString Backend::activeConfigProfile() const {
 // so the UI can ask the same question the tunnel does, instead of re-deriving it
 // from the settings and drifting.
 bool Backend::selectiveModeActive() const {
-    if (!m_settings.domain_bypass_enabled || m_settings.vpn_mode != QLatin1String("selective"))
+    if (!m_settings.domain_bypass_enabled || !geoRulesFit(activeConfigProfile())
+            || m_settings.vpn_mode != QLatin1String("selective"))
         return false;
     // App rules count as rules. Without this, someone who sets up "Through VPN"
     // with applications and no domains would be told their configuration routes
@@ -471,7 +477,13 @@ bool Backend::selectiveModeActive() const {
     const QStringList apps = m_settings.profile_app_rules.value(activeConfigProfile());
     if (!freetunnel::sanitizedAppRules(apps).isEmpty())
         return true;
-    return !coreBypassRules(m_settings.profiles.value(activeConfigProfile())).isEmpty();
+    if (!coreBypassRules(m_settings.profiles.value(activeConfigProfile())).isEmpty()) return true;
+    if (m_geoLists && geoRulesFit(activeConfigProfile())) {
+        for (const auto &list : m_settings.profile_geo_lists.value(activeConfigProfile()))
+            if (list.enabled && list.direction == freetunnel::GeoDirection::ThroughVpn
+                    && !m_geoLists->state(list).list.entries.empty()) return true;
+    }
+    return false;
 }
 
 bool Backend::selectiveModeWouldLeak() const {
@@ -481,7 +493,7 @@ bool Backend::selectiveModeWouldLeak() const {
 }
 
 void Backend::applySplitRules(bool warnOfLeak) {
-    const bool on = m_settings.domain_bypass_enabled;
+    const bool on = m_settings.domain_bypass_enabled && geoRulesFit(activeConfigProfile());
     const QStringList profileDomains = m_settings.profiles.value(activeConfigProfile());
     const QStringList coreDomains = coreBypassRules(profileDomains);
     std::vector<std::string> ex;
@@ -489,6 +501,20 @@ void Backend::applySplitRules(bool warnOfLeak) {
         ex.reserve(static_cast<size_t>(coreDomains.size()));
         std::transform(coreDomains.cbegin(), coreDomains.cend(), std::back_inserter(ex),
                        [](const QString &d) { return d.toStdString(); });
+    }
+    if (on && m_geoLists && geoRulesFit(activeConfigProfile())) {
+        std::vector<std::string> geo;
+        for (const auto &list : m_settings.profile_geo_lists.value(activeConfigProfile())) {
+            if (!list.enabled) continue;
+            const char *prefix = list.direction == freetunnel::GeoDirection::ThroughVpn ? "@2:" : "@3:";
+            for (const auto &entry : m_geoLists->state(list).list.entries)
+                geo.emplace_back(std::string(prefix) + entry);
+        }
+        if (!geo.empty()) {
+            const char *manual = m_settings.vpn_mode == QLatin1String("selective") ? "@0:" : "@1:";
+            for (auto &entry : ex) entry.insert(0, manual);
+            ex.insert(ex.end(), std::make_move_iterator(geo.begin()), std::make_move_iterator(geo.end()));
+        }
     }
     // Gated on `on` exactly as the domain list is, and the reason is a leak.
     // Turning split tunnelling off sets the core to general mode, and in general

@@ -883,6 +883,49 @@ class UiTourDeviceTest {
             scrollPageToEnd()
             shot("split-after-recommended-scrolled", "Split after Recommended for Russia, scrolled to the end: the applications")
         }
+        screen("geo-lists") {
+            val vpn = GeoDefinition("preview-vpn", act().getString(R.string.geo_blocked_sites),
+                "https://example.invalid/preview-vpn.txt", GeoLists.Kind.SITES, false, true)
+            val direct = GeoDefinition("preview-direct", act().getString(R.string.geo_ru_sites),
+                "https://example.invalid/preview-direct.txt", GeoLists.Kind.SITES, true, true)
+            val cache = GeoCache(GeoRepository.directory(context))
+            cache.store(vpn.source, vpn.kind, vpn.bypass, "domain:example.org\ndomain:example.net".toByteArray())
+            cache.store(direct.source, direct.kind, direct.bypass, "domain:example.ru".toByteArray())
+            SplitStore.edit(SplitPrefs(prefs), null) { profiles ->
+                profiles.select("Default")
+                profiles.putGeoList("Default", vpn)
+                profiles.putGeoList("Default", direct)
+            }
+            GeoRepository.get(context).refreshEnabled()
+            eventually("Geo list cache must load") { GeoRepository.get(context).state(vpn).cached != null
+                    && GeoRepository.get(context).state(direct).cached != null }
+            goTo(2)
+            render()
+            scrollPageTo("geo:preview-vpn:enabled")
+            shot("geo-lists", "Geo lists with fixture entries: manual-rule priority, VPN/bypass directions and update status")
+        }
+        screen("geo-refresh-menu") {
+            goTo(2)
+            scrollPageTo("geo:interval")
+            shot("geo-lists-bottom", "List cards and shared update frequency at the bottom of Split tunnelling")
+            activate("geo:interval")
+            awaitOverlay("select")
+            shot("geo-refresh-menu", "List update frequency: 1, 2, 5 or 24 hours, or never")
+            activate("select:2")
+            eventually("The update interval must be saved") { GeoRepository.updateHours(prefs) == 5 }
+        }
+        screen("geo-custom-list") {
+            goTo(2)
+            scrollPageTo("geo:presets")
+            activate("geo:presets")
+            awaitOverlay("select")
+            shot("geo-add-menu", "Add list menu with presets and a custom source")
+            activate("select:" + GeoPresets.read(context).size)
+            awaitOverlay("geoform")
+            typeInto("geoform:name", "My sites")
+            typeInto("geoform:source", "https://example.org/geosite.dat#category")
+            shot("geo-custom-list", "Custom geo-list form: HTTPS source, type and routing direction")
+        }
         screen("split-through-vpn-notice") {
             // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
             prefs.edit().putBoolean("through", true).putBoolean("split_enabled", true).commit()

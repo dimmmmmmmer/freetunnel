@@ -211,6 +211,10 @@ jobs:
           # (see android.yml).
           cache-provider: basic
           cache-disabled: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-patched-core
+          path: android/app/libs
       - run: scripts/prepare-trusttunnel-android.sh
       # Unsigned: build.gradle has no signing config, and this job no secret.
       # The ci job has run the tests and lint on this commit already.

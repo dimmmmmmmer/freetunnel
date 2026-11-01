@@ -6,7 +6,7 @@ import re
 import subprocess  # nosec B404 - Git is invoked without a shell, with validated commit IDs.
 
 PATTERNS = (
-    'android/*', 'include/core/ReleaseSigning.h', 'THIRD_PARTY_NOTICES.md',
+    'android/*', 'vendor/trusttunnel/*', 'scripts/upstream_ref.txt', 'include/core/ReleaseSigning.h', 'THIRD_PARTY_NOTICES.md',
     'LICENSE', 'licenses/*', 'qml/*', 'assets/icons/*', 'assets/logo.svg',
     'assets/fonts/*', 'i18n/freetunnel_ru.ts', 'data/*',
     '.github/workflows/android*.yml', 'scripts/*android*',

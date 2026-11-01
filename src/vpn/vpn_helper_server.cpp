@@ -323,12 +323,17 @@ private:
         // dropping the privileged socket makes the helper quit mid-session.
         int nl = -1;
         while ((nl = m_buf.indexOf('\n')) >= 0) {
+            if (nl > vpn_helper::kMaxAuthedIpcLineBytes) {
+                m_buf.clear();
+                m_sock->close();
+                return;
+            }
             const QByteArray line = m_buf.left(nl);
             m_buf.remove(0, nl + 1);
             const auto doc = QJsonDocument::fromJson(line);
             if (doc.isObject()) handleAuthed(doc.object());
         }
-        if (m_buf.size() > vpn_helper::kMaxIpcLineBytes) {
+        if (m_buf.size() > vpn_helper::kMaxAuthedIpcLineBytes) {
             m_buf.clear();
             m_sock->close();
         }

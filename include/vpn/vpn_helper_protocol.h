@@ -46,5 +46,8 @@ inline bool tokensEqual(const QString &a, const QString &b)
 
 // Connect payloads carry full TOML (certs can be large).
 inline constexpr int kMaxIpcLineBytes = 512 * 1024;
+// Downloaded geo lists exceed the handshake limit. Only an authenticated GUI
+// may send larger settings; unauthenticated sockets retain the smaller cap.
+inline constexpr int kMaxAuthedIpcLineBytes = 16 * 1024 * 1024;
 
 } // namespace vpn_helper

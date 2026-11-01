@@ -34,6 +34,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         m_activePath = m_paths.first();
     }
 
+    startGeoLists();
     wireVpnClientSignals();
     m_client.setSessionLogging(m_settings.logging_enabled);
 

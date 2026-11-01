@@ -443,4 +443,23 @@ public final class SplitProfilesTest {
         SplitProfiles slash = SplitProfiles.fromJson("{\"profiles\":[{\"name\":\"Default\",\"domains\":[\"10.0.0.0\\/8\"]}]}");
         assertEquals(list("10.0.0.0/8"), slash.domains("Default"));
     }
+    @Test public void geoListsAreOptInAndBelongToTheirProfile() throws Exception {
+        SplitProfiles profiles = SplitProfiles.empty();
+        assertTrue(profiles.geoLists(SplitProfiles.DEFAULT).isEmpty());
+        profiles.add("Work");
+        assertTrue(profiles.putGeoList("Work", new GeoDefinition("custom", "Work sites",
+                "https://example.com/list.txt", GeoLists.Kind.SITES, true, true)));
+        SplitProfiles restored = SplitProfiles.fromJson(profiles.toJson());
+        assertTrue(restored.geoLists(SplitProfiles.DEFAULT).isEmpty());
+        assertEquals(1, restored.geoLists("Work").size());
+        GeoDefinition list = restored.geoLists("Work").get(0);
+        assertEquals("https://example.com/list.txt", list.source);
+        assertTrue(list.bypass);
+        assertTrue(list.enabled);
+        restored.remove("Work");
+        assertTrue(restored.geoLists("Work").isEmpty());
+        restored.add("Work");
+        assertTrue(restored.geoLists("Work").isEmpty());
+    }
+
 }

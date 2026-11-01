@@ -460,7 +460,10 @@ open the address in Chrome or Safari instead.
 
 ## Build and signing
 
-Requires JDK 17, Android SDK 35, Build Tools 35.0.0, Bash, curl and Python 3.
+Requires JDK 17, Android SDK 35, Build Tools 35.0.0, Bash and Python 3.
+The patched stable adapter is built on Ubuntu 24.04 with Clang 18, GCC 13
+headers, CMake, Ninja, Conan 2.31.1, Rust 1.95, cargo-ndk 4.1.2 and
+NDK 29.0.14206865. The Android CI workflow installs these tools.
 From the repository root:
 
 ```sh
@@ -468,9 +471,15 @@ scripts/prepare-trusttunnel-android.sh
 ./android/gradlew -p android --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
 ```
 
-The public AAR download needs no GitHub PAT. Its SHA-256 is checked during
-preparation and every build:
-`da0886c22a2a1fad1fdd25d8f5d3d85c6ffa89188292bd000d41e885db446eca`.
+`android/core-source.json` pins the stable source commit and the routing patch.
+Preparation builds all four Android architectures from those sources. CI may
+reuse an adapter only when the source pin, patches and builder inputs match
+exactly; release CI disables that cache and rebuilds from source. The APK,
+device-test and signing-check jobs all use the same prepared artifact. Every app build verifies the source pin, patch and builder
+hashes, ABI inventory and AAR digest against its build manifest. This manifest
+is an integrity record, not an independent signature. No GitHub PAT is needed.
+To rebuild after changing a pin or patch, remove the old AAR and matching JSON
+from `android/app/libs` and run preparation again.
 Gradle 8.11.1 wrapper and distribution checksums are pinned too.
 
 Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (debug signing).

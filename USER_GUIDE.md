@@ -155,7 +155,7 @@ on Windows, libsecret on Linux.
 ## Split tunnelling
 
 The **Split tunnelling** tab decides what goes through the tunnel. Rules are
-addresses (a domain, an IP, a subnet) or programs, and both obey the **Mode**
+manual addresses (a domain, an IP, a subnet) or programs, and both obey the **Mode**
 switch at the top of the page:
 
 | Mode | What is listed |
@@ -166,9 +166,40 @@ switch at the top of the page:
 Under *Through VPN* with no rule that can be used, FreeTunnel keeps the full
 tunnel and the page says so, rather than send everything around it.
 
+### Geo lists
+
+In the **Geo lists** block, open **Add list** and choose a ready-made list or
+**Add your own list**.
+Each list has its own **Through VPN / Bypass VPN** choice and can be turned off
+without removing it. Lists belong to the selected split profile. Nothing is
+added until you choose it.
+
+Custom sources use an HTTPS download address. Choose **Sites** for domains or
+**IP addresses** for subnets. Plain text lists contain one entry per line;
+V2Ray-format `.dat` files also need a category after `#`, for example
+`https://example.org/geosite.dat#youtube`. Regular expressions and keyword
+matches are skipped; the card reports how many entries were skipped.
+
+Manual destination rules win over geo lists. If two geo lists disagree,
+**Through VPN** wins. Domain rules require a hostname visible to the core
+(for example through DNS or TLS); a connection whose hostname cannot be
+identified is matched by its IP address.
+
+Use **Update** to refresh a list, or choose automatic updates every 1, 2, 5 or
+24 hours. Choose **Never** for manual updates only after the initial download. Updates run
+while FreeTunnel is running; opening the app checks for overdue lists. Failed
+downloads keep the last valid copy. The list card shows its last update and
+any error. A list that has never loaded cannot route traffic yet.
+
+Android and Android TV use the same lists and priorities. Updating active
+routing rules there may briefly reconnect the VPN. Android cannot combine
+app selection with destination selection in the same way as desktop: if both
+are selected, FreeTunnel uses the full tunnel and shows a notice. Very large
+combined lists also fall back to the full tunnel with a notice.
+
 ### Changes while connected
 
-Every change on this page, turning split tunnelling on or off included, reaches
+On desktop, every change on this page, turning split tunnelling on or off included, reaches
 a tunnel that is already up without reconnecting it:
 
 - A program rule applies from the program's next connection.

@@ -130,7 +130,12 @@ final class SplitStore {
         final List<String> domains;
         /** The packages listed, installed or not. */
         final List<String> apps;
-        Rules(List<String> domains, List<String> apps) { this.domains = domains; this.apps = apps; }
+        final List<GeoDefinition> geoLists;
+        Rules(List<String> domains, List<String> apps, List<GeoDefinition> geoLists) {
+            this.domains = domains;
+            this.apps = apps;
+            this.geoLists = geoLists;
+        }
     }
 
     /**
@@ -148,7 +153,8 @@ final class SplitStore {
                 flag.put(RULES_MIGRATED, Boolean.TRUE);
                 save(backing, profiles, flag);
             }
-            return new Rules(new ArrayList<>(profiles.domains(name)), new ArrayList<>(profiles.apps(name)));
+            return new Rules(new ArrayList<>(profiles.domains(name)), new ArrayList<>(profiles.apps(name)),
+                             new ArrayList<>(profiles.geoLists(name)));
         }
     }
 }

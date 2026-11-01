@@ -105,6 +105,31 @@ class FreeTunnelVpnService : VpnService() {
     override fun attachBaseContext(base: Context) { super.attachBaseContext(AppLocale.wrap(base)) }
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "freetunnel-vpn") }
+    private val geoListener = GeoRepository.Listener { identity, changed ->
+        if (changed) execute {
+            val source = activeSource ?: return@execute
+            val profile = activeProfile ?: return@execute
+            if (destroyed || latestStartId != servedStartId || currentState == 0
+                || !prefs.getBoolean("split_enabled", false)) return@execute
+            val lists = SplitStore.rules(SplitPrefs(prefs), null, profile).geoLists
+            if (lists.none { it.enabled && GeoRepository.key(it) == identity }) return@execute
+            val previous = client
+            val startId = latestStartId
+            val epoch = permissionEpoch
+            establishedThisRequest = false
+            try {
+                val plan = RoutingConfig.prepare(this, source, profile)
+                if (activePlan?.toml != plan.toml) {
+                    replace(plan, startId, epoch)
+                    activeSource = source
+                    activeProfile = profile
+                }
+            } catch (error: Throwable) {
+                activeSource = source
+                handleReplacementFailure(error, previous, startId, epoch)
+            }
+        }
+    }
     private val prefs by lazy { getSharedPreferences("freetunnel", MODE_PRIVATE) }
     private var client: VpnClient? = null
     private var retainedTun: ParcelFileDescriptor? = null
@@ -140,6 +165,8 @@ class FreeTunnelVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         owner = this
+        GeoRepository.get(this).observe(geoListener)
+        GeoRepository.get(this).refreshEnabled()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "FreeTunnel VPN", NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(FAILURE_CHANNEL, getString(R.string.text_vpn_disconnected), NotificationManager.IMPORTANCE_HIGH))
@@ -218,20 +245,7 @@ class FreeTunnelVpnService : VpnService() {
                 activeSource = source
                 activeProfile = profile
             } catch (error: Throwable) {
-                if (!destroyed && startId == latestStartId && epoch == permissionEpoch) {
-                    if (retainedTun != null && client === previous && !establishedThisRequest) {
-                        logEvent("VPN settings rejected: ${error.javaClass.simpleName}", LogLines.WARN)
-                        publishState(currentState)
-                        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(stateText()))
-                        getSystemService(NotificationManager::class.java).notify(FAILURE_ID,
-                            NotificationCompat.Builder(this, FAILURE_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_alert)
-                                .setContentTitle(getString(R.string.text_vpn_settings_were_not_applied)).setContentText(getString(R.string.config_validation_error, error.message))
-                                .setContentIntent(openApp()).setAutoCancel(true).build())
-                        return@execute
-                    }
-                    logEvent("VPN start failed: ${error.javaClass.simpleName}", LogLines.ERROR)
-                    fail(getString(R.string.text_could_not_start_vpn))
-                }
+                handleReplacementFailure(error, previous, startId, epoch)
             }
         }
         // Request framework-managed recreation using SavedProfile. Android controls
@@ -239,10 +253,27 @@ class FreeTunnelVpnService : VpnService() {
         return if (intent?.action == ACTION_STOP) START_NOT_STICKY else START_STICKY
     }
 
+    private fun handleReplacementFailure(error: Throwable, previous: VpnClient?, startId: Int, epoch: Long) {
+        if (!destroyed && startId == latestStartId && epoch == permissionEpoch) {
+            if (retainedTun != null && client === previous && !establishedThisRequest) {
+                logEvent("VPN settings rejected: ${error.javaClass.simpleName}", LogLines.WARN)
+                publishState(currentState)
+                getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(stateText()))
+                getSystemService(NotificationManager::class.java).notify(FAILURE_ID,
+                    NotificationCompat.Builder(this, FAILURE_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_alert)
+                        .setContentTitle(getString(R.string.text_vpn_settings_were_not_applied)).setContentText(getString(R.string.config_validation_error, error.message))
+                        .setContentIntent(openApp()).setAutoCancel(true).build())
+                return
+            }
+            logEvent("VPN start failed: ${error.javaClass.simpleName}", LogLines.ERROR)
+            fail(getString(R.string.text_could_not_start_vpn))
+        }
+    }
+
     private fun replace(plan: RoutingConfig.Plan, startId: Int, epoch: Long) {
         NativeConfigValidator.validate(this, plan.toml)
-        val parsed = RoutingConfig.validate(plan.toml)
-        val config = VpnServiceConfig.parseToml(plan.toml) ?: error("Invalid adapter configuration")
+        val parsed = RoutingConfig.validateGenerated(plan.toml)
+        val config = VpnServiceConfig.parseToml(RoutingConfig.adapterSettings(plan.toml)) ?: error("Invalid adapter configuration")
         // Loading Android's CA store can fail, so it happens before the handover.
         val verifier = CertificateVerificator()
         if (destroyed || startId != latestStartId || epoch != permissionEpoch) return
@@ -459,6 +490,7 @@ class FreeTunnelVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        GeoRepository.get(this).removeObserver(geoListener)
         destroyed = true
         publishState(0)
         if (owner === this) owner = null

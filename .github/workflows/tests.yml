@@ -200,7 +200,16 @@ jobs:
         if: needs.changes.outputs.desktop != 'false'
         env:
           QT_QPA_PLATFORM: offscreen
+          FT_GEO_PREVIEW_DIR: ${{ github.workspace }}/ui-previews
         run: bash scripts/run-ctest.sh build-tests
+
+      - name: Upload geo-list UI preview
+        if: always() && needs.changes.outputs.desktop != 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: geo-ui-${{ runner.os }}
+          path: ui-previews/
+          if-no-files-found: warn
 
   coverage:
     name: Coverage (Linux)

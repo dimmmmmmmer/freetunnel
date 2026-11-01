@@ -30,8 +30,8 @@ class AndroidCiTest(unittest.TestCase):
         start = workflow.index('          test "$CHANGES" = success')
         body = workflow[start:].split('\n\n', 1)[0]
         script = '\n'.join(line[10:] for line in body.splitlines())
-        for results in itertools.product(['success', 'failure', 'cancelled', 'skipped'], repeat=3):
-            env = dict(os.environ, CHANGES='success', ANDROID='true', BUILD=results[0], DEVICES=results[1], SIGNING=results[2])
+        for results in itertools.product(['success', 'failure', 'cancelled', 'skipped'], repeat=4):
+            env = dict(os.environ, CHANGES='success', ANDROID='true', BUILD=results[0], DEVICES=results[1], SIGNING=results[2], CORE=results[3])
             # Command and script come from this repository, not user input.
             result = subprocess.run(['bash', '-c', script], env=env, capture_output=True)  # nosec B603
             self.assertEqual(all(r == 'success' for r in results), result.returncode == 0, results)
@@ -39,6 +39,17 @@ class AndroidCiTest(unittest.TestCase):
             env = dict(os.environ, CHANGES=changed, ANDROID='false', BUILD='skipped', DEVICES='skipped', SIGNING='skipped')
             # Command and script come from this repository, not user input.
             self.assertEqual(expected, subprocess.run(['bash', '-c', script], env=env, capture_output=True).returncode)  # nosec B603
+
+    def test_core_cache_is_exact_and_disabled_for_releases(self):
+        workflow = (ROOT / '.github/workflows/android.yml').read_text()
+        core = workflow.split('  core:\n', 1)[1].split('  build:\n', 1)[0]
+        self.assertIn('if: inputs.gradle-cache-disabled != true', core)
+        self.assertNotIn('restore-keys:', core)
+        for source in ['android/core-source.json', 'vendor/trusttunnel/*.patch',
+                       'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh',
+                       'scripts/android-core-manifest.py']:
+            self.assertIn(source, core)
+        self.assertIn('      - run: scripts/prepare-trusttunnel-android.sh\n      - uses: actions/upload-artifact', core)
 
     def test_instrumentation_exit_and_result_are_both_checked(self):
         with tempfile.TemporaryDirectory() as temporary:

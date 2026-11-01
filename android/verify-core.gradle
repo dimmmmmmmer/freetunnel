@@ -1,0 +1,44 @@
+// Every APK must use the source-built stable adapter from this exact checkout.
+// The manifest is an integrity record, not an independent signature.
+tasks.register('verifyPinnedRuntime') {
+    def artifact = file("libs/${coreAar}")
+    def manifest = file("libs/${coreAar.replace('.aar', '.json')}")
+    def pinFile = rootProject.file('core-source.json')
+    def repository = rootProject.projectDir.parentFile
+    def builder = new File(repository, 'scripts/build-trusttunnel-android.sh')
+    def recipes = new File(repository, 'scripts/export-patched-boringssl.sh')
+    def pin = new groovy.json.JsonSlurper().parse(pinFile)
+    inputs.files(artifact, manifest, pinFile, builder, recipes)
+    pin.patches.each { inputs.file(new File(repository, it)) }
+    doLast {
+        if (!artifact.exists() || !manifest.exists()) {
+            throw new GradleException('Run ../scripts/prepare-trusttunnel-android.sh first')
+        }
+        def sha256 = { File source ->
+            def hash = java.security.MessageDigest.getInstance('SHA-256')
+            source.withInputStream { stream ->
+                byte[] buffer = new byte[1024 * 1024]
+                int size
+                while ((size = stream.read(buffer)) != -1) hash.update(buffer, 0, size)
+            }
+            hash.digest().encodeHex().toString()
+        }
+        def record = new groovy.json.JsonSlurper().parse(manifest)
+        def patches = pin.patches.collectEntries { [(it): sha256(new File(repository, it))] }
+        def abis = []
+        new java.util.zip.ZipFile(artifact).withCloseable { zip ->
+            zip.entries().each { entry ->
+                if (entry.name.startsWith('jni/') && entry.name.endsWith('/libtrusttunnel_android.so')) {
+                    abis.add(entry.name.split('/')[1])
+                }
+            }
+        }
+        def expected = [version: pin.version, commit: pin.commit, abis: abis.sort(),
+                        patches: patches, builder: sha256(builder), recipes: sha256(recipes), sha256: sha256(artifact)]
+        if (coreAar != "trusttunnel-client-android-${pin.version}.aar" ||
+                abis != pin.abis.sort() || record != expected) {
+            throw new GradleException('Android core source, patch, ABI or artifact checksum mismatch')
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn('verifyPinnedRuntime') }

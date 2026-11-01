@@ -12,7 +12,7 @@ plugins {
 def appVersion = '1.2.4'
 def appVersionCode = appVersion.tokenize('.').collect { it as int }.with { it[0] * 10000 + it[1] * 100 + it[2] }
 
-// The TrustTunnel core the app is built on: one AAR, pinned by name here and by checksum in verifyPinnedRuntime. Its version
+// The TrustTunnel core the app is built on: one source-built AAR, checked against core-source.json and its build manifest. Its version
 // is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.11", as the desktop's
 // says which core it carries.
 def coreAar = 'trusttunnel-client-android-1.1.11.aar'
@@ -135,6 +135,8 @@ abstract class CopySharedData extends DefaultTask {
     abstract RegularFileProperty getRecommendedRussia()
     @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
     abstract RegularFileProperty getDefaultExcludedRoutes()
+    @InputFile @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract RegularFileProperty getGeoPresets()
     @OutputDirectory
     abstract DirectoryProperty getOutputDir()
 
@@ -142,6 +144,9 @@ abstract class CopySharedData extends DefaultTask {
     void copy() {
         def out = outputDir.get().asFile
         out.deleteDir()
+        def geo = new File(out, 'geo')
+        geo.mkdirs()
+        java.nio.file.Files.copy(geoPresets.get().asFile.toPath(), new File(geo, 'presets.json').toPath())
         def split = new File(out, 'split')
         split.mkdirs()
         java.nio.file.Files.copy(recommendedRussia.get().asFile.toPath(), new File(split, 'recommended-russia.txt').toPath())
@@ -149,6 +154,7 @@ abstract class CopySharedData extends DefaultTask {
     }
 }
 def copySharedData = tasks.register('copySharedData', CopySharedData) {
+    geoPresets.set(rootProject.file('../data/geo/presets.json'))
     recommendedRussia.set(rootProject.file('../data/split/recommended-russia.txt'))
     defaultExcludedRoutes.set(rootProject.file('../data/split/default-excluded-routes.txt'))
     outputDir.set(layout.buildDirectory.dir('generated/sharedData'))
@@ -205,15 +211,5 @@ androidComponents {
     }
 }
 
-tasks.register('verifyPinnedRuntime') {
-    def artifact = file("libs/${coreAar}")
-    inputs.file(artifact)
-    doLast {
-        if (!artifact.exists()) throw new GradleException('Run ../scripts/prepare-trusttunnel-android.sh first')
-        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(artifact.bytes).encodeHex().toString()
-        if (digest != 'da0886c22a2a1fad1fdd25d8f5d3d85c6ffa89188292bd000d41e885db446eca') {
-            throw new GradleException('TrustTunnel AAR checksum mismatch')
-        }
-    }
-}
-tasks.named('preBuild') { dependsOn('verifyPinnedRuntime') }
+ext.coreAar = coreAar
+apply from: rootProject.file('verify-core.gradle')

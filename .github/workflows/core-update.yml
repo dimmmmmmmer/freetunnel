@@ -108,7 +108,7 @@ jobs:
           if [ "$HAS_PAT" = true ]; then
             checks=""
           else
-            checks=$'\n\n'"Build, tests, security and Android CI are explicitly dispatched on this branch. Android core updates still require a separate package and checksum update."
+            checks=$'\n\n'"Build, tests, security and Android CI are explicitly dispatched on this branch. Android core updates also require updating android/core-source.json and validating the routing patch on the new stable source."
           fi
           body="$(cat <<EOF
           A newer stable TrustTunnelClient release is out: [$TAG]($UPSTREAM/releases/tag/$TAG) (\`$COMMIT\`). The pin was $PINNED.
