@@ -27,7 +27,8 @@ import VpnClientFramework
         #if DEBUG
         if isPreview {
             var profile = Profile(name: "FreeTunnel demo")
-            profile.routing.manualBypass = "home.example"
+            profile.routing.manualBypass = "home.example\n192.168.0.0/16"
+            profile.routing.manualVPN = "example.org"
             let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
                 kind: .sites, direction: .vpn)
             profile.routing.lists = [list]
@@ -252,7 +253,7 @@ import VpnClientFramework
             let text = try config.tunnel(routing: profile.routing, snapshots: snapshots,
                 killSwitch: preferences.killSwitch)
             try await vpn.connect(text: text, name: profile.name, killSwitch: preferences.killSwitch,
-                onDemand: preferences.onDemand)
+                onDemand: false)
         } catch { report(error) }
     }
 }

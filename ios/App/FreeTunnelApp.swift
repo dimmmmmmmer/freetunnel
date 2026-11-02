@@ -106,8 +106,12 @@ struct HomeView: View {
                 .disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
                 .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                 .accessibilityIdentifier("connect-button")
-            Text(status).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
-                .accessibilityIdentifier("connection-status")
+            if vpn.status == .connected, let date = vpn.connectedAt {
+                Text(date, style: .timer).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
+            } else if !vpn.isDisconnected {
+                Text(status).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
+                    .accessibilityIdentifier("connection-status")
+            }
             if state.preferences.profiles.isEmpty {
                 Button("Add server", action: showServers).buttonStyle(AppButtonStyle())
             } else {
@@ -123,52 +127,60 @@ struct HomeView: View {
 struct SettingsView: View {
     @ObservedObject var state: AppState
     var body: some View {
-        NavigationStack {
-            AppForm {
-                AppSection("VPN") {
-                    Toggle("Kill switch", isOn: $state.preferences.killSwitch)
-                    Toggle("Connect on demand", isOn: $state.preferences.onDemand)
-                    Text("VPN settings apply on the next connection.").font(AppStyle.caption)
-                        .foregroundStyle(.secondary)
+        AppForm {
+            AppSection("General") {
+                AppPicker("Language", selection: $state.preferences.language) {
+                    Text("System").tag("system"); Text("English").tag("en"); Text("Русский").tag("ru")
                 }
-                AppSection("Appearance") {
-                    AppPicker("Theme", selection: $state.preferences.theme) {
-                        Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark")
-                    }
-                    AppPicker("Language", selection: $state.preferences.language) {
-                        Text("System").tag("system"); Text("English").tag("en"); Text("Русский").tag("ru")
-                    }
+                Divider()
+                AppPicker("Theme", selection: $state.preferences.theme) {
+                    Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark")
                 }
-                AppSection("About") {
-                    Text("FreeTunnel for iOS")
-                    Text("TrustTunnel 1.1.11").foregroundStyle(.secondary)
-                    NavigationLink("Open-source licenses") { LicensesView() }
-                    Link("Source code", destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
-                    Link("Help", destination: URL(
-                        string: "https://github.com/dimmmmmmmer/freetunnel/blob/main/USER_GUIDE.md")!)
-                    Text("Updates are installed through TestFlight or the App Store.").font(AppStyle.caption)
-                }
-            }.navigationTitle("Settings")
+            }
+            AppSection("Security") {
+                Toggle("Kill switch", isOn: $state.preferences.killSwitch)
+            }
+            HStack(spacing: 8) {
+                Link("FreeTunnel 1.2.4", destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
+                Text("·")
+                Link("TrustTunnel 1.1.11", destination: URL(
+                    string: "https://github.com/TrustTunnel/TrustTunnelClient")!)
+            }.font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
+                .buttonStyle(.plain).frame(maxWidth: .infinity)
         }
     }
 }
 
 struct LogsView: View {
     @ObservedObject var vpn: VPNController
+    @State private var copied = false
     var body: some View {
-        NavigationStack {
-            ScrollView { Text(vpn.logs.isEmpty ? String(localized: "No logs yet") : vpn.logs)
+        VStack(spacing: 8) {
+            HStack {
+                Button("Clear") { Task { await vpn.readLogs(clear: true) } }
+                Spacer()
+                Button(copied ? "Copied" : "Copy") {
+                    UIPasteboard.general.string = vpn.logs
+                    copied = true
+                }
+            }.buttonStyle(.plain).font(AppStyle.label).foregroundStyle(AppStyle.accent).frame(minHeight: 44)
+            ScrollView {
+                Text(vpn.logs.isEmpty ? String(localized: "No logs yet") : vpn.logs)
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding() }
-                .background(AppStyle.background)
-                .navigationBarTitleDisplayMode(.inline).navigationTitle("Logs")
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("Refresh") { Task { await vpn.readLogs() } }
-                        Button("Clear", role: .destructive) { Task { await vpn.readLogs(clear: true) } }
-                        ShareLink(item: vpn.logs) { Image(systemName: "square.and.arrow.up") }
-                    }
-                }.task { await vpn.readLogs() }
-        }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxHeight: .infinity)
+        }.padding(.horizontal, 18).background(AppStyle.background)
+            .task {
+                while !Task.isCancelled {
+                    await vpn.readLogs()
+                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                }
+            }
+            .task(id: copied) {
+                if copied {
+                    try? await Task.sleep(for: .seconds(2))
+                    copied = false
+                }
+            }
     }
 }
