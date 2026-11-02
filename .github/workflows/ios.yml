@@ -1,10 +1,10 @@
 name: iOS
 on:
   pull_request:
-    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**']
+    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**', 'android/core-source.json', 'scripts/export-patched-boringssl.sh']
   push:
     branches: [main]
-    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**']
+    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**', 'android/core-source.json', 'scripts/export-patched-boringssl.sh']
   workflow_dispatch:
 env:
   CONAN_VER: '2.31.1'

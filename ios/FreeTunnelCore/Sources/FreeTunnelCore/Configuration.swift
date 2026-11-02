@@ -7,14 +7,14 @@ public struct Configuration {
     var rawTable: [String: Any] { table }
     public var name: String { endpoint["name"] as? String ?? hostname }
     public var defaultDirection: Direction { (table["vpn_mode"] as? String) == "selective" ? .bypass : .vpn }
-    public var dnsUpstreams: [String] { endpoint["dns_upstreams"] as? [String] ?? table["dns_upstreams"] as? [String] ?? [] }
+    public var dnsUpstreams: [String] {
+        endpoint["dns_upstreams"] as? [String] ?? table["dns_upstreams"] as? [String] ?? [] }
     public var hostname: String { endpoint["hostname"] as? String ?? "" }
     public var endpoint: [String: Any] { table["endpoint"] as? [String: Any] ?? [:] }
     public var skipsVerification: Bool { endpoint["skip_verification"] as? Bool ?? false }
     public init(_ text: String, maximumBytes: Int = 1_048_576) throws {
         guard text.utf8.count <= maximumBytes else { throw ClientError.tooLarge }
-        do { table = try TOMLDeserializer.tomlTable(with: Data(text.utf8)) }
-        catch { throw ClientError.invalidConfig }
+        do { table = try TOMLDeserializer.tomlTable(with: Data(text.utf8)) } catch { throw ClientError.invalidConfig }
         guard let server = table["endpoint"] as? [String: Any],
               let hostname = server["hostname"] as? String, !hostname.isEmpty,
               let addresses = server["addresses"] as? [String], !addresses.isEmpty,
@@ -24,7 +24,8 @@ public struct Configuration {
         }
         guard !hostname.hasPrefix("*."), GeoParser.manual(hostname) != nil else { throw ClientError.invalidConfig }
         if let proto = server["upstream_protocol"] {
-            guard let text = proto as? String, ["http2", "http3"].contains(text) else { throw ClientError.invalidConfig }
+            guard let text = proto as? String, ["http2", "http3"].contains(text) else {
+                throw ClientError.invalidConfig }
         }
         if let key = server["client_random_auth_key"] as? String, !key.isEmpty {
             throw ClientError.unsupportedFormat // Stable core; do not silently omit an auth key.
