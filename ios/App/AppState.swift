@@ -27,11 +27,13 @@ import VpnClientFramework
         if isPreview {
             var profile = Profile(name: "FreeTunnel demo")
             profile.routing.manualBypass = "home.example"
-            let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt", kind: .sites, direction: .vpn)
+            let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
+                kind: .sites, direction: .vpn)
             profile.routing.lists = [list]
             preferences.profiles = [profile]
             preferences.selectedID = profile.id
-            snapshots[list.id] = GeoSnapshot(source: list.source, kind: list.kind, entries: ["example.org", "*.example.org"], skipped: 0)
+            snapshots[list.id] = GeoSnapshot(source: list.source, kind: list.kind, entries: ["example.org",
+                "*.example.org"], skipped: 0)
             loaded = true
             return
         }
@@ -90,30 +92,61 @@ import VpnClientFramework
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
-    func importBatch(_ text: String, allowInsecure: Bool = false) throws -> Int {
+    private func parseImport(_ text: String, allowInsecure: Bool) throws -> [String] {
         guard text.utf8.count <= Configuration.maximumBytes else { throw ClientError.tooLarge }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let documents: [String]
         if trimmed.hasPrefix("tt://") {
             let links = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             guard links.count <= 100 else { throw ClientError.tooLarge }
-            // Parse the complete batch before storing any entry.
-            let configs = try links.map { link -> String in
+            documents = try links.map { link in
                 guard link.hasPrefix("tt://") else { throw ClientError.invalidConfig }
-                let toml = try TrustTunnelDeepLink.decodeDeeplink(link)
-                let config = try Configuration(toml)
-                if config.skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
-                return toml
+                return try TrustTunnelDeepLink.decodeDeeplink(link)
             }
-            for config in configs { try add(toml: config) }
-            return configs.count
+        } else {
+            documents = [trimmed]
         }
-        if try Configuration(trimmed).skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
-        try add(toml: trimmed)
-        return 1
+        return try documents.map { document in
+            let config = try Configuration(document)
+            if config.skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
+            return try config.serialized()
+        }
+    }
+    private func storeImport(_ documents: [String]) throws {
+        guard loaded else { throw ClientError.storageFailed }
+        guard documents.count <= 100 else { throw ClientError.tooLarge }
+        var profiles: [Profile] = []
+        do {
+            for document in documents {
+                let config = try Configuration(document)
+                var profile = Profile(name: config.name)
+                profile.routing.defaultDirection = config.defaultDirection
+                let secret = Secret(toml: document)
+                try Vault.write(encoder.encode(secret), key: profile.id.uuidString)
+                profiles.append(profile)
+            }
+            var updated = preferences
+            updated.profiles.append(contentsOf: profiles)
+            if updated.selectedID == nil { updated.selectedID = profiles.first?.id }
+            try encoder.encode(updated).write(
+                to: Identity.directory().appendingPathComponent("preferences.json"),
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            preferences = updated
+        } catch {
+            for profile in profiles { try? Vault.remove(profile.id.uuidString) }
+            throw error
+        }
+    }
+    func importBatch(_ text: String, allowInsecure: Bool = false) throws -> Int {
+        let documents = try parseImport(text, allowInsecure: allowInsecure)
+        try storeImport(documents)
+        return documents.count
     }
     func importFiles(_ urls: [URL]) {
         do {
             guard urls.count <= 100 else { throw ClientError.tooLarge }
+            var documents: [String] = []
             for url in urls {
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
@@ -123,8 +156,10 @@ import VpnClientFramework
                 guard data.count <= Configuration.maximumBytes, let text = String(data: data, encoding: .utf8) else {
                     throw ClientError.invalidConfig
                 }
-                _ = try importBatch(text)
+                documents += try parseImport(text, allowInsecure: false)
+                guard documents.count <= 100 else { throw ClientError.tooLarge }
             }
+            try storeImport(documents)
             message = NSLocalizedString("Imported", comment: "")
         } catch { report(error) }
     }
@@ -155,13 +190,16 @@ import VpnClientFramework
         guard !isPreview else { return }
         defer { scheduleRefresh() }
         for profile in preferences.profiles {
-            if profile.subscriptionEnabled && Date().timeIntervalSince(profile.subscriptionUpdated ?? .distantPast) >= 86400 {
+            if profile.subscriptionEnabled && Date().timeIntervalSince(
+                profile.subscriptionUpdated ?? .distantPast) >= 86400 {
                 await refreshSubscription(profile)
             }
             let interval = Routing.intervals.contains(profile.routing.refreshHours) ? profile.routing.refreshHours : 24
             for list in profile.routing.lists where list.enabled {
                 let previous = snapshots[list.id]
-                if previous == nil || (interval > 0 && Date().timeIntervalSince(previous!.updated) >= Double(interval * 3600)) {
+                if previous == nil || (interval > 0 && Date().timeIntervalSince(
+                    previous?.updated ?? .distantPast) >= Double(
+                    interval * 3600)) {
                     await refresh(list)
                 }
             }
@@ -210,8 +248,10 @@ import VpnClientFramework
         guard loaded, let profile = selected else { return }
         do {
             let config = try Configuration(secret(profile).toml)
-            let text = try config.tunnel(routing: profile.routing, snapshots: snapshots, killSwitch: preferences.killSwitch)
-            try await vpn.connect(text: text, name: profile.name, killSwitch: preferences.killSwitch, onDemand: preferences.onDemand)
+            let text = try config.tunnel(routing: profile.routing, snapshots: snapshots,
+                killSwitch: preferences.killSwitch)
+            try await vpn.connect(text: text, name: profile.name, killSwitch: preferences.killSwitch,
+                onDemand: preferences.onDemand)
         } catch { report(error) }
     }
 }

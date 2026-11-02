@@ -53,79 +53,130 @@ public enum GeoParser {
     public static func parse(_ data: Data, list: GeoList) throws -> GeoSnapshot {
         guard data.count <= maximumBytes else { throw ClientError.tooLarge }
         let parsedSource = try source(list.source)
-        var entries = Set<String>()
-        var skipped = 0
-        func add(_ entry: String?) throws {
-            if let entry { entries.insert(entry) } else { skipped += 1 }
-            if entries.count > maximumEntries { throw ClientError.tooLarge }
-        }
+        var parser = ListParser(kind: list.kind)
         if let category = parsedSource.category {
-            var root = ProtoReader(data)
-            var found = false
-            while let field = try root.next() {
-                guard field.number == 1, let blob = field.bytes else { continue }
-                var record = ProtoReader(blob)
-                var code = ""
-                var members: [Data] = []
-                var inverted = false
-                while let part = try record.next() {
-                    if part.number == 1, let bytes = part.bytes { code = String(data: bytes, encoding: .utf8) ?? "" }
-                    if part.number == 2, let bytes = part.bytes { members.append(bytes) }
-                    // geoip reverse_match must not silently invert a selected category.
-                    if list.kind == .ips && part.number == 3 { inverted = (part.integer ?? 0) != 0 }
-                }
-                guard code.lowercased() == category.lowercased() else { continue }
-                guard !inverted else { throw ClientError.unsupportedFormat }
-                found = true
-                for member in members {
-                    var item = ProtoReader(member)
-                    var type: UInt64 = 0
-                    var bytes = Data()
-                    while let part = try item.next() {
-                        if list.kind == .sites {
-                            if part.number == 1 { type = part.integer ?? 0 }
-                            if part.number == 2 { bytes = part.bytes ?? Data() }
-                        } else {
-                            if part.number == 1 { bytes = part.bytes ?? Data() }
-                            if part.number == 2 { type = part.integer ?? 0 }
-                        }
-                    }
-                    if list.kind == .sites {
-                        guard let text = String(data: bytes, encoding: .utf8), let host = domain(text) else { skipped += 1; continue }
-                        switch type {
-                        case 2: try add(host); try add("*." + host)
-                        case 3: try add(host)
-                        default: skipped += 1 // Plain substring/regex are not equivalent to a domain rule.
-                        }
-                    } else {
-                        guard bytes.count == 4 || bytes.count == 16, type <= UInt64(bytes.count * 8) else { throw ClientError.invalidList }
-                        var output = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                        let converted = bytes.withUnsafeBytes { ptr in
-                            inet_ntop(bytes.count == 4 ? AF_INET : AF_INET6, ptr.baseAddress, &output, socklen_t(output.count))
-                        }
-                        guard converted != nil else { throw ClientError.invalidList }
-                        try add(String(cString: output) + "/" + String(type))
-                    }
-                }
-            }
-            guard found else { throw ClientError.emptyList }
+            try parser.readDatabase(data, category: category)
         } else {
-            guard let text = String(data: data, encoding: .utf8), !text.contains("\0") else { throw ClientError.invalidList }
-            for line in text.split(whereSeparator: { $0.isNewline }) {
-                let value = line.trimmingCharacters(in: .whitespaces)
-                if value.isEmpty || value.hasPrefix("#") || value.hasPrefix("!") { continue }
-                if list.kind == .ips { try add(ip(value)) }
-                else if value.hasPrefix("full:") { try add(domain(String(value.dropFirst(5)))) }
-                else {
-                    let plain = value.hasPrefix("domain:") ? String(value.dropFirst(7)) : value
-                    guard let host = domain(plain) else { skipped += 1; continue }
-                    try add(host)
-                    if !host.hasPrefix("*.") { try add("*." + host) }
-                }
+            try parser.readText(data)
+        }
+        guard !parser.entries.isEmpty else { throw ClientError.emptyList }
+        return GeoSnapshot(
+            source: list.source, kind: list.kind,
+            entries: parser.entries.sorted(), skipped: parser.skipped
+        )
+    }
+}
+
+private struct ListParser {
+    let kind: ListKind
+    var entries = Set<String>()
+    var skipped = 0
+
+    mutating func add(_ entry: String?) throws {
+        if let entry { entries.insert(entry) } else { skipped += 1 }
+        if entries.count > GeoParser.maximumEntries { throw ClientError.tooLarge }
+    }
+
+    mutating func readDatabase(_ data: Data, category: String) throws {
+        var root = ProtoReader(data)
+        var found = false
+        while let field = try root.next() {
+            guard field.number == 1, let blob = field.bytes else { continue }
+            let record = try DatabaseRecord(blob)
+            guard record.code.lowercased() == category.lowercased() else { continue }
+            guard kind != .ips || !record.inverted else { throw ClientError.unsupportedFormat }
+            found = true
+            for member in record.members { try readMember(member) }
+        }
+        guard found else { throw ClientError.emptyList }
+    }
+
+    mutating func readMember(_ data: Data) throws {
+        var reader = ProtoReader(data)
+        var type: UInt64 = 0
+        var bytes = Data()
+        let typeField = kind == .sites ? 1 : 2
+        let dataField = kind == .sites ? 2 : 1
+        while let part = try reader.next() {
+            if part.number == typeField { type = part.integer ?? 0 }
+            if part.number == dataField { bytes = part.bytes ?? Data() }
+        }
+        if kind == .sites {
+            try readDomain(bytes, type: type)
+        } else {
+            try add(Self.cidr(bytes, prefix: type))
+        }
+    }
+
+    mutating func readDomain(_ bytes: Data, type: UInt64) throws {
+        guard let text = String(data: bytes, encoding: .utf8), let host = GeoParser.domain(text) else {
+            skipped += 1
+            return
+        }
+        switch type {
+        case 2:
+            try add(host)
+            try add("*." + host)
+        case 3: try add(host)
+        default: skipped += 1 // Substrings and regular expressions are not domain rules.
+        }
+    }
+
+    static func cidr(_ bytes: Data, prefix: UInt64) throws -> String {
+        guard bytes.count == 4 || bytes.count == 16, prefix <= UInt64(bytes.count * 8) else {
+            throw ClientError.invalidList
+        }
+        var output = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        let family = bytes.count == 4 ? AF_INET : AF_INET6
+        let size = socklen_t(output.count)
+        let converted = bytes.withUnsafeBytes { pointer in
+            inet_ntop(family, pointer.baseAddress, &output, size)
+        }
+        guard converted != nil else { throw ClientError.invalidList }
+        return String(cString: output) + "/" + String(prefix)
+    }
+
+    mutating func readText(_ data: Data) throws {
+        guard let text = String(data: data, encoding: .utf8), !text.contains("\0") else {
+            throw ClientError.invalidList
+        }
+        for line in text.split(whereSeparator: { $0.isNewline }) {
+            let value = line.trimmingCharacters(in: .whitespaces)
+            if value.isEmpty || value.hasPrefix("#") || value.hasPrefix("!") { continue }
+            try readLine(value)
+        }
+    }
+
+    mutating func readLine(_ value: String) throws {
+        if kind == .ips {
+            try add(GeoParser.ip(value))
+        } else if value.hasPrefix("full:") {
+            try add(GeoParser.domain(String(value.dropFirst(5))))
+        } else {
+            let plain = value.hasPrefix("domain:") ? String(value.dropFirst(7)) : value
+            guard let host = GeoParser.domain(plain) else { skipped += 1; return }
+            try add(host)
+            if !host.hasPrefix("*.") { try add("*." + host) }
+        }
+    }
+}
+
+private struct DatabaseRecord {
+    var code = ""
+    var members: [Data] = []
+    var inverted = false
+
+    init(_ data: Data) throws {
+        var reader = ProtoReader(data)
+        while let field = try reader.next() {
+            switch field.number {
+            case 1: code = field.bytes.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            case 2:
+                if let bytes = field.bytes { members.append(bytes) }
+            case 3: inverted = (field.integer ?? 0) != 0
+            default: break
             }
         }
-        guard !entries.isEmpty else { throw ClientError.emptyList }
-        return GeoSnapshot(source: list.source, kind: list.kind, entries: entries.sorted(), skipped: skipped)
     }
 }
 

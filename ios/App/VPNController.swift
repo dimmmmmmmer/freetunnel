@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import NetworkExtension
 import FreeTunnelCore
 
@@ -12,11 +13,13 @@ import FreeTunnelCore
     init() { Task { try? await load() } }
     private func load() async throws {
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
-        manager = managers.first { ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == Identity.tunnel }
+        manager = managers.first { (
+            $0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == Identity.tunnel }
         if let observer { NotificationCenter.default.removeObserver(observer) }
         guard let manager else { status = .disconnected; return }
         status = manager.connection.status
-        observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: manager.connection, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange,
+            object: manager.connection, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.status = self?.manager?.connection.status ?? .disconnected }
         }
     }
@@ -62,11 +65,28 @@ import FreeTunnelCore
     func readLogs(clear: Bool = false) async {
         guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else { return }
         let data: Data? = await withCheckedContinuation { continuation in
+            let reply = ProviderReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { reply.finish(nil) }
             do {
-                try session.sendProviderMessage(Data((clear ? "clear" : "logs").utf8)) { continuation.resume(returning: $0) }
-            } catch { continuation.resume(returning: nil) }
+                let command = Data((clear ? "clear" : "logs").utf8)
+                try session.sendProviderMessage(command) { reply.finish($0) }
+            } catch { reply.finish(nil) }
         }
         if let data, let text = String(data: data, encoding: .utf8) { logs = text }
     }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+}
+
+// A disconnected extension may never answer; resolve its request only once.
+private final class ProviderReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+    init(_ continuation: CheckedContinuation<Data?, Never>) { self.continuation = continuation }
+    func finish(_ data: Data?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: data)
+    }
 }

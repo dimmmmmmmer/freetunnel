@@ -22,17 +22,26 @@ struct RoutingView: View {
                         GroupBox("Manual rules") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Through VPN").font(.subheadline)
-                                TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body, design: .monospaced))
+                                TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body,
+                                    design: .monospaced))
                                 Text("Direct").font(.subheadline)
-                                TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(.body, design: .monospaced))
+                                TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(
+                                    .body, design: .monospaced))
                                 Button("Recommended for Russia") {
-                                    guard let url = Bundle.main.url(forResource: "recommended-russia", withExtension: "txt"),
+                                    guard let url = Bundle.main.url(forResource: "recommended-russia",
+                                        withExtension: "txt"),
                                           let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-                                    let lines = text.split(whereSeparator: { $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
-                                    let existing = routing.wrappedValue.manualBypass.split(whereSeparator: { $0.isNewline }).map(String.init)
-                                    routing.wrappedValue.manualBypass = Array(Set(existing + lines)).sorted().joined(separator: "\n")
+                                    let lines = text.split(whereSeparator: { $0.isNewline }).map {
+                                        $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty &&
+                                        !$0.hasPrefix("#") }
+                                    let existing = routing.wrappedValue.manualBypass.split(whereSeparator: {
+                                        $0.isNewline }).map(String.init)
+                                    routing.wrappedValue.manualBypass = Array(Set(existing + lines)).sorted()
+                                        .joined(separator: "\n")
                                 }
-                                Text("One domain or IP range per line. Manual rules take priority over lists.").font(.footnote).foregroundStyle(.secondary)
+                                Text(
+                                    "One domain or IP range per line. Manual rules take priority over lists.")
+                                    .font(.footnote).foregroundStyle(.secondary)
                             }.textInputAutocapitalization(.never).autocorrectionDisabled().padding(.top, 6)
                         }
                         HStack {
@@ -47,13 +56,17 @@ struct RoutingView: View {
                             Text("Every 5 hours").tag(5)
                             Text("Every 24 hours").tag(24)
                         }
-                        Text("Updates run when iOS allows the app to work. Open the app to refresh overdue lists.").font(.footnote).foregroundStyle(.secondary)
+                        Text(LocalizedStringKey(
+                            "Updates run when iOS allows the app to work. " +
+                            "Open the app to refresh overdue lists."
+                        )).font(.footnote).foregroundStyle(.secondary)
                         ForEach(profile.routing.lists) { list in
                             GeoCard(state: state, profile: profile, list: list)
                         }
                         Text("Changes apply on the next connection.").font(.footnote).foregroundStyle(.secondary)
                     }.padding()
-                }.navigationTitle("Split tunnelling").sheet(isPresented: $adding) { AddListView(state: state, profileID: profile.id) }
+                }.navigationTitle("Split tunnelling").sheet(isPresented: $adding) { AddListView(state: state,
+                    profileID: profile.id) }
             } else {
                 ContentUnavailableView("Select a server first", systemImage: "server.rack")
             }
@@ -76,7 +89,8 @@ private struct GeoCard: View {
                 .font(.headline)
             Text(list.source).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Picker("Route", selection: Binding(get: { list.direction }, set: { value in change { $0.direction = value } })) {
+            Picker("Route", selection: Binding(get: { list.direction }, set: { value in change {
+                $0.direction = value } })) {
                 Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
             }.pickerStyle(.segmented)
             if let snapshot = state.snapshots[list.id] {
@@ -130,16 +144,21 @@ private struct AddListView: View {
                 Section("Ready-made lists") {
                     ForEach(presets) { preset in
                         Button {
-                            add(GeoList(name: preset.name, source: preset.source, kind: preset.kind, direction: preset.direction))
+                            add(GeoList(name: preset.name, source: preset.source, kind: preset.kind,
+                                direction: preset.direction))
                         } label: { Text(LocalizedStringKey(preset.name)) }
                     }
                 }
                 Section("Custom list") {
                     TextField("Name", text: $name)
-                    TextField("HTTPS list URL", text: $source).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Picker("Contents", selection: $kind) { Text("Domains").tag(ListKind.sites); Text("IP ranges").tag(ListKind.ips) }
-                    Picker("Route", selection: $direction) { Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass) }
-                    Button("Add") { add(GeoList(name: name.isEmpty ? source : name, source: source, kind: kind, direction: direction)) }
+                    TextField("HTTPS list URL", text: $source).keyboardType(.URL).textInputAutocapitalization(
+                        .never).autocorrectionDisabled()
+                    Picker("Contents", selection: $kind) { Text("Domains").tag(ListKind.sites); Text(
+                        "IP ranges").tag(ListKind.ips) }
+                    Picker("Route", selection: $direction) { Text("Through VPN").tag(Direction.vpn); Text(
+                        "Direct").tag(Direction.bypass) }
+                    Button("Add") { add(GeoList(name: name.isEmpty ? source : name, source: source,
+                        kind: kind, direction: direction)) }
                         .disabled(source.isEmpty)
                 }
             }.navigationTitle("Add list").toolbar { Button("Cancel") { dismiss() } }

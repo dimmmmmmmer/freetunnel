@@ -16,10 +16,12 @@ struct ServersView: View {
                     HStack {
                         Button { if state.vpn.isDisconnected { state.preferences.selectedID = profile.id } } label: {
                             HStack {
-                                Image(systemName: state.preferences.selectedID == profile.id ? "checkmark.circle.fill" : "circle")
+                                Image(systemName: state.preferences.selectedID == profile.id
+                                      ? "checkmark.circle.fill" : "circle")
                                 VStack(alignment: .leading) {
                                     Text(profile.name).foregroundStyle(.primary)
-                                    if profile.subscriptionEnabled { Text("Subscription").font(.caption).foregroundStyle(.secondary) }
+                                    if profile.subscriptionEnabled { Text("Subscription").font(.caption)
+                                        .foregroundStyle(.secondary) }
                                 }
                             }
                         }.buttonStyle(.plain)
@@ -32,8 +34,10 @@ struct ServersView: View {
                             Button("Remove", role: .destructive) { removing = profile }
                         } label: { Image(systemName: "ellipsis.circle").padding(8) }
                     }.padding(.vertical, 5)
-                }.onMove { source, destination in state.preferences.profiles.move(fromOffsets: source, toOffset: destination) }
-                if state.preferences.profiles.isEmpty { Text("Add a server to get connected").foregroundStyle(.secondary) }
+                }.onMove { source, destination in state.preferences.profiles.move(fromOffsets: source,
+                    toOffset: destination) }
+                if state.preferences.profiles.isEmpty { Text("Add a server to get connected").foregroundStyle(
+                    .secondary) }
             }.navigationTitle("Servers")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { EditButton() }
@@ -45,7 +49,8 @@ struct ServersView: View {
                         } label: { Label("Add server", systemImage: "plus") }
                     }
                 }
-                .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data], allowsMultipleSelection: true) { result in
+                .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data],
+                    allowsMultipleSelection: true) { result in
                     switch result {
                     case .success(let urls): state.importFiles(urls)
                     case .failure(let error): state.report(error)
@@ -54,7 +59,8 @@ struct ServersView: View {
                 .sheet(isPresented: $adding) { ImportView(state: state) }
                 .sheet(isPresented: $creating) { NewServerView(state: state) }
                 .sheet(item: $editing) { ServerEditor(state: state, profile: $0) }
-                .confirmationDialog("Remove server?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+                .confirmationDialog("Remove server?", isPresented: Binding(get: { removing != nil }, set: {
+                    if !$0 { removing = nil } }), titleVisibility: .visible) {
                     Button("Remove", role: .destructive) {
                         guard let profile = removing else { return }
                         do { try state.remove(profile) } catch { state.report(error) }
@@ -78,8 +84,7 @@ struct ImportView: View {
             _ = try state.importBatch(text, allowInsecure: allowInsecure)
             state.importText = ""
             dismiss()
-        } catch ClientError.insecureConfig { confirmInsecure = true }
-        catch { state.report(error) }
+        } catch ClientError.insecureConfig { confirmInsecure = true } catch { state.report(error) }
     }
     var body: some View {
         NavigationStack {
@@ -105,7 +110,10 @@ struct ImportView: View {
                 .sheet(isPresented: $scanning) {
                     QRScanner { result in text = result; scanning = false }
                 }
-                .confirmationDialog("This configuration may disable certificate verification. Import it only if you trust its source.", isPresented: $confirmInsecure, titleVisibility: .visible) {
+                .confirmationDialog(LocalizedStringKey(
+                    "This configuration may disable certificate verification. " +
+                    "Import it only if you trust its source."
+                ), isPresented: $confirmInsecure, titleVisibility: .visible) {
                     Button("Import") { importNow(allowInsecure: true) }
                 }
         }
@@ -149,8 +157,8 @@ struct ServerEditor: View {
                     }
                 }
                 .task {
-                    do { record = try state.secret(profile); text = record?.toml ?? ""; name = profile.name }
-                    catch { state.report(error) }
+                    do { record = try state.secret(profile); text = record?.toml ?? ""
+                        name = profile.name } catch { state.report(error) }
                 }
                 .sheet(isPresented: $sharing) { ShareSheet(items: [text]) }
         }

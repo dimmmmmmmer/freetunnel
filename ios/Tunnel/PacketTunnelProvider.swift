@@ -24,7 +24,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 guard let settings = self.protocolConfiguration as? NETunnelProviderProtocol,
                       let key = settings.providerConfiguration?["secretKey"] as? String,
                       key == "active-tunnel",
-                      let text = String(data: try Vault.read(key), encoding: .utf8) else { throw ClientError.missingSecret }
+                      let text = String(data: try Vault.read(key), encoding: .utf8) else {
+                          throw ClientError.missingSecret }
                 let config = try Configuration(text, maximumBytes: 8_388_608)
                 let network = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
                 let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
@@ -35,7 +36,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 network.ipv6Settings = ipv6
                 let dns = config.dnsUpstreams
                 // A configured upstream makes the core answer its virtual DNS address.
-                let dnsSettings = NEDNSSettings(servers: dns.isEmpty ? ["46.243.231.30", "46.243.231.31"] : ["198.18.53.53"])
+                let dnsSettings = NEDNSSettings(servers: dns.isEmpty ? ["46.243.231.30",
+                    "46.243.231.31"] : ["198.18.53.53"])
                 dnsSettings.matchDomains = [""]
                 network.dnsSettings = dnsSettings
                 network.mtu = 1280

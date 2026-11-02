@@ -27,6 +27,9 @@ targets:
       - path: Resources
         excludes: ['PrivacyInfo.xcprivacy']
       - path: Resources/PrivacyInfo.xcprivacy
+      - path: ../licenses/common
+        type: folder
+      - path: ../THIRD_PARTY_NOTICES.md
       - path: ../data/geo/presets.json
       - path: ../data/split/recommended-russia.txt
     settings:

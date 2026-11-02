@@ -5,9 +5,11 @@ import FreeTunnelCore
 enum Identity {
     static var group: String { Bundle.main.object(forInfoDictionaryKey: "FreeTunnelAppGroup") as? String ?? "" }
     static var keychain: String { Bundle.main.object(forInfoDictionaryKey: "FreeTunnelKeychainGroup") as? String ?? "" }
-    static var tunnel: String { Bundle.main.object(forInfoDictionaryKey: "FreeTunnelTunnelIdentifier") as? String ?? "" }
+    static var tunnel: String { Bundle.main.object(
+        forInfoDictionaryKey: "FreeTunnelTunnelIdentifier") as? String ?? "" }
     static func directory() throws -> URL {
-        guard !group.isEmpty, let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else {
+        guard !group.isEmpty, let url = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: group) else {
             throw ClientError.storageFailed
         }
         return url

@@ -2,7 +2,8 @@ import XCTest
 @testable import FreeTunnelCore
 
 final class SubscriptionTests: XCTestCase {
-    var document: [String: Any] { ["version": 1, "hostname": "vpn.example", "address": "192.0.2.1:443", "username": "user", "password": "secret", "has_ipv6": true] }
+    var document: [String: Any] { ["version": 1, "hostname": "vpn.example", "address": "192.0.2.1:443",
+        "username": "user", "password": "secret", "has_ipv6": true] }
     func testCredentialsDoNotRemainInRequestURL() throws {
         let request = try Subscription.request("https://user:pass@example.com/sub#label")
         XCTAssertEqual(request.url?.absoluteString, "https://example.com/sub")
@@ -18,7 +19,8 @@ final class SubscriptionTests: XCTestCase {
         var changed = document
         changed["password"] = "new secret"
         changed["dns_upstreams"] = ["9.9.9.9"]
-        let result = try Configuration(Subscription.apply(JSONSerialization.data(withJSONObject: changed), previous: local))
+        let result = try Configuration(Subscription.apply(JSONSerialization.data(withJSONObject: changed),
+            previous: local))
         XCTAssertEqual(result.endpoint["password"] as? String, "new secret")
         XCTAssertEqual(result.endpoint["dns_upstreams"] as? [String], ["1.1.1.1"])
         XCTAssertEqual(result.endpoint["has_ipv6"] as? Bool, true)
@@ -40,4 +42,13 @@ final class SubscriptionTests: XCTestCase {
         value["client_random_prefix"] = "xyz"
         XCTAssertThrowsError(try Subscription.apply(JSONSerialization.data(withJSONObject: value)))
     }
+    func testClientRandomMaskUsesCoreHexFormat() throws {
+        var value = document
+        value["client_random_prefix"] = "AABB/FF00"
+        let result = try Configuration(Subscription.apply(JSONSerialization.data(withJSONObject: value)))
+        XCTAssertEqual(result.endpoint["client_random"] as? String, "aabb/ff00")
+        value["client_random_prefix"] = "0xaabb"
+        XCTAssertThrowsError(try Subscription.apply(JSONSerialization.data(withJSONObject: value)))
+    }
+
 }

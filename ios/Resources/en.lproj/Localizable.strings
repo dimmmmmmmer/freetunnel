@@ -106,3 +106,4 @@
 "tunnelFailed" = "Unable to complete the VPN operation. Check the server and connection status.";
 "%lld rules · %lld skipped" = "%lld rules · %lld skipped";
 "insecureConfig" = "Certificate verification is disabled. Review the configuration in the import screen before accepting it.";
+"Open-source licenses" = "Open-source licenses";

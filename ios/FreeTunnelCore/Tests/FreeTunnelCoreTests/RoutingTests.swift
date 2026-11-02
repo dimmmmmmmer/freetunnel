@@ -34,11 +34,13 @@ final class RoutingTests: XCTestCase {
         let list = GeoList(name: "List", source: "https://example.com/new.txt", kind: .sites, direction: .vpn)
         routing.lists = [list]
         XCTAssertThrowsError(try config.tunnel(routing: routing, snapshots: [:], killSwitch: true))
-        let stale = GeoSnapshot(source: "https://example.com/old.txt", kind: .sites, entries: ["example.com"], skipped: 0)
+        let stale = GeoSnapshot(source: "https://example.com/old.txt", kind: .sites, entries: ["example.com"],
+            skipped: 0)
         XCTAssertThrowsError(try config.tunnel(routing: routing, snapshots: [list.id: stale], killSwitch: true))
     }
     func testInvalidSourcesAndRulesAreRejected() {
-        for source in ["http://example.com/a", "https://user:secret@example.com/a", "https://example.com/a.dat", "https://example.com/a.dat#ru@ads"] {
+        for source in ["http://example.com/a", "https://user:secret@example.com/a",
+            "https://example.com/a.dat", "https://example.com/a.dat#ru@ads"] {
             XCTAssertThrowsError(try GeoParser.source(source))
         }
         for rule in ["@0:example.com", "example.com/path", "0.0.0.0/33", "::/129", "bad host"] {
@@ -47,7 +49,8 @@ final class RoutingTests: XCTestCase {
     }
     func testTextListsAndUnsupportedSyntax() throws {
         let list = GeoList(name: "List", source: "https://example.com/list.txt", kind: .sites, direction: .vpn)
-        let result = try GeoParser.parse(Data("# comment\nexample.com\nfull:single.example\nregexp:.*\nexample.com".utf8), list: list)
+        let result = try GeoParser.parse(Data(
+            "# comment\nexample.com\nfull:single.example\nregexp:.*\nexample.com".utf8), list: list)
         XCTAssertEqual(result.entries, ["*.example.com", "example.com", "single.example"])
         XCTAssertEqual(result.skipped, 1)
         XCTAssertThrowsError(try GeoParser.parse(Data("regexp:.*".utf8), list: list))

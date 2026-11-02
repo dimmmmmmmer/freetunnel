@@ -15,7 +15,11 @@ private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
             (url.host != original.host || (url.port ?? 443) != (original.port ?? 443)) {
             completionHandler(nil); return
         }
-        completionHandler(request)
+        var redirected = request
+        if let authorization = task.originalRequest?.value(forHTTPHeaderField: "Authorization") {
+            redirected.setValue(authorization, forHTTPHeaderField: "Authorization")
+        }
+        completionHandler(redirected)
     }
 }
 enum Downloads {
