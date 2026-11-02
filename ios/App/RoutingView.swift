@@ -64,7 +64,8 @@ struct RoutingView: View {
                         ForEach(profile.routing.lists) { list in
                             GeoCard(state: state, profile: profile, list: list)
                         }
-                        Text("Changes apply on the next connection.").font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
+                        Text("Changes apply on the next connection.").font(AppStyle.caption)
+                            .foregroundStyle(AppStyle.secondary)
                     }.frame(maxWidth: 600).frame(maxWidth: .infinity).padding(20)
                 }
                 .background(AppStyle.background).buttonStyle(AppButtonStyle())

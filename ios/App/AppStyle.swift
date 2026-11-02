@@ -38,6 +38,8 @@ struct AppButtonStyle: ButtonStyle {
 }
 
 struct AppFieldStyle: TextFieldStyle {
+    // TextFieldStyle requires this exact SwiftUI protocol method name.
+    // swiftlint:disable:next identifier_name
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration.padding(12).frame(minHeight: 44)
             .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))

@@ -134,9 +134,11 @@ struct ServerEditor: View {
             AppForm {
                 TextField("Name", text: $name)
                 AppSection("Configuration") {
-                    TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 260).appEditor()
+                    TextEditor(text: $text).font(.system(.caption, design: .monospaced))
+                        .frame(minHeight: 260).appEditor()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Configuration contains the server password.").font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
+                    Text("Configuration contains the server password.").font(AppStyle.caption)
+                        .foregroundStyle(AppStyle.secondary)
                 }
                 Button("Share configuration") { sharing = true }
             }.navigationTitle("Edit server")

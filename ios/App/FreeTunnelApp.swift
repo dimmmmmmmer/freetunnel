@@ -67,8 +67,7 @@ struct RootView: View {
     private func tabButton(_ id: String, title: LocalizedStringKey, icon: String) -> some View {
         Button { tab = id } label: {
             Group {
-                if icon.isEmpty { Image("TunnelLogo").resizable().scaledToFit().frame(width: 25, height: 25) }
-                else { Image(icon).resizable().scaledToFit().frame(width: 25, height: 25) }
+                Image(icon.isEmpty ? "TunnelLogo" : icon).resizable().scaledToFit().frame(width: 25, height: 25)
             }.frame(width: 48, height: 48)
                 .background(tab == id ? AppStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain).accessibilityLabel(title)
@@ -96,8 +95,9 @@ struct HomeView: View {
             Button {
                 if state.selected == nil { showServers(); return }
                 Task {
-                    if vpn.isDisconnected { await state.connect() }
-                    else { do { try await vpn.disconnect() } catch { state.report(error) } }
+                    if vpn.isDisconnected {
+                        await state.connect()
+                    } else { do { try await vpn.disconnect() } catch { state.report(error) } }
                 }
             } label: {
                 Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
@@ -128,7 +128,8 @@ struct SettingsView: View {
                 AppSection("VPN") {
                     Toggle("Kill switch", isOn: $state.preferences.killSwitch)
                     Toggle("Connect on demand", isOn: $state.preferences.onDemand)
-                    Text("VPN settings apply on the next connection.").font(AppStyle.caption).foregroundStyle(.secondary)
+                    Text("VPN settings apply on the next connection.").font(AppStyle.caption)
+                        .foregroundStyle(.secondary)
                 }
                 AppSection("Appearance") {
                     AppPicker("Theme", selection: $state.preferences.theme) {
