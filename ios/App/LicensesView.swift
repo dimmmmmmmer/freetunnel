@@ -15,7 +15,7 @@ struct LicensesView: View {
             NavigationLink(url.deletingPathExtension().lastPathComponent) {
                 ScrollView {
                     Text((try? String(contentsOf: url, encoding: .utf8)) ?? "")
-                        .font(.caption).textSelection(.enabled)
+                        .font(AppStyle.caption).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding()
                 }.navigationTitle(url.deletingPathExtension().lastPathComponent)
             }

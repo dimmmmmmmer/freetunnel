@@ -15,17 +15,17 @@ struct RoutingView: View {
                 ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text(profile.name).font(.headline)
+                        Text(profile.name).font(AppStyle.heading)
                         Toggle("Enable routing rules", isOn: routing.enabled)
                         AppPicker("Other traffic", selection: routing.defaultDirection) {
                             Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
                         }
                         AppSection("Manual rules") {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Through VPN").font(.subheadline)
+                                Text("Through VPN").font(AppStyle.label)
                                 TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body,
                                     design: .monospaced)).appEditor()
-                                Text("Direct").font(.subheadline)
+                                Text("Direct").font(AppStyle.label)
                                 TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(
                                     .body, design: .monospaced)).appEditor()
                                 Button("Recommended for Russia") {
@@ -42,11 +42,11 @@ struct RoutingView: View {
                                 }
                                 Text(
                                     "One domain or IP range per line. Manual rules take priority over lists.")
-                                    .font(.footnote).foregroundStyle(AppStyle.secondary)
+                                    .font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                             }.textInputAutocapitalization(.never).autocorrectionDisabled().padding(.top, 6)
                         }
                         HStack {
-                            Text("Geo lists").font(.subheadline.weight(.semibold)).foregroundStyle(AppStyle.secondary)
+                            Text("Geo lists").font(AppStyle.heading).foregroundStyle(AppStyle.secondary)
                             Spacer()
                             Button("Add list", systemImage: "plus") { adding = true }
                         }.id("geo-lists")
@@ -60,11 +60,11 @@ struct RoutingView: View {
                         Text(LocalizedStringKey(
                             "Updates run when iOS allows the app to work. " +
                             "Open the app to refresh overdue lists."
-                        )).font(.footnote).foregroundStyle(AppStyle.secondary)
+                        )).font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                         ForEach(profile.routing.lists) { list in
                             GeoCard(state: state, profile: profile, list: list)
                         }
-                        Text("Changes apply on the next connection.").font(.footnote).foregroundStyle(AppStyle.secondary)
+                        Text("Changes apply on the next connection.").font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                     }.frame(maxWidth: 600).frame(maxWidth: .infinity).padding(20)
                 }
                 .background(AppStyle.background).buttonStyle(AppButtonStyle())
@@ -100,17 +100,17 @@ private struct GeoCard: View {
             Toggle(LocalizedStringKey(list.name), isOn: Binding(get: { list.enabled }, set: { value in
                 change { $0.enabled = value }
             }))
-                .font(.headline)
-            Text(list.source).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                .font(AppStyle.heading)
+            Text(list.source).font(AppStyle.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             AppPicker("Route", selection: Binding(get: { list.direction }, set: { value in change {
                 $0.direction = value } })) {
                 Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
             }
             if let snapshot = state.snapshots[list.id] {
-                Text("\(snapshot.entries.count) rules · \(snapshot.skipped) skipped").font(.footnote)
-                Text(snapshot.updated, style: .relative).font(.caption).foregroundStyle(.secondary)
-            } else { Text("Not downloaded yet").font(.footnote).foregroundStyle(AppStyle.secondary) }
+                Text("\(snapshot.entries.count) rules · \(snapshot.skipped) skipped").font(AppStyle.caption)
+                Text(snapshot.updated, style: .relative).font(AppStyle.caption).foregroundStyle(.secondary)
+            } else { Text("Not downloaded yet").font(AppStyle.caption).foregroundStyle(AppStyle.secondary) }
             HStack {
                 Button("Refresh") { Task { await state.refresh(list) } }.disabled(state.busy.contains(list.id))
                 Spacer()
@@ -129,7 +129,7 @@ private struct GeoCard: View {
 private struct Preset: Decodable, Identifiable {
     let id: String; let name: String; let source: String; let kind: ListKind; let direction: Direction
 }
-private struct AddListView: View {
+struct AddListView: View {
     @ObservedObject var state: AppState
     let profileID: UUID
     @Environment(\.dismiss) private var dismiss

@@ -67,3 +67,12 @@ stored in this repository.
 - Review accessibility, Dynamic Type, VoiceOver, iPhone/iPad layouts and translations.
 - Include core dependencies' notices in the distribution, review the privacy manifest,
   and obtain Apple's beta approval before inviting external TestFlight users.
+
+## Interface
+
+The iOS client uses the desktop palette from `qml/Main.qml`, Inter fonts and the
+same navigation artwork. `AppStyle.swift` contains the shared iOS controls and
+spacing. Keep both light and dark colors aligned with the desktop theme.
+Connection is controlled by the central logo. Touch targets are at least 44 pt;
+forms retain native keyboard, accessibility and system permission behavior.
+The preview workflow captures every main screen in both system appearances.

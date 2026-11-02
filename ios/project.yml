@@ -27,6 +27,8 @@ targets:
       - path: Resources
         excludes: ['PrivacyInfo.xcprivacy']
       - path: Resources/PrivacyInfo.xcprivacy
+      - path: ../assets/fonts/inter/Inter-Regular.ttf
+      - path: ../assets/fonts/inter/Inter-Medium.ttf
       - path: ../licenses/common
         type: folder
       - path: ../THIRD_PARTY_NOTICES.md
@@ -45,6 +47,7 @@ targets:
         FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
         FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel
         UILaunchScreen: {}
+        UIAppFonts: [Inter-Regular.ttf, Inter-Medium.ttf]
         LSSupportsOpeningDocumentsInPlace: false
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
