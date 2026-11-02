@@ -12,6 +12,7 @@ struct RoutingView: View {
     var body: some View {
         NavigationStack {
             if let profile = state.selected {
+                ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(profile.name).font(.headline)
@@ -48,7 +49,7 @@ struct RoutingView: View {
                             Text("Geo lists").font(.title2.bold())
                             Spacer()
                             Button("Add list", systemImage: "plus") { adding = true }
-                        }
+                        }.id("geo-lists")
                         Picker("Refresh lists", selection: routing.refreshHours) {
                             Text("Never").tag(0)
                             Text("Every hour").tag(1)
@@ -65,7 +66,17 @@ struct RoutingView: View {
                         }
                         Text("Changes apply on the next connection.").font(.footnote).foregroundStyle(.secondary)
                     }.padding()
-                }.navigationTitle("Split tunnelling").sheet(isPresented: $adding) { AddListView(state: state,
+                }
+                .task {
+                    #if DEBUG
+                    if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_GEO"] == "1" {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        reader.scrollTo("geo-lists", anchor: .top)
+                    }
+                    #endif
+                }
+                }.navigationTitle("Split tunnelling").navigationBarTitleDisplayMode(.inline).sheet(
+                    isPresented: $adding) { AddListView(state: state,
                     profileID: profile.id) }
             } else {
                 ContentUnavailableView("Select a server first", systemImage: "server.rack")
