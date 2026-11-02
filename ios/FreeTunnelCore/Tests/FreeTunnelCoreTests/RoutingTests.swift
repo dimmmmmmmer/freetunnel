@@ -67,4 +67,13 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(try Configuration(Configuration(text).serialized()).endpoint["password"] as? String, password)
         XCTAssertThrowsError(try Configuration(source + "\nclient_random_auth_key = \"key\""))
     }
+    func testDisablingSplitRoutesEverythingThroughVPN() throws {
+        let config = try Configuration(source.replacingOccurrences(of: "general", with: "selective"))
+        var routing = Routing()
+        routing.enabled = false
+        let result = try Configuration(config.tunnel(routing: routing, snapshots: [:], killSwitch: true))
+        XCTAssertEqual(result.rawTable["vpn_mode"] as? String, "general")
+        XCTAssertEqual(result.rawTable["exclusions"] as? [String], [])
+    }
+
 }

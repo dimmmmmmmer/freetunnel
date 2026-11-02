@@ -63,6 +63,9 @@ public struct Configuration {
             }
             guard rules.count <= 100_000 else { throw ClientError.tooLarge }
             result["exclusions"] = Array(Set(rules)).sorted()
+        } else {
+            result["vpn_mode"] = "general"
+            result["exclusions"] = [String]()
         }
         let text = try Self.serialize(result)
         guard text.utf8.count <= 8_388_608 else { throw ClientError.tooLarge }
