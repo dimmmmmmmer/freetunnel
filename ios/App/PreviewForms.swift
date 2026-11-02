@@ -17,7 +17,6 @@ struct PreviewForms: ViewModifier {
                     if let profile = state.selected { ServerEditor(state: state, profile: profile) }
                 case "add-list":
                     if let profile = state.selected { AddListView(state: state, profileID: profile.id) }
-                case "licenses": NavigationStack { LicensesView() }
                 default: EmptyView()
                 }
             }.tint(AppStyle.accent).foregroundStyle(AppStyle.text).font(AppStyle.body)

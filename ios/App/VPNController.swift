@@ -9,6 +9,7 @@ import FreeTunnelCore
     private var manager: NETunnelProviderManager?
     private var observer: NSObjectProtocol?
     private var changing = false
+    var connectedAt: Date? { manager?.connection.connectedDate }
     var isDisconnected: Bool { status == .disconnected || status == .invalid }
     init() { Task { try? await load() } }
     private func load() async throws {
@@ -63,6 +64,7 @@ import FreeTunnelCore
         manager.connection.stopVPNTunnel()
     }
     func readLogs(clear: Bool = false) async {
+        if clear { logs = "" }
         guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else { return }
         let data: Data? = await withCheckedContinuation { continuation in
             let reply = ProviderReply(continuation)

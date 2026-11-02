@@ -109,3 +109,11 @@
 "Open-source licenses" = "Open-source licenses";
 "Home" = "Home";
 "Routing" = "Routing";
+"General" = "General";
+"Security" = "Security";
+"Copy" = "Copy";
+"Copied" = "Copied";
+"Domain or IP range" = "Domain or IP range";
+"Add rule" = "Add rule";
+"Invalid domain or IP range" = "Invalid domain or IP range";
+"Manual rules take priority over lists." = "Manual rules take priority over lists.";

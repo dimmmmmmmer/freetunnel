@@ -96,13 +96,20 @@ struct AppPicker<Selection: Hashable, Content: View>: View {
         self.content = content()
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
+        HStack(spacing: 8) {
+            Text(title).font(AppStyle.label)
+            Spacer(minLength: 8)
             Picker(title, selection: $selection) { content }
-                .labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8).frame(minHeight: 44)
-                .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
-        }
+                .labelsHidden().pickerStyle(.menu).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 180, alignment: .trailing)
+        }.frame(minHeight: 44)
+    }
+}
+
+struct AppIcon: View {
+    let name: String
+    var body: some View {
+        Image(name).resizable().scaledToFit().frame(width: 18, height: 18)
+            .frame(width: 44, height: 44).contentShape(Rectangle())
     }
 }

@@ -15,19 +15,14 @@ struct RoutingView: View {
                 ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text(profile.name).font(AppStyle.heading)
-                        Toggle("Enable routing rules", isOn: routing.enabled)
+                        Toggle("Split tunnelling", isOn: routing.enabled)
                         AppPicker("Other traffic", selection: routing.defaultDirection) {
                             Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
                         }
                         AppSection("Manual rules") {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Through VPN").font(AppStyle.label)
-                                TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body,
-                                    design: .monospaced)).appEditor()
-                                Text("Direct").font(AppStyle.label)
-                                TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(
-                                    .body, design: .monospaced)).appEditor()
+                                RuleChips(title: "Through VPN", rules: routing.manualVPN)
+                                RuleChips(title: "Direct", rules: routing.manualBypass)
                                 Button("Recommended for Russia") {
                                     guard let url = Bundle.main.url(forResource: "recommended-russia",
                                         withExtension: "txt"),
@@ -41,7 +36,7 @@ struct RoutingView: View {
                                         .joined(separator: "\n")
                                 }
                                 Text(
-                                    "One domain or IP range per line. Manual rules take priority over lists.")
+                                    "Manual rules take priority over lists.")
                                     .font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                             }.textInputAutocapitalization(.never).autocorrectionDisabled().padding(.top, 6)
                         }
@@ -77,7 +72,7 @@ struct RoutingView: View {
                     }
                     #endif
                 }
-                }.navigationTitle("Split tunnelling").navigationBarTitleDisplayMode(.inline).sheet(
+                }.toolbar(.hidden, for: .navigationBar).sheet(
                     isPresented: $adding) { AddListView(state: state,
                     profileID: profile.id).modifier(FormAlerts(state: state)) }
             } else {
@@ -110,7 +105,6 @@ private struct GeoCard: View {
             }
             if let snapshot = state.snapshots[list.id] {
                 Text("\(snapshot.entries.count) rules · \(snapshot.skipped) skipped").font(AppStyle.caption)
-                Text(snapshot.updated, style: .relative).font(AppStyle.caption).foregroundStyle(.secondary)
             } else { Text("Not downloaded yet").font(AppStyle.caption).foregroundStyle(AppStyle.secondary) }
             HStack {
                 Button("Refresh") { Task { await state.refresh(list) } }.disabled(state.busy.contains(list.id))

@@ -9,46 +9,28 @@ struct ServersView: View {
     @State private var files = false
     @State private var editing: Profile?
     @State private var removing: Profile?
+    @State private var exportText = ""
     var body: some View {
-        NavigationStack {
-            List {
-                ForEach(state.preferences.profiles) { profile in
-                    HStack {
-                        Button { if state.vpn.isDisconnected { state.preferences.selectedID = profile.id } } label: {
-                            HStack {
-                                Image(systemName: state.preferences.selectedID == profile.id
-                                      ? "checkmark.circle.fill" : "circle")
-                                VStack(alignment: .leading) {
-                                    Text(profile.name).foregroundStyle(.primary)
-                                    if profile.subscriptionEnabled { Text("Subscription").font(AppStyle.caption)
-                                        .foregroundStyle(.secondary) }
-                                }
-                            }
-                        }.buttonStyle(.plain)
-                        Spacer()
-                        Menu {
-                            Button("Edit") { editing = profile }
-                            if profile.subscriptionEnabled {
-                                Button("Refresh subscription") { Task { await state.refreshSubscription(profile) } }
-                            }
-                            Button("Remove", role: .destructive) { removing = profile }
-                        } label: { Image(systemName: "ellipsis.circle").padding(8) }
-                    }.appCard().listRowBackground(Color.clear).listRowSeparator(.hidden)
-                }.onMove { source, destination in state.preferences.profiles.move(fromOffsets: source,
-                    toOffset: destination) }
-                if state.preferences.profiles.isEmpty { Text("Add a server to get connected").foregroundStyle(
-                    .secondary) }
-            }.listStyle(.plain).scrollContentBackground(.hidden).background(AppStyle.background)
-                .navigationBarTitleDisplayMode(.inline).navigationTitle("Servers")
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) { EditButton() }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("New configuration") { creating = true }
-                            Button("Paste links or TOML") { adding = true }
-                            Button("Import files") { files = true }
-                        } label: { Label("Add server", systemImage: "plus") }
+        VStack(spacing: 8) {
+            Menu {
+                Button("New configuration") { creating = true }
+                Button("Paste links or TOML") { adding = true }
+                Button("Import files") { files = true }
+            } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                .buttonStyle(.plain).accessibilityLabel("Add server")
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(state.preferences.profiles) { profile in
+                        serverRow(profile)
                     }
+                    if state.preferences.profiles.isEmpty {
+                        Button("Add server") { adding = true }.buttonStyle(.plain)
+                    }
+                }.padding(.horizontal, 18)
+            }
+        }.background(AppStyle.background)
+                .sheet(isPresented: Binding(get: { !exportText.isEmpty }, set: { if !$0 { exportText = "" } })) {
+                    ShareSheet(items: [exportText])
                 }
                 .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data],
                     allowsMultipleSelection: true) { result in
@@ -68,7 +50,39 @@ struct ServersView: View {
                         removing = nil
                     }
                 }
-        }
+    }
+    private func serverRow(_ profile: Profile) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                if state.vpn.isDisconnected { state.preferences.selectedID = profile.id }
+            } label: {
+                HStack(spacing: 8) {
+                    Image("TunnelLogo").resizable().scaledToFit().frame(width: 22, height: 22)
+                        .opacity(state.preferences.selectedID == profile.id ? 1 : 0.4)
+                    Text(profile.name).font(AppStyle.label).lineLimit(1)
+                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            Button {
+                do { exportText = try state.secret(profile).toml } catch { state.report(error) }
+            } label: { AppIcon(name: "ActionExport") }.accessibilityLabel("Share configuration")
+            Button { editing = profile } label: { AppIcon(name: "ActionEdit") }.accessibilityLabel("Edit")
+            Button(role: .destructive) { removing = profile } label: { AppIcon(name: "ActionClose") }
+                .accessibilityLabel("Remove")
+        }.buttonStyle(.plain).padding(.vertical, 4)
+            .draggable(profile.id.uuidString)
+            .dropDestination(for: String.self) { identifiers, _ in
+                guard let id = identifiers.first, let source = state.preferences.profiles.firstIndex(where: {
+                    $0.id.uuidString == id }), let target = state.preferences.profiles.firstIndex(where: {
+                    $0.id == profile.id }) else { return false }
+                state.preferences.profiles.move(fromOffsets: IndexSet(integer: source),
+                    toOffset: target > source ? target + 1 : target)
+                return true
+            }
+            .contextMenu {
+                if profile.subscriptionEnabled {
+                    Button("Refresh subscription") { Task { await state.refreshSubscription(profile) } }
+                }
+            }
     }
 }
 

@@ -109,3 +109,11 @@
 "Open-source licenses" = "Лицензии компонентов";
 "Home" = "Главная";
 "Routing" = "Маршруты";
+"General" = "Общие";
+"Security" = "Безопасность";
+"Copy" = "Копировать";
+"Copied" = "Скопировано";
+"Domain or IP range" = "Домен или IP-подсеть";
+"Add rule" = "Добавить правило";
+"Invalid domain or IP range" = "Неверный домен или IP-подсеть";
+"Manual rules take priority over lists." = "Ручные правила имеют приоритет над списками.";
