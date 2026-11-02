@@ -25,6 +25,7 @@ for patch in pin['patches']:
 PY
 (
   cd "$work/upstream"
+  rustup target add aarch64-apple-ios aarch64-apple-ios-sim
   python3 scripts/bootstrap_conan_deps.py
 )
 bash "$root/scripts/export-patched-boringssl.sh"

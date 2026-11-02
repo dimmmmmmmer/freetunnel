@@ -42,6 +42,8 @@ targets:
         FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
         FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel
         UILaunchScreen: {}
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [org.freetunnel.ios.refresh]
         NSCameraUsageDescription: Scan a TrustTunnel configuration QR code.
         ITSAppUsesNonExemptEncryption: true
         CFBundleURLTypes:

@@ -18,23 +18,25 @@ import FreeTunnelCore
                     if newValue == .active { Task { await state.refreshDue() } }
                 }
         }
+        .backgroundTask(.appRefresh("org.freetunnel.ios.refresh")) { await state.refreshDue() }
     }
 }
 
 struct RootView: View {
+    @State private var tab = ProcessInfo.processInfo.environment["FT_PREVIEW_TAB"] ?? "connection"
     @ObservedObject var state: AppState
     var body: some View {
-        TabView {
-            HomeView(state: state, vpn: state.vpn).tabItem { Label("Connection", systemImage: "power.circle") }
-            ServersView(state: state).tabItem { Label("Servers", systemImage: "server.rack") }
-            RoutingView(state: state).tabItem { Label("Split tunnelling", systemImage: "arrow.triangle.branch") }
-            SettingsView(state: state).tabItem { Label("Settings", systemImage: "gearshape") }
-            LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }
+        TabView(selection: $tab) {
+            HomeView(state: state, vpn: state.vpn).tabItem { Label("Connection", systemImage: "power.circle") }.tag("connection")
+            ServersView(state: state).tabItem { Label("Servers", systemImage: "server.rack") }.tag("servers")
+            RoutingView(state: state).tabItem { Label("Split tunnelling", systemImage: "arrow.triangle.branch") }.tag("routing")
+            SettingsView(state: state).tabItem { Label("Settings", systemImage: "gearshape") }.tag("settings")
+            LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }.tag("logs")
         }
         .tint(Color(red: 0.61, green: 0.55, blue: 0.77))
         .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil }, set: { if !$0 { state.message = nil } })) {
             Button("OK") { state.message = nil }
-        } message: { Text(state.message ?? "") }
+        } message: { Text(LocalizedStringKey(state.message ?? "")) }
         .sheet(isPresented: Binding(get: { !state.importText.isEmpty }, set: { if !$0 { state.importText = "" } })) {
             ImportView(state: state, initial: state.importText)
         }
@@ -76,7 +78,7 @@ struct HomeView: View {
                     Label(vpn.isDisconnected ? "Connect" : "Disconnect", systemImage: "power")
                         .font(.title3.bold()).frame(maxWidth: 280).padding(.vertical, 14)
                 }.buttonStyle(.borderedProminent)
-                    .disabled(!state.loaded || state.selected == nil || vpn.status == .disconnecting)
+                    .disabled(state.isPreview || !state.loaded || state.selected == nil || vpn.status == .disconnecting)
                     .accessibilityIdentifier("connect-button")
                 Spacer()
             }.padding().navigationTitle("Connection").navigationBarTitleDisplayMode(.inline)
