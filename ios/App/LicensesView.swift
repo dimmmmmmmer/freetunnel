@@ -19,6 +19,7 @@ struct LicensesView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding()
                 }.navigationTitle(url.deletingPathExtension().lastPathComponent)
             }
-        }.navigationTitle("Open-source licenses")
+        }.scrollContentBackground(.hidden).background(AppStyle.background)
+            .navigationBarTitleDisplayMode(.inline).navigationTitle("Open-source licenses")
     }
 }

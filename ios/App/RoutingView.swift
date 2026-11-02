@@ -17,17 +17,17 @@ struct RoutingView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(profile.name).font(.headline)
                         Toggle("Enable routing rules", isOn: routing.enabled)
-                        Picker("Other traffic", selection: routing.defaultDirection) {
+                        AppPicker("Other traffic", selection: routing.defaultDirection) {
                             Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
-                        }.pickerStyle(.segmented)
-                        GroupBox("Manual rules") {
+                        }
+                        AppSection("Manual rules") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Through VPN").font(.subheadline)
                                 TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body,
-                                    design: .monospaced))
+                                    design: .monospaced)).appEditor()
                                 Text("Direct").font(.subheadline)
                                 TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(
-                                    .body, design: .monospaced))
+                                    .body, design: .monospaced)).appEditor()
                                 Button("Recommended for Russia") {
                                     guard let url = Bundle.main.url(forResource: "recommended-russia",
                                         withExtension: "txt"),
@@ -42,15 +42,15 @@ struct RoutingView: View {
                                 }
                                 Text(
                                     "One domain or IP range per line. Manual rules take priority over lists.")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.footnote).foregroundStyle(AppStyle.secondary)
                             }.textInputAutocapitalization(.never).autocorrectionDisabled().padding(.top, 6)
                         }
                         HStack {
-                            Text("Geo lists").font(.title2.bold())
+                            Text("Geo lists").font(.subheadline.weight(.semibold)).foregroundStyle(AppStyle.secondary)
                             Spacer()
                             Button("Add list", systemImage: "plus") { adding = true }
                         }.id("geo-lists")
-                        Picker("Refresh lists", selection: routing.refreshHours) {
+                        AppPicker("Refresh lists", selection: routing.refreshHours) {
                             Text("Never").tag(0)
                             Text("Every hour").tag(1)
                             Text("Every 2 hours").tag(2)
@@ -60,13 +60,14 @@ struct RoutingView: View {
                         Text(LocalizedStringKey(
                             "Updates run when iOS allows the app to work. " +
                             "Open the app to refresh overdue lists."
-                        )).font(.footnote).foregroundStyle(.secondary)
+                        )).font(.footnote).foregroundStyle(AppStyle.secondary)
                         ForEach(profile.routing.lists) { list in
                             GeoCard(state: state, profile: profile, list: list)
                         }
-                        Text("Changes apply on the next connection.").font(.footnote).foregroundStyle(.secondary)
-                    }.padding()
+                        Text("Changes apply on the next connection.").font(.footnote).foregroundStyle(AppStyle.secondary)
+                    }.frame(maxWidth: 600).frame(maxWidth: .infinity).padding(20)
                 }
+                .background(AppStyle.background).buttonStyle(AppButtonStyle())
                 .task {
                     #if DEBUG
                     if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_GEO"] == "1" {
@@ -102,22 +103,21 @@ private struct GeoCard: View {
                 .font(.headline)
             Text(list.source).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Picker("Route", selection: Binding(get: { list.direction }, set: { value in change {
+            AppPicker("Route", selection: Binding(get: { list.direction }, set: { value in change {
                 $0.direction = value } })) {
                 Text("Through VPN").tag(Direction.vpn); Text("Direct").tag(Direction.bypass)
-            }.pickerStyle(.segmented)
+            }
             if let snapshot = state.snapshots[list.id] {
                 Text("\(snapshot.entries.count) rules · \(snapshot.skipped) skipped").font(.footnote)
                 Text(snapshot.updated, style: .relative).font(.caption).foregroundStyle(.secondary)
-            } else { Text("Not downloaded yet").font(.footnote).foregroundStyle(.secondary) }
+            } else { Text("Not downloaded yet").font(.footnote).foregroundStyle(AppStyle.secondary) }
             HStack {
                 Button("Refresh") { Task { await state.refresh(list) } }.disabled(state.busy.contains(list.id))
                 Spacer()
                 if state.busy.contains(list.id) { ProgressView() }
                 Button("Remove", role: .destructive) { confirmRemove = true }
-            }.buttonStyle(.bordered)
-        }.padding(16).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.secondary.opacity(0.25)))
+            }.buttonStyle(AppButtonStyle())
+        }.appCard()
             .confirmationDialog("Remove list?", isPresented: $confirmRemove, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
                     guard var latest = state.preferences.profiles.first(where: { $0.id == profile.id }) else { return }
@@ -153,8 +153,8 @@ private struct AddListView: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Ready-made lists") {
+            AppForm {
+                AppSection("Ready-made lists") {
                     ForEach(presets) { preset in
                         Button {
                             add(GeoList(name: preset.name, source: preset.source, kind: preset.kind,
@@ -162,13 +162,13 @@ private struct AddListView: View {
                         } label: { Text(LocalizedStringKey(preset.name)) }
                     }
                 }
-                Section("Custom list") {
+                AppSection("Custom list") {
                     TextField("Name", text: $name)
                     TextField("HTTPS list URL", text: $source).keyboardType(.URL).textInputAutocapitalization(
                         .never).autocorrectionDisabled()
-                    Picker("Contents", selection: $kind) { Text("Domains").tag(ListKind.sites); Text(
+                    AppPicker("Contents", selection: $kind) { Text("Domains").tag(ListKind.sites); Text(
                         "IP ranges").tag(ListKind.ips) }
-                    Picker("Route", selection: $direction) { Text("Through VPN").tag(Direction.vpn); Text(
+                    AppPicker("Route", selection: $direction) { Text("Through VPN").tag(Direction.vpn); Text(
                         "Direct").tag(Direction.bypass) }
                     Button("Add") { add(GeoList(name: name.isEmpty ? source : name, source: source,
                         kind: kind, direction: direction)) }

@@ -33,12 +33,13 @@ struct ServersView: View {
                             }
                             Button("Remove", role: .destructive) { removing = profile }
                         } label: { Image(systemName: "ellipsis.circle").padding(8) }
-                    }.padding(.vertical, 5)
+                    }.appCard().listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }.onMove { source, destination in state.preferences.profiles.move(fromOffsets: source,
                     toOffset: destination) }
                 if state.preferences.profiles.isEmpty { Text("Add a server to get connected").foregroundStyle(
                     .secondary) }
-            }.navigationTitle("Servers")
+            }.listStyle(.plain).scrollContentBackground(.hidden).background(AppStyle.background)
+                .navigationBarTitleDisplayMode(.inline).navigationTitle("Servers")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { EditButton() }
                     ToolbarItem(placement: .topBarTrailing) {
@@ -88,9 +89,9 @@ struct ImportView: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Links or TOML") {
-                    TextEditor(text: $text).font(.system(.body, design: .monospaced)).frame(minHeight: 180)
+            AppForm {
+                AppSection("Links or TOML") {
+                    TextEditor(text: $text).font(.system(.body, design: .monospaced)).frame(minHeight: 180).appEditor()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Paste") { text = UIPasteboard.general.string ?? "" }
                     Button("Scan QR code") { scanning = true }
@@ -98,7 +99,7 @@ struct ImportView: View {
                         importNow()
                     }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                Section("Subscription") {
+                AppSection("Subscription") {
                     SecureField("HTTPS subscription URL", text: $subscription).textContentType(.URL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Add subscription") { Task { await state.subscribe(subscription) } }
@@ -130,12 +131,12 @@ struct ServerEditor: View {
     @State private var sharing = false
     var body: some View {
         NavigationStack {
-            Form {
+            AppForm {
                 TextField("Name", text: $name)
-                Section("Configuration") {
-                    TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 260)
+                AppSection("Configuration") {
+                    TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 260).appEditor()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Configuration contains the server password.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Configuration contains the server password.").font(.footnote).foregroundStyle(AppStyle.secondary)
                 }
                 Button("Share configuration") { sharing = true }
             }.navigationTitle("Edit server")

@@ -12,13 +12,13 @@ struct NewServerView: View {
     @State private var proto = "http2"
     var body: some View {
         NavigationStack {
-            Form {
+            AppForm {
                 TextField("Name", text: $name)
                 TextField("Hostname", text: $hostname).keyboardType(.URL)
                 TextField("Address and port", text: $address).keyboardType(.URL)
                 TextField("Username", text: $username).textContentType(.username)
                 SecureField("Password", text: $password).textContentType(.password)
-                Picker("Protocol", selection: $proto) { Text("HTTP/2").tag("http2"); Text("HTTP/3").tag("http3") }
+                AppPicker("Protocol", selection: $proto) { Text("HTTP/2").tag("http2"); Text("HTTP/3").tag("http3") }
             }.textInputAutocapitalization(.never).autocorrectionDisabled()
                 .navigationTitle("New configuration")
                 .toolbar {
