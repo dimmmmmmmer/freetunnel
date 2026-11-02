@@ -33,7 +33,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 ipv6.includedRoutes = [.default()]
                 network.ipv4Settings = ipv4
                 network.ipv6Settings = ipv6
-                let dns = config.endpoint["dns_upstreams"] as? [String] ?? []
+                let dns = config.dnsUpstreams
                 // A configured upstream makes the core answer its virtual DNS address.
                 let dnsSettings = NEDNSSettings(servers: dns.isEmpty ? ["46.243.231.30", "46.243.231.31"] : ["198.18.53.53"])
                 dnsSettings.matchDomains = [""]

@@ -23,9 +23,13 @@ for patch in pin['patches']:
     with (root / patch).open('rb') as source:
         subprocess.run(['patch', '-p1', '--fuzz=0'], stdin=source, cwd=upstream, check=True)
 PY
+# Cargo is invoked from an out-of-tree CMake build directory. Carry the
+# upstream toolchain into that directory instead of using the runner default.
+RUSTUP_TOOLCHAIN="$(cd "$work/upstream" && rustup show active-toolchain | cut -d ' ' -f 1)"
+export RUSTUP_TOOLCHAIN
 (
   cd "$work/upstream"
-  rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+  rustup target add --toolchain "$RUSTUP_TOOLCHAIN" aarch64-apple-ios aarch64-apple-ios-sim
   python3 scripts/bootstrap_conan_deps.py
 )
 bash "$root/scripts/export-patched-boringssl.sh"

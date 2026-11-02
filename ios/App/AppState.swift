@@ -82,6 +82,7 @@ import VpnClientFramework
         guard loaded else { throw ClientError.storageFailed }
         let config = try Configuration(toml)
         var profile = Profile(name: config.name)
+        profile.routing.defaultDirection = config.defaultDirection
         profile.subscriptionEnabled = subscription != nil
         profile.subscriptionUpdated = subscription == nil ? nil : Date()
         let record = Secret(toml: try config.serialized(), subscription: subscription)
@@ -89,7 +90,7 @@ import VpnClientFramework
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
-    func importBatch(_ text: String) throws -> Int {
+    func importBatch(_ text: String, allowInsecure: Bool = false) throws -> Int {
         guard text.utf8.count <= Configuration.maximumBytes else { throw ClientError.tooLarge }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("tt://") {
@@ -99,12 +100,14 @@ import VpnClientFramework
             let configs = try links.map { link -> String in
                 guard link.hasPrefix("tt://") else { throw ClientError.invalidConfig }
                 let toml = try TrustTunnelDeepLink.decodeDeeplink(link)
-                _ = try Configuration(toml)
+                let config = try Configuration(toml)
+                if config.skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
                 return toml
             }
             for config in configs { try add(toml: config) }
             return configs.count
         }
+        if try Configuration(trimmed).skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
         try add(toml: trimmed)
         return 1
     }

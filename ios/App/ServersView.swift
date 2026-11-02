@@ -5,6 +5,7 @@ import FreeTunnelCore
 struct ServersView: View {
     @ObservedObject var state: AppState
     @State private var adding = false
+    @State private var creating = false
     @State private var files = false
     @State private var editing: Profile?
     @State private var removing: Profile?
@@ -38,6 +39,7 @@ struct ServersView: View {
                     ToolbarItem(placement: .topBarLeading) { EditButton() }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button("New configuration") { creating = true }
                             Button("Paste links or TOML") { adding = true }
                             Button("Import files") { files = true }
                         } label: { Label("Add server", systemImage: "plus") }
@@ -50,6 +52,7 @@ struct ServersView: View {
                     }
                 }
                 .sheet(isPresented: $adding) { ImportView(state: state) }
+                .sheet(isPresented: $creating) { NewServerView(state: state) }
                 .sheet(item: $editing) { ServerEditor(state: state, profile: $0) }
                 .confirmationDialog("Remove server?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                     Button("Remove", role: .destructive) {
@@ -70,12 +73,13 @@ struct ImportView: View {
     @State private var subscription = ""
     @State private var scanning = false
     @State private var confirmInsecure = false
-    private func importNow() {
+    private func importNow(allowInsecure: Bool = false) {
         do {
-            _ = try state.importBatch(text)
+            _ = try state.importBatch(text, allowInsecure: allowInsecure)
             state.importText = ""
             dismiss()
-        } catch { state.report(error) }
+        } catch ClientError.insecureConfig { confirmInsecure = true }
+        catch { state.report(error) }
     }
     var body: some View {
         NavigationStack {
@@ -86,8 +90,7 @@ struct ImportView: View {
                     Button("Paste") { text = UIPasteboard.general.string ?? "" }
                     Button("Scan QR code") { scanning = true }
                     Button("Import") {
-                        // The native parser enforces the final syntax. A manual TLS bypass requires explicit consent.
-                        if text.contains("skip_verification") { confirmInsecure = true } else { importNow() }
+                        importNow()
                     }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Section("Subscription") {
@@ -103,7 +106,7 @@ struct ImportView: View {
                     QRScanner { result in text = result; scanning = false }
                 }
                 .confirmationDialog("This configuration may disable certificate verification. Import it only if you trust its source.", isPresented: $confirmInsecure, titleVisibility: .visible) {
-                    Button("Import") { importNow() }
+                    Button("Import") { importNow(allowInsecure: true) }
                 }
         }
     }
@@ -136,7 +139,7 @@ struct ServerEditor: View {
                                 guard var record else { throw ClientError.missingSecret }
                                 record.toml = try Configuration(text).serialized()
                                 try Vault.write(JSONEncoder().encode(record), key: profile.id.uuidString)
-                                var updated = profile
+                                var updated = state.preferences.profiles.first { $0.id == profile.id } ?? profile
                                 updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if updated.name.isEmpty { updated.name = try Configuration(text).name }
                                 state.update(updated)

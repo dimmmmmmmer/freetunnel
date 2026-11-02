@@ -50,8 +50,8 @@ public enum Subscription {
         else { endpoint["name"] = object["name"] as? String ?? object["hostname"] }
         for key in ["has_ipv6", "anti_dpi"] {
             if let value = object[key] {
-                guard CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else { throw ClientError.invalidConfig }
-                endpoint[key] = (value as! NSNumber).boolValue
+                guard let boolean = value as? NSNumber, CFGetTypeID(boolean) == CFBooleanGetTypeID() else { throw ClientError.invalidConfig }
+                endpoint[key] = boolean.boolValue
             }
         }
         if let proto = object["upstream_protocol"] as? String {
@@ -67,10 +67,11 @@ public enum Subscription {
         if let certificate = object["certificate"] as? String { endpoint["certificate"] = try certificates(certificate) }
         else { endpoint["certificate"] = "" }
         if let prefix = object["client_random_prefix"] as? String {
-            let hex = prefix.hasPrefix("0x") ? String(prefix.dropFirst(2)) : prefix
-            guard hex.utf8.count <= 64, hex.utf8.count % 2 == 0,
-                  hex.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { throw ClientError.invalidConfig }
-            endpoint["client_random"] = hex.isEmpty ? "" : "0x" + hex.lowercased()
+            let pattern = "^(?:[0-9a-fA-F]{2}){1,32}(?:/(?:[0-9a-fA-F]{2}){1,32})?$"
+            guard prefix.isEmpty || prefix.range(of: pattern, options: .regularExpression) != nil else {
+                throw ClientError.invalidConfig
+            }
+            endpoint["client_random"] = prefix.lowercased()
         }
         if let dns = object["dns_upstreams"] as? [String], previous == nil { endpoint["dns_upstreams"] = dns }
         // Subscription responses update the endpoint only, preserving local routing/settings.

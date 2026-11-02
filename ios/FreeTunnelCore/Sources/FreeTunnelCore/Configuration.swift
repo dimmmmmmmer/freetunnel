@@ -6,6 +6,8 @@ public struct Configuration {
     private var table: [String: Any]
     var rawTable: [String: Any] { table }
     public var name: String { endpoint["name"] as? String ?? hostname }
+    public var defaultDirection: Direction { (table["vpn_mode"] as? String) == "selective" ? .bypass : .vpn }
+    public var dnsUpstreams: [String] { endpoint["dns_upstreams"] as? [String] ?? table["dns_upstreams"] as? [String] ?? [] }
     public var hostname: String { endpoint["hostname"] as? String ?? "" }
     public var endpoint: [String: Any] { table["endpoint"] as? [String: Any] ?? [:] }
     public var skipsVerification: Bool { endpoint["skip_verification"] as? Bool ?? false }
@@ -94,7 +96,7 @@ public struct Configuration {
     }
     private static func value(_ input: Any) throws -> String {
         if let text = input as? String { return quote(text) }
-        if type(of: input) == Bool.self { return (input as! Bool) ? "true" : "false" }
+        if type(of: input) == Bool.self, let boolean = input as? Bool { return boolean ? "true" : "false" }
         if let integer = input as? Int64 { return String(integer) }
         if let integer = input as? Int { return String(integer) }
         if let number = input as? Double, number.isFinite { return String(number) }

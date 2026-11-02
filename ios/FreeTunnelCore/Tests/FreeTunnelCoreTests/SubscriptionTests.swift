@@ -36,7 +36,7 @@ final class SubscriptionTests: XCTestCase {
     func testClientRandomPrefixConversion() throws {
         var value = document; value["client_random_prefix"] = "AABB"
         let config = try Configuration(Subscription.apply(JSONSerialization.data(withJSONObject: value)))
-        XCTAssertEqual(config.endpoint["client_random"] as? String, "0xaabb")
+        XCTAssertEqual(config.endpoint["client_random"] as? String, "aabb")
         value["client_random_prefix"] = "xyz"
         XCTAssertThrowsError(try Subscription.apply(JSONSerialization.data(withJSONObject: value)))
     }
