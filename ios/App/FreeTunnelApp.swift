@@ -29,10 +29,10 @@ struct RootView: View {
     @ObservedObject var state: AppState
     var body: some View {
         TabView(selection: $tab) {
-            HomeView(state: state, vpn: state.vpn).tabItem { Label("Connection",
+            HomeView(state: state, vpn: state.vpn).tabItem { Label("Home",
                 systemImage: "power.circle") }.tag("connection")
             ServersView(state: state).tabItem { Label("Servers", systemImage: "server.rack") }.tag("servers")
-            RoutingView(state: state).tabItem { Label("Split tunnelling",
+            RoutingView(state: state).tabItem { Label("Routing",
                 systemImage: "arrow.triangle.branch") }.tag("routing")
             SettingsView(state: state).tabItem { Label("Settings", systemImage: "gearshape") }.tag("settings")
             LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }.tag("logs")
