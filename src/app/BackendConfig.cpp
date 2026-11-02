@@ -165,7 +165,7 @@ void Backend::pingConfigs()
         pingConfigAtIndex(i);
 }
 
-QVariantMap Backend::configFields(int index) const
+QVariantMap Backend::configFields(int index)
 {
     QVariantMap f;
     if (index < 0 || index >= m_paths.size())
@@ -175,19 +175,26 @@ QVariantMap Backend::configFields(int index) const
         return f;
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
     const QString configPath = m_paths.at(index);
-    QString password = freetunnel::CredentialStore::loadPassword(
-            freetunnel::CredentialStore::keyForConfigPath(configPath));
-    if (password.isEmpty())
-        password = c.password;
+    // The file's own copy of a secret first, then the store's (readConfigSecrets).
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(configPath, c);
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        // Nothing of the config goes with this: a form opened without the secret
+        // looks complete, and saving it writes the config over without it. The
+        // editor says why and closes.
+        f[QStringLiteral("path")] = configPath;
+        f[QStringLiteral("secretError")] = noteSecretNotRead(secrets.unreadable);
+        return f;
+    }
     f[QStringLiteral("name")] = nameForPath(configPath);
     f[QStringLiteral("hostname")] = c.hostname;
     f[QStringLiteral("addresses")] = c.addresses;
     f[QStringLiteral("username")] = c.username;
-    f[QStringLiteral("password")] = password;
+    f[QStringLiteral("password")] = secrets.password;
     f[QStringLiteral("protocol")] = c.protocol;
     f[QStringLiteral("dns")] = c.dns;
     f[QStringLiteral("customSni")] = c.customSni;
     f[QStringLiteral("clientRandom")] = c.clientRandom;
+    f[QStringLiteral("authKey")] = secrets.authKey;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("skipVerification")] = c.skipVerification;
     f[QStringLiteral("antiDpi")] = c.antiDpi;
@@ -201,15 +208,31 @@ QVariantMap Backend::configFields(int index) const
     return f;
 }
 
-QString Backend::configDeepLink(int index) const
+QString Backend::configDeepLink(int index)
 {
-    if (index < 0 || index >= m_paths.size())
+    // Said here, not by the window: the window cannot tell this from a secret the
+    // credential store could not be asked for, which has a message of its own.
+    const auto failed = [this]() {
+        const QString message = tr("Couldn’t build deep-link");
+        appendLog(QStringLiteral("WARN"), message);
+        emit errorOccurred(message);
         return QString();
+    };
+    if (index < 0 || index >= m_paths.size())
+        return failed();
     const QString path = m_paths.at(index);
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-        return QString();
+        return failed();
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(file.readAll()));
+    // A link made without a secret the config has is a link that cannot connect, or
+    // one that quietly drops the auth key and comes out as version 1. So there is
+    // no link at all when either could not be read.
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(path, c);
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        reportSecretNotRead(secrets.unreadable);
+        return QString();
+    }
     freetunnel::DeepLinkConfig dl;
     dl.version = freetunnel::kDeepLinkWriteVersion;
     dl.hostname = c.hostname;
@@ -218,10 +241,7 @@ QString Backend::configDeepLink(int index) const
     dl.customSni = c.customSni;
     dl.hasIpv6 = c.allowIpv6;
     dl.username = c.username;
-    dl.password = freetunnel::CredentialStore::loadPassword(
-            freetunnel::CredentialStore::keyForConfigPath(path));
-    if (dl.password.isEmpty())
-        dl.password = c.password;
+    dl.password = secrets.password;
     // The certificates alone, as the import keeps them. A config kept outside the
     // app's folder is never cleaned at start, and can still hold a private key
     // beside its certificate; a link is made to be handed on.
@@ -229,36 +249,53 @@ QString Backend::configDeepLink(int index) const
     dl.upstreamProtocol = c.protocol == QLatin1String("http3")
             ? freetunnel::UpstreamProtocol::Http3 : freetunnel::UpstreamProtocol::Http2;
     dl.clientRandomPrefix = c.clientRandom;
+    // The link of a server that checks an auth key has to carry it: without it the
+    // link cannot connect. It then is version 2 (encodeDeepLink), which FreeTunnel
+    // 1.2.3 and earlier and TrustTunnel's clients up to 1.1.11 refuse.
+    dl.clientRandomAuthKey = secrets.authKey;
     dl.name = nameForPath(path);
     for (const QString &d : freetunnel::splitDnsList(c.dns))
         dl.dnsUpstreams << d.trimmed();
-    return freetunnel::encodeDeepLink(dl);
+    const QString link = freetunnel::encodeDeepLink(dl);
+    return link.isEmpty() ? failed() : link;
 }
 
-bool Backend::exportConfigToml(int index, const QString &fileUrl) const
+bool Backend::exportConfigToml(int index, const QString &fileUrl)
 {
-    if (index < 0 || index >= m_paths.size())
+    const auto failed = [this]() {
+        const QString message = tr("Export failed");
+        appendLog(QStringLiteral("WARN"), message);
+        emit errorOccurred(message);
         return false;
+    };
+    if (index < 0 || index >= m_paths.size())
+        return failed();
     const QString src = m_paths.at(index);
     QFile in(src);
     if (!in.open(QIODevice::ReadOnly | QIODevice::Text))
-        return false;
+        return failed();
     freetunnel::ConfigToml c = freetunnel::parseConfigToml(QString::fromUtf8(in.readAll()));
-    if (c.password.isEmpty())
-        c.password = freetunnel::CredentialStore::loadPassword(
-                freetunnel::CredentialStore::keyForConfigPath(src));
+    // No file is written for a secret that could not be read: the export would be a
+    // config that cannot connect, handed on as if it were the user's.
+    const freetunnel::ConfigSecrets secrets = freetunnel::readConfigSecrets(src, c);
+    if (secrets.unreadable != freetunnel::SecretUnreadable::None) {
+        reportSecretNotRead(secrets.unreadable);
+        return false;
+    }
+    c.password = secrets.password;
+    c.clientRandomAuthKey = secrets.authKey;
     const QString dest = fileUrl.startsWith(QLatin1String("file:"))
             ? QUrl(fileUrl).toLocalFile() : fileUrl;
     if (dest.isEmpty())
-        return false;
+        return failed();
     // The certificates alone, as for the link above: an export is made to be
     // handed on too.
     c.certificate = freetunnel::certificatesOnly(c.certificate);
-    // The export carries the password in cleartext into a user-chosen directory
+    // The export carries the password (and the auth key) in cleartext into a user-chosen directory
     // (~/Downloads and friends): writeConfigFile makes it owner-only before the
     // first byte lands, instead of chmod'ing a world-readable file afterwards.
-    return freetunnel::backend_config::writeConfigFile(dest,
-                                                       freetunnel::buildConfigToml(c).toUtf8());
+    return freetunnel::backend_config::writeConfigFile(dest, freetunnel::buildConfigToml(c).toUtf8())
+            ? true : failed();
 }
 
 void Backend::moveConfig(int from, int to)

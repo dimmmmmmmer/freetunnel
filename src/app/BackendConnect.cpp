@@ -42,7 +42,7 @@ void Backend::logConnectAttempt()
                            h3 ? QStringLiteral("UDP/QUIC") : QStringLiteral("TCP")));
 }
 
-void Backend::failConnectNoPassword()
+void Backend::failConnectWithoutSecrets(freetunnel::ConnectConfig::Problem problem)
 {
     m_connecting = false;
     // Nothing further will report Connected or Error for this attempt, so
@@ -52,7 +52,15 @@ void Backend::failConnectNoPassword()
     // happened to succeed.
     m_reapplying = false;
     emit stateChanged();
-    emit errorOccurred(tr("Config has no password — edit it and try again"));
+    using Problem = freetunnel::ConnectConfig::Problem;
+    if (problem == Problem::NoPassword) {
+        emit errorOccurred(tr("Config has no password — edit it and try again"));
+    } else {
+        // The credential store could not be asked: not the same as a config with
+        // no password, and not something to connect through without.
+        reportSecretNotRead(problem == Problem::AuthKeyUnreadable ? freetunnel::SecretUnreadable::AuthKey
+                                                                   : freetunnel::SecretUnreadable::Password);
+    }
     // Nor would anything apply a subscription's update held for the attempt.
     flushHeldSubscriptionUpdates();
 }
@@ -112,7 +120,7 @@ void Backend::buildConnectTomlAsync()
     // Carried out of the worker by value rather than written into a member: the
     // worker thread must touch no part of Backend, or "nothing destroys it
     // underneath itself" stops being true in the other direction.
-    auto toml = std::make_shared<QString>();
+    auto built = std::make_shared<freetunnel::ConnectConfig>();
     auto builtOn = std::make_shared<QThread *>(nullptr);
     // Qt::DirectConnection is what makes this actually asynchronous, and it is not
     // decoration. A QThread OBJECT lives in the thread that created it — here the
@@ -123,9 +131,9 @@ void Backend::buildConnectTomlAsync()
     // the body in the emitting thread, which for started() is the worker.
     QObject::connect(
             watcher, &QThread::started, watcher,
-            [watcher, toml, builtOn, path, level]() {
+            [watcher, built, builtOn, path, level]() {
                 *builtOn = QThread::currentThread();
-                *toml = freetunnel::buildConnectConfigToml(path, level);
+                *built = freetunnel::buildConnectConfig(path, level);
                 watcher->quit();
             },
             Qt::DirectConnection);
@@ -138,25 +146,27 @@ void Backend::buildConnectTomlAsync()
     // die between the check and the use. And `this` lives in the GUI thread, so
     // the default connection type delivers queued — finished() is emitted in the
     // worker, the body runs on ours.
-    QObject::connect(watcher, &QThread::finished, this, [this, generation, toml, builtOn]() {
+    QObject::connect(watcher, &QThread::finished, this, [this, generation, built, builtOn]() {
 #ifdef FT_ENABLE_TEST_HOOKS
         m_lastTomlBuildThread.store(*builtOn);
 #endif
-        onConnectTomlReady(generation, *toml);
+        onConnectTomlReady(generation, *built);
     });
     QObject::connect(watcher, &QThread::finished, watcher, &QObject::deleteLater);
     watcher->start();
 }
 
-void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
+void Backend::onConnectTomlReady(quint64 generation, const freetunnel::ConnectConfig &config)
 {
     // Superseded by a disconnect, a config switch or a newer attempt while the
     // credential store had us waiting.
     if (generation != m_connectGen)
         return;
     m_awaitingToml = false;
-    if (toml.isEmpty()) {
-        failConnectNoPassword();
+    // Checked before the client or the helper is given anything: neither ever sees
+    // a config without a secret the user's config has.
+    if (config.problem != freetunnel::ConnectConfig::Problem::None) {
+        failConnectWithoutSecrets(config.problem);
         return;
     }
     // From here a switch is an ordinary connect attempt: what the helper reports
@@ -166,7 +176,7 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
     // config pick a silent no-op.
     m_reapplying = false;
     m_inConnect = true;
-    m_client.loadConfigFromToml(toml);
+    m_client.loadConfigFromToml(config.toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
     m_client.setKillSwitchPortsFromConfig(m_settings.killswitch_ports_from_config);

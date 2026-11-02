@@ -9,6 +9,7 @@
 
 #include <toml++/toml.h>
 
+#include "vpn/trusttunnel_tls_profiles.h"
 #include "vpn/vpn.h"
 
 namespace ag {
@@ -44,6 +45,14 @@ struct TrustTunnelConfig {
         std::string certificate;
         std::string client_random;
         std::string client_random_mask;
+        // Core 1.3. The real one keeps the hex text and decodes it when it
+        // connects (an odd length or a character that is not hex decodes to
+        // nothing, and the core then connects without it, silently); the key
+        // takes priority over client_random, which the core then ignores.
+        std::string client_random_auth_key;
+        // Core 1.3: the ClientHello fingerprint. The real one is an enum and an
+        // unknown non-empty name fails the whole config; this keeps the name.
+        std::string tls_profile;
     } location;
     std::string exclusions;
     VpnMode mode = VPN_MODE_GENERAL;
@@ -64,6 +73,11 @@ struct TrustTunnelConfig {
         loc.skip_verification = t["endpoint.skip_verification"].value<bool>().value_or(false);
         if (!loc.skip_verification)
             loc.certificate = t["endpoint.certificate"].value<std::string>().value_or("");
+        loc.client_random_auth_key =
+                t["endpoint.client_random_auth_key"].value<std::string>().value_or("");
+        loc.tls_profile = t["endpoint.tls_profile"].value<std::string>().value_or("");
+        if (!loc.tls_profile.empty() && !knownTlsProfile(loc.tls_profile))
+            return false;
         const std::string random = t["endpoint.client_random"].value<std::string>().value_or("");
         const size_t slash = random.find('/');
         loc.client_random = random.substr(0, slash);
@@ -71,6 +85,13 @@ struct TrustTunnelConfig {
             return true;
         loc.client_random_mask = random.substr(slash + 1);
         return !loc.client_random_mask.empty();
+    }
+
+    // The spellings of the real TLS_PROFILE_MAP (trusttunnel/src/config.cpp), from
+    // the list the wrapper's explanation of a refusal and the import use too.
+    static bool knownTlsProfile(const std::string &name)
+    {
+        return freetunnel::isKnownTlsProfile(name);
     }
 
     // The real build_config rejects a table that parses as TOML but isn't a

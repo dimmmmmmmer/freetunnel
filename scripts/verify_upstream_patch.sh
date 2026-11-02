@@ -17,9 +17,10 @@ git -C "$TMP/upstream" checkout FETCH_HEAD
 # Applied with --fuzz=0, here and wherever the patches are applied: by default
 # GNU patch lets a hunk land with up to two of its context lines not matching,
 # which after an upstream bump can mean in the wrong place, and says so only in
-# its output. An offset is still allowed (01's client.cpp hunk is 35 lines
-# down on the current pin), so the lines each hunk expects to find must occur
-# exactly once in its file: then an exact match can only be the right place.
+# its output. An offset is still allowed (a hunk may land some lines from its
+# stated position after an upstream edit above it), so the lines each hunk
+# expects to find must occur exactly once in its file: then an exact match can
+# only be the right place.
 # Checked before each patch, against the tree the previous ones left.
 unique_hunks() {
   python3 - "$TMP/upstream" "$1" <<'PY'
@@ -84,16 +85,59 @@ grep -q 'connect_request_handler' \
   "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
 grep -q 'ft_fill_connect_snapshot' \
   "$TMP/upstream/trusttunnel/src/client.cpp"
-# 03: rule and mode edits reach the running session, and with the kill switch
-# on a first connect that fails keeps the session (and the block) while the
-# core retries. The retry check names the field and the value, since a policy
-# set on the wrong struct would still mention the constant.
+# 03: rule and mode edits reach the running session.
 grep -q 'void update_exclusions(VpnMode mode, std::string_view exclusions);' \
   "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
 grep -q 'vpn_update_exclusions(vpn, mode,' \
   "$TMP/upstream/trusttunnel/src/client.cpp"
-grep -q 'parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;' \
-  "$TMP/upstream/trusttunnel/src/client.cpp"
+# The other half of the kill-switch change is not a patch any more: with the
+# kill switch on, FreeTunnel passes ConnectOptions{.fall_into_recovery = true},
+# and the core maps it to the recovery loop, so a first connect that fails keeps
+# the session (and the block) while the core retries. The patches do not
+# provide that, so assert the upstream contract FreeTunnel now relies on: the
+# option exists, and connect_to_server turns it into the policy. The mapping
+# spans several lines (.retry_info = { .policy = options... ? ... }), so the
+# second check reads the function's text rather than one line of it, and names
+# the destination: a policy set on some other struct would still mention the
+# constant, and only .retry_info.policy reaches the core's retry decision.
+grep -qF 'bool fall_into_recovery' \
+  "$TMP/upstream/trusttunnel/include/vpn/trusttunnel/client.h"
+python3 - "$TMP/upstream/trusttunnel/src/client.cpp" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+start = text.find("TrustTunnelClient::connect_to_server(")
+body = text[start:text.find("\n}\n", start)] if start >= 0 else ""
+if not re.search(r"\.retry_info\s*=\s*\{[^{}]*?\.policy\s*=\s*"
+                 r"options\.fall_into_recovery\s*\?\s*VPN_CRP_FALL_INTO_RECOVERY\b", body):
+    print("error: connect_to_server no longer maps options.fall_into_recovery onto "
+          "retry_info.policy; FreeTunnel's kill switch relies on it", file=sys.stderr)
+    sys.exit(1)
+PY
+
+# The tls_profile names the core takes (TLS_PROFILE_MAP) are the list FreeTunnel
+# explains a refusal with and refuses a file by (include/vpn/
+# trusttunnel_tls_profiles.h). A name the core adds would be turned away by us as
+# unknown, and one it drops would be taken and then fail at connect.
+python3 - "$TMP/upstream/trusttunnel/src/config.cpp" "$ROOT/include/vpn/trusttunnel_tls_profiles.h" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+core = Path(sys.argv[1]).read_text()
+ours = Path(sys.argv[2]).read_text()
+block = re.search(r"TLS_PROFILE_MAP\s*=\s*\{(.*?)\n\};", core, re.S)
+theirs = set(re.findall(r'\{\s*"([^"]+)"\s*,\s*VPN_TLS_PROFILE_\w+\s*\}', block.group(1))) if block else set()
+listed = re.search(r"kTrustTunnelTlsProfiles\{(.*?)\};", ours, re.S)
+mine = set(re.findall(r'"([^"]+)"', listed.group(1))) if listed else set()
+if not theirs or theirs != mine:
+    print("error: the core's tls_profile names (TLS_PROFILE_MAP in trusttunnel/src/config.cpp) are "
+          f"{sorted(theirs)}, and include/vpn/trusttunnel_tls_profiles.h lists {sorted(mine)}",
+          file=sys.stderr)
+    sys.exit(1)
+PY
 
 # The elevated helper hands the core every key of the config the GUI sends,
 # except the few that would point root at a file, an interface or a hole in the
@@ -104,6 +148,10 @@ grep -q 'parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;' \
 # that kind, and listed it below. Keys are listed by TOML path, not by name: the
 # helper clears [listener.tun] netns, and a netns read from another table would
 # be a new key that nobody has checked.
+# Core 1.3 added two, both read and listed: endpoint.tls_profile picks the TLS
+# ClientHello fingerprint, and endpoint.client_random_auth_key derives the
+# ClientHello's random from a key. Neither names a file or an interface and
+# neither touches the kill switch, so the helper clears neither.
 CHECKED_CONFIG_KEYS="
   loglevel vpn_mode killswitch_enabled killswitch_allow_ports
   post_quantum_group_enabled exclusions_tcp_early_ack_enabled
@@ -113,7 +161,8 @@ CHECKED_CONFIG_KEYS="
   endpoint.hostname endpoint.custom_sni endpoint.addresses endpoint.username
   endpoint.password endpoint.skip_verification endpoint.anti_dpi
   endpoint.has_ipv6 endpoint.certificate endpoint.upstream_protocol
-  endpoint.client_random endpoint.dns_upstreams
+  endpoint.client_random endpoint.client_random_auth_key endpoint.tls_profile
+  endpoint.dns_upstreams
   listener.socks listener.tun
   listener.socks.address listener.socks.username listener.socks.password
   listener.tun.bound_if listener.tun.use_existing listener.tun.device_name
@@ -124,10 +173,12 @@ CHECKED_CONFIG_KEYS="
 # Read every file of the core that handles a TOML table, not only config.cpp, so
 # that a parser moved into a file of its own is still read. The CLI and the
 # per-platform front-ends parse configs of their own, and FreeTunnel uses neither.
+# The unit tests in test/ directories read tables too, but they are not part of
+# the library the helper links.
 mapfile -t TOML_SOURCES < <(grep -rlE \
   --include='*.cpp' --include='*.cc' --include='*.h' --include='*.hpp' \
   --include='*.mm' --exclude-dir=.git --exclude-dir=third-party \
-  --exclude-dir=platform 'toml::' "$TMP/upstream" \
+  --exclude-dir=platform --exclude-dir=test 'toml::' "$TMP/upstream" \
   | grep -v '/trusttunnel/src/trusttunnel_client\.cpp$' | LC_ALL=C sort)
 if (( ${#TOML_SOURCES[@]} == 0 )); then
   echo "error: no upstream source handles a TOML table; where is the config read now?" >&2
@@ -182,12 +233,20 @@ problems="$(LC_ALL=C awk -v checked="${CHECKED_CONFIG_KEYS//$'\n'/ }" '
     if (obj == "socks_config") return "listener.socks." key
     if (obj == "config" && fn == "build_config") return key
     if (obj == "config" && fn == "build_endpoint") return "endpoint." key
+    # The CLI option --export-deeplink reads the same tables back to write a link:
+    # config is the root table there and endpoint the [endpoint] one, so a key
+    # added to it is still a key like any other.
+    if (obj == "config" && fn == "build_deeplink_export_table") return key
+    if (obj == "endpoint" && fn == "build_deeplink_export_table") return "endpoint." key
     if (obj == "config" && fn ~ /_listener_config$/) return "listener." key
     if (obj !~ /^[A-Za-z_]/) obj = "an expression"
     return "\"" key "\" on " obj " in " fn "(), which this scan cannot place in a table"
   }
   function read_at(path) {
-    if (path in listed) seen[path] = 1
+    # A read in the CLI-only export still has to be a listed key, so a key added
+    # there is flagged, but it does not count as seen: it does not prove that
+    # build_config / build_endpoint, the parser the helper runs, still reads it.
+    if (path in listed) { if (fn != "build_deeplink_export_table") seen[path] = 1 }
     else printf "%s:%d: %s\n", FILENAME, FNR, path
   }
 ' "${TOML_SOURCES[@]}")"

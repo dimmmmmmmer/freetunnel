@@ -26,6 +26,7 @@ private slots:
     void peerCredentialCheckNeedsALiveSocket();
     void quittingDoesNotDeleteASuccessorsToken();
     void quittingRemovesATokenKeptInTheFallbackFile();
+    void aStoreThatCannotBeReadIsReadAsOneThatHoldsNothing();
     void aRunningInstancePutsItsTokenBack();
     void theSocketNameIsPerUser();
     void linuxPutsTheNameInTheRuntimeDirectory();
@@ -273,6 +274,50 @@ void TestInstanceControl::quittingRemovesATokenKeptInTheFallbackFile()
     QVERIFY2(freetunnel::readInstanceAuthToken(&stored), "the successor's token must survive");
     QCOMPARE(stored, QStringLiteral("successors-token"));
     freetunnel::removeInstanceAuthToken();
+}
+
+// The single-instance token is not a config's secret. A store that cannot be asked
+// for it (a locked keyring) is read as one that holds none, and the token file is
+// used, as it is where there is no keyring: a second launch still finds the first.
+void TestInstanceControl::aStoreThatCannotBeReadIsReadAsOneThatHoldsNothing()
+{
+#if !defined(Q_OS_LINUX)
+    QSKIP("AppConfigLocation override is Linux-only in this test");
+#endif
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    const auto restore = qScopeGuard([configHome] {
+        freetunnel::CredentialStore::setReadFailureForTest({});
+        qunsetenv("FT_TEST_KEYRING");
+        if (configHome.isEmpty())
+            qunsetenv("XDG_CONFIG_HOME");
+        else
+            qputenv("XDG_CONFIG_HOME", configHome);
+    });
+    qputenv("XDG_CONFIG_HOME", tmp.path().toUtf8());
+    qputenv("FT_TEST_KEYRING", "absent"); // nothing moves the file's token into a store
+
+    const QString path = freetunnel::instanceAuthFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    {
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QVERIFY(f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+        f.write("token-in-the-file");
+    }
+    freetunnel::CredentialStore::setReadFailureForTest(
+            [](const QString &key) { return key == freetunnel::CredentialStore::keyForInstanceToken(); });
+
+    QString read;
+    QVERIFY2(freetunnel::readInstanceAuthToken(&read), "a locked keyring stopped a second launch finding the first");
+    QCOMPARE(read, QStringLiteral("token-in-the-file"));
+    // The file is not swept for a token the store was never asked for.
+    freetunnel::sweepLegacyInstanceAuthFile();
+    QVERIFY(QFileInfo::exists(path));
+    // And a quit removes the token it is the owner of, whichever of the two holds it.
+    freetunnel::removeInstanceAuthToken(QStringLiteral("token-in-the-file"));
+    QVERIFY(!QFileInfo::exists(path));
 }
 
 // An older FreeTunnel quitting through an update compares the stored token with

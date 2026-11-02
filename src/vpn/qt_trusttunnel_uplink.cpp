@@ -9,7 +9,7 @@
 // serves. On Linux and macOS its AutoNetworkMonitor watches the system and moves
 // that binding when the default route moves. On Windows it does not: the
 // network monitor it uses has no Windows implementation (native_libs_common
-// 8.1.52, NetworkMonitorImpl::start() has only Apple and Linux branches), so the
+// 8.1.54, NetworkMonitorImpl::start() has only Apple and Linux branches), so the
 // adapter picked when the session started was used for its whole life. Unplug
 // the cable a session started on while Wi-Fi is up and the core kept trying the
 // dead adapter until it ran out of recovery attempts, about a minute, and

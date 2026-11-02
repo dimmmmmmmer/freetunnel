@@ -47,6 +47,10 @@ enum VpnErrorCode {
     VPN_EC_AUTH_REQUIRED,
     VPN_EC_LOCATION_UNAVAILABLE,
     VPN_EC_CERTIFICATE_VERIFICATION_FAILED,
+    // Core 1.3: inserted here, so the three after it moved up by one. Fatal, like
+    // a failed verification. The numbers only ever cross the helper's IPC as
+    // names (qt_trusttunnel_format_vpn_error), but the order is the real one.
+    VPN_EC_CERTIFICATE_NOT_YET_VALID,
     VPN_EC_EVENT_LOOP_FAILURE,
     VPN_EC_INITIAL_CONNECT_FAILED,
     VPN_EC_FATAL_CONNECTIVITY_ERROR,

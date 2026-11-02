@@ -6,7 +6,7 @@ wintun.h, compiled into the VPN core: GPL-2.0 OR MIT, used under MIT (below).
 FreeTunnel uses wintun.dll only through the API of wintun.h. FreeTunnel is not
 endorsed by WireGuard LLC or the WireGuard or Wintun projects.
 
-[TrustTunnel/TrustTunnelClient@170609c24ca865819fed68437b01c013049bc3fa: third-party/wintun/LICENSE.txt (the LICENSE.txt of wintun-0.14.1.zip)]
+[TrustTunnel/TrustTunnelClient@b1ddbd293e530d8ae49097727030773f964ef2cc: third-party/wintun/LICENSE.txt (the LICENSE.txt of wintun-0.14.1.zip)]
 Prebuilt Binaries License
 -------------------------
 
@@ -92,7 +92,7 @@ Prebuilt Binaries License
    terms, release dates, APIs, ABIs, general availability, or other
    characteristics of the Software.
 
-[TrustTunnel/TrustTunnelClient@170609c24ca865819fed68437b01c013049bc3fa: third-party/wintun/include/wintun.h, lines 1-3]
+[TrustTunnel/TrustTunnelClient@b1ddbd293e530d8ae49097727030773f964ef2cc: third-party/wintun/include/wintun.h, lines 1-3]
 /* SPDX-License-Identifier: GPL-2.0 OR MIT
  *
  * Copyright (C) 2018-2021 WireGuard LLC. All Rights Reserved.

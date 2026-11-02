@@ -17,6 +17,7 @@
 #include "core/ConfigPaths.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 namespace freetunnel::backend_config {
 
@@ -83,6 +84,17 @@ void restorePassword(const QString &target, const QString &previous)
         freetunnel::CredentialStore::storePassword(key, previous);
 }
 
+// The same for the auth key, which a save touched only when it changed anything
+// (see storeConfigAuthKey), so a save that did not is not put back either.
+void restoreAuthKey(const QString &target, const QString &previous)
+{
+    const QString key = freetunnel::CredentialStore::keyForConfigAuthKey(target);
+    if (previous.isEmpty())
+        freetunnel::CredentialStore::deletePassword(key);
+    else
+        freetunnel::CredentialStore::storePassword(key, previous);
+}
+
 } // namespace
 
 bool writeConfigFile(const QString &target, const QByteArray &body)
@@ -104,11 +116,39 @@ bool storeConfigPassword(const QString &target, const QString &password)
     // proves nothing: a store that rejected the write would look like success and
     // the config would be committed with a stale credential, failing to connect
     // with no indication why.
-    return freetunnel::CredentialStore::loadPassword(key) == password;
+    const freetunnel::StoredSecret stored = freetunnel::CredentialStore::lookup(key);
+    return stored.found() && stored.value == password;
+}
+
+bool storeConfigAuthKey(const QString &target, const QString &authKey, const QString &previousAuthKey)
+{
+    const QString key = freetunnel::CredentialStore::keyForConfigAuthKey(target);
+    if (authKey.isEmpty()) {
+        // A config without a key has no entry to touch, and costs the store
+        // nothing. One that had a key and has none now must lose it: left in the
+        // store, it would be sent to whatever server the config names next.
+        if (previousAuthKey.isEmpty())
+            return true;
+        freetunnel::CredentialStore::deletePassword(key);
+        // Gone is "not found": a store that cannot be asked has not said the key is
+        // gone, and a key left behind would be sent to whatever server the config
+        // names next.
+        return freetunnel::CredentialStore::lookup(key).notFound();
+    }
+    freetunnel::CredentialStore::storePassword(key, authKey);
+    // The value, not just "something is there", as for the password.
+    const freetunnel::StoredSecret stored = freetunnel::CredentialStore::lookup(key);
+    return stored.found() && stored.value == authKey;
+}
+
+void dropLeftoverAuthKey(const QString &target)
+{
+    freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigAuthKey(target));
 }
 
 bool saveConfigWithPassword(const QString &target, const QByteArray &body, const QString &password,
-                            const QString &previousPassword, QString *errOut)
+                            const QString &previousPassword, const QString &authKey,
+                            const QString &previousAuthKey, QString *errOut)
 {
     // Editing a config saves over the ORIGINAL file (ownerConfigPathForSave reuses
     // oldPath when the name is unchanged). The old order — truncate the file, then
@@ -129,17 +169,39 @@ bool saveConfigWithPassword(const QString &target, const QByteArray &body, const
             *errOut = QStringLiteral("password");
         return false;
     }
+    if (!storeConfigAuthKey(target, authKey, previousAuthKey)) {
+        // Both secrets or neither: the password is already in, and the config on
+        // disk is the old one, which goes with the old password.
+        restorePassword(target, previousPassword);
+        restoreAuthKey(target, previousAuthKey);
+        file.cancelWriting();
+        if (errOut)
+            *errOut = QStringLiteral("authkey");
+        return false;
+    }
     if (!file.commit()) {
         // The other way round from the case above, and as bad: the store holds the
         // new password while the file is still the old config, perhaps with
         // another username, and every connect fails until the next good save.
         // Put the store back to what the file on disk goes with.
         restorePassword(target, previousPassword);
+        if (!authKey.isEmpty() || !previousAuthKey.isEmpty())
+            restoreAuthKey(target, previousAuthKey);
         if (errOut)
             *errOut = QStringLiteral("write");
         return false;
     }
     return true;
+}
+
+QString authKeyNotStoredMessage()
+{
+    // One wording for every store: the cause is the same as for the password, and
+    // said there in the terms of each, but a key has no length limit worth
+    // naming, and this is the rarer message.
+    return QCoreApplication::translate("Backend",
+                                       "Could not store the auth key in the system's credential store. If it "
+                                       "asked for access or to be unlocked, allow that and try again.");
 }
 
 QString passwordNotStoredMessage(bool storeIsThere)
@@ -174,6 +236,41 @@ QString passwordNotStoredMessage(bool storeIsThere)
 #endif
 }
 
+QString passwordNotReadMessage(bool storeIsThere)
+{
+    // The same four cases as passwordNotStoredMessage(), for a read. A store that
+    // is there and could not be read from was locked (Linux), asked the user and
+    // was refused (macOS), or was not reachable (Windows).
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password from the Keychain. If macOS "
+                                       "asked for access to the Keychain, allow it and try again.");
+#elif defined(Q_OS_WIN)
+    Q_UNUSED(storeIsThere);
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password from Windows Credential "
+                                       "Manager. Try again.");
+#else
+    if (storeIsThere) {
+        return QCoreApplication::translate("Backend",
+                                           "Could not read the VPN password from your keyring. If it "
+                                           "asked to be unlocked, unlock it and try again.");
+    }
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the VPN password: secure credential storage is "
+                                       "unavailable. Install gnome-keyring or KWallet, then try again.");
+#endif
+}
+
+QString authKeyNotReadMessage()
+{
+    // One wording for every store, as for authKeyNotStoredMessage().
+    return QCoreApplication::translate("Backend",
+                                       "Could not read the auth key from the system's credential store. If "
+                                       "it asked for access or to be unlocked, allow that and try again.");
+}
+
 void updateStoredConfigList(QStringList &stored, const QString &oldPath, const QString &target)
 {
     const int storedIdx = oldPath.isEmpty() ? -1 : stored.indexOf(oldPath);
@@ -205,12 +302,24 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
             *contentOut = content;
         return false;
     }
-    // A server that checks the auth key turns this core away at the TLS
-    // handshake. Imported, the config would fail every connect with nothing to
-    // say why; the empty key the endpoint's export always writes is no key.
-    if (!freetunnel::endpointClientRandomAuthKey(content).isEmpty()) {
+    // The core drops a key it cannot decode and connects without it, and a server
+    // that checks one then turns the client away with nothing to say why, so a
+    // key that is not whole bytes of hex is refused here. The empty key the
+    // endpoint's export always writes is no key.
+    if (!freetunnel::isValidClientRandomAuthKey(freetunnel::endpointClientRandomAuthKey(content))) {
         if (errOut)
             *errOut = QStringLiteral("authkey");
+        return false;
+    }
+    // Core 1.3 refuses the whole config for a tls_profile it has no name for, and
+    // says so only in a log the user does not see; a file with one would import
+    // and then never connect. The content is handed back for the message to name it.
+    const QString profile = freetunnel::endpointTlsProfile(content);
+    if (!profile.isEmpty() && !freetunnel::isKnownTlsProfile(profile.toStdString())) {
+        if (errOut)
+            *errOut = QStringLiteral("tlsprofile");
+        if (contentOut)
+            *contentOut = content;
         return false;
     }
     // A certificate with no certificate in it is refused, as a link's is: the

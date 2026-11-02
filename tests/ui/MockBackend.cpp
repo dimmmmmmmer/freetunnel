@@ -248,11 +248,17 @@ QVariantMap MockBackend::configFields(int index) const
     QVariantMap f;
     if (index < 0 || index >= m_configs.size())
         return f;
+    if (!configSecretError.isEmpty()) {
+        f[QStringLiteral("path")] = configPath(index);
+        f[QStringLiteral("secretError")] = configSecretError;
+        return f;
+    }
     f[QStringLiteral("name")] = m_configs.at(index);
     f[QStringLiteral("hostname")] = QStringLiteral("vpn.example.com");
     f[QStringLiteral("addresses")] = QStringLiteral("1.2.3.4:443");
     f[QStringLiteral("username")] = QStringLiteral("user");
     f[QStringLiteral("password")] = QStringLiteral("pass");
+    f[QStringLiteral("authKey")] = QStringLiteral("aabbccdd");
     f[QStringLiteral("protocol")] = QStringLiteral("http2");
     f[QStringLiteral("allowIpv6")] = true;
     f[QStringLiteral("splitProfile")] = QStringLiteral("Default");

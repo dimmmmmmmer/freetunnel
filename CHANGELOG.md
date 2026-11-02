@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — core 1.3 preview
+
+- Desktop: testing TrustTunnel 1.3.0-rc.2 with support for server authentication keys.
+- Authentication keys are stored in the system credential store and included when sharing a configuration. Links with a key require a client supporting the version 2 link format.
+
 ## 1.2.4
 
 - Fixed tray behavior, slow responses and connection handling on desktop.

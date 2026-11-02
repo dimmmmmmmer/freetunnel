@@ -19,10 +19,12 @@
 #include <QTcpServer>
 #include <QTranslator>
 #include <QScopeGuard>
+#include <QSemaphore>
 #include <QThread>
 #include <QUuid>
 
 #include "app/Backend.h"
+#include "app/BackendConfigShared.h"
 #include "app/LogModel.h"
 #include "core/AppSettings.h"
 #include "core/ConfigStore.h"
@@ -78,6 +80,13 @@ private slots:
     void aRefreshOfAnotherConfigLeavesTheConnectedTunnelAlone();
     void aRefreshOfAnotherConfigIsWrittenWhileTheTunnelComesUp();
     void anUpdateHeldForTheActiveConfigIsWrittenOnceAnotherIsPicked();
+    // A secret the credential store could not be asked for.
+    void aKeyTheStoreCannotReadStopsTheConnect();
+    void aPasswordTheStoreCannotReadStopsTheConnect();
+    void aConfigWithNoPasswordSaysSoAndNotThatItCouldNotBeRead();
+    void aConfigKeptOutsideTheStoreConnectsWhateverTheStoreSays();
+    void aPasswordInTheFileBesideAStoreThatCannotBeReadStopsTheConnect();
+    void anUpdateHeldForAConnectThatCouldNotReadItsKeyIsApplied();
     void exportRoundTrips();
     void domainRulesAcceptTldWildcardsAndIdn();
 };
@@ -524,6 +533,7 @@ struct TestConfigs {
     {
         for (const QString &path : std::as_const(paths)) {
             freetunnel::CredentialStore::deletePassword(path);
+            freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigAuthKey(path));
             QFile::remove(path);
         }
     }
@@ -1027,6 +1037,19 @@ void TestIntegrationBackendVpn::aFailureBeforeTheSessionCameUpIsSaidInTheUsersTe
                                  << QStringLiteral("Authentication failed — check the username and password.");
     QTest::newRow("no answer") << QStringLiteral("Connection failed: endpoint timed out (~30s)")
                                << QStringLiteral("Server isn't responding (timed out).");
+    // What core 1.3 reports when a session cannot be opened, whatever the reason:
+    // a failed derivation of the client random from the auth key is one (it is in
+    // the core's log, not here), and it has to stay a connect failure in the user's
+    // words, not be taken for a wrong password.
+    QTest::newRow("a session the core could not open")
+            << QStringLiteral("Connection failed: Failed to open session with endpoint")
+            << QStringLiteral("Couldn't connect to the server: Failed to open session with endpoint");
+    // The core's own wording for the key, which only its log has today. Kept in
+    // case a later core reports it: "auth" in it is not a wrong password either.
+    QTest::newRow("auth key wording keeps its reason")
+            << QStringLiteral("Connection failed: Failed to derive client_random from auth key")
+            << QStringLiteral("Couldn't connect to the server: Failed to derive client_random "
+                              "from auth key");
     // Windows with no network at all, which is retried until there is one.
     QTest::newRow("no network")
             << QStringLiteral("set_system_dns() failed: Couldn't detect active network interface")
@@ -1951,6 +1974,265 @@ void TestIntegrationBackendVpn::anUpdateHeldForTheActiveConfigIsWrittenOnceAnoth
     QCOMPARE(backend.activeIndex(), backend.configIndex(configs.paths.at(1)));
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+namespace {
+
+// Reads of these entries fail on the connect's worker thread, and nowhere else:
+// a keyring that is locked when the connect asks and has been unlocked since, as
+// the GUI thread's own reads (a subscription's refresh, the editor) then find it.
+void failReadsOnTheWorkerFor(const QStringList &keys)
+{
+    freetunnel::CredentialStore::setReadFailureForTest([keys](const QString &key) {
+        return keys.contains(key) && QThread::currentThread() != QCoreApplication::instance()->thread();
+    });
+}
+
+// The hooks put back however the test ends.
+struct CredentialHooksReset {
+    ~CredentialHooksReset()
+    {
+        freetunnel::CredentialStore::setReadFailureForTest({});
+        freetunnel::CredentialStore::setCallHookForTest({});
+        qunsetenv("FT_TEST_KEYRING");
+    }
+};
+
+} // namespace
+
+// The core was handed a config without the key its server checks for, and the
+// server turned the client away with nothing to say why. A key the store cannot be
+// asked for stops the connect instead: the user is told, the state is back to off,
+// and the helper never hears of a config.
+void TestIntegrationBackendVpn::aKeyTheStoreCannotReadStopsTheConnect()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("keyread")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const QString keyEntry = freetunnel::CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(freetunnel::CredentialStore::storePassword(keyEntry, QStringLiteral("aabbccdd")));
+    MockHelperEnv env(QStringLiteral("backend-keyread-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    failReadsOnTheWorkerFor({keyEntry});
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    QSignalSpy states(&backend, &Backend::stateChanged);
+    backend.connectVpn();
+    QVERIFY(backend.connecting()); // the optimistic state, while the key is read
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    const QString said = freetunnel::backend_config::authKeyNotReadMessage();
+    QVERIFY2(anyErrorIs(errors, said), qPrintable(errors.at(0).at(0).toString()));
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.connected());
+    QVERIFY2(states.count() >= 2, "the window was not told the attempt is over");
+    QVERIFY2(backend.logText().contains(said), "the log does not say why");
+
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QVERIFY2(env.lastConnectConfig().isEmpty(), "the helper was given a config without the key");
+
+    // Once the keyring answers, the same config connects, with its key.
+    freetunnel::CredentialStore::setReadFailureForTest({});
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QVERIFY2(env.lastConnectConfig().contains(QStringLiteral("client_random_auth_key = \"aabbccdd\"")),
+             qPrintable(env.lastConnectConfig()));
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+void TestIntegrationBackendVpn::aPasswordTheStoreCannotReadStopsTheConnect()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("pwread")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    MockHelperEnv env(QStringLiteral("backend-pwread-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    failReadsOnTheWorkerFor({freetunnel::CredentialStore::keyForConfigPath(path)});
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    // Not "has no password": the config has one.
+    const QString said = errors.at(0).at(0).toString();
+    QVERIFY2(said == freetunnel::backend_config::passwordNotReadMessage(true)
+                     || said == freetunnel::backend_config::passwordNotReadMessage(false),
+             qPrintable(said));
+    QVERIFY(!said.contains(QStringLiteral("no password")));
+    QVERIFY(!backend.connecting());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QVERIFY(backend.logText().contains(said));
+    backend.prepareQuit();
+}
+
+// A password that is not there is not one that could not be read, and says so in
+// its own words: the fix is to edit the config, not to unlock anything.
+void TestIntegrationBackendVpn::aConfigWithNoPasswordSaysSoAndNotThatItCouldNotBeRead()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("nopassword")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    QVERIFY(freetunnel::CredentialStore::deletePassword(path)); // the helper function stored one
+    QVERIFY(freetunnel::CredentialStore::lookup(path).notFound());
+    MockHelperEnv env(QStringLiteral("backend-nopassword-token"));
+    QVERIFY(env.start());
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("Config has no password — edit it and try again"));
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.connected());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QCOMPARE(errors.count(), 1);
+    backend.prepareQuit();
+}
+
+// A Linux machine with no keyring keeps its configs' passwords in the files, so a
+// key the store cannot be asked for is not a key it lost: the config never had one
+// there. It connects, as it did before the store could say it could not be asked.
+// (With a store that is there, it does not: the next case.)
+void TestIntegrationBackendVpn::aConfigKeptOutsideTheStoreConnectsWhateverTheStoreSays()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    TestConfigs configs;
+    const QString path = QDir(base).filePath(QStringLiteral("no-keyring.toml"));
+    freetunnel::ConfigToml cfg;
+    cfg.hostname = QStringLiteral("no-keyring.example");
+    cfg.addresses = QStringLiteral("203.0.113.50:443");
+    cfg.username = QStringLiteral("user");
+    cfg.password = QStringLiteral("inline-secret");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(freetunnel::buildConfigToml(cfg).toUtf8());
+    file.close();
+    configs.paths << path;
+    configs.install();
+    MockHelperEnv env(QStringLiteral("backend-nokeyring-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    qputenv("FT_TEST_KEYRING", "absent"); // nothing takes the password out of the file
+    failReadsOnTheWorkerFor({freetunnel::CredentialStore::keyForConfigAuthKey(path)});
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.at(0).at(0).toString()));
+    QVERIFY(env.lastConnectConfig().contains(QStringLiteral("inline-secret")));
+    QVERIFY(readConfig(path).contains(QStringLiteral("inline-secret"))); // still where it was
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected() && !backend.connecting(); }, 5000));
+    backend.prepareQuit();
+}
+
+// A password in the file says nothing about the key when there is a store to hold it.
+// Another client's config can have it put back beside a key the store keeps, and a
+// store that refuses to take it out again is one that cannot be asked for the key:
+// connecting without it would be turned away by the server with nothing to say why.
+void TestIntegrationBackendVpn::aPasswordInTheFileBesideAStoreThatCannotBeReadStopsTheConnect()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(base);
+    TestConfigs configs;
+    const QString path = QDir(base).filePath(QStringLiteral("file-password-stored-key.toml"));
+    freetunnel::ConfigToml cfg;
+    cfg.hostname = QStringLiteral("file-password.example");
+    cfg.addresses = QStringLiteral("203.0.113.51:443");
+    cfg.username = QStringLiteral("user");
+    cfg.password = QStringLiteral("inline-secret");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(freetunnel::buildConfigToml(cfg).toUtf8());
+    file.close();
+    configs.paths << path;
+    configs.install();
+    const QString keyEntry = freetunnel::CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(freetunnel::CredentialStore::storePassword(keyEntry, QStringLiteral("aabbccdd")));
+    MockHelperEnv env(QStringLiteral("backend-filepw-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    qputenv("FT_TEST_KEYRING", "locked"); // there, and it will not take the password out of the file
+    failReadsOnTheWorkerFor({keyEntry});
+
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !errors.isEmpty(); }, 10000));
+    const QString said = freetunnel::backend_config::authKeyNotReadMessage();
+    QVERIFY2(anyErrorIs(errors, said), qPrintable(errors.at(0).at(0).toString()));
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.connected());
+    QTest::qWait(300);
+    QCOMPARE(env.server.connectCount(), 0);
+    QVERIFY2(env.lastConnectConfig().isEmpty(), "the helper was given a config without the key");
+    QVERIFY(readConfig(path).contains(QStringLiteral("inline-secret"))); // still where it was
+    backend.prepareQuit();
+}
+
+// A subscription's update is held while a connect is being built, and applied when
+// that connect ends. One that ends because a key could not be read ends too.
+void TestIntegrationBackendVpn::anUpdateHeldForAConnectThatCouldNotReadItsKeyIsApplied()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("sub-keyread")));
+    configs.install();
+    const QString path = configs.paths.at(0);
+    const QString keyEntry = freetunnel::CredentialStore::keyForConfigAuthKey(path);
+    QVERIFY(freetunnel::CredentialStore::storePassword(keyEntry, QStringLiteral("aabbccdd")));
+    const LinkedConfig linked(path);
+    QVERIFY(!linked.source.isEmpty());
+    MockHelperEnv env(QStringLiteral("backend-sub-keyread-token"));
+    QVERIFY(env.start());
+    const CredentialHooksReset reset;
+    failReadsOnTheWorkerFor({keyEntry});
+    // The worker waits at its read of the key until the refresh has been fetched.
+    QSemaphore reading;
+    QSemaphore proceed;
+    freetunnel::CredentialStore::setCallHookForTest([&](const char *call, const QString &key) {
+        if (QLatin1String(call) == QLatin1String("load") && key == keyEntry
+                && QThread::currentThread() != QCoreApplication::instance()->thread()) {
+            reading.release();
+            proceed.acquire();
+        }
+    });
+
+    FakeSubscriptionNetwork network;
+    Backend backend;
+    network.install(backend.subscriptions());
+    backend.subscriptions()->stopSchedulerForTest();
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(reading.tryAcquire(1, 10000));
+    const QString before = readConfig(path);
+
+    QVERIFY(backend.refreshSubscription(path));
+    QVERIFY(network.answer(movedTo(QStringLiteral("sub-keyread"), QStringLiteral("203.0.113.91:443"))));
+    QCOMPARE(readConfig(path), before); // held: the connect is being built from it
+
+    proceed.release();
+    QVERIFY(QTest::qWaitFor(
+            [&]() { return anyErrorIs(errors, freetunnel::backend_config::authKeyNotReadMessage()); }, 10000));
+    QVERIFY2(QTest::qWaitFor([&]() { return readConfig(path).contains(QStringLiteral("203.0.113.91:443")); }, 10000),
+             "the held update was not applied once the connect ended");
+    QCOMPARE(env.server.connectCount(), 0);
     backend.prepareQuit();
 }
 

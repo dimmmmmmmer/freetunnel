@@ -121,7 +121,7 @@ void TestIntegrationConfigWorkflow::aCommentedHeaderDoesNotKeepThePasswordOnDisk
 
     // The connect path migrates again first; the password reaches the core from
     // the store, in [endpoint], and the file still does not have it.
-    const QString connect = buildConnectConfigToml(target);
+    const QString connect = buildConnectConfig(target).toml;
     const ConfigToml sent = parseConfigToml(connect);
     QCOMPARE(sent.password, QStringLiteral("commented-pass"));
     QCOMPARE(sent.hostname, QStringLiteral("vpn.example.com"));
@@ -143,7 +143,7 @@ void TestIntegrationConfigWorkflow::aCommentedHeaderDoesNotKeepThePasswordOnDisk
                   "\n[listener.tun]\n"
                   "mtu_size = 1280\n");
     damaged.close();
-    QCOMPARE(parseConfigToml(buildConnectConfigToml(target)).password, QStringLiteral("left-at-root"));
+    QCOMPARE(parseConfigToml(buildConnectConfig(target).toml).password, QStringLiteral("left-at-root"));
     QCOMPARE(CredentialStore::loadPassword(key), QStringLiteral("left-at-root"));
     QVERIFY2(!onDisk().contains(QStringLiteral("left-at-root")), qPrintable(onDisk()));
 }
@@ -177,7 +177,7 @@ void TestIntegrationConfigWorkflow::aClientRandomReachesTheCoreInAFormItTakes()
                   + "[listener.tun]\n"
                     "mtu_size = 1500\n");
         out.close();
-        return buildConnectConfigToml(target);
+        return buildConnectConfig(target).toml;
     };
 
     const QString joined = connectWith("client_random = \"deadbeef\"\nclient_random_mask = \"ffff0000\"\n");
@@ -226,7 +226,7 @@ void TestIntegrationConfigWorkflow::aQuotedPasswordGoesToTheStore()
 
     // Sent once, from the store: a second password key would make the core refuse
     // the config.
-    const QString connect = buildConnectConfigToml(target);
+    const QString connect = buildConnectConfig(target).toml;
     QCOMPARE(parseConfigToml(connect).password, QStringLiteral("quoted-pass"));
     QCOMPARE(connect.count(QStringLiteral("password")), 1);
 }

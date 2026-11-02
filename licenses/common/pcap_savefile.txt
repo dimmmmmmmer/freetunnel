@@ -1,9 +1,9 @@
 pcap_savefile.h (from libpcap, vendored in TrustTunnelClient)
-Version: as vendored at 170609c2
-Source: https://github.com/TrustTunnel/TrustTunnelClient/blob/170609c24ca865819fed68437b01c013049bc3fa/third-party/pcap_savefile/include/pcap_savefile.h
+Version: as vendored at b1ddbd29
+Source: https://github.com/TrustTunnel/TrustTunnelClient/blob/b1ddbd293e530d8ae49097727030773f964ef2cc/third-party/pcap_savefile/include/pcap_savefile.h
 License: BSD-4-Clause-UC
 
-[TrustTunnel/TrustTunnelClient@170609c24ca865819fed68437b01c013049bc3fa: third-party/pcap_savefile/include/pcap_savefile.h, lines 1-32]
+[TrustTunnel/TrustTunnelClient@b1ddbd293e530d8ae49097727030773f964ef2cc: third-party/pcap_savefile/include/pcap_savefile.h, lines 1-32]
 /*
  * Copyright (c) 1994, 1995, 1996
  *      The Regents of the University of California.  All rights reserved.

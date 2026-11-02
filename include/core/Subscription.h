@@ -54,6 +54,14 @@ struct SubscriptionDocument {
     // does not set them.
     std::optional<QString> name;
     std::optional<QStringList> dnsUpstreams;
+    // The key the server checks the TLS client random against (core 1.3), whole
+    // bytes of hex. A secret, like the password: applySubscription() hands it on
+    // for the credential store. Absent unless the document has the field, and
+    // absent is not "no key": the endpoint's own format (1.3.0-beta.2) has no such
+    // field and never sends one, so a server that checks a key still serves a
+    // document without it. Only the deep link carries it. Present and empty says
+    // the server has none.
+    std::optional<QString> clientRandomAuthKey;
 };
 
 // Why a document was not taken. Each is a different answer to the user, and
@@ -62,7 +70,6 @@ enum class SubscriptionDocError {
     Invalid,            // damaged, or a field this client cannot take
     UnsupportedVersion, // newer than kSubscriptionMaxVersion
     SkipVerification,   // asks to skip TLS verification, which a subscription never may
-    NeedsNewerCore,     // a client_random_auth_key, which this core cannot compute
     TooLarge,           // over kMaxSubscriptionBodyBytes
 };
 
@@ -85,19 +92,22 @@ std::optional<SubscriptionDocument> parseSubscriptionJson(const QByteArray &body
 enum class SubscriptionApplyMode { Refresh, Creation };
 
 // The fields a refresh can change.
-enum class SubscriptionField { Hostname, Address, Username, Password, Certificate, CustomSni, ClientRandom };
+enum class SubscriptionField {
+    Hostname, Address, Username, Password, Certificate, CustomSni, ClientRandom, AuthKey
+};
 
 struct SubscriptionChange {
     SubscriptionField field = SubscriptionField::Hostname;
     // For the hostname, the address, the SNI and the client random only. A change
-    // to the credentials or the certificate is listed without them.
+    // to the credentials, the auth key or the certificate is listed without them.
     QString oldValue;
     QString newValue;
 };
 
 struct SubscriptionApplied {
-    ConfigToml config;    // its password is empty: that is for the credential store
+    ConfigToml config;    // its password and auth key are empty: they are for the credential store
     QString password;
+    QString clientRandomAuthKey;
     QList<SubscriptionChange> changes; // what Refresh changed; empty for Creation
     // The server is another one, not the same name in other letter case: a
     // Refresh whose hostname differs once both are in ACE form, ignoring case.
@@ -114,9 +124,19 @@ struct SubscriptionApplied {
 // what is local by nature, such as skip_verification, post-quantum, the tunnel's
 // routing and the keys this editor does not know.
 //
+// The auth key is the subscription's only when the document says something about
+// it (SubscriptionDocument::clientRandomAuthKey). The endpoint's format has no
+// field for it, so a refresh keeps the key the config has, and lists no change;
+// Creation has none to keep, and the caller gives the one the link it came with
+// carried (Backend, serverOfDocument).
+//
 // Creation starts from a new config instead, and also takes the protocol, IPv6,
 // anti-DPI, the name and the DNS servers from the document; `current` and
 // `currentPassword` are not read.
+//
+// `current.clientRandomAuthKey` is the key the config has now, as `currentPassword`
+// is its password: not the file's, which holds neither once they are stored, but
+// the credential store's, which the caller puts there.
 SubscriptionApplied applySubscription(const ConfigToml &current, const QString &currentPassword,
                                       const SubscriptionDocument &document, SubscriptionApplyMode mode);
 

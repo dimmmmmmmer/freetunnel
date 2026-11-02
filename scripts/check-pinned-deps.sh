@@ -23,7 +23,9 @@ import json, re
 from pathlib import Path
 pin = json.loads(Path('android/core-source.json').read_text())
 assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
-assert pin['commit'] == Path('scripts/upstream_ref.txt').read_text().strip()
+# This desktop preview retains the reviewed stable Android 1.1.11 source.
+assert pin['version'] == '1.1.11'
+assert pin['commit'] == 'c0990e174fc75b2e52acd15882c62e69a3022581'
 gradle = Path('android/app/build.gradle').read_text()
 assert "def coreAar = 'trusttunnel-client-android-" + pin['version'] + ".aar'" in gradle
 assert pin['patches'] and all(Path(p).is_file() for p in pin['patches'])

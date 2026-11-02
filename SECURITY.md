@@ -25,7 +25,7 @@ model.
 
 | Area | Protection | Details |
 | --- | --- | --- |
-| VPN passwords | Kept in the OS credential store, not in config files | [Credential storage](#credential-storage), [threat model](docs/security-threats.md#credential-storage) |
+| VPN passwords and auth keys | Kept in the OS credential store, not in config files | [Credential storage](#credential-storage), [threat model](docs/security-threats.md#credential-storage) |
 | Connecting | The helper's config is built in memory and sent over an authenticated loopback channel | [During connect](#during-connect) |
 | Privileged helper | Only the helper runs elevated; it listens on loopback only and both sides prove a one-time token | [How the app is split](#how-the-app-is-split), [threat model](docs/security-threats.md#privileged-helper-and-its-ipc) |
 | Configs reaching root | The helper clears config keys that would point the elevated core at a path, port or interface | [What the helper takes from a config](#what-the-helper-takes-from-a-config), [threat model](docs/security-threats.md#config-files-reaching-root) |
@@ -92,7 +92,9 @@ for someone who trusts every config they use.
 ## Credential storage
 
 VPN passwords are **not stored in user-editable TOML** config files under normal
-operation. They go to the OS credential store:
+operation. Nor is a config's client random auth key (TrustTunnel 1.3), which
+whoever holds can pass the server's TLS-level gate. They go to the OS credential
+store, the key in an entry of its own beside the password's:
 
 | Platform | Store |
 | --- | --- |
@@ -109,6 +111,40 @@ When no Secret Service is available (no GNOME Keyring or KWallet bridge):
   second launch hand a link to the running app. It goes to an owner-only
   (0600) file, `instance-auth`, until a start finds a store to keep it in.
 - The app deletes that file when it quits.
+
+### A store that cannot be read
+
+Asking the store for an entry has three answers: it is there, it is not, and the
+store could not be asked (a locked keyring, a Keychain prompt that was denied or
+closed, Credential Manager failing, no Secret Service running). The third is
+never read as the second, because a config would then go on without a secret it
+has. On Linux that takes a search that cannot prompt: a Secret Service answers a
+dismissed unlock prompt the same way as an entry that is not there, so a locked
+item is looked for, by libsecret and by `secret-tool`, before "not there" is
+believed. Two cases it cannot tell apart: a libsecret older than 0.19, which
+cannot search (only what `secret-tool` stored is looked for, and only if
+`secret-tool` is installed), and a Secret Service that leaves locked items out of
+a search. There a locked keyring whose prompt was dismissed still reads as an
+entry that is not there.
+
+- A **connect** stops and says which secret could not be read. The helper is
+  never given a config without the password or auth key the config has.
+- The **editor** does not open that config, and a save made from a form opened
+  before is refused. A rename cannot drop a secret that was never read.
+- A **share link** or an **export** is not made at all. A link without the key
+  would be version 1 and could not connect.
+- A **subscription** refresh is tried again later, and writes nothing.
+- A config whose password is in the legacy password file, or in its own file on a
+  machine with no keyring at all, never had a key in the store, so it connects,
+  is shared and is exported as before. A password in its own file beside a
+  keyring that is there is not that: the key may be in the keyring, so a keyring
+  that cannot be read stops the config the same way.
+- The single-instance token is the exception: it falls back to its owner-only
+  file, so a second launch still finds the first.
+
+Every such failure is logged under the `freetunnel.credentialstore` category
+with what the OS said, the kind of entry and the config's file name, never a
+value.
 
 ### Password files from older builds
 
