@@ -65,6 +65,7 @@ import VpnClientFramework
             let data = try encoder.encode(preferences)
             try data.write(to: Identity.directory().appendingPathComponent("preferences.json"),
                            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            scheduleRefresh()
         } catch { message = ClientError.storageFailed.rawValue }
     }
     private func cachePath(_ id: String) throws -> URL {
@@ -237,9 +238,8 @@ import VpnClientFramework
             guard let url = record.subscription else { throw ClientError.invalidSource }
             let data = try await Downloads.read(Subscription.request(url), limit: Subscription.maximumBytes)
             record.toml = try Subscription.apply(data, previous: record.toml)
-            guard preferences.profiles.contains(where: { $0.id == profile.id }) else { return }
+            guard var updated = preferences.profiles.first(where: { $0.id == profile.id }) else { return }
             try Vault.write(encoder.encode(record), key: profile.id.uuidString)
-            var updated = preferences.profiles.first { $0.id == profile.id }!
             updated.subscriptionUpdated = Date()
             update(updated)
         } catch { report(error) }
