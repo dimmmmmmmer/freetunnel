@@ -19,3 +19,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: swift test --package-path ios/FreeTunnelCore
+  build:
+    name: iOS unsigned device and simulator builds
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install build tools
+        run: |
+          brew install xcodegen ninja
+          python3 -m venv .ios-tools
+          .ios-tools/bin/pip install conan==2.31.1 pyyaml==6.0.3
+          echo "$PWD/.ios-tools/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.conan2
+          key: ios-core-${{ runner.os }}-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'ios/scripts/build-core.sh') }}
+      - name: Build patched stable core
+        run: bash ios/scripts/build-core.sh
+      - name: Generate Xcode project
+        run: xcodegen generate --spec ios/project.yml
+      - name: Compile for simulator
+        run: xcodebuild -project ios/FreeTunnel.xcodeproj -scheme FreeTunnel -sdk iphonesimulator -configuration Debug -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
+      - name: Compile for iPhone
+        run: xcodebuild -project ios/FreeTunnel.xcodeproj -scheme FreeTunnel -sdk iphoneos -configuration Release -derivedDataPath ios/DerivedData-device CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
