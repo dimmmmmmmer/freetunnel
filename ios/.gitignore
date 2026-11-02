@@ -6,3 +6,6 @@ DerivedData/
 *.xcarchive
 *.ipa
 *.xcresult
+
+previews/
+DerivedData-device/

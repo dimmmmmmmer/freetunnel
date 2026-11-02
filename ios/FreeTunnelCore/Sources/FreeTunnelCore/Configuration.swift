@@ -9,20 +9,31 @@ public struct Configuration {
     public var hostname: String { endpoint["hostname"] as? String ?? "" }
     public var endpoint: [String: Any] { table["endpoint"] as? [String: Any] ?? [:] }
     public var skipsVerification: Bool { endpoint["skip_verification"] as? Bool ?? false }
-    public init(_ text: String) throws {
-        guard text.utf8.count <= Self.maximumBytes else { throw ClientError.tooLarge }
+    public init(_ text: String, maximumBytes: Int = 1_048_576) throws {
+        guard text.utf8.count <= maximumBytes else { throw ClientError.tooLarge }
         do { table = try TOMLDeserializer.tomlTable(with: Data(text.utf8)) }
         catch { throw ClientError.invalidConfig }
         guard let server = table["endpoint"] as? [String: Any],
               let hostname = server["hostname"] as? String, !hostname.isEmpty,
               let addresses = server["addresses"] as? [String], !addresses.isEmpty,
-              addresses.allSatisfy({ !$0.isEmpty && !$0.contains(where: { $0.isWhitespace }) }),
+              addresses.allSatisfy(Self.validAddress),
               server["username"] is String, server["password"] is String else {
             throw ClientError.invalidConfig
+        }
+        guard !hostname.hasPrefix("*."), GeoParser.manual(hostname) != nil else { throw ClientError.invalidConfig }
+        if let proto = server["upstream_protocol"] {
+            guard let text = proto as? String, ["http2", "http3"].contains(text) else { throw ClientError.invalidConfig }
         }
         if let key = server["client_random_auth_key"] as? String, !key.isEmpty {
             throw ClientError.unsupportedFormat // Stable core; do not silently omit an auth key.
         }
+    }
+    private static func validAddress(_ text: String) -> Bool {
+        guard !text.isEmpty, !text.contains(where: { $0.isWhitespace }),
+              let parts = URLComponents(string: "https://" + text),
+              parts.host?.isEmpty == false, parts.user == nil, parts.password == nil,
+              parts.path.isEmpty, parts.query == nil, parts.fragment == nil, parts.port != 0 else { return false }
+        return true
     }
     public func serialized() throws -> String { try Self.serialize(table) }
     public func tunnel(routing: Routing, snapshots: [String: GeoSnapshot], killSwitch: Bool) throws -> String {

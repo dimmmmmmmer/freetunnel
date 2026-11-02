@@ -25,7 +25,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                       let key = settings.providerConfiguration?["secretKey"] as? String,
                       key == "active-tunnel",
                       let text = String(data: try Vault.read(key), encoding: .utf8) else { throw ClientError.missingSecret }
-                let config = try Configuration(text)
+                let config = try Configuration(text, maximumBytes: 8_388_608)
                 let network = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
                 let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
                 ipv4.includedRoutes = [.default()]

@@ -67,13 +67,15 @@ public enum GeoParser {
                 var record = ProtoReader(blob)
                 var code = ""
                 var members: [Data] = []
+                var inverted = false
                 while let part = try record.next() {
                     if part.number == 1, let bytes = part.bytes { code = String(data: bytes, encoding: .utf8) ?? "" }
                     if part.number == 2, let bytes = part.bytes { members.append(bytes) }
                     // geoip reverse_match must not silently invert a selected category.
-                    if list.kind == .ips && part.number == 3 && (part.integer ?? 0) != 0 { throw ClientError.unsupportedFormat }
+                    if list.kind == .ips && part.number == 3 { inverted = (part.integer ?? 0) != 0 }
                 }
                 guard code.lowercased() == category.lowercased() else { continue }
+                guard !inverted else { throw ClientError.unsupportedFormat }
                 found = true
                 for member in members {
                     var item = ProtoReader(member)

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import BackgroundTasks
 import FreeTunnelCore
 import VpnClientFramework
 
@@ -11,10 +12,30 @@ import VpnClientFramework
     @Published var loaded = false
     @Published var importText = ""
     let vpn = VPNController()
+    var isPreview: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("--ui-preview")
+        #else
+        return false
+        #endif
+    }
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     var selected: Profile? { preferences.profiles.first { $0.id == preferences.selectedID } }
     init() {
+        #if DEBUG
+        if isPreview {
+            var profile = Profile(name: "FreeTunnel demo")
+            profile.routing.manualBypass = "home.example"
+            let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt", kind: .sites, direction: .vpn)
+            profile.routing.lists = [list]
+            preferences.profiles = [profile]
+            preferences.selectedID = profile.id
+            snapshots[list.id] = GeoSnapshot(source: list.source, kind: list.kind, entries: ["example.org", "*.example.org"], skipped: 0)
+            loaded = true
+            return
+        }
+        #endif
         do {
             let path = try Identity.directory().appendingPathComponent("preferences.json")
             if FileManager.default.fileExists(atPath: path.path) {
@@ -30,19 +51,19 @@ import VpnClientFramework
                 }
             }
             loaded = true
-        } catch { message = ClientError.storageFailed.localizedDescription }
+        } catch { message = ClientError.storageFailed.rawValue }
     }
     func report(_ error: Error) {
         // URL errors often include subscription credentials. Never display raw errors.
-        message = (error as? ClientError ?? .networkFailed).localizedDescription
+        message = (error as? ClientError ?? .networkFailed).rawValue
     }
     private func persist() {
-        guard loaded else { return }
+        guard loaded, !isPreview else { return }
         do {
             let data = try encoder.encode(preferences)
             try data.write(to: Identity.directory().appendingPathComponent("preferences.json"),
                            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch { message = ClientError.storageFailed.localizedDescription }
+        } catch { message = ClientError.storageFailed.rawValue }
     }
     private func cachePath(_ id: String) throws -> URL {
         guard UUID(uuidString: id) != nil else { throw ClientError.invalidList }
@@ -62,6 +83,7 @@ import VpnClientFramework
         let config = try Configuration(toml)
         var profile = Profile(name: config.name)
         profile.subscriptionEnabled = subscription != nil
+        profile.subscriptionUpdated = subscription == nil ? nil : Date()
         let record = Secret(toml: try config.serialized(), subscription: subscription)
         try Vault.write(encoder.encode(record), key: profile.id.uuidString)
         preferences.profiles.append(profile)
@@ -127,7 +149,12 @@ import VpnClientFramework
         } catch { report(error) } // Previous valid snapshot is kept on failure.
     }
     func refreshDue() async {
+        guard !isPreview else { return }
+        defer { scheduleRefresh() }
         for profile in preferences.profiles {
+            if profile.subscriptionEnabled && Date().timeIntervalSince(profile.subscriptionUpdated ?? .distantPast) >= 86400 {
+                await refreshSubscription(profile)
+            }
             let interval = Routing.intervals.contains(profile.routing.refreshHours) ? profile.routing.refreshHours : 24
             for list in profile.routing.lists where list.enabled {
                 let previous = snapshots[list.id]
@@ -136,6 +163,20 @@ import VpnClientFramework
                 }
             }
         }
+    }
+    func scheduleRefresh() {
+        guard !isPreview else { return }
+        let intervals = preferences.profiles.compactMap { profile -> Int? in
+            let hours = profile.routing.refreshHours
+            if profile.routing.lists.contains(where: { $0.enabled }) && hours > 0 { return hours }
+            return profile.subscriptionEnabled ? 24 : nil
+        }
+        let id = "org.freetunnel.ios.refresh"
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: id)
+        guard let hours = intervals.min() else { return }
+        let request = BGAppRefreshTaskRequest(identifier: id)
+        request.earliestBeginDate = Date().addingTimeInterval(Double(hours * 3600))
+        try? BGTaskScheduler.shared.submit(request)
     }
     func subscribe(_ url: String) async {
         guard busy.insert("subscription").inserted else { return }
