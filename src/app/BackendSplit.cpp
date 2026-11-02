@@ -502,7 +502,7 @@ void Backend::applySplitRules(bool warnOfLeak) {
         std::transform(coreDomains.cbegin(), coreDomains.cend(), std::back_inserter(ex),
                        [](const QString &d) { return d.toStdString(); });
     }
-    if (on && m_geoLists && geoRulesFit(activeConfigProfile())) {
+    if (on && m_geoLists) {
         std::vector<std::string> geo;
         for (const auto &list : m_settings.profile_geo_lists.value(activeConfigProfile())) {
             if (!list.enabled) continue;

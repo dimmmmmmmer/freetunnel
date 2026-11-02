@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""
-Checks that the Android device tests still name what the app has.
+"""Checks that the Android device tests still name what the app has."""
+import os
+import re
+import sys
+
+HELP = __doc__ + """
 
 The device tests (android/app/src/androidTest) run only on an emulator, 25 to 30 minutes
 into Android CI, and they reach into the app by name: a control by its key (the tag that
@@ -23,9 +27,6 @@ What it catches is the usual way the tests go stale, a name changed on one side.
 
 Prints each finding and exits 1 if there is any.
 """
-import os
-import re
-import sys
 
 KEY_SHAPE = re.compile(r'^[a-z]+(:[A-Za-z0-9_${}.]+)+$')
 # Strings of that shape that are no key of the app's: the tags UiComponentsDeviceTest gives the views it builds for itself
@@ -101,11 +102,11 @@ def template_regex(pieces):
 
 
 def key_templates(text):
-    """
-    The strings the app builds, as regular expressions: a literal is itself, and "config:" + index + ":select" is config:<anything>:select.
+    """Convert dynamic control keys to regular expressions."""
+    # The strings the app builds, as regular expressions: a literal is itself, and "config:" + index +
+    # ":select" is config:<anything>:select.
 
-    A piece of a Kotlin template ($name) is <anything> as well.
-    """
+    # A piece of a Kotlin template ($name) is <anything> as well.
     templates = []
     for line in text.split('\n'):
         if line.lstrip().startswith(('//', '*', '/*')):
@@ -136,14 +137,13 @@ def key_templates(text):
 
 
 def fits(literal, templates, words, app_text):
-    """
-    Whether a test's key is a shape the app builds.
+    """Check whether a test key matches a key built by the app."""
+    # Whether a test's key is a shape the app builds.
 
-    A number or a $name in it stands for a number (the first time) or for any word the app uses in a key
-    (a name). A shape that begins with something unknown ("key + ":select"", a row that adds its own part
-    to the key it is given) takes any beginning, so the key's first word is asked for as well, as the
-    start of some key of the app's.
-    """
+    # A number or a $name in it stands for a number (the first time) or for any word the app uses in a key
+    # (a name). A shape that begins with something unknown ("key + ":select"", a row that adds its own part
+    # to the key it is given) takes any beginning, so the key's first word is asked for as well, as the
+    # start of some key of the app's.
     def one(key):
         for template, open_start in templates:
             if template.fullmatch(key):
@@ -234,11 +234,12 @@ def main_thread_helpers(bodies):
 
 
 def nested_main(text):
-    """
-    Line numbers where a block run on the main thread (onMain, runOnMainSync) runs another, itself or through a helper of the test that does.
+    """Find nested main-thread calls, including calls through helpers."""
+    # Line numbers where a block run on the main thread (onMain, runOnMainSync) runs another, itself or
+    # through a helper of the test that does.
 
-    Instrumentation.runOnMainSync throws when it is called on the main thread, and a test that does it fails on the device with nothing wrong in the app.
-    """
+    # Instrumentation.runOnMainSync throws when it is called on the main thread, and a test that does it
+    # fails on the device with nothing wrong in the app.
     code = strip_code(text)
     uses = main_thread_helpers(method_bodies(code))
     lines = set()
@@ -393,6 +394,6 @@ def main(android):
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print(__doc__)
+        print(HELP)
         sys.exit(2)
     sys.exit(main(sys.argv[1]))
