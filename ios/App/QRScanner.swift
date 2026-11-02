@@ -46,8 +46,11 @@ private struct ScannerController: UIViewControllerRepresentable {
             scanner.stopScanning()
             failed()
         }
-        func dataScanner(_ scanner: DataScannerViewController, didAdd addedItems: [RecognizedItem],
-            allItems: [RecognizedItem]) {
+        func dataScanner(
+            _ scanner: DataScannerViewController,
+            didAdd addedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
             guard !delivered else { return }
             for item in addedItems {
                 if case .barcode(let code) = item, let text = code.payloadStringValue, text.hasPrefix("tt://") {
