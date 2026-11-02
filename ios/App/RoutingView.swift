@@ -77,7 +77,7 @@ struct RoutingView: View {
                 }
                 }.navigationTitle("Split tunnelling").navigationBarTitleDisplayMode(.inline).sheet(
                     isPresented: $adding) { AddListView(state: state,
-                    profileID: profile.id) }
+                    profileID: profile.id).modifier(FormAlerts(state: state)) }
             } else {
                 ContentUnavailableView("Select a server first", systemImage: "server.rack")
             }

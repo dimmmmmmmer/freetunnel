@@ -38,12 +38,13 @@ struct RootView: View {
             LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }.tag("logs")
         }
         .tint(Color(red: 0.61, green: 0.55, blue: 0.77))
-        .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil }, set: { if !$0 {
+        .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil && state.openDialogs.isEmpty },
+            set: { if !$0 {
             state.message = nil } })) {
             Button("OK") { state.message = nil }
         } message: { Text(LocalizedStringKey(state.message ?? "")) }
         .sheet(isPresented: Binding(get: { !state.importText.isEmpty }, set: { if !$0 { state.importText = "" } })) {
-            ImportView(state: state, initial: state.importText)
+            ImportView(state: state, initial: state.importText).modifier(FormAlerts(state: state))
         }
     }
 }

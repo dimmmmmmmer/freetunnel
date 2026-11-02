@@ -56,9 +56,9 @@ struct ServersView: View {
                     case .failure(let error): state.report(error)
                     }
                 }
-                .sheet(isPresented: $adding) { ImportView(state: state) }
-                .sheet(isPresented: $creating) { NewServerView(state: state) }
-                .sheet(item: $editing) { ServerEditor(state: state, profile: $0) }
+                .sheet(isPresented: $adding) { ImportView(state: state).modifier(FormAlerts(state: state)) }
+                .sheet(isPresented: $creating) { NewServerView(state: state).modifier(FormAlerts(state: state)) }
+                .sheet(item: $editing) { ServerEditor(state: state, profile: $0).modifier(FormAlerts(state: state)) }
                 .confirmationDialog("Remove server?", isPresented: Binding(get: { removing != nil }, set: {
                     if !$0 { removing = nil } }), titleVisibility: .visible) {
                     Button("Remove", role: .destructive) {

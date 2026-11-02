@@ -9,6 +9,7 @@ import VpnClientFramework
     @Published var snapshots: [String: GeoSnapshot] = [:]
     @Published var busy = Set<String>()
     @Published var message: String?
+    @Published var openDialogs = Set<UUID>()
     @Published var loaded = false
     @Published var importText = ""
     let vpn = VPNController()
