@@ -1,0 +1,21 @@
+name: iOS
+on:
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**']
+  push:
+    branches: [main, codex/ios-client]
+    paths: ['ios/**', '.github/workflows/ios.yml', 'vendor/trusttunnel/**', 'data/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core-tests:
+    name: iOS configuration and routing tests
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: swift test --package-path ios/FreeTunnelCore
