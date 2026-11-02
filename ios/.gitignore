@@ -1,0 +1,8 @@
+.build/
+FreeTunnel.xcodeproj/
+App/Info.plist
+Tunnel/Info.plist
+DerivedData/
+*.xcarchive
+*.ipa
+*.xcresult

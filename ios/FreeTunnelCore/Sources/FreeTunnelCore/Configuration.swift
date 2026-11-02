@@ -4,6 +4,7 @@ import TOMLDeserializer
 public struct Configuration {
     public static let maximumBytes = 1_048_576
     private var table: [String: Any]
+    var rawTable: [String: Any] { table }
     public var name: String { endpoint["name"] as? String ?? hostname }
     public var hostname: String { endpoint["hostname"] as? String ?? "" }
     public var endpoint: [String: Any] { table["endpoint"] as? [String: Any] ?? [:] }
