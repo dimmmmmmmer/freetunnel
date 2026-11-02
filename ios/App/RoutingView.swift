@@ -25,6 +25,13 @@ struct RoutingView: View {
                                 TextEditor(text: routing.manualVPN).frame(minHeight: 90).font(.system(.body, design: .monospaced))
                                 Text("Direct").font(.subheadline)
                                 TextEditor(text: routing.manualBypass).frame(minHeight: 90).font(.system(.body, design: .monospaced))
+                                Button("Recommended for Russia") {
+                                    guard let url = Bundle.main.url(forResource: "recommended-russia", withExtension: "txt"),
+                                          let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+                                    let lines = text.split(whereSeparator: { $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                                    let existing = routing.wrappedValue.manualBypass.split(whereSeparator: { $0.isNewline }).map(String.init)
+                                    routing.wrappedValue.manualBypass = Array(Set(existing + lines)).sorted().joined(separator: "\n")
+                                }
                                 Text("One domain or IP range per line. Manual rules take priority over lists.").font(.footnote).foregroundStyle(.secondary)
                             }.textInputAutocapitalization(.never).autocorrectionDisabled().padding(.top, 6)
                         }

@@ -2,7 +2,7 @@ import Foundation
 
 public enum ClientError: String, Error, LocalizedError {
     case invalidConfig, invalidSource, invalidList, tooLarge, emptyList, unsupportedFormat
-    case missingSecret, storageFailed, networkFailed, tunnelFailed
+    case missingSecret, storageFailed, networkFailed, tunnelFailed, insecureConfig
     public var errorDescription: String? { NSLocalizedString(rawValue, comment: "") }
 }
 public enum Direction: String, Codable, CaseIterable, Identifiable {
