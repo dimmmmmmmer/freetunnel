@@ -57,7 +57,7 @@ stored in this repository.
 
 - Both unsigned platform builds and the core tests must pass.
 - Verify real-device connect/disconnect, locked-screen operation, Wi-Fi/cellular
-  handover, DNS, IPv6, reconnect, on-demand and kill-switch behaviour.
+  handover, DNS, IPv6, reconnect and kill-switch behaviour.
 - Verify manual-rule precedence over geo domains/IPs against a real endpoint.
 - Check Keychain sharing and accessibility after first unlock, and fail closed
   when access is denied. Simulator preview mode does not validate these features.
