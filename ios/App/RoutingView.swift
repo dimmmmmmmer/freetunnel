@@ -96,8 +96,9 @@ private struct GeoCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle(LocalizedStringKey(list.name), isOn: Binding(get: { list.enabled }, set: {
-                value in change { $0.enabled = value } }))
+            Toggle(LocalizedStringKey(list.name), isOn: Binding(get: { list.enabled }, set: { value in
+                change { $0.enabled = value }
+            }))
                 .font(.headline)
             Text(list.source).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
