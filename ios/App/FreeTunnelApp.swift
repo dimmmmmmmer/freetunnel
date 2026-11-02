@@ -29,7 +29,7 @@ struct RootView: View {
     @ObservedObject var state: AppState
     var body: some View {
         TabView(selection: $tab) {
-            HomeView(state: state, vpn: state.vpn).tabItem { Label("Home",
+            HomeView(state: state, vpn: state.vpn, showServers: { tab = "servers" }).tabItem { Label("Home",
                 systemImage: "power.circle") }.tag("connection")
             ServersView(state: state).tabItem { Label("Servers", systemImage: "server.rack") }.tag("servers")
             RoutingView(state: state).tabItem { Label("Routing",
@@ -37,7 +37,12 @@ struct RootView: View {
             SettingsView(state: state).tabItem { Label("Settings", systemImage: "gearshape") }.tag("settings")
             LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }.tag("logs")
         }
-        .tint(Color(red: 0.61, green: 0.55, blue: 0.77))
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .top, spacing: 0) { navigation }
+        .tint(AppStyle.accent)
+        .foregroundStyle(AppStyle.text)
+        .background(AppStyle.background)
+        .buttonStyle(AppButtonStyle())
         .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil && state.openDialogs.isEmpty },
             set: { if !$0 {
             state.message = nil } })) {
@@ -47,6 +52,26 @@ struct RootView: View {
             ImportView(state: state, initial: state.importText).modifier(FormAlerts(state: state))
         }
     }
+    private var navigation: some View {
+        HStack(spacing: 10) {
+            tabButton("connection", title: "Home", icon: "")
+            tabButton("servers", title: "Servers", icon: "server.rack")
+            tabButton("routing", title: "Routing", icon: "arrow.triangle.branch")
+            tabButton("settings", title: "Settings", icon: "gearshape")
+            tabButton("logs", title: "Logs", icon: "text.alignleft")
+        }.frame(maxWidth: .infinity).padding(.vertical, 12).background(AppStyle.background)
+    }
+    private func tabButton(_ id: String, title: LocalizedStringKey, icon: String) -> some View {
+        Button { tab = id } label: {
+            Group {
+                if icon.isEmpty { Image("TunnelLogo").resizable().scaledToFit().frame(width: 25, height: 25) }
+                else { Image(systemName: icon).font(.system(size: 23, weight: .medium)) }
+            }.frame(width: 48, height: 48)
+                .background(tab == id ? AppStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain).accessibilityLabel(title)
+            .accessibilityAddTraits(tab == id ? [.isSelected] : [])
+    }
+
 }
 
 struct HomeView: View {
@@ -61,37 +86,34 @@ struct HomeView: View {
         default: "Disconnected"
         }
     }
+    var showServers: () -> Void
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 30) {
-                Spacer()
-                Image("TunnelLogo").resizable().scaledToFit().frame(width: 110, height: 110).accessibilityHidden(true)
-                Text("FreeTunnel").font(.largeTitle.bold())
-                Text(status).font(.title2).accessibilityIdentifier("connection-status")
-                if state.preferences.profiles.isEmpty {
-                    Text("Add a server to get connected").foregroundStyle(.secondary)
-                } else {
-                    Picker("Server", selection: $state.preferences.selectedID) {
-                        ForEach(state.preferences.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
-                    }.pickerStyle(.menu).disabled(!vpn.isDisconnected)
+        VStack(spacing: 22) {
+            Spacer()
+            Button {
+                if state.selected == nil { showServers(); return }
+                Task {
+                    if vpn.isDisconnected { await state.connect() }
+                    else { do { try await vpn.disconnect() } catch { state.report(error) } }
                 }
-                Button {
-                    Task {
-                        if vpn.isDisconnected {
-                            await state.connect()
-                        } else {
-                            do { try await vpn.disconnect() } catch { state.report(error) }
-                        }
-                    }
-                } label: {
-                    Label(vpn.isDisconnected ? "Connect" : "Disconnect", systemImage: "power")
-                        .font(.title3.bold()).frame(maxWidth: 280).padding(.vertical, 14)
-                }.buttonStyle(.borderedProminent)
-                    .disabled(state.isPreview || !state.loaded || state.selected == nil || vpn.status == .disconnecting)
-                    .accessibilityIdentifier("connect-button")
-                Spacer()
-            }.padding().navigationTitle("Connection").navigationBarTitleDisplayMode(.inline)
-        }
+            } label: {
+                Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
+                    .opacity(vpn.isDisconnected ? 0.5 : 1)
+            }.buttonStyle(.plain)
+                .disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
+                .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
+                .accessibilityIdentifier("connect-button")
+            Text(status).font(.subheadline).foregroundStyle(AppStyle.secondary)
+                .accessibilityIdentifier("connection-status")
+            if state.preferences.profiles.isEmpty {
+                Button("Add server", action: showServers).buttonStyle(AppButtonStyle())
+            } else {
+                Picker("Server", selection: $state.preferences.selectedID) {
+                    ForEach(state.preferences.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
+                }.pickerStyle(.menu).disabled(!vpn.isDisconnected)
+            }
+            Spacer()
+        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).background(AppStyle.background)
     }
 }
 
@@ -99,21 +121,21 @@ struct SettingsView: View {
     @ObservedObject var state: AppState
     var body: some View {
         NavigationStack {
-            Form {
-                Section("VPN") {
+            AppForm {
+                AppSection("VPN") {
                     Toggle("Kill switch", isOn: $state.preferences.killSwitch)
                     Toggle("Connect on demand", isOn: $state.preferences.onDemand)
                     Text("VPN settings apply on the next connection.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Appearance") {
-                    Picker("Theme", selection: $state.preferences.theme) {
+                AppSection("Appearance") {
+                    AppPicker("Theme", selection: $state.preferences.theme) {
                         Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark")
                     }
-                    Picker("Language", selection: $state.preferences.language) {
+                    AppPicker("Language", selection: $state.preferences.language) {
                         Text("System").tag("system"); Text("English").tag("en"); Text("Русский").tag("ru")
                     }
                 }
-                Section("About") {
+                AppSection("About") {
                     Text("FreeTunnel for iOS")
                     Text("TrustTunnel 1.1.11").foregroundStyle(.secondary)
                     NavigationLink("Open-source licenses") { LicensesView() }
@@ -134,7 +156,8 @@ struct LogsView: View {
             ScrollView { Text(vpn.logs.isEmpty ? String(localized: "No logs yet") : vpn.logs)
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding() }
-                .navigationTitle("Logs")
+                .background(AppStyle.background)
+                .navigationBarTitleDisplayMode(.inline).navigationTitle("Logs")
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Refresh") { Task { await vpn.readLogs() } }
