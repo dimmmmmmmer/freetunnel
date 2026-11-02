@@ -2,6 +2,10 @@ import SwiftUI
 
 // Keep these semantic colors in sync with the theme in qml/Main.qml.
 enum AppStyle {
+    static let body = Font.custom("Inter-Regular", size: 16, relativeTo: .body)
+    static let label = Font.custom("Inter-Regular", size: 14, relativeTo: .subheadline)
+    static let heading = Font.custom("Inter-Medium", size: 16, relativeTo: .headline)
+    static let caption = Font.custom("Inter-Regular", size: 12, relativeTo: .caption)
     static let background = color(0xececec, 0x181818)
     static let surface = color(0xe2e2e2, 0x262626)
     static let input = color(0xd6d6d6, 0x101010)
@@ -24,7 +28,7 @@ enum AppStyle {
 struct AppButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.subheadline)
+        configuration.label.font(AppStyle.label)
             .foregroundStyle(configuration.role == .destructive ? AppStyle.danger : AppStyle.accent)
             .padding(.horizontal, 12).frame(minHeight: 44)
             .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
@@ -62,7 +66,7 @@ struct AppSection<Content: View>: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(AppStyle.secondary)
+            Text(title).font(AppStyle.heading).foregroundStyle(AppStyle.secondary)
             content
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -91,7 +95,7 @@ struct AppPicker<Selection: Hashable, Content: View>: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline).foregroundStyle(AppStyle.secondary)
+            Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
             Picker(title, selection: $selection) { content }
                 .labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8).frame(minHeight: 44)

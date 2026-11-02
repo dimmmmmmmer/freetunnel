@@ -20,7 +20,7 @@ struct ServersView: View {
                                       ? "checkmark.circle.fill" : "circle")
                                 VStack(alignment: .leading) {
                                     Text(profile.name).foregroundStyle(.primary)
-                                    if profile.subscriptionEnabled { Text("Subscription").font(.caption)
+                                    if profile.subscriptionEnabled { Text("Subscription").font(AppStyle.caption)
                                         .foregroundStyle(.secondary) }
                                 }
                             }
@@ -136,7 +136,7 @@ struct ServerEditor: View {
                 AppSection("Configuration") {
                     TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 260).appEditor()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Configuration contains the server password.").font(.footnote).foregroundStyle(AppStyle.secondary)
+                    Text("Configuration contains the server password.").font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                 }
                 Button("Share configuration") { sharing = true }
             }.navigationTitle("Edit server")
@@ -158,6 +158,13 @@ struct ServerEditor: View {
                     }
                 }
                 .task {
+                    #if DEBUG
+                    if state.isPreview {
+                        name = profile.name
+                        text = "[endpoint]\nname = \"FreeTunnel demo\"\nhostname = \"vpn.example.org\"\n"
+                        return
+                    }
+                    #endif
                     do { record = try state.secret(profile); text = record?.toml ?? ""
                         name = profile.name } catch { state.report(error) }
                 }

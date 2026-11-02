@@ -28,21 +28,24 @@ struct RootView: View {
     @State private var tab = ProcessInfo.processInfo.environment["FT_PREVIEW_TAB"] ?? "connection"
     @ObservedObject var state: AppState
     var body: some View {
-        TabView(selection: $tab) {
-            HomeView(state: state, vpn: state.vpn, showServers: { tab = "servers" }).tabItem { Label("Home",
-                systemImage: "power.circle") }.tag("connection")
-            ServersView(state: state).tabItem { Label("Servers", systemImage: "server.rack") }.tag("servers")
-            RoutingView(state: state).tabItem { Label("Routing",
-                systemImage: "arrow.triangle.branch") }.tag("routing")
-            SettingsView(state: state).tabItem { Label("Settings", systemImage: "gearshape") }.tag("settings")
-            LogsView(vpn: state.vpn).tabItem { Label("Logs", systemImage: "text.alignleft") }.tag("logs")
+        VStack(spacing: 0) {
+            navigation
+            Group {
+                switch tab {
+                case "servers": ServersView(state: state)
+                case "routing": RoutingView(state: state)
+                case "settings": SettingsView(state: state)
+                case "logs": LogsView(vpn: state.vpn)
+                default: HomeView(state: state, vpn: state.vpn, showServers: { tab = "servers" })
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .top, spacing: 0) { navigation }
         .tint(AppStyle.accent)
         .foregroundStyle(AppStyle.text)
+        .font(AppStyle.body)
         .background(AppStyle.background)
         .buttonStyle(AppButtonStyle())
+        .modifier(PreviewForms(state: state))
         .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil && state.openDialogs.isEmpty },
             set: { if !$0 {
             state.message = nil } })) {
@@ -55,17 +58,17 @@ struct RootView: View {
     private var navigation: some View {
         HStack(spacing: 10) {
             tabButton("connection", title: "Home", icon: "")
-            tabButton("servers", title: "Servers", icon: "server.rack")
-            tabButton("routing", title: "Routing", icon: "arrow.triangle.branch")
-            tabButton("settings", title: "Settings", icon: "gearshape")
-            tabButton("logs", title: "Logs", icon: "text.alignleft")
+            tabButton("servers", title: "Servers", icon: "NavConnection")
+            tabButton("routing", title: "Routing", icon: "NavNetwork")
+            tabButton("settings", title: "Settings", icon: "NavSettings")
+            tabButton("logs", title: "Logs", icon: "NavLog")
         }.frame(maxWidth: .infinity).padding(.vertical, 12).background(AppStyle.background)
     }
     private func tabButton(_ id: String, title: LocalizedStringKey, icon: String) -> some View {
         Button { tab = id } label: {
             Group {
                 if icon.isEmpty { Image("TunnelLogo").resizable().scaledToFit().frame(width: 25, height: 25) }
-                else { Image(systemName: icon).font(.system(size: 23, weight: .medium)) }
+                else { Image(icon).resizable().scaledToFit().frame(width: 25, height: 25) }
             }.frame(width: 48, height: 48)
                 .background(tab == id ? AppStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain).accessibilityLabel(title)
@@ -103,7 +106,7 @@ struct HomeView: View {
                 .disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
                 .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                 .accessibilityIdentifier("connect-button")
-            Text(status).font(.subheadline).foregroundStyle(AppStyle.secondary)
+            Text(status).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
                 .accessibilityIdentifier("connection-status")
             if state.preferences.profiles.isEmpty {
                 Button("Add server", action: showServers).buttonStyle(AppButtonStyle())
@@ -125,7 +128,7 @@ struct SettingsView: View {
                 AppSection("VPN") {
                     Toggle("Kill switch", isOn: $state.preferences.killSwitch)
                     Toggle("Connect on demand", isOn: $state.preferences.onDemand)
-                    Text("VPN settings apply on the next connection.").font(.footnote).foregroundStyle(.secondary)
+                    Text("VPN settings apply on the next connection.").font(AppStyle.caption).foregroundStyle(.secondary)
                 }
                 AppSection("Appearance") {
                     AppPicker("Theme", selection: $state.preferences.theme) {
@@ -142,7 +145,7 @@ struct SettingsView: View {
                     Link("Source code", destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
                     Link("Help", destination: URL(
                         string: "https://github.com/dimmmmmmmer/freetunnel/blob/main/USER_GUIDE.md")!)
-                    Text("Updates are installed through TestFlight or the App Store.").font(.footnote)
+                    Text("Updates are installed through TestFlight or the App Store.").font(AppStyle.caption)
                 }
             }.navigationTitle("Settings")
         }
