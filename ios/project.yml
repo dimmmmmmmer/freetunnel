@@ -42,6 +42,8 @@ targets:
     info:
       path: App/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: FreeTunnel
         FreeTunnelAppGroup: $(FT_APP_GROUP)
         FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
@@ -85,6 +87,8 @@ targets:
     info:
       path: Tunnel/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         FreeTunnelAppGroup: $(FT_APP_GROUP)
         FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
         FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel

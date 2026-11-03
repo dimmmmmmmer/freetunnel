@@ -92,7 +92,7 @@ struct AppForm<Content: View>: View {
             VStack(alignment: .leading, spacing: 14) { content }
                 .frame(maxWidth: 600).frame(maxWidth: .infinity).padding(.horizontal, 18).padding(
                     .vertical, 10)
-        }.background(AppStyle.background).buttonStyle(AppButtonStyle()).textFieldStyle(AppFieldStyle())
+        }.background(AppStyle.background).buttonStyle(AppButtonStyle())
     }
 }
 struct AppSection<Content: View>: View {
@@ -143,6 +143,17 @@ struct AppPicker<Value: Hashable>: View {
     var boxed = false
     var previewID: String?
     @State private var open = false
+    @State private var opensAbove = false
+    private var menuWidth: CGFloat {
+        let font = UIFontMetrics.default.scaledFont(
+            for: UIFont(name: "Inter-Regular", size: 14) ?? .systemFont(ofSize: 14))
+        let width =
+            options.map {
+                (NSLocalizedString($0.title, comment: "") as NSString).size(withAttributes: [.font: font])
+                    .width
+            }.max() ?? 0
+        return min(330, max(170, width + 60))
+    }
     var body: some View {
         Group {
             if boxed {
@@ -185,24 +196,41 @@ struct AppPicker<Value: Hashable>: View {
             .accessibilityValue(
                 Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
             )
-            .popover(isPresented: $open, arrowEdge: .top) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(options) { option in
-                        Button {
-                            selection = option.value
-                            open = false
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text(LocalizedStringKey(option.title)).fixedSize(
-                                    horizontal: false, vertical: true)
-                                Spacer(minLength: 8)
-                                if selection == option.value {
-                                    Image(systemName: "checkmark").font(.system(size: 10))
-                                }
-                            }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(minHeight: 40)
-                        }.buttonStyle(.plain)
-                    }
-                }.font(AppStyle.body).padding(6).frame(minWidth: 170, maxWidth: 330)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(key: PickerAnchorFrame.self, value: geometry.frame(in: .global))
+                }
+            )
+            .onPreferenceChange(PickerAnchorFrame.self) { frame in
+                let height =
+                    UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                    .first?.screen.bounds.height ?? 800
+                opensAbove = frame.midY > height / 2
+            }
+            .popover(isPresented: $open, arrowEdge: opensAbove ? .bottom : .top) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(options) { option in
+                            Button {
+                                selection = option.value
+                                open = false
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Text(LocalizedStringKey(option.title)).fixedSize(
+                                        horizontal: false, vertical: true)
+                                    Spacer(minLength: 8)
+                                    if selection == option.value {
+                                        Image(systemName: "checkmark").font(.system(size: 10))
+                                    }
+                                }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(minHeight: 40)
+                            }.buttonStyle(.plain)
+                        }
+                    }.font(AppStyle.body).padding(6)
+                }.scrollBounceBehavior(.basedOnSize).frame(width: menuWidth)
+                    .frame(
+                        idealHeight: CGFloat(options.count * 40 + 12),
+                        maxHeight: CGFloat(options.count * 40 + 12)
+                    )
                     .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
             }
     }
@@ -226,7 +254,7 @@ struct AppDialog<Content: View>: View {
                 .background(AppStyle.background, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border))
                 .padding(.horizontal, 14).padding(.vertical, 12)
-        }.buttonStyle(AppButtonStyle()).textFieldStyle(AppFieldStyle()).toggleStyle(AppToggleStyle())
+        }.buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
     }
 }
 extension View {
@@ -246,4 +274,9 @@ struct AppIcon: View {
         Image(name).resizable().scaledToFit().frame(width: 17, height: 17)
             .frame(width: 26, height: 44).contentShape(Rectangle())
     }
+}
+
+private struct PickerAnchorFrame: PreferenceKey {
+    static var defaultValue: CGRect { .zero }
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
