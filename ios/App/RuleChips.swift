@@ -74,7 +74,7 @@ struct ChipFlow: Layout {
                 vertical += rowHeight + 6
                 rowHeight = 0
             }
-            points.append(CGPoint(horizontal: horizontal, vertical: vertical))
+            points.append(CGPoint(x: horizontal, y: vertical))
             horizontal += size.width + 6
             rowHeight = max(rowHeight, size.height)
         }
@@ -90,7 +90,7 @@ struct ChipFlow: Layout {
             let point = layout.points[index]
             view.place(
                 at: CGPoint(
-                    horizontal: bounds.minX + point.horizontal, vertical: bounds.minY + point.vertical),
+                    x: bounds.minX + point.x, y: bounds.minY + point.y),
                 anchor: .topLeading,
                 proposal: ProposedViewSize(width: bounds.width, height: nil))
         }
