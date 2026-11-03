@@ -1,0 +1,44 @@
+FreeTunnel for Windows 7 (experimental build)
+=============================================
+
+This is an unofficial build of FreeTunnel for Windows 7 SP1, made by the
+"Windows 7 (experimental)" workflow (.github/workflows/win7.yml). It is not a
+FreeTunnel release. THIRD_PARTY_NOTICES.md next to this file describes the
+regular Windows build; this build differs from it as follows.
+
+Qt
+--
+This build ships Qt 6.8.5, not Qt 6.8.3, built from source and MODIFIED:
+the qtbase files of crystalidea/qt6windows7 were copied over qtbase before
+it was compiled, so that Qt runs on Windows 7, 8 and 8.1. Qt is licensed under
+the GNU Lesser General Public License v3 (licenses/desktop/), and you may
+replace the Qt DLLs in this folder with your own build of Qt 6.8.5.
+
+The complete corresponding source is:
+  - qtbase        https://github.com/qt/qtbase/tree/v6.8.5-lts-lgpl
+  - qtshadertools https://github.com/qt/qtshadertools/tree/v6.8.5-lts-lgpl
+  - qtsvg         https://github.com/qt/qtsvg/tree/v6.8.5-lts-lgpl
+  - qtdeclarative https://github.com/qt/qtdeclarative/tree/v6.8.5-lts-lgpl
+  - the modifications: https://github.com/crystalidea/qt6windows7 (the qtbase
+    folder), at the commit named in FREETUNNEL-WIN7-QT.txt
+FREETUNNEL-WIN7-QT.txt, next to this file, names the exact commit of each.
+The build commands are in .github/workflows/win7.yml of FreeTunnel's source.
+
+OpenSSL
+-------
+Qt's TLS plugin (tls\qopensslbackend.dll) has OpenSSL 3.5.9 linked into it,
+in place of the Schannel backend the regular build uses. OpenSSL is licensed
+under the Apache License 2.0: licenses\desktop\OpenSSL-LICENSE.txt.
+Source: https://github.com/openssl/openssl/tree/openssl-3.5.9
+
+BoringSSL
+---------
+The BoringSSL inside FreeTunnel.exe carries one more patch than the regular
+build's: win7/boringssl-win7-rand-fallback.patch in FreeTunnel's source, which
+makes it use RtlGenRandom where Windows has no ProcessPrng.
+
+Runtime libraries
+-----------------
+The Microsoft Visual C++ runtime and the Universal C Runtime (ucrtbase.dll and
+the api-ms-win-*.dll files) are included so that Windows 7 does not need
+KB2999226. Windows 10 and later ignore these copies and use their own.

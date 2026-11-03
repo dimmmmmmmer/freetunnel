@@ -1,0 +1,57 @@
+diff --git a/crypto/rand/windows.cc b/crypto/rand/windows.cc
+index ebd0d4a..3bcf71e 100644
+--- a/crypto/rand/windows.cc
++++ b/crypto/rand/windows.cc
+@@ -60,15 +60,49 @@ void bssl::CRYPTO_sysrand(uint8_t *out, size_t requested) {
+ typedef BOOL(WINAPI *ProcessPrngFunction)(PBYTE pbData, SIZE_T cbData);
+ static ProcessPrngFunction g_processprng_fn = nullptr;
+ 
++// FreeTunnel Windows 7 build: ProcessPrng is not exported by the
++// bcryptprimitives.dll of Windows 7, where the unpatched code aborts on the
++// first random byte. RtlGenRandom (advapi32!SystemFunction036) has been there
++// since Windows XP and is what BoringSSL used before ProcessPrng; it is only
++// taken when ProcessPrng is missing, so newer Windows keep the upstream path.
++typedef BOOLEAN(WINAPI *RtlGenRandomFunction)(PVOID RandomBuffer,
++                                              ULONG RandomBufferLength);
++static RtlGenRandomFunction g_rtlgenrandom_fn = nullptr;
++
++static BOOL WINAPI rtlgenrandom_prng(PBYTE out, SIZE_T requested) {
++  while (requested > 0) {
++    ULONG len = ULONG_MAX;
++    if (requested < len) {
++      len = (ULONG)requested;
++    }
++    if (!g_rtlgenrandom_fn(out, len)) {
++      return FALSE;
++    }
++    requested -= len;
++    out += len;
++  }
++  return TRUE;
++}
++
+ static void init_processprng() {
+   HMODULE hmod = LoadLibraryW(L"bcryptprimitives");
+-  if (hmod == nullptr) {
++  if (hmod != nullptr) {
++    g_processprng_fn =
++        (ProcessPrngFunction)GetProcAddress(hmod, "ProcessPrng");
++  }
++  if (g_processprng_fn != nullptr) {
++    return;
++  }
++  HMODULE advapi = LoadLibraryW(L"advapi32");
++  if (advapi == nullptr) {
+     abort();
+   }
+-  g_processprng_fn = (ProcessPrngFunction)GetProcAddress(hmod, "ProcessPrng");
+-  if (g_processprng_fn == nullptr) {
++  g_rtlgenrandom_fn =
++      (RtlGenRandomFunction)GetProcAddress(advapi, "SystemFunction036");
++  if (g_rtlgenrandom_fn == nullptr) {
+     abort();
+   }
++  g_processprng_fn = rtlgenrandom_prng;
+ }
+ 
+ void bssl::CRYPTO_init_sysrand() {

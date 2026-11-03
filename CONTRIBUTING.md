@@ -318,6 +318,7 @@ bash scripts/coverage-upstream-report.sh
 | `.github/workflows/tests.yml` | Fast unit tests (Linux + macOS + Windows) through `scripts/run-ctest.sh`; Linux coverage + ASan+UBSan ([details](#coverage-and-sanitizers)) | Pushes to `main`, pull requests, `v*` tags, and weekly (Mon) |
 | `.github/workflows/security.yml` | The checks below | Pushes to `main`, pull requests, `v*` tags, and weekly (Mon) |
 | `.github/workflows/core-update.yml` | Opens a pull request when TrustTunnelClient has a stable release newer than the pinned core ([details](#bumping-the-upstream-core)) | Daily, and by hand |
+| `.github/workflows/win7.yml` | Experimental Windows 7 build: Qt 6.8.5 with a Windows 7 backport and OpenSSL, BoringSSL with a randomness fallback, and an import check of every binary in the package. Not a release and not a required check ([details](win7/README.md)) | By hand, and on pull requests that change its files |
 
 - **On a `v*` tag** the release waits for Tests and Security to pass on the
   tagged commit, and is refused outright, within a minute of the push, when the
