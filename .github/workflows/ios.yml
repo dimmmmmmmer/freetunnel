@@ -38,12 +38,12 @@ jobs:
         id: conan-cache
         with:
           path: ~/.conan2
-          key: ios-core-${{ runner.os }}-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'ios/scripts/build-core.sh') }}
+          key: ios-core-${{ runner.os }}-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'ios/scripts/build-core.sh', 'ios/patches/*.patch') }}
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         id: core-cache
         with:
           path: ios/.build/VpnClientFramework.xcframework
-          key: ios-framework-xcode26.3-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'ios/scripts/build-core.sh', 'scripts/export-patched-boringssl.sh') }}
+          key: ios-framework-xcode26.3-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'ios/scripts/build-core.sh', 'scripts/export-patched-boringssl.sh', 'ios/patches/*.patch') }}
       - name: Build patched stable core
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: bash ios/scripts/build-core.sh

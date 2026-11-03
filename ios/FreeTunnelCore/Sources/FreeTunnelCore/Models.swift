@@ -40,18 +40,83 @@ public struct Profile: Codable, Identifiable, Equatable {
     public var id: UUID
     public var name: String
     public var routing = Routing()
+    public var splitProfile = "Default"
     public var subscriptionEnabled = false
     public var subscriptionUpdated: Date?
     public init(id: UUID = UUID(), name: String) { self.id = id; self.name = name }
+    enum CodingKeys: String, CodingKey { case id, name, routing, splitProfile, subscriptionEnabled, subscriptionUpdated }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id); name = try c.decode(String.self, forKey: .name)
+        routing = try c.decodeIfPresent(Routing.self, forKey: .routing) ?? Routing()
+        splitProfile = try c.decodeIfPresent(String.self, forKey: .splitProfile) ?? "Default"
+        subscriptionEnabled = try c.decodeIfPresent(Bool.self, forKey: .subscriptionEnabled) ?? false
+        subscriptionUpdated = try c.decodeIfPresent(Date.self, forKey: .subscriptionUpdated)
+    }
+}
+public struct SplitProfile: Codable, Equatable, Identifiable {
+    public var name: String
+    public var routing: Routing
+    public var id: String { name }
+    public init(name: String, routing: Routing = Routing()) { self.name = name; self.routing = routing }
 }
 public struct Preferences: Codable {
     public var profiles: [Profile] = []
     public var selectedID: UUID?
     public var killSwitch = true
-    public var onDemand = false
     public var theme = "system"
     public var language = "system"
+    public var splitProfiles = [SplitProfile(name: "Default")]
+    public var activeSplitProfile = "Default"
+    public var autoConnect = false
+    public var loggingEnabled = true
+    public var verboseLogs = false
+    public var excludedRoutes = Preferences.defaultExcludedRoutes
+    public static let defaultExcludedRoutes = ["10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12",
+        "192.0.0.0/24", "192.168.0.0/16", "255.255.255.255/32"]
     public init() {}
+    public func routing(for profile: Profile) -> Routing {
+        splitProfiles.first { $0.name == profile.splitProfile }?.routing ?? Routing()
+    }
+    enum CodingKeys: String, CodingKey {
+        case profiles, selectedID, killSwitch, theme, language, splitProfiles, activeSplitProfile,
+             autoConnect, loggingEnabled, verboseLogs, excludedRoutes
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        profiles = try c.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
+        selectedID = try c.decodeIfPresent(UUID.self, forKey: .selectedID)
+        killSwitch = try c.decodeIfPresent(Bool.self, forKey: .killSwitch) ?? true
+        theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
+        language = try c.decodeIfPresent(String.self, forKey: .language) ?? "system"
+        autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? false
+        loggingEnabled = try c.decodeIfPresent(Bool.self, forKey: .loggingEnabled) ?? true
+        verboseLogs = try c.decodeIfPresent(Bool.self, forKey: .verboseLogs) ?? false
+        excludedRoutes = try c.decodeIfPresent([String].self, forKey: .excludedRoutes) ?? Self.defaultExcludedRoutes
+        activeSplitProfile = try c.decodeIfPresent(String.self, forKey: .activeSplitProfile) ?? "Default"
+        if let stored = try c.decodeIfPresent([SplitProfile].self, forKey: .splitProfiles) {
+            splitProfiles = stored
+        } else {
+            // Earlier previews kept routing per server. Preserve every distinct set,
+            // including both manual directions, when introducing shared profiles.
+            splitProfiles = []
+            for index in profiles.indices {
+                let routing = profiles[index].routing
+                if let existing = splitProfiles.first(where: { $0.routing == routing }) {
+                    profiles[index].splitProfile = existing.name
+                } else {
+                    let name = splitProfiles.isEmpty ? "Default" : "Profile \(splitProfiles.count + 1)"
+                    splitProfiles.append(SplitProfile(name: name, routing: routing))
+                    profiles[index].splitProfile = name
+                }
+            }
+        }
+        if !splitProfiles.contains(where: { $0.name == "Default" }) { splitProfiles.insert(SplitProfile(name: "Default"), at: 0) }
+        if !splitProfiles.contains(where: { $0.name == activeSplitProfile }) { activeSplitProfile = "Default" }
+        for index in profiles.indices where !splitProfiles.contains(where: { $0.name == profiles[index].splitProfile }) {
+            profiles[index].splitProfile = "Default"
+        }
+    }
 }
 public struct GeoSnapshot: Codable {
     public let source: String

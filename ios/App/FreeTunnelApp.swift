@@ -7,180 +7,172 @@ import FreeTunnelCore
     var body: some Scene {
         WindowGroup {
             RootView(state: state)
-                .preferredColorScheme(
-                    state.preferences.theme == "dark" ? .dark : state.preferences.theme == "light" ? .light : nil)
-                .environment(\.locale, state.preferences.language == "system" ? .current : Locale(
-                    identifier: state.preferences.language))
+                .preferredColorScheme(state.preferences.theme == "dark" ? .dark : state.preferences.theme == "light" ? .light : nil)
+                .environment(\.locale, state.preferences.language == "system" ? .current : Locale(identifier: state.preferences.language))
                 .onOpenURL { url in
-                    if url.scheme == "tt" { state.importText = url.absoluteString } else if url.isFileURL {
-                        state.importFiles([url]) }
+                    if url.scheme == "tt" { state.confirmImport(url.absoluteString) }
+                    else if url.isFileURL { state.importFiles([url]) }
                 }
                 .task { await state.refreshDue() }
-                .onChange(of: phase) { _, newValue in
-                    if newValue == .active { Task { await state.refreshDue() } }
-                }
-        }
-        .backgroundTask(.appRefresh("org.freetunnel.ios.refresh")) { await state.refreshDue() }
+                .onChange(of: phase) { _, newValue in if newValue == .active { Task { await state.refreshDue() } } }
+        }.backgroundTask(.appRefresh("org.freetunnel.ios.refresh")) { await state.refreshDue() }
     }
 }
-
 struct RootView: View {
     @State private var tab = ProcessInfo.processInfo.environment["FT_PREVIEW_TAB"] ?? "connection"
     @ObservedObject var state: AppState
     var body: some View {
-        VStack(spacing: 0) {
-            navigation
-            Group {
-                switch tab {
-                case "servers": ServersView(state: state)
-                case "routing": RoutingView(state: state)
-                case "settings": SettingsView(state: state)
-                case "logs": LogsView(vpn: state.vpn)
-                default: HomeView(state: state, vpn: state.vpn, showServers: { tab = "servers" })
+        ZStack {
+            VStack(spacing: 0) {
+                navigation
+                Group {
+                    switch tab {
+                    case "servers": ServersView(state: state, vpn: state.vpn)
+                    case "routing": RoutingView(state: state)
+                    case "settings": SettingsView(state: state)
+                    case "logs": LogsView(state: state, vpn: state.vpn)
+                    default: HomeView(state: state, vpn: state.vpn) { state.openAddMenu = true; tab = "servers" }
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if let dialog = state.dialog {
+                switch dialog {
+                case .server(let id): ServerEditor(state: state, profile: state.preferences.profiles.first { $0.id == id })
+                case .importText: ImportView(state: state)
+                case .subscription: ImportView(state: state, subscriptionOnly: true)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .tint(AppStyle.accent)
-        .foregroundStyle(AppStyle.text)
-        .font(AppStyle.body)
-        .background(AppStyle.background)
-        .buttonStyle(AppButtonStyle())
-        .modifier(PreviewForms(state: state))
-        .alert("FreeTunnel", isPresented: Binding(get: { state.message != nil && state.openDialogs.isEmpty },
-            set: { if !$0 {
-            state.message = nil } })) {
-            Button("OK") { state.message = nil }
-        } message: { Text(LocalizedStringKey(state.message ?? "")) }
-        .sheet(isPresented: Binding(get: { !state.importText.isEmpty }, set: { if !$0 { state.importText = "" } })) {
-            ImportView(state: state, initial: state.importText).modifier(FormAlerts(state: state))
-        }
+            }
+            if let confirmation = state.confirmation {
+                Color.black.opacity(0.45).ignoresSafeArea()
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(LocalizedStringKey(confirmation.text)).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("Cancel") { state.confirmation = nil }
+                        Button(LocalizedStringKey(confirmation.actionTitle)) {
+                            state.confirmation = nil; confirmation.action()
+                        }.buttonStyle(AppButtonStyle(primary: true))
+                    }
+                }.padding(18).frame(maxWidth: 340).background(AppStyle.background, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border)).padding(18)
+            }
+            if let message = state.message {
+                VStack { Spacer(); Text(LocalizedStringKey(message)).font(AppStyle.label).padding(12)
+                    .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border)).padding(.horizontal, 20).padding(.bottom, 16) }
+                    .allowsHitTesting(false)
+            }
+        }.tint(AppStyle.accent).foregroundStyle(AppStyle.text).font(AppStyle.body)
+            .background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
+            .modifier(PreviewForms(state: state))
+            .task(id: state.message) {
+                guard state.message != nil else { return }
+                do { try await Task.sleep(for: .seconds(6)); state.message = nil } catch {}
+            }
+            .task {
+                guard !state.isPreview else { return }
+                await state.vpn.prepare()
+                if state.preferences.autoConnect && state.vpn.isDisconnected { await state.connect() }
+            }
     }
     private var navigation: some View {
-        HStack(spacing: 10) {
-            tabButton("connection", title: "Home", icon: "")
+        HStack(spacing: 8) {
+            tabButton("connection", title: "Home", icon: "TunnelLogo")
             tabButton("servers", title: "Servers", icon: "NavConnection")
             tabButton("routing", title: "Routing", icon: "NavNetwork")
             tabButton("settings", title: "Settings", icon: "NavSettings")
             tabButton("logs", title: "Logs", icon: "NavLog")
-        }.frame(maxWidth: .infinity).padding(.vertical, 12).background(AppStyle.background)
+        }.frame(maxWidth: .infinity).padding(.vertical, 8).background(AppStyle.background)
     }
     private func tabButton(_ id: String, title: LocalizedStringKey, icon: String) -> some View {
         Button { tab = id } label: {
-            Group {
-                Image(icon.isEmpty ? "TunnelLogo" : icon).resizable().scaledToFit().frame(width: 25, height: 25)
-            }.frame(width: 48, height: 48)
-                .background(tab == id ? AppStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(.plain).accessibilityLabel(title)
-            .accessibilityAddTraits(tab == id ? [.isSelected] : [])
+            Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
+                .opacity(tab == id ? 1 : 0.8).frame(width: 46, height: 38)
+                .background(tab == id ? AppStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityLabel(title).accessibilityAddTraits(tab == id ? [.isSelected] : [])
     }
-
 }
-
 struct HomeView: View {
     @ObservedObject var state: AppState
     @ObservedObject var vpn: VPNController
-    var status: LocalizedStringKey {
-        switch vpn.status {
-        case .connected: "Connected"
-        case .connecting: "Connecting"
-        case .reasserting: "Reconnecting"
-        case .disconnecting: "Disconnecting"
-        default: "Disconnected"
-        }
-    }
     var showServers: () -> Void
+    @State private var picker = false
+    @State private var pulse = false
+    private var transitioning: Bool { !vpn.isDisconnected && vpn.status != .connected }
     var body: some View {
-        VStack(spacing: 22) {
-            Spacer()
-            Button {
-                if state.selected == nil { showServers(); return }
-                Task {
-                    if vpn.isDisconnected {
-                        await state.connect()
-                    } else { do { try await vpn.disconnect() } catch { state.report(error) } }
+        VStack(spacing: 0) {
+            Spacer(minLength: 12)
+            VStack(spacing: 22) {
+                VStack(spacing: 6) {
+                    Button {
+                        if state.selected == nil { showServers(); return }
+                        Task {
+                            if vpn.isDisconnected { await state.connect() }
+                            else { do { try await vpn.disconnect() } catch { state.report(error) } }
+                        }
+                    } label: {
+                        Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
+                            .opacity(vpn.isDisconnected ? 0.5 : transitioning ? 0.7 : 1)
+                            .scaleEffect(pulse ? 1.05 : 1)
+                            .animation(pulse ? .easeInOut(duration: 0.75).repeatForever(autoreverses: true) : .easeOut(duration: 0.12), value: pulse)
+                    }.buttonStyle(.plain).disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
+                        .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
+                    if vpn.status == .connected, let date = vpn.connectedAt {
+                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15)).foregroundStyle(AppStyle.secondary)
+                    } else if transitioning {
+                        Text(vpn.status == .disconnecting ? "Disconnecting…" : "Connecting…")
+                            .font(.custom("Inter-Medium", size: 15)).foregroundStyle(AppStyle.secondary)
+                    }
                 }
-            } label: {
-                Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
-                    .opacity(vpn.isDisconnected ? 0.5 : 1)
-            }.buttonStyle(.plain)
-                .disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
-                .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
-                .accessibilityIdentifier("connect-button")
-            if vpn.status == .connected, let date = vpn.connectedAt {
-                Text(date, style: .timer).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
-            } else if !vpn.isDisconnected {
-                Text(status).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
-                    .accessibilityIdentifier("connection-status")
-            }
-            if state.preferences.profiles.isEmpty {
-                Button("Add server", action: showServers).buttonStyle(AppButtonStyle())
-            } else {
-                Picker("Server", selection: $state.preferences.selectedID) {
-                    ForEach(state.preferences.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
-                }.pickerStyle(.menu).disabled(!vpn.isDisconnected)
-            }
-            Spacer()
-        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).background(AppStyle.background)
-    }
-}
-
-struct SettingsView: View {
-    @ObservedObject var state: AppState
-    var body: some View {
-        AppForm {
-            AppSection("General") {
-                AppPicker("Language", selection: $state.preferences.language) {
-                    Text("System").tag("system"); Text("English").tag("en"); Text("Русский").tag("ru")
-                }
-                Divider()
-                AppPicker("Theme", selection: $state.preferences.theme) {
-                    Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark")
-                }
-            }
-            AppSection("Security") {
-                Toggle("Kill switch", isOn: $state.preferences.killSwitch)
-            }
-            HStack(spacing: 8) {
-                Link("FreeTunnel 1.2.4", destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
-                Text("·")
-                Link("TrustTunnel 1.1.11", destination: URL(
-                    string: "https://github.com/TrustTunnel/TrustTunnelClient")!)
-            }.font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
-                .buttonStyle(.plain).frame(maxWidth: .infinity)
-        }
-    }
-}
-
-struct LogsView: View {
-    @ObservedObject var vpn: VPNController
-    @State private var copied = false
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Button("Clear") { Task { await vpn.readLogs(clear: true) } }
-                Spacer()
-                Button(copied ? "Copied" : "Copy") {
-                    UIPasteboard.general.string = vpn.logs
-                    copied = true
-                }
-            }.buttonStyle(.plain).font(AppStyle.label).foregroundStyle(AppStyle.accent).frame(minHeight: 44)
-            ScrollView {
-                Text(vpn.logs.isEmpty ? String(localized: "No logs yet") : vpn.logs)
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: .infinity)
-        }.padding(.horizontal, 18).background(AppStyle.background)
+                HStack(spacing: 6) {
+                    Button {
+                        if state.selected == nil { showServers() } else { picker.toggle() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(state.selected?.name ?? String(localized: "Add a config"))
+                                .font(.custom("Inter-Medium", size: 15)).lineLimit(1)
+                            if state.selected != nil { Image(systemName: "arrowtriangle.down.fill").font(.system(size: 7)) }
+                        }
+                    }.buttonStyle(.plain).popover(isPresented: $picker) {
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                ForEach(state.preferences.profiles) { profile in
+                                    Button { state.select(profile.id); picker = false } label: {
+                                        HStack { Text(profile.name); Spacer(minLength: 12)
+                                            if state.selected?.id == profile.id { Image(systemName: "checkmark").font(.system(size: 10)) } }
+                                            .padding(.horizontal, 12).frame(minHeight: 40)
+                                    }.buttonStyle(.plain)
+                                }
+                            }.padding(6)
+                        }.frame(width: 280, height: CGFloat(min(3, state.preferences.profiles.count)) * 40 + 12)
+                            .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
+                    }
+                    if state.selected != nil {
+                        Button(action: showServers) { Image(systemName: "plus").font(.system(size: 14)).frame(width: 22, height: 22) }
+                            .buttonStyle(.plain).accessibilityLabel("Add a config")
+                    }
+                }.padding(.horizontal, 18)
+            }.animation(.easeOut(duration: 0.28), value: vpn.status)
+            Spacer(minLength: 34)
+            HStack(spacing: 12) {
+                speedTile(up: false, value: vpn.downSpeed)
+                speedTile(up: true, value: vpn.upSpeed)
+            }.padding(.bottom, 44)
+        }.frame(maxWidth: .infinity).background(AppStyle.background)
+            .onChange(of: transitioning) { _, value in pulse = value }
+            .onAppear { pulse = transitioning }
             .task {
+                guard !state.isPreview else { return }
                 while !Task.isCancelled {
-                    await vpn.readLogs()
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                    await vpn.sampleTraffic()
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 }
             }
-            .task(id: copied) {
-                if copied {
-                    try? await Task.sleep(for: .seconds(2))
-                    copied = false
-                }
-            }
+    }
+    private func speedTile(up: Bool, value: Double) -> some View {
+        HStack(spacing: 5) {
+            Text(up ? "↑" : "↓").foregroundStyle(up ? AppStyle.secondary : AppStyle.success)
+            Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(.custom("Inter-Medium", size: 15))
+        }.frame(width: 116, height: 44).background(AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
     }
 }

@@ -23,6 +23,7 @@ for patch in pin['patches']:
     with (root / patch).open('rb') as source:
         subprocess.run(['patch', '-p1', '--fuzz=0'], stdin=source, cwd=upstream, check=True)
 PY
+patch -d "$work/upstream" -p1 --fuzz=0 < "$root/ios/patches/packet-counters.patch"
 # Cargo is invoked from an out-of-tree CMake build directory. Carry the
 # upstream toolchain into that directory instead of using the runner default.
 RUSTUP_TOOLCHAIN="$(cd "$work/upstream" && rustup show active-toolchain | cut -d ' ' -f 1)"

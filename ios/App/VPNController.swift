@@ -6,12 +6,16 @@ import FreeTunnelCore
 @MainActor final class VPNController: ObservableObject {
     @Published private(set) var status: NEVPNStatus = .disconnected
     @Published private(set) var logs = ""
+    @Published private(set) var downSpeed = 0.0
+    @Published private(set) var upSpeed = 0.0
+    private var lastStats: (up: UInt64, down: UInt64, time: TimeInterval)?
     private var manager: NETunnelProviderManager?
     private var observer: NSObjectProtocol?
     private var changing = false
     var connectedAt: Date? { manager?.connection.connectedDate }
     var isDisconnected: Bool { status == .disconnected || status == .invalid }
     init() { Task { try? await load() } }
+    func prepare() async { try? await load() }
     private func load() async throws {
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
         manager = managers.first { (
@@ -24,7 +28,7 @@ import FreeTunnelCore
             Task { @MainActor in self?.status = self?.manager?.connection.status ?? .disconnected }
         }
     }
-    func connect(text: String, name: String, killSwitch: Bool, onDemand: Bool) async throws {
+    func connect(text: String, name: String, killSwitch: Bool, onDemand: Bool, logging: Bool, verbose: Bool) async throws {
         guard !changing else { throw ClientError.tunnelFailed }
         changing = true
         defer { changing = false }
@@ -37,7 +41,7 @@ import FreeTunnelCore
         // The system configuration contains a reference, never the VPN credentials.
         let key = "active-tunnel"
         try Vault.write(Data(text.utf8), key: key)
-        config.providerConfiguration = ["secretKey": key]
+        config.providerConfiguration = ["secretKey": key, "loggingEnabled": logging, "verboseLogs": verbose]
         config.includeAllNetworks = killSwitch
         config.excludeLocalNetworks = false
         config.disconnectOnSleep = false
@@ -63,18 +67,48 @@ import FreeTunnelCore
         try await manager.saveToPreferences()
         manager.connection.stopVPNTunnel()
     }
-    func readLogs(clear: Bool = false) async {
-        if clear { logs = "" }
-        guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else { return }
-        let data: Data? = await withCheckedContinuation { continuation in
+    func disconnectAndWait() async throws {
+        try await disconnect()
+        for _ in 0..<100 {
+            if isDisconnected { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw ClientError.tunnelFailed
+    }
+    func send(_ command: Data) async -> Data? {
+        guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else { return nil }
+        return await withCheckedContinuation { continuation in
             let reply = ProviderReply(continuation)
             DispatchQueue.global().asyncAfter(deadline: .now() + 5) { reply.finish(nil) }
-            do {
-                let command = Data((clear ? "clear" : "logs").utf8)
-                try session.sendProviderMessage(command) { reply.finish($0) }
-            } catch { reply.finish(nil) }
+            do { try session.sendProviderMessage(command) { reply.finish($0) } }
+            catch { reply.finish(nil) }
         }
-        if let data, let text = String(data: data, encoding: .utf8) { logs = text }
+    }
+    func readLogs(clear: Bool = false) async {
+        if clear { logs = "" }
+        if let data = await send(Data((clear ? "clear" : "logs").utf8)), let text = String(data: data, encoding: .utf8) {
+            logs = text
+        } else if let url = try? Identity.directory().appendingPathComponent("freetunnel.log") {
+            if clear { try? Data().write(to: url, options: .atomic) }
+            logs = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+    }
+    func configureLogging(enabled: Bool, verbose: Bool) async {
+        if let data = try? JSONSerialization.data(withJSONObject: ["loggingEnabled": enabled, "verboseLogs": verbose]) {
+            _ = await send(data)
+        }
+    }
+    func sampleTraffic() async {
+        guard !isDisconnected, let data = await send(Data("stats".utf8)),
+              let stats = try? JSONDecoder().decode(TrafficCounters.self, from: data) else {
+            lastStats = nil; upSpeed = 0; downSpeed = 0; return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastStats, now > lastStats.time, stats.up >= lastStats.up, stats.down >= lastStats.down {
+            upSpeed = Double(stats.up - lastStats.up) / (now - lastStats.time) / 1_000_000
+            downSpeed = Double(stats.down - lastStats.down) / (now - lastStats.time) / 1_000_000
+        }
+        lastStats = (stats.up, stats.down, now)
     }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }
@@ -92,3 +126,5 @@ private final class ProviderReply: @unchecked Sendable {
         pending?.resume(returning: data)
     }
 }
+
+private struct TrafficCounters: Decodable { let up: UInt64; let down: UInt64 }

@@ -4,194 +4,164 @@ import FreeTunnelCore
 
 struct ServersView: View {
     @ObservedObject var state: AppState
-    @State private var adding = false
-    @State private var creating = false
+    @ObservedObject var vpn: VPNController
     @State private var files = false
-    @State private var editing: Profile?
-    @State private var removing: Profile?
-    @State private var exportText = ""
+    @State private var scanning = false
+    @State private var exportProfile: UUID?
+    @State private var exportDocument: ConfigDocument?
+    @State private var exporting = false
+    @State private var exportName = "config"
     var body: some View {
         VStack(spacing: 8) {
-            Menu {
-                Button("New configuration") { creating = true }
-                Button("Paste links or TOML") { adding = true }
-                Button("Import files") { files = true }
-            } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                .buttonStyle(.plain).accessibilityLabel("Add server")
+            HStack(spacing: 16) {
+                Button { state.openAddMenu.toggle() } label: {
+                    Image(systemName: "plus").font(.system(size: 21, weight: .light)).frame(width: 40, height: 32)
+                }.buttonStyle(.plain).accessibilityLabel("Add a config")
+                    .popover(isPresented: $state.openAddMenu) { addMenu }
+                Button { Task { await state.pingServers() } } label: {
+                    Image(systemName: "speedometer").font(.system(size: 19)).frame(width: 40, height: 32)
+                }.buttonStyle(.plain).disabled(state.pinging).accessibilityLabel("Check latency")
+            }.padding(.top, 8)
             ScrollView {
-                VStack(spacing: 4) {
-                    ForEach(state.preferences.profiles) { profile in
-                        serverRow(profile)
-                    }
+                VStack(spacing: 0) {
+                    ForEach(state.preferences.profiles) { profile in serverRow(profile) }
                     if state.preferences.profiles.isEmpty {
-                        Button("Add server") { adding = true }.buttonStyle(.plain)
+                        Button("Add a config") { state.openAddMenu = true }.buttonStyle(.plain).padding(.top, 20)
                     }
                 }.padding(.horizontal, 18)
             }
         }.background(AppStyle.background)
-                .sheet(isPresented: Binding(get: { !exportText.isEmpty }, set: { if !$0 { exportText = "" } })) {
-                    ShareSheet(items: [exportText])
+            .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): state.importFiles(urls)
+                case .failure(let error): state.report(error)
                 }
-                .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data],
-                    allowsMultipleSelection: true) { result in
-                    switch result {
-                    case .success(let urls): state.importFiles(urls)
-                    case .failure(let error): state.report(error)
-                    }
-                }
-                .sheet(isPresented: $adding) { ImportView(state: state).modifier(FormAlerts(state: state)) }
-                .sheet(isPresented: $creating) { NewServerView(state: state).modifier(FormAlerts(state: state)) }
-                .sheet(item: $editing) { ServerEditor(state: state, profile: $0).modifier(FormAlerts(state: state)) }
-                .confirmationDialog("Remove server?", isPresented: Binding(get: { removing != nil }, set: {
-                    if !$0 { removing = nil } }), titleVisibility: .visible) {
-                    Button("Remove", role: .destructive) {
-                        guard let profile = removing else { return }
-                        do { try state.remove(profile) } catch { state.report(error) }
-                        removing = nil
-                    }
-                }
+            }
+            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .plainText,
+                defaultFilename: exportName + ".toml") { result in
+                if case .failure(let error) = result { state.report(error) }
+            }
+            .sheet(isPresented: $scanning) { QRScanner { text in scanning = false; state.confirmImport(text) } }
+    }
+    private var addMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            menuAction("Paste from clipboard") { state.confirmImport(UIPasteboard.general.string ?? "") }
+            menuAction("From file…") { files = true }
+            Divider().padding(.vertical, 5)
+            menuAction("Create new…") { state.dialog = .server(nil) }
+            Divider().padding(.vertical, 5)
+            menuAction("Scan QR code") { scanning = true }
+            menuAction("Subscription") { state.dialog = .subscription }
+        }.padding(6).frame(width: 250).font(AppStyle.body)
+            .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
+    }
+    private func menuAction(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        Button { state.openAddMenu = false; action() } label: {
+            Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(.horizontal, 9)
+        }.buttonStyle(.plain)
     }
     private func serverRow(_ profile: Profile) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                if state.vpn.isDisconnected { state.preferences.selectedID = profile.id }
-            } label: {
+        HStack(spacing: 8) {
+            Button { state.select(profile.id) } label: {
                 HStack(spacing: 8) {
                     Image("TunnelLogo").resizable().scaledToFit().frame(width: 22, height: 22)
                         .opacity(state.preferences.selectedID == profile.id ? 1 : 0.4)
-                    Text(profile.name).font(AppStyle.label).lineLimit(1)
-                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    Text(profile.name).font(.custom(state.preferences.selectedID == profile.id ? "Inter-Medium" : "Inter-Regular", size: 14))
+                        .lineLimit(1).truncationMode(.tail)
+                }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if let ping = state.pings[profile.id] { Text(ping).font(AppStyle.caption).foregroundStyle(AppStyle.secondary) }
+            if state.selected?.id == profile.id && !vpn.isDisconnected && vpn.status != .disconnecting {
+                Text(vpn.status == .connected ? "connected" : "connecting…").font(.custom("Inter-Medium", size: 11))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .foregroundStyle(vpn.status == .connected ? AppStyle.success : AppStyle.secondary)
+                    .background(AppStyle.selected, in: Capsule())
             }
-            Button {
-                do { exportText = try state.secret(profile).toml } catch { state.report(error) }
-            } label: { AppIcon(name: "ActionExport") }.accessibilityLabel("Share configuration")
-            Button { editing = profile } label: { AppIcon(name: "ActionEdit") }.accessibilityLabel("Edit")
-            Button(role: .destructive) { removing = profile } label: { AppIcon(name: "ActionClose") }
-                .accessibilityLabel("Remove")
-        }.buttonStyle(.plain).padding(.vertical, 4)
+            HStack(spacing: 0) {
+                Button { exportProfile = profile.id } label: { AppIcon(name: "ActionExport") }
+                    .accessibilityLabel("Export config")
+                    .popover(isPresented: Binding(get: { exportProfile == profile.id }, set: { if !$0 { exportProfile = nil } })) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            exportAction("Export .toml…") {
+                                let config = try Configuration(state.secret(profile).toml)
+                                exportDocument = ConfigDocument(text: try DeepLinkEncoder.exportTOML(config))
+                                exportName = profile.name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_")
+                                exporting = true
+                            }
+                            exportAction("Copy deep-link") {
+                                UIPasteboard.general.string = try DeepLinkEncoder.encode(Configuration(state.secret(profile).toml))
+                                state.message = "Link copied"
+                            }
+                        }.padding(6).frame(width: 230).presentationCompactAdaptation(.popover)
+                            .presentationBackground(AppStyle.background)
+                    }
+                Button { state.dialog = .server(profile.id) } label: { AppIcon(name: "ActionEdit") }.accessibilityLabel("Edit")
+                Button {
+                    state.confirm(String(format: NSLocalizedString("Delete config “%@”?", comment: ""), profile.name)) {
+                        do { try state.remove(profile) } catch { state.report(error) }
+                    }
+                } label: { AppIcon(name: "ActionClose") }.accessibilityLabel("Delete")
+            }.buttonStyle(.plain).foregroundStyle(AppStyle.secondary)
+        }.padding(.leading, 10).padding(.trailing, 6)
             .draggable(profile.id.uuidString)
             .dropDestination(for: String.self) { identifiers, _ in
                 guard let id = identifiers.first, let source = state.preferences.profiles.firstIndex(where: {
                     $0.id.uuidString == id }), let target = state.preferences.profiles.firstIndex(where: {
                     $0.id == profile.id }) else { return false }
-                state.preferences.profiles.move(fromOffsets: IndexSet(integer: source),
-                    toOffset: target > source ? target + 1 : target)
+                state.preferences.profiles.move(fromOffsets: IndexSet(integer: source), toOffset: target > source ? target + 1 : target)
                 return true
             }
             .contextMenu {
-                if profile.subscriptionEnabled {
-                    Button("Refresh subscription") { Task { await state.refreshSubscription(profile) } }
-                }
+                if profile.subscriptionEnabled { Button("Refresh subscription") { Task { await state.refreshSubscription(profile) } } }
             }
     }
+    private func exportAction(_ title: LocalizedStringKey, action: @escaping () throws -> Void) -> some View {
+        Button {
+            exportProfile = nil
+            do { try action() } catch { state.report(error) }
+        } label: { Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(.horizontal, 9) }
+            .buttonStyle(.plain)
+    }
 }
-
+struct ConfigDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
 struct ImportView: View {
     @ObservedObject var state: AppState
-    var initial = ""
-    @Environment(\.dismiss) private var dismiss
+    var subscriptionOnly = false
     @State private var text = ""
-    @State private var subscription = ""
-    @State private var scanning = false
-    @State private var confirmInsecure = false
-    private func importNow(allowInsecure: Bool = false) {
-        do {
-            _ = try state.importBatch(text, allowInsecure: allowInsecure)
-            state.importText = ""
-            dismiss()
-        } catch ClientError.insecureConfig { confirmInsecure = true } catch { state.report(error) }
-    }
     var body: some View {
-        NavigationStack {
-            AppForm {
-                AppSection("Links or TOML") {
-                    TextEditor(text: $text).font(.system(.body, design: .monospaced)).frame(minHeight: 180).appEditor()
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Paste") { text = UIPasteboard.general.string ?? "" }
-                    Button("Scan QR code") { scanning = true }
-                    Button("Import") {
-                        importNow()
-                    }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        AppDialog(title: subscriptionOnly ? "Subscription" : "Import", close: { state.dialog = nil }) {
+            VStack(alignment: .leading, spacing: 12) {
+                if subscriptionOnly { LabeledField(title: "HTTPS subscription URL", text: $text) }
+                else { TextEditor(text: $text).frame(height: 180).appEditor().font(.system(size: 12, design: .monospaced)) }
+                HStack {
+                    if !subscriptionOnly { Button("Paste") { text = UIPasteboard.general.string ?? "" } }
+                    Spacer()
+                    Button(subscriptionOnly ? "Add" : "Import") {
+                        if subscriptionOnly { Task { await state.subscribe(text); if state.message == NSLocalizedString("Imported", comment: "") { state.dialog = nil } } }
+                        else { state.confirmImport(text) }
+                    }.buttonStyle(AppButtonStyle(primary: true)).disabled(text.isEmpty)
                 }
-                AppSection("Subscription") {
-                    SecureField("HTTPS subscription URL", text: $subscription).textContentType(.URL)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Add subscription") { Task { await state.subscribe(subscription) } }
-                        .disabled(subscription.isEmpty || state.busy.contains("subscription"))
-                }
-            }.navigationTitle("Add server")
-                .toolbar { Button("Done") { dismiss() } }
-                .onAppear { if text.isEmpty { text = initial } }
-                .sheet(isPresented: $scanning) {
-                    QRScanner { result in text = result; scanning = false }
-                }
-                .confirmationDialog(LocalizedStringKey(
-                    "This configuration may disable certificate verification. " +
-                    "Import it only if you trust its source."
-                ), isPresented: $confirmInsecure, titleVisibility: .visible) {
-                    Button("Import") { importNow(allowInsecure: true) }
-                }
+            }.textInputAutocapitalization(.never).autocorrectionDisabled()
         }
     }
 }
-
-struct ServerEditor: View {
-    @ObservedObject var state: AppState
-    let profile: Profile
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var text = ""
-    @State private var record: Secret?
-    @State private var sharing = false
-    var body: some View {
-        NavigationStack {
-            AppForm {
-                TextField("Name", text: $name)
-                AppSection("Configuration") {
-                    TextEditor(text: $text).font(.system(.caption, design: .monospaced))
-                        .frame(minHeight: 260).appEditor()
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Configuration contains the server password.").font(AppStyle.caption)
-                        .foregroundStyle(AppStyle.secondary)
+@MainActor extension AppState {
+    func confirmImport(_ text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { report(ClientError.invalidConfig); return }
+        confirm("Import this configuration?", actionTitle: "Add") {
+            do { _ = try self.importBatch(text); self.dialog = nil; self.message = "Imported" }
+            catch ClientError.insecureConfig {
+                self.confirm("This configuration may disable certificate verification. Import it only if you trust its source.", actionTitle: "Add") {
+                    do { _ = try self.importBatch(text, allowInsecure: true); self.dialog = nil; self.message = "Imported" }
+                    catch { self.report(error) }
                 }
-                Button("Share configuration") { sharing = true }
-            }.navigationTitle("Edit server")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            do {
-                                guard var record else { throw ClientError.missingSecret }
-                                record.toml = try Configuration(text).serialized()
-                                try Vault.write(JSONEncoder().encode(record), key: profile.id.uuidString)
-                                var updated = state.preferences.profiles.first { $0.id == profile.id } ?? profile
-                                updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if updated.name.isEmpty { updated.name = try Configuration(text).name }
-                                state.update(updated)
-                                dismiss()
-                            } catch { state.report(error) }
-                        }.disabled(record == nil || !state.vpn.isDisconnected)
-                    }
-                }
-                .task {
-                    #if DEBUG
-                    if state.isPreview {
-                        name = profile.name
-                        text = "[endpoint]\nname = \"FreeTunnel demo\"\nhostname = \"vpn.example.org\"\n"
-                        return
-                    }
-                    #endif
-                    do { record = try state.secret(profile); text = record?.toml ?? ""
-                        name = profile.name } catch { state.report(error) }
-                }
-                .sheet(isPresented: $sharing) { ShareSheet(items: [text]) }
+            } catch { self.report(error) }
         }
     }
-}
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
