@@ -174,7 +174,7 @@ its **Applications**.
 
 ### Routing by geo lists
 
-As on the desktop (see [Routing by geo lists](../README.md#routing-by-geo-lists-windows-and-android)), **Routing**
+As on the desktop (see [Routing by geo lists](../README.md#routing-by-geo-lists)), **Routing**
 decides what goes through the tunnel by lists of what is blocked in Russia, or of Russian sites:
 
 | Routing | Core mode | The lists' entries |

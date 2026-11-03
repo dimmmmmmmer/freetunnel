@@ -754,8 +754,6 @@ void TestIntegrationBackendVpn::aRuleEditReachesTheRunningSessionWithoutARebuild
 // it. Back to "Everything through VPN", the list is switched off.
 void TestIntegrationBackendVpn::geoRoutingRoutesByTheListsOnceTheyAreIn()
 {
-    qputenv("FT_TEST_GEO_ROUTING", "1");
-    const auto unset = qScopeGuard([]() { qunsetenv("FT_TEST_GEO_ROUTING"); });
     QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/geo"))
             .removeRecursively();
 

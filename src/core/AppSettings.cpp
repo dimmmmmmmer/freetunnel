@@ -257,10 +257,12 @@ void saveAppSettings(const AppSettings &cfg) {
 
 void seedFreshInstallSettings()
 {
-#if defined(Q_OS_WIN)
     QSettings s;
+    // The app's own store alone. With the fallbacks, macOS's native settings
+    // also read the global domain (NSGlobalDomain: AppleLanguages and the like),
+    // which is never empty, and a new install there would never be seen as one.
+    s.setFallbacksEnabled(false);
     if (!s.allKeys().isEmpty())
         return;
     s.setValue("routing/geo_mode", QStringLiteral("blocked"));
-#endif
 }

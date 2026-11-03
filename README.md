@@ -179,9 +179,9 @@ switch at the top of the page:
 Under *Through VPN* with no rule that can be used, FreeTunnel keeps the full
 tunnel and the page says so, rather than send everything around it.
 
-### Routing by geo lists (Windows and Android)
+### Routing by geo lists
 
-On Windows and Android, **Routing** at the top of the page decides what goes through the
+On every platform, **Routing** at the top of the page decides what goes through the
 tunnel by lists of what is blocked in Russia, or of Russian sites, that
 FreeTunnel downloads and keeps up to date:
 

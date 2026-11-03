@@ -746,6 +746,11 @@ jobs:
           # where AppStartup looks first. Checked, as the other two platforms are.
           test -e AppDir/usr/translations/qtbase_ru.qm \
             || { echo "::error::Qt's Russian catalogue (usr/translations/qtbase_ru.qm) was not deployed"; exit 1; }
+          # A TLS backend for Qt's network: the update check, subscriptions and
+          # the geo lists are all https, and without one each fails with "TLS
+          # initialization failed" while everything else works.
+          ls AppDir/usr/plugins/tls/libqopensslbackend.so >/dev/null \
+            || { echo "::error::Qt's OpenSSL TLS backend (usr/plugins/tls/libqopensslbackend.so) was not deployed"; exit 1; }
           # The third-party notices, into the AppDir: the AppImage keeps them in
           # usr/share/doc/freetunnel, and the .deb, made from the same AppDir,
           # moves them to /usr/share/doc/freetunnel. linuxdeploy copied the
@@ -1021,6 +1026,11 @@ jobs:
           # runner image. The app uses no SQL, so drop those plugins first.
           rm -rf "$QT_ROOT_DIR/plugins/sqldrivers"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -always-overwrite -qmldir=client/qml
+          # A TLS backend for Qt's network (Secure Transport, or OpenSSL where Qt
+          # was built with it): the update check, subscriptions and the geo lists
+          # are all https, and without one each fails while everything else works.
+          ls "$APP"/Contents/PlugIns/tls/*.dylib >/dev/null 2>&1 \
+            || { echo "::error::no TLS backend under Contents/PlugIns/tls: macdeployqt did not deploy Qt's tls plugins"; exit 1; }
           # Qt's own words in Russian, such as the reason in a network error.
           # macdeployqt copies no catalogues, so a Russian session had them in
           # English. AppStartup looks for them in Contents/Resources/translations;
