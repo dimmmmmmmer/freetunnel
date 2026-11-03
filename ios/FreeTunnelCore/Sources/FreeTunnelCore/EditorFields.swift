@@ -35,7 +35,7 @@ public struct EditorFields: Equatable {
         let trimmedRandom = random.trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = trimmedRandom.split(separator: "/", omittingEmptySubsequences: false)
         guard trimmedRandom.isEmpty || (parts.count <= 2 && parts.allSatisfy { part in
-            !part.isEmpty && part.count.isMultiple(of: 2) && part.allSatisfy { $0.isHexDigit }
+            !part.isEmpty && part.count <= 64 && part.count.isMultiple(of: 2) && part.allSatisfy { $0.isHexDigit }
         }) else { throw ClientError.invalidConfig }
         let host = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         var root = previous?.rawTable ?? [:]
