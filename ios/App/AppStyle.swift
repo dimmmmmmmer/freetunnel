@@ -119,6 +119,7 @@ struct AppPicker<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [AppChoice<Value>]
     var boxed = false
+    var previewID: String?
     @State private var open = false
     var body: some View {
         Group {
@@ -136,6 +137,13 @@ struct AppPicker<Value: Hashable>: View {
                     trigger
                 }.frame(minHeight: 42)
             }
+        }.task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--ui-preview"), let previewID,
+               ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == previewID {
+                try? await Task.sleep(for: .milliseconds(500)); open = true
+            }
+            #endif
         }
     }
     private var trigger: some View {

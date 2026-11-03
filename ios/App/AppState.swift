@@ -37,7 +37,8 @@ import VpnClientFramework
         #if DEBUG
         if isPreview {
             var profile = Profile(name: "FreeTunnel demo")
-            profile.routing.manualBypass = "example.org"
+            profile.routing.defaultDirection = .bypass
+            profile.routing.manualVPN = "example.org"
             let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
                 kind: .sites, direction: .vpn)
             profile.routing.lists = [list]
@@ -46,6 +47,9 @@ import VpnClientFramework
             preferences.selectedID = profile.id
             snapshots[list.id] = GeoSnapshot(source: list.source, kind: list.kind, entries: ["example.org",
                 "*.example.org"], skipped: 0)
+            let scenario = ProcessInfo.processInfo.environment["FT_PREVIEW_SCENARIO"] ?? ""
+            vpn.preparePreview(scenario)
+            if scenario == "connected" { pings[profile.id] = "38 ms" }
             loaded = true
             return
         }

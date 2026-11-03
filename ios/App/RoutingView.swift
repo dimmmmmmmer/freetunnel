@@ -36,7 +36,7 @@ struct RoutingView: View {
                             }
                             state.preferences = updated
                             state.reapplySelected()
-                        }), options: [.init(.vpn, "Bypass VPN"), .init(.bypass, "Through VPN")])
+                        }), options: [.init(.vpn, "Bypass VPN"), .init(.bypass, "Through VPN")], previewID: "mode")
                     }
                     if viaVPN && manual.wrappedValue.isEmpty && opposite.wrappedValue.isEmpty && !routing.wrappedValue.lists.contains(where: { $0.enabled }) {
                         Text("Add a rule to use Through VPN. The full tunnel stays on while the profile is empty.")
@@ -145,7 +145,7 @@ struct GeoListsBlock: View {
                 else if let preset = presets.first(where: { $0.id == id }) {
                     add(GeoList(name: preset.name, source: preset.source, kind: preset.kind, direction: preset.direction))
                 }
-            }), options: [.init("", "Choose…")] + presets.map { .init($0.id, $0.name) } + [.init("custom", "Add your own list")])
+            }), options: [.init("", "Choose…")] + presets.map { .init($0.id, $0.name) } + [.init("custom", "Add your own list")], previewID: "add-list")
             ForEach(routing.wrappedValue.lists) { list in
                 GeoCard(state: state, profileName: profileName, list: list)
             }
@@ -156,7 +156,7 @@ struct GeoListsBlock: View {
                     LabeledField(title: "Name", text: $customName)
                     LabeledField(title: "HTTPS address", text: $source, placeholder: "https://…/geosite.dat#category")
                     AppPicker(title: "List type", selection: $kind, options: [.init(.sites, "Sites"), .init(.ips, "IP addresses")])
-                    AppPicker(title: "Route", selection: $direction, options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")])
+                    AppPicker(title: "Route", selection: $direction, options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")], previewID: "direction")
                     Button("Add") { add(GeoList(name: customName.isEmpty ? source : customName, source: source, kind: kind, direction: direction)) }
                 }.textInputAutocapitalization(.never).autocorrectionDisabled().id("custom-list")
             }
@@ -165,7 +165,7 @@ struct GeoListsBlock: View {
                 for index in updated.splitProfiles.indices { updated.splitProfiles[index].routing.refreshHours = hours }
                 state.preferences = updated
             }), options: [.init(1, "Every hour"),
-                .init(2, "Every 2 hours"), .init(5, "Every 5 hours"), .init(24, "Every 24 hours"), .init(0, "Never")])
+                .init(2, "Every 2 hours"), .init(5, "Every 5 hours"), .init(24, "Every 24 hours"), .init(0, "Never")], previewID: "interval")
                 .accessibilityHint("Updates run when iOS allows the app to work. Open the app to refresh overdue lists.")
         }.onAppear {
             #if DEBUG
@@ -187,7 +187,7 @@ private struct GeoCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(LocalizedStringKey(list.name), isOn: Binding(get: { list.enabled }, set: { value in change { $0.enabled = value } }))
             AppPicker(title: "Route", selection: Binding(get: { list.direction }, set: { value in change { $0.direction = value } }),
-                options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")])
+                options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")], previewID: "direction")
             Group {
                 if state.busy.contains(list.id) { Text("Updating…") }
                 else if let snapshot = state.snapshots[list.id] {
