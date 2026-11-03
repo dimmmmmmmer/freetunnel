@@ -143,7 +143,6 @@ struct AppPicker<Value: Hashable>: View {
     var boxed = false
     var previewID: String?
     @State private var open = false
-    @State private var opensAbove = false
     private var menuWidth: CGFloat {
         let font = UIFontMetrics.default.scaledFont(
             for: UIFont(name: "Inter-Regular", size: 14) ?? .systemFont(ofSize: 14))
@@ -196,18 +195,7 @@ struct AppPicker<Value: Hashable>: View {
             .accessibilityValue(
                 Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
             )
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(key: PickerAnchorFrame.self, value: geometry.frame(in: .global))
-                }
-            )
-            .onPreferenceChange(PickerAnchorFrame.self) { frame in
-                let height =
-                    UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-                    .first?.screen.bounds.height ?? 800
-                opensAbove = frame.midY > height / 2
-            }
-            .popover(isPresented: $open, arrowEdge: opensAbove ? .bottom : .top) {
+            .popover(isPresented: $open) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(options) { option in
@@ -274,7 +262,3 @@ struct AppIcon: View {
     }
 }
 
-private struct PickerAnchorFrame: PreferenceKey {
-    static var defaultValue: CGRect { .zero }
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
