@@ -2,8 +2,8 @@
 // Geo routing: the Split tunnelling page's choice between routing only what is
 // blocked in Russia through the tunnel, everything but Russian sites, or the
 // user's own rules alone; and the lists those modes route by (GeoListUpdater).
-// Windows and Linux; macOS not yet. How it turns into what the core is told is
-// in applySplitRules() (BackendSplit.cpp).
+// Every platform. How it turns into what the core is told is in
+// applySplitRules() (BackendSplit.cpp).
 #include "app/Backend.h"
 
 #include <QLocale>
@@ -33,19 +33,10 @@ QString slotFor(GeoRoutingMode mode, bool sites)
 
 bool Backend::geoRoutingAvailable() const
 {
-    // Nothing of it is Windows' own: the lists are downloaded and read here, the
-    // helper hands their entries to the core, and the core matches them the same
-    // way on every platform. macOS is left for its own step.
-#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
+    // On every platform: the lists are downloaded and read here, the helper hands
+    // their entries to the core, and the core matches them the same way
+    // everywhere. Kept as a property so that a platform can be held back again.
     return true;
-#else
-#ifdef FT_ENABLE_TEST_HOOKS
-    // So the macOS tests can drive it too. Compiled out of release builds.
-    if (qEnvironmentVariableIsSet("FT_TEST_GEO_ROUTING"))
-        return true;
-#endif
-    return false;
-#endif
 }
 
 GeoRoutingMode Backend::effectiveGeoMode() const

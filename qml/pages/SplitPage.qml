@@ -13,7 +13,7 @@ Item {
     // The built-in profile is stored as "Default" and shown in the UI's language.
     function profileLabel(name) { return name === "Default" ? qsTr("Default") : name }
 
-    // Geo routing (Windows and Linux). The rules below keep the meaning the Mode switch
+    // Geo routing. The rules below keep the meaning the Mode switch
     // gives them under it too: they add to the lists or take sites off them.
     readonly property bool geoOn: backend.geoRoutingAvailable && backend.geoMode !== "off"
     readonly property bool rulesSelective: backend.vpnMode === "selective"
@@ -32,7 +32,7 @@ Item {
             anchors.leftMargin: 18; anchors.rightMargin: 18
             spacing: 0
             Item { Layout.preferredHeight: 10 }
-            // ----- Routing by geo lists (Windows and Linux) -----
+            // ----- Routing by geo lists -----
             // Three rows with a line of explanation each, rather than a dropdown:
             // what each choice sends around the tunnel is the whole question, and
             // a dropdown's value column has no room to say it.

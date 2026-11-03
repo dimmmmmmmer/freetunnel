@@ -41,7 +41,7 @@ struct AppSettings {
     // level (the core's excluded_routes), independent of the domain rules above.
     QStringList excluded_routes;
 
-    // Geo routing (core/GeoListUpdater.h), on Windows and Linux: "off" (the
+    // Geo routing (core/GeoListUpdater.h): "off" (the
     // rules above alone, as before there was geo routing), "blocked" (only what
     // is blocked in Russia goes through the tunnel) or "except_ru" (everything
     // does but Russian sites). Off unless chosen: an install that already has
@@ -102,7 +102,7 @@ AppSettings loadAppSettings();
 void saveAppSettings(const AppSettings &cfg);
 
 // What a new install starts with that an existing one does not get on upgrade:
-// geo routing on "blocked", on Windows and Linux. Writes it only when the settings store is
+// geo routing on "blocked". Writes it only when the settings store is
 // still empty, which is the first run. Called by the app before Backend reads the
 // settings; the tests, which build Backend themselves, keep the plain defaults.
 void seedFreshInstallSettings();
