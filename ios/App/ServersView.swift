@@ -31,6 +31,13 @@ struct ServersView: View {
                 }.padding(.horizontal, 18)
             }
         }.background(AppStyle.background)
+            .task {
+                #if DEBUG
+                if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "export" {
+                    try? await Task.sleep(for: .milliseconds(500)); exportProfile = state.selected?.id
+                }
+                #endif
+            }
             .fileImporter(isPresented: $files, allowedContentTypes: [.plainText, .data], allowsMultipleSelection: true) { result in
                 switch result {
                 case .success(let urls): state.importFiles(urls)

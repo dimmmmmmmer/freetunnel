@@ -12,9 +12,31 @@ import FreeTunnelCore
     private var manager: NETunnelProviderManager?
     private var observer: NSObjectProtocol?
     private var changing = false
-    var connectedAt: Date? { manager?.connection.connectedDate }
+    var connectedAt: Date? {
+        #if DEBUG
+        if let previewConnectedAt { return previewConnectedAt }
+        #endif
+        return manager?.connection.connectedDate
+    }
     var isDisconnected: Bool { status == .disconnected || status == .invalid }
-    init() { Task { try? await load() } }
+    init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-preview") { return }
+        #endif
+        Task { try? await load() }
+    }
+    #if DEBUG
+    private var previewConnectedAt: Date?
+    func preparePreview(_ scenario: String) {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-preview") else { return }
+        if scenario == "connected" {
+            status = .connected; previewConnectedAt = Date().addingTimeInterval(-125)
+            downSpeed = 2.4; upSpeed = 0.3
+        } else if scenario == "logs-filled" {
+            logs = "12:00:00 INFO Configuration loaded\n12:00:01 CORE Connecting to vpn.example.org\n12:00:02 INFO Connected"
+        }
+    }
+    #endif
     func prepare() async { try? await load() }
     private func load() async throws {
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()

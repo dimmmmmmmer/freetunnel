@@ -15,10 +15,10 @@ struct SettingsView: View {
                 AppSection("General") {
                     VStack(spacing: 0) {
                         AppPicker(title: "Language", selection: $state.preferences.language,
-                            options: [.init("system", "System"), .init("en", "English"), .init("ru", "Русский")])
+                            options: [.init("system", "System"), .init("en", "English"), .init("ru", "Русский")], previewID: "language")
                         Divider().overlay(AppStyle.border)
                         AppPicker(title: "Theme", selection: $state.preferences.theme,
-                            options: [.init("system", "System"), .init("light", "Light"), .init("dark", "Dark")])
+                            options: [.init("system", "System"), .init("light", "Light"), .init("dark", "Dark")], previewID: "theme")
                         Divider().overlay(AppStyle.border)
                         Toggle("Connect on startup", isOn: $state.preferences.autoConnect)
                     }
