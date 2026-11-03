@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Restored macOS 13 support for Intel and Apple Silicon.
+
 ## 1.2.4
 
 - Fixed tray behavior, slow responses and connection handling on desktop.
