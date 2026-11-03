@@ -99,6 +99,16 @@ targets:
       - package: FreeTunnelCore
       - framework: .build/VpnClientFramework.xcframework
         embed: false
+  FreeTunnelUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: FreeTunnel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.freetunnel.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   FreeTunnel:
     build:
@@ -108,3 +118,7 @@ schemes:
       config: Debug
     archive:
       config: Release
+    test:
+      config: Debug
+      targets:
+        - FreeTunnelUITests

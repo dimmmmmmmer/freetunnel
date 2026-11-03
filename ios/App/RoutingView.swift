@@ -8,7 +8,9 @@ struct RoutingView: View {
     private var name: String { state.preferences.activeSplitProfile }
     private var routing: Binding<Routing> {
         Binding(
-            get: { state.preferences.splitProfiles.first { $0.name == name }?.routing ?? Routing() },
+            get: {
+                state.preferences.splitProfiles.first { $0.name == name }?.routing ?? Routing()
+            },
             set: { state.setRouting($0, name: name) })
     }
     private var viaVPN: Bool { routing.wrappedValue.defaultDirection == .bypass }
@@ -49,7 +51,8 @@ struct RoutingView: View {
                                     }
                                     state.preferences = updated
                                     state.reapplySelected()
-                                }), options: [.init(.vpn, "Bypass VPN"), .init(.bypass, "Through VPN")],
+                                }),
+                            options: [.init(.vpn, "Bypass VPN"), .init(.bypass, "Through VPN")],
                             previewID: "mode")
                     }
                     if viaVPN && manual.wrappedValue.isEmpty && opposite.wrappedValue.isEmpty
@@ -67,16 +70,18 @@ struct RoutingView: View {
                                     Button {
                                         state.preferences.activeSplitProfile = profile.name
                                     } label: {
-                                        Text(LocalizedStringKey(profile.name)).font(AppStyle.label).padding(
-                                            .horizontal, 11
-                                        ).frame(height: 28)
+                                        Text(LocalizedStringKey(profile.name)).font(AppStyle.label)
+                                            .padding(
+                                                .horizontal, 11
+                                            ).frame(height: 28)
                                     }.buttonStyle(.plain)
                                     if profile.name != "Default" {
                                         Button {
                                             state.confirm(
                                                 String(
                                                     format: NSLocalizedString(
-                                                        "Delete profile “%@”?", comment: ""), profile.name)
+                                                        "Delete profile “%@”?", comment: ""),
+                                                    profile.name)
                                             ) {
                                                 state.removeSplitProfile(profile.name)
                                             }
@@ -86,10 +91,12 @@ struct RoutingView: View {
                                         }
                                         .buttonStyle(.plain).accessibilityLabel("Delete profile")
                                     }
-                                }.foregroundStyle(name == profile.name ? AppStyle.accentText : AppStyle.text)
-                                    .background(
-                                        name == profile.name ? AppStyle.accent : AppStyle.surface,
-                                        in: Capsule())
+                                }.foregroundStyle(
+                                    name == profile.name ? AppStyle.accentText : AppStyle.text
+                                )
+                                .background(
+                                    name == profile.name ? AppStyle.accent : AppStyle.surface,
+                                    in: Capsule())
                             }
                             Button {
                                 addingProfile = true
@@ -135,15 +142,18 @@ struct RoutingView: View {
                     GeoListsBlock(state: state, profileName: name).id("geo-lists")
                 }.frame(maxWidth: 600).frame(maxWidth: .infinity).padding(.horizontal, 18).padding(
                     .vertical, 10)
-            }.background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
-                .task {
-                    #if DEBUG
-                        if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_GEO"] == "1" {
-                            try? await Task.sleep(for: .milliseconds(300))
-                            reader.scrollTo("geo-lists", anchor: .top)
-                        }
-                    #endif
-                }
+            }.background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(
+                AppToggleStyle()
+            )
+            .task {
+                #if DEBUG
+                    if state.isPreview
+                        && ProcessInfo.processInfo.environment["FT_PREVIEW_GEO"] == "1" {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        reader.scrollTo("geo-lists", anchor: .top)
+                    }
+                #endif
+            }
         }
     }
     private func recommended() {
@@ -153,7 +163,9 @@ struct RoutingView: View {
         var rules = manual.wrappedValue.split(whereSeparator: { $0.isNewline }).map(String.init)
         for line in text.split(whereSeparator: { $0.isNewline }) {
             let value = line.trimmingCharacters(in: .whitespaces)
-            if !value.isEmpty && !value.hasPrefix("#") && !rules.contains(value) { rules.append(value) }
+            if !value.isEmpty && !value.hasPrefix("#") && !rules.contains(value) {
+                rules.append(value)
+            }
         }
         manual.wrappedValue = rules.joined(separator: "\n")
     }
@@ -168,7 +180,10 @@ struct GeoListsBlock: View {
     @State private var direction: Direction = .vpn
     private var routing: Binding<Routing> {
         Binding(
-            get: { state.preferences.splitProfiles.first { $0.name == profileName }?.routing ?? Routing() },
+            get: {
+                state.preferences.splitProfiles.first { $0.name == profileName }?.routing
+                    ?? Routing()
+            },
             set: { state.setRouting($0, name: profileName) })
     }
     private var presets: [Preset] {
@@ -181,7 +196,8 @@ struct GeoListsBlock: View {
         do {
             _ = try GeoParser.source(list.source)
             var value = routing.wrappedValue
-            guard !value.lists.contains(where: { $0.source == list.source && $0.kind == list.kind }) else {
+            guard !value.lists.contains(where: { $0.source == list.source && $0.kind == list.kind })
+            else {
                 return
             }
             value.lists.append(list)
@@ -194,7 +210,8 @@ struct GeoListsBlock: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Geo lists").font(AppStyle.heading).foregroundStyle(AppStyle.faint).padding(.bottom, 4)
+            Text("Geo lists").font(AppStyle.heading).foregroundStyle(AppStyle.faint).padding(
+                .bottom, 4)
             Text("Ready-made groups of sites and IP addresses. Your manual rules take priority.")
                 .font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
             AppPicker(
@@ -223,7 +240,8 @@ struct GeoListsBlock: View {
                     Button("Cancel") { customOpen = false }
                     LabeledField(title: "Name", text: $customName)
                     LabeledField(
-                        title: "HTTPS address", text: $source, placeholder: "https://…/geosite.dat#category")
+                        title: "HTTPS address", text: $source,
+                        placeholder: "https://…/geosite.dat#category")
                     AppPicker(
                         title: "List type", selection: $kind,
                         options: [.init(.sites, "Sites"), .init(.ips, "IP addresses")])
@@ -234,7 +252,8 @@ struct GeoListsBlock: View {
                     Button("Add") {
                         add(
                             GeoList(
-                                name: customName.isEmpty ? source : customName, source: source, kind: kind,
+                                name: customName.isEmpty ? source : customName, source: source,
+                                kind: kind,
                                 direction: direction))
                     }
                 }.textInputAutocapitalization(.never).autocorrectionDisabled().id("custom-list")
@@ -252,16 +271,19 @@ struct GeoListsBlock: View {
                     }),
                 options: [
                     .init(1, "Every hour"),
-                    .init(2, "Every 2 hours"), .init(5, "Every 5 hours"), .init(24, "Every 24 hours"),
+                    .init(2, "Every 2 hours"), .init(5, "Every 5 hours"),
+                    .init(24, "Every 24 hours"),
                     .init(0, "Never")
                 ], previewID: "interval"
             )
             .accessibilityHint(
-                "Updates run when iOS allows the app to work. Open the app to refresh overdue lists.")
+                "Updates run when iOS allows the app to work. Open the app to refresh overdue lists."
+            )
         }.onAppear {
             #if DEBUG
                 customOpen =
-                    state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] == "add-list"
+                    state.isPreview
+                    && ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] == "add-list"
             #endif
         }
     }
@@ -277,7 +299,9 @@ private struct GeoCard: View {
         return formatter.string(from: date)
     }
     private func change(_ edit: (inout GeoList) -> Void) {
-        guard var value = state.preferences.splitProfiles.first(where: { $0.name == profileName })?.routing,
+        guard
+            var value = state.preferences.splitProfiles.first(where: { $0.name == profileName })?
+                .routing,
             let index = value.lists.firstIndex(where: { $0.id == list.id })
         else { return }
         edit(&value.lists[index])
@@ -287,14 +311,16 @@ private struct GeoCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(
                 LocalizedStringKey(list.name),
-                isOn: Binding(get: { list.enabled }, set: { value in change { $0.enabled = value } })
+                isOn: Binding(
+                    get: { list.enabled }, set: { value in change { $0.enabled = value } })
             )
             .toggleStyle(AppToggleStyle(minimumHeight: 22))
             AppPicker(
                 title: "Route",
                 selection: Binding(
                     get: { list.direction }, set: { value in change { $0.direction = value } }),
-                options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")], previewID: "direction")
+                options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")],
+                previewID: "direction")
             Group {
                 if state.busy.contains(list.id) {
                     Text("Updating…")
@@ -304,19 +330,26 @@ private struct GeoCard: View {
                             format: NSLocalizedString("%lld entries · %@", comment: ""),
                             snapshot.entries.count,
                             updatedLabel(snapshot.updated)))
-                    if snapshot.skipped > 0 { Text("Unsupported entries skipped: \(snapshot.skipped)") }
+                    if snapshot.skipped > 0 {
+                        Text("Unsupported entries skipped: \(snapshot.skipped)")
+                    }
                 } else {
                     Text("Not downloaded yet")
                 }
-                if let error = state.geoErrors[list.id] { Text(error).foregroundStyle(AppStyle.text) }
+                if let error = state.geoErrors[list.id] {
+                    Text(error).foregroundStyle(AppStyle.text)
+                }
             }.font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
             HStack {
-                Button("Update") { Task { await state.refresh(list) } }.disabled(state.busy.contains(list.id))
+                Button("Update") { Task { await state.refresh(list) } }.disabled(
+                    state.busy.contains(list.id))
                 Spacer()
                 Button("Remove") {
                     guard
-                        var value = state.preferences.splitProfiles.first(where: { $0.name == profileName })?
-                            .routing
+                        var value = state.preferences.splitProfiles.first(where: {
+                            $0.name == profileName
+                        })?
+                        .routing
                     else { return }
                     value.lists.removeAll { $0.id == list.id }
                     state.setRouting(value, name: profileName)

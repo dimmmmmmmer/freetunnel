@@ -19,34 +19,40 @@ struct ServersView: View {
                 } label: {
                     Image(systemName: "plus").font(.system(size: 21, weight: .light)).frame(
                         width: 40, height: 32)
-                }.buttonStyle(.plain).accessibilityLabel("Add a config")
-                    .popover(isPresented: $state.openAddMenu) { addMenu }
+                }.buttonStyle(.plain).accessibilityLabel("Add a config").accessibilityIdentifier(
+                    "server-add"
+                )
+                .popover(isPresented: $state.openAddMenu) { addMenu }
                 Button {
                     Task { await state.pingServers() }
                 } label: {
-                    Image(systemName: "speedometer").font(.system(size: 19)).frame(width: 40, height: 32)
+                    Image(systemName: "speedometer").font(.system(size: 19)).frame(
+                        width: 40, height: 32)
                 }.buttonStyle(.plain).disabled(state.pinging).accessibilityLabel("Check latency")
             }.padding(.top, 8)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(state.preferences.profiles) { profile in serverRow(profile) }
                     if state.preferences.profiles.isEmpty {
-                        Button("Add a config") { state.openAddMenu = true }.buttonStyle(.plain).padding(
-                            .top, 20)
+                        Button("Add a config") { state.openAddMenu = true }.buttonStyle(.plain)
+                            .padding(
+                                .top, 20)
                     }
                 }.padding(.horizontal, 18)
             }
         }.background(AppStyle.background)
             .task {
                 #if DEBUG
-                    if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "export" {
+                    if state.isPreview
+                        && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "export" {
                         try? await Task.sleep(for: .milliseconds(500))
                         exportProfile = state.selected?.id
                     }
                 #endif
             }
             .fileImporter(
-                isPresented: $files, allowedContentTypes: [.plainText, .data], allowsMultipleSelection: true
+                isPresented: $files, allowedContentTypes: [.plainText, .data],
+                allowsMultipleSelection: true
             ) { result in
                 switch result {
                 case .success(let urls): state.importFiles(urls)
@@ -68,7 +74,9 @@ struct ServersView: View {
     }
     private var addMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
-            menuAction("Paste from clipboard") { state.confirmImport(UIPasteboard.general.string ?? "") }
+            menuAction("Paste from clipboard") {
+                state.confirmImport(UIPasteboard.general.string ?? "")
+            }
             menuAction("From file…") { files = true }
             Divider().padding(.vertical, 5)
             menuAction("Create new…") { state.dialog = .server(nil) }
@@ -83,7 +91,8 @@ struct ServersView: View {
             state.openAddMenu = false
             action()
         } label: {
-            Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(.horizontal, 9)
+            Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(
+                .horizontal, 9)
         }.buttonStyle(.plain)
     }
     private func serverRow(_ profile: Profile) -> some View {
@@ -96,16 +105,19 @@ struct ServersView: View {
                         .opacity(state.preferences.selectedID == profile.id ? 1 : 0.4)
                     Text(profile.name).font(
                         .custom(
-                            state.preferences.selectedID == profile.id ? "Inter-Medium" : "Inter-Regular",
+                            state.preferences.selectedID == profile.id
+                                ? "Inter-Medium" : "Inter-Regular",
                             size: 14)
                     )
                     .lineLimit(1).truncationMode(.tail)
-                }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+                }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).contentShape(
+                    Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("server-select-" + profile.name)
             if let ping = state.pings[profile.id] {
                 Text(ping).font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
             }
-            if state.selected?.id == profile.id && !vpn.isDisconnected && vpn.status != .disconnecting {
+            if state.selected?.id == profile.id && !vpn.isDisconnected
+                && vpn.status != .disconnecting {
                 Text(vpn.status == .connected ? "connected" : "connecting…").font(
                     .custom("Inter-Medium", size: 11)
                 )
@@ -117,6 +129,17 @@ struct ServersView: View {
         }.padding(.leading, 10).padding(.trailing, 6)
             .draggable(profile.id.uuidString)
             .dropDestination(for: String.self) { identifiers, _ in
+                moveServer(identifiers, to: profile)
+            }
+            .contextMenu {
+                if profile.subscriptionEnabled {
+                    Button("Refresh subscription") {
+                        Task { await state.refreshSubscription(profile) }
+                    }
+                }
+            }
+    }
+    private func moveServer(_ identifiers: [String], to profile: Profile) -> Bool {
                 guard let id = identifiers.first,
                     let source = state.preferences.profiles.firstIndex(where: {
                         $0.id.uuidString == id
@@ -126,14 +149,9 @@ struct ServersView: View {
                     })
                 else { return false }
                 state.preferences.profiles.move(
-                    fromOffsets: IndexSet(integer: source), toOffset: target > source ? target + 1 : target)
+                    fromOffsets: IndexSet(integer: source),
+                    toOffset: target > source ? target + 1 : target)
                 return true
-            }
-            .contextMenu {
-                if profile.subscriptionEnabled {
-                    Button("Refresh subscription") { Task { await state.refreshSubscription(profile) } }
-                }
-            }
     }
     private func serverActions(_ profile: Profile) -> some View {
         HStack(spacing: 0) {
@@ -150,7 +168,8 @@ struct ServersView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     exportAction("Export .toml…") {
                         let config = try Configuration(state.secret(profile).toml)
-                        exportDocument = ConfigDocument(text: try DeepLinkEncoder.exportTOML(config))
+                        exportDocument = ConfigDocument(
+                            text: try DeepLinkEncoder.exportTOML(config))
                         exportName = profile.name.replacingOccurrences(of: "/", with: "_")
                             .replacingOccurrences(of: "\\", with: "_")
                         exporting = true
@@ -168,24 +187,27 @@ struct ServersView: View {
                 state.dialog = .server(profile.id)
             } label: {
                 AppIcon(name: "ActionEdit")
-            }.accessibilityLabel("Edit")
+            }.accessibilityLabel("Edit").accessibilityIdentifier("server-edit-" + profile.name)
             Button {
                 state.confirm(
-                    String(format: NSLocalizedString("Delete config “%@”?", comment: ""), profile.name)
+                    String(
+                        format: NSLocalizedString("Delete config “%@”?", comment: ""), profile.name)
                 ) {
                     do { try state.remove(profile) } catch { state.report(error) }
                 }
             } label: {
                 AppIcon(name: "ActionClose")
-            }.accessibilityLabel("Delete")
+            }.accessibilityLabel("Delete").accessibilityIdentifier("server-delete-" + profile.name)
         }.buttonStyle(.plain).foregroundStyle(AppStyle.secondary)
     }
-    private func exportAction(_ title: LocalizedStringKey, action: @escaping () throws -> Void) -> some View {
+    private func exportAction(_ title: LocalizedStringKey, action: @escaping () throws -> Void)
+        -> some View {
         Button {
             exportProfile = nil
             do { try action() } catch { state.report(error) }
         } label: {
-            Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(.horizontal, 9)
+            Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(
+                .horizontal, 9)
         }
         .buttonStyle(.plain)
     }
@@ -195,7 +217,9 @@ struct ConfigDocument: FileDocument {
     var text: String
     init(text: String) { self.text = text }
     init(configuration: ReadConfiguration) throws {
-        guard let decoded = String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8)
+        guard
+            let decoded = String(
+                data: configuration.file.regularFileContents ?? Data(), encoding: .utf8)
         else {
             throw ClientError.invalidConfig
         }
@@ -220,7 +244,9 @@ struct ImportView: View {
                         .system(size: 12, design: .monospaced))
                 }
                 HStack {
-                    if !subscriptionOnly { Button("Paste") { text = UIPasteboard.general.string ?? "" } }
+                    if !subscriptionOnly {
+                        Button("Paste") { text = UIPasteboard.general.string ?? "" }
+                    }
                     Spacer()
                     Button(subscriptionOnly ? "Add" : "Import") {
                         if subscriptionOnly {

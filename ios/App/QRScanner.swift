@@ -5,7 +5,8 @@ struct QRScanner: View {
     let received: (String) -> Void
     @State private var unavailable = false
     var body: some View {
-        if !unavailable && DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+        if !unavailable && DataScannerViewController.isSupported
+            && DataScannerViewController.isAvailable {
             ScannerController(received: received, failed: { unavailable = true }).ignoresSafeArea()
         } else {
             ContentUnavailableView(
@@ -32,7 +33,9 @@ private struct ScannerController: UIViewControllerRepresentable {
         return scanner
     }
     func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
-    static func dismantleUIViewController(_ controller: DataScannerViewController, coordinator: Coordinator) {
+    static func dismantleUIViewController(
+        _ controller: DataScannerViewController, coordinator: Coordinator
+    ) {
         controller.stopScanning()
     }
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
@@ -57,7 +60,8 @@ private struct ScannerController: UIViewControllerRepresentable {
         ) {
             guard !delivered else { return }
             for item in addedItems {
-                if case .barcode(let code) = item, let text = code.payloadStringValue, text.hasPrefix("tt://") {
+                if case .barcode(let code) = item, let text = code.payloadStringValue,
+                    text.hasPrefix("tt://") {
                     delivered = true
                     scanner.stopScanning()
                     received(text)

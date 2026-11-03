@@ -7,8 +7,9 @@ struct SettingsView: View {
         Binding(
             get: { state.preferences.excludedRoutes.joined(separator: "\n") },
             set: { value in
-                state.preferences.excludedRoutes = value.split(whereSeparator: { $0.isNewline }).map(
-                    String.init)
+                state.preferences.excludedRoutes = value.split(whereSeparator: { $0.isNewline })
+                    .map(
+                        String.init)
                 state.reapplySelected()
             })
     }
@@ -20,13 +21,15 @@ struct SettingsView: View {
                         AppPicker(
                             title: "Language", selection: $state.preferences.language,
                             options: [
-                                .init("system", "System"), .init("en", "English"), .init("ru", "Русский")
+                                .init("system", "System"), .init("en", "English"),
+                                .init("ru", "Русский")
                             ], previewID: "language")
                         Divider().overlay(AppStyle.border)
                         AppPicker(
                             title: "Theme", selection: $state.preferences.theme,
                             options: [
-                                .init("system", "System"), .init("light", "Light"), .init("dark", "Dark")
+                                .init("system", "System"), .init("light", "Light"),
+                                .init("dark", "Dark")
                             ], previewID: "theme")
                         Divider().overlay(AppStyle.border)
                         Toggle("Connect on startup", isOn: $state.preferences.autoConnect)
@@ -36,8 +39,9 @@ struct SettingsView: View {
                     Toggle(isOn: $state.preferences.killSwitch) {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Kill switch")
-                            Text("block traffic if the VPN drops").font(AppStyle.caption).foregroundStyle(
-                                AppStyle.faint)
+                            Text("block traffic if the VPN drops").font(AppStyle.caption)
+                                .foregroundStyle(
+                                    AppStyle.faint)
                         }
                     }.onChange(of: state.preferences.killSwitch) { _, _ in state.reapplySelected() }
                 }
@@ -47,7 +51,8 @@ struct SettingsView: View {
                         Spacer(minLength: 0)
                         Button("Restore defaults") {
                             state.confirm(
-                                "Replace the excluded routes with the defaults?", actionTitle: "Replace"
+                                "Replace the excluded routes with the defaults?",
+                                actionTitle: "Replace"
                             ) {
                                 state.preferences.excludedRoutes = Preferences.defaultExcludedRoutes
                                 state.reapplySelected()
@@ -61,7 +66,9 @@ struct SettingsView: View {
                         }.foregroundStyle(AppStyle.danger)
                     }.font(AppStyle.caption).buttonStyle(.plain)
                     RuleChips(
-                        rules: routes, placeholder: "IP or subnet (e.g. 10.0.0.0/8), then Enter", ipOnly: true
+                        rules: routes, placeholder: "IP or subnet (e.g. 10.0.0.0/8), then Enter",
+                        ipOnly: true,
+                        identifier: "excluded-routes"
                     )
                 }
                 AppSection("Logging") {
@@ -71,8 +78,10 @@ struct SettingsView: View {
                         Toggle(isOn: $state.preferences.verboseLogs) {
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Verbose logs")
-                                Text("full VPN core detail for debugging (noisy)").font(AppStyle.caption)
-                                    .foregroundStyle(AppStyle.faint)
+                                Text("full VPN core detail for debugging (noisy)").font(
+                                    AppStyle.caption
+                                )
+                                .foregroundStyle(AppStyle.faint)
                             }
                         }.disabled(!state.preferences.loggingEnabled)
                     }
@@ -89,7 +98,8 @@ struct SettingsView: View {
                                 ProgressView().controlSize(.small)
                             } else {
                                 Text(
-                                    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                                    Bundle.main.object(
+                                        forInfoDictionaryKey: "CFBundleShortVersionString")
                                         as? String ?? "1.2.4"
                                 ).foregroundStyle(AppStyle.faint)
                             }
@@ -99,18 +109,21 @@ struct SettingsView: View {
                 HStack(spacing: 8) {
                     Link(
                         "FreeTunnel "
-                            + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                            + (Bundle.main.object(
+                                forInfoDictionaryKey: "CFBundleShortVersionString")
                                 as? String ?? "1.2.4"),
                         destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
                     Text("·")
                     Link(
                         String(localized: "TrustTunnel core ") + "1.1.11",
-                        destination: URL(string: "https://github.com/TrustTunnel/TrustTunnelClient")!)
+                        destination: URL(
+                            string: "https://github.com/TrustTunnel/TrustTunnelClient")!)
                 }.font(AppStyle.caption).foregroundStyle(AppStyle.faint).buttonStyle(.plain)
                     .frame(maxWidth: .infinity).padding(.vertical, 14).id("settings-bottom")
             }.task {
                 #if DEBUG
-                    if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_BOTTOM"] == "1" {
+                    if state.isPreview
+                        && ProcessInfo.processInfo.environment["FT_PREVIEW_BOTTOM"] == "1" {
                         try? await Task.sleep(for: .milliseconds(300))
                         reader.scrollTo("settings-bottom", anchor: .bottom)
                     }

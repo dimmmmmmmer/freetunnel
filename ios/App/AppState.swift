@@ -34,16 +34,22 @@ import VpnClientFramework
     private let decoder = JSONDecoder()
     var selected: Profile? { preferences.profiles.first { $0.id == preferences.selectedID } }
     init() {
+        prepareUITests()
         #if DEBUG
             if isPreview {
-                var profile = Profile(name: "FreeTunnel demo")
+                var profile = Profile(
+                    name: ProcessInfo.processInfo.environment["FT_PREVIEW_LONG_NAMES"] == "1"
+                        ? "Очень длинное название сервера — Германия, Франкфурт-на-Майне, основной сервер"
+                        : "FreeTunnel demo")
                 profile.routing.defaultDirection = .bypass
                 profile.routing.manualVPN = "example.org"
                 let list = GeoList(
                     name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
                     kind: .sites, direction: .vpn)
                 profile.routing.lists = [list]
-                preferences.splitProfiles = [SplitProfile(name: "Default", routing: profile.routing)]
+                preferences.splitProfiles = [
+                    SplitProfile(name: "Default", routing: profile.routing)
+                ]
                 preferences.profiles = [profile]
                 preferences.selectedID = profile.id
                 snapshots[list.id] = GeoSnapshot(
@@ -80,6 +86,19 @@ import VpnClientFramework
         // URL errors often include subscription credentials. Never display raw errors.
         message = (error as? ClientError ?? .networkFailed).rawValue
     }
+    private func prepareUITests() {
+        #if DEBUG && targetEnvironment(simulator)
+            if UITestSupport.enabled {
+                if ProcessInfo.processInfo.environment["FT_UI_TEST_RESET"] == "1",
+                    let directory = try? UITestSupport.directory() {
+                    try? FileManager.default.removeItem(at: directory)
+                }
+                if let clipboard = ProcessInfo.processInfo.environment["FT_UI_TEST_CLIPBOARD"] {
+                    UIPasteboard.general.string = clipboard
+                }
+            }
+        #endif
+    }
     private func persist() {
         guard loaded, !isPreview else { return }
         do {
@@ -101,7 +120,9 @@ import VpnClientFramework
         return try decoder.decode(Secret.self, from: Vault.read(profile.id.uuidString))
     }
     func update(_ profile: Profile) {
-        guard let index = preferences.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        guard let index = preferences.profiles.firstIndex(where: { $0.id == profile.id }) else {
+            return
+        }
         preferences.profiles[index] = profile
     }
 }
@@ -114,9 +135,14 @@ extension AppState {
         profile.routing = config.importedRouting
         profile.subscriptionEnabled = subscription != nil
         profile.subscriptionUpdated = subscription == nil ? nil : Date()
-        let record = Secret(toml: try config.storingImportedRulesInProfile(), subscription: subscription)
+        let record = Secret(
+            toml: try config.storingImportedRulesInProfile(), subscription: subscription)
         try Vault.write(encoder.encode(record), key: profile.id.uuidString)
-        if let splitProfile { profile.splitProfile = splitProfile } else { assignImportedRouting(&profile) }
+        if let splitProfile {
+            profile.splitProfile = splitProfile
+        } else {
+            assignImportedRouting(&profile)
+        }
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
@@ -154,10 +180,12 @@ extension AppState {
                 profiles.append(profile)
             }
             var updated = preferences
-            for index in profiles.indices where profiles[index].routing != updated.splitProfiles[0].routing {
+            for index in profiles.indices
+            where profiles[index].routing != updated.splitProfiles[0].routing {
                 let name = "Imported " + profiles[index].id.uuidString.prefix(8)
                 profiles[index].splitProfile = name
-                updated.splitProfiles.append(SplitProfile(name: name, routing: profiles[index].routing))
+                updated.splitProfiles.append(
+                    SplitProfile(name: name, routing: profiles[index].routing))
             }
             updated.profiles.append(contentsOf: profiles)
             if updated.selectedID == nil { updated.selectedID = profiles.first?.id }
@@ -186,7 +214,8 @@ extension AppState {
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size <= Configuration.maximumBytes else { throw ClientError.tooLarge }
                 let data = try Data(contentsOf: url)
-                guard data.count <= Configuration.maximumBytes, let text = String(data: data, encoding: .utf8)
+                guard data.count <= Configuration.maximumBytes,
+                    let text = String(data: data, encoding: .utf8)
                 else {
                     throw ClientError.invalidConfig
                 }
@@ -201,7 +230,9 @@ extension AppState {
         guard vpn.isDisconnected else { throw ClientError.tunnelFailed }
         try Vault.remove(profile.id.uuidString)
         preferences.profiles.removeAll { $0.id == profile.id }
-        if preferences.selectedID == profile.id { preferences.selectedID = preferences.profiles.first?.id }
+        if preferences.selectedID == profile.id {
+            preferences.selectedID = preferences.profiles.first?.id
+        }
 
     }
     func refresh(_ list: GeoList) async {
@@ -209,7 +240,12 @@ extension AppState {
         defer { busy.remove(list.id) }
         do {
             let url = try GeoParser.source(list.source).url
-            let data = try await Downloads.read(URLRequest(url: url), limit: GeoParser.maximumBytes)
+            let data: Data
+            if UITestSupport.enabled {
+                data = Data("example.org\nexample.net\n".utf8)
+            } else {
+                data = try await Downloads.read(URLRequest(url: url), limit: GeoParser.maximumBytes)
+            }
             let snapshot = try await Task.detached { try GeoParser.parse(data, list: list) }.value
             guard
                 preferences.splitProfiles.contains(where: { profile in
@@ -224,7 +260,9 @@ extension AppState {
             snapshots[list.id] = snapshot
             geoErrors.removeValue(forKey: list.id)
             if let selected,
-                preferences.routing(for: selected).lists.contains(where: { $0.id == list.id && $0.enabled }) {
+                preferences.routing(for: selected).lists.contains(where: {
+                    $0.id == list.id && $0.enabled
+                }) {
                 reapplySelected()
             }
         } catch {
@@ -233,7 +271,7 @@ extension AppState {
         }  // Previous valid snapshot is kept on failure.
     }
     func refreshDue() async {
-        guard !isPreview else { return }
+        guard !isPreview, !UITestSupport.enabled else { return }
         defer { scheduleRefresh() }
         for profile in preferences.profiles {
             if profile.subscriptionEnabled
@@ -244,7 +282,8 @@ extension AppState {
         }
         for profile in preferences.splitProfiles {
             let interval =
-                Routing.intervals.contains(profile.routing.refreshHours) ? profile.routing.refreshHours : 24
+                Routing.intervals.contains(profile.routing.refreshHours)
+                ? profile.routing.refreshHours : 24
             for list in profile.routing.lists where list.enabled {
                 let previous = snapshots[list.id]
                 if previous == nil
@@ -259,7 +298,7 @@ extension AppState {
         }
     }
     func scheduleRefresh() {
-        guard !isPreview else { return }
+        guard !isPreview, !UITestSupport.enabled else { return }
         var intervals = preferences.splitProfiles.compactMap { profile -> Int? in
             let hours = profile.routing.refreshHours
             if profile.routing.lists.contains(where: { $0.enabled }) && hours > 0 { return hours }
@@ -277,7 +316,8 @@ extension AppState {
         guard busy.insert("subscription").inserted else { return }
         defer { busy.remove("subscription") }
         do {
-            let data = try await Downloads.read(Subscription.request(url), limit: Subscription.maximumBytes)
+            let data = try await Downloads.read(
+                Subscription.request(url), limit: Subscription.maximumBytes)
             try add(toml: Subscription.apply(data), subscription: url)
             message = NSLocalizedString("Imported", comment: "")
         } catch { report(error) }
@@ -289,16 +329,19 @@ extension AppState {
         do {
             var record = try secret(profile)
             guard let url = record.subscription else { throw ClientError.invalidSource }
-            let data = try await Downloads.read(Subscription.request(url), limit: Subscription.maximumBytes)
+            let data = try await Downloads.read(
+                Subscription.request(url), limit: Subscription.maximumBytes)
             record.toml = try Subscription.apply(data, previous: record.toml)
-            guard var updated = preferences.profiles.first(where: { $0.id == profile.id }) else { return }
+            guard var updated = preferences.profiles.first(where: { $0.id == profile.id }) else {
+                return
+            }
             try Vault.write(encoder.encode(record), key: profile.id.uuidString)
             updated.subscriptionUpdated = Date()
             update(updated)
         } catch { report(error) }
     }
     func connect() async {
-        guard !isPreview else { return }
+        guard !isPreview, !UITestSupport.enabled else { return }
         guard loaded, let profile = selected else { return }
         do {
             let config = try Configuration(secret(profile).toml)

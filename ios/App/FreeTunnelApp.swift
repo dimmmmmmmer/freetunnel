@@ -54,7 +54,8 @@ struct RootView: View {
             if let dialog = state.dialog {
                 switch dialog {
                 case .server(let id):
-                    ServerEditor(state: state, profile: state.preferences.profiles.first { $0.id == id })
+                    ServerEditor(
+                        state: state, profile: state.preferences.profiles.first { $0.id == id })
                 case .importText: ImportView(state: state)
                 case .subscription: ImportView(state: state, subscriptionOnly: true)
                 }
@@ -62,7 +63,8 @@ struct RootView: View {
             if let confirmation = state.confirmation {
                 Color.black.opacity(0.45).ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 18) {
-                    Text(LocalizedStringKey(confirmation.text)).fixedSize(horizontal: false, vertical: true)
+                    Text(LocalizedStringKey(confirmation.text)).fixedSize(
+                        horizontal: false, vertical: true)
                     HStack {
                         Spacer()
                         Button("Cancel") { state.confirmation = nil }.buttonStyle(
@@ -71,6 +73,7 @@ struct RootView: View {
                             state.confirmation = nil
                             confirmation.action()
                         }.buttonStyle(AppButtonStyle(primary: true, dialog: true))
+                            .accessibilityIdentifier("confirm-action")
                     }
                 }.padding(18).frame(maxWidth: 340).background(
                     AppStyle.background, in: RoundedRectangle(cornerRadius: 14)
@@ -80,7 +83,9 @@ struct RootView: View {
             if let message = state.message {
                 VStack {
                     Spacer()
-                    Text(LocalizedStringKey(message)).font(AppStyle.label).padding(12)
+                    Text(LocalizedStringKey(message)).accessibilityIdentifier("notification").font(
+                        AppStyle.label
+                    ).padding(12)
                         .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border)).padding(
                             .horizontal, 20
@@ -89,7 +94,9 @@ struct RootView: View {
                 .allowsHitTesting(false)
             }
         }.tint(AppStyle.accent).foregroundStyle(AppStyle.text).font(AppStyle.body)
-            .background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
+            .background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(
+                AppToggleStyle()
+            )
             .modifier(PreviewForms(state: state))
             .task(id: state.message) {
                 guard state.message != nil else { return }
@@ -101,7 +108,9 @@ struct RootView: View {
             .task {
                 guard !state.isPreview else { return }
                 await state.vpn.prepare()
-                if state.preferences.autoConnect && state.vpn.isDisconnected { await state.connect() }
+                if state.preferences.autoConnect && state.vpn.isDisconnected {
+                    await state.connect()
+                }
             }
     }
     private var navigation: some View {
@@ -119,8 +128,10 @@ struct RootView: View {
         } label: {
             Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
                 .opacity(tab == id ? 1 : 0.8).frame(width: 46, height: 38)
-                .background(tab == id ? AppStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain).accessibilityLabel(title).accessibilityAddTraits(tab == id ? [.isSelected] : [])
+                .background(
+                    tab == id ? AppStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityIdentifier("tab-" + id).accessibilityLabel(title)
+            .accessibilityAddTraits(tab == id ? [.isSelected] : [])
     }
 }
 struct HomeView: View {
@@ -131,6 +142,13 @@ struct HomeView: View {
     @State private var pulse = false
     private var transitioning: Bool { !vpn.isDisconnected && vpn.status != .connected }
     var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                homeContent.frame(minHeight: geometry.size.height)
+            }.scrollBounceBehavior(.basedOnSize)
+        }
+    }
+    private var homeContent: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
             VStack(spacing: 22) {
@@ -161,11 +179,13 @@ struct HomeView: View {
                     )
                     .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                     if vpn.status == .connected, let date = vpn.connectedAt {
-                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15)).foregroundStyle(
-                            AppStyle.secondary)
+                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15))
+                            .foregroundStyle(
+                                AppStyle.secondary)
                     } else if transitioning {
                         Text(vpn.status == .disconnecting ? "Disconnecting…" : "Connecting…")
-                            .font(.custom("Inter-Medium", size: 15)).foregroundStyle(AppStyle.secondary)
+                            .font(.custom("Inter-Medium", size: 15)).foregroundStyle(
+                                AppStyle.secondary)
                     }
                 }
                 HStack(spacing: 6) {
@@ -191,7 +211,8 @@ struct HomeView: View {
                                             Text(profile.name)
                                             Spacer(minLength: 12)
                                             if state.selected?.id == profile.id {
-                                                Image(systemName: "checkmark").font(.system(size: 10))
+                                                Image(systemName: "checkmark").font(
+                                                    .system(size: 10))
                                             }
                                         }
                                         .padding(.horizontal, 12).frame(minHeight: 40)
@@ -199,13 +220,16 @@ struct HomeView: View {
                                 }
                             }.padding(6)
                         }.frame(
-                            width: 280, height: CGFloat(min(3, state.preferences.profiles.count)) * 40 + 12
+                            width: 280,
+                            height: CGFloat(min(3, state.preferences.profiles.count)) * 40 + 12
                         )
-                        .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
+                        .presentationCompactAdaptation(.popover).presentationBackground(
+                            AppStyle.background)
                     }
                     if state.selected != nil {
                         Button(action: showServers) {
-                            Image(systemName: "plus").font(.system(size: 14)).frame(width: 22, height: 22)
+                            Image(systemName: "plus").font(.system(size: 14)).frame(
+                                width: 22, height: 22)
                         }
                         .buttonStyle(.plain).accessibilityLabel("Add a config")
                     }
@@ -232,6 +256,7 @@ struct HomeView: View {
             Text(upload ? "↑" : "↓").foregroundStyle(upload ? AppStyle.secondary : AppStyle.success)
             Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(
                 .custom("Inter-Medium", size: 15))
-        }.frame(width: 116, height: 44).background(AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
+        }.frame(width: 116, height: 44).background(
+            AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
     }
 }

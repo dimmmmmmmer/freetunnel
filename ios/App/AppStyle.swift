@@ -32,7 +32,8 @@ enum AppStyle {
                 let value = traits.userInterfaceStyle == .dark ? dark : light
                 return UIColor(
                     red: Double((value >> 16) & 255) / 255,
-                    green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, alpha: 1)
+                    green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255,
+                    alpha: 1)
             })
     }
 }
@@ -42,8 +43,12 @@ struct AppButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(dialog ? AppStyle.body : AppStyle.label)
-            .foregroundStyle(primary ? AppStyle.accentText : dialog ? AppStyle.text : AppStyle.accent)
-            .padding(.horizontal, dialog ? 13 : 10).frame(minWidth: dialog ? 88 : nil, minHeight: 32)
+            .foregroundStyle(
+                primary ? AppStyle.accentText : dialog ? AppStyle.text : AppStyle.accent
+            )
+            .padding(.horizontal, dialog ? 13 : 10).frame(
+                minWidth: dialog ? 88 : nil, minHeight: 32
+            )
             .background(
                 primary ? AppStyle.accent : dialog ? AppStyle.background : AppStyle.surface,
                 in: RoundedRectangle(cornerRadius: 8)
@@ -78,9 +83,10 @@ struct AppToggleStyle: ToggleStyle {
     }
 }
 struct AppFieldStyle: TextFieldStyle {
+    @ScaledMetric(relativeTo: .subheadline) private var fieldHeight = 36.0
     // swiftlint:disable:next identifier_name
     func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration.font(AppStyle.label).padding(.horizontal, 12).frame(height: 36)
+        configuration.font(AppStyle.label).padding(.horizontal, 12).frame(minHeight: fieldHeight)
             .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
     }
@@ -92,7 +98,8 @@ struct AppForm<Content: View>: View {
             VStack(alignment: .leading, spacing: 14) { content }
                 .frame(maxWidth: 600).frame(maxWidth: .infinity).padding(.horizontal, 18).padding(
                     .vertical, 10)
-        }.background(AppStyle.background).buttonStyle(AppButtonStyle())
+        }.scrollDismissesKeyboard(.interactively).background(AppStyle.background).buttonStyle(
+            AppButtonStyle())
     }
 }
 struct AppSection<Content: View>: View {
@@ -114,6 +121,7 @@ struct LabeledField: View {
     @Binding var text: String
     var placeholder = ""
     var secure = false
+    var identifier = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
@@ -123,7 +131,8 @@ struct LabeledField: View {
                 } else {
                     TextField(placeholder, text: $text)
                 }
-            }.textFieldStyle(AppFieldStyle())
+            }.textFieldStyle(AppFieldStyle()).accessibilityLabel(title).accessibilityIdentifier(
+                identifier)
         }
     }
 }
@@ -143,13 +152,17 @@ struct AppPicker<Value: Hashable>: View {
     var boxed = false
     var previewID: String?
     @State private var open = false
+    @ScaledMetric(relativeTo: .body) private var rowHeight = 40.0
+    @ScaledMetric(relativeTo: .body) private var fieldHeight = 36.0
     private var menuWidth: CGFloat {
         let font = UIFontMetrics.default.scaledFont(
             for: UIFont(name: "Inter-Regular", size: 14) ?? .systemFont(ofSize: 14))
         let width =
             options.map {
-                (NSLocalizedString($0.title, comment: "") as NSString).size(withAttributes: [.font: font])
-                    .width
+                (NSLocalizedString($0.title, comment: "") as NSString).size(withAttributes: [
+                    .font: font
+                ])
+                .width
             }.max() ?? 0
         return min(330, max(170, width + 60))
     }
@@ -158,11 +171,12 @@ struct AppPicker<Value: Hashable>: View {
             if boxed {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
-                    trigger.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).frame(
-                        height: 36
-                    )
-                    .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
+                    trigger.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+                        .frame(
+                            minHeight: fieldHeight
+                        )
+                        .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
                 }
             } else {
                 HStack(spacing: 8) {
@@ -186,14 +200,18 @@ struct AppPicker<Value: Hashable>: View {
             open = true
         } label: {
             HStack(spacing: 5) {
-                Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
-                    .lineLimit(1).truncationMode(.tail)
+                Text(
+                    LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…")
+                )
+                .lineLimit(1).truncationMode(.tail)
                 if boxed { Spacer(minLength: 0) }
                 Image(systemName: "arrowtriangle.down.fill").font(.system(size: 7))
             }.foregroundStyle(boxed ? AppStyle.text : AppStyle.secondary)
         }.buttonStyle(.plain).accessibilityLabel(title)
+            .accessibilityIdentifier(previewID.map { "picker-" + $0 } ?? "")
             .accessibilityValue(
-                Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
+                Text(
+                    LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
             )
             .popover(isPresented: $open) {
                 ScrollView {
@@ -210,14 +228,18 @@ struct AppPicker<Value: Hashable>: View {
                                     if selection == option.value {
                                         Image(systemName: "checkmark").font(.system(size: 10))
                                     }
-                                }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(minHeight: 40)
+                                }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(
+                                    minHeight: rowHeight)
                             }.buttonStyle(.plain)
                         }
                     }.font(AppStyle.body).padding(6)
                 }.scrollBounceBehavior(.basedOnSize)
-                    .frame(width: menuWidth, height: CGFloat(options.count * 40 + 12))
+                    .frame(
+                        width: menuWidth, height: min(360, CGFloat(options.count) * rowHeight + 12)
+                    )
                     .fixedSize()
-                    .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
+                    .presentationCompactAdaptation(.popover).presentationBackground(
+                        AppStyle.background)
             }
     }
 }
@@ -230,9 +252,11 @@ struct AppDialog<Content: View>: View {
             Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: close)
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Button(action: close) { Image(systemName: "arrow.left").frame(width: 22, height: 28) }
-                        .buttonStyle(.plain).accessibilityLabel("Back")
-                    Text(title).font(.custom("Inter-Medium", size: 15))
+                    Button(action: close) {
+                        Image(systemName: "arrow.left").frame(width: 22, height: 28)
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("Back")
+                    Text(title).font(.custom("Inter-Medium", size: 15, relativeTo: .headline))
                     Spacer(minLength: 0)
                 }
                 content

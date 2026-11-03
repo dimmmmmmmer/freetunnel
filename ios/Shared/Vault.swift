@@ -14,6 +14,7 @@ enum Identity {
             forInfoDictionaryKey: "FreeTunnelTunnelIdentifier") as? String ?? ""
     }
     static func directory() throws -> URL {
+        if UITestSupport.enabled { return try UITestSupport.directory() }
         guard !group.isEmpty,
             let url = FileManager.default.containerURL(
                 forSecurityApplicationGroupIdentifier: group)
@@ -34,6 +35,10 @@ enum Vault {
         ]
     }
     static func write(_ data: Data, key: String) throws {
+        if UITestSupport.enabled {
+            try data.write(to: UITestSupport.secretPath(key), options: .atomic)
+            return
+        }
         var record = try query(key)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
@@ -50,16 +55,28 @@ enum Vault {
         }
     }
     static func read(_ key: String) throws -> Data {
+        if UITestSupport.enabled { return try Data(contentsOf: UITestSupport.secretPath(key)) }
         var record = try query(key)
         record[kSecReturnData as String] = true
         record[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(record as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { throw ClientError.missingSecret }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw ClientError.missingSecret
+        }
         return data
     }
     static func remove(_ key: String) throws {
+        if UITestSupport.enabled {
+            let path = try UITestSupport.secretPath(key)
+            if FileManager.default.fileExists(atPath: path.path) {
+                try FileManager.default.removeItem(at: path)
+            }
+            return
+        }
         let status = SecItemDelete(try query(key) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw ClientError.storageFailed }
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ClientError.storageFailed
+        }
     }
 }

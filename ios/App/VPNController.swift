@@ -48,6 +48,7 @@ import NetworkExtension
     #endif
     func prepare() async { try? await load() }
     private func load() async throws {
+        guard !UITestSupport.enabled else { return }
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
         manager = managers.first {
             ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier
@@ -80,7 +81,9 @@ import NetworkExtension
         // The system configuration contains a reference, never the VPN credentials.
         let key = "active-tunnel"
         try Vault.write(Data(text.utf8), key: key)
-        config.providerConfiguration = ["secretKey": key, "loggingEnabled": logging, "verboseLogs": verbose]
+        config.providerConfiguration = [
+            "secretKey": key, "loggingEnabled": logging, "verboseLogs": verbose
+        ]
         config.includeAllNetworks = killSwitch
         config.excludeLocalNetworks = false
         config.disconnectOnSleep = false
@@ -119,7 +122,9 @@ import NetworkExtension
         return await withCheckedContinuation { continuation in
             let reply = ProviderReply(continuation)
             DispatchQueue.global().asyncAfter(deadline: .now() + 5) { reply.finish(nil) }
-            do { try session.sendProviderMessage(command) { reply.finish($0) } } catch { reply.finish(nil) }
+            do { try session.sendProviderMessage(command) { reply.finish($0) } } catch {
+                reply.finish(nil)
+            }
         }
     }
     func readLogs(clear: Bool = false) async {
@@ -151,8 +156,10 @@ import NetworkExtension
         let now = ProcessInfo.processInfo.systemUptime
         if let lastStats, now > lastStats.time, stats.uploaded >= lastStats.uploaded,
             stats.downloaded >= lastStats.downloaded {
-            upSpeed = Double(stats.uploaded - lastStats.uploaded) / (now - lastStats.time) / 1_000_000
-            downSpeed = Double(stats.downloaded - lastStats.downloaded) / (now - lastStats.time) / 1_000_000
+            upSpeed =
+                Double(stats.uploaded - lastStats.uploaded) / (now - lastStats.time) / 1_000_000
+            downSpeed =
+                Double(stats.downloaded - lastStats.downloaded) / (now - lastStats.time) / 1_000_000
         }
         lastStats = TrafficSample(uploaded: stats.uploaded, downloaded: stats.downloaded, time: now)
     }
