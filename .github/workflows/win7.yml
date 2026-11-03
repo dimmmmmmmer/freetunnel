@@ -490,9 +490,12 @@ jobs:
           Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
 
           # The patched Qt's own windeployqt, so the patched DLLs are the ones
-          # deployed. The runtimes are copied by hand below.
+          # deployed. The runtimes are copied by hand below. --force-openssl:
+          # windeployqt skips qopensslbackend.dll when it finds no OpenSSL DLLs
+          # to ship with it, and there are none, because OpenSSL is linked into
+          # the plugin itself.
           & (Join-Path $env:QT_WIN7_PREFIX 'bin\windeployqt.exe') --release --no-translations `
-            --no-compiler-runtime --qmldir client\qml dist\FreeTunnel.exe
+            --no-compiler-runtime --force-openssl --qmldir client\qml dist\FreeTunnel.exe
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
           if (-not (Test-Path dist\Qt6Core.dll)) { throw "windeployqt deployed no Qt6Core.dll" }
           # HTTPS in the app goes through this one (see OPENSSL_VER above).
