@@ -106,6 +106,27 @@ inline QJsonObject waitForEvent(QTcpSocket &sock, const QString &ev, int timeout
     return {};
 }
 
+// A connected socket alone is not readiness. Qt 6.8.3 on macOS 15.8 reports a
+// connection to a port nobody listens on as made (waitForConnected() is true,
+// and the socket is gone the moment it is written to), so a helper still
+// starting looked up, and every test then ran against nothing. The helper's
+// challenge, with the proof only the token gives, is what says it is there.
+// The probe does not authenticate: a session closed after "ready" makes the
+// helper quit.
+inline bool answersReadinessProbe(QTcpSocket &socket, const QString &token)
+{
+    const QString nonce = QStringLiteral("test-helper-readiness");
+    socket.write(line({{QStringLiteral("cmd"), QStringLiteral("hello")},
+                       {QStringLiteral("nonce"), nonce}}));
+    socket.flush();
+    const QJsonObject response = QJsonDocument::fromJson(readLineWithin(socket, 500)).object();
+    return response.value(QStringLiteral("ev")).toString() == QLatin1String("challenge")
+            && !response.value(QStringLiteral("nonce")).toString().isEmpty()
+            && vpn_helper::tokensEqual(
+                    response.value(QStringLiteral("proof")).toString(),
+                    vpn_helper::authProof(token, QString::fromLatin1(vpn_helper::kHelperRole), nonce));
+}
+
 // How many of the lines in `bytes` the helper refuses itself, at once and in
 // order: a connect with no inline config. Only complete lines count, split where
 // the helper splits them, so random bytes with a newline inside are two lines.
@@ -277,14 +298,15 @@ private:
                        QStringLiteral("--token-file"), tokenPath});
         if (!m_proc->waitForStarted(5000))
             return false;
-        // Up once it accepts a connection; gone means it could not bind (the port
-        // was taken in between) or died on start, and waiting longer proves nothing.
+        // Up once it answers a hello (answersReadinessProbe); gone means it could
+        // not bind (the port was taken in between) or died on start, and waiting
+        // longer proves nothing.
         for (int i = 0; i < 100; ++i) {
             if (m_proc->state() == QProcess::NotRunning)
                 return false;
             QTcpSocket probe;
             probe.connectToHost(QHostAddress(QStringLiteral("127.0.0.1")), port);
-            if (probe.waitForConnected(100)) {
+            if (probe.waitForConnected(100) && answersReadinessProbe(probe, token)) {
                 probe.abort();
                 return true;
             }

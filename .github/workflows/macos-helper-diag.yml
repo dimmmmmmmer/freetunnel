@@ -4,7 +4,7 @@ name: macOS helper diagnostics
 on:
   push:
     branches: [claude/trusting-lamport-vf2fid]
-    paths: ['.github/workflows/macos-helper-diag.yml', 'scripts/macos-helper-diag.sh']
+    paths: ['.github/workflows/macos-helper-diag.yml', 'scripts/macos-helper-diag.sh', 'tests/real_helper.h', 'tests/test_helper_server*.cpp']
 
 permissions:
   contents: read
@@ -28,5 +28,5 @@ jobs:
           arch: clang_64
           cache: true
       - run: cmake -S tests -B build-diag -G Ninja
-      - run: cmake --build build-diag --target freetunnel_test_helper test_helper_server_fuzz test_helper_server_lifecycle -j
+      - run: cmake --build build-diag --target freetunnel_test_helper test_helper_server test_helper_server_fuzz test_helper_server_lifecycle test_helper_server_settings -j
       - run: bash scripts/macos-helper-diag.sh build-diag
