@@ -1,8 +1,9 @@
 import Foundation
+
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #else
-import Glibc
+    import Glibc
 #endif
 
 public enum GeoParser {
@@ -10,7 +11,8 @@ public enum GeoParser {
     public static let maximumEntries = 100_000
     public static func source(_ text: String) throws -> (url: URL, category: String?) {
         guard var parts = URLComponents(string: text), parts.scheme == "https",
-              parts.host?.isEmpty == false, parts.user == nil, parts.password == nil else {
+            parts.host?.isEmpty == false, parts.user == nil, parts.password == nil
+        else {
             throw ClientError.invalidSource
         }
         let category = parts.fragment
@@ -26,15 +28,21 @@ public enum GeoParser {
     public static func domain(_ raw: String) -> String? {
         var text = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         var prefix = ""
-        if text.hasPrefix("*.") { prefix = "*."; text.removeFirst(2) }
+        if text.hasPrefix("*.") {
+            prefix = "*."
+            text.removeFirst(2)
+        }
         guard !text.isEmpty, text.utf8.count <= 253, !text.contains(":"), !text.contains("/"),
-              !text.contains("@"), !text.contains(" "), !text.contains("?"), !text.contains("#") else { return nil }
+            !text.contains("@"), !text.contains(" "), !text.contains("?"), !text.contains("#")
+        else { return nil }
         guard let host = URL(string: "https://" + text)?.host, !host.isEmpty else { return nil }
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard labels.allSatisfy({ label in
-            !label.isEmpty && label.count <= 63 && label.first != "-" && label.last != "-" &&
-            label.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }
-        }) else { return nil }
+        guard
+            labels.allSatisfy({ label in
+                !label.isEmpty && label.count <= 63 && label.first != "-" && label.last != "-"
+                    && label.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }
+            })
+        else { return nil }
         return prefix + host
     }
     public static func ip(_ raw: String) -> String? {
@@ -45,7 +53,9 @@ public enum GeoParser {
         let family: Int32 = text.contains(":") ? AF_INET6 : AF_INET
         guard inet_pton(family, text, &bytes) == 1 else { return nil }
         if parts.count == 2 {
-            guard let length = Int(parts[1]), length >= 0, length <= (family == AF_INET ? 32 : 128) else { return nil }
+            guard let length = Int(parts[1]), length >= 0, length <= (family == AF_INET ? 32 : 128) else {
+                return nil
+            }
             return text.lowercased() + "/" + String(length)
         }
         return text.lowercased()
@@ -118,7 +128,7 @@ private struct ListParser {
             try add(host)
             try add("*." + host)
         case 3: try add(host)
-        default: skipped += 1 // Substrings and regular expressions are not domain rules.
+        default: skipped += 1  // Substrings and regular expressions are not domain rules.
         }
     }
 
@@ -154,7 +164,10 @@ private struct ListParser {
             try add(GeoParser.domain(String(value.dropFirst(5))))
         } else {
             let plain = value.hasPrefix("domain:") ? String(value.dropFirst(7)) : value
-            guard let host = GeoParser.domain(plain) else { skipped += 1; return }
+            guard let host = GeoParser.domain(plain) else {
+                skipped += 1
+                return
+            }
             try add(host)
             if !host.hasPrefix("*.") { try add("*." + host) }
         }
@@ -181,7 +194,11 @@ private struct DatabaseRecord {
 }
 
 private struct ProtoReader {
-    struct Field { var number: Int; var integer: UInt64?; var bytes: Data? }
+    struct Field {
+        var number: Int
+        var integer: UInt64?
+        var bytes: Data?
+    }
     let data: Data
     var offset = 0
     init(_ data: Data) { self.data = Data(data) }
@@ -189,7 +206,8 @@ private struct ProtoReader {
         var result: UInt64 = 0
         for shift in stride(from: 0, through: 63, by: 7) {
             guard offset < data.count else { throw ClientError.invalidList }
-            let byte = data[offset]; offset += 1
+            let byte = data[offset]
+            offset += 1
             if shift == 63 && byte > 1 { throw ClientError.invalidList }
             result |= UInt64(byte & 127) << shift
             if byte & 128 == 0 { return result }
@@ -206,7 +224,8 @@ private struct ProtoReader {
         case 2:
             let length = try varint()
             guard length <= UInt64(data.count - offset) else { throw ClientError.invalidList }
-            field.bytes = data.subdata(in: offset..<(offset + Int(length))); offset += Int(length)
+            field.bytes = data.subdata(in: offset..<(offset + Int(length)))
+            offset += Int(length)
         case 1, 5:
             let length = tag & 7 == 1 ? 8 : 4
             guard length <= data.count - offset else { throw ClientError.invalidList }

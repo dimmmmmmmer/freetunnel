@@ -5,28 +5,46 @@ public enum DeepLinkEncoder {
     public static func encode(_ config: Configuration) throws -> String {
         let fields = EditorFields(config)
         var output = Data()
-        func entry(_ tag: Int, _ data: Data) { output += varint(tag); output += varint(data.count); output += data }
+        func entry(_ tag: Int, _ data: Data) {
+            output += varint(tag)
+            output += varint(data.count)
+            output += data
+        }
         func string(_ tag: Int, _ value: String) { entry(tag, Data(value.utf8)) }
-        entry(0, varint(1)); string(1, fields.hostname)
+        entry(0, varint(1))
+        string(1, fields.hostname)
         for address in config.endpoint["addresses"] as? [String] ?? [] { string(2, address) }
-        string(5, fields.username); string(6, fields.password)
-        if !fields.ipv6 { entry(4, Data([0])) }
-        if fields.skipVerification { entry(7, Data([1])) }
-        if fields.antiDPI { entry(10, Data([1])) }
-        if !fields.sni.isEmpty { string(3, fields.sni) }
-        let certificate = try certificates(fields.certificate)
-        if !certificate.isEmpty { entry(8, certificate) }
-        if fields.proto == "http3" { entry(9, varint(2)) }
-        if !fields.random.isEmpty { string(11, fields.random) }
-        if !fields.name.isEmpty { string(12, fields.name) }
+        string(5, fields.username)
+        string(6, fields.password)
+        for (tag, data) in try optionalFields(fields) { entry(tag, data) }
         if !config.dnsUpstreams.isEmpty {
             var data = Data()
-            for server in config.dnsUpstreams { let bytes = Data(server.utf8); data += varint(bytes.count); data += bytes }
+            for server in config.dnsUpstreams {
+                let bytes = Data(server.utf8)
+                data += varint(bytes.count)
+                data += bytes
+            }
             entry(13, data)
         }
         guard output.count <= Configuration.maximumBytes else { throw ClientError.tooLarge }
-        return "tt://?" + output.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+        return "tt://?"
+            + output.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+    private static func optionalFields(_ fields: EditorFields) throws -> [(Int, Data)] {
+        var result: [(Int, Data)] = []
+        func entry(_ tag: Int, _ data: Data) { result.append((tag, data)) }
+        func text(_ tag: Int, _ value: String) { entry(tag, Data(value.utf8)) }
+        if !fields.ipv6 { entry(4, Data([0])) }
+        if fields.skipVerification { entry(7, Data([1])) }
+        if fields.antiDPI { entry(10, Data([1])) }
+        if !fields.sni.isEmpty { text(3, fields.sni) }
+        let certificate = try certificates(fields.certificate)
+        if !certificate.isEmpty { entry(8, certificate) }
+        if fields.proto == "http3" { entry(9, varint(2)) }
+        if !fields.random.isEmpty { text(11, fields.random) }
+        if !fields.name.isEmpty { text(12, fields.name) }
+        return result
     }
     private static func varint(_ value: Int) -> Data {
         let width = value < 64 ? 1 : value < 16_384 ? 2 : 4
@@ -45,7 +63,9 @@ public enum DeepLinkEncoder {
     private static func certificates(_ pem: String) throws -> Data {
         var data = Data()
         for block in try certificateBlocks(pem) {
-            guard let der = Data(base64Encoded: block.filter { !$0.isWhitespace }) else { throw ClientError.invalidConfig }
+            guard let der = Data(base64Encoded: block.filter { !$0.isWhitespace }) else {
+                throw ClientError.invalidConfig
+            }
             data += der
         }
         if !pem.isEmpty && data.isEmpty { throw ClientError.invalidConfig }
@@ -57,7 +77,10 @@ public enum DeepLinkEncoder {
         if let pem = endpoint["certificate"] as? String, !pem.isEmpty {
             let blocks = try certificateBlocks(pem)
             guard !blocks.isEmpty else { throw ClientError.invalidConfig }
-            endpoint["certificate"] = blocks.map { "-----BEGIN CERTIFICATE-----\n" + $0.trimmingCharacters(in: .whitespacesAndNewlines) + "\n-----END CERTIFICATE-----" }.joined(separator: "\n")
+            endpoint["certificate"] = blocks.map {
+                "-----BEGIN CERTIFICATE-----\n" + $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    + "\n-----END CERTIFICATE-----"
+            }.joined(separator: "\n")
         }
         root["endpoint"] = endpoint
         return try Configuration.serialize(root)

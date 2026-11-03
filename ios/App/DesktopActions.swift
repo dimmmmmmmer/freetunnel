@@ -1,8 +1,11 @@
-import SwiftUI
-import Network
 import FreeTunnelCore
+import Network
+import SwiftUI
 
-enum AppDialogRoute: Equatable { case server(UUID?), importText, subscription }
+enum AppDialogRoute: Equatable {
+    case server(UUID?)
+    case importText, subscription
+}
 struct AppConfirmation {
     var text: String
     var actionTitle: String
@@ -10,13 +13,13 @@ struct AppConfirmation {
 }
 @MainActor extension AppState {
     static let previewConfig = """
-    [endpoint]
-    name = "FreeTunnel demo"
-    hostname = "vpn.example.org"
-    addresses = ["192.0.2.1:443"]
-    username = "user"
-    password = "password"
-    """
+        [endpoint]
+        name = "FreeTunnel demo"
+        hostname = "vpn.example.org"
+        addresses = ["192.0.2.1:443"]
+        username = "user"
+        password = "password"
+        """
     func confirm(_ text: String, actionTitle: String = "Delete", action: @escaping () -> Void) {
         confirmation = AppConfirmation(text: text, actionTitle: actionTitle, action: action)
     }
@@ -27,14 +30,16 @@ struct AppConfirmation {
             preferences.splitProfiles.append(SplitProfile(name: name, routing: profile.routing))
         }
     }
-    func saveServer(_ fields: EditorFields, original: Configuration?, profile: Profile?, splitProfile: String) throws {
+    func saveServer(_ fields: EditorFields, original: Configuration?, profile: Profile?, splitProfile: String)
+        throws {
         let text = try fields.configuration(previous: original).serialized()
         if let profile {
             var record = try secret(profile)
             record.toml = text
             if !isPreview { try Vault.write(JSONEncoder().encode(record), key: profile.id.uuidString) }
             guard var latest = preferences.profiles.first(where: { $0.id == profile.id }) else { return }
-            latest.name = try Configuration(text).name; latest.splitProfile = splitProfile
+            latest.name = try Configuration(text).name
+            latest.splitProfile = splitProfile
             update(latest)
             if selected?.id == profile.id { reapplySelected() }
         } else {
@@ -88,7 +93,8 @@ struct AppConfirmation {
     }
     func addSplitProfile(_ name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 16, !preferences.splitProfiles.contains(where: { $0.name == name }) else { return }
+        guard !name.isEmpty, name.count <= 16, !preferences.splitProfiles.contains(where: { $0.name == name })
+        else { return }
         var routing = Routing()
         if let active = preferences.splitProfiles.first(where: { $0.name == preferences.activeSplitProfile }) {
             routing.defaultDirection = active.routing.defaultDirection
@@ -104,7 +110,8 @@ struct AppConfirmation {
         defer { pinging = false }
         let targets = preferences.profiles.compactMap { profile -> (UUID, String)? in
             guard let config = try? Configuration(secret(profile).toml),
-                  let address = (config.endpoint["addresses"] as? [String])?.first else { return nil }
+                let address = (config.endpoint["addresses"] as? [String])?.first
+            else { return nil }
             return (profile.id, address)
         }
         for (id, _) in targets { pings[id] = "…" }
@@ -114,31 +121,38 @@ struct AppConfirmation {
                 for (id, address) in targets[start..<min(start + 4, targets.count)] {
                     group.addTask { (id, await TCPProbe.measure(address)) }
                 }
-                for await (id, milliseconds) in group {
-                    if preferences.profiles.contains(where: { $0.id == id }) {
-                        pings[id] = milliseconds.map { "\($0) ms" } ?? "—"
-                    }
+                for await (id, milliseconds) in group
+                where preferences.profiles.contains(where: { $0.id == id }) {
+                    pings[id] = milliseconds.map { "\($0) ms" } ?? "—"
                 }
             }
         }
     }
     func checkUpdates() async {
-        if let updateURL { _ = await UIApplication.shared.open(updateURL); return }
+        if let updateURL {
+            _ = await UIApplication.shared.open(updateURL)
+            return
+        }
         guard !checkingUpdate else { return }
         checkingUpdate = true
         defer { checkingUpdate = false }
         do {
             let url = URL(string: "https://api.github.com/repos/dimmmmmmmer/freetunnel/releases/latest")!
             let data = try await Downloads.read(URLRequest(url: url), limit: 1_048_576)
-            struct Release: Decodable { let tag_name: String; let html_url: URL }
-            let release = try JSONDecoder().decode(Release.self, from: data)
-            let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.4"
-            let version = release.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
+            let release = try JSONDecoder().decode(ReleaseMetadata.self, from: data)
+            let current =
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.4"
+            let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
             if version.compare(current, options: .numeric) == .orderedDescending {
-                updateStatus = release.tag_name
-                updateURL = release.html_url
-            } else { updateStatus = "Up to date" }
-        } catch { updateStatus = "Check for updates"; report(error) }
+                updateStatus = release.tagName
+                updateURL = release.htmlURL
+            } else {
+                updateStatus = "Up to date"
+            }
+        } catch {
+            updateStatus = "Check for updates"
+            report(error)
+        }
     }
 }
 private final class TCPProbe: @unchecked Sendable {
@@ -148,17 +162,21 @@ private final class TCPProbe: @unchecked Sendable {
     private let started = DispatchTime.now().uptimeNanoseconds
     private init(host: String, port: UInt16, continuation: CheckedContinuation<Int?, Never>) {
         self.continuation = continuation
-        connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        connection = NWConnection(
+            host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
     }
     static func measure(_ address: String) async -> Int? {
         guard let parts = URLComponents(string: "https://" + address), let host = parts.host,
-              let port = UInt16(exactly: parts.port ?? 443), port > 0 else { return nil }
+            let port = UInt16(exactly: parts.port ?? 443), port > 0
+        else { return nil }
         return await withCheckedContinuation { continuation in
-            let probe = TCPProbe(host: host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")),
+            let probe = TCPProbe(
+                host: host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")),
                 port: port, continuation: continuation)
             probe.connection.stateUpdateHandler = { state in
                 switch state {
-                case .ready: probe.finish(Int((DispatchTime.now().uptimeNanoseconds - probe.started) / 1_000_000))
+                case .ready:
+                    probe.finish(Int((DispatchTime.now().uptimeNanoseconds - probe.started) / 1_000_000))
                 case .failed, .cancelled: probe.finish(nil)
                 default: break
                 }
@@ -169,8 +187,22 @@ private final class TCPProbe: @unchecked Sendable {
         }
     }
     private func finish(_ value: Int?) {
-        lock.lock(); let reply = continuation; continuation = nil; lock.unlock()
+        lock.lock()
+        let reply = continuation
+        continuation = nil
+        lock.unlock()
         guard let reply else { return }
-        connection.stateUpdateHandler = nil; connection.cancel(); reply.resume(returning: value)
+        connection.stateUpdateHandler = nil
+        connection.cancel()
+        reply.resume(returning: value)
     }
 }
+
+private struct ReleaseMetadata: Decodable {
+                let tagName: String
+                let htmlURL: URL
+                enum CodingKeys: String, CodingKey {
+                    case tagName = "tag_name"
+                    case htmlURL = "html_url"
+                }
+            }

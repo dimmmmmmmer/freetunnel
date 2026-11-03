@@ -1,24 +1,30 @@
-import Foundation
 import CoreFoundation
+import Foundation
 import Security
 
 public enum Subscription {
     public static let maximumBytes = 65_536
     public static func request(_ text: String) throws -> URLRequest {
         guard var parts = URLComponents(string: text), parts.scheme == "https",
-              parts.host?.isEmpty == false, parts.port != 0,
-              !(parts.user ?? "").contains(":"), text.utf8.count <= 2560 else { throw ClientError.invalidSource }
+            parts.host?.isEmpty == false, parts.port != 0,
+            !(parts.user ?? "").contains(":"), text.utf8.count <= 2560
+        else { throw ClientError.invalidSource }
         let user = parts.user ?? ""
         let password = parts.password ?? ""
         guard !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
-            throw ClientError.invalidSource }
+            throw ClientError.invalidSource
+        }
         parts.fragment = nil
-        parts.user = nil; parts.password = nil
+        parts.user = nil
+        parts.password = nil
         guard let url = parts.url else { throw ClientError.invalidSource }
         var request = URLRequest(url: url)
         let credentials = Data((user + ":" + password).utf8).base64EncodedString()
-        if !user.isEmpty || !password.isEmpty { request.setValue("Basic " + credentials,
-            forHTTPHeaderField: "Authorization") }
+        if !user.isEmpty || !password.isEmpty {
+            request.setValue(
+                "Basic " + credentials,
+                forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }
@@ -47,9 +53,10 @@ public enum Subscription {
     private static func document(_ data: Data) throws -> [String: Any] {
         guard data.count <= maximumBytes else { throw ClientError.tooLarge }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
-              version.doubleValue == 1, object["skip_verification"] as? Bool != true,
-              (object["client_random_auth_key"] as? String ?? "").isEmpty else {
+            let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
+            version.doubleValue == 1, object["skip_verification"] as? Bool != true,
+            (object["client_random_auth_key"] as? String ?? "").isEmpty
+        else {
             throw ClientError.unsupportedFormat
         }
         let stringFields = [
@@ -69,7 +76,8 @@ public enum Subscription {
     private static func applyRequired(_ object: [String: Any], to endpoint: inout [String: Any]) throws {
         for key in ["hostname", "address", "username", "password"] {
             guard let text = object[key] as? String, !text.isEmpty, text.utf8.count <= 8192,
-                  !text.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
+                !text.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+            else {
                 throw ClientError.invalidConfig
             }
             endpoint[key == "address" ? "addresses" : key] = key == "address" ? [text] : text
@@ -109,9 +117,11 @@ public enum Subscription {
         let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
         guard !matches.isEmpty, matches.count <= 8 else { throw ClientError.invalidConfig }
         return try matches.map { match in
-            guard let bodyRange = Range(match.range(at: 1), in: text), let fullRange = Range(match.range, in: text),
-                  let der = Data(base64Encoded: String(text[bodyRange]).filter { !$0.isWhitespace }),
-                  SecCertificateCreateWithData(nil, der as CFData) != nil else { throw ClientError.invalidConfig }
+            guard let bodyRange = Range(match.range(at: 1), in: text),
+                let fullRange = Range(match.range, in: text),
+                let der = Data(base64Encoded: String(text[bodyRange]).filter { !$0.isWhitespace }),
+                SecCertificateCreateWithData(nil, der as CFData) != nil
+            else { throw ClientError.invalidConfig }
             return String(text[fullRange])
         }.joined(separator: "\n")
     }

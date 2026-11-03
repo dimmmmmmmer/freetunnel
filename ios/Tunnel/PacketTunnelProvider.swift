@@ -1,6 +1,6 @@
 import Foundation
-import NetworkExtension
 import FreeTunnelCore
+import NetworkExtension
 import VpnClientFramework
 
 final class PacketTunnelProvider: NEPacketTunnelProvider {
@@ -15,7 +15,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func flushLogs() {
         flushPending = false
         guard let url = try? Identity.directory().appendingPathComponent("freetunnel.log") else { return }
-        try? Data(lines.joined(separator: "\n").utf8).write(to: url,
+        try? Data(lines.joined(separator: "\n").utf8).write(
+            to: url,
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
     private func log(_ message: String, level: String = "INFO", isCore: Bool = false) {
@@ -27,17 +28,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             queue.asyncAfter(deadline: .now() + 0.5) { self.flushLogs() }
         }
     }
-    override func startTunnel(options: [String: NSObject]? = nil, completionHandler: @escaping (Error?) -> Void) {
+    override func startTunnel(
+        options: [String: NSObject]? = nil, completionHandler: @escaping (Error?) -> Void
+    ) {
         queue.async {
             self.startReply = completionHandler
             self.stopping = false
 
             do {
                 guard let settings = self.protocolConfiguration as? NETunnelProviderProtocol,
-                      let key = settings.providerConfiguration?["secretKey"] as? String,
-                      key == "active-tunnel",
-                      let text = String(data: try Vault.read(key), encoding: .utf8) else {
-                          throw ClientError.missingSecret }
+                    let key = settings.providerConfiguration?["secretKey"] as? String,
+                    key == "active-tunnel",
+                    let text = String(data: try Vault.read(key), encoding: .utf8)
+                else {
+                    throw ClientError.missingSecret
+                }
                 self.loggingEnabled = settings.providerConfiguration?["loggingEnabled"] as? Bool ?? true
                 let verbose = settings.providerConfiguration?["verboseLogs"] as? Bool ?? false
                 NativeLogger.setLogLevel(verbose ? .debug : .info)
@@ -47,31 +52,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 self.log("Connecting")
                 let config = try Configuration(text, maximumBytes: 8_388_608)
-                let exclusions = try config.excludedRoutes.map(IPRoutes.parse)
-                let network = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
-                let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
-                ipv4.includedRoutes = [.default()]
-                ipv4.excludedRoutes = exclusions.filter { !$0.ipv6 }.map {
-                    NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.ipv4Mask)
-                }
-                let ipv6 = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [64])
-                ipv6.includedRoutes = [.default()]
-                ipv6.excludedRoutes = exclusions.filter { $0.ipv6 }.map {
-                    NEIPv6Route(destinationAddress: $0.address, networkPrefixLength: NSNumber(value: $0.prefix))
-                }
-                network.ipv4Settings = ipv4
-                network.ipv6Settings = ipv6
-                let dns = config.dnsUpstreams
-                // A configured upstream makes the core answer its virtual DNS address.
-                let dnsSettings = NEDNSSettings(servers: dns.isEmpty ? ["46.243.231.30",
-                    "46.243.231.31"] : ["198.18.53.53"])
-                dnsSettings.matchDomains = [""]
-                network.dnsSettings = dnsSettings
-                network.mtu = 1280
+                let network = try self.networkSettings(config)
                 self.setTunnelNetworkSettings(network) { error in
                     self.queue.async {
                         guard !self.stopping, self.startReply != nil else { return }
-                        if error != nil { self.fail(); return }
+                        if error != nil {
+                            self.fail()
+                            return
+                        }
                         self.startClient(text)
                     }
                 }
@@ -85,13 +73,48 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             } catch { self.fail() }
         }
     }
+    private func networkSettings(_ config: Configuration) throws -> NEPacketTunnelNetworkSettings {
+        let exclusions = try config.excludedRoutes.map(IPRoutes.parse)
+        let network = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
+        let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
+        ipv4.includedRoutes = [.default()]
+        ipv4.excludedRoutes = exclusions.filter { !$0.ipv6 }.map {
+            NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.ipv4Mask)
+        }
+        let ipv6 = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [64])
+        ipv6.includedRoutes = [.default()]
+        ipv6.excludedRoutes = exclusions.filter { $0.ipv6 }.map {
+            NEIPv6Route(
+                destinationAddress: $0.address, networkPrefixLength: NSNumber(value: $0.prefix))
+        }
+        network.ipv4Settings = ipv4
+        network.ipv6Settings = ipv6
+        let dns = config.dnsUpstreams
+        // A configured upstream makes the core answer its virtual DNS address.
+        let dnsSettings = NEDNSSettings(
+            servers: dns.isEmpty
+                ? [
+                    "46.243.231.30",
+                    "46.243.231.31"
+                ] : ["198.18.53.53"])
+        dnsSettings.matchDomains = [""]
+        network.dnsSettings = dnsSettings
+        network.mtu = 1280
+        return network
+    }
     private func startClient(_ text: String) {
-        client = VpnClient(config: text, connectionInfoHandler: { _ in
-            // Connection records may contain browsing history; do not collect them by default.
-        }, stateChangeHandler: { [weak self] value in
-            self?.queue.async { self?.stateChanged(Int(value)) }
-        })
-        guard let client, client.start(packetFlow) else { fail(); return }
+        client = VpnClient(
+            config: text,
+            connectionInfoHandler: { _ in
+                // Connection records may contain browsing history; do not collect them by default.
+            },
+            stateChangeHandler: { [weak self] value in
+                self?.queue.async { self?.stateChanged(Int(value)) }
+            })
+        guard let client, client.start(packetFlow) else {
+            fail()
+            return
+        }
     }
     private func stateChanged(_ state: Int) {
         guard !stopping else { return }
@@ -110,21 +133,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
     private func finishStart(_ error: Error?) {
-        timeout?.cancel(); timeout = nil
-        let reply = startReply; startReply = nil
+        timeout?.cancel()
+        timeout = nil
+        let reply = startReply
+        startReply = nil
         reply?(error)
     }
     private func fail() {
         stopping = true
         log("Unable to establish the tunnel")
-        client?.stop(); client = nil
+        client?.stop()
+        client = nil
         finishStart(ClientError.tunnelFailed)
     }
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         queue.async {
             self.stopping = true
             self.finishStart(ClientError.tunnelFailed)
-            self.client?.stop(); self.client = nil
+            self.client?.stop()
+            self.client = nil
             self.log("Stopped")
             self.flushLogs()
             NativeLogger.setCallback(nil)
@@ -132,25 +159,38 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
     override func sleep(completionHandler: @escaping () -> Void) {
-        queue.async { self.client?.notify_sleep(); completionHandler() }
+        queue.async {
+            self.client?.notify_sleep()
+            completionHandler()
+        }
     }
     override func wake() { queue.async { self.client?.notify_wake() } }
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         queue.async {
             if let settings = try? JSONSerialization.jsonObject(with: messageData) as? [String: Bool],
-               let enabled = settings["loggingEnabled"] {
+                let enabled = settings["loggingEnabled"] {
                 self.loggingEnabled = enabled
                 NativeLogger.setLogLevel(settings["verboseLogs"] == true ? .debug : .info)
-                completionHandler?(Data()); return
+                completionHandler?(Data())
+                return
             }
             let command = String(data: messageData, encoding: .utf8)
             if command == "stats" {
-                let counters: [String: UInt64] = ["up": self.client?.uploadedBytes() ?? 0,
-                    "down": self.client?.downloadedBytes() ?? 0]
-                completionHandler?(try? JSONEncoder().encode(counters)); return
+                let counters: [String: UInt64] = [
+                    "up": self.client?.uploadedBytes() ?? 0,
+                    "down": self.client?.downloadedBytes() ?? 0
+                ]
+                completionHandler?(try? JSONEncoder().encode(counters))
+                return
             }
-            if command == "clear" { self.lines.removeAll(); self.flushLogs() }
-            guard command == "clear" || command == "logs" else { completionHandler?(nil); return }
+            if command == "clear" {
+                self.lines.removeAll()
+                self.flushLogs()
+            }
+            guard command == "clear" || command == "logs" else {
+                completionHandler?(nil)
+                return
+            }
             completionHandler?(Data(LogLines.shownText(self.lines.joined(separator: "\n")).utf8))
         }
     }
