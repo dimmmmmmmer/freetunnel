@@ -24,8 +24,8 @@
      std::unique_ptr<ag::TrustTunnelClient> _native_client;
      std::unique_ptr<ag::AutoNetworkMonitor> _network_monitor;
      NEPacketTunnelFlow *_tunnelFlow;
-+    std::atomic<uint64_t> _uploadedBytes{0};
-+    std::atomic<uint64_t> _downloadedBytes{0};
++    std::atomic<uint64_t> _uploadedBytes;
++    std::atomic<uint64_t> _downloadedBytes;
      id _readPacketsHandler;
  }
  @end
@@ -37,7 +37,16 @@
          nativePackets.data[i] = ag::VpnPacket{
              .data = (uint8_t *) packets[i].bytes,
              .size = (size_t) packets[i].length,
-@@ -215,7 +220,9 @@
+@@ -184,6 +189,8 @@
+             stateChangeHandler:(StateChangeHandler)stateChangeHandler {
+     self = [super init];
+     if (self) {
++        _uploadedBytes.store(0, std::memory_order_relaxed);
++        _downloadedBytes.store(0, std::memory_order_relaxed);
+         toml::parse_result parse_result = toml::parse(config.UTF8String);
+         if (!parse_result) {
+             errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description());
+@@ -215,7 +222,9 @@
                      for (size_t i = 0; i < event->packet.chunks_num; ++i) {
                          [packet appendBytes:event->packet.chunks[i].iov_base length:event->packet.chunks[i].iov_len];
                      }
@@ -48,7 +57,7 @@
                  }
              },
              .state_changed_handler = [stateChangeHandler](ag::VpnStateChangedEvent *event) {
-@@ -275,6 +282,9 @@
+@@ -275,6 +284,9 @@
      return _native_client->disconnect();
  }
  

@@ -41,6 +41,21 @@ public struct Configuration {
               parts.path.isEmpty, parts.query == nil, parts.fragment == nil, parts.port != 0 else { return false }
         return true
     }
+    public var importedRouting: Routing {
+        var routing = Routing()
+        routing.defaultDirection = defaultDirection
+        let rules = (table["exclusions"] as? [String] ?? []).compactMap(GeoParser.manual)
+        if defaultDirection == .vpn { routing.manualBypass = rules.joined(separator: "\n") }
+        else { routing.manualVPN = rules.joined(separator: "\n") }
+        return routing
+    }
+    public func storingImportedRulesInProfile() throws -> String {
+        var result = table
+        if let rules = table["exclusions"] as? [String] {
+            result["exclusions"] = rules.filter { GeoParser.manual($0) == nil }
+        }
+        return try Self.serialize(result)
+    }
     public func serialized() throws -> String { try Self.serialize(table) }
     public func tunnel(routing: Routing, snapshots: [String: GeoSnapshot], killSwitch: Bool,
                        excludedRoutes: [String] = [], verboseLogs: Bool = false) throws -> String {

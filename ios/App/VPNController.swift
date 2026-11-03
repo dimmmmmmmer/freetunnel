@@ -90,7 +90,7 @@ import FreeTunnelCore
             logs = text
         } else if let url = try? Identity.directory().appendingPathComponent("freetunnel.log") {
             if clear { try? Data().write(to: url, options: .atomic) }
-            logs = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            logs = LogLines.shownText((try? String(contentsOf: url, encoding: .utf8)) ?? "")
         }
     }
     func configureLogging(enabled: Bool, verbose: Bool) async {

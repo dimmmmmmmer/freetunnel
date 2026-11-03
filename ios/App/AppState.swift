@@ -94,16 +94,16 @@ import VpnClientFramework
         guard let index = preferences.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         preferences.profiles[index] = profile
     }
-    func add(toml: String, subscription: String? = nil) throws {
+    func add(toml: String, subscription: String? = nil, splitProfile: String? = nil) throws {
         guard loaded else { throw ClientError.storageFailed }
         let config = try Configuration(toml)
         var profile = Profile(name: config.name)
-        profile.routing.defaultDirection = config.defaultDirection
+        profile.routing = config.importedRouting
         profile.subscriptionEnabled = subscription != nil
         profile.subscriptionUpdated = subscription == nil ? nil : Date()
-        let record = Secret(toml: try config.serialized(), subscription: subscription)
+        let record = Secret(toml: try config.storingImportedRulesInProfile(), subscription: subscription)
         try Vault.write(encoder.encode(record), key: profile.id.uuidString)
-        assignImportedRouting(&profile)
+        if let splitProfile { profile.splitProfile = splitProfile } else { assignImportedRouting(&profile) }
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
@@ -135,14 +135,14 @@ import VpnClientFramework
             for document in documents {
                 let config = try Configuration(document)
                 var profile = Profile(name: config.name)
-                profile.routing.defaultDirection = config.defaultDirection
-                let secret = Secret(toml: document)
+                profile.routing = config.importedRouting
+                let secret = Secret(toml: try config.storingImportedRulesInProfile())
                 try Vault.write(encoder.encode(secret), key: profile.id.uuidString)
                 profiles.append(profile)
             }
             var updated = preferences
             for index in profiles.indices {
-                if profiles[index].routing.defaultDirection != updated.splitProfiles[0].routing.defaultDirection {
+                if profiles[index].routing != updated.splitProfiles[0].routing {
                     let name = "Imported " + profiles[index].id.uuidString.prefix(8)
                     profiles[index].splitProfile = name
                     updated.splitProfiles.append(SplitProfile(name: name, routing: profiles[index].routing))
@@ -199,12 +199,14 @@ import VpnClientFramework
             let url = try GeoParser.source(list.source).url
             let data = try await Downloads.read(URLRequest(url: url), limit: GeoParser.maximumBytes)
             let snapshot = try await Task.detached { try GeoParser.parse(data, list: list) }.value
-            guard preferences.splitProfiles.contains(where: { $0.routing.lists.contains(list) }) else { return }
+            guard preferences.splitProfiles.contains(where: { profile in profile.routing.lists.contains {
+                $0.id == list.id && $0.source == list.source && $0.kind == list.kind
+            } }) else { return }
             try encoder.encode(snapshot).write(to: cachePath(list.id),
                 options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             snapshots[list.id] = snapshot
             geoErrors.removeValue(forKey: list.id)
-            if let selected, preferences.routing(for: selected).lists.contains(list) { reapplySelected() }
+            if let selected, preferences.routing(for: selected).lists.contains(where: { $0.id == list.id && $0.enabled }) { reapplySelected() }
         } catch {
             geoErrors[list.id] = NSLocalizedString((error as? ClientError ?? .networkFailed).rawValue, comment: "")
         } // Previous valid snapshot is kept on failure.

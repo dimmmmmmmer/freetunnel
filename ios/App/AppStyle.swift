@@ -8,7 +8,7 @@ enum AppStyle {
     static let caption = Font.custom("Inter-Regular", size: 12, relativeTo: .caption)
     static let background = color(0xececec, 0x181818)
     static let surface = color(0xe2e2e2, 0x262626)
-    static let tile = color(0xd6d6d6, 0x202020)
+    static let tile = color(0xd8d8d8, 0x202020)
     static let input = color(0xd6d6d6, 0x101010)
     static let inputBorder = color(0xc2c2c2, 0x3a3a3a)
     static let text = color(0x1b1b1b, 0xeaeaea)
@@ -18,8 +18,13 @@ enum AppStyle {
     static let accentText = color(0xffffff, 0x181818)
     static let border = color(0xe5e5e5, 0x2e2e2e)
     static let danger = color(0xa32d2d, 0xe06a6a)
-    static let success = color(0x238663, 0x3fbf93)
-    static let selected = accent.opacity(0.16)
+    static let success = color(0x1d9e75, 0x3fbf93)
+    static let toggleOff = color(0xc4c4c4, 0x3a3a3a)
+    static let toggleKnobOff = color(0xffffff, 0x4e4e4e)
+    static let selected = Color(uiColor: UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        return UIColor(white: dark ? 0.69 : 0.31, alpha: dark ? 0.16 : 0.12)
+    })
     private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
             let value = traits.userInterfaceStyle == .dark ? dark : light
@@ -46,10 +51,10 @@ struct AppToggleStyle: ToggleStyle {
             configuration.label
             Spacer(minLength: 8)
             Button { configuration.isOn.toggle() } label: {
-                Capsule().fill(configuration.isOn ? AppStyle.accent : AppStyle.inputBorder)
+                Capsule().fill(configuration.isOn ? AppStyle.accent : AppStyle.toggleOff)
                     .frame(width: 38, height: 22)
                     .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                        Circle().fill(configuration.isOn ? .white : AppStyle.secondary.opacity(0.5))
+                        Circle().fill(configuration.isOn ? .white : AppStyle.toggleKnobOff)
                             .frame(width: 16, height: 16).padding(3)
                     }
                     .animation(.easeOut(duration: 0.12), value: configuration.isOn)
@@ -57,7 +62,7 @@ struct AppToggleStyle: ToggleStyle {
                 .accessibilityLabel(Text("Toggle"))
                 .accessibilityValue(Text(configuration.isOn ? "On" : "Off"))
                 .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
-        }.frame(minHeight: 42)
+        }.frame(minHeight: 42).accessibilityRepresentation { Toggle(configuration).toggleStyle(.switch) }
     }
 }
 struct AppFieldStyle: TextFieldStyle {

@@ -59,6 +59,23 @@ final class DesktopParityTests: XCTestCase {
             XCTAssertThrowsError(try config.tunnel(routing: routing, snapshots: [:], killSwitch: true, excludedRoutes: [route]))
         }
     }
+    func testImportedRulesBecomeEditableAndCanBeRemoved() throws {
+        let config = try Configuration("exclusions = [\"example.org\", \"192.0.2.0/24\"]\n" + source)
+        var routing = config.importedRouting
+        XCTAssertEqual(routing.manualBypass, "example.org\n192.0.2.0/24")
+        let stored = try Configuration(config.storingImportedRulesInProfile())
+        routing.manualBypass = ""
+        let result = try Configuration(stored.tunnel(routing: routing, snapshots: [:], killSwitch: true))
+        XCTAssertEqual(result.rawTable["exclusions"] as? [String], [])
+    }
+    func testCoreLogTimestampAndLevelMatchDesktop() {
+        let entry = LogLines.entry("26.06.2026 19:57:38.006946 INFO [4439691] CATEGORY: message", isCore: true)
+        XCTAssertEqual(entry, "2026-06-26 19:57:38\tCORE\t[4439691] CATEGORY: message")
+        XCTAssertEqual(LogLines.shownText(entry), "19:57:38 CORE [4439691] CATEGORY: message")
+        let warning = LogLines.entry("26.06.2026 19:57:38.006946 WARNING retry", isCore: true)
+        XCTAssertEqual(LogLines.shownText(warning), "19:57:38 WARN retry")
+        XCTAssertFalse(LogLines.entry("line one\nline two\tsecret").contains("\n"))
+    }
     func testDeepLinkV1AndExportDoNotCopyPrivateKeys() throws {
         let config = try Configuration(source)
         let link = try DeepLinkEncoder.encode(config)
