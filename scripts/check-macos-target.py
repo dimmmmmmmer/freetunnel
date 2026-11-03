@@ -4,7 +4,7 @@ import argparse
 import pathlib
 import plistlib
 import re
-import subprocess
+import subprocess  # nosec B404 - Fixed Apple tools, argument arrays, no shell.
 
 
 def version(value):
@@ -16,6 +16,7 @@ def main():
     parser.add_argument('bundle', type=pathlib.Path)
     parser.add_argument('--target', default='13.0')
     args = parser.parse_args()
+    args.bundle = args.bundle.resolve(strict=True)
     target = version(args.target)
     with (args.bundle / 'Contents/Info.plist').open('rb') as stream:
         info = plistlib.load(stream)
@@ -27,10 +28,11 @@ def main():
         if not path.is_file() or path.resolve() in seen:
             continue
         seen.add(path.resolve())
-        description = subprocess.check_output(['file', '-b', str(path)], text=True)
+        # Absolute bundle paths cannot become options; no content is evaluated as code.
+        description = subprocess.check_output(['/usr/bin/file', '-b', str(path)], text=True)  # nosec B603
         if 'Mach-O' not in description:
             continue
-        commands = subprocess.check_output(['otool', '-l', str(path)], text=True)
+        commands = subprocess.check_output(['/usr/bin/otool', '-l', str(path)], text=True)  # nosec B603
         # otool emits one load-command section per architecture of fat binaries.
         minimums = re.findall(r'\bcmd LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)\b(.*?)(?=Load command|\Z)',
                               commands, re.DOTALL)
