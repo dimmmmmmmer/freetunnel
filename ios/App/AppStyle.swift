@@ -21,36 +21,46 @@ enum AppStyle {
     static let success = color(0x1d9e75, 0x3fbf93)
     static let toggleOff = color(0xc4c4c4, 0x3a3a3a)
     static let toggleKnobOff = color(0xffffff, 0x4e4e4e)
-    static let selected = Color(uiColor: UIColor { traits in
-        let dark = traits.userInterfaceStyle == .dark
-        return UIColor(white: dark ? 0.69 : 0.31, alpha: dark ? 0.16 : 0.12)
-    })
-    private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in
-            let value = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: Double((value >> 16) & 255) / 255,
-                green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, alpha: 1)
+    static let selected = Color(
+        uiColor: UIColor { traits in
+            let dark = traits.userInterfaceStyle == .dark
+            return UIColor(white: dark ? 0.69 : 0.31, alpha: dark ? 0.16 : 0.12)
         })
+    private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(
+            uiColor: UIColor { traits in
+                let value = traits.userInterfaceStyle == .dark ? dark : light
+                return UIColor(
+                    red: Double((value >> 16) & 255) / 255,
+                    green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, alpha: 1)
+            })
     }
 }
 struct AppButtonStyle: ButtonStyle {
     var primary = false
+    var dialog = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(AppStyle.label)
-            .foregroundStyle(primary ? AppStyle.accentText : AppStyle.accent)
-            .padding(.horizontal, 10).frame(minHeight: 32)
-            .background(primary ? AppStyle.accent : AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+        configuration.label.font(dialog ? AppStyle.body : AppStyle.label)
+            .foregroundStyle(primary ? AppStyle.accentText : dialog ? AppStyle.text : AppStyle.accent)
+            .padding(.horizontal, dialog ? 13 : 10).frame(minWidth: dialog ? 88 : nil, minHeight: 32)
+            .background(
+                primary ? AppStyle.accent : dialog ? AppStyle.background : AppStyle.surface,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border))
             .opacity(!enabled ? 0.45 : configuration.isPressed ? 0.65 : 1)
     }
 }
 struct AppToggleStyle: ToggleStyle {
+    var minimumHeight: CGFloat = 42
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 8) {
             configuration.label
             Spacer(minLength: 8)
-            Button { configuration.isOn.toggle() } label: {
+            Button {
+                configuration.isOn.toggle()
+            } label: {
                 Capsule().fill(configuration.isOn ? AppStyle.accent : AppStyle.toggleOff)
                     .frame(width: 38, height: 22)
                     .overlay(alignment: configuration.isOn ? .trailing : .leading) {
@@ -62,7 +72,9 @@ struct AppToggleStyle: ToggleStyle {
                 .accessibilityLabel(Text("Toggle"))
                 .accessibilityValue(Text(configuration.isOn ? "On" : "Off"))
                 .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
-        }.frame(minHeight: 42).accessibilityRepresentation { Toggle(configuration).toggleStyle(.switch) }
+        }.frame(minHeight: minimumHeight).accessibilityRepresentation {
+            Toggle(configuration).toggleStyle(.switch)
+        }
     }
 }
 struct AppFieldStyle: TextFieldStyle {
@@ -78,14 +90,18 @@ struct AppForm<Content: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) { content }
-                .frame(maxWidth: 600).frame(maxWidth: .infinity).padding(.horizontal, 18).padding(.vertical, 10)
+                .frame(maxWidth: 600).frame(maxWidth: .infinity).padding(.horizontal, 18).padding(
+                    .vertical, 10)
         }.background(AppStyle.background).buttonStyle(AppButtonStyle()).textFieldStyle(AppFieldStyle())
     }
 }
 struct AppSection<Content: View>: View {
     let title: LocalizedStringKey
     @ViewBuilder let content: Content
-    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
+    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(AppStyle.heading).foregroundStyle(AppStyle.faint).padding(.bottom, 4)
@@ -102,8 +118,11 @@ struct LabeledField: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
             Group {
-                if secure { SecureField(placeholder, text: $text) }
-                else { TextField(placeholder, text: $text) }
+                if secure {
+                    SecureField(placeholder, text: $text)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
             }.textFieldStyle(AppFieldStyle())
         }
     }
@@ -112,7 +131,10 @@ struct AppChoice<Value: Hashable>: Identifiable {
     let value: Value
     let title: String
     var id: Value { value }
-    init(_ value: Value, _ title: String) { self.value = value; self.title = title }
+    init(_ value: Value, _ title: String) {
+        self.value = value
+        self.title = title
+    }
 }
 struct AppPicker<Value: Hashable>: View {
     let title: LocalizedStringKey
@@ -126,9 +148,11 @@ struct AppPicker<Value: Hashable>: View {
             if boxed {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(AppStyle.label).foregroundStyle(AppStyle.secondary)
-                    trigger.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).frame(height: 36)
-                        .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
+                    trigger.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).frame(
+                        height: 36
+                    )
+                    .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
                 }
             } else {
                 HStack(spacing: 8) {
@@ -139,15 +163,18 @@ struct AppPicker<Value: Hashable>: View {
             }
         }.task {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--ui-preview"), let previewID,
-               ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == previewID {
-                try? await Task.sleep(for: .milliseconds(500)); open = true
-            }
+                if ProcessInfo.processInfo.arguments.contains("--ui-preview"), let previewID,
+                    ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == previewID {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    open = true
+                }
             #endif
         }
     }
     private var trigger: some View {
-        Button { open = true } label: {
+        Button {
+            open = true
+        } label: {
             HStack(spacing: 5) {
                 Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
                     .lineLimit(1).truncationMode(.tail)
@@ -155,16 +182,23 @@ struct AppPicker<Value: Hashable>: View {
                 Image(systemName: "arrowtriangle.down.fill").font(.system(size: 7))
             }.foregroundStyle(boxed ? AppStyle.text : AppStyle.secondary)
         }.buttonStyle(.plain).accessibilityLabel(title)
+            .accessibilityValue(
+                Text(LocalizedStringKey(options.first { $0.value == selection }?.title ?? "Choose…"))
+            )
             .popover(isPresented: $open, arrowEdge: .top) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(options) { option in
                         Button {
-                            selection = option.value; open = false
+                            selection = option.value
+                            open = false
                         } label: {
                             HStack(spacing: 12) {
-                                Text(LocalizedStringKey(option.title)).fixedSize(horizontal: false, vertical: true)
+                                Text(LocalizedStringKey(option.title)).fixedSize(
+                                    horizontal: false, vertical: true)
                                 Spacer(minLength: 8)
-                                if selection == option.value { Image(systemName: "checkmark").font(.system(size: 10)) }
+                                if selection == option.value {
+                                    Image(systemName: "checkmark").font(.system(size: 10))
+                                }
                             }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(minHeight: 40)
                         }.buttonStyle(.plain)
                     }
@@ -208,6 +242,8 @@ extension View {
 }
 struct AppIcon: View {
     let name: String
-    var body: some View { Image(name).resizable().scaledToFit().frame(width: 17, height: 17)
-        .frame(width: 26, height: 44).contentShape(Rectangle()) }
+    var body: some View {
+        Image(name).resizable().scaledToFit().frame(width: 17, height: 17)
+            .frame(width: 26, height: 44).contentShape(Rectangle())
+    }
 }

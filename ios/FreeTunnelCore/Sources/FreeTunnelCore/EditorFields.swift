@@ -18,7 +18,8 @@ public struct EditorFields: Equatable {
     public init() {}
     public init(_ config: Configuration) {
         let endpoint = config.endpoint
-        name = config.name; hostname = config.hostname
+        name = config.name
+        hostname = config.hostname
         addresses = (endpoint["addresses"] as? [String] ?? []).joined(separator: ", ")
         username = endpoint["username"] as? String ?? ""
         password = endpoint["password"] as? String ?? ""
@@ -34,20 +35,29 @@ public struct EditorFields: Equatable {
     public func configuration(previous: Configuration? = nil) throws -> Configuration {
         let trimmedRandom = random.trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = trimmedRandom.split(separator: "/", omittingEmptySubsequences: false)
-        guard trimmedRandom.isEmpty || (parts.count <= 2 && parts.allSatisfy { part in
-            !part.isEmpty && part.count <= 64 && part.count.isMultiple(of: 2) && part.allSatisfy { $0.isHexDigit }
-        }) else { throw ClientError.invalidConfig }
+        guard
+            trimmedRandom.isEmpty
+                || (parts.count <= 2
+                    && parts.allSatisfy { part in
+                        !part.isEmpty && part.count <= 64 && part.count.isMultiple(of: 2)
+                            && part.allSatisfy { $0.isHexDigit }
+                    })
+        else { throw ClientError.invalidConfig }
         let host = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         var root = previous?.rawTable ?? [:]
         var endpoint = previous?.endpoint ?? [:]
         endpoint["name"] = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? host : name
         endpoint["hostname"] = host
-        endpoint["addresses"] = addresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        endpoint["username"] = username; endpoint["password"] = password
+        endpoint["addresses"] = addresses.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        endpoint["username"] = username
+        endpoint["password"] = password
         endpoint["upstream_protocol"] = proto
         endpoint["custom_sni"] = sni.trimmingCharacters(in: .whitespacesAndNewlines)
         endpoint["client_random"] = trimmedRandom
-        endpoint["has_ipv6"] = ipv6; endpoint["skip_verification"] = skipVerification
+        endpoint["has_ipv6"] = ipv6
+        endpoint["skip_verification"] = skipVerification
         endpoint["anti_dpi"] = antiDPI
         endpoint["certificate"] = certificate
         // Canonical location used by the desktop and core. Remove the legacy alias.

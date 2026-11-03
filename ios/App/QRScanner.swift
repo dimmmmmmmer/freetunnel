@@ -8,8 +8,10 @@ struct QRScanner: View {
         if !unavailable && DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
             ScannerController(received: received, failed: { unavailable = true }).ignoresSafeArea()
         } else {
-            ContentUnavailableView("Camera unavailable", systemImage: "qrcode.viewfinder", description: Text(
-                "Paste a link or import a file instead."))
+            ContentUnavailableView(
+                "Camera unavailable", systemImage: "qrcode.viewfinder",
+                description: Text(
+                    "Paste a link or import a file instead."))
         }
     }
 }
@@ -18,9 +20,10 @@ private struct ScannerController: UIViewControllerRepresentable {
     let failed: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(received: received, failed: failed) }
     func makeUIViewController(context: Context) -> DataScannerViewController {
-        let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
+        let scanner = DataScannerViewController(
+            recognizedDataTypes: [.barcode(symbologies: [.qr])],
             qualityLevel: .balanced, recognizesMultipleItems: false, isGuidanceEnabled: true,
-                isHighlightingEnabled: true)
+            isHighlightingEnabled: true)
         scanner.delegate = context.coordinator
         do { try scanner.startScanning() } catch {
             scanner.stopScanning()
@@ -30,7 +33,8 @@ private struct ScannerController: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
     static func dismantleUIViewController(_ controller: DataScannerViewController, coordinator: Coordinator) {
-        controller.stopScanning() }
+        controller.stopScanning()
+    }
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         let received: (String) -> Void
         private var delivered = false
@@ -54,7 +58,10 @@ private struct ScannerController: UIViewControllerRepresentable {
             guard !delivered else { return }
             for item in addedItems {
                 if case .barcode(let code) = item, let text = code.payloadStringValue, text.hasPrefix("tt://") {
-                    delivered = true; scanner.stopScanning(); received(text); break
+                    delivered = true
+                    scanner.stopScanning()
+                    received(text)
+                    break
                 }
             }
         }

@@ -1,6 +1,6 @@
+import FreeTunnelCore
 import SwiftUI
 import UniformTypeIdentifiers
-import FreeTunnelCore
 
 struct ServerEditor: View {
     @ObservedObject var state: AppState
@@ -14,34 +14,51 @@ struct ServerEditor: View {
     @State private var importingCertificate = false
     private var changed: Bool { fields != initial || splitProfile != initialProfile }
     private func close() {
-        if changed { state.confirm("Discard unsaved changes?", actionTitle: "Discard") { state.dialog = nil } }
-        else { state.dialog = nil }
+        if changed {
+            state.confirm("Discard unsaved changes?", actionTitle: "Discard") { state.dialog = nil }
+        } else {
+            state.dialog = nil
+        }
     }
     var body: some View {
         AppDialog(title: profile == nil ? "New config" : "Edit config", close: close) {
             ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        LabeledField(title: "Config name", text: $fields.name, placeholder: String(localized: "Germany · Frankfurt"))
-                        LabeledField(title: "Server host", text: $fields.hostname, placeholder: "frankfurt.example.com")
-                        LabeledField(title: "Address(es) · host:port (comma-separated)", text: $fields.addresses,
+                        LabeledField(
+                            title: "Config name", text: $fields.name,
+                            placeholder: String(localized: "Germany · Frankfurt"))
+                        LabeledField(
+                            title: "Server host", text: $fields.hostname, placeholder: "frankfurt.example.com"
+                        )
+                        LabeledField(
+                            title: "Address(es) · host:port (comma-separated)", text: $fields.addresses,
                             placeholder: "1.2.3.4:443")
                         HStack(alignment: .top, spacing: 10) {
                             LabeledField(title: "Username", text: $fields.username)
                             LabeledField(title: "Password", text: $fields.password, secure: true)
                         }
                         HStack(alignment: .top, spacing: 10) {
-                            AppPicker(title: "Protocol", selection: $fields.proto, options: [.init("http2", "HTTP/2"),
-                                .init("http3", "HTTP/3")], boxed: true).frame(maxWidth: .infinity)
-                            LabeledField(title: "DNS servers", text: $fields.dns, placeholder: "1.1.1.1, 8.8.8.8")
-                                .frame(maxWidth: .infinity)
+                            AppPicker(
+                                title: "Protocol", selection: $fields.proto,
+                                options: [
+                                    .init("http2", "HTTP/2"),
+                                    .init("http3", "HTTP/3")
+                                ], boxed: true
+                            ).frame(maxWidth: .infinity)
+                            LabeledField(
+                                title: "DNS servers", text: $fields.dns, placeholder: "1.1.1.1, 8.8.8.8"
+                            )
+                            .frame(maxWidth: .infinity)
                         }
                         HStack(alignment: .top, spacing: 10) {
                             LabeledField(title: "Custom SNI", text: $fields.sni)
                             LabeledField(title: "Client random (hex)", text: $fields.random)
                         }
-                        AppPicker(title: "Split profile", selection: $splitProfile,
-                            options: state.preferences.splitProfiles.map { .init($0.name, $0.name) }, boxed: true)
+                        AppPicker(
+                            title: "Split profile", selection: $splitProfile,
+                            options: state.preferences.splitProfiles.map { .init($0.name, $0.name) },
+                            boxed: true)
                         VStack(spacing: 0) {
                             Toggle("Allow IPv6", isOn: $fields.ipv6)
                             Toggle("Skip certificate check", isOn: $fields.skipVerification)
@@ -58,15 +75,17 @@ struct ServerEditor: View {
                         }
                         HStack(spacing: 8) {
                             Spacer()
-                            Button("Cancel", action: close).frame(minWidth: 88)
+                            Button("Cancel", action: close).buttonStyle(AppButtonStyle(dialog: true))
                             Button("Save") {
                                 do {
                                     if changed || profile == nil {
-                                        try state.saveServer(fields, original: original, profile: profile, splitProfile: splitProfile)
+                                        try state.saveServer(
+                                            fields, original: original, profile: profile,
+                                            splitProfile: splitProfile)
                                     }
                                     state.dialog = nil
                                 } catch { state.report(error) }
-                            }.buttonStyle(AppButtonStyle(primary: true)).disabled(!ready)
+                            }.buttonStyle(AppButtonStyle(primary: true, dialog: true)).disabled(!ready)
                         }.padding(.top, 6).id("editor-bottom")
                     }.textInputAutocapitalization(.never).autocorrectionDisabled()
                 }.task {
@@ -74,14 +93,20 @@ struct ServerEditor: View {
                     do {
                         if let profile {
                             let config = try Configuration(state.secret(profile).toml)
-                            original = config; fields = EditorFields(config); fields.name = profile.name
+                            original = config
+                            fields = EditorFields(config)
+                            fields.name = profile.name
                             splitProfile = profile.splitProfile
                         }
-                        initial = fields; initialProfile = splitProfile; ready = true
+                        initial = fields
+                        initialProfile = splitProfile
+                        ready = true
                         #if DEBUG
-                        if state.isPreview && ProcessInfo.processInfo.environment["FT_PREVIEW_BOTTOM"] == "1" {
-                            try? await Task.sleep(for: .milliseconds(300)); reader.scrollTo("editor-bottom", anchor: .bottom)
-                        }
+                            if state.isPreview
+                                && ProcessInfo.processInfo.environment["FT_PREVIEW_BOTTOM"] == "1" {
+                                try? await Task.sleep(for: .milliseconds(300))
+                                reader.scrollTo("editor-bottom", anchor: .bottom)
+                            }
                         #endif
                     } catch { state.report(error) }
                 }
@@ -96,7 +121,8 @@ struct ServerEditor: View {
                 }
                 let data = try Data(contentsOf: url)
                 guard data.count <= 1_048_576, let text = String(data: data, encoding: .utf8),
-                      text.contains("-----BEGIN CERTIFICATE-----"), !text.contains("PRIVATE KEY") else {
+                    text.contains("-----BEGIN CERTIFICATE-----"), !text.contains("PRIVATE KEY")
+                else {
                     throw ClientError.invalidConfig
                 }
                 fields.certificate = text

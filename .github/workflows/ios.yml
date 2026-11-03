@@ -63,9 +63,10 @@ jobs:
       - name: Compile for iPhone
         run: xcodebuild -project ios/FreeTunnel.xcodeproj -scheme FreeTunnel -sdk iphoneos -configuration Release -derivedDataPath ios/DerivedData-device CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
       - name: Render iPhone previews
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: bash ios/scripts/preview.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
         with:
           name: ios-previews
           path: ios/previews/*.png

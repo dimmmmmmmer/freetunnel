@@ -8,10 +8,13 @@ struct FormAlerts: ViewModifier {
         content
             .onAppear { state.openDialogs.insert(identifier) }
             .onDisappear { state.openDialogs.remove(identifier) }
-            .alert("FreeTunnel", isPresented: Binding(
-                get: { state.message != nil },
-                set: { if !$0 { state.message = nil } }
-            )) {
+            .alert(
+                "FreeTunnel",
+                isPresented: Binding(
+                    get: { state.message != nil },
+                    set: { if !$0 { state.message = nil } }
+                )
+            ) {
                 Button("OK") { state.message = nil }
             } message: {
                 Text(LocalizedStringKey(state.message ?? ""))

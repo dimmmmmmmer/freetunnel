@@ -1,5 +1,5 @@
-import SwiftUI
 import FreeTunnelCore
+import SwiftUI
 
 @main struct FreeTunnelApp: App {
     @StateObject private var state = AppState()
@@ -7,14 +7,26 @@ import FreeTunnelCore
     var body: some Scene {
         WindowGroup {
             RootView(state: state)
-                .preferredColorScheme(state.preferences.theme == "dark" ? .dark : state.preferences.theme == "light" ? .light : nil)
-                .environment(\.locale, state.preferences.language == "system" ? .current : Locale(identifier: state.preferences.language))
+                .preferredColorScheme(
+                    state.preferences.theme == "dark"
+                        ? .dark : state.preferences.theme == "light" ? .light : nil
+                )
+                .environment(
+                    \.locale,
+                    state.preferences.language == "system"
+                        ? .current : Locale(identifier: state.preferences.language)
+                )
                 .onOpenURL { url in
-                    if url.scheme == "tt" { state.confirmImport(url.absoluteString) }
-                    else if url.isFileURL { state.importFiles([url]) }
+                    if url.scheme == "tt" {
+                        state.confirmImport(url.absoluteString)
+                    } else if url.isFileURL {
+                        state.importFiles([url])
+                    }
                 }
                 .task { await state.refreshDue() }
-                .onChange(of: phase) { _, newValue in if newValue == .active { Task { await state.refreshDue() } } }
+                .onChange(of: phase) { _, newValue in
+                    if newValue == .active { Task { await state.refreshDue() } }
+                }
         }.backgroundTask(.appRefresh("org.freetunnel.ios.refresh")) { await state.refreshDue() }
     }
 }
@@ -31,13 +43,18 @@ struct RootView: View {
                     case "routing": RoutingView(state: state)
                     case "settings": SettingsView(state: state)
                     case "logs": LogsView(state: state, vpn: state.vpn)
-                    default: HomeView(state: state, vpn: state.vpn) { state.openAddMenu = true; tab = "servers" }
+                    default:
+                        HomeView(state: state, vpn: state.vpn) {
+                            state.openAddMenu = true
+                            tab = "servers"
+                        }
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let dialog = state.dialog {
                 switch dialog {
-                case .server(let id): ServerEditor(state: state, profile: state.preferences.profiles.first { $0.id == id })
+                case .server(let id):
+                    ServerEditor(state: state, profile: state.preferences.profiles.first { $0.id == id })
                 case .importText: ImportView(state: state)
                 case .subscription: ImportView(state: state, subscriptionOnly: true)
                 }
@@ -48,26 +65,38 @@ struct RootView: View {
                     Text(LocalizedStringKey(confirmation.text)).fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Spacer()
-                        Button("Cancel") { state.confirmation = nil }
+                        Button("Cancel") { state.confirmation = nil }.buttonStyle(
+                            AppButtonStyle(dialog: true))
                         Button(LocalizedStringKey(confirmation.actionTitle)) {
-                            state.confirmation = nil; confirmation.action()
-                        }.buttonStyle(AppButtonStyle(primary: true))
+                            state.confirmation = nil
+                            confirmation.action()
+                        }.buttonStyle(AppButtonStyle(primary: true, dialog: true))
                     }
-                }.padding(18).frame(maxWidth: 340).background(AppStyle.background, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border)).padding(18)
+                }.padding(18).frame(maxWidth: 340).background(
+                    AppStyle.background, in: RoundedRectangle(cornerRadius: 14)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border)).padding(18)
             }
             if let message = state.message {
-                VStack { Spacer(); Text(LocalizedStringKey(message)).font(AppStyle.label).padding(12)
-                    .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border)).padding(.horizontal, 20).padding(.bottom, 16) }
-                    .allowsHitTesting(false)
+                VStack {
+                    Spacer()
+                    Text(LocalizedStringKey(message)).font(AppStyle.label).padding(12)
+                        .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border)).padding(
+                            .horizontal, 20
+                        ).padding(.bottom, 16)
+                }
+                .allowsHitTesting(false)
             }
         }.tint(AppStyle.accent).foregroundStyle(AppStyle.text).font(AppStyle.body)
             .background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
             .modifier(PreviewForms(state: state))
             .task(id: state.message) {
                 guard state.message != nil else { return }
-                do { try await Task.sleep(for: .seconds(6)); state.message = nil } catch {}
+                do {
+                    try await Task.sleep(for: .seconds(6))
+                    state.message = nil
+                } catch {}
             }
             .task {
                 guard !state.isPreview else { return }
@@ -85,7 +114,9 @@ struct RootView: View {
         }.frame(maxWidth: .infinity).padding(.vertical, 8).background(AppStyle.background)
     }
     private func tabButton(_ id: String, title: LocalizedStringKey, icon: String) -> some View {
-        Button { tab = id } label: {
+        Button {
+            tab = id
+        } label: {
             Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
                 .opacity(tab == id ? 1 : 0.8).frame(width: 46, height: 38)
                 .background(tab == id ? AppStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
@@ -105,20 +136,32 @@ struct HomeView: View {
             VStack(spacing: 22) {
                 VStack(spacing: 6) {
                     Button {
-                        if state.selected == nil { showServers(); return }
+                        if state.selected == nil {
+                            showServers()
+                            return
+                        }
                         Task {
-                            if vpn.isDisconnected { await state.connect() }
-                            else { do { try await vpn.disconnect() } catch { state.report(error) } }
+                            if vpn.isDisconnected {
+                                await state.connect()
+                            } else {
+                                do { try await vpn.disconnect() } catch { state.report(error) }
+                            }
                         }
                     } label: {
                         Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
                             .opacity(vpn.isDisconnected ? 0.5 : transitioning ? 0.7 : 1)
                             .scaleEffect(pulse ? 1.05 : 1)
-                            .animation(pulse ? .easeInOut(duration: 0.75).repeatForever(autoreverses: true) : .easeOut(duration: 0.12), value: pulse)
-                    }.buttonStyle(.plain).disabled(state.isPreview || !state.loaded || vpn.status == .disconnecting)
-                        .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
+                            .animation(
+                                pulse
+                                    ? .easeInOut(duration: 0.75).repeatForever(autoreverses: true)
+                                    : .easeOut(duration: 0.12), value: pulse)
+                    }.buttonStyle(.plain).disabled(
+                        state.isPreview || !state.loaded || vpn.status == .disconnecting
+                    )
+                    .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                     if vpn.status == .connected, let date = vpn.connectedAt {
-                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15)).foregroundStyle(AppStyle.secondary)
+                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15)).foregroundStyle(
+                            AppStyle.secondary)
                     } else if transitioning {
                         Text(vpn.status == .disconnecting ? "Disconnecting…" : "Connecting…")
                             .font(.custom("Inter-Medium", size: 15)).foregroundStyle(AppStyle.secondary)
@@ -131,32 +174,46 @@ struct HomeView: View {
                         HStack(spacing: 6) {
                             Text(state.selected?.name ?? String(localized: "Add a config"))
                                 .font(.custom("Inter-Medium", size: 15)).lineLimit(1)
-                            if state.selected != nil { Image(systemName: "arrowtriangle.down.fill").font(.system(size: 7)) }
+                            if state.selected != nil {
+                                Image(systemName: "arrowtriangle.down.fill").font(.system(size: 7))
+                            }
                         }
                     }.buttonStyle(.plain).popover(isPresented: $picker) {
                         ScrollView {
                             VStack(spacing: 0) {
                                 ForEach(state.preferences.profiles) { profile in
-                                    Button { state.select(profile.id); picker = false } label: {
-                                        HStack { Text(profile.name); Spacer(minLength: 12)
-                                            if state.selected?.id == profile.id { Image(systemName: "checkmark").font(.system(size: 10)) } }
-                                            .padding(.horizontal, 12).frame(minHeight: 40)
+                                    Button {
+                                        state.select(profile.id)
+                                        picker = false
+                                    } label: {
+                                        HStack {
+                                            Text(profile.name)
+                                            Spacer(minLength: 12)
+                                            if state.selected?.id == profile.id {
+                                                Image(systemName: "checkmark").font(.system(size: 10))
+                                            }
+                                        }
+                                        .padding(.horizontal, 12).frame(minHeight: 40)
                                     }.buttonStyle(.plain)
                                 }
                             }.padding(6)
-                        }.frame(width: 280, height: CGFloat(min(3, state.preferences.profiles.count)) * 40 + 12)
-                            .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
+                        }.frame(
+                            width: 280, height: CGFloat(min(3, state.preferences.profiles.count)) * 40 + 12
+                        )
+                        .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
                     }
                     if state.selected != nil {
-                        Button(action: showServers) { Image(systemName: "plus").font(.system(size: 14)).frame(width: 22, height: 22) }
-                            .buttonStyle(.plain).accessibilityLabel("Add a config")
+                        Button(action: showServers) {
+                            Image(systemName: "plus").font(.system(size: 14)).frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain).accessibilityLabel("Add a config")
                     }
                 }.padding(.horizontal, 18)
             }.animation(.easeOut(duration: 0.28), value: vpn.status)
             Spacer(minLength: 34)
             HStack(spacing: 12) {
-                speedTile(up: false, value: vpn.downSpeed)
-                speedTile(up: true, value: vpn.upSpeed)
+                speedTile(upload: false, value: vpn.downSpeed)
+                speedTile(upload: true, value: vpn.upSpeed)
             }.padding(.bottom, 44)
         }.frame(maxWidth: .infinity).background(AppStyle.background)
             .onChange(of: transitioning) { _, value in pulse = value }
@@ -169,10 +226,11 @@ struct HomeView: View {
                 }
             }
     }
-    private func speedTile(up: Bool, value: Double) -> some View {
+    private func speedTile(upload: Bool, value: Double) -> some View {
         HStack(spacing: 5) {
-            Text(up ? "↑" : "↓").foregroundStyle(up ? AppStyle.secondary : AppStyle.success)
-            Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(.custom("Inter-Medium", size: 15))
+            Text(upload ? "↑" : "↓").foregroundStyle(upload ? AppStyle.secondary : AppStyle.success)
+            Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(
+                .custom("Inter-Medium", size: 15))
         }.frame(width: 116, height: 44).background(AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
     }
 }

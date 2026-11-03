@@ -1,8 +1,9 @@
 import Foundation
+
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #else
-import Glibc
+    import Glibc
 #endif
 
 public struct IPRoute: Equatable {
@@ -19,11 +20,16 @@ public enum IPRoutes {
         let parts = value.split(separator: "/", omittingEmptySubsequences: false)
         guard (1...2).contains(parts.count) else { throw ClientError.invalidList }
         let address = String(parts[0])
-        var v4 = in_addr(); var v6 = in6_addr()
+        var ipv4Address = in_addr()
+        var ipv6Address = in6_addr()
         let ipv6: Bool
-        if inet_pton(AF_INET, address, &v4) == 1 { ipv6 = false }
-        else if inet_pton(AF_INET6, address, &v6) == 1 { ipv6 = true }
-        else { throw ClientError.invalidList }
+        if inet_pton(AF_INET, address, &ipv4Address) == 1 {
+            ipv6 = false
+        } else if inet_pton(AF_INET6, address, &ipv6Address) == 1 {
+            ipv6 = true
+        } else {
+            throw ClientError.invalidList
+        }
         let maxBits = ipv6 ? 128 : 32
         let prefix = parts.count == 1 ? maxBits : Int(parts[1]) ?? -1
         guard (0...maxBits).contains(prefix) else { throw ClientError.invalidList }

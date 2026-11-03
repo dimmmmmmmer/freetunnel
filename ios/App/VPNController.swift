@@ -1,56 +1,73 @@
-import Foundation
 import Combine
-import NetworkExtension
+import Foundation
 import FreeTunnelCore
+import NetworkExtension
 
 @MainActor final class VPNController: ObservableObject {
     @Published private(set) var status: NEVPNStatus = .disconnected
     @Published private(set) var logs = ""
     @Published private(set) var downSpeed = 0.0
     @Published private(set) var upSpeed = 0.0
-    private var lastStats: (up: UInt64, down: UInt64, time: TimeInterval)?
+    private struct TrafficSample {
+        let uploaded: UInt64
+        let downloaded: UInt64
+        let time: TimeInterval
+    }
+    private var lastStats: TrafficSample?
     private var manager: NETunnelProviderManager?
     private var observer: NSObjectProtocol?
     private var changing = false
     var connectedAt: Date? {
         #if DEBUG
-        if let previewConnectedAt { return previewConnectedAt }
+            if let previewConnectedAt { return previewConnectedAt }
         #endif
         return manager?.connection.connectedDate
     }
     var isDisconnected: Bool { status == .disconnected || status == .invalid }
     init() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-preview") { return }
+            if ProcessInfo.processInfo.arguments.contains("--ui-preview") { return }
         #endif
         Task { try? await load() }
     }
     #if DEBUG
-    private var previewConnectedAt: Date?
-    func preparePreview(_ scenario: String) {
-        guard ProcessInfo.processInfo.arguments.contains("--ui-preview") else { return }
-        if scenario == "connected" {
-            status = .connected; previewConnectedAt = Date().addingTimeInterval(-125)
-            downSpeed = 2.4; upSpeed = 0.3
-        } else if scenario == "logs-filled" {
-            logs = "12:00:00 INFO Configuration loaded\n12:00:01 CORE Connecting to vpn.example.org\n12:00:02 INFO Connected"
+        private var previewConnectedAt: Date?
+        func preparePreview(_ scenario: String) {
+            guard ProcessInfo.processInfo.arguments.contains("--ui-preview") else { return }
+            if scenario == "connected" {
+                status = .connected
+                previewConnectedAt = Date().addingTimeInterval(-125)
+                downSpeed = 2.4
+                upSpeed = 0.3
+            } else if scenario == "logs-filled" {
+                logs =
+                    "12:00:00 INFO Configuration loaded\n"
+                    + "12:00:01 CORE Connecting to vpn.example.org\n12:00:02 INFO Connected"
+            }
         }
-    }
     #endif
     func prepare() async { try? await load() }
     private func load() async throws {
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
-        manager = managers.first { (
-            $0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == Identity.tunnel }
+        manager = managers.first {
+            ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier
+                == Identity.tunnel
+        }
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        guard let manager else { status = .disconnected; return }
+        guard let manager else {
+            status = .disconnected
+            return
+        }
         status = manager.connection.status
-        observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange,
-            object: manager.connection, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(
+            forName: .NEVPNStatusDidChange,
+            object: manager.connection, queue: .main
+        ) { [weak self] _ in
             Task { @MainActor in self?.status = self?.manager?.connection.status ?? .disconnected }
         }
     }
-    func connect(text: String, name: String, killSwitch: Bool, onDemand: Bool, logging: Bool, verbose: Bool) async throws {
+    func connect(text: String, name: String, killSwitch: Bool, logging: Bool, verbose: Bool)
+        async throws {
         guard !changing else { throw ClientError.tunnelFailed }
         changing = true
         defer { changing = false }
@@ -70,10 +87,8 @@ import FreeTunnelCore
         manager.protocolConfiguration = config
         manager.localizedDescription = "FreeTunnel"
         manager.isEnabled = true
-        let rule = NEOnDemandRuleConnect()
-        rule.interfaceTypeMatch = .any
-        manager.onDemandRules = onDemand ? [rule] : []
-        manager.isOnDemandEnabled = onDemand
+        manager.onDemandRules = []
+        manager.isOnDemandEnabled = false
         try await manager.saveToPreferences()
         try await load()
         guard let connection = self.manager?.connection else { throw ClientError.tunnelFailed }
@@ -98,17 +113,19 @@ import FreeTunnelCore
         throw ClientError.tunnelFailed
     }
     func send(_ command: Data) async -> Data? {
-        guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else { return nil }
+        guard let session = manager?.connection as? NETunnelProviderSession, !isDisconnected else {
+            return nil
+        }
         return await withCheckedContinuation { continuation in
             let reply = ProviderReply(continuation)
             DispatchQueue.global().asyncAfter(deadline: .now() + 5) { reply.finish(nil) }
-            do { try session.sendProviderMessage(command) { reply.finish($0) } }
-            catch { reply.finish(nil) }
+            do { try session.sendProviderMessage(command) { reply.finish($0) } } catch { reply.finish(nil) }
         }
     }
     func readLogs(clear: Bool = false) async {
         if clear { logs = "" }
-        if let data = await send(Data((clear ? "clear" : "logs").utf8)), let text = String(data: data, encoding: .utf8) {
+        if let data = await send(Data((clear ? "clear" : "logs").utf8)),
+            let text = String(data: data, encoding: .utf8) {
             logs = text
         } else if let url = try? Identity.directory().appendingPathComponent("freetunnel.log") {
             if clear { try? Data().write(to: url, options: .atomic) }
@@ -116,21 +133,28 @@ import FreeTunnelCore
         }
     }
     func configureLogging(enabled: Bool, verbose: Bool) async {
-        if let data = try? JSONSerialization.data(withJSONObject: ["loggingEnabled": enabled, "verboseLogs": verbose]) {
+        if let data = try? JSONSerialization.data(withJSONObject: [
+            "loggingEnabled": enabled, "verboseLogs": verbose
+        ]) {
             _ = await send(data)
         }
     }
     func sampleTraffic() async {
         guard !isDisconnected, let data = await send(Data("stats".utf8)),
-              let stats = try? JSONDecoder().decode(TrafficCounters.self, from: data) else {
-            lastStats = nil; upSpeed = 0; downSpeed = 0; return
+            let stats = try? JSONDecoder().decode(TrafficCounters.self, from: data)
+        else {
+            lastStats = nil
+            upSpeed = 0
+            downSpeed = 0
+            return
         }
         let now = ProcessInfo.processInfo.systemUptime
-        if let lastStats, now > lastStats.time, stats.up >= lastStats.up, stats.down >= lastStats.down {
-            upSpeed = Double(stats.up - lastStats.up) / (now - lastStats.time) / 1_000_000
-            downSpeed = Double(stats.down - lastStats.down) / (now - lastStats.time) / 1_000_000
+        if let lastStats, now > lastStats.time, stats.uploaded >= lastStats.uploaded,
+            stats.downloaded >= lastStats.downloaded {
+            upSpeed = Double(stats.uploaded - lastStats.uploaded) / (now - lastStats.time) / 1_000_000
+            downSpeed = Double(stats.downloaded - lastStats.downloaded) / (now - lastStats.time) / 1_000_000
         }
-        lastStats = (stats.up, stats.down, now)
+        lastStats = TrafficSample(uploaded: stats.uploaded, downloaded: stats.downloaded, time: now)
     }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }
@@ -149,4 +173,11 @@ private final class ProviderReply: @unchecked Sendable {
     }
 }
 
-private struct TrafficCounters: Decodable { let up: UInt64; let down: UInt64 }
+private struct TrafficCounters: Decodable {
+    let uploaded: UInt64
+    let downloaded: UInt64
+    enum CodingKeys: String, CodingKey {
+        case uploaded = "up"
+        case downloaded = "down"
+    }
+}
