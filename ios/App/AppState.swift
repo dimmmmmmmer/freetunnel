@@ -12,6 +12,16 @@ import VpnClientFramework
     @Published var openDialogs = Set<UUID>()
     @Published var loaded = false
     @Published var importText = ""
+    @Published var dialog: AppDialogRoute?
+    @Published var confirmation: AppConfirmation?
+    @Published var openAddMenu = false
+    @Published var pings: [UUID: String] = [:]
+    @Published var pinging = false
+    @Published var geoErrors: [String: String] = [:]
+    @Published var updateStatus = "Check for updates"
+    @Published var updateURL: URL?
+    @Published var checkingUpdate = false
+    var reconnectTask: Task<Void, Never>?
     let vpn = VPNController()
     var isPreview: Bool {
         #if DEBUG
@@ -27,11 +37,11 @@ import VpnClientFramework
         #if DEBUG
         if isPreview {
             var profile = Profile(name: "FreeTunnel demo")
-            profile.routing.manualBypass = "home.example\n192.168.0.0/16"
-            profile.routing.manualVPN = "example.org"
+            profile.routing.manualBypass = "example.org"
             let list = GeoList(name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
                 kind: .sites, direction: .vpn)
             profile.routing.lists = [list]
+            preferences.splitProfiles = [SplitProfile(name: "Default", routing: profile.routing)]
             preferences.profiles = [profile]
             preferences.selectedID = profile.id
             snapshots[list.id] = GeoSnapshot(source: list.source, kind: list.kind, entries: ["example.org",
@@ -45,7 +55,7 @@ import VpnClientFramework
             if FileManager.default.fileExists(atPath: path.path) {
                 preferences = try decoder.decode(Preferences.self, from: Data(contentsOf: path))
             }
-            for profile in preferences.profiles {
+            for profile in preferences.splitProfiles {
                 for list in profile.routing.lists {
                     if let data = try? Data(contentsOf: cachePath(list.id)),
                        let snapshot = try? decoder.decode(GeoSnapshot.self, from: data),
@@ -70,14 +80,15 @@ import VpnClientFramework
             scheduleRefresh()
         } catch { message = ClientError.storageFailed.rawValue }
     }
-    private func cachePath(_ id: String) throws -> URL {
+    func cachePath(_ id: String) throws -> URL {
         guard UUID(uuidString: id) != nil else { throw ClientError.invalidList }
         let directory = try Identity.directory().appendingPathComponent("geo", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent(id + ".json")
     }
     func secret(_ profile: Profile) throws -> Secret {
-        try decoder.decode(Secret.self, from: Vault.read(profile.id.uuidString))
+        if isPreview { return Secret(toml: Self.previewConfig) }
+        return try decoder.decode(Secret.self, from: Vault.read(profile.id.uuidString))
     }
     func update(_ profile: Profile) {
         guard let index = preferences.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
@@ -92,6 +103,7 @@ import VpnClientFramework
         profile.subscriptionUpdated = subscription == nil ? nil : Date()
         let record = Secret(toml: try config.serialized(), subscription: subscription)
         try Vault.write(encoder.encode(record), key: profile.id.uuidString)
+        assignImportedRouting(&profile)
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
@@ -129,6 +141,13 @@ import VpnClientFramework
                 profiles.append(profile)
             }
             var updated = preferences
+            for index in profiles.indices {
+                if profiles[index].routing.defaultDirection != updated.splitProfiles[0].routing.defaultDirection {
+                    let name = "Imported " + profiles[index].id.uuidString.prefix(8)
+                    profiles[index].splitProfile = name
+                    updated.splitProfiles.append(SplitProfile(name: name, routing: profiles[index].routing))
+                }
+            }
             updated.profiles.append(contentsOf: profiles)
             if updated.selectedID == nil { updated.selectedID = profiles.first?.id }
             try encoder.encode(updated).write(
@@ -171,10 +190,7 @@ import VpnClientFramework
         try Vault.remove(profile.id.uuidString)
         preferences.profiles.removeAll { $0.id == profile.id }
         if preferences.selectedID == profile.id { preferences.selectedID = preferences.profiles.first?.id }
-        for list in profile.routing.lists {
-            snapshots.removeValue(forKey: list.id)
-            if let path = try? cachePath(list.id) { try? FileManager.default.removeItem(at: path) }
-        }
+
     }
     func refresh(_ list: GeoList) async {
         guard busy.insert(list.id).inserted else { return }
@@ -183,11 +199,15 @@ import VpnClientFramework
             let url = try GeoParser.source(list.source).url
             let data = try await Downloads.read(URLRequest(url: url), limit: GeoParser.maximumBytes)
             let snapshot = try await Task.detached { try GeoParser.parse(data, list: list) }.value
-            guard preferences.profiles.contains(where: { $0.routing.lists.contains(list) }) else { return }
+            guard preferences.splitProfiles.contains(where: { $0.routing.lists.contains(list) }) else { return }
             try encoder.encode(snapshot).write(to: cachePath(list.id),
                 options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             snapshots[list.id] = snapshot
-        } catch { report(error) } // Previous valid snapshot is kept on failure.
+            geoErrors.removeValue(forKey: list.id)
+            if let selected, preferences.routing(for: selected).lists.contains(list) { reapplySelected() }
+        } catch {
+            geoErrors[list.id] = NSLocalizedString((error as? ClientError ?? .networkFailed).rawValue, comment: "")
+        } // Previous valid snapshot is kept on failure.
     }
     func refreshDue() async {
         guard !isPreview else { return }
@@ -197,6 +217,8 @@ import VpnClientFramework
                 profile.subscriptionUpdated ?? .distantPast) >= 86400 {
                 await refreshSubscription(profile)
             }
+        }
+        for profile in preferences.splitProfiles {
             let interval = Routing.intervals.contains(profile.routing.refreshHours) ? profile.routing.refreshHours : 24
             for list in profile.routing.lists where list.enabled {
                 let previous = snapshots[list.id]
@@ -210,11 +232,12 @@ import VpnClientFramework
     }
     func scheduleRefresh() {
         guard !isPreview else { return }
-        let intervals = preferences.profiles.compactMap { profile -> Int? in
+        var intervals = preferences.splitProfiles.compactMap { profile -> Int? in
             let hours = profile.routing.refreshHours
             if profile.routing.lists.contains(where: { $0.enabled }) && hours > 0 { return hours }
-            return profile.subscriptionEnabled ? 24 : nil
+            return nil
         }
+        if preferences.profiles.contains(where: { $0.subscriptionEnabled }) { intervals.append(24) }
         let id = "org.freetunnel.ios.refresh"
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: id)
         guard let hours = intervals.min() else { return }
@@ -247,13 +270,15 @@ import VpnClientFramework
         } catch { report(error) }
     }
     func connect() async {
+        guard !isPreview else { return }
         guard loaded, let profile = selected else { return }
         do {
             let config = try Configuration(secret(profile).toml)
-            let text = try config.tunnel(routing: profile.routing, snapshots: snapshots,
-                killSwitch: preferences.killSwitch)
+            let text = try config.tunnel(routing: preferences.routing(for: profile), snapshots: snapshots,
+                killSwitch: preferences.killSwitch, excludedRoutes: preferences.excludedRoutes,
+                verboseLogs: preferences.verboseLogs)
             try await vpn.connect(text: text, name: profile.name, killSwitch: preferences.killSwitch,
-                onDemand: false)
+                onDemand: false, logging: preferences.loggingEnabled, verbose: preferences.verboseLogs)
         } catch { report(error) }
     }
 }

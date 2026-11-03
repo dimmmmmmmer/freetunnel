@@ -73,6 +73,8 @@ stored in this repository.
 The iOS client uses the desktop palette from `qml/Main.qml`, Inter fonts and the
 same navigation artwork. `AppStyle.swift` contains the shared iOS controls and
 spacing. Keep both light and dark colors aligned with the desktop theme.
-Connection is controlled by the central logo. Touch targets are at least 44 pt;
-forms retain native keyboard, accessibility and system permission behavior.
+Connection is controlled by the central logo. The structured server editor, routing
+profiles, geo cards, settings and log panel follow desktop composition. Keyboard,
+file pickers and system permissions retain native behavior. The stable Apple adapter
+adds atomic packet counters for the speed tiles; no core version upgrade is involved.
 The preview workflow captures every main screen in both system appearances.

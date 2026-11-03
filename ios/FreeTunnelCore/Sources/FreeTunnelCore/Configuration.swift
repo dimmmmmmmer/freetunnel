@@ -9,6 +9,9 @@ public struct Configuration {
     public var defaultDirection: Direction { (table["vpn_mode"] as? String) == "selective" ? .bypass : .vpn }
     public var dnsUpstreams: [String] {
         endpoint["dns_upstreams"] as? [String] ?? table["dns_upstreams"] as? [String] ?? [] }
+    public var excludedRoutes: [String] {
+        ((table["listener"] as? [String: Any])?["tun"] as? [String: Any])?["excluded_routes"] as? [String] ?? []
+    }
     public var hostname: String { endpoint["hostname"] as? String ?? "" }
     public var endpoint: [String: Any] { table["endpoint"] as? [String: Any] ?? [:] }
     public var skipsVerification: Bool { endpoint["skip_verification"] as? Bool ?? false }
@@ -39,12 +42,14 @@ public struct Configuration {
         return true
     }
     public func serialized() throws -> String { try Self.serialize(table) }
-    public func tunnel(routing: Routing, snapshots: [String: GeoSnapshot], killSwitch: Bool) throws -> String {
+    public func tunnel(routing: Routing, snapshots: [String: GeoSnapshot], killSwitch: Bool,
+                       excludedRoutes: [String] = [], verboseLogs: Bool = false) throws -> String {
+        for route in excludedRoutes { _ = try IPRoutes.parse(route) }
         var result = table
         result["killswitch_enabled"] = killSwitch
-        result["loglevel"] = "warn"
+        result["loglevel"] = verboseLogs ? "debug" : "info"
         result["listener"] = ["tun": ["mtu_size": 1280,
-            "included_routes": ["0.0.0.0/0", "::/0"], "excluded_routes": [String]()]]
+            "included_routes": ["0.0.0.0/0", "::/0"], "excluded_routes": excludedRoutes]]
         if routing.enabled {
             result["vpn_mode"] = routing.defaultDirection == .vpn ? "general" : "selective"
             var rules = result["exclusions"] as? [String] ?? []
@@ -63,6 +68,8 @@ public struct Configuration {
             }
             guard rules.count <= 100_000 else { throw ClientError.tooLarge }
             result["exclusions"] = Array(Set(rules)).sorted()
+            // An empty selective profile must not silently send all traffic direct.
+            if routing.defaultDirection == .bypass && rules.isEmpty { result["vpn_mode"] = "general" }
         } else {
             result["vpn_mode"] = "general"
             result["exclusions"] = [String]()

@@ -2,8 +2,9 @@ import SwiftUI
 import FreeTunnelCore
 
 struct RuleChips: View {
-    let title: LocalizedStringKey
     @Binding var rules: String
+    var placeholder: LocalizedStringKey = "domains, comma-separated, then Enter"
+    var ipOnly = false
     @State private var input = ""
     @State private var invalid = false
     private var entries: [String] {
@@ -13,54 +14,48 @@ struct RuleChips: View {
     private func add() {
         let values = input.split(whereSeparator: { $0.isWhitespace || $0 == "," }).map(String.init)
         let parsed = values.compactMap(GeoParser.manual)
-        guard !values.isEmpty, parsed.count == values.count else { invalid = true; return }
+        guard !values.isEmpty, parsed.count == values.count,
+              !ipOnly || parsed.allSatisfy({ IPRoutes.isValid($0) }) else { invalid = true; return }
         var updated = entries
         for value in parsed where !updated.contains(value) { updated.append(value) }
-        rules = updated.joined(separator: "\n")
-        input = ""
-        invalid = false
+        rules = updated.joined(separator: "\n"); input = ""; invalid = false
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(AppStyle.label)
             ChipFlow {
                 ForEach(entries, id: \.self) { entry in
-                    HStack(spacing: 4) {
-                        Text(entry).font(AppStyle.label).lineLimit(1)
-                        Button {
-                            rules = entries.filter { $0 != entry }.joined(separator: "\n")
-                        } label: {
-                            Image(systemName: "xmark").font(.system(size: 11))
-                                .frame(width: 32, height: 44).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityLabel(Text("Remove") + Text(" " + entry))
-                    }.padding(.leading, 11)
-                        .background(AppStyle.surface, in: Capsule())
+                    RuleChip(text: entry) { rules = entries.filter { $0 != entry }.joined(separator: "\n") }
                 }
             }
-            HStack(spacing: 6) {
-                TextField("Domain or IP range", text: $input)
-                    .textFieldStyle(AppFieldStyle()).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .submitLabel(.done).onSubmit(add)
-                Button(action: add) { Image(systemName: "plus").frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).accessibilityLabel("Add rule").disabled(input.isEmpty)
-            }
+            TextField(placeholder, text: $input).textFieldStyle(AppFieldStyle())
+                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done).onSubmit(add)
             if invalid { Text("Invalid domain or IP range").font(AppStyle.caption).foregroundStyle(AppStyle.danger) }
         }
     }
 }
-
-private struct ChipFlow: Layout {
+struct RuleChip: View {
+    let text: String
+    var selected = false
+    var remove: (() -> Void)?
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(LocalizedStringKey(text)).font(AppStyle.label).lineLimit(1).truncationMode(.middle)
+            if let remove {
+                Button(action: remove) { Image(systemName: "xmark").font(.system(size: 9)).frame(width: 18, height: 28) }
+                    .buttonStyle(.plain).accessibilityLabel(Text("Remove") + Text(" " + text))
+            }
+        }.padding(.leading, 11).padding(.trailing, remove == nil ? 11 : 5).frame(height: 28)
+            .foregroundStyle(selected ? AppStyle.accentText : AppStyle.text)
+            .background(selected ? AppStyle.accent : AppStyle.surface, in: Capsule())
+    }
+}
+struct ChipFlow: Layout {
     private func positions(_ subviews: Subviews, width: CGFloat) -> (points: [CGPoint], height: CGFloat) {
-        var points: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
+        var points: [CGPoint] = []; var x: CGFloat = 0; var y: CGFloat = 0; var rowHeight: CGFloat = 0
         for view in subviews {
             let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
             if x > 0 && x + size.width > width { x = 0; y += rowHeight + 6; rowHeight = 0 }
-            points.append(CGPoint(x: x, y: y))
-            x += size.width + 6
-            rowHeight = max(rowHeight, size.height)
+            points.append(CGPoint(x: x, y: y)); x += size.width + 6; rowHeight = max(rowHeight, size.height)
         }
         return (points, y + rowHeight)
     }

@@ -1,28 +1,18 @@
 import SwiftUI
 
-// Simulator screenshots only: no launch environment can activate this in Release.
 struct PreviewForms: ViewModifier {
     @ObservedObject var state: AppState
-    @State private var showing = false
     func body(content: Content) -> some View {
-        #if DEBUG
         content.task {
-            showing = state.isPreview && !(ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] ?? "").isEmpty
-        }.sheet(isPresented: $showing) {
-            Group {
-                switch ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] {
-                case "import": ImportView(state: state)
-                case "new-server": NewServerView(state: state)
-                case "edit-server":
-                    if let profile = state.selected { ServerEditor(state: state, profile: profile) }
-                case "add-list":
-                    if let profile = state.selected { AddListView(state: state, profileID: profile.id) }
-                default: EmptyView()
-                }
-            }.tint(AppStyle.accent).foregroundStyle(AppStyle.text).font(AppStyle.body)
+            #if DEBUG
+            guard state.isPreview else { return }
+            switch ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] {
+            case "import": state.openAddMenu = true
+            case "new-server": state.dialog = .server(nil)
+            case "edit-server": state.dialog = .server(state.selected?.id)
+            default: break
+            }
+            #endif
         }
-        #else
-        content
-        #endif
     }
 }
