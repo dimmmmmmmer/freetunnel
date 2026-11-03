@@ -136,6 +136,7 @@ struct HomeView: View {
             VStack(spacing: 22) {
                 VStack(spacing: 6) {
                     Button {
+                        guard !state.isPreview else { return }
                         if state.selected == nil {
                             showServers()
                             return
@@ -156,7 +157,7 @@ struct HomeView: View {
                                     ? .easeInOut(duration: 0.75).repeatForever(autoreverses: true)
                                     : .easeOut(duration: 0.12), value: pulse)
                     }.buttonStyle(.plain).disabled(
-                        state.isPreview || !state.loaded || vpn.status == .disconnecting
+                        !state.loaded || vpn.status == .disconnecting
                     )
                     .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                     if vpn.status == .connected, let date = vpn.connectedAt {

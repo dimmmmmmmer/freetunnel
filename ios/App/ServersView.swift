@@ -160,7 +160,8 @@ struct ServersView: View {
                             Configuration(state.secret(profile).toml))
                         state.message = "Link copied"
                     }
-                }.padding(6).frame(width: 230).presentationCompactAdaptation(.popover)
+                }.padding(6).frame(width: 230).foregroundStyle(AppStyle.text)
+                    .presentationCompactAdaptation(.popover)
                     .presentationBackground(AppStyle.background)
             }
             Button {
