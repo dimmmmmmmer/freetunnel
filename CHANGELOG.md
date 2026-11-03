@@ -20,8 +20,8 @@ compare link at the bottom of its release notes.
   the taskbar, so the VPN keeps running with the window out of the way.
 - Windows: connecting no longer asks for administrator rights through UAC
   every time; the installer sets up a helper service the app starts itself.
-- Windows: routing by geo lists. Only what is blocked in Russia goes through
-  the VPN, out of the box; or everything but Russian sites; or everything.
+- Windows and Linux: routing by geo lists. Only what is blocked in Russia goes
+  through the VPN, out of the box; or everything but Russian sites; or everything.
   The lists are downloaded and kept up to date by FreeTunnel.
 - Linux: launches and links reach FreeTunnel after an AppImage update, and from
   outside the desktop session.
@@ -77,7 +77,7 @@ compare link at the bottom of its release notes.
   front of whatever the user is doing. Off by default. It is ignored when
   there is no tray to bring the window back from, which is also the only
   reason the window is shown in that case.
-- **Windows: routing by geo lists.** **Routing**, at the top of the Split
+- **Windows and Linux: routing by geo lists.** **Routing**, at the top of the Split
   tunnelling page, chooses between *Only blocked sites through VPN* (sites
   and addresses blocked in Russia go through the tunnel, everything else
   directly), *Everything through VPN except Russian sites*, and *Everything

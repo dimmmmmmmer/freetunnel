@@ -29,6 +29,7 @@ private slots:
     void anExcludedRouteOfEveryAddressIsDroppedOnLoad();
     void hotkeysNobodyChoseAreTurnedOffOnce_data();
     void hotkeysNobodyChoseAreTurnedOffOnce();
+    void aNewInstallStartsOnBlockedSitesThroughTheVpn();
 };
 
 void TestAppSettings::initTestCase() {
@@ -280,6 +281,25 @@ void TestAppSettings::hotkeysNobodyChoseAreTurnedOffOnce()
     turnedOn.hotkeys_enabled = true;
     saveAppSettings(turnedOn);
     QCOMPARE(loadAppSettings().hotkeys_enabled, true);
+    QSettings().clear();
+}
+
+// A new install routes only what is blocked in Russia through the tunnel, on
+// Windows and Linux; one that already has settings keeps routing as it did, and
+// macOS, which has no geo routing yet, is left as it was.
+void TestAppSettings::aNewInstallStartsOnBlockedSitesThroughTheVpn() {
+    QSettings().clear();
+    seedFreshInstallSettings();
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
+    QCOMPARE(loadAppSettings().geo_mode, QStringLiteral("blocked"));
+#else
+    QCOMPARE(loadAppSettings().geo_mode, QStringLiteral("off"));
+#endif
+
+    QSettings().clear();
+    QSettings().setValue("ui/language", QStringLiteral("ru"));
+    seedFreshInstallSettings();
+    QCOMPARE(loadAppSettings().geo_mode, QStringLiteral("off"));
     QSettings().clear();
 }
 

@@ -746,6 +746,11 @@ jobs:
           # where AppStartup looks first. Checked, as the other two platforms are.
           test -e AppDir/usr/translations/qtbase_ru.qm \
             || { echo "::error::Qt's Russian catalogue (usr/translations/qtbase_ru.qm) was not deployed"; exit 1; }
+          # A TLS backend for Qt's network: the update check, subscriptions and
+          # the geo lists are all https, and without one each fails with "TLS
+          # initialization failed" while everything else works.
+          ls AppDir/usr/plugins/tls/libqopensslbackend.so >/dev/null \
+            || { echo "::error::Qt's OpenSSL TLS backend (usr/plugins/tls/libqopensslbackend.so) was not deployed"; exit 1; }
           # The third-party notices, into the AppDir: the AppImage keeps them in
           # usr/share/doc/freetunnel, and the .deb, made from the same AppDir,
           # moves them to /usr/share/doc/freetunnel. linuxdeploy copied the

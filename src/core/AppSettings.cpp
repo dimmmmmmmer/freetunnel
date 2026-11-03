@@ -257,7 +257,7 @@ void saveAppSettings(const AppSettings &cfg) {
 
 void seedFreshInstallSettings()
 {
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
     QSettings s;
     if (!s.allKeys().isEmpty())
         return;
