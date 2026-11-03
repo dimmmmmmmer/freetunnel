@@ -226,11 +226,9 @@ struct AppPicker<Value: Hashable>: View {
                             }.buttonStyle(.plain)
                         }
                     }.font(AppStyle.body).padding(6)
-                }.scrollBounceBehavior(.basedOnSize).frame(width: menuWidth)
-                    .frame(
-                        idealHeight: CGFloat(options.count * 40 + 12),
-                        maxHeight: CGFloat(options.count * 40 + 12)
-                    )
+                }.scrollBounceBehavior(.basedOnSize)
+                    .frame(width: menuWidth, height: CGFloat(options.count * 40 + 12))
+                    .fixedSize()
                     .presentationCompactAdaptation(.popover).presentationBackground(AppStyle.background)
             }
     }
