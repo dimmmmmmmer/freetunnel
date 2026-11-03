@@ -50,7 +50,7 @@ struct RootView: View {
                         }
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            }.accessibilityHidden(state.dialog != nil || state.confirmation != nil)
             if let dialog = state.dialog {
                 switch dialog {
                 case .server(let id):
@@ -135,6 +135,7 @@ struct RootView: View {
     }
 }
 struct HomeView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject var state: AppState
     @ObservedObject var vpn: VPNController
     var showServers: () -> Void
@@ -236,7 +237,9 @@ struct HomeView: View {
                 }.padding(.horizontal, 18)
             }.animation(.easeOut(duration: 0.28), value: vpn.status)
             Spacer(minLength: 34)
-            HStack(spacing: 12) {
+            (typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 12))
+                : AnyLayout(HStackLayout(spacing: 12))) {
                 speedTile(upload: false, value: vpn.downSpeed)
                 speedTile(upload: true, value: vpn.upSpeed)
             }.padding(.bottom, 44)
@@ -256,7 +259,8 @@ struct HomeView: View {
             Text(upload ? "↑" : "↓").foregroundStyle(upload ? AppStyle.secondary : AppStyle.success)
             Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(
                 .custom("Inter-Medium", size: 15))
-        }.frame(width: 116, height: 44).background(
+        }.fixedSize().padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minWidth: 116, minHeight: 44).background(
             AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
     }
 }

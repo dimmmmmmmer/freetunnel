@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 @MainActor final class FreeTunnelUITests: XCTestCase {
@@ -22,7 +23,8 @@ import XCTest
     private func reveal(_ element: XCUIElement) {
         for _ in 0..<10 {
             if element.isHittable { return }
-            app.swipeUp()
+            let scroll = app.scrollViews.containing(.any, identifier: element.identifier).firstMatch
+            if scroll.exists { scroll.swipeUp() } else { app.swipeUp() }
         }
         XCTAssertTrue(element.isHittable, "Cannot reach \(element.identifier)")
     }
@@ -163,7 +165,7 @@ import XCTest
                 capture(label + "-" + page)
             }
             tab("servers")
-            app.buttons["Edit"].tap()
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-edit-'")).firstMatch.tap()
             XCTAssertTrue(app.textFields["server-name"].waitForExistence(timeout: 5))
             capture(label + "-editor")
             reveal(app.buttons["server-save"])

@@ -16,7 +16,9 @@ for family in small-phone ipad; do
   if ! xcodebuild -project "$root/ios/FreeTunnel.xcodeproj" -scheme FreeTunnel \
       -destination "platform=iOS Simulator,id=$device" -configuration Debug \
       -derivedDataPath "$root/ios/DerivedData" -resultBundlePath "$root/ios/ui-results/$family.xcresult" \
-      CODE_SIGNING_ALLOWED=NO ARCHS=arm64 -parallel-testing-enabled NO test; then
+      CODE_SIGNING_ALLOWED=NO ARCHS=arm64 -parallel-testing-enabled NO \
+      -test-timeouts-enabled YES -default-test-execution-time-allowance 180 \
+      -maximum-test-execution-time-allowance 240 test; then
     result=1
   fi
   if test -d "$root/ios/ui-results/$family.xcresult"; then

@@ -146,6 +146,7 @@ struct AppChoice<Value: Hashable>: Identifiable {
     }
 }
 struct AppPicker<Value: Hashable>: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let title: LocalizedStringKey
     @Binding var selection: Value
     let options: [AppChoice<Value>]
@@ -178,6 +179,11 @@ struct AppPicker<Value: Hashable>: View {
                         .background(AppStyle.input, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.inputBorder))
                 }
+            } else if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                    trigger
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
             } else {
                 HStack(spacing: 8) {
                     Text(title)
