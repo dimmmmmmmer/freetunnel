@@ -18,13 +18,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         try? Data(lines.joined(separator: "\n").utf8).write(to: url,
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
-    private func log(_ message: String, level: String = "INFO") {
+    private func log(_ message: String, level: String = "INFO", isCore: Bool = false) {
         guard loggingEnabled else { return }
-        let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"
-        let stamp = formatter.string(from: Date())
-        for line in message.split(whereSeparator: { $0.isNewline }) {
-            lines.append("\(stamp) \(level) \(line)")
-        }
+        lines.append(LogLines.entry(message, level: level, isCore: isCore))
         if lines.count > 1000 { lines.removeFirst(lines.count - 1000) }
         if !flushPending {
             flushPending = true
@@ -47,7 +43,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 NativeLogger.setLogLevel(verbose ? .debug : .info)
                 NativeLogger.setCallback { [weak self] level, message in
                     let tag = ["ERROR", "WARN", "INFO", "DEBUG", "TRACE"][min(4, max(0, level.rawValue))]
-                    self?.queue.async { self?.log(message, level: tag) }
+                    self?.queue.async { self?.log(message, level: tag, isCore: true) }
                 }
                 self.log("Connecting")
                 let config = try Configuration(text, maximumBytes: 8_388_608)
@@ -155,7 +151,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             if command == "clear" { self.lines.removeAll(); self.flushLogs() }
             guard command == "clear" || command == "logs" else { completionHandler?(nil); return }
-            completionHandler?(Data(self.lines.joined(separator: "\n").utf8))
+            completionHandler?(Data(LogLines.shownText(self.lines.joined(separator: "\n")).utf8))
         }
     }
 }

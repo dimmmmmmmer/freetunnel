@@ -22,7 +22,7 @@ struct ServerEditor: View {
             ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        LabeledField(title: "Name", text: $fields.name, placeholder: String(localized: "Germany · Frankfurt"))
+                        LabeledField(title: "Config name", text: $fields.name, placeholder: String(localized: "Germany · Frankfurt"))
                         LabeledField(title: "Server host", text: $fields.hostname, placeholder: "frankfurt.example.com")
                         LabeledField(title: "Address(es) · host:port (comma-separated)", text: $fields.addresses,
                             placeholder: "1.2.3.4:443")

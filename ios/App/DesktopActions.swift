@@ -21,7 +21,7 @@ struct AppConfirmation {
         confirmation = AppConfirmation(text: text, actionTitle: actionTitle, action: action)
     }
     func assignImportedRouting(_ profile: inout Profile) {
-        if profile.routing.defaultDirection != preferences.splitProfiles[0].routing.defaultDirection {
+        if profile.routing != preferences.splitProfiles[0].routing {
             let name = "Imported " + profile.id.uuidString.prefix(8)
             profile.splitProfile = name
             preferences.splitProfiles.append(SplitProfile(name: name, routing: profile.routing))
@@ -44,8 +44,7 @@ struct AppConfirmation {
                 preferences.profiles.append(created)
                 return
             }
-            try add(toml: text)
-            if let index = preferences.profiles.indices.last { preferences.profiles[index].splitProfile = splitProfile }
+            try add(toml: text, splitProfile: splitProfile)
         }
     }
     func select(_ id: UUID) {
@@ -67,7 +66,11 @@ struct AppConfirmation {
     }
     func setRouting(_ value: Routing, name: String) {
         guard let index = preferences.splitProfiles.firstIndex(where: { $0.name == name }) else { return }
+        var previous = preferences.splitProfiles[index].routing
+        guard previous != value else { return }
         preferences.splitProfiles[index].routing = value
+        previous.refreshHours = value.refreshHours
+        guard previous != value else { return }
         let ready = value.lists.filter { $0.enabled }.allSatisfy { list in
             snapshots[list.id]?.source == list.source && snapshots[list.id]?.kind == list.kind
         }
@@ -86,7 +89,13 @@ struct AppConfirmation {
     func addSplitProfile(_ name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 16, !preferences.splitProfiles.contains(where: { $0.name == name }) else { return }
-        preferences.splitProfiles.append(SplitProfile(name: name))
+        var routing = Routing()
+        if let active = preferences.splitProfiles.first(where: { $0.name == preferences.activeSplitProfile }) {
+            routing.defaultDirection = active.routing.defaultDirection
+            routing.enabled = active.routing.enabled
+            routing.refreshHours = active.routing.refreshHours
+        }
+        preferences.splitProfiles.append(SplitProfile(name: name, routing: routing))
         preferences.activeSplitProfile = name
     }
     func pingServers() async {

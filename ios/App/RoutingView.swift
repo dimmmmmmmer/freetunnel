@@ -19,20 +19,22 @@ struct RoutingView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(spacing: 0) {
                         Toggle("Split Tunneling", isOn: Binding(get: { routing.wrappedValue.enabled }, set: { enabled in
-                            for index in state.preferences.splitProfiles.indices {
-                                state.preferences.splitProfiles[index].routing.enabled = enabled
-                            }
+                            var updated = state.preferences
+                            for index in updated.splitProfiles.indices { updated.splitProfiles[index].routing.enabled = enabled }
+                            state.preferences = updated
                             state.reapplySelected()
                         }))
                         AppPicker(title: "Mode", selection: Binding(get: { routing.wrappedValue.defaultDirection }, set: { direction in
-                            for index in state.preferences.splitProfiles.indices {
-                                var value = state.preferences.splitProfiles[index].routing
+                            var updated = state.preferences
+                            for index in updated.splitProfiles.indices {
+                                var value = updated.splitProfiles[index].routing
                                 if value.defaultDirection != direction {
                                     let vpn = value.manualVPN; value.manualVPN = value.manualBypass; value.manualBypass = vpn
                                     value.defaultDirection = direction
-                                    state.preferences.splitProfiles[index].routing = value
+                                    updated.splitProfiles[index].routing = value
                                 }
                             }
+                            state.preferences = updated
                             state.reapplySelected()
                         }), options: [.init(.vpn, "Bypass VPN"), .init(.bypass, "Through VPN")])
                     }
@@ -158,7 +160,11 @@ struct GeoListsBlock: View {
                     Button("Add") { add(GeoList(name: customName.isEmpty ? source : customName, source: source, kind: kind, direction: direction)) }
                 }.textInputAutocapitalization(.never).autocorrectionDisabled().id("custom-list")
             }
-            AppPicker(title: "Update lists", selection: routing.refreshHours, options: [.init(1, "Every hour"),
+            AppPicker(title: "Update lists", selection: Binding(get: { routing.wrappedValue.refreshHours }, set: { hours in
+                var updated = state.preferences
+                for index in updated.splitProfiles.indices { updated.splitProfiles[index].routing.refreshHours = hours }
+                state.preferences = updated
+            }), options: [.init(1, "Every hour"),
                 .init(2, "Every 2 hours"), .init(5, "Every 5 hours"), .init(24, "Every 24 hours"), .init(0, "Never")])
                 .accessibilityHint("Updates run when iOS allows the app to work. Open the app to refresh overdue lists.")
         }.onAppear {

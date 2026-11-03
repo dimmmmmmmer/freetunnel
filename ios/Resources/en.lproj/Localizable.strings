@@ -203,3 +203,4 @@
 "tooLarge" = "The size or rule count limit was exceeded.";
 "tunnelFailed" = "Unable to complete the VPN operation. Check the server and connection status.";
 "unsupportedFormat" = "This format or setting is not supported by the stable core.";
+"Config name" = "Name";
