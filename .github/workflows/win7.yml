@@ -500,6 +500,11 @@ jobs:
           if (-not (Test-Path dist\Qt6Core.dll)) { throw "windeployqt deployed no Qt6Core.dll" }
           # HTTPS in the app goes through this one (see OPENSSL_VER above).
           if (-not (Test-Path dist\tls\qopensslbackend.dll)) { throw "windeployqt deployed no OpenSSL TLS backend" }
+          # The DirectX Shader Compiler, which only Qt's Direct3D 12 backend
+          # uses and which needs Windows 8 API sets. Qt Quick draws with
+          # Direct3D 11 here (the backport gives Windows 7 that one), whose
+          # shaders go through d3dcompiler_47.dll, which stays.
+          Remove-Item -Force -ErrorAction SilentlyContinue dist\dxcompiler.dll, dist\dxil.dll
 
           # Qt's Russian words (the reason in a network error), merged the way
           # windeployqt merges them.
@@ -518,6 +523,9 @@ jobs:
           if (-not $crt) { throw "VC++ CRT redist not found under '$env:VCToolsRedistDir'" }
           Copy-Item (Join-Path $crt.FullName "*.dll") dist\ -Force
           if (-not (Test-Path "dist\MSVCP140.dll")) { throw "VC++ runtime (MSVCP140.dll) was not bundled" }
+          # Except the C++/CX runtime, which nothing here uses and which
+          # imports WinRT API sets Windows 7 does not have.
+          Remove-Item -Force -ErrorAction SilentlyContinue dist\vccorlib140.dll
 
           # The Universal CRT, app-local: Windows 7 has it only with KB2999226.
           # Windows 10 and later always use their own and ignore these copies.

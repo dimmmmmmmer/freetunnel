@@ -83,7 +83,7 @@ In CI, on every run:
 - every `.exe` and `.dll` in the package is read by
   `scripts/check-win7-imports.py`, which fails the run on an import that
   Windows 7 is known not to have (a Windows 8+ DLL or API set, a Windows 8+
-  function, a PE header asking for Windows 8+). It knows the usual suspects,
+  function, an .exe whose PE header asks for Windows 8+). It knows the usual suspects,
   not every Windows 7 export table, so a clean report means "nothing known to
   be missing", not "works".
 

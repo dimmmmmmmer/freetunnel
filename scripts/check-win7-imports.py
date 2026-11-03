@@ -15,7 +15,7 @@ which are not available on a CI runner. So:
 
   FAIL  a DLL that is not on Windows 7 (combase, shcore, an API set newer
         than Windows 7's ...), a function that was added in Windows 8 or
-        later, or a PE header that asks for a Windows newer than 6.1.
+        later, or an .exe whose PE header asks for a Windows newer than 6.1.
   WARN  a DLL neither bundled nor known to be on Windows 7, a delay-loaded
         Windows 8+ function (fine when the code checks the Windows version
         before calling it, a crash when it does not), or a function that needs
@@ -335,12 +335,16 @@ def check_file(path: str, rel: str, bundled: set[str]) -> list[Finding]:
         return [Finding("WARN", rel, f"could not read the import table: {exc}")]
 
     findings = []
-    if imp.subsystem_version > WIN7_VERSION:
+    # Only a process's executable has its subsystem version checked: Windows
+    # refuses to start an .exe that asks for a newer one, and loads DLLs
+    # whatever theirs says. Microsoft's own app-local Universal CRT for
+    # Windows 7 is marked 10.0, for instance. The OS version field is not
+    # checked at all.
+    if rel.lower().endswith(".exe") and imp.subsystem_version > WIN7_VERSION:
         findings.append(Finding(
             "FAIL", rel,
-            "PE subsystem version %d.%d is newer than Windows 7 (6.1); the loader refuses it" % imp.subsystem_version))
-    if imp.os_version > WIN7_VERSION:
-        findings.append(Finding("WARN", rel, "PE OS version %d.%d is newer than Windows 7 (6.1)" % imp.os_version))
+            "PE subsystem version %d.%d is newer than Windows 7 (6.1); Windows 7 refuses to start it"
+            % imp.subsystem_version))
 
     for kind, table in (("static", imp.static), ("delay", imp.delay)):
         for dll, funcs in sorted(table.items()):
