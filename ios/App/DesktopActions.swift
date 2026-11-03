@@ -30,14 +30,20 @@ struct AppConfirmation {
             preferences.splitProfiles.append(SplitProfile(name: name, routing: profile.routing))
         }
     }
-    func saveServer(_ fields: EditorFields, original: Configuration?, profile: Profile?, splitProfile: String)
+    func saveServer(
+        _ fields: EditorFields, original: Configuration?, profile: Profile?, splitProfile: String
+    )
         throws {
         let text = try fields.configuration(previous: original).serialized()
         if let profile {
             var record = try secret(profile)
             record.toml = text
-            if !isPreview { try Vault.write(JSONEncoder().encode(record), key: profile.id.uuidString) }
-            guard var latest = preferences.profiles.first(where: { $0.id == profile.id }) else { return }
+            if !isPreview {
+                try Vault.write(JSONEncoder().encode(record), key: profile.id.uuidString)
+            }
+            guard var latest = preferences.profiles.first(where: { $0.id == profile.id }) else {
+                return
+            }
             latest.name = try Configuration(text).name
             latest.splitProfile = splitProfile
             update(latest)
@@ -70,7 +76,9 @@ struct AppConfirmation {
         }
     }
     func setRouting(_ value: Routing, name: String) {
-        guard let index = preferences.splitProfiles.firstIndex(where: { $0.name == name }) else { return }
+        guard let index = preferences.splitProfiles.firstIndex(where: { $0.name == name }) else {
+            return
+        }
         var previous = preferences.splitProfiles[index].routing
         guard previous != value else { return }
         preferences.splitProfiles[index].routing = value
@@ -85,7 +93,8 @@ struct AppConfirmation {
         guard name != "Default" else { return }
         let affected = selected?.splitProfile == name
         preferences.splitProfiles.removeAll { $0.name == name }
-        for index in preferences.profiles.indices where preferences.profiles[index].splitProfile == name {
+        for index in preferences.profiles.indices
+        where preferences.profiles[index].splitProfile == name {
             preferences.profiles[index].splitProfile = "Default"
         }
         if preferences.activeSplitProfile == name { preferences.activeSplitProfile = "Default" }
@@ -93,10 +102,13 @@ struct AppConfirmation {
     }
     func addSplitProfile(_ name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 16, !preferences.splitProfiles.contains(where: { $0.name == name })
+        guard !name.isEmpty, name.count <= 16,
+            !preferences.splitProfiles.contains(where: { $0.name == name })
         else { return }
         var routing = Routing()
-        if let active = preferences.splitProfiles.first(where: { $0.name == preferences.activeSplitProfile }) {
+        if let active = preferences.splitProfiles.first(where: {
+            $0.name == preferences.activeSplitProfile
+        }) {
             routing.defaultDirection = active.routing.defaultDirection
             routing.enabled = active.routing.enabled
             routing.refreshHours = active.routing.refreshHours
@@ -137,11 +149,13 @@ struct AppConfirmation {
         checkingUpdate = true
         defer { checkingUpdate = false }
         do {
-            let url = URL(string: "https://api.github.com/repos/dimmmmmmmer/freetunnel/releases/latest")!
+            let url = URL(
+                string: "https://api.github.com/repos/dimmmmmmmer/freetunnel/releases/latest")!
             let data = try await Downloads.read(URLRequest(url: url), limit: 1_048_576)
             let release = try JSONDecoder().decode(ReleaseMetadata.self, from: data)
             let current =
-                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.4"
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+                ?? "1.2.4"
             let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
             if version.compare(current, options: .numeric) == .orderedDescending {
                 updateStatus = release.tagName
@@ -176,7 +190,8 @@ private final class TCPProbe: @unchecked Sendable {
             probe.connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    probe.finish(Int((DispatchTime.now().uptimeNanoseconds - probe.started) / 1_000_000))
+                    probe.finish(
+                        Int((DispatchTime.now().uptimeNanoseconds - probe.started) / 1_000_000))
                 case .failed, .cancelled: probe.finish(nil)
                 default: break
                 }
@@ -199,10 +214,10 @@ private final class TCPProbe: @unchecked Sendable {
 }
 
 private struct ReleaseMetadata: Decodable {
-                let tagName: String
-                let htmlURL: URL
-                enum CodingKeys: String, CodingKey {
-                    case tagName = "tag_name"
-                    case htmlURL = "html_url"
-                }
-            }
+    let tagName: String
+    let htmlURL: URL
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+    }
+}

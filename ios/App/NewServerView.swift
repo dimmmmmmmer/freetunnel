@@ -27,16 +27,24 @@ struct ServerEditor: View {
                     VStack(alignment: .leading, spacing: 12) {
                         LabeledField(
                             title: "Config name", text: $fields.name,
-                            placeholder: String(localized: "Germany · Frankfurt"))
+                            placeholder: String(localized: "Germany · Frankfurt"),
+                            identifier: "server-name")
                         LabeledField(
-                            title: "Server host", text: $fields.hostname, placeholder: "frankfurt.example.com"
+                            title: "Server host", text: $fields.hostname,
+                            placeholder: "frankfurt.example.com",
+                            identifier: "server-host"
                         )
                         LabeledField(
-                            title: "Address(es) · host:port (comma-separated)", text: $fields.addresses,
-                            placeholder: "1.2.3.4:443")
+                            title: "Address(es) · host:port (comma-separated)",
+                            text: $fields.addresses,
+                            placeholder: "1.2.3.4:443", identifier: "server-addresses")
                         HStack(alignment: .top, spacing: 10) {
-                            LabeledField(title: "Username", text: $fields.username)
-                            LabeledField(title: "Password", text: $fields.password, secure: true)
+                            LabeledField(
+                                title: "Username", text: $fields.username, identifier: "server-user"
+                            )
+                            LabeledField(
+                                title: "Password", text: $fields.password, secure: true,
+                                identifier: "server-password")
                         }
                         HStack(alignment: .top, spacing: 10) {
                             AppPicker(
@@ -47,7 +55,8 @@ struct ServerEditor: View {
                                 ], boxed: true
                             ).frame(maxWidth: .infinity)
                             LabeledField(
-                                title: "DNS servers", text: $fields.dns, placeholder: "1.1.1.1, 8.8.8.8"
+                                title: "DNS servers", text: $fields.dns,
+                                placeholder: "1.1.1.1, 8.8.8.8"
                             )
                             .frame(maxWidth: .infinity)
                         }
@@ -57,7 +66,9 @@ struct ServerEditor: View {
                         }
                         AppPicker(
                             title: "Split profile", selection: $splitProfile,
-                            options: state.preferences.splitProfiles.map { .init($0.name, $0.name) },
+                            options: state.preferences.splitProfiles.map {
+                                .init($0.name, $0.name)
+                            },
                             boxed: true)
                         VStack(spacing: 0) {
                             Toggle("Allow IPv6", isOn: $fields.ipv6)
@@ -66,16 +77,21 @@ struct ServerEditor: View {
                         }.font(AppStyle.label).foregroundStyle(AppStyle.secondary)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("Certificate (PEM) · optional").foregroundStyle(AppStyle.secondary)
+                                Text("Certificate (PEM) · optional").foregroundStyle(
+                                    AppStyle.secondary)
                                 Spacer(minLength: 4)
-                                Button("Load from file…") { importingCertificate = true }.buttonStyle(.plain)
+                                Button("Load from file…") { importingCertificate = true }
+                                    .buttonStyle(.plain)
                             }.font(AppStyle.caption)
-                            TextEditor(text: $fields.certificate).font(.system(size: 11, design: .monospaced))
-                                .frame(height: 84).appEditor()
+                            TextEditor(text: $fields.certificate).font(
+                                .system(size: 11, design: .monospaced)
+                            )
+                            .frame(height: 84).appEditor()
                         }
                         HStack(spacing: 8) {
                             Spacer()
-                            Button("Cancel", action: close).buttonStyle(AppButtonStyle(dialog: true))
+                            Button("Cancel", action: close).buttonStyle(
+                                AppButtonStyle(dialog: true))
                             Button("Save") {
                                 do {
                                     if changed || profile == nil {
@@ -85,10 +101,13 @@ struct ServerEditor: View {
                                     }
                                     state.dialog = nil
                                 } catch { state.report(error) }
-                            }.buttonStyle(AppButtonStyle(primary: true, dialog: true)).disabled(!ready)
+                            }.buttonStyle(AppButtonStyle(primary: true, dialog: true)).disabled(
+                                !ready
+                            )
+                            .accessibilityIdentifier("server-save")
                         }.padding(.top, 6).id("editor-bottom")
                     }.textInputAutocapitalization(.never).autocorrectionDisabled()
-                }.task {
+                }.scrollDismissesKeyboard(.interactively).task {
                     guard !ready else { return }
                     do {
                         if let profile {
@@ -111,12 +130,15 @@ struct ServerEditor: View {
                     } catch { state.report(error) }
                 }
             }
-        }.fileImporter(isPresented: $importingCertificate, allowedContentTypes: [.data, .plainText]) { result in
+        }.fileImporter(
+            isPresented: $importingCertificate, allowedContentTypes: [.data, .plainText]
+        ) { result in
             do {
                 let url = try result.get()
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
-                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 1_048_576 else {
+                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 1_048_576
+                else {
                     throw ClientError.tooLarge
                 }
                 let data = try Data(contentsOf: url)

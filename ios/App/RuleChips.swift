@@ -5,6 +5,7 @@ struct RuleChips: View {
     @Binding var rules: String
     var placeholder: LocalizedStringKey = "domains, comma-separated, then Enter"
     var ipOnly = false
+    var identifier = "manual-rules"
     @State private var input = ""
     @State private var invalid = false
     private var entries: [String] {
@@ -32,13 +33,19 @@ struct RuleChips: View {
         VStack(alignment: .leading, spacing: 6) {
             ChipFlow {
                 ForEach(entries, id: \.self) { entry in
-                    RuleChip(text: entry) { rules = entries.filter { $0 != entry }.joined(separator: "\n") }
+                    RuleChip(text: entry) {
+                        rules = entries.filter { $0 != entry }.joined(separator: "\n")
+                    }
                 }
             }
             TextField(placeholder, text: $input).textFieldStyle(AppFieldStyle())
-                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done).onSubmit(add)
+                .accessibilityIdentifier(identifier)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
+                .onSubmit(
+                    add)
             if invalid {
-                Text("Invalid domain or IP range").font(AppStyle.caption).foregroundStyle(AppStyle.danger)
+                Text("Invalid domain or IP range").font(AppStyle.caption).foregroundStyle(
+                    AppStyle.danger)
             }
         }
     }
@@ -56,13 +63,15 @@ struct RuleChip: View {
                 }
                 .buttonStyle(.plain).accessibilityLabel(Text("Remove") + Text(" " + text))
             }
-        }.padding(.leading, 11).padding(.trailing, remove == nil ? 11 : 5).frame(height: 28)
+        }.padding(.leading, 11).padding(.trailing, remove == nil ? 11 : 5).frame(minHeight: 28)
             .foregroundStyle(selected ? AppStyle.accentText : AppStyle.text)
             .background(selected ? AppStyle.accent : AppStyle.surface, in: Capsule())
     }
 }
 struct ChipFlow: Layout {
-    private func positions(_ subviews: Subviews, width: CGFloat) -> (points: [CGPoint], height: CGFloat) {
+    private func positions(_ subviews: Subviews, width: CGFloat) -> (
+        points: [CGPoint], height: CGFloat
+    ) {
         var points: [CGPoint] = []
         var horizontal: CGFloat = 0
         var vertical: CGFloat = 0
@@ -84,7 +93,9 @@ struct ChipFlow: Layout {
         let width = max(1, proposal.width ?? 320)
         return CGSize(width: width, height: positions(subviews, width: width).height)
     }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
         let layout = positions(subviews, width: bounds.width)
         for (index, view) in subviews.enumerated() {
             let point = layout.points[index]

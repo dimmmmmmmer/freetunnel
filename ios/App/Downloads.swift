@@ -9,7 +9,8 @@ private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
         willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        guard let url = request.url, url.scheme == "https", url.user == nil, url.password == nil else {
+        guard let url = request.url, url.scheme == "https", url.user == nil, url.password == nil
+        else {
             completionHandler(nil)
             return
         }

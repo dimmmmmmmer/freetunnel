@@ -14,7 +14,8 @@ struct LogsView: View {
                     UIPasteboard.general.string = vpn.logs
                     state.message = "Log copied"
                 }
-            }.buttonStyle(.plain).font(AppStyle.label).foregroundStyle(AppStyle.accent).frame(height: 24)
+            }.buttonStyle(.plain).font(AppStyle.label).foregroundStyle(AppStyle.accent).frame(
+                height: 24)
             if !state.preferences.loggingEnabled {
                 HStack {
                     Text("Logging is off.").foregroundStyle(.orange)
@@ -22,7 +23,8 @@ struct LogsView: View {
                     Button("Turn on") {
                         state.preferences.loggingEnabled = true
                         Task {
-                            await vpn.configureLogging(enabled: true, verbose: state.preferences.verboseLogs)
+                            await vpn.configureLogging(
+                                enabled: true, verbose: state.preferences.verboseLogs)
                         }
                     }.buttonStyle(.plain)
                 }.font(AppStyle.caption)
@@ -36,10 +38,11 @@ struct LogsView: View {
                 ScrollViewReader { reader in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(vpn.logs).font(.system(size: 11, design: .monospaced)).textSelection(
-                                .enabled
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(vpn.logs).font(.system(size: 11, design: .monospaced))
+                                .textSelection(
+                                    .enabled
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             Color.clear.frame(height: 1).id("log-bottom")
                         }.padding(12)
                     }.onChange(of: vpn.logs) { _, _ in
@@ -51,25 +54,30 @@ struct LogsView: View {
                 }
             }
             HStack(spacing: 8) {
-                Button("freetunnel.log") { exporting = true }.buttonStyle(.plain).font(.system(size: 11))
-                    .foregroundStyle(AppStyle.faint).accessibilityLabel("Export log")
+                Button("freetunnel.log") { exporting = true }.buttonStyle(.plain).font(
+                    .system(size: 11)
+                )
+                .foregroundStyle(AppStyle.faint).accessibilityLabel("Export log")
                 Spacer(minLength: 0)
                 Toggle("Auto-scroll", isOn: $autoScroll).font(AppStyle.caption).foregroundStyle(
                     AppStyle.secondary
                 )
                 .fixedSize().frame(height: 22)
             }
-        }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 12).background(AppStyle.background)
-            .fileExporter(
-                isPresented: $exporting, document: ConfigDocument(text: vpn.logs), contentType: .plainText,
-                defaultFilename: "freetunnel.log"
-            ) { result in if case .failure(let error) = result { state.report(error) } }
-            .task {
-                guard !state.isPreview else { return }
-                while !Task.isCancelled {
-                    await vpn.readLogs()
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                }
+        }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 12).background(
+            AppStyle.background
+        )
+        .fileExporter(
+            isPresented: $exporting, document: ConfigDocument(text: vpn.logs),
+            contentType: .plainText,
+            defaultFilename: "freetunnel.log"
+        ) { result in if case .failure(let error) = result { state.report(error) } }
+        .task {
+            guard !state.isPreview else { return }
+            while !Task.isCancelled {
+                await vpn.readLogs()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
+        }
     }
 }
