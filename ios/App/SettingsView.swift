@@ -2,6 +2,7 @@ import FreeTunnelCore
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject var state: AppState
     private var routes: Binding<String> {
         Binding(
@@ -46,9 +47,11 @@ struct SettingsView: View {
                     }.onChange(of: state.preferences.killSwitch) { _, _ in state.reapplySelected() }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+                    (typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                        : AnyLayout(HStackLayout(spacing: 8))) {
                         Text("Excluded routes").foregroundStyle(AppStyle.faint)
-                        Spacer(minLength: 0)
+                        if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                         Button("Restore defaults") {
                             state.confirm(
                                 "Replace the excluded routes with the defaults?",

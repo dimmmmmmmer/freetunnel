@@ -2,6 +2,7 @@ import FreeTunnelCore
 import SwiftUI
 
 struct RoutingView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject var state: AppState
     @State private var newProfile = ""
     @State private var addingProfile = false
@@ -118,10 +119,12 @@ struct RoutingView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
+                        (typeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                            : AnyLayout(HStackLayout(spacing: 8))) {
                             Text(viaVPN ? "Rules — via VPN" : "Rules — bypass VPN").foregroundStyle(
                                 AppStyle.faint)
-                            Spacer(minLength: 0)
+                            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                             Button("Recommended for Russia") { recommended() }
                             if !manual.wrappedValue.isEmpty {
                                 Button("Clear all") {

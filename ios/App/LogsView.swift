@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LogsView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject var state: AppState
     @ObservedObject var vpn: VPNController
     @State private var autoScroll = true
@@ -53,16 +54,18 @@ struct LogsView: View {
                     }
                 }
             }
-            HStack(spacing: 8) {
+            (typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 8))) {
                 Button("freetunnel.log") { exporting = true }.buttonStyle(.plain).font(
                     .system(size: 11)
                 )
                 .foregroundStyle(AppStyle.faint).accessibilityLabel("Export log")
-                Spacer(minLength: 0)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 Toggle("Auto-scroll", isOn: $autoScroll).font(AppStyle.caption).foregroundStyle(
                     AppStyle.secondary
                 )
-                .fixedSize().frame(height: 22)
+                .fixedSize().frame(minHeight: 22)
             }
         }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 12).background(
             AppStyle.background

@@ -78,3 +78,19 @@ profiles, geo cards, settings and log panel follow desktop composition. Keyboard
 file pickers and system permissions retain native behavior. The stable Apple adapter
 adds atomic packet counters for the speed tiles; no core version upgrade is involved.
 The preview workflow captures every main screen in both system appearances.
+
+### UI journeys and screen sizes
+
+After generating the Xcode project, `bash ios/scripts/ui-tests.sh` runs XCUITest
+on an iPhone SE (3rd generation) and an iPad (A16). It exercises import, invalid
+input, editing and deleting configs, manual-rule chips, geo-list direction and
+removal, theme and refresh interval changes, including persistence across app
+restarts. The same run captures portrait, landscape, long names, the editor with
+the keyboard, and accessibility-sized text. Results and screenshots are uploaded
+as `ios-ui-tests`; the existing `ios-previews` artifact covers the standard iPhone.
+
+These tests use a separate on-disk store and deterministic list-download data,
+only with `--ui-testing` in Debug simulator builds. They exercise the production
+forms, config parser and preference/cache serialization. They **do not** validate
+Keychain entitlements, Network Extension permission, actual VPN traffic or the
+reachability of list servers; those remain signed-device acceptance checks.
