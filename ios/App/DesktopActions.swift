@@ -123,7 +123,7 @@ struct AppConfirmation {
         }
     }
     func checkUpdates() async {
-        if let updateURL { UIApplication.shared.open(updateURL); return }
+        if let updateURL { _ = await UIApplication.shared.open(updateURL); return }
         guard !checkingUpdate else { return }
         checkingUpdate = true
         defer { checkingUpdate = false }
