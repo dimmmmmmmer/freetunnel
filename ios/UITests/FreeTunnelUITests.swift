@@ -29,7 +29,8 @@ import XCTest
         XCTAssertTrue(element.isHittable, "Cannot reach \(element.identifier)")
     }
     private func capture(_ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        // Capture the display: application-frame cropping can clip landscape screenshots.
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -158,6 +159,13 @@ import XCTest
         app.launch()
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
             XCUIDevice.shared.orientation = orientation
+            let landscape = orientation == .landscapeLeft
+            let rotated = NSPredicate { _, _ in
+                let frame = self.app.windows.firstMatch.frame
+                return landscape ? frame.width > frame.height : frame.height > frame.width
+            }
+            expectation(for: rotated, evaluatedWith: app.windows.firstMatch)
+            waitForExpectations(timeout: 5)
             let label = orientation == .portrait ? "portrait" : "landscape"
             for page in ["connection", "servers", "routing", "settings", "logs"] {
                 tab(page)
