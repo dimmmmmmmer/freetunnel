@@ -90,5 +90,38 @@ if [[ "$digest" != "$NLC_RECIPE_SHA256" ]]; then
   exit 1
 fi
 
+# Extra patches for one build only, on top of NLC's: FT_BORINGSSL_EXTRA_PATCHES
+# names files, one per line. The Windows 7 build (.github/workflows/win7.yml)
+# uses it for win7/boringssl-win7-rand-fallback.patch; release builds set
+# nothing and export NLC's recipe exactly as digested above. The recipe applies
+# every file in patches/ in name order, so each one is copied in under a 90_
+# prefix that sorts after NLC's own, and has to apply on top of them.
+extra_names=()
+while IFS= read -r extra; do
+  [[ -z "$extra" ]] && continue
+  if [[ ! -f "$extra" ]]; then
+    echo "boringssl: extra patch not found: $extra" >&2
+    exit 1
+  fi
+  name="90_$(basename "$extra")"
+  cp "$extra" "$RECIPE/patches/$name"
+  extra_names+=("$name")
+  echo "boringssl: adding $name"
+done <<< "${FT_BORINGSSL_EXTRA_PATCHES:-}"
+
 conan export "$RECIPE" --user adguard --channel oss
 echo "boringssl recipe exported from NLC ${NLC_COMMIT} (recipe ${digest})"
+
+# The newest export is the revision conan resolves to; make sure it is the one
+# that carries the extra patches, rather than trusting the timestamp order.
+if [[ ${#extra_names[@]} -gt 0 ]]; then
+  version="$(sed -nE 's/^[[:space:]]*version = "([^"]+)".*/\1/p' "$RECIPE/conanfile.py")"
+  sources="$(conan cache path "openssl/${version}@adguard/oss" --folder export_source)"
+  for name in "${extra_names[@]}"; do
+    if [[ ! -f "$sources/patches/$name" ]]; then
+      echo "boringssl: $name is not in the latest exported recipe ($sources)" >&2
+      exit 1
+    fi
+  done
+  echo "boringssl: latest recipe revision carries ${extra_names[*]}"
+fi

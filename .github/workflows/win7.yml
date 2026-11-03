@@ -1,0 +1,591 @@
+name: Windows 7 (experimental)
+
+# An unofficial, untested-by-hand FreeTunnel build for Windows 7 SP1. Not part
+# of a release, not a required check: win7/README.md says what it is, what a
+# Windows 7 machine needs, and how far it has been checked.
+#
+# What differs from the Windows leg of build.yml:
+#
+#   - Qt. The official Qt 6 binaries need Windows 10, so Qt is built here from
+#     source with crystalidea/qt6windows7's qtbase backport copied over it. That
+#     backport targets Qt 6.8.5, whose LGPL source is public (the v6.8.5-lts-lgpl
+#     tags), so this build uses 6.8.5 rather than QT_VER; the QML and C++ only
+#     use API that 6.8.3 already had. The Qt build takes a couple of hours and is
+#     cached under a key made of every pin below, so it runs once per pin change.
+#   - BoringSSL gets win7/boringssl-win7-rand-fallback.patch: without it the
+#     first random byte aborts the process on Windows 7.
+#   - The toolchain: windows-2022, i.e. Visual Studio 2022, instead of
+#     windows-latest's newer Visual Studio, whose runtime moves away from
+#     Windows 7. The app-local UCRT is bundled, so Windows 7 needs no KB2999226.
+#   - scripts/check-win7-imports.py reads every .exe and .dll that ends up in
+#     the package and fails the run on an import Windows 7 is known not to have.
+#
+# Runs by hand (Actions -> Windows 7 (experimental) -> Run workflow) and on pull
+# requests that touch the files it is made of. The artifacts are a Setup.exe
+# and a portable zip.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/win7.yml'
+      - 'win7/**'
+      - 'scripts/check-win7-imports.py'
+      - 'scripts/export-patched-boringssl.sh'
+
+concurrency:
+  group: win7-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: TrustTunnel/TrustTunnelClient
+  # The same values as build.yml; scripts/check-pinned-deps.sh keeps them so.
+  CONAN_VER: '2.31.1'
+  # Only for Qt's own Russian catalogue, which is data and is taken from the
+  # official build (lconvert is in qttools, which this Qt build leaves out).
+  QT_VER: '6.8.3'
+  # The Qt that is built and shipped here. Each module is fetched by the commit
+  # its v6.8.5-lts-lgpl tag points to (git ls-remote https://github.com/qt/<module>
+  # 'refs/tags/v6.8.5-lts-lgpl^{}'), never by the tag, which can be moved.
+  QT_WIN7_VER: '6.8.5'
+  QTBASE_SHA: feb9556bde250306b5a1157aaccb76106844909e
+  QTSHADERTOOLS_SHA: 5adc61d08c4e831ec4523cbee95a8dc5593f4666
+  QTDECLARATIVE_SHA: f940c1bc2873694c74cefe617a6ad8c7182f76a5
+  QTSVG_SHA: 8a5de5f011591918891e506244725347aa9c1ab4
+  # crystalidea/qt6windows7, "keep text aliased when Windows has font smoothing
+  # turned off", the newest commit of its 6.8.5 patch set when this was written.
+  QT6WIN7_SHA: 12d31c9e349dbf3c1d0d14497db1f3b41a113007
+  # Qt's TLS. Qt 6.8's Schannel backend hands Windows SCH_CREDENTIALS, which
+  # only Windows 10 1809 and later accept, so on Windows 7 every HTTPS request
+  # of the app (updates, subscriptions, geo lists) would fail. Qt is linked to
+  # OpenSSL instead, as the backport's own builds are: 3.5.9, the LTS line, by
+  # the commit its openssl-3.5.9 tag points to.
+  OPENSSL_VER: '3.5.9'
+  OPENSSL_SHA: 45e844fa2a14ec92d146bd8f5778ac130b6625fb
+  # Bump to rebuild Qt with the same pins (a changed configure line, say).
+  QT_WIN7_BUILD_REV: '1'
+  # Short on purpose: Qt's build tree is deep, and MAX_PATH is still a thing.
+  QT_WIN7_PREFIX: 'C:\q\inst'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: read
+
+jobs:
+  # The same icons build.yml renders: logo.ico and the installer's bitmaps are
+  # not committed.
+  icons:
+    name: Render bundle icons
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install rasterizers
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+      - name: Render icons from logo.svg
+        run: bash scripts/render-icons.sh icons-out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bundle-icons
+          path: icons-out/
+
+  qt:
+    name: Qt for Windows 7
+    runs-on: windows-2022
+    # qtbase, qtshadertools, qtsvg and qtdeclarative from scratch on a 4-core
+    # runner; a cache hit makes this a minute.
+    timeout-minutes: 330
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Cache key
+        id: key
+        shell: bash
+        run: |
+          echo "key=win7-qt-${QT_WIN7_VER}-${QTBASE_SHA:0:12}-${QTSHADERTOOLS_SHA:0:12}-${QTDECLARATIVE_SHA:0:12}-${QTSVG_SHA:0:12}-${QT6WIN7_SHA:0:12}-openssl-${OPENSSL_SHA:0:12}-r${QT_WIN7_BUILD_REV}-windows-2022" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Qt
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.QT_WIN7_PREFIX }}
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Set up MSVC
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Fetch Qt and the Windows 7 backport
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Get-Source([string]$url, [string]$sha, [string]$dir) {
+              git init -q $dir
+              git -C $dir config core.autocrlf false
+              git -C $dir remote add origin $url
+              $backoff = @(15, 30, 60)
+              for ($i = 0; ; $i++) {
+                  git -C $dir fetch -q --depth 1 origin $sha
+                  if ($LASTEXITCODE -eq 0) { break }
+                  if ($i -ge $backoff.Count) { throw "could not fetch $url $sha" }
+                  Start-Sleep -Seconds $backoff[$i]
+              }
+              git -C $dir -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+              if ($LASTEXITCODE -ne 0) { throw "could not check out $url $sha" }
+              $head = git -C $dir rev-parse HEAD
+              if ($head -ne $sha) { throw "$url checked out $head, expected $sha" }
+          }
+          Get-Source 'https://github.com/qt/qtbase.git' $env:QTBASE_SHA 'C:\q\src\qtbase'
+          Get-Source 'https://github.com/qt/qtshadertools.git' $env:QTSHADERTOOLS_SHA 'C:\q\src\qtshadertools'
+          Get-Source 'https://github.com/qt/qtsvg.git' $env:QTSVG_SHA 'C:\q\src\qtsvg'
+          Get-Source 'https://github.com/qt/qtdeclarative.git' $env:QTDECLARATIVE_SHA 'C:\q\src\qtdeclarative'
+          Get-Source 'https://github.com/crystalidea/qt6windows7.git' $env:QT6WIN7_SHA 'C:\q\src\qt6windows7'
+          Get-Source 'https://github.com/openssl/openssl.git' $env:OPENSSL_SHA 'C:\q\src\openssl'
+
+          # The backport is a set of whole files, to be copied over the qtbase
+          # checkout of the version it was written for.
+          if (-not (Select-String -Quiet -SimpleMatch -Path 'C:\q\src\qt6windows7\README.md' -Pattern "**$env:QT_WIN7_VER**")) {
+              throw "qt6windows7 at $env:QT6WIN7_SHA does not say it supports Qt $env:QT_WIN7_VER"
+          }
+          $from = 'C:\q\src\qt6windows7\qtbase'
+          $files = Get-ChildItem -Path $from -Recurse -File
+          if ($files.Count -lt 20) { throw "only $($files.Count) files in the backport's qtbase" }
+          foreach ($f in $files) {
+              $rel = $f.FullName.Substring($from.Length + 1)
+              $dest = Join-Path 'C:\q\src\qtbase' $rel
+              New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+              Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
+              Write-Host "patched qtbase\$rel"
+          }
+
+      - name: Build Qt
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Checked([scriptblock]$cmd) {
+              & $cmd
+              if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE from: $cmd" }
+          }
+          $prefix = $env:QT_WIN7_PREFIX
+
+          # OpenSSL, static, for Qt's TLS plugin to link. The paths compiled
+          # into it (OPENSSLDIR, where openssl.cnf is read from, which Qt's
+          # OPENSSL_init_ssl does; MODULESDIR; ENGINESDIR) are OpenSSL's own
+          # Windows defaults under C:\Program Files, which only administrators
+          # can write: never the C:\q build path, which on a user's machine
+          # anyone could create and fill. no-dso/no-module/no-engine take
+          # loading code from a DLL out of the library altogether. The install
+          # is staged under the Qt prefix with DESTDIR, which changes none of
+          # those paths, so it is cached with Qt; its LICENSE goes with it.
+          $sslStage = Join-Path $prefix 'openssl-sdk'
+          # A native perl, as OpenSSL asks: Strawberry's, never an MSYS one.
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (-not (Test-Path $perl)) { $perl = (Get-Command perl).Source }
+          Write-Host "perl: $perl"
+          Push-Location C:\q\src\openssl
+          Invoke-Checked {
+              & $perl Configure VC-WIN64A no-asm no-shared no-dso no-module no-engine no-apps no-tests no-docs `
+                '--prefix=C:\Program Files\OpenSSL' '--openssldir=C:\Program Files\Common Files\SSL'
+          }
+          Invoke-Checked { nmake /nologo }
+          Invoke-Checked { nmake /nologo install_sw "DESTDIR=$sslStage" }
+          Pop-Location
+          $sslRoot = Join-Path $sslStage 'Program Files\OpenSSL'
+          foreach ($f in 'include\openssl\ssl.h', 'lib\libssl.lib', 'lib\libcrypto.lib') {
+              if (-not (Test-Path (Join-Path $sslRoot $f))) { throw "the OpenSSL install has no $f" }
+          }
+          Copy-Item C:\q\src\openssl\LICENSE.txt (Join-Path $sslStage 'LICENSE.txt')
+
+          # Release only, no tests or examples. TLS through the OpenSSL linked
+          # above (see OPENSSL_VER), and no Schannel backend at all, so Qt never
+          # picks the one that cannot work on Windows 7.
+          Invoke-Checked {
+              cmake -G Ninja -S C:\q\src\qtbase -B C:\q\b\qtbase `
+                -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" `
+                -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+                -DQT_BUILD_TESTS=OFF -DQT_BUILD_EXAMPLES=OFF `
+                -DINPUT_openssl=linked -DFEATURE_schannel=OFF `
+                -DOPENSSL_ROOT_DIR="$sslRoot" -DOPENSSL_USE_STATIC_LIBS=ON
+          }
+          # Whichever variable FindOpenSSL cached it in (SSL_EAY_RELEASE with
+          # MSVC), every libssl the configure found has to be the one above,
+          # not the OpenSSL that comes with the runner image.
+          $cache = Get-Content C:\q\b\qtbase\CMakeCache.txt
+          $cache | Select-String -Pattern '^(\w*(SSL|EAY)\w*|QT_FEATURE_\w*(openssl|schannel)\w*)[:=]' |
+              ForEach-Object { Write-Host $_.Line }
+          $found = @($cache | Select-String -Pattern '^\w+(:\w+)?=(.*libssl[^/\\]*\.lib)$' |
+                       ForEach-Object { $_.Matches.Groups[2].Value })
+          if ($found.Count -eq 0) { throw 'the qtbase configure cached no libssl path' }
+          foreach ($lib in $found) {
+              if (-not ($lib -replace '/', '\').StartsWith($sslRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                  throw "qtbase found libssl at '$lib', not under $sslRoot"
+              }
+          }
+          Invoke-Checked { cmake --build C:\q\b\qtbase --parallel }
+          Invoke-Checked { cmake --install C:\q\b\qtbase }
+
+          # The TLS plugin has OpenSSL inside it, and Schannel is not there.
+          $tls = Join-Path $prefix 'plugins\tls'
+          Get-ChildItem $tls | ForEach-Object { Write-Host "plugins\tls\$($_.Name)" }
+          if (-not (Test-Path (Join-Path $tls 'qopensslbackend.dll'))) { throw 'Qt has no OpenSSL TLS backend' }
+          if (Test-Path (Join-Path $tls 'qschannelbackend.dll')) { throw 'Qt still has the Schannel TLS backend' }
+          $deps = dumpbin /nologo /dependents (Join-Path $tls 'qopensslbackend.dll') | Out-String
+          if ($deps -match 'libssl|libcrypto') { throw "qopensslbackend.dll loads OpenSSL DLLs instead of linking it:`n$deps" }
+
+          # qtshadertools before qtdeclarative, which compiles QtQuick.Effects'
+          # shaders with it.
+          $toolchain = Join-Path $prefix 'lib\cmake\Qt6\qt.toolchain.cmake'
+          foreach ($m in 'qtshadertools', 'qtsvg', 'qtdeclarative') {
+              Invoke-Checked {
+                  cmake -G Ninja -S "C:\q\src\$m" -B "C:\q\b\$m" `
+                    -DCMAKE_TOOLCHAIN_FILE="$toolchain" -DCMAKE_BUILD_TYPE=Release `
+                    -DCMAKE_INSTALL_PREFIX="$prefix" `
+                    -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+                    -DQT_BUILD_TESTS=OFF -DQT_BUILD_EXAMPLES=OFF
+              }
+              Invoke-Checked { cmake --build "C:\q\b\$m" --parallel }
+              Invoke-Checked { cmake --install "C:\q\b\$m" }
+          }
+
+          foreach ($f in 'bin\Qt6Core.dll', 'bin\Qt6Quick.dll', 'bin\Qt6Svg.dll', 'bin\windeployqt.exe',
+                         'plugins\tls\qopensslbackend.dll', 'plugins\platforms\qwindows.dll',
+                         'qml\QtQuick\Effects', 'qml\QtQuick\Dialogs', 'qml\Qt\labs\platform') {
+              if (-not (Test-Path (Join-Path $prefix $f))) { throw "the Qt install has no $f" }
+          }
+          # Recorded in the install, so a cached Qt says what it is.
+          Set-Content -Path (Join-Path $prefix 'FREETUNNEL-WIN7-QT.txt') -Value @(
+              "Qt $env:QT_WIN7_VER for Windows 7, built by FreeTunnel's win7.yml"
+              "qtbase $env:QTBASE_SHA"
+              "qtshadertools $env:QTSHADERTOOLS_SHA"
+              "qtsvg $env:QTSVG_SHA"
+              "qtdeclarative $env:QTDECLARATIVE_SHA"
+              "crystalidea/qt6windows7 $env:QT6WIN7_SHA (qtbase files copied over)"
+              "OpenSSL $env:OPENSSL_VER $env:OPENSSL_SHA (static, in plugins\tls\qopensslbackend.dll)"
+              "MSVC $env:VCToolsVersion, Windows SDK $env:WindowsSDKVersion"
+          )
+
+      - name: Save Qt
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.QT_WIN7_PREFIX }}
+          key: ${{ steps.key.outputs.key }}
+
+  build:
+    name: Build (freetunnel-windows7-x86_64)
+    needs: [icons, qt]
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Checkout client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: client
+
+      - name: Use rendered bundle icons
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: bundle-icons
+          path: client/assets
+
+      - name: Read pinned upstream ref
+        id: upstream_ref
+        shell: bash
+        run: |
+          set -eu
+          ref="$(tr -d '[:space:]' < client/scripts/upstream_ref.txt)"
+          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "upstream_ref.txt is not a 40-hex commit SHA: '$ref'" >&2
+            exit 1
+          fi
+          echo "value=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout upstream core (${{ env.UPSTREAM_REPO }})
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ steps.upstream_ref.outputs.value }}
+          path: upstream
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Inject client into upstream tree
+        shell: bash
+        run: |
+          set -eux
+          rm -rf upstream/FreeTunnel
+          mkdir -p upstream/FreeTunnel
+          (cd client && tar --exclude='./.git' -cf - .) | (cd upstream/FreeTunnel && tar -xf -)
+          {
+            printf '\n# --- injected by FreeTunnel CI ---\n'
+            printf 'if (BUILD_TRUSTTUNNEL_QT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FreeTunnel/CMakeLists.txt")\n'
+            printf '    add_subdirectory(FreeTunnel)\n'
+            printf 'endif ()\n'
+          } >> upstream/CMakeLists.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Apply the vendored core patches
+        shell: bash
+        run: |
+          set -eu
+          for p in client/vendor/trusttunnel/*.patch; do
+            echo "==> $(basename "$p")"
+            patch -p1 --fuzz=0 -d upstream < "$p"
+          done
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          Write-Host "MSVC $env:VCToolsVersion, Windows SDK $env:WindowsSDKVersion, UCRT $env:UCRTVersion"
+          cl 2>&1 | Select-Object -First 1
+
+      - name: Restore Qt for Windows 7
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.QT_WIN7_PREFIX }}
+          key: ${{ needs.qt.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Content (Join-Path $env:QT_WIN7_PREFIX 'FREETUNNEL-WIN7-QT.txt')
+          # The pins and the retries of build.yml's Windows leg, which says why.
+          $pinned = [ordered]@{ nasm = '3.2.0'; nsis = '3.13.0' }
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          $backoff = @(15, 30, 60, 120)
+          for ($i = 0; $i -le $backoff.Count; $i++) {
+              $failed = @()
+              foreach ($name in $pinned.Keys) {
+                  $version = $pinned[$name]
+                  choco install -y --no-progress $name --version $version
+                  if ($LASTEXITCODE -ne 0) { $failed += "$name $version" }
+              }
+              choco install -y --no-progress strawberryperl
+              if (-not (Test-Path $nsis)) { $failed += 'makensis.exe' }
+              if ($failed.Count -eq 0) { break }
+              if ($i -eq $backoff.Count) {
+                  throw "Chocolatey did not install $($failed -join ', ') after $($i + 1) attempts"
+              }
+              Write-Host "Missing after attempt $($i + 1): $($failed -join ', ') — retrying in $($backoff[$i])s…"
+              Start-Sleep -Seconds $backoff[$i]
+          }
+          pip install -r upstream/requirements.txt
+          pip install "conan==$env:CONAN_VER"
+
+      # Its own key: these packages are built by another compiler than
+      # build.yml's, and BoringSSL with the Windows 7 patch.
+      - name: Conan cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.conan2
+          key: win7-windows-2022-conan2-${{ hashFiles('upstream/conanfile.py', 'client/win7/*.patch') }}
+          restore-keys: win7-windows-2022-conan2-
+
+      - name: Patch bootstrap for Windows (run .sh via sh)
+        shell: bash
+        run: |
+          set -eux
+          sed -i 's/subprocess\.run(\[os\.path\.join(/subprocess.run(["sh", os.path.join(/g' \
+            upstream/scripts/bootstrap_conan_deps.py
+
+      - name: Bootstrap conan dependencies
+        working-directory: upstream
+        shell: bash
+        run: ./scripts/bootstrap_conan_deps.py
+
+      # The recipe build.yml exports, plus the Windows 7 randomness fallback.
+      # The script checks that the newest recipe revision carries the patch.
+      - name: Export patched boringssl recipe (with the Windows 7 patch)
+        shell: bash
+        env:
+          FT_BORINGSSL_EXTRA_PATCHES: client/win7/boringssl-win7-rand-fallback.patch
+        run: bash client/scripts/export-patched-boringssl.sh
+
+      - name: Prepare conan profile
+        shell: bash
+        run: |
+          set -eux
+          conan profile detect --force
+          CONAN_HOME_DIR="$(conan config home)"
+          touch "$CONAN_HOME_DIR/global.conf"
+          grep -q "core.download:retry " "$CONAN_HOME_DIR/global.conf" \
+            || echo "core.download:retry = 8" >> "$CONAN_HOME_DIR/global.conf"
+          grep -q "core.download:retry_wait" "$CONAN_HOME_DIR/global.conf" \
+            || echo "core.download:retry_wait = 30" >> "$CONAN_HOME_DIR/global.conf"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($attempt in 1..3) {
+            cmake -S upstream -B build -G Ninja `
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+              -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+              -DIPV6_UNAVAILABLE=ON -DDISABLE_HTTP3=OFF `
+              -DBUILD_TRUSTTUNNEL_QT=ON `
+              -DCMAKE_PREFIX_PATH="$env:QT_WIN7_PREFIX"
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            if ($attempt -lt 3) {
+              Write-Host "configure attempt $attempt failed - retrying in 90 s"
+              Start-Sleep -Seconds 90
+            }
+          }
+          if (-not $ok) { exit 1 }
+          # The Qt that was found has to be this one, not one on the runner.
+          $qtDir = (Select-String -Path build\CMakeCache.txt -Pattern '^Qt6_DIR:PATH=(.*)$').Matches.Groups[1].Value
+          Write-Host "Qt6_DIR: $qtDir"
+          $want = (Join-Path $env:QT_WIN7_PREFIX 'lib\cmake\Qt6') -replace '\\', '/'
+          if (($qtDir -replace '\\', '/') -ne $want) { throw "configured against $qtDir, not $want" }
+
+      - name: Build
+        run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          set -eu
+          project_version="$(sed -nE 's/^project\(FreeTunnel VERSION ([0-9.]+).*/\1/p' client/CMakeLists.txt)"
+          : "${project_version:?could not read project(FreeTunnel VERSION ...) from CMakeLists.txt}"
+          echo "version=${project_version}+win7.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version_num=${project_version}.0" >> "$GITHUB_OUTPUT"
+
+      # The official Qt, for its Russian catalogues and the lconvert that merges
+      # them, exactly what windeployqt --translations ru does in build.yml. It
+      # sets no environment, so nothing below can pick up its DLLs by accident.
+      - name: Install official Qt (translations only)
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
+        with:
+          version: ${{ env.QT_VER }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          archives: qtbase qttools qttranslations
+          dir: ${{ runner.temp }}
+          set-env: false
+          cache: true
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem -Path build\FreeTunnel -Recurse -Filter FreeTunnel.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path dist, out | Out-Null
+          Copy-Item $exe.FullName dist\
+          New-Item -ItemType Directory -Force -Path dist\assets | Out-Null
+          Copy-Item client\assets\logo.ico dist\assets\ -Force
+          Copy-Item client\assets\logo.png dist\assets\ -Force -ErrorAction SilentlyContinue
+
+          # The patched Qt's own windeployqt, so the patched DLLs are the ones
+          # deployed. The runtimes are copied by hand below.
+          & (Join-Path $env:QT_WIN7_PREFIX 'bin\windeployqt.exe') --release --no-translations `
+            --no-compiler-runtime --qmldir client\qml dist\FreeTunnel.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          if (-not (Test-Path dist\Qt6Core.dll)) { throw "windeployqt deployed no Qt6Core.dll" }
+          # HTTPS in the app goes through this one (see OPENSSL_VER above).
+          if (-not (Test-Path dist\tls\qopensslbackend.dll)) { throw "windeployqt deployed no OpenSSL TLS backend" }
+
+          # Qt's Russian words (the reason in a network error), merged the way
+          # windeployqt merges them.
+          $lconvert = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'Qt') -Recurse -Filter lconvert.exe | Select-Object -First 1
+          if (-not $lconvert) { throw "lconvert.exe not found in the official Qt" }
+          $tr = Join-Path (Split-Path (Split-Path $lconvert.FullName)) 'translations'
+          $catalogues = @('qtbase_ru.qm', 'qtdeclarative_ru.qm') | ForEach-Object { Join-Path $tr $_ } | Where-Object { Test-Path $_ }
+          if (-not ($catalogues -match 'qtbase_ru\.qm$')) { throw "no qtbase_ru.qm in $tr" }
+          New-Item -ItemType Directory -Force -Path dist\translations | Out-Null
+          & $lconvert.FullName -o dist\translations\qt_ru.qm @catalogues
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path dist\translations\qt_ru.qm)) { throw "lconvert did not write qt_ru.qm" }
+
+          # MSVC runtime, for the Qt DLLs (FreeTunnel.exe links it statically).
+          $crt = Get-ChildItem -Path (Join-Path $env:VCToolsRedistDir "x64") -Directory `
+                   -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if (-not $crt) { throw "VC++ CRT redist not found under '$env:VCToolsRedistDir'" }
+          Copy-Item (Join-Path $crt.FullName "*.dll") dist\ -Force
+          if (-not (Test-Path "dist\MSVCP140.dll")) { throw "VC++ runtime (MSVCP140.dll) was not bundled" }
+
+          # The Universal CRT, app-local: Windows 7 has it only with KB2999226.
+          # Windows 10 and later always use their own and ignore these copies.
+          $ucrt = @(
+              (Join-Path $env:UniversalCRTSdkDir "Redist\$env:UCRTVersion\ucrt\DLLs\x64"),
+              (Join-Path $env:UniversalCRTSdkDir "Redist\ucrt\DLLs\x64")
+          ) | Where-Object { Test-Path (Join-Path $_ 'ucrtbase.dll') } | Select-Object -First 1
+          if (-not $ucrt) {
+              Get-ChildItem -Path (Join-Path $env:UniversalCRTSdkDir 'Redist') -Recurse -Filter ucrtbase.dll -ErrorAction SilentlyContinue |
+                  ForEach-Object { Write-Host $_.FullName }
+              throw "the redistributable UCRT was not found under $env:UniversalCRTSdkDir"
+          }
+          Copy-Item (Join-Path $ucrt '*.dll') dist\ -Force
+
+          # Wintun 0.14.1 supports Windows 7; pinned and verified as in build.yml.
+          Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile wintun.zip
+          $wtHash = (Get-FileHash wintun.zip -Algorithm SHA256).Hash
+          if ($wtHash -ne "07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51") {
+              throw "Wintun checksum mismatch: $wtHash"
+          }
+          Expand-Archive -Path wintun.zip -DestinationPath wintun_extract -Force
+          Copy-Item "wintun_extract\wintun\bin\amd64\wintun.dll" dist\ -Force
+
+          Copy-Item client\THIRD_PARTY_NOTICES.md, client\LICENSE dist\ -Force
+          New-Item -ItemType Directory -Force -Path dist\licenses | Out-Null
+          Copy-Item client\licenses\common, client\licenses\desktop dist\licenses\ -Recurse -Force
+          # What this build ships differently (Qt 6.8.5, patched Qt and BoringSSL,
+          # OpenSSL inside Qt's TLS plugin).
+          Copy-Item client\win7\NOTICE-Windows7.txt dist\ -Force
+          Copy-Item (Join-Path $env:QT_WIN7_PREFIX 'FREETUNNEL-WIN7-QT.txt') dist\ -Force
+          Copy-Item (Join-Path $env:QT_WIN7_PREFIX 'openssl-sdk\LICENSE.txt') dist\licenses\desktop\OpenSSL-LICENSE.txt -Force
+
+          Compress-Archive -Path dist\* -DestinationPath out\freetunnel-windows7-x86_64-portable.zip -Force
+
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          $distAbs = (Resolve-Path dist).Path
+          & $nsis "/DBUILD_DIR=$distAbs" "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" "/DPRODUCT_VERSION_NUM=${{ steps.ver.outputs.version_num }}" client\win\installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          $setup = Get-ChildItem -Path "client\win" -Filter "FreeTunnel-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS did not produce FreeTunnel-*-Setup.exe" }
+          Move-Item $setup.FullName "out\freetunnel-windows7-x86_64-Setup.exe" -Force
+          Get-ChildItem out
+
+      # Every .exe and .dll in the package against what Windows 7 has. The
+      # SystemFunction036 string is the BoringSSL patch's fallback lookup: a
+      # FreeTunnel.exe without it was linked against an unpatched BoringSSL.
+      # Not failed here, so the artifacts below are uploaded either way.
+      - name: Windows 7 import check
+        id: imports
+        continue-on-error: true
+        shell: bash
+        run: |
+          status=0
+          python client/scripts/check-win7-imports.py dist \
+            --report out/win7-import-check.md \
+            --expect-string FreeTunnel.exe=SystemFunction036 || status=$?
+          if [[ -f out/win7-import-check.md ]]; then
+            cat out/win7-import-check.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: freetunnel-windows7-x86_64
+          path: out/*
+          if-no-files-found: error
+
+      - name: Fail on Windows 7 import problems
+        if: steps.imports.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::error::The package imports something Windows 7 does not have; see out/win7-import-check.md in the artifact or the job summary."
+          exit 1
