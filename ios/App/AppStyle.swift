@@ -261,4 +261,3 @@ struct AppIcon: View {
             .frame(width: 26, height: 44).contentShape(Rectangle())
     }
 }
-
