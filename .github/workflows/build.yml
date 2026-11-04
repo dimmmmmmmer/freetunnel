@@ -356,7 +356,23 @@ jobs:
           # binaries, so what it does has to be reviewable in a diff, not whatever
           # upstream is serving today. It is 8 KB of shell — refresh it by opening
           # a PR against scripts/llvm.sh.
-          sudo bash client/scripts/llvm.sh 18
+          #
+          # Retried: the installer's own reachability check (check_url) treats a
+          # transient network failure as "this distribution is not supported"
+          # and exits 2, so one blip against apt.llvm.org's edge turned a good
+          # jammy repository into a red build. The script is idempotent, so
+          # re-running it is safe. The explicit failure after the last attempt
+          # is deliberate: the loop's own `sleep` would otherwise leave the step
+          # green with clang-18 missing.
+          for attempt in 1 2 3; do
+            sudo bash client/scripts/llvm.sh 18 && break
+            if [ "$attempt" = 3 ]; then
+              echo "::error::client/scripts/llvm.sh failed after 3 attempts"
+              exit 1
+            fi
+            echo "llvm.sh failed (attempt $attempt), retrying…"
+            sleep 20
+          done
           # gcc-13 libstdc++ headers: older libstdc++ (jammy's GCC 11, and gcc-12
           # when this was built on 22.04) misses some transitive includes the core
           # relies on (e.g. <algorithm>); clang-18 auto-selects the newest GCC,
