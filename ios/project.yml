@@ -1,0 +1,124 @@
+name: FreeTunnel
+options:
+  bundleIdPrefix: org.freetunnel
+  deploymentTarget:
+    iOS: '17.0'
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+    MARKETING_VERSION: '1.2.4'
+    CURRENT_PROJECT_VERSION: '1'
+    FT_APP_ID: org.freetunnel.ios
+    FT_APP_GROUP: group.org.freetunnel.ios
+    FT_KEYCHAIN_GROUP: $(AppIdentifierPrefix)org.freetunnel.ios.shared
+    TARGETED_DEVICE_FAMILY: '1,2'
+packages:
+  FreeTunnelCore:
+    path: FreeTunnelCore
+targets:
+  FreeTunnel:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+      - path: Resources
+        excludes: ['PrivacyInfo.xcprivacy']
+      - path: Resources/PrivacyInfo.xcprivacy
+      - path: ../assets/fonts/inter/Inter-Regular.ttf
+      - path: ../assets/fonts/inter/Inter-Medium.ttf
+      - path: ../licenses/common
+        type: folder
+      - path: ../THIRD_PARTY_NOTICES.md
+      - path: ../data/geo/presets.json
+      - path: ../data/split/recommended-russia.txt
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(FT_APP_ID)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: App/FreeTunnel.entitlements
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: FreeTunnel
+        FreeTunnelAppGroup: $(FT_APP_GROUP)
+        FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
+        FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel
+        UILaunchScreen: {}
+        UIAppFonts: [Inter-Regular.ttf, Inter-Medium.ttf]
+        LSSupportsOpeningDocumentsInPlace: false
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [org.freetunnel.ios.refresh]
+        NSCameraUsageDescription: Scan a TrustTunnel configuration QR code.
+        ITSAppUsesNonExemptEncryption: true
+        CFBundleURLTypes:
+          - CFBundleURLName: TrustTunnel configuration
+            CFBundleURLSchemes: [tt]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: TrustTunnel configuration
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.plain-text, public.data]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    dependencies:
+      - package: FreeTunnelCore
+      - framework: .build/VpnClientFramework.xcframework
+        embed: true
+      - target: FreeTunnelTunnel
+        embed: true
+  FreeTunnelTunnel:
+    type: app-extension
+    platform: iOS
+    sources: [Tunnel, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(FT_APP_ID).tunnel
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: Tunnel/FreeTunnelTunnel.entitlements
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/../../Frameworks
+    info:
+      path: Tunnel/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        FreeTunnelAppGroup: $(FT_APP_GROUP)
+        FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
+        FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PacketTunnelProvider
+    dependencies:
+      - package: FreeTunnelCore
+      - framework: .build/VpnClientFramework.xcframework
+        embed: false
+  FreeTunnelUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: FreeTunnel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.freetunnel.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  FreeTunnel:
+    build:
+      targets:
+        FreeTunnel: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - FreeTunnelUITests
