@@ -47,6 +47,11 @@ compare link at the bottom of its release notes.
 
 ### Changed
 
+- **Windows, macOS and Linux: built with Qt 6.11.3**, up from 6.8.3.
+  - macOS: FreeTunnel now needs macOS 13 or newer (it was 12), the oldest Qt
+    6.11 runs on.
+  - Linux: the packages are built on Ubuntu 22.04 and need glibc 2.35 or newer
+    (Ubuntu 22.04+, Debian 12+); they were built on Ubuntu 20.04.
 - **Windows, macOS and Linux: the VPN core is TrustTunnel 1.1.11**, up from
   1.1.7, with NativeLibsCommon 8.1.54.
   - Linux: the core no longer picks a stale default route through a network
@@ -107,6 +112,10 @@ compare link at the bottom of its release notes.
 
 ### Fixed
 
+- **macOS 15.8: a server that cannot be reached is reported as such.** Qt 6.8.3
+  took a refused connection there for a made one, so the update check said
+  nothing when it could not reach GitHub, and a connection to the VPN helper
+  could look made before the helper was there.
 - **Windows, macOS and Linux: tt:// links from TrustTunnel 1.3 servers are no
   longer refused as an unsupported version.**
   - Subscriptions aren't supported yet. A subscription link that also carries

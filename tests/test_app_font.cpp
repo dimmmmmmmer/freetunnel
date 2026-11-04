@@ -322,7 +322,7 @@ QSet<char32_t> nonAsciiCharactersDrawn(QStringList *places)
             for (const char32_t ch : text.toUcs4()) {
                 if (ch > 127 && !out.contains(ch)) {
                     out.insert(ch);
-                    places->append(QStringLiteral("%1 in %2").arg(QChar::fromUcs4(ch)).arg(it.key()));
+                    places->append(QStringLiteral("%1 in %2").arg(QString::fromUcs4(&ch, 1)).arg(it.key()));
                 }
             }
         }
@@ -338,7 +338,7 @@ QSet<char32_t> nonAsciiCharactersDrawn(QStringList *places)
             for (const char32_t ch : xml.readElementText().toUcs4()) {
                 if (ch > 127 && !out.contains(ch)) {
                     out.insert(ch);
-                    places->append(QStringLiteral("%1 in freetunnel_ru.ts").arg(QChar::fromUcs4(ch)));
+                    places->append(QStringLiteral("%1 in freetunnel_ru.ts").arg(QString::fromUcs4(&ch, 1)));
                 }
             }
         }
@@ -370,7 +370,7 @@ void TestAppFont::everyCharacterTheInterfaceDrawsIsInTheFont()
         for (const char32_t ch : characters) {
             if (!raw.supportsCharacter(ch) && !drawnByAnotherFont.contains(ch))
                 lacking << QStringLiteral("U+%1 %2 (%3)")
-                                   .arg(uint(ch), 4, 16, QLatin1Char('0')).arg(QChar::fromUcs4(ch)).arg(file.mid(8));
+                                   .arg(uint(ch), 4, 16, QLatin1Char('0')).arg(QString::fromUcs4(&ch, 1)).arg(file.mid(8));
         }
     }
     QVERIFY2(lacking.isEmpty(), qPrintable(QStringLiteral("not in Inter: ") + lacking.join(QStringLiteral(", "))));

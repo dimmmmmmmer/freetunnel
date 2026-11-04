@@ -100,7 +100,10 @@ done < <(grep -rhoE 'uses:[[:space:]]*[^[:space:]]+@[^[:space:]]+' .github/workf
 check_one_value() {
   local name="$1"
   local values
-  values="$(grep -rhoE "^  ${name}: '[^']+'" .github/workflows | sort -u)"
+  # win7.yml ships a Qt of its own (6.8.5, built from source for Windows 7): its
+  # QT_VER is the official Qt whose Russian catalogues that build takes, which
+  # follows its own Qt, not the one the other workflows build and test with.
+  values="$(grep -rhoE --exclude=win7.yml "^  ${name}: '[^']+'" .github/workflows | sort -u)"
   if [[ -z "$values" ]]; then
     echo "pinned-deps: no workflow declares ${name}" >&2
     fail=1
@@ -112,7 +115,17 @@ check_one_value() {
 }
 
 check_one_value QT_VER
+check_one_value AQT_SOURCE
 check_one_value CONAN_VER
+
+# The aqtinstall every Qt comes through runs in CI with the repository's token
+# around: a commit, never a branch or a tag, which can be moved.
+while read -r line; do
+  if ! [[ "$line" =~ aqtinstall\.git@[0-9a-f]{40}\'$ ]]; then
+    echo "pinned-deps: AQT_SOURCE must name a full commit SHA: $line" >&2
+    fail=1
+  fi
+done < <(grep -rh '^  AQT_SOURCE:' .github/workflows)
 
 # ...and that nothing reintroduces a literal alongside the declaration.
 while read -r line; do

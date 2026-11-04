@@ -877,15 +877,14 @@ void TestSubscriptionFetcher::eachStatusMeansSomething()
 }
 
 // An endpoint sends a 401, 403, 404 or 405 with no length, so the body ends
-// where the connection does, and on schannel Qt never hears that close (see
-// aServerThatHangsUpIsANetworkError). Held open, the connection stands for that
+// where the connection does. Held open, the connection stays incomplete
 // on every backend: only the headers can decide, and they must, or each refusal
 // would end at the deadline as a timeout and be tried again.
 //
 // Except a 401, which Qt reads to its end before it says anything of it
 // (QHttpNetworkReplyPrivate::shouldEmitSignals(), then handleStatus() once all
 // is read), so nothing can judge one on its headers. Held open it waits out the
-// deadline, and so does the endpoint's own on schannel. This pins that.
+// deadline. A closed response completes on every Qt 6.11 backend.
 void TestSubscriptionFetcher::aStatusIsJudgedOnItsHeaders_data()
 {
     QTest::addColumn<int>("code");
@@ -915,7 +914,7 @@ void TestSubscriptionFetcher::aStatusIsJudgedOnItsHeaders()
     response.holdBody = heldOpen;
     server.setRoute("/sub", response);
     server.setRoute("/doc", json());
-    const bool waits = code == 401 && (heldOpen || m_backend == QLatin1String("schannel"));
+    const bool waits = code == 401 && heldOpen;
     if (waits)
         qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "1500");
     QElapsedTimer elapsed;
@@ -1041,13 +1040,8 @@ void TestSubscriptionFetcher::aHandshakeTheServerEndsIsRefusedByServer()
     QCOMPARE(server.serverNames().value(afterARedirect ? 1 : 0), QStringLiteral("vpn.test"));
 }
 
-// After the handshake it is the network's, whatever Qt tries again. Except on
-// schannel, where Qt 6.8 never ends the reply: its schannel backend takes the
-// server's close_notify after the handshake as a close of its own and reports
-// no error (TlsCryptographSchannel::transmit()), and the HTTP channel, waiting
-// for a reply with nothing to read, just goes idle (_q_disconnected()). Only the
-// deadline ends that fetch. Both outcomes mean the same to the user and to the
-// next refresh, so this pins which one each backend gives.
+// After the handshake, a close without an HTTP response is a network error.
+// Qt 6.11 also reports this promptly on Schannel, which used to hang in 6.8.
 void TestSubscriptionFetcher::aServerThatHangsUpIsANetworkError()
 {
     TlsTestServer server;
@@ -1055,11 +1049,8 @@ void TestSubscriptionFetcher::aServerThatHangsUpIsANetworkError()
     TlsTestServer::Response response;
     response.hangUp = true;
     server.setRoute("/sub", response);
-    const bool schannel = m_backend == QLatin1String("schannel");
-    if (schannel)
-        qputenv("FT_SUBSCRIPTION_TIMEOUT_MS", "1500");
     const std::optional<SubscriptionFetchResult> result = fetch(pinned(server.port(), pemOf({&m_certs->selfSigned})));
-    QVERIFY_FETCH(result, schannel ? SubscriptionFetchError::Timeout : SubscriptionFetchError::Network);
+    QVERIFY_FETCH(result, SubscriptionFetchError::Network);
     QCOMPARE(refreshPolicyFor(result->error, SubscriptionDocError::Invalid),
              refreshPolicyFor(SubscriptionFetchError::Network, SubscriptionDocError::Invalid));
     QCOMPARE(subscriptionFailureText(result->error, SubscriptionDocError::Invalid),

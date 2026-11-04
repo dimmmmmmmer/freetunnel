@@ -243,7 +243,7 @@ else()
     if(FT_HAS_FORTIFY3 AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Any compiler takes =3; it is glibc that decides, and before 2.33 (or with
         # a compiler it does not trust with it) it quietly makes it 2. The Linux
-        # release is built on glibc 2.31, so ask glibc what it did, and have the log
+        # release is built on glibc 2.35, but ask glibc what it did, and have the log
         # say the level that is really in the binary.
         include(CheckCXXSourceCompiles)
         set(CMAKE_REQUIRED_FLAGS "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3")

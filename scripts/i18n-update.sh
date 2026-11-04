@@ -12,7 +12,7 @@ expected_qt_version() {
     sed -nE "s/^  QT_VER: '([^']+)'.*/\1/p" "$ROOT/.github/workflows/security.yml" | head -n1
 }
 
-# "lupdate version 6.8.3" and the like, or a note that the tool would not say.
+# "lupdate version 6.11.3" and the like, or a note that the tool would not say.
 tool_version() {
     "$1" -version 2>/dev/null | head -n1 || true
 }

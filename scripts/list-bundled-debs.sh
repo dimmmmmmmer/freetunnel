@@ -4,7 +4,7 @@
 # Debian copyright file in the bundle.
 #
 # linuxdeploy copies the libraries that FreeTunnel and Qt need from the build
-# container (Ubuntu 20.04) into the AppDir, and the copyright files of most of
+# container (Ubuntu 22.04) into the AppDir, and the copyright files of most of
 # their packages with them, but not of all: it found none for libdbus-1-3,
 # libsystemd0, libgcc-s1 and a few more. THIRD_PARTY_NOTICES.md points to these
 # files, and its source offer to the package versions written here (and, for
