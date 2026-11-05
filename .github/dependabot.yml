@@ -5,5 +5,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+  # The Android app's Gradle dependencies and plugins (android/app/build.gradle,
+  # android/build.gradle) and the Gradle wrapper. Their versions are declared
+  # there by hand. A PR that touches
+  # only android/ runs android.yml, not the desktop workflows (see
+  # scripts/check-desktop-changes.sh).
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
 # FetchContent deps (QHotkey) and TrustTunnel upstream are pinned in CMakeLists.txt
 # and scripts/upstream_ref.txt — see scripts/check-pinned-deps.sh in security CI.
+# The core AAR and the TLS stack are pinned by name and checksum too; Dependabot
+# does not update these custom binary pins; core-update.yml monitors core releases.
