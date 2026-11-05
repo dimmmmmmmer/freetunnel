@@ -205,7 +205,7 @@ jobs:
       - name: Ensure Android SDK 35 packages
         # As in android.yml: the runner image's command-line tools.
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           # No cache at all in a release build, and never the proprietary one
           # (see android.yml).
