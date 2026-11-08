@@ -40,6 +40,7 @@
 #include <QQmlExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 
 #include "ui/MockBackend.h"
 #include "ui/MockDesktop.h"
@@ -54,6 +55,8 @@ class TestQmlUi : public QObject {
 private slots:
     void initTestCase();
     void cleanup();
+    void popupContentsAreRendered_data();
+    void popupContentsAreRendered();
     void homePageLoads();
     void configsPageLoads();
     void splitPageLoads();
@@ -2412,6 +2415,87 @@ void TestQmlUi::theSelectPopupElidesWhatTheWindowCannotHold()
 
 // Both are placed and sized when they open, and after a resize they hung away
 // from the control they drop from.
+// A shader-only layer can load, lay out and accept clicks while drawing nothing
+// with QT_QUICK_BACKEND=software. Check pixels in all three actual popup cards.
+void TestQmlUi::popupContentsAreRendered_data()
+{
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("popupKind");
+    for (const QString &mode : {QStringLiteral("light"), QStringLiteral("dark")}) {
+        for (int kind = 0; kind < 3; ++kind)
+            QTest::newRow(qPrintable(mode + QString::number(kind))) << mode << kind;
+    }
+}
+
+void TestQmlUi::popupContentsAreRendered()
+{
+    QFETCH(QString, mode);
+    QFETCH(int, popupKind);
+    const QString savedTheme = m_backend.themeMode();
+    const QStringList savedConfigs = m_backend.configs();
+    const auto restore = qScopeGuard([this, savedTheme, savedConfigs] {
+        m_backend.setThemeMode(savedTheme);
+        m_backend.setConfigs(savedConfigs);
+    });
+    m_backend.setThemeMode(mode);
+    m_backend.setConfigs({QStringLiteral("Home"), QStringLiteral("Work")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    const auto deleteRoot = qScopeGuard([root] { delete root; });
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QQuickItem *popup = nullptr;
+    if (popupKind == 2) {
+        auto *anchor = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        QVERIFY(anchor);
+        const QVariantList options{QVariantMap{{QStringLiteral("v"), QStringLiteral("a")},
+                                              {QStringLiteral("t"), QStringLiteral("First")}},
+                                   QVariantMap{{QStringLiteral("v"), QStringLiteral("b")},
+                                              {QStringLiteral("t"), QStringLiteral("Second")}}};
+        QVERIFY(QMetaObject::invokeMethod(root, "showSelect",
+            Q_ARG(QVariant, QVariant::fromValue(static_cast<QObject *>(anchor))),
+            Q_ARG(QVariant, options), Q_ARG(QVariant, QStringLiteral("a")), Q_ARG(QVariant, QVariant())));
+        popup = qobject_cast<QQuickItem *>(evaluateIn(root, QStringLiteral("selectPopup")).value<QObject *>());
+    } else {
+        root->setProperty("currentPage", popupKind);
+        const QString name = popupKind == 0 ? QStringLiteral("configPicker") : QStringLiteral("importMenu");
+        QTRY_VERIFY((popup = root->findChild<QQuickItem *>(name)) != nullptr);
+        if (popupKind == 0) {
+            auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+            QVERIFY(label);
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        } else {
+            popup->setProperty("open", true);
+        }
+    }
+    QVERIFY(popup);
+    QTRY_VERIFY(popup->opacity() > 0.99);
+    const QString captureDir = qEnvironmentVariable("FT_UI_SCREENSHOT_DIR");
+    if (!captureDir.isEmpty()) {
+        QVERIFY(QDir().mkpath(captureDir));
+        QTest::qWait(160); // Let the popup's slide animation finish as well.
+        QVERIFY(window->grabWindow().save(captureDir + QLatin1Char('/') + mode
+                                         + QString::number(popupKind) + QStringLiteral(".png")));
+    }
+    // Distinguish the card from the identical page background beneath it. The
+    // sample is inside the top padding, away from the border and menu labels.
+    const QColor markerColor(QStringLiteral("#e71bc5"));
+    popup->setProperty("color", markerColor);
+    const auto cardIsDrawn = [&] {
+        const QImage frame = window->grabWindow();
+        if (frame.isNull())
+            return false;
+        const QPoint pixel = (popup->mapToScene(QPointF(popup->width() / 2, 3))
+                              * frame.devicePixelRatio()).toPoint();
+        return frame.rect().contains(pixel) && frame.pixelColor(pixel) == markerColor;
+    };
+    QTRY_VERIFY2(cardIsDrawn(), "the popup exists but its background is not rendered");
+    if (qEnvironmentVariable("QT_QUICK_BACKEND") == QStringLiteral("software"))
+        QCOMPARE(window->rendererInterface()->graphicsApi(), QSGRendererInterface::Software);
+}
+
 void TestQmlUi::popupsCloseWhenTheWindowIsResized()
 {
     {

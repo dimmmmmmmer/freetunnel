@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Effects
 // See AppPickerOverlay.qml: Qt.labs.platform's FileDialog needs either a native
 // helper or Qt Widgets, and on a desktop with neither it opens nothing at all.
 // Choosing a config file was broken the same way, on the same platforms.
@@ -293,11 +292,7 @@ Item {
                                                          mrCreate.labelWidth)) + 40))
         height: menuCol.height + 12; radius: 10; color: theme.bg
         border.color: theme.border; border.width: 1
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true; shadowColor: "#000000"
-            shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
-        }
+        PopupShadow { radius: parent.radius; strength: theme.dark ? 0.5 : 0.2 }
         Column { id: menuCol; width: parent.width - 10; x: 5; y: 6; spacing: 1
             component MenuRow: Rectangle {
                 property alias text: mrLbl.text
