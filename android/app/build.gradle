@@ -37,7 +37,7 @@ dependencies {
     implementation 'io.nayuki:qrcodegen:1.8.0'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
-    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.core:core-ktx:1.19.1'
     testImplementation 'junit:junit:4.13.2'
     // The platform's org.json is a stub in unit tests (every call throws); SplitProfiles keeps its profiles as JSON.
     testImplementation 'org.json:json:20260814'
