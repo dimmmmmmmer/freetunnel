@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 // The app's version, X.Y.Z, set here and nowhere else. An official release is
@@ -37,7 +36,7 @@ dependencies {
     implementation 'io.nayuki:qrcodegen:1.8.0'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
-    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.core:core-ktx:1.19.1'
     testImplementation 'junit:junit:4.13.2'
     // The platform's org.json is a stub in unit tests (every call throws); SplitProfiles keeps its profiles as JSON.
     testImplementation 'org.json:json:20260814'
@@ -45,8 +44,8 @@ dependencies {
 
 android {
     namespace 'org.freetunnel.android'
-    compileSdk 35
-    buildToolsVersion '35.0.0'
+    compileSdk 37
+    buildToolsVersion '36.0.0'
     defaultConfig {
         applicationId 'org.freetunnel.android'
         minSdk 26
@@ -84,7 +83,6 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
-    kotlinOptions { jvmTarget = '11' }
 }
 
 // The third-party notices, from the repository, into the APK's assets:

@@ -761,7 +761,7 @@ A dependency of Tomlj.
 
 #### AndroidX
 
-- Version: Core KTX 1.16.0 (`androidx.core:core-ktx:1.16.0`), with the
+- Version: Core KTX 1.19.1 (`androidx.core:core-ktx:1.19.1`), with the
   AndroidX libraries it depends on (Core, Core ViewTree, Annotation, Annotation
   Experimental, Collection, Concurrent Futures, Interpolator, Lifecycle, Arch
   Core, ProfileInstaller, Startup, Tracing, VersionedParcelable)
@@ -772,8 +772,8 @@ A dependency of Tomlj.
 #### Kotlin standard library and kotlinx.coroutines
 
 - Version: kotlin-stdlib 2.4.21, kotlinx-coroutines-core and
-  kotlinx-coroutines-android 1.6.4 (a dependency of AndroidX Lifecycle),
-  JetBrains annotations 13.0
+  kotlinx-coroutines-android 1.9.0 (a dependency of AndroidX Lifecycle),
+  JetBrains annotations 23.0.0
 - License: Apache-2.0, with the NOTICE files of Kotlin and kotlinx.coroutines
   ([licenses/android/NOTICE-files.txt](licenses/android/NOTICE-files.txt)).
   `kotlin.time` derives from the ThreeTen backport, BSD-3-Clause
@@ -781,10 +781,9 @@ A dependency of Tomlj.
   a part of `kotlin.math` is under the Boost Software License 1.0, which asks for
   no notice in compiled form.
 - Copyright: Copyright 2010-2024 JetBrains s.r.o and respective authors and
-  developers; Copyright 2016-2021 JetBrains s.r.o and respective authors and
-  developers (kotlinx.coroutines)
+  developers; Copyright 2016-2024 JetBrains s.r.o and contributors (kotlinx.coroutines)
 - Source: <https://github.com/JetBrains/kotlin/tree/v2.4.21/libraries/stdlib>,
-  <https://github.com/Kotlin/kotlinx.coroutines/tree/1.6.4>,
+  <https://github.com/Kotlin/kotlinx.coroutines/tree/1.9.0>,
   <https://github.com/JetBrains/java-annotations>
 
 #### Guava ListenableFuture and JSpecify

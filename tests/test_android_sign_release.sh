@@ -388,9 +388,9 @@ for tool in zipalign apksigner aapt2; do
   rm -rf "$TMP/partial"
 done
 
-# Without BUILD_TOOLS, Build Tools 35.0.0 under ANDROID_HOME, or ANDROID_SDK_ROOT.
-mkdir -p "$TMP/sdk/build-tools/35.0.0"
-cp "$TMP/bt/"* "$TMP/sdk/build-tools/35.0.0/"
+# Without BUILD_TOOLS, Build Tools 36.0.0 under ANDROID_HOME, or ANDROID_SDK_ROOT.
+mkdir -p "$TMP/sdk/build-tools/36.0.0"
+cp "$TMP/bt/"* "$TMP/sdk/build-tools/36.0.0/"
 fresh
 TOOLS=""
 EXTRA=(env ANDROID_HOME="$TMP/sdk")
@@ -405,7 +405,7 @@ expect "Build Tools under ANDROID_SDK_ROOT" 0 "Signed "
 fresh
 TOOLS=""
 run
-expect "no Build Tools anywhere" 1 "::error title=No Build Tools::/build-tools/35.0.0/zipalign is not an executable"
+expect "no Build Tools anywhere" 1 "::error title=No Build Tools::/build-tools/36.0.0/zipalign is not an executable"
 
 fresh
 rm "$F/unsigned.apk"

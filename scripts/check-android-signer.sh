@@ -18,7 +18,7 @@
 #
 # usage: check-android-signer.sh <release-certificate.sha256> [<apk>]
 # env:   APKSIGNER, the apksigner to run (only with an APK); by default
-#        Build Tools 35.0.0's, under ANDROID_HOME or ANDROID_SDK_ROOT.
+#        Build Tools 36.0.0's, under ANDROID_HOME or ANDROID_SDK_ROOT.
 set -euo pipefail
 export LC_ALL=C
 
@@ -48,7 +48,7 @@ if [[ -z "$apk" ]]; then
 fi
 
 [[ -f "$apk" ]] || fail "No APK" "$apk does not exist"
-signer="${APKSIGNER:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/35.0.0/apksigner}"
+signer="${APKSIGNER:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/36.0.0/apksigner}"
 [[ -x "$signer" ]] || fail "No apksigner" "$signer is not an executable apksigner"
 
 tmp="$(mktemp -d)"

@@ -39,7 +39,7 @@
 #        ANDROID_KEY_ALIAS, by default freetunnel. apksigner reads the two
 #        passwords from the environment itself, so they are never arguments.
 #        BUILD_TOOLS, the directory to take zipalign, apksigner and aapt2 from;
-#        by default Build Tools 35.0.0 under ANDROID_HOME or ANDROID_SDK_ROOT.
+#        by default Build Tools 36.0.0 under ANDROID_HOME or ANDROID_SDK_ROOT.
 set -euo pipefail
 export LC_ALL=C
 
@@ -85,9 +85,9 @@ done
 [[ -f "$ANDROID_KEYSTORE_PATH" ]] || fail "No keystore" "ANDROID_KEYSTORE_PATH is $ANDROID_KEYSTORE_PATH, which does not exist"
 alias="${ANDROID_KEY_ALIAS:-freetunnel}"
 
-tools="${BUILD_TOOLS:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/35.0.0}"
+tools="${BUILD_TOOLS:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/36.0.0}"
 for tool in zipalign apksigner aapt2; do
-  [[ -x "$tools/$tool" ]] || fail "No Build Tools" "$tools/$tool is not an executable. Install Build Tools 35.0.0: sdkmanager \"build-tools;35.0.0\""
+  [[ -x "$tools/$tool" ]] || fail "No Build Tools" "$tools/$tool is not an executable. Install Build Tools 36.0.0: sdkmanager \"build-tools;36.0.0\""
 done
 
 tmp="$(mktemp -d)"
