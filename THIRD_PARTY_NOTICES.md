@@ -699,16 +699,16 @@ Maven coordinates; the others come in as their dependencies.
 
 #### ktoml
 
-- Version: 0.7.0 (`com.akuleshov7:ktoml-core:0.7.0`)
+- Version: 0.7.1 (`com.akuleshov7:ktoml-core:0.7.1`)
 - License: MIT, [licenses/android/ktoml.txt](licenses/android/ktoml.txt)
 - Copyright: Copyright (c) 2023 Andrey Kuleshov
-- Source: <https://github.com/akuleshov7/ktoml/tree/v0.7.0>
+- Source: <https://github.com/akuleshov7/ktoml/tree/v0.7.1>
 
 #### kotlinx.serialization and kotlinx-datetime
 
 ktoml's dependencies.
 
-- Version: kotlinx-serialization-core 1.8.1, kotlinx-datetime 0.6.2
+- Version: kotlinx-serialization-core 1.9.0, kotlinx-datetime 0.7.1-0.6.x-compat
 - License: Apache-2.0, with kotlinx.serialization's NOTICE
   ([licenses/android/NOTICE-files.txt](licenses/android/NOTICE-files.txt));
   kotlinx-datetime's date calculations derive from the ThreeTen backport,
@@ -716,8 +716,8 @@ ktoml's dependencies.
 - Copyright: Copyright 2017-2019 JetBrains s.r.o and respective authors and
   developers; JetBrains s.r.o. and contributors; ThreeTen backport: Copyright
   (c) 2007-present, Stephen Colebourne & Michael Nascimento Santos
-- Source: <https://github.com/Kotlin/kotlinx.serialization/tree/v1.8.1>,
-  <https://github.com/Kotlin/kotlinx-datetime/tree/v0.6.2>
+- Source: <https://github.com/Kotlin/kotlinx.serialization/tree/v1.9.0>,
+  <https://github.com/Kotlin/kotlinx-datetime/tree/v0.7.1>
 
 #### Tomlj
 
@@ -740,7 +740,7 @@ A dependency of Tomlj.
 
 A dependency of Tomlj.
 
-- Version: checker-qual 3.21.2
+- Version: checker-qual 3.21.2 (`org.checkerframework:checker-qual:3.21.2`)
 - License: MIT, [licenses/android/checker-qual.txt](licenses/android/checker-qual.txt)
 - Copyright: Copyright 2004-present by the Checker Framework developers
 - Source: <https://github.com/typetools/checker-framework/tree/checker-framework-3.21.2/checker-qual>
@@ -771,7 +771,7 @@ A dependency of Tomlj.
 
 #### Kotlin standard library and kotlinx.coroutines
 
-- Version: kotlin-stdlib 2.1.20, kotlinx-coroutines-core and
+- Version: kotlin-stdlib 2.4.21, kotlinx-coroutines-core and
   kotlinx-coroutines-android 1.6.4 (a dependency of AndroidX Lifecycle),
   JetBrains annotations 13.0
 - License: Apache-2.0, with the NOTICE files of Kotlin and kotlinx.coroutines
@@ -783,7 +783,7 @@ A dependency of Tomlj.
 - Copyright: Copyright 2010-2024 JetBrains s.r.o and respective authors and
   developers; Copyright 2016-2021 JetBrains s.r.o and respective authors and
   developers (kotlinx.coroutines)
-- Source: <https://github.com/JetBrains/kotlin/tree/v2.1.20/libraries/stdlib>,
+- Source: <https://github.com/JetBrains/kotlin/tree/v2.4.21/libraries/stdlib>,
   <https://github.com/Kotlin/kotlinx.coroutines/tree/1.6.4>,
   <https://github.com/JetBrains/java-annotations>
 
