@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
-import QtQuick.Effects
 // See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
 // has no native helper and the application does not link Qt Widgets.
 import QtQuick.Dialogs as Dialogs

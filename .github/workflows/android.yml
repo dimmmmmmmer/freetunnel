@@ -128,10 +128,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Ensure Android SDK 35 packages
+      - name: Ensure Android SDK 37 packages
         # Ubuntu 24.04 already supplies command-line tools. Reuse them rather than
         # downloading a second toolchain before each job.
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"'
       # From v6 the default cache ('enhanced') is gradle-actions-caching, a
       # closed-source component under the Gradle Terms of Use. 'basic' is the
       # MIT implementation on the GitHub Actions cache: fewer optimisations, and
@@ -217,10 +217,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Ensure Android SDK 35 packages
+      - name: Ensure Android SDK 37 packages
         # Ubuntu 24.04 already supplies command-line tools. Reuse them rather than
         # downloading a second toolchain before each job.
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic # see the build job
@@ -269,7 +269,7 @@ jobs:
             adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
             if [ "${{ matrix.target }}" = android-tv ]; then adb shell pm list features | grep -qx 'feature:android.software.leanback'; fi
             if [ "${{ matrix.target }}" = android-tv ]; then mkdir -p android/app/build/reports/tv-screens && adb shell monkey -p org.freetunnel.android -c android.intent.category.LEANBACK_LAUNCHER 1 && sleep 5 && adb exec-out screencap -p > android/app/build/reports/tv-screens/app.png && adb shell input keyevent KEYCODE_HOME && sleep 3 && adb exec-out screencap -p > android/app/build/reports/tv-screens/launcher.png; fi
-            status=0; ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')" || status=$?; if [ -z "$(find android/app/build/outputs/connected_android_test_additional_output -type f -name '*.png' 2>/dev/null | head -n 1)" ]; then adb pull /data/local/tmp/uitour android/app/build/reports/uitour || true; fi; mkdir -p android/app/build/reports/logcat; adb logcat -d -v threadtime '*:W' > android/app/build/reports/logcat/warnings.txt || true; adb logcat -d -b crash -v threadtime > android/app/build/reports/logcat/crash.txt || true; exit $status
+            status=0; ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/36.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')" || status=$?; if [ -z "$(find android/app/build/outputs/connected_android_test_additional_output -type f -name '*.png' 2>/dev/null | head -n 1)" ]; then adb pull /data/local/tmp/uitour android/app/build/reports/uitour || true; fi; mkdir -p android/app/build/reports/logcat; adb logcat -d -v threadtime '*:W' > android/app/build/reports/logcat/warnings.txt || true; adb logcat -d -b crash -v threadtime > android/app/build/reports/logcat/crash.txt || true; exit $status
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -301,10 +301,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Ensure Android SDK 35 packages
+      - name: Ensure Android SDK 37 packages
         # Ubuntu 24.04 already supplies command-line tools. Reuse them rather than
         # downloading a second toolchain before each job.
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic # see the build job

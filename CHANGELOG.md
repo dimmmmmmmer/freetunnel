@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed desktop menus disappearing when using software rendering.
+
 - Restored macOS 13 support for Intel and Apple Silicon.
 
 ## 1.2.4

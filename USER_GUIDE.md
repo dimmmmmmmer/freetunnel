@@ -376,6 +376,14 @@ install. How, and what that guards against: [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
+- **A desktop window is blank or menus disappear:** close FreeTunnel completely
+  (including its tray icon), then try software rendering in a new terminal. In
+  PowerShell: `$env:QT_QUICK_BACKEND="software"; & "C:\path\to\freetunnel.exe"`;
+  on Linux: `QT_QUICK_BACKEND=software freetunnel`; on macOS:
+  `QT_QUICK_BACKEND=software /Applications/FreeTunnel.app/Contents/MacOS/freetunnel`.
+  Use your installed executable path; close that terminal after testing.
+  Hardware acceleration remains the default; this workaround only changes
+  how the window is drawn.
 - **The TV cannot receive a configuration:** keep the receive window open and check
   that both devices are on the same local network. Guest Wi-Fi or client isolation
   can prevent the phone from reaching the TV.

@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Effects
 import "../components"
 
 Item {
@@ -265,11 +264,7 @@ Item {
         width: 140
         height: picker.height + 12
         radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true; shadowColor: "#000000"
-            shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
-        }
+        PopupShadow { radius: parent.radius; strength: theme.dark ? 0.5 : 0.2 }
         Column {
             anchors.fill: parent; anchors.margins: 5
             ListView {

@@ -461,7 +461,7 @@ open the address in Chrome or Safari instead.
 
 ## Build and signing
 
-Requires JDK 17, Android SDK 35, Build Tools 35.0.0, Bash and Python 3.
+Requires JDK 17, Android SDK 37, Build Tools 36.0.0, Bash and Python 3.
 The patched stable adapter is built on Ubuntu 24.04 with Clang 18, GCC 13
 headers, CMake, Ninja, Conan 2.31.1, Rust 1.95, cargo-ndk 4.1.2 and
 NDK 29.0.14206865. The Android CI workflow installs these tools.
@@ -481,11 +481,13 @@ hashes, ABI inventory and AAR digest against its build manifest. This manifest
 is an integrity record, not an independent signature. No GitHub PAT is needed.
 To rebuild after changing a pin or patch, remove the old AAR and matching JSON
 from `android/app/libs` and run preparation again.
-Gradle 8.11.1 wrapper and distribution checksums are pinned too.
+Gradle 9.6.0 wrapper and distribution checksums are pinned too. The app uses
+AGP 9.5.1 with built-in Kotlin 2.4.21; debug and release JVM tests are both enabled.
+Compile SDK 37 does not change the Android 8.0 minimum or target SDK 35.
 
 Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (debug signing).
 Gradle builds release APKs unsigned, and never sees a keystore:
-`scripts/sign-android-release.sh` signs them with Build Tools 35.0.0 alone
+`scripts/sign-android-release.sh` signs them with Build Tools 36.0.0 alone
 (`apksigner`, with `zipalign` and `aapt2` to check the result), in CI and
 locally. For a signed release APK on your own machine, supply
 `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_PASSWORD`
@@ -647,7 +649,7 @@ adb shell am instrument -w -e withoutInstallPermission true \
   org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner
 adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
 ./android/gradlew -p android :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner \
+  -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/36.0.0/apksigner \
     verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk |
     sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
 ```

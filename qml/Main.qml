@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
-import QtQuick.Effects
 import Qt.labs.platform as Platform
 import "components"
 
@@ -899,11 +898,7 @@ Window {
             // height is set imperatively in showSelect() so the popup can flip /
             // scroll to stay inside the window.
             radius: 10; color: theme.bg; border.color: theme.border; border.width: 1
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true; shadowColor: "#000000"
-                shadowOpacity: theme.dark ? 0.5 : 0.2; shadowBlur: 0.7; shadowVerticalOffset: 5
-            }
+            PopupShadow { radius: parent.radius; strength: theme.dark ? 0.5 : 0.2 }
             ListView {
                 id: spList
                 anchors.fill: parent; anchors.margins: 6

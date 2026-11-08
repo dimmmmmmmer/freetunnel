@@ -10,7 +10,7 @@ NOTICE files of Apache-2.0 components (Apache License 2.0, section 4(d))
    Kotlin Compiler
    Copyright 2010-2024 JetBrains s.r.o and respective authors and developers
 
-[Kotlin/kotlinx.coroutines@1.6.4: license/NOTICE.txt]
+[Kotlin/kotlinx.coroutines@1.9.0: license/NOTICE.txt]
 =========================================================================
 ==  NOTICE file corresponding to the section 4 d of                    ==
 ==  the Apache License, Version 2.0,                                   ==
@@ -18,7 +18,7 @@ NOTICE files of Apache-2.0 components (Apache License 2.0, section 4(d))
 =========================================================================
 
 kotlinx.coroutines library.
-Copyright 2016-2021 JetBrains s.r.o and respective authors and developers
+Copyright 2016-2024 JetBrains s.r.o and contributors
 
 [Kotlin/kotlinx.serialization@v1.9.0: license/NOTICE.txt]
    =========================================================================
