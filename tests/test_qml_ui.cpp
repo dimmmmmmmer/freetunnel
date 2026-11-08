@@ -84,6 +84,7 @@ private slots:
     void theTrayMenuShowsConfigNamesAsTyped_data();
     void theTrayMenuShowsConfigNamesAsTyped();
     void doubleClickingTheLogoTogglesOnce();
+    void theLogoIsGreenWhileConnected();
     void aToastWaitsForAWindowThatIsAway();
     void aWindowHiddenWithTheAppIsAway();
     void onlyATrayActionsFailureIsNotified();
@@ -1445,6 +1446,31 @@ void TestQmlUi::doubleClickingTheLogoTogglesOnce()
     QVERIFY(m_backend.connecting());
 
     m_backend.setConnecting(false);
+    delete root;
+}
+
+// Green while connected, as the tray icon is: the same mark, logo-green.svg, over
+// the grey one. It was grey in every state, brighter when connected and no more.
+void TestQmlUi::theLogoIsGreenWhileConnected()
+{
+    m_backend.setConnected(false);
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    auto *green = root->findChild<QQuickItem *>(QStringLiteral("connectedLogo"));
+    QVERIFY2(green, "no green mark on Home");
+    QCOMPARE(green->property("source").toUrl(), QUrl(QStringLiteral("qrc:/assets/logo-green.svg")));
+    QCOMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 1.0);
+    QVERIFY(green->property("visible").toBool());
+    // It has loaded: a mark that failed to load would leave the grey one showing.
+    QTRY_COMPARE(green->property("status").toInt(), 1); // Image.Ready
+
+    m_backend.setConnected(false);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
     delete root;
 }
 

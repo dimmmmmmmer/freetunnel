@@ -1417,7 +1417,8 @@ public final class MainActivity extends Activity {
         FrameLayout box = new FrameLayout(this);
         box.setClipChildren(false);
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.ic_logo);
+        // Green while connected, as the desktop's Home and its tray icon are.
+        logo.setImageResource(HomeState.green(vpnState, stopping) ? R.drawable.ic_logo_green : R.drawable.ic_logo);
         logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         box.addView(logo, new FrameLayout.LayoutParams(-1, -1));
         box.setContentDescription(isVpnActive() ? getString(R.string.text_disconnect_freetunnel) : getString(R.string.text_connect_freetunnel));
