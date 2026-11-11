@@ -167,7 +167,9 @@ class FreeTunnelVpnService : VpnService() {
     private var servedStartId = 0
 
     private val loggingPreferences = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "logging" || key == "verbose_logs") execute { configureCoreLogging() }
+        if (key == "logging" || key == "verbose_logs") execute {
+            if (client != null) configureCoreLogging()
+        }
     }
     private fun configureCoreLogging() {
         if (destroyed || owner !== this) return
@@ -320,7 +322,6 @@ class FreeTunnelVpnService : VpnService() {
 
     /** Starts a core on a duplicate of [tun], the retained TUN built from [plan]. */
     private fun startCore(plan: RoutingConfig.Plan, tun: ParcelFileDescriptor, verifier: CertificateVerificator = CertificateVerificator()) {
-        configureCoreLogging()
         val token = generation + 1
         val listener = object : VpnClientListener {
             override fun protectSocket(socket: Int) = protect(socket)
@@ -347,12 +348,16 @@ class FreeTunnelVpnService : VpnService() {
         var descriptor: ParcelFileDescriptor? = null
         try {
             candidate = VpnClient(plan.toml, listener)
+            // VpnClient loads JNI before NativeLogger can be used.
+            configureCoreLogging()
             generation = token
             client = candidate
             descriptor = ParcelFileDescriptor.dup(tun.fileDescriptor)
             if (!blocked) publishState(1)
             collector?.startNotifying(candidate)
             check(candidate.start(descriptor)) { "VPN core rejected the configuration" }
+            // Native construction sets its level from TOML; honor any preference changed during startup.
+            configureCoreLogging()
             candidate = null
         } finally {
             runCatching { descriptor?.close() }
