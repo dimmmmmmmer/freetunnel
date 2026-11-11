@@ -717,7 +717,15 @@ class VpnDeviceTest {
     @Test fun failedSynchronousStartRetainsNewTunWhenKillSwitchIsEnabled() {
         FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "does-not-exist.invalid:443"))
         eventually { FreeTunnelVpnService.state(context) == 6 }
+        val tun = serviceField("retainedTun").get(serviceOwner()) as? android.os.ParcelFileDescriptor
+        assertNotNull("Resolution failure must retain the service's TUN descriptor", tun)
+        assertTrue("The retained descriptor must stay open", tun!!.fileDescriptor.valid())
+        // ConnectivityService publishes the newly established VPN asynchronously;
+        // the service's blocked state can be visible before allNetworks includes it.
+        eventually { network() != null && FreeTunnelVpnService.state(context) == 6 }
         assertNotNull("Resolution failure after establish must retain TUN", network())
+        assertSame("Publishing the network must not replace the blocked TUN", tun,
+            serviceField("retainedTun").get(serviceOwner()))
         FreeTunnelVpnService.stop(context)
         eventually { network() == null }
     }
