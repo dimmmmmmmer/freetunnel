@@ -14,8 +14,9 @@ private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
             completionHandler(nil)
             return
         }
-        // Authenticated subscriptions may redirect only within the same origin.
-        if task.originalRequest?.value(forHTTPHeaderField: "Authorization") != nil
+        // Subscription URLs may carry credentials in either userinfo or the path.
+        if (task.originalRequest?.value(forHTTPHeaderField: "Authorization") != nil
+            || task.originalRequest?.value(forHTTPHeaderField: "Accept") == "application/json")
             && (url.host != original.host || (url.port ?? 443) != (original.port ?? 443)) {
             completionHandler(nil)
             return

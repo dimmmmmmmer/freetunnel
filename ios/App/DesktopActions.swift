@@ -10,6 +10,9 @@ struct AppConfirmation {
     var text: String
     var actionTitle: String
     var action: () -> Void
+    var alternateTitle: String?
+    var alternateAction: (() -> Void)?
+    var cancelAction: (() -> Void)?
 }
 @MainActor extension AppState {
     static let previewConfig = """
@@ -145,24 +148,27 @@ struct AppConfirmation {
             _ = await UIApplication.shared.open(updateURL)
             return
         }
+        let channel = UpdateChannel(rawValue: Bundle.main.object(forInfoDictionaryKey: "FreeTunnelDistributionChannel") as? String ?? "development") ?? .development
+        if channel == .development { updateStatus = "Development build"; return }
+        if channel == .testFlight {
+            updateStatus = "Updates in TestFlight"
+            if let link = UpdatePolicy.testFlightURL(Bundle.main.object(forInfoDictionaryKey: "FreeTunnelTestFlightURL") as? String ?? "") {
+                _ = await UIApplication.shared.open(link)
+            } else { message = "Open TestFlight to update this app." }
+            return
+        }
         guard !checkingUpdate else { return }
         checkingUpdate = true
         defer { checkingUpdate = false }
         do {
-            let url = URL(
-                string: "https://api.github.com/repos/dimmmmmmmer/freetunnel/releases/latest")!
+            let bundleID = Bundle.main.bundleIdentifier ?? "org.freetunnel.ios"
+            guard let url = UpdatePolicy.lookup(bundleID: bundleID) else { throw ClientError.invalidSource }
             let data = try await Downloads.read(URLRequest(url: url), limit: 1_048_576)
-            let release = try JSONDecoder().decode(ReleaseMetadata.self, from: data)
-            let current =
-                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-                ?? "1.2.4"
-            let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-            if version.compare(current, options: .numeric) == .orderedDescending {
-                updateStatus = release.tagName
-                updateURL = release.htmlURL
-            } else {
-                updateStatus = "Up to date"
-            }
+            let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.4"
+            if let release = try UpdatePolicy.newerRelease(data, bundleID: bundleID, current: current) {
+                updateStatus = release.version
+                updateURL = release.trackViewUrl
+            } else { updateStatus = "Up to date" }
         } catch {
             updateStatus = "Check for updates"
             report(error)
@@ -210,14 +216,5 @@ private final class TCPProbe: @unchecked Sendable {
         connection.stateUpdateHandler = nil
         connection.cancel()
         reply.resume(returning: value)
-    }
-}
-
-private struct ReleaseMetadata: Decodable {
-    let tagName: String
-    let htmlURL: URL
-    enum CodingKeys: String, CodingKey {
-        case tagName = "tag_name"
-        case htmlURL = "html_url"
     }
 }

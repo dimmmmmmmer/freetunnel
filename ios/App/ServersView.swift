@@ -250,12 +250,7 @@ struct ImportView: View {
                     Spacer()
                     Button(subscriptionOnly ? "Add" : "Import") {
                         if subscriptionOnly {
-                            Task {
-                                await state.subscribe(text)
-                                if state.message == NSLocalizedString("Imported", comment: "") {
-                                    state.dialog = nil
-                                }
-                            }
+                            state.subscribe(text)
                         } else {
                             state.confirmImport(text)
                         }
@@ -267,27 +262,76 @@ struct ImportView: View {
 }
 @MainActor extension AppState {
     func confirmImport(_ text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            report(ClientError.invalidConfig)
-            return
+        do {
+            var batch: [ImportDocument.Document] = []
+            for item in try ImportDocument.split(text) {
+                do { batch.append(try ImportDocument.parse(item)) } catch { report(error) }
+            }
+            enqueueImports(batch)
+        } catch { report(error) }
+    }
+    func enqueueImports(_ batch: [ImportDocument.Document]) {
+        guard batch.count + pendingImports.count + (importing ? 1 : 0) <= 100 else {
+            report(ClientError.tooLarge); return
         }
-        confirm("Import this configuration?", actionTitle: "Add") {
-            do {
-                _ = try self.importBatch(text)
-                self.dialog = nil
-                self.message = "Imported"
-            } catch ClientError.insecureConfig {
-                self.confirm(
-                    "This configuration may disable certificate verification. Import it only if you trust its source.",
-                    actionTitle: "Add"
-                ) {
+        pendingImports += batch
+        nextImport()
+    }
+    func nextImport() {
+        guard !importing, confirmation == nil, !pendingImports.isEmpty else { return }
+        importing = true
+        let document = pendingImports.removeFirst()
+        if let source = document.subscription {
+            confirm(String(format: NSLocalizedString("Fetch subscription from %@?", comment: ""), URLComponents(string: source)?.host ?? ""), actionTitle: "Continue") {
+                Task {
                     do {
-                        _ = try self.importBatch(text, allowInsecure: true)
-                        self.dialog = nil
-                        self.message = "Imported"
-                    } catch { self.report(error) }
+                        let data = try await Downloads.read(Subscription.request(source), limit: Subscription.maximumBytes)
+                        self.offerImportedConfig(try Subscription.apply(data), subscription: source)
+                    } catch { self.report(error); self.finishImport() }
                 }
-            } catch { self.report(error) }
-        }
+            }
+            confirmation?.cancelAction = { self.finishImport() }
+        } else if let toml = document.toml {
+            offerImportedConfig(toml, subscription: nil)
+        } else { finishImport() }
+    }
+    func finishImport() {
+        importing = false
+        nextImport()
+    }
+    func offerImportedConfig(_ text: String, subscription: String?) {
+        do {
+            let config = try Configuration(text)
+            let existing = preferences.profiles.first { $0.name.caseInsensitiveCompare(config.name) == .orderedSame }
+            let title = existing == nil ? "Add" : "Replace"
+            var prompt = NSLocalizedString("Import this configuration?", comment: "") + "\n" + config.name
+            if existing != nil { prompt += "\n" + NSLocalizedString("A configuration with this name already exists.", comment: "") }
+            if config.skipsVerification {
+                prompt += "\n" + NSLocalizedString("This configuration may disable certificate verification. Import it only if you trust its source.", comment: "")
+            }
+            let save: (UUID?) -> Void = { id in
+                do {
+                    if let id, var profile = self.preferences.profiles.first(where: { $0.id == id }) {
+                        let record = Secret(toml: try config.storingImportedRulesInProfile(), subscription: subscription)
+                        try Vault.write(JSONEncoder().encode(record), key: id.uuidString)
+                        profile.subscriptionEnabled = subscription != nil
+                        profile.subscriptionUpdated = subscription == nil ? nil : Date()
+                        self.update(profile)
+                        if self.selected?.id == id { self.reapplySelected() }
+                    } else {
+                        try self.add(toml: text, subscription: subscription)
+                    }
+                    self.dialog = nil
+                    self.message = "Imported"
+                } catch { self.report(error) }
+                self.finishImport()
+            }
+            confirm(prompt, actionTitle: title) { save(existing?.id) }
+            confirmation?.cancelAction = { self.finishImport() }
+            if existing != nil {
+                confirmation?.alternateTitle = "Add copy"
+                confirmation?.alternateAction = { save(nil) }
+            }
+        } catch { report(error); finishImport() }
     }
 }

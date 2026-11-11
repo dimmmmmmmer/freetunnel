@@ -204,3 +204,29 @@
 "tunnelFailed" = "Unable to complete the VPN operation. Check the server and connection status.";
 "unsupportedFormat" = "This format or setting is not supported by the stable core.";
 "Config name" = "Name";
+
+"Stop updates" = "Stop updates";
+
+"Stop subscription updates?" = "Stop subscription updates?";
+
+"Fetch subscription from %@?" = "Fetch subscription from %@?";
+
+"Continue" = "Continue";
+
+"The subscription changes the server from %@ to %@. Apply?" = "The subscription changes the server from %@ to %@. Apply?";
+
+"Apply" = "Apply";
+
+"Subscription updated" = "Subscription updated";
+
+"Subscription changed its server. Refresh it to review." = "Subscription changed its server. Refresh it to review.";
+
+"A configuration with this name already exists." = "A configuration with this name already exists.";
+
+"Add copy" = "Add copy";
+
+"Development build" = "Development build";
+
+"Updates in TestFlight" = "Updates in TestFlight";
+
+"Open TestFlight to update this app." = "Open TestFlight to update this app.";

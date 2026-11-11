@@ -6,7 +6,7 @@ public enum Subscription {
     public static let maximumBytes = 65_536
     public static func request(_ text: String) throws -> URLRequest {
         guard var parts = URLComponents(string: text), parts.scheme == "https",
-            parts.host?.isEmpty == false, parts.port != 0,
+            parts.host?.isEmpty == false, parts.port != 0, (parts.port ?? 443) <= 65535,
             !(parts.user ?? "").contains(":"), text.utf8.count <= 2560
         else { throw ClientError.invalidSource }
         let user = parts.user ?? ""
@@ -38,6 +38,9 @@ public enum Subscription {
         ]) { _, replacement in replacement }
         try applyRequired(object, to: &endpoint)
         try applyOptions(object, to: &endpoint)
+        if let old {
+            for key in ["has_ipv6", "anti_dpi", "upstream_protocol"] { endpoint[key] = old.endpoint[key] }
+        }
         endpoint["name"] = old?.name ?? object["name"] as? String ?? object["hostname"] as? String
         if let dns = object["dns_upstreams"] as? [String], previous == nil {
             endpoint["dns_upstreams"] = dns
@@ -102,7 +105,7 @@ public enum Subscription {
         endpoint["client_random"] = try clientRandom(object["client_random_prefix"] as? String ?? "")
     }
 
-    private static func clientRandom(_ prefix: String) throws -> String {
+    static func clientRandom(_ prefix: String) throws -> String {
         let pattern = "^(?:[0-9a-fA-F]{2}){1,32}(?:/(?:[0-9a-fA-F]{2}){1,32})?$"
         guard prefix.isEmpty || prefix.range(of: pattern, options: .regularExpression) != nil else {
             throw ClientError.invalidConfig
@@ -110,7 +113,7 @@ public enum Subscription {
         return prefix.lowercased()
     }
 
-    private static func certificates(_ text: String) throws -> String {
+    static func certificates(_ text: String) throws -> String {
         if text.isEmpty { return "" }
         let pattern = "-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\\s]+)-----END CERTIFICATE-----"
         let regex = try NSRegularExpression(pattern: pattern)

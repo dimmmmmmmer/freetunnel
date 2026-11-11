@@ -8,7 +8,7 @@ xcrun simctl install "$device" "$root/ios/DerivedData/Build/Products/Debug-iphon
 mkdir -p "$root/ios/previews"
 for appearance in light dark; do
  xcrun simctl ui "$device" appearance "$appearance"
- for screen in connection connection-active servers servers-active routing routing-geo settings settings-bottom logs logs-filled import new-server new-server-bottom edit-server edit-server-bottom add-list add-list-menu routing-mode geo-direction geo-interval settings-language settings-theme server-export; do
+ for screen in connection connection-active servers servers-active routing routing-geo settings settings-bottom logs logs-filled import subscription new-server new-server-bottom edit-server edit-server-bottom add-list add-list-menu routing-mode geo-direction geo-interval settings-language settings-theme server-export; do
   xcrun simctl terminate "$device" org.freetunnel.ios || true
   tab="$screen"
   geo=0
@@ -30,7 +30,7 @@ for appearance in light dark; do
     settings-bottom) tab=settings; bottom=1 ;;
     new-server-bottom|edit-server-bottom) form="${screen%-bottom}"; tab=servers; bottom=1 ;;
     add-list) form=add-list; tab=routing; geo=1 ;;
-    import|new-server|edit-server) form="$screen"; tab=servers ;;
+    import|subscription|new-server|edit-server) form="$screen"; tab=servers ;;
   esac
   if [[ "$screen" == routing-geo ]]; then tab=routing; geo=1; fi
   SIMCTL_CHILD_FT_PREVIEW_MENU="$menu" SIMCTL_CHILD_FT_PREVIEW_SCENARIO="$scenario" SIMCTL_CHILD_FT_PREVIEW_BOTTOM="$bottom" SIMCTL_CHILD_FT_PREVIEW_FORM="$form" SIMCTL_CHILD_FT_PREVIEW_GEO="$geo" SIMCTL_CHILD_FT_PREVIEW_TAB="$tab" xcrun simctl launch "$device" org.freetunnel.ios --ui-preview -AppleLanguages '(ru)'

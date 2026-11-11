@@ -1,4 +1,5 @@
 import SwiftUI
+import FreeTunnelCore
 import VisionKit
 
 struct QRScanner: View {
@@ -61,7 +62,7 @@ private struct ScannerController: UIViewControllerRepresentable {
             guard !delivered else { return }
             for item in addedItems {
                 if case .barcode(let code) = item, let text = code.payloadStringValue,
-                    text.hasPrefix("tt://") {
+                    ImportDocument.isLink(text) {
                     delivered = true
                     scanner.stopScanning()
                     received(text)

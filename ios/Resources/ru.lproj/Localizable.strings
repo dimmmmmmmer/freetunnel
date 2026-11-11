@@ -204,3 +204,29 @@
 "tunnelFailed" = "Не удалось выполнить операцию VPN. Проверьте сервер и состояние подключения.";
 "unsupportedFormat" = "Этот формат или параметр пока не поддерживается стабильным ядром.";
 "Config name" = "Имя";
+
+"Stop updates" = "Остановить обновления";
+
+"Stop subscription updates?" = "Остановить обновления подписки?";
+
+"Fetch subscription from %@?" = "Загрузить подписку с %@?";
+
+"Continue" = "Продолжить";
+
+"The subscription changes the server from %@ to %@. Apply?" = "Подписка меняет сервер с %@ на %@. Применить?";
+
+"Apply" = "Применить";
+
+"Subscription updated" = "Подписка обновлена";
+
+"Subscription changed its server. Refresh it to review." = "В подписке изменился сервер. Обновите её вручную для проверки.";
+
+"A configuration with this name already exists." = "Конфигурация с таким именем уже существует.";
+
+"Add copy" = "Добавить копию";
+
+"Development build" = "Тестовая сборка";
+
+"Updates in TestFlight" = "Обновления в TestFlight";
+
+"Open TestFlight to update this app." = "Откройте TestFlight, чтобы обновить приложение.";
