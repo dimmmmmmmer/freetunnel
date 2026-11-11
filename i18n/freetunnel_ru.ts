@@ -382,6 +382,10 @@
         <translation>Сертификат должен быть в формате PEM: один или несколько блоков BEGIN CERTIFICATE</translation>
     </message>
     <message>
+        <source>Choose up to 100 links or files, no larger than 1 MB each.</source>
+        <translation>Выберите до 100 ссылок или файлов размером не более 1 МБ каждый.</translation>
+    </message>
+    <message>
         <source>Not a valid TrustTunnel config: %1</source>
         <translation>Это не похоже на конфиг TrustTunnel: %1</translation>
     </message>

@@ -233,6 +233,8 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
+    Q_INVOKABLE void importFiles(const QStringList &paths) { importedFiles = paths; }
+    QStringList importedFiles;
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     int createConfigCalls = 0;
     QVariantMap lastCreateConfig;

@@ -320,8 +320,9 @@ Item {
     }
     Dialogs.FileDialog {
         id: fileDlg; objectName: "configImportDialog"; title: qsTr("Select a config")
+        fileMode: Dialogs.FileDialog.OpenFiles
         nameFilters: ["TOML (*.toml)", qsTr("All files (*)")]
-        onAccepted: backend.importFile(fileDlg.selectedFile.toString())
+        onAccepted: backend.importFiles(fileDlg.selectedFiles.map(function(url) { return url.toString() }))
     }
     Dialogs.FileDialog {
         id: tomlSaveDlg; objectName: "configExportDialog"; title: qsTr("Export config")

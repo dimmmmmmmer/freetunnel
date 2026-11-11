@@ -19,6 +19,10 @@ final class ImportBatch {
         if (trimmed.startsWith("\uFEFF")) trimmed = trimmed.substring(1).trim();
         if (!DeepLinkImport.looksLikeLink(trimmed)) return Collections.singletonList(trimmed);
         String[] links = trimmed.split("\\s+");
+        int starts = 0;
+        for (String link : links) if (DeepLinkImport.looksLikeLink(link)) starts++;
+        // Existing single-link import accepts a payload wrapped onto several lines.
+        if (starts <= 1) return Collections.singletonList(trimmed);
         if (links.length > MAX_ITEMS) throw new IllegalArgumentException("Too many links");
         // Keep invalid entries too: each receives the normal validation error, and
         // does not silently disappear or prevent the next valid entry being offered.

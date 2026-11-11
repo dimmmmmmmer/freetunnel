@@ -16,6 +16,7 @@ public final class ImportBatchTest {
     @Test public void preservesMultilineToml() {
         String toml = "[endpoint]\nname = \"\"\"line one\nline two\"\"\"\npassword = \"tt://not-a-link\"";
         assertEquals(Collections.singletonList(toml), ImportBatch.split(toml));
+        assertEquals(Collections.singletonList("tt://payload\ncontinuation"), ImportBatch.split("tt://payload\ncontinuation"));
     }
 
     @Test public void boundsBatchCountAndUtf8Bytes() {

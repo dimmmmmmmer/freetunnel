@@ -66,6 +66,7 @@ private slots:
     void switchingProfileSwitchesTheApplicationList();
     void everyFileDialogActuallyOpens();
     void everyFileDialogActuallyOpens_data();
+    void multipleConfigFilesReachTheBackend();
     void settingsPageLoads();
     void logsPageLoads();
     void createConfigOverlayLoads();
@@ -478,6 +479,29 @@ void TestQmlUi::everyFileDialogActuallyOpens_data()
 // AA_DontUseNativeDialogs is set for the whole test binary, so this exercises
 // the drawn dialog — the one that has to exist when the desktop offers nothing —
 // rather than opening a native modal window on a CI runner.
+void TestQmlUi::multipleConfigFilesReachTheBackend()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("configImportDialog"));
+    QVERIFY(dialog);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QList<QUrl> files{QUrl::fromLocalFile(directory.filePath(QStringLiteral("Work #1.toml"))),
+                           QUrl::fromLocalFile(directory.filePath(QStringLiteral("Second.txt")))};
+    for (const QUrl &url : files) {
+        QFile file(url.toLocalFile());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    QCOMPARE(dialog->property("fileMode").toInt(), 1); // FileDialog.OpenFiles
+    // currentFiles is Qt's writable compatibility alias for selectedFiles.
+    // Exercise our accepted handler with both URLs, including an escaped name.
+    QVERIFY(dialog->setProperty("currentFiles", QVariant::fromValue(files)));
+    QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
+    QCOMPARE(m_backend.importedFiles, QStringList({files[0].toString(), files[1].toString()}));
+    delete root;
+}
+
 void TestQmlUi::everyFileDialogActuallyOpens()
 {
     QFETCH(QString, page);

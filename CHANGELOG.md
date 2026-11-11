@@ -6,7 +6,7 @@
 
 - Restored macOS 13 support for Intel and Apple Silicon.
 - The Home logo turns green while connected on desktop, Android and Android TV.
-- Android can import multiple links/files and export the connection log.
+- Desktop and Android can import multiple links/files; Android can export the connection log.
 
 ## 1.2.4
 

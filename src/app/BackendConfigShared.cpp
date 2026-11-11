@@ -193,7 +193,21 @@ bool readValidatedImportContent(const QString &path, QString *contentOut, QStrin
             *errOut = QStringLiteral("read");
         return false;
     }
-    const QString content = QString::fromUtf8(vf.readAll());
+    const QByteArray bytes = vf.read(1024 * 1024 + 1);
+    if (bytes.size() > 1024 * 1024) {
+        if (errOut) *errOut = QStringLiteral("large");
+        return false;
+    }
+    QString content = QString::fromUtf8(bytes);
+    if (content.startsWith(QChar(0xfeff))) content.remove(0, 1);
+    const QString trimmed = content.trimmed();
+    if (trimmed.startsWith(QStringLiteral("tt://"))
+            || trimmed.startsWith(QStringLiteral("https://trusttunnel.org/qr.html"))
+            || trimmed.startsWith(QStringLiteral("https://www.trusttunnel.org/qr.html"))) {
+        if (contentOut) *contentOut = trimmed;
+        if (errOut) *errOut = QStringLiteral("links");
+        return false;
+    }
     const freetunnel::ConfigToml c = freetunnel::parseConfigToml(content);
     if (c.addresses.trimmed().isEmpty() || c.username.trimmed().isEmpty()) {
         // The endpoint's own export has no [endpoint]: its keys are at the top,

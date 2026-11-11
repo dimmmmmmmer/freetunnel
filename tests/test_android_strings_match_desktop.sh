@@ -32,6 +32,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["text_ms", "Backend", " ms"]
 ["text_paste_from_clipboard", "ConfigsPage", "Paste from clipboard"]
 ["text_clipboard_is_empty", "Backend", "Clipboard is empty"]
+["import_batch_too_large", "Backend", "Choose up to 100 links or files, no larger than 1 MB each."]
 ["text_cancel", "ConfirmDialog", "Cancel"]
 ["text_new_configuration", "CreateConfigOverlay", "New config"]
 ["text_edit_configuration", "CreateConfigOverlay", "Edit config"]
@@ -301,7 +302,6 @@ text_could_not_save_configurations_data_on_disk_is_unchan
 picker_none
 split_apps_hint
 export_no_picker
-import_batch_too_large
 logs_export
 logs_exported
 logs_no_picker

@@ -173,6 +173,8 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
+    Q_INVOKABLE void importFiles(const QStringList &paths);
+    bool importLinkBatch(const QString &text);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
     // Export: a shareable tt:// deep link, or a full .toml written to disk
