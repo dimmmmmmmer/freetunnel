@@ -4264,7 +4264,8 @@ class TvDeviceTest {
         val a = open()
         writeLog(entryLine)
         render(a, 4)
-        assertEquals(context.getString(R.string.logs_export), onMain { byKey(a, "logs:export").contentDescription })
+        val export = byKey(a, "logs:export")
+        assertEquals(context.getString(R.string.logs_export), onMain { export.contentDescription })
         val destination = java.io.File(context.cacheDir, "export-test.log")
         try {
             onMain { method("writeLogExport", android.net.Uri::class.java).invoke(a, android.net.Uri.fromFile(destination)) }
