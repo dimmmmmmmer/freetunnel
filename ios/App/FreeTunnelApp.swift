@@ -65,29 +65,13 @@ struct RootView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(LocalizedStringKey(confirmation.text)).fixedSize(
                         horizontal: false, vertical: true)
-                    let actions =
-                        confirmation.alternateTitle == nil
-                        ? AnyLayout(HStackLayout(spacing: 8))
-                        : AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
-                    actions {
-                        Button("Cancel") {
-                            state.confirmation = nil
-                            confirmation.cancelAction?()
-                        }.buttonStyle(
-                            AppButtonStyle(dialog: true))
-                        if let title = confirmation.alternateTitle {
-                            Button(LocalizedStringKey(title)) {
-                                state.confirmation = nil
-                                confirmation.alternateAction?()
-                            }.buttonStyle(AppButtonStyle(dialog: true)).accessibilityIdentifier(
-                                "confirm-copy")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { confirmationButtons(confirmation) }
+                            .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .trailing, spacing: 8) {
+                            confirmationButtons(confirmation)
                         }
-                        Button(LocalizedStringKey(confirmation.actionTitle)) {
-                            state.confirmation = nil
-                            confirmation.action()
-                        }.buttonStyle(AppButtonStyle(primary: true, dialog: true))
-                            .accessibilityIdentifier("confirm-action")
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
                 }.padding(18).frame(maxWidth: 340).background(
                     AppStyle.background, in: RoundedRectangle(cornerRadius: 14)
                 )
@@ -125,6 +109,24 @@ struct RootView: View {
                     await state.connect()
                 }
             }
+    }
+    @ViewBuilder
+    private func confirmationButtons(_ confirmation: AppConfirmation) -> some View {
+        Button("Cancel") {
+            state.confirmation = nil
+            confirmation.cancelAction?()
+        }.buttonStyle(AppButtonStyle(dialog: true))
+        if let title = confirmation.alternateTitle {
+            Button(LocalizedStringKey(title)) {
+                state.confirmation = nil
+                confirmation.alternateAction?()
+            }.buttonStyle(AppButtonStyle(dialog: true)).accessibilityIdentifier("confirm-copy")
+        }
+        Button(LocalizedStringKey(confirmation.actionTitle)) {
+            state.confirmation = nil
+            confirmation.action()
+        }.buttonStyle(AppButtonStyle(primary: true, dialog: true))
+            .accessibilityIdentifier("confirm-action")
     }
     private var navigation: some View {
         HStack(spacing: 8) {
