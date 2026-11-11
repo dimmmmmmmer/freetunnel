@@ -310,6 +310,23 @@ struct ImportView: View {
         importing = false
         nextImport()
     }
+    private func importPrompt(_ config: Configuration, replacing: Bool) -> String {
+        var prompt =
+            NSLocalizedString("Import this configuration?", comment: "") + "\n" + config.name
+        if replacing {
+            prompt +=
+                "\n"
+                + NSLocalizedString(
+                    "A configuration with this name already exists.", comment: "")
+        }
+        if config.skipsVerification {
+            let warning = NSLocalizedString(
+                "This configuration may disable certificate verification. Import it only if you trust its source.",
+                comment: "")
+            prompt += "\n" + warning
+        }
+        return prompt
+    }
     func offerImportedConfig(_ text: String, subscription: String?) {
         do {
             let config = try Configuration(text)
@@ -317,20 +334,7 @@ struct ImportView: View {
                 $0.name.caseInsensitiveCompare(config.name) == .orderedSame
             }
             let title = existing == nil ? "Add" : "Replace"
-            var prompt =
-                NSLocalizedString("Import this configuration?", comment: "") + "\n" + config.name
-            if existing != nil {
-                prompt +=
-                    "\n"
-                    + NSLocalizedString(
-                        "A configuration with this name already exists.", comment: "")
-            }
-            if config.skipsVerification {
-                let warning = NSLocalizedString(
-                    "This configuration may disable certificate verification. Import it only if you trust its source.",
-                    comment: "")
-                prompt += "\n" + warning
-            }
+            let prompt = importPrompt(config, replacing: existing != nil)
             let save: (UUID?) -> Void = { id in
                 do {
                     if let id, var profile = self.preferences.profiles.first(where: { $0.id == id }) {
