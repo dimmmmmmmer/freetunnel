@@ -301,6 +301,10 @@ text_could_not_save_configurations_data_on_disk_is_unchan
 picker_none
 split_apps_hint
 export_no_picker
+import_batch_too_large
+logs_export
+logs_exported
+logs_no_picker
 
 ## Logs and Settings: a log that cannot be read to copy, and a link with no browser to open it
 text_could_not_read_log

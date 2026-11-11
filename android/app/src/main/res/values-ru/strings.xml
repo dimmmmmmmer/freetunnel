@@ -225,6 +225,10 @@
     <string name="settings_core">"Ядро TrustTunnel "</string>
     <string name="update_check_failed">"Не удалось проверить обновления: %1$s"</string>
     <string name="update_latest">"Установлена последняя версия"</string>
+    <string name="import_batch_too_large">"Выберите до 100 ссылок или файлов размером не более 1 МБ каждый."</string>
+    <string name="logs_export">"Экспорт журнала"</string>
+    <string name="logs_exported">"Журнал сохранён"</string>
+    <string name="logs_no_picker">"На устройстве нет приложения для сохранения файлов. Используйте «Копировать»."</string>
     <string name="logs_off">"Логирование выключено."</string>
     <string name="logs_turn_on">"Включить"</string>
     <string name="logs_placeholder">"Логи появятся после подключения"</string>

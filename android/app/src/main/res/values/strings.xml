@@ -225,6 +225,10 @@
     <string name="settings_core">"TrustTunnel core "</string>
     <string name="update_check_failed">"Update check failed: %1$s"</string>
     <string name="update_latest">"You have the latest version"</string>
+    <string name="import_batch_too_large">"Choose up to 100 links or files, no larger than 1 MB each."</string>
+    <string name="logs_export">"Export log"</string>
+    <string name="logs_exported">"Log exported"</string>
+    <string name="logs_no_picker">"This device has no file picker to save to. Use Copy instead."</string>
     <string name="logs_off">"Logging is off."</string>
     <string name="logs_turn_on">"Turn on"</string>
     <string name="logs_placeholder">"Logs will appear after connecting"</string>

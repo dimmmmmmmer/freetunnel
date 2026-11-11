@@ -102,6 +102,7 @@ public final class MainActivity extends Activity {
     private static final int PREPARE_VPN = 22;
     private static final int EXPORT_CONFIG = 24;
     private static final int PICK_CERTIFICATE = 25;
+    private static final int EXPORT_LOG = 26;
     private static final String PREFS = "freetunnel";
     private String[] tabNames;
     // The Home tab is the logo, in its own greys: the app never tints it.
@@ -118,6 +119,14 @@ public final class MainActivity extends Activity {
     private final ExecutorService ioWorker = Executors.newSingleThreadExecutor();
     // The config an export is being asked for: the file picker answers later, when the list may have changed.
     private Config exporting;
+    private final ArrayDeque<PendingImport> localImports = new ArrayDeque<>();
+    private boolean localImportBusy;
+    private static final class PendingImport {
+        final String name;
+        final String text;
+        final Uri uri;
+        PendingImport(String name, String text, Uri uri) { this.name = name; this.text = text; this.uri = uri; }
+    }
     private int activeIndex;
     private int page;
     // The theme setting, "system" (the default), "light" or "dark", and the theme in
@@ -308,6 +317,7 @@ public final class MainActivity extends Activity {
         if (page <= 1) render();
         else if (page == 3) refreshUpdateControls();
         else if (page == 4) { refreshLog(false); scheduleLogTick(); }
+        processLocalImports();
     }
 
     @Override protected void onPause() {
@@ -360,7 +370,7 @@ public final class MainActivity extends Activity {
         if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
         Uri uri = intent.getData();
         intent.setData(null); // Do not import again if Android recreates the activity.
-        if (uri != null) importDeepLink(uri.toString(), null);
+        if (uri != null) queueLocalText(getString(R.string.text_configuration), uri.toString());
     }
 
     private int dp(float n) { return ui.dp(n); }
@@ -1922,13 +1932,14 @@ public final class MainActivity extends Activity {
         ClipData clip = cm.getPrimaryClip();
         if (clip == null || clip.getItemCount() == 0) { toast(getString(R.string.text_clipboard_is_empty)); return; }
         CharSequence value = clip.getItemAt(0).coerceToText(this);
-        importText(getString(R.string.text_from_clipboard), value == null ? "" : value.toString().trim(), null);
+        queueLocalText(getString(R.string.text_from_clipboard), value == null ? "" : value.toString());
     }
     // Many TVs have no document picker. Some have one for GET_CONTENT only, which
     // onActivityResult reads the same way.
     private void pickFile() {
         for (String action : new String[]{Intent.ACTION_OPEN_DOCUMENT, Intent.ACTION_GET_CONTENT}) {
-            if (startForResult(new Intent(action).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), PICK_CONFIG)) return;
+            if (startForResult(new Intent(action).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE)
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_CONFIG)) return;
         }
         toast(getString(isTv() ? R.string.text_no_file_picker_receive : R.string.text_no_file_picker));
     }
@@ -1936,6 +1947,72 @@ public final class MainActivity extends Activity {
     // origin is the address it was sent from, null when it came from this device.
     private void importText(String fallbackName, String text, String origin) {
         importText(fallbackName, text, origin, null);
+    }
+    private void queueLocalText(String name, String text) {
+        try {
+            List<String> documents = ImportBatch.split(text);
+            if (documents.size() + localImports.size() + (localImportBusy ? 1 : 0) > ImportBatch.MAX_ITEMS)
+                throw new IllegalArgumentException("Too many imports");
+            for (String document : documents) localImports.add(new PendingImport(name, document, null));
+            processLocalImports();
+        } catch (IllegalArgumentException tooLarge) { toast(getString(R.string.import_batch_too_large)); }
+    }
+    // One confirmation at a time, including mixed valid/invalid batches. Reading
+    // cloud-backed documents never blocks the UI, and stops while the app is away.
+    private void processLocalImports() {
+        if (isDestroyed() || !resumed || localImportBusy || receivedTexts.busy()) return;
+        PendingImport item = localImports.poll();
+        if (item == null) { processReceived(); return; }
+        localImportBusy = true;
+        if (item.uri == null) {
+            importText(item.name, item.text, null, this::finishLocalImport);
+            return;
+        }
+        ioWorker.execute(() -> {
+            List<String> documents = null;
+            String name = item.uri.getLastPathSegment();
+            if (name == null || name.isEmpty()) name = getString(R.string.text_configuration);
+            int error = R.string.text_could_not_open_file;
+            try (InputStream input = getContentResolver().openInputStream(item.uri);
+                    ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                if (input == null) throw new IOException("No stream");
+                byte[] bytes = new byte[8192];
+                int n;
+                while ((n = input.read(bytes)) != -1) {
+                    if (out.size() + n > ImportBatch.MAX_BYTES) throw new IllegalArgumentException("File is too large");
+                    out.write(bytes, 0, n);
+                }
+                try (Cursor cursor = getContentResolver().query(item.uri,
+                        new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null && !cursor.getString(0).isEmpty())
+                        name = cursor.getString(0);
+                } catch (Exception ignored) { }
+                int slash = name.lastIndexOf('/');
+                if (slash >= 0) name = name.substring(slash + 1);
+                documents = ImportBatch.split(out.toString(StandardCharsets.UTF_8.name()));
+            } catch (IllegalArgumentException tooLarge) { error = R.string.import_batch_too_large; }
+            catch (Exception unreadable) { documents = null; }
+            final List<String> ready = documents;
+            final String fileName = name;
+            final int failure = error;
+            runOnUiThread(() -> {
+                if (isDestroyed()) return;
+                if (ready == null || ready.size() + localImports.size() > ImportBatch.MAX_ITEMS) {
+                    toast(getString(ready == null ? failure : R.string.import_batch_too_large));
+                    finishLocalImport(true);
+                    return;
+                }
+                for (int i = ready.size() - 1; i >= 0; i--)
+                    localImports.addFirst(new PendingImport(fileName, ready.get(i), null));
+                finishLocalImport(false);
+            });
+        });
+    }
+    private void finishLocalImport(boolean refused) {
+        host.postDelayed(() -> {
+            localImportBusy = false;
+            processLocalImports();
+        }, refused ? 3500 : 0);
     }
     // Whoever asks for an import is told when it is answered, once: it was added, replaced, or cancelled,
     // or it was refused, which is true then, and a notice says why. Receive from phone takes its next text then.
@@ -2108,7 +2185,7 @@ public final class MainActivity extends Activity {
     // count until it is answered, whatever the answer, which is what lets the phone send another when ten
     // waited. When one is refused, its notice stays up before the next one's check, and its question, can cover it.
     private void processReceived() {
-        if (isDestroyed() || receivedTexts.busy() || receivedTexts.queued() == 0) return;
+        if (isDestroyed() || localImportBusy || receivedTexts.busy() || receivedTexts.queued() == 0) return;
         if (receivedHold) {
             if (toastView != null && SystemClock.uptimeMillis() < receivedHoldUntil) {
                 if (!receivedPollPending) {
@@ -2125,7 +2202,7 @@ public final class MainActivity extends Activity {
             if (!receivedTexts.answered(item)) return;
             if (refused) { receivedHold = true; receivedHoldUntil = SystemClock.uptimeMillis() + 10_000; }
             // After what answered it is done, not inside it.
-            host.post(this::processReceived);
+            host.post(() -> { processReceived(); processLocalImports(); });
         });
     }
     // The app is left: what is waiting for its turn is dropped, and so is what the receiver handed over
@@ -2587,22 +2664,27 @@ public final class MainActivity extends Activity {
             else writeExport(saved);
             return;
         }
+        if (requestCode == EXPORT_LOG) {
+            Uri saved = resultCode == RESULT_OK && data != null ? data.getData() : null;
+            if (saved != null) writeLogExport(saved);
+            return;
+        }
         if (requestCode != PICK_CONFIG || resultCode != RESULT_OK || data == null) return;
-        Uri uri = data.getData(); if (uri == null) return;
-        try (InputStream input = getContentResolver().openInputStream(uri); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            if (input == null) return;
-            byte[] bytes = new byte[8192]; int n; int total = 0;
-            while ((n = input.read(bytes)) != -1) { total += n; if (total > 1024 * 1024) { toast(getString(R.string.text_file_is_too_large)); return; } out.write(bytes, 0, n); }
-            String name = null;
-            try (Cursor cursor = getContentResolver().query(uri,
-                    new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
-            } catch (Exception ignored) { }
-            if (name == null || name.isEmpty()) name = uri.getLastPathSegment();
-            if (name == null || name.isEmpty()) name = getString(R.string.text_configuration);
-            int slash = name.lastIndexOf('/'); if (slash >= 0) name = name.substring(slash + 1);
-            importToml(name, out.toString(StandardCharsets.UTF_8.name()), null);
-        } catch (Exception e) { toast(getString(R.string.text_could_not_open_file)); }
+        List<Uri> files = new ArrayList<>();
+        ClipData clip = data.getClipData();
+        int count = clip == null ? (data.getData() == null ? 0 : 1) : clip.getItemCount();
+        if (count + localImports.size() + (localImportBusy ? 1 : 0) > ImportBatch.MAX_ITEMS) {
+            toast(getString(R.string.import_batch_too_large));
+            return;
+        }
+        if (clip != null) {
+            for (int i = 0; i < count; i++) {
+                Uri uri = clip.getItemAt(i).getUri();
+                if (uri != null && !files.contains(uri)) files.add(uri);
+            }
+        } else if (data.getData() != null) files.add(data.getData());
+        for (Uri uri : files) localImports.add(new PendingImport(null, null, uri));
+        processLocalImports();
     }
 
     // The Split page (qml/pages/SplitPage.qml), top to bottom: the Split Tunneling switch; the Mode, as a value and its ▾; the
@@ -3838,6 +3920,25 @@ public final class MainActivity extends Activity {
 
     private File logFile() { return new File(getFilesDir(), LogFile.NAME); }
 
+    private void exportLog() {
+        Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("text/plain").putExtra(Intent.EXTRA_TITLE, "freetunnel.log");
+        if (!startForResult(save, EXPORT_LOG)) toast(getString(R.string.logs_no_picker));
+    }
+    private void writeLogExport(Uri uri) {
+        ioWorker.execute(() -> {
+            boolean written;
+            try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                if (out == null) throw new IOException("No stream");
+                // Preserve dates and levels in the file, not just the shortened UI text.
+                out.write(LogFile.read(logFile()).getBytes(StandardCharsets.UTF_8));
+                written = true;
+            } catch (Exception e) { written = false; }
+            final boolean ok = written;
+            runOnUiThread(() -> { if (!isDestroyed()) toast(getString(ok ? R.string.logs_exported : R.string.export_failed)); });
+        });
+    }
+
     private void logs(LinearLayout body) {
         Theme t = t();
         LinearLayout actions = row();
@@ -3905,6 +4006,12 @@ public final class MainActivity extends Activity {
         // The foot: Auto-scroll, at the right. The label and the toggle are one small row, which fills round them with the focus and
         // is no wider than they are.
         LinearLayout foot = row();
+        TextView export = ui.link("freetunnel.log", 11, Ui.LinkKind.FAINT, "logs:export");
+        export.setContentDescription(getString(R.string.logs_export));
+        export.setOnClickListener(v -> exportLog());
+        LinearLayout.LayoutParams exportLp = ui.linkLp(false);
+        exportLp.leftMargin = -dp(Ui.LINK_PAD_H_DP);
+        foot.addView(export, exportLp);
         foot.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         ToggleView auto = ui.toggle(logAutoScroll, true, "logs:autoscroll");
         auto.setContentDescription(getString(R.string.logs_auto_scroll));
@@ -3985,6 +4092,7 @@ public final class MainActivity extends Activity {
         if (page == 4 && resumed) host.postDelayed(logTicker, 1000);
     }
     @Override protected void onDestroy() {
+        localImports.clear();
         toastHandler.removeCallbacksAndMessages(null);
         stopReceiver();
         dropReceived();

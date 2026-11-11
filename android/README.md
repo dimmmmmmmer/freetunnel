@@ -11,6 +11,9 @@ certificate is not an official release or an update compatibility contract.
 
 - Confirmed import of TOML, `tt://` and TrustTunnel QR-page links. Import only
   adds a profile; it never starts VPN or replaces another profile implicitly.
+  Paste multiple links or select multiple TOML/text files; each configuration
+  is checked and confirmed in order. Text files can contain links too.
+  Imports are limited to 100 pending items and 1 MiB per document.
   Links of format versions 0 to 2 are read; TrustTunnel 1.3 writes version 2.
   Subscriptions are not followed yet: a link or file with only a subscription
   is refused, and from other links and files only the server's own settings
@@ -111,7 +114,7 @@ Both are the desktop's pages ([HomePage.qml](../qml/pages/HomePage.qml),
 
 Settings and Logs are the desktop's pages ([SettingsPage.qml](../qml/pages/SettingsPage.qml),
 [LogsPage.qml](../qml/pages/LogsPage.qml)), with what only the desktop has left out (Launch at system
-startup, Hotkeys, the Windows-only ports row, Verbose logs, the log's path) and a few rows that only Android
+startup, Hotkeys, the Windows-only ports row, Verbose logs) and a few rows that only Android
 has. Their words are the desktop's English and its Russian wherever the control is the same:
 `tests/test_android_strings_match_desktop.sh` holds every string to `i18n/freetunnel_ru.ts`, through a
 table of the strings the desktop has too, and fails for one that is neither in it nor on its
@@ -153,7 +156,8 @@ Android-only list.
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 
-**Logs**: **Clear** and **Copy** as links as wide as their words (Copy says *Log copied*, and asks the
+**Logs**: **freetunnel.log** saves the complete log through the system file picker;
+TVs without a file picker can use **Copy**. **Clear** and **Copy** as links as wide as their words (Copy says *Log copied*, and asks the
 clipboard not to show what it copied, as the log lists where connections went); *Logging is off.* with **Turn on**;
 the log in a box that fills the page and scrolls in itself, *Logs will appear after connecting* in the middle of
 it while it is empty; and **Auto-scroll** at the foot. The box follows the file once a second, by changing its text
