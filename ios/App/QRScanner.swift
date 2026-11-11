@@ -1,5 +1,5 @@
-import SwiftUI
 import FreeTunnelCore
+import SwiftUI
 import VisionKit
 
 struct QRScanner: View {

@@ -88,7 +88,9 @@ struct ServerEditor: View {
                             )
                             .frame(height: 84).appEditor()
                         }
-                        if let profile, state.preferences.profiles.first(where: { $0.id == profile.id })?.subscriptionEnabled == true {
+                        if let profile,
+                            state.preferences.profiles.first(where: { $0.id == profile.id })?
+                                .subscriptionEnabled == true {
                             HStack {
                                 Button("Refresh subscription") {
                                     let refresh: () -> Void = {
@@ -96,12 +98,18 @@ struct ServerEditor: View {
                                         Task { await state.refreshSubscription(profile) }
                                     }
                                     if changed {
-                                        state.confirm("Discard unsaved changes?", actionTitle: "Discard", action: refresh)
-                                    } else { refresh() }
+                                        state.confirm(
+                                            "Discard unsaved changes?", actionTitle: "Discard",
+                                            action: refresh)
+                                    } else {
+                                        refresh()
+                                    }
                                 }
                                 Spacer(minLength: 8)
                                 Button("Stop updates") {
-                                    state.confirm("Stop subscription updates?", actionTitle: "Stop updates") {
+                                    state.confirm(
+                                        "Stop subscription updates?", actionTitle: "Stop updates"
+                                    ) {
                                         state.detachSubscription(profile)
                                     }
                                 }.foregroundStyle(AppStyle.danger)

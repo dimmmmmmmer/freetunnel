@@ -65,16 +65,22 @@ struct RootView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(LocalizedStringKey(confirmation.text)).fixedSize(
                         horizontal: false, vertical: true)
-                    let actions = confirmation.alternateTitle == nil
-                        ? AnyLayout(HStackLayout(spacing: 8)) : AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+                    let actions =
+                        confirmation.alternateTitle == nil
+                        ? AnyLayout(HStackLayout(spacing: 8))
+                        : AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
                     actions {
-                        Button("Cancel") { state.confirmation = nil; confirmation.cancelAction?() }.buttonStyle(
+                        Button("Cancel") {
+                            state.confirmation = nil
+                            confirmation.cancelAction?()
+                        }.buttonStyle(
                             AppButtonStyle(dialog: true))
                         if let title = confirmation.alternateTitle {
                             Button(LocalizedStringKey(title)) {
                                 state.confirmation = nil
                                 confirmation.alternateAction?()
-                            }.buttonStyle(AppButtonStyle(dialog: true)).accessibilityIdentifier("confirm-copy")
+                            }.buttonStyle(AppButtonStyle(dialog: true)).accessibilityIdentifier(
+                                "confirm-copy")
                         }
                         Button(LocalizedStringKey(confirmation.actionTitle)) {
                             state.confirmation = nil
@@ -252,9 +258,9 @@ struct HomeView: View {
             (typeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 12))
                 : AnyLayout(HStackLayout(spacing: 12))) {
-                speedTile(upload: false, value: vpn.downSpeed)
-                speedTile(upload: true, value: vpn.upSpeed)
-            }.padding(.bottom, 44)
+                    speedTile(upload: false, value: vpn.downSpeed)
+                    speedTile(upload: true, value: vpn.upSpeed)
+                }.padding(.bottom, 44)
         }.frame(maxWidth: .infinity).background(AppStyle.background)
             .onChange(of: transitioning) { _, value in pulse = value }
             .onAppear { pulse = transitioning }
@@ -273,6 +279,6 @@ struct HomeView: View {
                 .custom("Inter-Medium", size: 15))
         }.fixedSize().padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minWidth: 116, minHeight: 44).background(
-            AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
+                AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
     }
 }

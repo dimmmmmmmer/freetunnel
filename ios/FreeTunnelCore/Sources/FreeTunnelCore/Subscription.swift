@@ -11,7 +11,9 @@ public enum Subscription {
         else { throw ClientError.invalidSource }
         let user = parts.user ?? ""
         let password = parts.password ?? ""
-        guard !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
+        guard
+            !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+        else {
             throw ClientError.invalidSource
         }
         parts.fragment = nil
@@ -39,7 +41,9 @@ public enum Subscription {
         try applyRequired(object, to: &endpoint)
         try applyOptions(object, to: &endpoint)
         if let old {
-            for key in ["has_ipv6", "anti_dpi", "upstream_protocol"] { endpoint[key] = old.endpoint[key] }
+            for key in ["has_ipv6", "anti_dpi", "upstream_protocol"] {
+                endpoint[key] = old.endpoint[key]
+            }
         }
         endpoint["name"] = old?.name ?? object["name"] as? String ?? object["hostname"] as? String
         if let dns = object["dns_upstreams"] as? [String], previous == nil {
@@ -56,7 +60,8 @@ public enum Subscription {
     private static func document(_ data: Data) throws -> [String: Any] {
         guard data.count <= maximumBytes else { throw ClientError.tooLarge }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
+            let version = object["version"] as? NSNumber,
+            CFGetTypeID(version) != CFBooleanGetTypeID(),
             version.doubleValue == 1, object["skip_verification"] as? Bool != true,
             (object["client_random_auth_key"] as? String ?? "").isEmpty
         else {
@@ -69,14 +74,18 @@ public enum Subscription {
         for key in stringFields {
             if let value = object[key], !(value is String) { throw ClientError.invalidConfig }
         }
-        if let value = object["skip_verification"], CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID() {
+        if let value = object["skip_verification"],
+            CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID() {
             throw ClientError.invalidConfig
         }
-        if let value = object["dns_upstreams"], !(value is [String]) { throw ClientError.invalidConfig }
+        if let value = object["dns_upstreams"], !(value is [String]) {
+            throw ClientError.invalidConfig
+        }
         return object
     }
 
-    private static func applyRequired(_ object: [String: Any], to endpoint: inout [String: Any]) throws {
+    private static func applyRequired(_ object: [String: Any], to endpoint: inout [String: Any])
+        throws {
         for key in ["hostname", "address", "username", "password"] {
             guard let text = object[key] as? String, !text.isEmpty, text.utf8.count <= 8192,
                 !text.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
@@ -87,10 +96,12 @@ public enum Subscription {
         }
     }
 
-    private static func applyOptions(_ object: [String: Any], to endpoint: inout [String: Any]) throws {
+    private static func applyOptions(_ object: [String: Any], to endpoint: inout [String: Any])
+        throws {
         for key in ["has_ipv6", "anti_dpi"] {
             if let value = object[key] {
-                guard let boolean = value as? NSNumber, CFGetTypeID(boolean) == CFBooleanGetTypeID() else {
+                guard let boolean = value as? NSNumber, CFGetTypeID(boolean) == CFBooleanGetTypeID()
+                else {
                     throw ClientError.invalidConfig
                 }
                 endpoint[key] = boolean.boolValue
@@ -102,7 +113,8 @@ public enum Subscription {
         }
         endpoint["custom_sni"] = object["custom_sni"] as? String ?? ""
         endpoint["certificate"] = try certificates(object["certificate"] as? String ?? "")
-        endpoint["client_random"] = try clientRandom(object["client_random_prefix"] as? String ?? "")
+        endpoint["client_random"] = try clientRandom(
+            object["client_random_prefix"] as? String ?? "")
     }
 
     static func clientRandom(_ prefix: String) throws -> String {
