@@ -4223,6 +4223,7 @@ class TvDeviceTest {
         eventually("Second confirmation replaces the first only after its answer") {
             overlayTag(a, "confirm")?.let { it !== first } == true
         }
+        SystemClock.sleep(500) // The import confirmation deliberately ignores the opening key press.
         click(a, "confirm:ok")
         eventually("Only the accepted second config is saved") { org.json.JSONArray(ConfigStore.read(prefs)).length() == 3 }
         assertEquals("Batch B", org.json.JSONArray(ConfigStore.read(prefs)).getJSONObject(2).getString("name"))
@@ -4245,10 +4246,12 @@ class TvDeviceTest {
             }
             eventually("First file is offered", 30_000) { overlayTag(a, "confirm") != null }
             val question = overlayTag(a, "confirm")
+            SystemClock.sleep(500)
             click(a, "confirm:ok")
             eventually("Second file waits for first confirmation", 30_000) {
                 overlayTag(a, "confirm")?.let { it !== question } == true
             }
+            SystemClock.sleep(500)
             click(a, "confirm:ok")
             eventually("Both files added") { org.json.JSONArray(ConfigStore.read(prefs)).length() == 4 }
             val saved = org.json.JSONArray(ConfigStore.read(prefs))
