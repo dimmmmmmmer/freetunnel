@@ -1468,6 +1468,15 @@ void TestQmlUi::theLogoIsGreenWhileConnected()
     // It has loaded: a mark that failed to load would leave the grey one showing.
     QTRY_COMPARE(green->property("status").toInt(), 1); // Image.Ready
 
+    // Disconnect is optimistic: the helper may still report Connected until
+    // its first state notification, but Home must already stop showing green.
+    m_backend.setDisconnecting(true);
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+    m_backend.setDisconnecting(false);
+    QTRY_COMPARE(green->opacity(), 1.0);
+
     m_backend.setConnected(false);
     QTRY_COMPARE(green->opacity(), 0.0);
     QVERIFY(!green->property("visible").toBool());

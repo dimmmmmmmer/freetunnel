@@ -120,7 +120,7 @@ Item {
                                 anchors.fill: parent
                                 source: "qrc:/assets/logo-green.svg"
                                 sourceSize: Qt.size(264, 264)
-                                opacity: backend.connected ? 1.0 : 0.0
+                                opacity: backend.connected && !backend.disconnecting ? 1.0 : 0.0
                                 visible: opacity > 0
                                 Behavior on opacity { NumberAnimation { duration: 220 } }
                             }
