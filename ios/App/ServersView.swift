@@ -140,18 +140,18 @@ struct ServersView: View {
             }
     }
     private func moveServer(_ identifiers: [String], to profile: Profile) -> Bool {
-                guard let id = identifiers.first,
-                    let source = state.preferences.profiles.firstIndex(where: {
-                        $0.id.uuidString == id
-                    }),
-                    let target = state.preferences.profiles.firstIndex(where: {
-                        $0.id == profile.id
-                    })
-                else { return false }
-                state.preferences.profiles.move(
-                    fromOffsets: IndexSet(integer: source),
-                    toOffset: target > source ? target + 1 : target)
-                return true
+        guard let id = identifiers.first,
+            let source = state.preferences.profiles.firstIndex(where: {
+                $0.id.uuidString == id
+            }),
+            let target = state.preferences.profiles.firstIndex(where: {
+                $0.id == profile.id
+            })
+        else { return false }
+        state.preferences.profiles.move(
+            fromOffsets: IndexSet(integer: source),
+            toOffset: target > source ? target + 1 : target)
+        return true
     }
     private func serverActions(_ profile: Profile) -> some View {
         HStack(spacing: 0) {
@@ -272,7 +272,8 @@ struct ImportView: View {
     }
     func enqueueImports(_ batch: [ImportDocument.Document]) {
         guard batch.count + pendingImports.count + (importing ? 1 : 0) <= 100 else {
-            report(ClientError.tooLarge); return
+            report(ClientError.tooLarge)
+            return
         }
         pendingImports += batch
         nextImport()
@@ -282,18 +283,28 @@ struct ImportView: View {
         importing = true
         let document = pendingImports.removeFirst()
         if let source = document.subscription {
-            confirm(String(format: NSLocalizedString("Fetch subscription from %@?", comment: ""), URLComponents(string: source)?.host ?? ""), actionTitle: "Continue") {
+            confirm(
+                String(
+                    format: NSLocalizedString("Fetch subscription from %@?", comment: ""),
+                    URLComponents(string: source)?.host ?? ""), actionTitle: "Continue"
+            ) {
                 Task {
                     do {
-                        let data = try await Downloads.read(Subscription.request(source), limit: Subscription.maximumBytes)
+                        let data = try await Downloads.read(
+                            Subscription.request(source), limit: Subscription.maximumBytes)
                         self.offerImportedConfig(try Subscription.apply(data), subscription: source)
-                    } catch { self.report(error); self.finishImport() }
+                    } catch {
+                        self.report(error)
+                        self.finishImport()
+                    }
                 }
             }
             confirmation?.cancelAction = { self.finishImport() }
         } else if let toml = document.toml {
             offerImportedConfig(toml, subscription: nil)
-        } else { finishImport() }
+        } else {
+            finishImport()
+        }
     }
     func finishImport() {
         importing = false
@@ -302,17 +313,30 @@ struct ImportView: View {
     func offerImportedConfig(_ text: String, subscription: String?) {
         do {
             let config = try Configuration(text)
-            let existing = preferences.profiles.first { $0.name.caseInsensitiveCompare(config.name) == .orderedSame }
+            let existing = preferences.profiles.first {
+                $0.name.caseInsensitiveCompare(config.name) == .orderedSame
+            }
             let title = existing == nil ? "Add" : "Replace"
-            var prompt = NSLocalizedString("Import this configuration?", comment: "") + "\n" + config.name
-            if existing != nil { prompt += "\n" + NSLocalizedString("A configuration with this name already exists.", comment: "") }
+            var prompt =
+                NSLocalizedString("Import this configuration?", comment: "") + "\n" + config.name
+            if existing != nil {
+                prompt +=
+                    "\n"
+                    + NSLocalizedString(
+                        "A configuration with this name already exists.", comment: "")
+            }
             if config.skipsVerification {
-                prompt += "\n" + NSLocalizedString("This configuration may disable certificate verification. Import it only if you trust its source.", comment: "")
+                let warning = NSLocalizedString(
+                    "This configuration may disable certificate verification. Import it only if you trust its source.",
+                    comment: "")
+                prompt += "\n" + warning
             }
             let save: (UUID?) -> Void = { id in
                 do {
                     if let id, var profile = self.preferences.profiles.first(where: { $0.id == id }) {
-                        let record = Secret(toml: try config.storingImportedRulesInProfile(), subscription: subscription)
+                        let record = Secret(
+                            toml: try config.storingImportedRulesInProfile(),
+                            subscription: subscription)
                         try Vault.write(JSONEncoder().encode(record), key: id.uuidString)
                         profile.subscriptionEnabled = subscription != nil
                         profile.subscriptionUpdated = subscription == nil ? nil : Date()
@@ -332,6 +356,9 @@ struct ImportView: View {
                 confirmation?.alternateTitle = "Add copy"
                 confirmation?.alternateAction = { save(nil) }
             }
-        } catch { report(error); finishImport() }
+        } catch {
+            report(error)
+            finishImport()
+        }
     }
 }

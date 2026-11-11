@@ -148,13 +148,23 @@ struct AppConfirmation {
             _ = await UIApplication.shared.open(updateURL)
             return
         }
-        let channel = UpdateChannel(rawValue: Bundle.main.object(forInfoDictionaryKey: "FreeTunnelDistributionChannel") as? String ?? "development") ?? .development
-        if channel == .development { updateStatus = "Development build"; return }
+        let channel =
+            UpdateChannel(
+                rawValue: Bundle.main.object(forInfoDictionaryKey: "FreeTunnelDistributionChannel")
+                    as? String ?? "development") ?? .development
+        if channel == .development {
+            updateStatus = "Development build"
+            return
+        }
         if channel == .testFlight {
             updateStatus = "Updates in TestFlight"
-            if let link = UpdatePolicy.testFlightURL(Bundle.main.object(forInfoDictionaryKey: "FreeTunnelTestFlightURL") as? String ?? "") {
+            if let link = UpdatePolicy.testFlightURL(
+                Bundle.main.object(forInfoDictionaryKey: "FreeTunnelTestFlightURL") as? String ?? ""
+            ) {
                 _ = await UIApplication.shared.open(link)
-            } else { message = "Open TestFlight to update this app." }
+            } else {
+                message = "Open TestFlight to update this app."
+            }
             return
         }
         guard !checkingUpdate else { return }
@@ -162,13 +172,20 @@ struct AppConfirmation {
         defer { checkingUpdate = false }
         do {
             let bundleID = Bundle.main.bundleIdentifier ?? "org.freetunnel.ios"
-            guard let url = UpdatePolicy.lookup(bundleID: bundleID) else { throw ClientError.invalidSource }
+            guard let url = UpdatePolicy.lookup(bundleID: bundleID) else {
+                throw ClientError.invalidSource
+            }
             let data = try await Downloads.read(URLRequest(url: url), limit: 1_048_576)
-            let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.4"
-            if let release = try UpdatePolicy.newerRelease(data, bundleID: bundleID, current: current) {
+            let current =
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+                ?? "1.2.4"
+            if let release = try UpdatePolicy.newerRelease(
+                data, bundleID: bundleID, current: current) {
                 updateStatus = release.version
                 updateURL = release.trackViewUrl
-            } else { updateStatus = "Up to date" }
+            } else {
+                updateStatus = "Up to date"
+            }
         } catch {
             updateStatus = "Check for updates"
             report(error)

@@ -152,59 +152,11 @@ extension AppState {
         preferences.profiles.append(profile)
         if preferences.selectedID == nil { preferences.selectedID = profile.id }
     }
-    private func parseImport(_ text: String, allowInsecure: Bool) throws -> [String] {
-        guard text.utf8.count <= Configuration.maximumBytes else { throw ClientError.tooLarge }
-        let documents = try ImportDocument.split(text).map { value -> String in
-            let imported = try ImportDocument.parse(value)
-            guard let toml = imported.toml else { throw ClientError.invalidConfig }
-            return toml
-        }
-        return try documents.map { document in
-            let config = try Configuration(document)
-            if config.skipsVerification && !allowInsecure { throw ClientError.insecureConfig }
-            return try config.serialized()
-        }
-    }
-    private func storeImport(_ documents: [String]) throws {
-        guard loaded else { throw ClientError.storageFailed }
-        guard documents.count <= 100 else { throw ClientError.tooLarge }
-        var profiles: [Profile] = []
-        do {
-            for document in documents {
-                let config = try Configuration(document)
-                var profile = Profile(name: config.name)
-                profile.routing = config.importedRouting
-                let secret = Secret(toml: try config.storingImportedRulesInProfile())
-                try Vault.write(encoder.encode(secret), key: profile.id.uuidString)
-                profiles.append(profile)
-            }
-            var updated = preferences
-            for index in profiles.indices
-            where profiles[index].routing != updated.splitProfiles[0].routing {
-                let name = "Imported " + profiles[index].id.uuidString.prefix(8)
-                profiles[index].splitProfile = name
-                updated.splitProfiles.append(
-                    SplitProfile(name: name, routing: profiles[index].routing))
-            }
-            updated.profiles.append(contentsOf: profiles)
-            if updated.selectedID == nil { updated.selectedID = profiles.first?.id }
-            try encoder.encode(updated).write(
-                to: Identity.directory().appendingPathComponent("preferences.json"),
-                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-            )
-            preferences = updated
-        } catch {
-            for profile in profiles { try? Vault.remove(profile.id.uuidString) }
-            throw error
-        }
-    }
-    func importBatch(_ text: String, allowInsecure: Bool = false) throws -> Int {
-        let documents = try parseImport(text, allowInsecure: allowInsecure)
-        try storeImport(documents)
-        return documents.count
-    }
     func importFiles(_ urls: [URL]) {
-        guard urls.count <= 100 else { report(ClientError.tooLarge); return }
+        guard urls.count <= 100 else {
+            report(ClientError.tooLarge)
+            return
+        }
         var batch: [ImportDocument.Document] = []
         for url in urls {
             do {
@@ -213,7 +165,9 @@ extension AppState {
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size <= Configuration.maximumBytes else { throw ClientError.tooLarge }
                 let data = try Data(contentsOf: url)
-                guard let text = String(data: data, encoding: .utf8) else { throw ClientError.invalidConfig }
+                guard let text = String(data: data, encoding: .utf8) else {
+                    throw ClientError.invalidConfig
+                }
                 for item in try ImportDocument.split(text) {
                     guard batch.count < 100 else { throw ClientError.tooLarge }
                     do { batch.append(try ImportDocument.parse(item)) } catch { report(error) }
@@ -225,7 +179,9 @@ extension AppState {
     }
     func remove(_ profile: Profile) throws {
         // An unrelated saved server is editable while the selected VPN runs.
-        guard vpn.isDisconnected || selected?.id != profile.id else { throw ClientError.tunnelFailed }
+        guard vpn.isDisconnected || selected?.id != profile.id else {
+            throw ClientError.tunnelFailed
+        }
         try Vault.remove(profile.id.uuidString)
         preferences.profiles.removeAll { $0.id == profile.id }
         if preferences.selectedID == profile.id {
@@ -318,32 +274,53 @@ extension AppState {
     }
     func refreshSubscription(_ profile: Profile, manual: Bool = true) async {
         let key = "subscription-" + profile.id.uuidString
-        guard openDialogs.isEmpty, dialog == nil, confirmation == nil, busy.insert(key).inserted else { return }
+        guard openDialogs.isEmpty, dialog == nil, confirmation == nil, busy.insert(key).inserted
+        else { return }
         defer { busy.remove(key) }
         do {
             let record = try secret(profile)
             guard let url = record.subscription else { throw ClientError.invalidSource }
             let previous = try Configuration(record.toml)
             if !manual && !(previous.endpoint["custom_sni"] as? String ?? "").isEmpty { return }
-            let data = try await Downloads.read(Subscription.request(url), limit: Subscription.maximumBytes)
+            let data = try await Downloads.read(
+                Subscription.request(url), limit: Subscription.maximumBytes)
             let text = try Subscription.apply(data, previous: record.toml)
             let changed = try Configuration(text)
             let apply = {
-                do {
-                    guard var latest = self.preferences.profiles.first(where: { $0.id == profile.id }), self.openDialogs.isEmpty, self.dialog == nil else { return }
-                    let current = try self.secret(latest)
-                    guard current.toml == record.toml, current.subscription == url else { return }
-                    try Vault.write(JSONEncoder().encode(Secret(toml: text, subscription: url)), key: profile.id.uuidString)
-                    latest.subscriptionUpdated = Date()
-                    self.update(latest)
-                    if self.selected?.id == profile.id && text != record.toml { self.reapplySelected() }
-                    if manual { self.message = "Subscription updated" }
-                } catch { self.report(error) }
+                self.applySubscription(
+                    profile, original: record, url: url, text: text, manual: manual)
             }
             if previous.hostname.caseInsensitiveCompare(changed.hostname) != .orderedSame {
-                guard manual else { message = "Subscription changed its server. Refresh it to review."; return }
-                confirm(String(format: NSLocalizedString("The subscription changes the server from %@ to %@. Apply?", comment: ""), previous.hostname, changed.hostname), actionTitle: "Apply", action: apply)
-            } else { apply() }
+                guard manual else {
+                    message = "Subscription changed its server. Refresh it to review."
+                    return
+                }
+                confirm(
+                    String(
+                        format: NSLocalizedString(
+                            "The subscription changes the server from %@ to %@. Apply?", comment: ""
+                        ), previous.hostname, changed.hostname), actionTitle: "Apply", action: apply
+                )
+            } else {
+                apply()
+            }
+        } catch { report(error) }
+    }
+    private func applySubscription(
+        _ profile: Profile, original: Secret, url: String, text: String, manual: Bool
+    ) {
+        do {
+            guard var latest = preferences.profiles.first(where: { $0.id == profile.id }),
+                openDialogs.isEmpty, dialog == nil
+            else { return }
+            let current = try secret(latest)
+            guard current.toml == original.toml, current.subscription == url else { return }
+            try Vault.write(
+                encoder.encode(Secret(toml: text, subscription: url)), key: profile.id.uuidString)
+            latest.subscriptionUpdated = Date()
+            update(latest)
+            if selected?.id == profile.id && text != original.toml { reapplySelected() }
+            if manual { message = "Subscription updated" }
         } catch { report(error) }
     }
     func detachSubscription(_ profile: Profile) {
