@@ -107,6 +107,18 @@ public:
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
     void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
+    QStringList subscriptionPaths;
+    QStringList fetchedSubscriptions;
+    QStringList canceledSubscriptions;
+    QStringList refreshedSubscriptions;
+    Q_INVOKABLE bool hasSubscription(const QString &path) const { return subscriptionPaths.contains(path); }
+    Q_INVOKABLE bool fetchSubscriptionForImport(const QString &token) { fetchedSubscriptions.append(token); return true; }
+    Q_INVOKABLE void cancelSubscriptionImport(const QString &token) { canceledSubscriptions.append(token); }
+    Q_INVOKABLE bool answerHostnameChange(const QString &, bool) { return true; }
+    Q_INVOKABLE void setConfigOpenInEditor(const QString &) { }
+    Q_INVOKABLE bool beginSubscriptionImport(const QString &) { return true; }
+    Q_INVOKABLE bool refreshSubscription(const QString &path) { refreshedSubscriptions.append(path); return true; }
+    Q_INVOKABLE bool detachSubscription(const QString &) { return true; }
     Q_INVOKABLE QString configPath(int index) const
     {
         return index >= 0 && index < m_configs.size()
@@ -352,6 +364,8 @@ public:
     void setExitingSilently(bool exiting) { m_exiting = exiting; }
 
 signals:
+    void subscriptionConsentRequired(const QString &token, const QVariantMap &details);
+    void subscriptionHostnameChanged(const QString &path, const QString &oldHostname, const QString &newHostname);
     void stateChanged();
     void tick();
     void configChanged();

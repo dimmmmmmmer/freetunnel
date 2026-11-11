@@ -71,6 +71,8 @@ private slots:
     void logsPageLoads();
     void createConfigOverlayLoads();
     void mainWindowLoads();
+    void subscriptionConsentIsQueuedAndCancellationDoesNotFetch();
+    void subscriptionRefreshAsksBeforeDiscardingEditorChanges();
     void mainWindowPageNavigation();
     void closingTheWindowQuitsWhenThereIsNoTray();
     void everythingTheWindowsAgentLooksForCanBeFound();
@@ -2704,6 +2706,66 @@ void TestQmlUi::chipsAreCutOnlyWhereTheRowEnds()
     QVERIFY(page);
     const QString problem = check(page, route);
     QVERIFY2(problem.isEmpty(), qPrintable(problem));
+    delete root;
+}
+
+void TestQmlUi::subscriptionRefreshAsksBeforeDiscardingEditorChanges()
+{
+    const QStringList previousConfigs = m_backend.configs();
+    m_backend.setConfigs({QStringLiteral("Subscribed")});
+    const QString path = m_backend.configPath(0);
+    m_backend.subscriptionPaths = {path};
+    m_backend.refreshedSubscriptions.clear();
+    auto restore = qScopeGuard([&] { m_backend.subscriptionPaths.clear(); m_backend.setConfigs(previousConfigs); });
+    QScopedPointer<QObject> root(createMainWindow(m_engine));
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root.data());
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    root->setProperty("editIndex", 0);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *field = nullptr;
+    QTRY_VERIFY((field = root->findChild<QObject *>(QStringLiteral("nameField"))) != nullptr);
+    field->setProperty("text", QStringLiteral("Unsaved name"));
+    QObject *refresh = root->findChild<QObject *>(QStringLiteral("refreshSubscriptionAction"));
+    QVERIFY(refresh);
+    QObject *form = root->findChild<QObject *>(QStringLiteral("editorForm"));
+    QVERIFY(form);
+    form->setProperty("contentY", qMax(0.0, form->property("contentHeight").toDouble() - form->property("height").toDouble()));
+    QCoreApplication::processEvents();
+    QQmlExpression click(QQmlEngine::contextForObject(refresh), refresh, QStringLiteral("clicked(null)"));
+    click.evaluate();
+    QVERIFY2(!click.hasError(), qPrintable(click.error().toString()));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt->property("visible").toBool());
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+    QMetaObject::invokeMethod(prompt, "cancel");
+    QCOMPARE(field->property("text").toString(), QStringLiteral("Unsaved name"));
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+}
+
+void TestQmlUi::subscriptionConsentIsQueuedAndCancellationDoesNotFetch()
+{
+    m_backend.fetchedSubscriptions.clear();
+    m_backend.canceledSubscriptions.clear();
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("first"), {{QStringLiteral("origin"), QStringLiteral("https://one.example")}});
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("second"), {{QStringLiteral("origin"), QStringLiteral("https://two.example")}});
+    QVERIFY(prompt->property("text").toString().contains(QStringLiteral("one.example")));
+    QVERIFY(m_backend.fetchedSubscriptions.isEmpty());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QCOMPARE(m_backend.canceledSubscriptions, QStringList{QStringLiteral("first")});
+    QTRY_VERIFY(prompt->property("visible").toBool());
+    QTRY_VERIFY(prompt->property("text").toString().contains(QStringLiteral("two.example")));
+    QMetaObject::invokeMethod(prompt, "close");
+    QMetaObject::invokeMethod(prompt, "confirmed");
+    QCOMPARE(m_backend.fetchedSubscriptions, QStringList{QStringLiteral("second")});
     delete root;
 }
 

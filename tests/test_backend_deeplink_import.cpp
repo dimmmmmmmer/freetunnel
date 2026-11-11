@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QScopeGuard>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include <QCoreApplication>
@@ -98,6 +99,9 @@ void TestBackendDeepLinkImport::initTestCase()
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir(base).removeRecursively();
     QDir().mkpath(base);
+    // This suite exercises static import and the explicit subscriptions-disabled fallback.
+    // Enabled subscriptions and their consent queue have their own backend suite.
+    QSettings().setValue(QStringLiteral("subscriptions/enabled"), false);
 }
 
 // ---- import from a file ---------------------------------------------------

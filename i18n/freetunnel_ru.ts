@@ -500,6 +500,10 @@
         <translation>Из файла…</translation>
     </message>
     <message>
+        <source>Subscription</source>
+        <translation>Подписка</translation>
+    </message>
+    <message>
         <source>Create new…</source>
         <translation>Создать новый…</translation>
     </message>
@@ -584,6 +588,18 @@
     <message>
         <source>Address(es) · host:port (comma-separated)</source>
         <translation>Адрес(а) · host:port (через запятую)</translation>
+    </message>
+    <message>
+        <source>Refresh subscription</source>
+        <translation>Обновить подписку</translation>
+    </message>
+    <message>
+        <source>Stop updates</source>
+        <translation>Остановить обновления</translation>
+    </message>
+    <message>
+        <source>Stop subscription updates?</source>
+        <translation>Остановить обновления подписки?</translation>
     </message>
     <message>
         <source>Username</source>
@@ -983,6 +999,26 @@
         <translation>Конфиг добавлен: %1</translation>
     </message>
     <message>
+        <source>Fetch subscription from %1?</source>
+        <translation>Загрузить подписку с %1?</translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation>Продолжить</translation>
+    </message>
+    <message>
+        <source>The subscription changes the server from %1 to %2. Apply?</source>
+        <translation>Подписка меняет сервер с %1 на %2. Применить?</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Применить</translation>
+    </message>
+    <message>
+        <source>Keep current</source>
+        <translation>Оставить текущий</translation>
+    </message>
+    <message>
         <source>Import</source>
         <translation>Импортировать</translation>
     </message>
@@ -1372,6 +1408,25 @@
     <message>
         <source>This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses</source>
         <translation>Этой подписке нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel</translation>
+    </message>
+</context>
+<context>
+    <name>SubscriptionOverlay</name>
+    <message>
+        <source>Subscription</source>
+        <translation>Подписка</translation>
+    </message>
+    <message>
+        <source>HTTPS subscription URL</source>
+        <translation>HTTPS-адрес подписки</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Добавить</translation>
     </message>
 </context>
 <context>

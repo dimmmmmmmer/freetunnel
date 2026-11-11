@@ -38,6 +38,7 @@ See [what changed](CHANGELOG.md) for release notes.
 
 - **Connect with one click:** save multiple server configurations and switch between them.
 - **Easy import:** add `tt://` links or TOML files; send several at once from your phone to Android TV.
+- **Subscriptions:** keep server settings up to date, with confirmation before downloading from a new source.
 - **Split tunnelling:** choose which apps and sites use the VPN, with a ready-made profile for Russia.
 - **Geo lists:** ready-made site and IP lists or your own HTTPS list; choose VPN or direct access, with manual rules taking priority.
 - **Kill switch:** block traffic if the VPN connection drops.

@@ -289,7 +289,7 @@ Item {
         // sizes itself the same way.
         width: Math.min(cfgRoot.width - 16,
                         Math.max(140, Math.ceil(Math.max(mrPaste.labelWidth, mrFile.labelWidth,
-                                                         mrCreate.labelWidth)) + 40))
+                                                         mrCreate.labelWidth, mrSubscription.labelWidth)) + 40))
         height: menuCol.height + 12; radius: 10; color: theme.bg
         border.color: theme.border; border.width: 1
         PopupShadow { radius: parent.radius; strength: theme.dark ? 0.5 : 0.2 }
@@ -314,6 +314,8 @@ Item {
                 onTriggered: { importMenu.open = false; fileDlg.open() } }
             Item { width: parent.width; height: 11
                 Rectangle { anchors.centerIn: parent; width: parent.width - 16; height: 1; color: theme.border } }
+            MenuRow { id: mrSubscription; text: qsTr("Subscription")
+                onTriggered: { importMenu.open = false; shell.overlay = "subscription" } }
             MenuRow { id: mrCreate; text: qsTr("Create new…")
                 onTriggered: { importMenu.open = false; shell.editIndex = -1; shell.overlay = "create" } }
         }

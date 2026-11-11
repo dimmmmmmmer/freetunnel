@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -20,6 +21,9 @@ import androidx.core.content.edit
 import androidx.core.app.NotificationCompat
 import com.adguard.trusttunnel.CertificateVerificator
 import com.adguard.trusttunnel.VpnClient
+import com.adguard.trusttunnel.Logger
+import com.adguard.trusttunnel.log.NativeLogger
+import com.adguard.trusttunnel.log.NativeLoggerLevel
 import com.adguard.trusttunnel.VpnClientListener
 import com.adguard.trusttunnel.VpnServiceConfig
 import com.adguard.trusttunnel.utils.NetworkUtils
@@ -162,9 +166,31 @@ class FreeTunnelVpnService : VpnService() {
     // newer is still to be served, so ending the service with this id fails and leaves that start its service. Worker only.
     private var servedStartId = 0
 
+    private val loggingPreferences = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "logging" || key == "verbose_logs") execute { configureCoreLogging() }
+    }
+    private fun configureCoreLogging() {
+        if (destroyed || owner !== this) return
+        NativeLogger.defaultLogLevel = if (prefs.getBoolean("verbose_logs", false)
+            && prefs.getBoolean("logging", true)) NativeLoggerLevel.DEBUG else NativeLoggerLevel.INFO
+        // The callback retains no Service: a new service owns subsequent native messages.
+        Logger.setCallback(object : Logger.Callback {
+            override fun log(logLevel: Logger.LogLevel, message: String) {
+                owner?.logCore(logLevel.name, message)
+            }
+        })
+    }
+    private fun logCore(level: String, message: String) {
+        if (destroyed || !prefs.getBoolean("logging", true)) return
+        if (!prefs.getBoolean("verbose_logs", false) && level != "WARN" && level != "ERROR") return
+        runCatching { LogFile.append(File(filesDir, LogFile.NAME),
+            LogLines.coreEntry(System.currentTimeMillis(), java.time.ZoneId.systemDefault(), level, message)) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         owner = this
+        prefs.registerOnSharedPreferenceChangeListener(loggingPreferences)
         GeoRepository.get(this).observe(geoListener)
         GeoRepository.get(this).refreshEnabled()
         val manager = getSystemService(NotificationManager::class.java)
@@ -294,6 +320,7 @@ class FreeTunnelVpnService : VpnService() {
 
     /** Starts a core on a duplicate of [tun], the retained TUN built from [plan]. */
     private fun startCore(plan: RoutingConfig.Plan, tun: ParcelFileDescriptor, verifier: CertificateVerificator = CertificateVerificator()) {
+        configureCoreLogging()
         val token = generation + 1
         val listener = object : VpnClientListener {
             override fun protectSocket(socket: Int) = protect(socket)
@@ -492,6 +519,7 @@ class FreeTunnelVpnService : VpnService() {
     override fun onDestroy() {
         GeoRepository.get(this).removeObserver(geoListener)
         destroyed = true
+        prefs.unregisterOnSharedPreferenceChangeListener(loggingPreferences)
         publishState(0)
         if (owner === this) owner = null
         execute {

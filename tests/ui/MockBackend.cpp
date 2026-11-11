@@ -248,6 +248,7 @@ QVariantMap MockBackend::configFields(int index) const
     QVariantMap f;
     if (index < 0 || index >= m_configs.size())
         return f;
+    f[QStringLiteral("path")] = configPath(index);
     f[QStringLiteral("name")] = m_configs.at(index);
     f[QStringLiteral("hostname")] = QStringLiteral("vpn.example.com");
     f[QStringLiteral("addresses")] = QStringLiteral("1.2.3.4:443");

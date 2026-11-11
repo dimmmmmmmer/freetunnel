@@ -15,10 +15,13 @@ certificate is not an official release or an update compatibility contract.
   is checked and confirmed in order. Text files can contain links too.
   Imports are limited to 100 pending items and 1 MiB per document.
   Links of format versions 0 to 2 are read; TrustTunnel 1.3 writes version 2.
-  Subscriptions are not followed yet: a link or file with only a subscription
-  is refused, and from other links and files only the server's own settings
-  are imported. The subscription address is not kept; the rest of a file is
-  kept as written. Servers that need an auth key are refused until the app
+  HTTPS subscriptions ask before their first download; their addresses and credentials
+  stay in encrypted storage. Refresh or stop updates in the server editor. While the
+  app is open, subscriptions refresh when at least 24 hours old (failed requests
+  retry no sooner than one hour). A changed server hostname needs confirmation;
+  local routing, DNS and transport preferences are preserved. Automatic refresh is
+  suspended for configurations with custom SNI. Servers that need an auth key are
+  refused until the app
   moves to TrustTunnel core 1.3. The rules for each version 2 field are the
   desktop's, in [DEEP_LINK.md](../DEEP_LINK.md); for TOML, only an empty
   `client_random_auth_key` counts as no key. That is stricter than the
@@ -34,6 +37,9 @@ certificate is not an official release or an update compatibility contract.
   would be when it lacks the server's host name, addresses, user name or
   password. It is named after its `name`, or, when it has none, as other
   TOML files are: after the file, or "From clipboard" when pasted.
+- Scan a TrustTunnel QR code using the camera on phones and tablets. Camera access
+  is requested only when opening the scanner; decoded configurations still need confirmation.
+- Optional verbose native-core logs use the same timestamp and severity format as desktop.
 - TOML, Android adapter and native configuration checks before saving.
   The editor shows the password as dots and prevents screen capture.
 - AES-GCM encrypted profiles with Android Keystore. Read failures preserve

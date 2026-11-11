@@ -312,23 +312,26 @@ public:
     // Ask again, and tell QML if the answer moved. See the definition.
     void recheckCredentialStorage();
 
-    // TrustTunnel subscriptions, with experimental/subscriptions on (BackendSubscriptions.cpp).
-    // None of it is Q_INVOKABLE: the window has no part in it until its screens come.
+    // TrustTunnel subscriptions (BackendSubscriptions.cpp).
+    // Window actions preserve the controller's consent and credential-storage rules.
     // Answers and status come through subscriptions()'s signals; the question about
     // what a fetch gave is deepLinkImportConfirmationRequired()'s, with a token for
     // a link, and the answer confirmDeepLinkImport()'s.
+    Q_INVOKABLE bool hasSubscription(const QString &path) const;
     SubscriptionController *subscriptions() const { return m_subscriptions; }
-    bool beginSubscriptionImport(const QString &url); // "Add from subscription URL"; asks first
-    bool fetchSubscriptionForImport(const QString &token); // the user agreed to the fetch
+    Q_INVOKABLE bool beginSubscriptionImport(const QString &url); // "Add from subscription URL"; asks first
+    Q_INVOKABLE bool fetchSubscriptionForImport(const QString &token); // the user agreed to the fetch
     bool confirmSubscriptionImport(const QString &token, bool replaceExisting, bool useLinkFallback);
-    void cancelSubscriptionImport(const QString &token);
-    bool refreshSubscription(const QString &path);
-    bool detachSubscription(const QString &path);
-    bool answerHostnameChange(const QString &path, bool accept);
+    Q_INVOKABLE void cancelSubscriptionImport(const QString &token);
+    Q_INVOKABLE bool refreshSubscription(const QString &path);
+    Q_INVOKABLE bool detachSubscription(const QString &path);
+    Q_INVOKABLE bool answerHostnameChange(const QString &path, bool accept);
     // The config the editor has open, or empty once it closes: an update to it waits.
-    void setConfigOpenInEditor(const QString &path);
+    Q_INVOKABLE void setConfigOpenInEditor(const QString &path);
 
 signals:
+    void subscriptionConsentRequired(const QString &token, const QVariantMap &details);
+    void subscriptionHostnameChanged(const QString &path, const QString &oldHostname, const QString &newHostname);
     void stateChanged();
     void tick();
     void configChanged();

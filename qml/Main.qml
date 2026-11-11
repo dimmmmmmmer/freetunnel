@@ -109,6 +109,16 @@ Window {
 
     Connections {
         target: backend
+        function onSubscriptionConsentRequired(token, details) {
+            showConfirmWithCancellation(qsTr("Fetch subscription from %1?").arg(details.origin), qsTr("Continue"), "",
+                function() { backend.fetchSubscriptionForImport(token) }, null, false,
+                function() { backend.cancelSubscriptionImport(token) })
+        }
+        function onSubscriptionHostnameChanged(path, oldHostname, newHostname) {
+            showConfirmWithAlternate(qsTr("The subscription changes the server from %1 to %2. Apply?").arg(oldHostname).arg(newHostname),
+                qsTr("Apply"), qsTr("Keep current"), function() { backend.answerHostnameChange(path, true) },
+                function() { backend.answerHostnameChange(path, false) }, false)
+        }
         function onAboutToShutdown() {
             shuttingDown = true
             // Defer so tray/dock menu items can finish closing before we tear down.
@@ -360,7 +370,8 @@ Window {
     onCurrentPageChanged: pageLoader.setSource(pagePaths[currentPage], pageProps())
     onOverlayChanged: {
         var src = overlay === "create" ? "CreateConfigOverlay.qml"
-                : overlay === "apps" ? "AppPickerOverlay.qml" : ""
+                : overlay === "apps" ? "AppPickerOverlay.qml"
+                : overlay === "subscription" ? "SubscriptionOverlay.qml" : ""
         overlayLoader.setSource(src, src === "" ? {} : pageProps())
     }
 
@@ -934,6 +945,7 @@ Window {
     // ---------- window-level confirm dialog (covers the whole window) --------
     property var confirmCb: null
     property var confirmAltCb: null
+    property var confirmCancelCb: null
     // Requests that arrived while a dialog was already up, oldest first.
     property var confirmQueue: []
     function showConfirm(message, confirmLabel, cb) {
@@ -942,6 +954,9 @@ Window {
     // altLabel === "" keeps the plain two-button dialog. returnConfirms false
     // leaves the answer to a click (see ConfirmDialog).
     function showConfirmWithAlternate(message, confirmLabel, altLabel, cb, altCb, returnConfirms) {
+        showConfirmWithCancellation(message, confirmLabel, altLabel, cb, altCb, returnConfirms, null)
+    }
+    function showConfirmWithCancellation(message, confirmLabel, altLabel, cb, altCb, returnConfirms, cancelCb) {
         // A second request used to overwrite the live dialog in place, so the
         // user answered a question they never read using the buttons of the
         // previous one — and the callback that ran was the new one. Deep links
@@ -950,18 +965,19 @@ Window {
         if (winConfirm.visible) {
             confirmQueue.push({ message: message, confirmLabel: confirmLabel,
                                 altLabel: altLabel, cb: cb, altCb: altCb,
-                                returnConfirms: returnConfirms })
+                                returnConfirms: returnConfirms, cancelCb: cancelCb })
             return
         }
-        applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms)
+        applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms, cancelCb)
     }
-    function applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms) {
+    function applyConfirm(message, confirmLabel, altLabel, cb, altCb, returnConfirms, cancelCb) {
         winConfirm.text = message
         winConfirm.confirmText = confirmLabel
         winConfirm.altText = altLabel
         winConfirm.returnConfirms = returnConfirms
         win.confirmCb = cb
         win.confirmAltCb = altCb
+        win.confirmCancelCb = cancelCb
         winConfirm.open()
     }
     // Whether this question is on screen already, or waiting its turn.
@@ -974,7 +990,7 @@ Window {
             return
         var next = confirmQueue.shift()
         applyConfirm(next.message, next.confirmLabel, next.altLabel, next.cb, next.altCb,
-                     next.returnConfirms)
+                     next.returnConfirms, next.cancelCb)
     }
     // Drawn above everything, the editor's own "Discard unsaved changes?" included,
     // so it owns Return and Escape while it is up and that one stands down (see
@@ -983,6 +999,7 @@ Window {
     ConfirmDialog { id: winConfirm; objectName: "windowConfirm"; z: 2500; theme: win.theme
         onConfirmed: if (win.confirmCb) win.confirmCb()
         onAlternate: if (win.confirmAltCb) win.confirmAltCb()
+        onCanceled: if (win.confirmCancelCb) win.confirmCancelCb()
         // Deferred: the dialog clears `visible` before it emits confirmed()/
         // alternate(), so showing the next one inline would replace confirmCb
         // before the answer to the current question had run.

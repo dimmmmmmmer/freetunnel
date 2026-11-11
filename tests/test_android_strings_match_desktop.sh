@@ -26,6 +26,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 # One row for each string the desktop has too: [android name, desktop context, desktop source text].
 cat > "$TMP/table.jsonl" <<'TABLE'
+["settings_verbose_logs", "SettingsPage", "Verbose logs"]
+["settings_verbose_hint", "SettingsPage", "full VPN core detail for debugging (noisy)"]
 ["text_add_configuration", "ConfigsPage", "Add a config"]
 ["text_connecting", "HomePage", "Connecting…"]
 ["text_connected", "Backend", "Connected"]
@@ -305,6 +307,20 @@ export_no_picker
 logs_export
 logs_exported
 logs_no_picker
+qr_scan
+qr_hint
+qr_unavailable
+subscription_title
+subscription_url
+subscription_fetch
+subscription_failed
+subscription_updating
+subscription_updated
+subscription_refresh
+subscription_stop
+subscription_stop_question
+subscription_host_changed
+subscription_review
 
 ## Logs and Settings: a log that cannot be read to copy, and a link with no browser to open it
 text_could_not_read_log
