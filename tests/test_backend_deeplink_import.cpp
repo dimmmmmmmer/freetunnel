@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QScopeGuard>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include <QCoreApplication>
@@ -43,6 +44,10 @@ private slots:
     void importFileLeavesTheOriginalAlone();
     void importFileSaysWhenTheConfigSkipsCertificateChecks();
     void clipboardImportNeedsALink();
+    void clipboardBatchAsksForEachLinkWithoutImportingIt();
+    void textFilesCanContainLinkBatches();
+    void fileBatchesContinueAfterAnUnreadableFile();
+    void oversizedBatchesAreRefusedBeforeImport();
 
     // TrustTunnel 1.3: version 2 links and the configs its endpoint exports.
     void aVersion2LinkFromTheEndpointImports();
@@ -94,6 +99,9 @@ void TestBackendDeepLinkImport::initTestCase()
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir(base).removeRecursively();
     QDir().mkpath(base);
+    // This suite exercises static import and the explicit subscriptions-disabled fallback.
+    // Enabled subscriptions and their consent queue have their own backend suite.
+    QSettings().setValue(QStringLiteral("subscriptions/enabled"), false);
 }
 
 // ---- import from a file ---------------------------------------------------
@@ -252,6 +260,69 @@ void TestBackendDeepLinkImport::clipboardImportNeedsALink()
     // whatever internal complaint it happens to produce.
     QVERIFY2(failed.at(1).at(0).toString().contains(QStringLiteral("tt://")),
              qPrintable(failed.at(1).at(0).toString()));
+}
+
+void TestBackendDeepLinkImport::clipboardBatchAsksForEachLinkWithoutImportingIt()
+{
+    Backend backend;
+    const int before = backend.configs().size();
+    QSignalSpy questions(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failures(&backend, &Backend::errorOccurred);
+    QGuiApplication::clipboard()->setText(v2::kFull + QStringLiteral("\ninvalid\t") + v2::kFull);
+    QVERIFY(!backend.importFromClipboard());
+    QCOMPARE(questions.count(), 2);
+    QCOMPARE(failures.count(), 1);
+    QCOMPARE(backend.configs().size(), before);
+    QString wrapped = v2::kFull;
+    wrapped.insert(wrapped.size() / 2, QLatin1Char('\n'));
+    QGuiApplication::clipboard()->setText(wrapped);
+    QVERIFY(!backend.importFromClipboard());
+    QCOMPARE(questions.count(), 3);
+    QCOMPARE(failures.count(), 1);
+}
+
+void TestBackendDeepLinkImport::textFilesCanContainLinkBatches()
+{
+    Backend backend;
+    QSignalSpy questions(&backend, &Backend::deepLinkImportConfirmationRequired);
+    const QString path = writeTempConfig(QStringLiteral("batch.txt"), (v2::kFull + '\n' + v2::kFull).toUtf8());
+    QVERIFY(!path.isEmpty());
+    const auto cleanup = qScopeGuard([&] { QFile::remove(path); });
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(questions.count(), 2);
+}
+
+void TestBackendDeepLinkImport::fileBatchesContinueAfterAnUnreadableFile()
+{
+    Backend backend;
+    QSignalSpy imported(&backend, &Backend::configImported);
+    QSignalSpy failures(&backend, &Backend::errorOccurred);
+    const QString path = writeTempConfig(QStringLiteral("batch-config.toml"), validImportBody());
+    QVERIFY(!path.isEmpty());
+    const auto cleanup = qScopeGuard([&] { QFile::remove(path); });
+    backend.importFiles({path + QStringLiteral(".missing"), path});
+    QCOMPARE(failures.count(), 1);
+    QCOMPARE(imported.count(), 1);
+    QVERIFY(QFile::exists(path));
+}
+
+void TestBackendDeepLinkImport::oversizedBatchesAreRefusedBeforeImport()
+{
+    Backend backend;
+    QSignalSpy questions(&backend, &Backend::deepLinkImportConfirmationRequired);
+    QSignalSpy failures(&backend, &Backend::errorOccurred);
+    QStringList links;
+    for (int i = 0; i < 101; ++i) links.append(v2::kFull);
+    QGuiApplication::clipboard()->setText(links.join('\n'));
+    QVERIFY(!backend.importFromClipboard());
+    backend.importFiles(links);
+    QCOMPARE(failures.count(), 2);
+    QCOMPARE(questions.count(), 0);
+    const QString path = writeTempConfig(QStringLiteral("oversized.toml"), QByteArray(1024 * 1024 + 1, 'a'));
+    QVERIFY(!path.isEmpty());
+    const auto cleanup = qScopeGuard([&] { QFile::remove(path); });
+    QVERIFY(!backend.importFile(path));
+    QCOMPARE(failures.count(), 3);
 }
 
 void TestBackendDeepLinkImport::cleanupTestCase()

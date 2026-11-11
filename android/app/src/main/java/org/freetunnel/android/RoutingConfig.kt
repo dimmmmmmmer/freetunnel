@@ -282,7 +282,8 @@ object RoutingConfig {
         } else emptyList()
         return prepare(source, prefs.getBoolean("split_enabled", false), prefs.getBoolean("through", false),
             rules.domains, apps, prefs.getBoolean("killswitch", true),
-            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo)
+            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo,
+            prefs.getBoolean("verbose_logs", false) && prefs.getBoolean("logging", true))
     }
 
     /**
@@ -293,7 +294,8 @@ object RoutingConfig {
      */
     @JvmStatic @JvmOverloads fun prepare(source: String, enabled: Boolean, through: Boolean,
                            domains: List<String>, apps: List<String>, killSwitch: Boolean,
-                           excludedRoutes: List<String> = emptyList(), geoRules: List<String> = emptyList()): Plan {
+                           excludedRoutes: List<String> = emptyList(), geoRules: List<String> = emptyList(),
+                           verboseLogs: Boolean = false): Plan {
         val parsed = validate(source)
         val originalMode = parsed.getString("vpn_mode") ?: "general"
         val original = parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
@@ -333,6 +335,7 @@ object RoutingConfig {
         }
         val root = linkedMapOf<String, Any>()
         parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
+        root["loglevel"] = if (verboseLogs) "debug" else "info"
         root["vpn_mode"] = mode
         root["exclusions"] = rules
         root["killswitch_enabled"] = killSwitch

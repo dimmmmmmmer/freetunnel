@@ -152,6 +152,21 @@ exports with `--format toml`, imported from file (see
 Passwords stay in the OS credential store: Keychain on macOS, Credential Manager
 on Windows, libsecret on Linux.
 
+### Subscriptions
+
+Choose **Configs → ＋ → Subscription** and paste the HTTPS address supplied by
+your provider. A subscription embedded in a link or TOML file offers the same
+confirmation before downloading. Review the fetched server before adding it.
+Subscription credentials are stored securely, outside exported configurations.
+
+Open the server editor to **Refresh subscription** or **Stop updates**. Updates
+preserve local routing, DNS and transport choices. A different server hostname
+needs your confirmation. Automatic refresh is suspended when custom SNI is set;
+use a manual refresh to decide when to contact the subscription server.
+Desktop refreshes while running; Android checks for updates at least 24 hours old
+while the app is open. Mobile background execution is subject to the operating
+system, so use **Refresh subscription** when you need an update immediately.
+
 ## Split tunnelling
 
 The **Split tunnelling** tab decides what goes through the tunnel. Rules are
@@ -376,6 +391,14 @@ install. How, and what that guards against: [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
+- **A desktop window is blank or menus disappear:** close FreeTunnel completely
+  (including its tray icon), then try software rendering in a new terminal. In
+  PowerShell: `$env:QT_QUICK_BACKEND="software"; & "C:\path\to\freetunnel.exe"`;
+  on Linux: `QT_QUICK_BACKEND=software freetunnel`; on macOS:
+  `QT_QUICK_BACKEND=software /Applications/FreeTunnel.app/Contents/MacOS/freetunnel`.
+  Use your installed executable path; close that terminal after testing.
+  Hardware acceleration remains the default; this workaround only changes
+  how the window is drawn.
 - **The TV cannot receive a configuration:** keep the receive window open and check
   that both devices are on the same local network. Guest Wi-Fi or client isolation
   can prevent the phone from reaching the TV.

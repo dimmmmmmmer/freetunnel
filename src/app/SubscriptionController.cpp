@@ -331,36 +331,33 @@ void SubscriptionController::setBusy(const QString &path, bool busy)
         m_busy.remove(path);
 }
 
-// A new import takes the place of one still waiting, and its fetch.
+// A batch keeps each consent token alive until answered or expired.
 QString SubscriptionController::open(SubscriptionImport import, const QVariantMap &details)
 {
-    if (m_import)
-        close(m_import->token);
+    for (const QString &token : m_imports.keys())
+        if (now() > m_imports.value(token).expiresAt) close(token);
+    if (m_imports.size() >= 100) return {};
     import.token = kTokenPrefix + QUuid::createUuid().toString(QUuid::WithoutBraces);
     import.expiresAt = now() + kImportSeconds;
-    m_import = std::move(import);
-    const QString token = m_import->token;
+    const QString token = import.token;
+    m_imports.insert(token, std::move(import));
     emit consentRequired(token, details);
     return token;
 }
 
 SubscriptionImport *SubscriptionController::pendingImport(const QString &token)
 {
-    if (!m_import || m_import->token != token)
-        return nullptr;
-    if (now() > m_import->expiresAt) {
-        close(token);
-        return nullptr;
-    }
-    return &*m_import;
+    auto it = m_imports.find(token);
+    if (it == m_imports.end()) return nullptr;
+    if (now() > it->expiresAt) { close(token); return nullptr; }
+    return &it.value();
 }
 
 void SubscriptionController::close(const QString &token)
 {
-    if (!m_import || m_import->token != token)
-        return;
+    if (!m_imports.contains(token)) return;
     abortFetch(token);
-    m_import.reset();
+    m_imports.remove(token);
 }
 
 bool SubscriptionController::isImportToken(const QString &text)

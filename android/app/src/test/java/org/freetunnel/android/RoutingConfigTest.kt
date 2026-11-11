@@ -32,6 +32,17 @@ class RoutingConfigTest {
     private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
         "192.168.0.0/16", "255.255.255.255/32")
 
+    @Test fun verboseLoggingOverridesImportedLevelWithoutDroppingGeoRules() {
+        val input = "loglevel = \"error\"\n" + source
+        val geo = listOf("@2:geo.example")
+        val verbose = RoutingConfig.prepare(input, true, true, listOf("manual.example"), emptyList(), true, emptyList(), geo, true)
+        val parsed = Toml.parse(verbose.toml)
+        assertEquals("debug", parsed.getString("loglevel"))
+        assertEquals(listOf("@0:manual.example", "@2:geo.example"), parsed.getArray("exclusions")!!.toList())
+        val normal = RoutingConfig.prepare(input, false, false, emptyList(), emptyList(), true)
+        assertEquals("info", Toml.parse(normal.toml).getString("loglevel"))
+    }
+
     @Test fun realWorldSizeGeoPolicyFitsGeneratedConfiguration() {
         val geo = (0 until 150_000).map { "@2:site$it.example" }
         val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true, emptyList(), geo)

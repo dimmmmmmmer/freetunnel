@@ -8,6 +8,7 @@
 #include <QFileDevice>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -28,9 +29,46 @@ bool Backend::importFromClipboard()
         return false;
     }
     if (text.startsWith(QStringLiteral("tt://")) || text.contains(QStringLiteral("tt=")))
-        return importDeepLink(text);
+        return importLinkBatch(text);
     emit errorOccurred(tr("No tt:// link in the clipboard"));
     return false;
+}
+
+bool Backend::importLinkBatch(const QString &text)
+{
+    if (text.size() > 1024 * 1024 || text.toUtf8().size() > 1024 * 1024) {
+        emit errorOccurred(tr("Choose up to 100 links or files, no larger than 1 MB each."));
+        return false;
+    }
+    const QStringList links = text.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    int starts = 0;
+    for (const QString &link : links) {
+        if (link.startsWith(QStringLiteral("tt://")) || link.startsWith(QStringLiteral("https://trusttunnel.org/qr.html"))
+                || link.startsWith(QStringLiteral("https://www.trusttunnel.org/qr.html")))
+            ++starts;
+    }
+    // Keep accepting an individual link whose payload was line-wrapped.
+    if (starts <= 1)
+        return importDeepLink(text);
+    if (links.size() > 100) {
+        emit errorOccurred(tr("Choose up to 100 links or files, no larger than 1 MB each."));
+        return false;
+    }
+    // Main.qml queues confirmations, so a later link cannot replace the question
+    // already on screen. Invalid entries do not stop the remaining links.
+    for (const QString &link : links)
+        importDeepLink(link);
+    return false; // Each valid link still needs the user's confirmation.
+}
+
+void Backend::importFiles(const QStringList &paths)
+{
+    if (paths.size() > 100) {
+        emit errorOccurred(tr("Choose up to 100 links or files, no larger than 1 MB each."));
+        return;
+    }
+    for (const QString &path : paths)
+        importFile(path);
 }
 
 bool Backend::finalizeImportedConfig(const QString &target, bool hadNoActive, bool targetPreExisted)
@@ -94,9 +132,13 @@ bool Backend::importFile(const QString &path)
     QString content;
     QString importErr;
     if (!freetunnel::backend_config::readValidatedImportContent(p, &content, &importErr)) {
+        if (importErr == QLatin1String("links"))
+            return importLinkBatch(content);
         if (importErr == QLatin1String("export"))
             return importEndpointExport(content, QFileInfo(p).completeBaseName());
-        if (importErr == QLatin1String("read"))
+        if (importErr == QLatin1String("large"))
+            emit errorOccurred(tr("Choose up to 100 links or files, no larger than 1 MB each."));
+        else if (importErr == QLatin1String("read"))
             emit errorOccurred(tr("Could not read the file"));
         else if (importErr == QLatin1String("authkey"))
             emit errorOccurred(freetunnel::newerCoreRefusal());

@@ -237,7 +237,7 @@ AppSettings loadAppSettings() {
     loadBypassProfiles(s, out); // and, inside it, the per-profile application lists
     loadHotkeys(s, out);
     out.last_config_path = s.value("vpn/last_config_path", "").toString();
-    out.subscriptions_enabled = s.value("experimental/subscriptions", false).toBool();
+    out.subscriptions_enabled = s.value("subscriptions/enabled", true).toBool();
     if (out.log_path.isEmpty()) {
         out.log_path = defaultLogPath();
     }
@@ -283,5 +283,5 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("hotkeys/connect", cfg.hotkey_connect);
     s.setValue("hotkeys/disconnect", cfg.hotkey_disconnect);
     s.setValue("vpn/last_config_path", cfg.last_config_path);
-    s.setValue("experimental/subscriptions", cfg.subscriptions_enabled);
+    s.setValue("subscriptions/enabled", cfg.subscriptions_enabled);
 }

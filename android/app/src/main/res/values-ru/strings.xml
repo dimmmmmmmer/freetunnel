@@ -225,6 +225,10 @@
     <string name="settings_core">"Ядро TrustTunnel "</string>
     <string name="update_check_failed">"Не удалось проверить обновления: %1$s"</string>
     <string name="update_latest">"Установлена последняя версия"</string>
+    <string name="import_batch_too_large">"Выберите до 100 ссылок или файлов размером не более 1 МБ каждый."</string>
+    <string name="logs_export">"Экспорт журнала"</string>
+    <string name="logs_exported">"Журнал сохранён"</string>
+    <string name="logs_no_picker">"На устройстве нет приложения для сохранения файлов. Используйте «Копировать»."</string>
     <string name="logs_off">"Логирование выключено."</string>
     <string name="logs_turn_on">"Включить"</string>
     <string name="logs_placeholder">"Логи появятся после подключения"</string>
@@ -259,4 +263,20 @@
     <string name="geo_every_5_hours">"Каждые 5 часов"</string>
     <string name="geo_every_24_hours">"Каждые 24 часа"</string>
     <string name="geo_never">"Никогда"</string>
+    <string name="settings_verbose_logs">Подробные логи</string>
+    <string name="settings_verbose_hint">полная детализация ядра VPN для отладки (шумно)</string>
+    <string name="qr_scan">Сканировать QR-код</string>
+    <string name="qr_hint">Наведите камеру на QR-код TrustTunnel.</string>
+    <string name="qr_unavailable">Камера недоступна. Вставьте ссылку или импортируйте файл.</string>
+    <string name="subscription_title">Подписка</string>
+    <string name="subscription_url">HTTPS-адрес подписки</string>
+    <string name="subscription_fetch">Загрузить подписку с %1$s?</string>
+    <string name="subscription_failed">Не удалось обновить подписку. Сохранённая конфигурация не изменена.</string>
+    <string name="subscription_updating">Обновление подписки…</string>
+    <string name="subscription_updated">Подписка обновлена</string>
+    <string name="subscription_refresh">Обновить подписку</string>
+    <string name="subscription_stop">Остановить обновления</string>
+    <string name="subscription_stop_question">Остановить обновления подписки?</string>
+    <string name="subscription_host_changed">Подписка меняет сервер с %1$s на %2$s. Применить?</string>
+    <string name="subscription_review">В подписке изменился сервер. Обновите её вручную для проверки.</string>
 </resources>

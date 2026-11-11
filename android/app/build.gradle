@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 // The app's version, X.Y.Z, set here and nowhere else. An official release is
@@ -25,24 +24,29 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:1.7.25'
     implementation 'com.github.tony19:logback-android:2.0.0'
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
-    implementation 'com.akuleshov7:ktoml-core:0.7.0'
+    implementation 'com.akuleshov7:ktoml-core:0.7.1'
     implementation 'org.tomlj:tomlj:1.1.1'
+    // Tomlj exposes these annotations in its API but declares them runtime-only.
+    // Kotlin 2.4 also needs them on the compilation classpath.
+    compileOnly 'org.checkerframework:checker-qual:3.21.2'
+    androidTestCompileOnly 'org.checkerframework:checker-qual:3.21.2'
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
     // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
     // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.
     implementation 'io.nayuki:qrcodegen:1.8.0'
+    implementation 'com.google.zxing:core:3.5.4'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
-    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.core:core-ktx:1.19.1'
     testImplementation 'junit:junit:4.13.2'
     // The platform's org.json is a stub in unit tests (every call throws); SplitProfiles keeps its profiles as JSON.
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'org.json:json:20260814'
 }
 
 android {
     namespace 'org.freetunnel.android'
-    compileSdk 35
-    buildToolsVersion '35.0.0'
+    compileSdk 37
+    buildToolsVersion '36.0.0'
     defaultConfig {
         applicationId 'org.freetunnel.android'
         minSdk 26
@@ -80,7 +84,6 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
-    kotlinOptions { jvmTarget = '11' }
 }
 
 // The third-party notices, from the repository, into the APK's assets:

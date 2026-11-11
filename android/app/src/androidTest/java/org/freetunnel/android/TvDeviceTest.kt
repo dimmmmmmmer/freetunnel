@@ -1,5 +1,7 @@
 package org.freetunnel.android
 
+import android.content.ClipData
+
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.ActivityNotFoundException
@@ -416,7 +418,7 @@ class TvDeviceTest {
             render(a, page)
             onMain {
                 val content = root(a)
-                val keys = descendants(content).filter { it.isShown && it.isFocusable }.mapNotNull { it.tag as? String }.toMutableSet()
+                val keys = descendants(content).filter { it.isShown && it.isEnabled && it.isFocusable }.mapNotNull { it.tag as? String }.toMutableSet()
                 // On a phone the log's text is selectable, so a stop of its own inside the box, and a ScrollView is offered to the arrows only
                 // where none of what is in it is a stop: the text is the stop there, and the box is on a TV.
                 if (content.findViewWithTag<TextView?>("log:text")?.isTextSelectable == true) keys.remove("log:box")
@@ -1809,9 +1811,10 @@ class TvDeviceTest {
                 .map { it.tag as String to descendants(it).filterIsInstance<TextView>().first().text.toString() }.toList()
         }
         val others = listOf("add:paste" to context.getString(R.string.text_paste_from_clipboard),
-            "add:file" to context.getString(R.string.add_from_file), "add:create" to context.getString(R.string.add_create_new))
+            "add:file" to context.getString(R.string.add_from_file), "add:create" to context.getString(R.string.add_create_new),
+            "add:subscription" to context.getString(R.string.subscription_title))
         if (!isTv) {
-            assertEquals(others, rows)
+            assertEquals(others + ("add:qr" to context.getString(R.string.qr_scan)), rows)
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             eventually("Back closes the menu") { overlayTag(a, "addmenu") == null }
             // Create new… opens the editor, as the desktop's does.
@@ -3800,12 +3803,31 @@ class TvDeviceTest {
             // The desktop's own texts: no About section.
             assertFalse(descendants(body).filterIsInstance<TextView>().any { it.text.toString() == "About" })
             // The desktop's switches that this has, and no switch for checking updates on launch, which the app does by itself.
-            assertEquals(listOf("switch:auto_connect", "switch:killswitch", "switch:logging"),
+            assertEquals(listOf("switch:auto_connect", "switch:killswitch", "switch:logging", "switch:verbose_logs"),
                 descendants(body).mapNotNull { it.tag as? String }.filter { it.startsWith("switch:") }.distinct().sorted().toList())
         }
         assertTrue("Kill switch has its subtitle", shows(a, context.getString(R.string.settings_kill_switch_hint)))
         // What only the desktop has is not here.
-        for (text in listOf("Launch at system startup", "Hotkeys", "Verbose logs", "Let the VPN config open ports")) assertFalse("$text is the desktop's alone", shows(a, text))
+        for (text in listOf("Launch at system startup", "Hotkeys", "Let the VPN config open ports")) assertFalse("$text is the desktop's alone", shows(a, text))
+    }
+
+    @Test fun detailedLoggingIsAvailableOnlyWhileLoggingIsOn() {
+        val a = open()
+        render(a, 3)
+        onMain {
+            assertFalse(root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled)
+        }
+        click(a, "switch:logging")
+        eventually("Logging enables the detail toggle") {
+            onMain { root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled }
+        }
+        click(a, "switch:verbose_logs")
+        assertTrue(prefs.getBoolean("verbose_logs", false))
+        click(a, "switch:logging")
+        eventually("Turning logging off disables detail without losing the preference") {
+            onMain { !root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled }
+        }
+        assertTrue(prefs.getBoolean("verbose_logs", false))
     }
 
     // The toggles' tracks, the dropdowns' values and the links at the end of a row end where the page's margin does, as the desktop's do. A
@@ -4204,6 +4226,72 @@ class TvDeviceTest {
         onMain { method("openLink", String::class.java).invoke(a, "freetunnel-test-nothing-opens-this://x") }
         assertTrue(context.getString(R.string.text_no_browser) in toastTexts(a))
         assertFalse(onMain { a.isFinishing || a.isDestroyed })
+    }
+
+    @Test fun clipboardBatchesAskInOrderAndCancellationDoesNotDropTheNextLink() {
+        val a = open()
+        fun link(name: String) = DeepLinkImport.encode(requireNotNull(DeepLinkImport.linkOf(name, RoutingConfig.validate(source))))
+        onMain {
+            val clipboard = a.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("batch", link("Batch A") + "\n" + link("Batch B")))
+            method("pasteFromClipboard").invoke(a)
+        }
+        eventually("First confirmation") { overlayTag(a, "confirm") != null }
+        assertEquals(2, org.json.JSONArray(ConfigStore.read(prefs)).length())
+        val first = overlayTag(a, "confirm")
+        click(a, "confirm:cancel")
+        eventually("Second confirmation replaces the first only after its answer") {
+            overlayTag(a, "confirm")?.let { it !== first } == true
+        }
+        SystemClock.sleep(500) // The import confirmation deliberately ignores the opening key press.
+        click(a, "confirm:ok")
+        eventually("Only the accepted second config is saved") { org.json.JSONArray(ConfigStore.read(prefs)).length() == 3 }
+        assertEquals("Batch B", org.json.JSONArray(ConfigStore.read(prefs)).getJSONObject(2).getString("name"))
+    }
+
+    @Test fun multipleSelectedFilesAreImportedOneAtATimeAndTextFilesCanContainLinks() {
+        val a = open()
+        val dir = java.io.File(context.cacheDir, "batch-import-test").apply { mkdirs() }
+        val first = java.io.File(dir, "First.toml").apply { writeText(source) }
+        val second = java.io.File(dir, "Second.txt").apply {
+            writeText(DeepLinkImport.encode(requireNotNull(DeepLinkImport.linkOf("File link", RoutingConfig.validate(source)))))
+        }
+        try {
+            val picked = ClipData.newRawUri("first", android.net.Uri.fromFile(first)).apply {
+                addItem(ClipData.Item(android.net.Uri.fromFile(second)))
+            }
+            onMain {
+                method("onActivityResult", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java)
+                    .invoke(a, 21, android.app.Activity.RESULT_OK, Intent().apply { clipData = picked })
+            }
+            eventually("First file is offered", 30_000) { overlayTag(a, "confirm") != null }
+            val question = overlayTag(a, "confirm")
+            SystemClock.sleep(500)
+            click(a, "confirm:ok")
+            eventually("Second file waits for first confirmation", 30_000) {
+                overlayTag(a, "confirm")?.let { it !== question } == true
+            }
+            SystemClock.sleep(500)
+            click(a, "confirm:ok")
+            eventually("Both files added") { org.json.JSONArray(ConfigStore.read(prefs)).length() == 4 }
+            val saved = org.json.JSONArray(ConfigStore.read(prefs))
+            assertEquals("First.toml", saved.getJSONObject(2).getString("name"))
+            assertEquals("File link", saved.getJSONObject(3).getString("name"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun logExportPreservesTheFileDatesAndLevels() {
+        val a = open()
+        writeLog(entryLine)
+        render(a, 4)
+        val export = byKey(a, "logs:export")
+        assertEquals(context.getString(R.string.logs_export), onMain { export.contentDescription })
+        val destination = java.io.File(context.cacheDir, "export-test.log")
+        try {
+            onMain { method("writeLogExport", android.net.Uri::class.java).invoke(a, android.net.Uri.fromFile(destination)) }
+            (field("ioWorker").get(a) as ExecutorService).submit {}.get(30, TimeUnit.SECONDS)
+            assertEquals(LogFile.read(logFile), destination.readText())
+        } finally { destination.delete() }
     }
 
     // ---- Logs (qml/pages/LogsPage.qml) ----

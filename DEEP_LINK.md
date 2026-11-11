@@ -94,7 +94,7 @@ another. Each record:
 | `0x0B` | Client random prefix | UTF-8 `prefix[/mask]` hex | no | empty | See [rules](#client-random-tag-0x0b) |
 | `0x0C` | Display name | UTF-8 string | no | empty | See [naming](#display-name-tag-0x0c) |
 | `0x0D` | DNS upstreams | string list | no | empty | See [encoding](#dns-upstream-list-tag-0x0d) |
-| `0x0E` | Subscription address | UTF-8 string, `https://` | no | — | Version 2. Not kept, see [rules](#subscription-address-tag-0x0e) |
+| `0x0E` | Subscription address | UTF-8 string, `https://` | no | — | Version 2. Securely linked, see [rules](#subscription-address-tag-0x0e) |
 | `0x0F` | Client random auth key | UTF-8 hex | no | empty | Version 2. A link with one is refused, see [rules](#client-random-auth-key-tag-0x0f) |
 
 \* Unless the link has a subscription address (tag `0x0E`), as the format
@@ -194,15 +194,15 @@ A value is accepted when it:
 
 Any other value fails the import. The error never quotes the address.
 
-FreeTunnel does not support subscriptions yet. What the import does:
+FreeTunnel asks before fetching the address, then asks before importing the
+returned server. This also works for subscription-only links. The imported
+configuration is linked for future updates; the address is held in secure
+credential storage, never in the exported TOML or link. Local routing, DNS and
+transport preferences survive refreshes. A change of hostname requires consent.
 
-| The link carries | Result |
-| --- | --- |
-| The address alone, or with only part of a server (a "subscription-only" link) | Refused: "Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive." |
-| The address and a whole server: a hostname, at least one address, a username and a password, none of them empty | The server is imported as the link has it. The question says the server won't update itself, and the address is not kept |
-
-The address is not written anywhere, neither to the config nor to the
-credential store, and it is never logged.
+If subscriptions are explicitly disabled, a complete embedded server can still
+be imported without its subscription, with a notice; a subscription-only link
+cannot be imported in that mode. See [User guide](USER_GUIDE.md#subscriptions).
 
 ### Client random auth key (tag `0x0F`)
 
@@ -261,7 +261,7 @@ Import fails when:
 
 These links are well formed, and refused with a reason of their own:
 
-- a subscription address without a whole server
+- a subscription address without a whole server when subscriptions are explicitly disabled
   ([tag `0x0E`](#subscription-address-tag-0x0e));
 - a non-empty client random auth key
   ([tag `0x0F`](#client-random-auth-key-tag-0x0f)).
@@ -312,7 +312,7 @@ A TrustTunnel 1.3 config imported from a file is handled the same way:
   is kept as it is. A non-empty one refuses the import with the message above.
 - A subscription address, as `subscription_url` or as an
   `[endpoint.subscription]` table, is left out of the copy FreeTunnel stores, and
-  the notice after the import says so. The file you picked is not changed.
+  linked separately after consent. The file you picked is not changed.
 - A stored config that holds one already, as one imported by 1.2.3 or earlier
   can, loses it the next time FreeTunnel starts, and nothing else in it
   changes. That is only for the copies in FreeTunnel's own folder: a config kept
@@ -360,8 +360,8 @@ it from file as it would the link with the same server.
 - **The name.** `name` names the config. The endpoint writes `name = ""` for a
   server it was given no name for, and then the file's name is used.
 - **The link's rules.** A non-empty `client_random_auth_key`, and a
-  subscription address without a whole server, are refused with the link's
-  messages. `subscription_url` is left out, and the question says so. The
+  subscription requiring an unsupported auth key, are refused with the link's
+  messages. `subscription_url` is held separately after the fetch confirmation. The
   certificate keeps only its certificates (see
   [tag `0x08`](#certificate-tag-0x08)). A client random the core cannot use, a
   certificate with no certificate in it, and no address or username without a
@@ -533,7 +533,7 @@ tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzZWNyZXQCCzEuMi4zLjQ6NDQz
 | `06` | `06` | `secret` | Password |
 | `02` | `0b` | `1.2.3.4:443` | Address |
 
-A subscription-only link, which FreeTunnel refuses for now, is two records:
+A subscription-only link, which asks before fetching, is two records:
 version 2, then tag `0x0E` with the address.
 
 ```text

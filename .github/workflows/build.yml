@@ -356,7 +356,23 @@ jobs:
           # binaries, so what it does has to be reviewable in a diff, not whatever
           # upstream is serving today. It is 8 KB of shell — refresh it by opening
           # a PR against scripts/llvm.sh.
-          sudo bash client/scripts/llvm.sh 18
+          #
+          # Retried: the installer's own reachability check (check_url) treats a
+          # transient network failure as "this distribution is not supported"
+          # and exits 2, so one blip against apt.llvm.org's edge turned a good
+          # jammy repository into a red build. The script is idempotent, so
+          # re-running it is safe. The explicit failure after the last attempt
+          # is deliberate: the loop's own `sleep` would otherwise leave the step
+          # green with clang-18 missing.
+          for attempt in 1 2 3; do
+            sudo bash client/scripts/llvm.sh 18 && break
+            if [ "$attempt" = 3 ]; then
+              echo "::error::client/scripts/llvm.sh failed after 3 attempts"
+              exit 1
+            fi
+            echo "llvm.sh failed (attempt $attempt), retrying…"
+            sleep 20
+          done
           # gcc-13 libstdc++ headers: older libstdc++ (jammy's GCC 11, and gcc-12
           # when this was built on 22.04) misses some transitive includes the core
           # relies on (e.g. <algorithm>); clang-18 auto-selects the newest GCC,
@@ -717,8 +733,14 @@ jobs:
           # To refresh: download upstream, review, upload under a new
           # build-tools-<date> tag, update the URLs and digests here.
           tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
-          curl -fsSL -o "$ld" "$tools/$ld"
-          curl -fsSL -o "$ldqt" "$tools/$ldqt"
+          # Retried: GitHub's release downloads answer 5xx now and then (a 504 on
+          # 2026-11-09 failed this leg on main), and curl retries 408, 429, 5xx,
+          # timeouts and refused connections, waiting between attempts.
+          # scripts/fetch-appimage-runtime.sh fetches from the same place with
+          # --retry too. The digests below still decide what is used.
+          dl() { curl -fsSL --retry 5 --retry-delay 15 --retry-connrefused -o "$1" "$2"; }
+          dl "$ld" "$tools/$ld"
+          dl "$ldqt" "$tools/$ldqt"
           echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
             || { echo "::error::$ld does not match its pinned digest"; exit 1; }
           echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \

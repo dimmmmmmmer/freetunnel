@@ -202,10 +202,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Ensure Android SDK 35 packages
+      - name: Ensure Android SDK 37 packages
         # As in android.yml: the runner image's command-line tools.
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           # No cache at all in a release build, and never the proprietary one
           # (see android.yml).
@@ -252,10 +252,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Ensure Android Build Tools 35.0.0
+      - name: Ensure Android Build Tools 36.0.0
         # The runner image's command-line tools, as in android.yml. zipalign,
         # apksigner and aapt2 are all this job needs from the SDK.
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0"'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: android-release-unsigned

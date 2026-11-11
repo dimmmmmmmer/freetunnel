@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
-import QtQuick.Effects
 // See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
 // has no native helper and the application does not link Qt Widgets.
 import QtQuick.Dialogs as Dialogs
@@ -21,6 +20,7 @@ Item {
     readonly property int safeTop: shell.titlebarSafeTop
     readonly property int cardWidth: Math.min(width - 28, 372)
 
+    Component.onDestruction: backend.setConfigOpenInEditor("")
     anchors.fill: parent
     // Dimmed backdrop — the main UI shows through; click to close. It takes hover
     // too: the page under the dim is out of reach, and lit up as if it were not.
@@ -61,6 +61,11 @@ Item {
         // and saving against the old number then writes over whatever is at that
         // position now. See Backend::createConfig().
         property string editPath: ""
+        property bool subscriptionLinked: false
+        Connections {
+            target: backend
+            function onConfigsChanged() { cform.subscriptionLinked = backend.hasSubscription(cform.editPath) }
+        }
         readonly property bool editing: shell.editIndex >= 0
         // Join on a separator no field can contain (U+001F): a plain join() lets
         // a boundary-shifting edit (name "ab" + host "c" → name "a" + host "bc")
@@ -70,6 +75,11 @@ Item {
                     protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
                     skipVerification, antiDpi, splitProfile].join("\u001f")
         }
+        function afterDiscard(action) {
+            if (snapshot() !== snap)
+                shell.showConfirm(qsTr("Discard unsaved changes?"), qsTr("Discard"), action)
+            else action()
+        }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
         // Prefill from the selected config when editing; snapshot for dirty-check.
@@ -77,6 +87,8 @@ Item {
             if (editing) {
                 var f = backend.configFields(shell.editIndex)
                 cform.editPath = f.path || ""
+                backend.setConfigOpenInEditor(cform.editPath)
+                cform.subscriptionLinked = backend.hasSubscription(cform.editPath)
                 fName.text = f.name || ""; fHost.text = f.hostname || ""
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""
                 fPass.text = f.password || ""; fDns.text = f.dns || ""
@@ -214,6 +226,22 @@ Item {
                                 Keys.onTabPressed: function(e) { nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason); e.accepted = true }
                                 Keys.onBacktabPressed: function(e) { nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason); e.accepted = true } } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
+                }
+                RowLayout {
+                    width: parent.width
+                    objectName: "subscriptionActions"
+                    visible: cform.editing && cform.subscriptionLinked
+                    spacing: 8
+                    Text { text: qsTr("Refresh subscription"); color: theme.accent; font.pixelSize: 13
+                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
+                            objectName: "refreshSubscriptionAction"
+                            onClicked: { cform.afterDiscard(function() { backend.setConfigOpenInEditor(""); backend.refreshSubscription(cform.editPath); cform.close() }) } } }
+                    Item { Layout.fillWidth: true }
+                    Text { text: qsTr("Stop updates"); color: theme.danger; font.pixelSize: 13
+                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
+                            onClicked: shell.showConfirm(qsTr("Stop subscription updates?"), qsTr("Stop updates"), function() {
+                                if (backend.detachSubscription(cform.editPath)) cform.subscriptionLinked = false
+                            }) } }
                 }
                 Dialogs.FileDialog {
                     id: certFileDlg; objectName: "certificateDialog"; title: qsTr("Select a certificate")

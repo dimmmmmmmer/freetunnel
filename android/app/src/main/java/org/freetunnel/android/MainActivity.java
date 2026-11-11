@@ -102,6 +102,8 @@ public final class MainActivity extends Activity {
     private static final int PREPARE_VPN = 22;
     private static final int EXPORT_CONFIG = 24;
     private static final int PICK_CERTIFICATE = 25;
+    private static final int EXPORT_LOG = 26;
+    private static final int SCAN_QR = 27;
     private static final String PREFS = "freetunnel";
     private String[] tabNames;
     // The Home tab is the logo, in its own greys: the app never tints it.
@@ -118,6 +120,14 @@ public final class MainActivity extends Activity {
     private final ExecutorService ioWorker = Executors.newSingleThreadExecutor();
     // The config an export is being asked for: the file picker answers later, when the list may have changed.
     private Config exporting;
+    private final ArrayDeque<PendingImport> localImports = new ArrayDeque<>();
+    private boolean localImportBusy;
+    private static final class PendingImport {
+        final String name;
+        final String text;
+        final Uri uri;
+        PendingImport(String name, String text, Uri uri) { this.name = name; this.text = text; this.uri = uri; }
+    }
     private int activeIndex;
     private int page;
     // The theme setting, "system" (the default), "light" or "dark", and the theme in
@@ -225,6 +235,8 @@ public final class MainActivity extends Activity {
     private static final class Config {
         String name;
         String toml;
+        String subscription;
+        long subscriptionUpdated;
         // The split profile this config uses, as it is named there: Default unless the config was given another in
         // the editor. A name that is no longer a profile counts as Default (SplitProfiles.effective).
         String profile;
@@ -308,10 +320,13 @@ public final class MainActivity extends Activity {
         if (page <= 1) render();
         else if (page == 3) refreshUpdateControls();
         else if (page == 4) { refreshLog(false); scheduleLogTick(); }
+        processLocalImports();
+        host.removeCallbacks(subscriptionTicker); host.post(subscriptionTicker);
     }
 
     @Override protected void onPause() {
         resumed = false;
+        host.removeCallbacks(subscriptionTicker);
         GeoRepository.get(this).removeObserver(geoListener);
         FreeTunnelVpnService.setAppVisible(false);
         host.removeCallbacks(homeTicker);
@@ -360,7 +375,7 @@ public final class MainActivity extends Activity {
         if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
         Uri uri = intent.getData();
         intent.setData(null); // Do not import again if Android recreates the activity.
-        if (uri != null) importDeepLink(uri.toString(), null);
+        if (uri != null) queueLocalText(getString(R.string.text_configuration), uri.toString());
     }
 
     private int dp(float n) { return ui.dp(n); }
@@ -1417,7 +1432,8 @@ public final class MainActivity extends Activity {
         FrameLayout box = new FrameLayout(this);
         box.setClipChildren(false);
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.ic_logo);
+        // Green while connected, as the desktop's Home and its tray icon are.
+        logo.setImageResource(HomeState.green(vpnState, stopping) ? R.drawable.ic_logo_green : R.drawable.ic_logo);
         logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         box.addView(logo, new FrameLayout.LayoutParams(-1, -1));
         box.setContentDescription(isVpnActive() ? getString(R.string.text_disconnect_freetunnel) : getString(R.string.text_connect_freetunnel));
@@ -1901,6 +1917,99 @@ public final class MainActivity extends Activity {
     // The Configs page's menu under its +: no title. A TV has no camera for a link's QR code and a remote
     // is no way to type one, so there a phone's way in comes first; then the desktop's items, in its
     // order and its words, and a separator before the last.
+    private boolean subscriptionLoading;
+    private final java.util.Map<Config, Long> subscriptionAttempts = new java.util.HashMap<>();
+    private final Runnable subscriptionTicker = new Runnable() {
+        @Override public void run() {
+            if (!resumed || isDestroyed()) return;
+            if (topModalOverlay() == null && !subscriptionLoading && !localImportBusy && !stopping && vpnState != 1) {
+                long now = System.currentTimeMillis();
+                for (Config config : new ArrayList<>(configs)) {
+                    if (config.subscription == null || now - config.subscriptionUpdated < 86400000L
+                            || now - subscriptionAttempts.getOrDefault(config, 0L) < 3600000L
+                            || !ConfigForm.read(config.toml).customSni.isEmpty()) continue;
+                    refreshSubscription(config, false); break;
+                }
+            }
+            host.postDelayed(this, 60000);
+        }
+    };
+    private void subscriptionForm() {
+        final Overlay[] shown = new Overlay[1];
+        LinearLayout form = column(); form.setPadding(dp(18), dp(16), dp(18), dp(16));
+        form.addView(ui.sectionLabel(getString(R.string.subscription_title)), lp(-1, -2)); gap(form, 12);
+        EditText address = ui.lineEdit();
+        address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        address.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        form.addView(ui.field(getString(R.string.subscription_url), address, "subscription:url"), lp(-1, -2)); gap(form, 16);
+        LinearLayout actions = row(); actions.setGravity(Gravity.END);
+        Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.SECONDARY, 88, "subscription:cancel");
+        cancel.setOnClickListener(v -> closeOverlay(shown[0])); actions.addView(cancel, lp(-2, 34));
+        Button add = ui.button(getString(R.string.geo_add), Ui.Kind.PRIMARY, 88, "subscription:add");
+        add.setOnClickListener(v -> {
+            String source = address.getText().toString().trim();
+            try { SubscriptionData.address(source); } catch (Exception error) { toast(getString(R.string.subscription_failed)); return; }
+            closeOverlay(shown[0]); beginSubscription(source, null, null);
+        }); actions.addView(add, lp(-2, 34)); form.addView(actions, lp(-1, -2));
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        shown[0] = showOverlay("subscription", OverlayLayer.Kind.CARD, form, null,
+                () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
+    }
+    private void beginSubscription(String source, String origin, Answered done) {
+        if (subscriptionLoading) { toast(getString(R.string.subscription_updating)); answered(done, true); return; }
+        final String server;
+        try { server = SubscriptionData.address(source).getHost(); }
+        catch (Exception error) { toast(getString(R.string.subscription_failed)); answered(done, true); return; }
+        showConfirm(getString(R.string.subscription_fetch, ShownText.of(server)), getString(R.string.geo_add), null, () -> {
+            subscriptionLoading = true; toast(getString(R.string.subscription_updating));
+            ioWorker.execute(() -> {
+                SubscriptionData.Document document = null;
+                try { document = SubscriptionData.apply(SubscriptionData.fetch(source), null); } catch (Exception ignored) { }
+                final SubscriptionData.Document ready = document;
+                runOnUiThread(() -> {
+                    subscriptionLoading = false;
+                    if (isDestroyed()) return;
+                    if (ready == null) { toast(getString(R.string.subscription_failed)); answered(done, true); return; }
+                    validateAsync(ready.toml, SplitProfiles.DEFAULT, false, false,
+                        checked -> showImportConfirmation(ready.name, false, checked, origin, true, done, source),
+                        () -> answered(done, true));
+                });
+            });
+        }, null, () -> answered(done, false));
+    }
+    private void refreshSubscription(Config config, boolean manual) {
+        if (subscriptionLoading || config.subscription == null || !configs.contains(config)) return;
+        subscriptionLoading = true;
+        subscriptionAttempts.put(config, System.currentTimeMillis());
+        final String before = config.toml, source = config.subscription;
+        if (manual) toast(getString(R.string.subscription_updating));
+        ioWorker.execute(() -> {
+            SubscriptionData.Document document = null;
+            try { document = SubscriptionData.apply(SubscriptionData.fetch(source), before); } catch (Exception ignored) { }
+            final SubscriptionData.Document ready = document;
+            runOnUiThread(() -> {
+                subscriptionLoading = false;
+                if (isDestroyed() || !configs.contains(config) || !before.equals(config.toml) || !source.equals(config.subscription)) return;
+                if (ready == null) { if (manual) toast(getString(R.string.subscription_failed)); return; }
+                if (!manual && topModalOverlay() != null) return;
+                String oldHost = ConfigForm.read(before).hostname, nextHost = ConfigForm.read(ready.toml).hostname;
+                Runnable apply = () -> validateAsync(ready.toml, config.profile, false, false, checked -> {
+                    if (topModalOverlay() != null || !configs.contains(config) || !before.equals(config.toml) || !source.equals(config.subscription)) return;
+                    long oldUpdated = config.subscriptionUpdated;
+                    config.toml = checked.getToml(); config.subscriptionUpdated = System.currentTimeMillis();
+                    if (!saveConfigs()) { config.toml = before; config.subscriptionUpdated = oldUpdated; return; }
+                    if (configs.indexOf(config) == activeIndex && !before.equals(config.toml)) applyCurrentRules();
+                    render(); if (manual) toast(getString(R.string.subscription_updated));
+                }, () -> { });
+                if (!oldHost.equalsIgnoreCase(nextHost)) {
+                    if (manual) showConfirm(getString(R.string.subscription_host_changed, ShownText.of(oldHost), ShownText.of(nextHost)),
+                            getString(R.string.geo_add), apply);
+                    else toast(getString(R.string.subscription_review));
+                } else apply.run();
+            });
+        });
+    }
+
     private void addMenu() {
         if (storageFailed) { toast(getString(R.string.text_storage_is_unavailable_saved_data_has_been_preserved)); return; }
         List<MenuEntry> items = new ArrayList<>();
@@ -1909,6 +2018,8 @@ public final class MainActivity extends Activity {
         items.add(new MenuEntry(getString(R.string.add_from_file), "add:file", this::pickFile));
         items.add(MenuEntry.SEPARATOR);
         items.add(new MenuEntry(getString(R.string.add_create_new), "add:create", () -> editConfig(-1)));
+        items.add(new MenuEntry(getString(R.string.subscription_title), "add:subscription", this::subscriptionForm));
+        if (!isTv()) items.add(new MenuEntry(getString(R.string.qr_scan), "add:qr", () -> startForResult(new Intent(this, QrScannerActivity.class), SCAN_QR)));
         showMenu("addmenu", "configs:add", items, this::refreshConfigsHint);
         refreshConfigsHint();
     }
@@ -1921,13 +2032,14 @@ public final class MainActivity extends Activity {
         ClipData clip = cm.getPrimaryClip();
         if (clip == null || clip.getItemCount() == 0) { toast(getString(R.string.text_clipboard_is_empty)); return; }
         CharSequence value = clip.getItemAt(0).coerceToText(this);
-        importText(getString(R.string.text_from_clipboard), value == null ? "" : value.toString().trim(), null);
+        queueLocalText(getString(R.string.text_from_clipboard), value == null ? "" : value.toString());
     }
     // Many TVs have no document picker. Some have one for GET_CONTENT only, which
     // onActivityResult reads the same way.
     private void pickFile() {
         for (String action : new String[]{Intent.ACTION_OPEN_DOCUMENT, Intent.ACTION_GET_CONTENT}) {
-            if (startForResult(new Intent(action).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), PICK_CONFIG)) return;
+            if (startForResult(new Intent(action).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE)
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_CONFIG)) return;
         }
         toast(getString(isTv() ? R.string.text_no_file_picker_receive : R.string.text_no_file_picker));
     }
@@ -1936,12 +2048,82 @@ public final class MainActivity extends Activity {
     private void importText(String fallbackName, String text, String origin) {
         importText(fallbackName, text, origin, null);
     }
+    private void queueLocalText(String name, String text) {
+        try {
+            List<String> documents = ImportBatch.split(text);
+            if (documents.size() + localImports.size() + (localImportBusy ? 1 : 0) > ImportBatch.MAX_ITEMS)
+                throw new IllegalArgumentException("Too many imports");
+            for (String document : documents) localImports.add(new PendingImport(name, document, null));
+            processLocalImports();
+        } catch (IllegalArgumentException tooLarge) { toast(getString(R.string.import_batch_too_large)); }
+    }
+    // One confirmation at a time, including mixed valid/invalid batches. Reading
+    // cloud-backed documents never blocks the UI, and stops while the app is away.
+    private void processLocalImports() {
+        if (isDestroyed() || !resumed || localImportBusy || receivedTexts.busy()) return;
+        PendingImport item = localImports.poll();
+        if (item == null) { processReceived(); return; }
+        localImportBusy = true;
+        if (item.uri == null) {
+            importText(item.name, item.text, null, this::finishLocalImport);
+            return;
+        }
+        ioWorker.execute(() -> {
+            List<String> documents = null;
+            String name = item.uri.getLastPathSegment();
+            if (name == null || name.isEmpty()) name = getString(R.string.text_configuration);
+            int error = R.string.text_could_not_open_file;
+            try (InputStream input = getContentResolver().openInputStream(item.uri);
+                    ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                if (input == null) throw new IOException("No stream");
+                byte[] bytes = new byte[8192];
+                int n;
+                while ((n = input.read(bytes)) != -1) {
+                    if (out.size() + n > ImportBatch.MAX_BYTES) throw new IllegalArgumentException("File is too large");
+                    out.write(bytes, 0, n);
+                }
+                try (Cursor cursor = getContentResolver().query(item.uri,
+                        new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null && !cursor.getString(0).isEmpty())
+                        name = cursor.getString(0);
+                } catch (Exception ignored) { }
+                int slash = name.lastIndexOf('/');
+                if (slash >= 0) name = name.substring(slash + 1);
+                documents = ImportBatch.split(out.toString(StandardCharsets.UTF_8.name()));
+            } catch (IllegalArgumentException tooLarge) { error = R.string.import_batch_too_large; }
+            catch (Exception unreadable) { documents = null; }
+            final List<String> ready = documents;
+            final String fileName = name;
+            final int failure = error;
+            runOnUiThread(() -> {
+                if (isDestroyed()) return;
+                if (ready == null || ready.size() + localImports.size() > ImportBatch.MAX_ITEMS) {
+                    toast(getString(ready == null ? failure : R.string.import_batch_too_large));
+                    finishLocalImport(true);
+                    return;
+                }
+                for (int i = ready.size() - 1; i >= 0; i--)
+                    localImports.addFirst(new PendingImport(fileName, ready.get(i), null));
+                finishLocalImport(false);
+            });
+        });
+    }
+    private void finishLocalImport(boolean refused) {
+        host.postDelayed(() -> {
+            localImportBusy = false;
+            processLocalImports();
+        }, refused ? 3500 : 0);
+    }
     // Whoever asks for an import is told when it is answered, once: it was added, replaced, or cancelled,
     // or it was refused, which is true then, and a notice says why. Receive from phone takes its next text then.
     private interface Answered { void answered(boolean refused); }
     private static void answered(Answered done, boolean refused) { if (done != null) done.answered(refused); }
 
     private void importText(String fallbackName, String text, String origin, Answered done) {
+        try {
+            String source = SubscriptionData.source(text);
+            if (source != null) { beginSubscription(source, origin, done); return; }
+        } catch (Exception invalid) { toast(getString(R.string.text_invalid_trusttunnel_link)); answered(done, true); return; }
         if (DeepLinkImport.looksLikeLink(text)) importDeepLink(text, origin, done);
         else importToml(fallbackName, text, origin, done);
     }
@@ -2107,7 +2289,7 @@ public final class MainActivity extends Activity {
     // count until it is answered, whatever the answer, which is what lets the phone send another when ten
     // waited. When one is refused, its notice stays up before the next one's check, and its question, can cover it.
     private void processReceived() {
-        if (isDestroyed() || receivedTexts.busy() || receivedTexts.queued() == 0) return;
+        if (isDestroyed() || localImportBusy || receivedTexts.busy() || receivedTexts.queued() == 0) return;
         if (receivedHold) {
             if (toastView != null && SystemClock.uptimeMillis() < receivedHoldUntil) {
                 if (!receivedPollPending) {
@@ -2124,7 +2306,7 @@ public final class MainActivity extends Activity {
             if (!receivedTexts.answered(item)) return;
             if (refused) { receivedHold = true; receivedHoldUntil = SystemClock.uptimeMillis() + 10_000; }
             // After what answered it is done, not inside it.
-            host.post(this::processReceived);
+            host.post(() -> { processReceived(); processLocalImports(); });
         });
     }
     // The app is left: what is waiting for its turn is dropped, and so is what the receiver handed over
@@ -2196,6 +2378,10 @@ public final class MainActivity extends Activity {
     }
     private void showImportConfirmation(String name, boolean namedAfterFile, RoutingConfig.Import checked, String origin, boolean link,
                                         Answered done) {
+        showImportConfirmation(name, namedAfterFile, checked, origin, link, done, null);
+    }
+    private void showImportConfirmation(String name, boolean namedAfterFile, RoutingConfig.Import checked, String origin, boolean link,
+                                        Answered done, String subscription) {
         String source = checked.getToml();
         org.tomlj.TomlTable parsed = RoutingConfig.validate(source);
         Config clash = null;
@@ -2225,16 +2411,19 @@ public final class MainActivity extends Activity {
         final Runnable declined = () -> answered(done, false);
         if (existing == null) {
             showConfirm(message, getString(R.string.import_confirm), null,
-                    () -> { addImported(name, source); answered(done, false); }, null, declined, isTv() && origin != null);
+                    () -> { addImported(name, source, subscription); answered(done, false); }, null, declined, isTv() && origin != null);
         } else {
             showConfirm(message, getString(R.string.import_replace), getString(R.string.import_add_copy),
-                    () -> { replaceImported(existing, name, source); answered(done, false); },
-                    () -> { addImported(name, source); answered(done, false); }, declined);
+                    () -> { replaceImported(existing, name, source, subscription); answered(done, false); },
+                    () -> { addImported(name, source, subscription); answered(done, false); }, declined);
         }
     }
     // After an import the page stays as it is, and the toast says what was added, as the desktop's does.
-    private void addImported(String name, String source) {
-        configs.add(new Config(name, source));
+    private void addImported(String name, String source) { addImported(name, source, null); }
+    private void addImported(String name, String source, String subscription) {
+        Config added = new Config(name, source); added.subscription = subscription;
+        added.subscriptionUpdated = subscription == null ? 0 : System.currentTimeMillis();
+        configs.add(added);
         if (configs.size() == 1) activeIndex = 0;
         if (!saveConfigs()) return;
         render();
@@ -2242,11 +2431,14 @@ public final class MainActivity extends Activity {
     }
     // Replace: the config goes where the one it replaces was, and if that one is the one the VPN runs,
     // the VPN reconnects to this. If that one is gone by now, it is added.
-    private void replaceImported(Config existing, String name, String source) {
+    private void replaceImported(Config existing, String name, String source) { replaceImported(existing, name, source, null); }
+    private void replaceImported(Config existing, String name, String source, String subscription) {
         int at = configs.indexOf(existing);
-        if (at < 0) { addImported(name, source); return; }
+        if (at < 0) { addImported(name, source, subscription); return; }
         // The config goes where the old one was, and uses the profile it used.
-        configs.set(at, new Config(name, source, existing.profile));
+        Config replacement = new Config(name, source, existing.profile); replacement.subscription = subscription;
+        replacement.subscriptionUpdated = subscription == null ? 0 : System.currentTimeMillis();
+        configs.set(at, replacement);
         if (!saveConfigs()) return;
         if (at == activeIndex) applyCurrentRules();
         render();
@@ -2406,6 +2598,24 @@ public final class MainActivity extends Activity {
         load.setOnClickListener(v -> pickCertificate(certificate));
         form.addView(ui.fieldArea(getString(R.string.editor_certificate), load, certificate, "editor:cert", 70), lp(-1, -2));
         gap(form, 10);
+        if (editing != null && editing.subscription != null) {
+            LinearLayout subscriptionActions = row();
+            TextView refresh = ui.link(getString(R.string.subscription_refresh), 12, Ui.LinkKind.ACCENT, "subscription:refresh");
+            refresh.setOnClickListener(v -> {
+                Runnable refreshSaved = () -> { closeOverlay(shown[0]); refreshSubscription(editing, true); };
+                if (snapshot.get().equals(opened)) refreshSaved.run();
+                else showConfirm(getString(R.string.editor_discard_question), getString(R.string.editor_discard), refreshSaved);
+            });
+            subscriptionActions.addView(refresh, lp(-2, -2));
+            subscriptionActions.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            TextView detach = ui.link(getString(R.string.subscription_stop), 12, Ui.LinkKind.DANGER, "subscription:stop");
+            detach.setOnClickListener(v -> showConfirm(getString(R.string.subscription_stop_question), getString(R.string.subscription_stop), () -> {
+                String source = editing.subscription; editing.subscription = null;
+                if (!saveConfigs()) { editing.subscription = source; return; }
+                subscriptionActions.setVisibility(View.GONE);
+            }));
+            subscriptionActions.addView(detach, lp(-2, -2)); form.addView(subscriptionActions, lp(-1, -2)); gap(form, 10);
+        }
         Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.SECONDARY, 88, "editor:cancel");
         cancel.setOnClickListener(v -> tryClose.run());
         Button save = ui.button(getString(R.string.text_save), Ui.Kind.PRIMARY, 88, "editor:save");
@@ -2470,7 +2680,9 @@ public final class MainActivity extends Activity {
                 else {
                     int current = configs.indexOf(editing);
                     if (current < 0) { checking[0] = false; save.setEnabled(true); return; }
-                    configs.set(current, new Config(n, checked.getToml(), chosenProfile[0]));
+                    Config changed = new Config(n, checked.getToml(), chosenProfile[0]);
+                    changed.subscription = editing.subscription; changed.subscriptionUpdated = editing.subscriptionUpdated;
+                    configs.set(current, changed);
                 }
                 boolean saved = saveConfigs();
                 closeOverlay(overlay);
@@ -2586,22 +2798,31 @@ public final class MainActivity extends Activity {
             else writeExport(saved);
             return;
         }
+        if (requestCode == SCAN_QR) {
+            if (resultCode == RESULT_OK && data != null) queueLocalText(getString(R.string.qr_scan), data.getStringExtra(QrScannerActivity.RESULT_LINK));
+            return;
+        }
+        if (requestCode == EXPORT_LOG) {
+            Uri saved = resultCode == RESULT_OK && data != null ? data.getData() : null;
+            if (saved != null) writeLogExport(saved);
+            return;
+        }
         if (requestCode != PICK_CONFIG || resultCode != RESULT_OK || data == null) return;
-        Uri uri = data.getData(); if (uri == null) return;
-        try (InputStream input = getContentResolver().openInputStream(uri); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            if (input == null) return;
-            byte[] bytes = new byte[8192]; int n; int total = 0;
-            while ((n = input.read(bytes)) != -1) { total += n; if (total > 1024 * 1024) { toast(getString(R.string.text_file_is_too_large)); return; } out.write(bytes, 0, n); }
-            String name = null;
-            try (Cursor cursor = getContentResolver().query(uri,
-                    new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
-            } catch (Exception ignored) { }
-            if (name == null || name.isEmpty()) name = uri.getLastPathSegment();
-            if (name == null || name.isEmpty()) name = getString(R.string.text_configuration);
-            int slash = name.lastIndexOf('/'); if (slash >= 0) name = name.substring(slash + 1);
-            importToml(name, out.toString(StandardCharsets.UTF_8.name()), null);
-        } catch (Exception e) { toast(getString(R.string.text_could_not_open_file)); }
+        List<Uri> files = new ArrayList<>();
+        ClipData clip = data.getClipData();
+        int count = clip == null ? (data.getData() == null ? 0 : 1) : clip.getItemCount();
+        if (count + localImports.size() + (localImportBusy ? 1 : 0) > ImportBatch.MAX_ITEMS) {
+            toast(getString(R.string.import_batch_too_large));
+            return;
+        }
+        if (clip != null) {
+            for (int i = 0; i < count; i++) {
+                Uri uri = clip.getItemAt(i).getUri();
+                if (uri != null && !files.contains(uri)) files.add(uri);
+            }
+        } else if (data.getData() != null) files.add(data.getData());
+        for (Uri uri : files) localImports.add(new PendingImport(null, null, uri));
+        processLocalImports();
     }
 
     // The Split page (qml/pages/SplitPage.qml), top to bottom: the Split Tunneling switch; the Mode, as a value and its ▾; the
@@ -3511,6 +3732,7 @@ public final class MainActivity extends Activity {
         // Logging.
         section(body, getString(R.string.settings_logging));
         addSwitch(body, getString(R.string.text_enable_logging), "", "logging", true);
+        addSwitch(body, getString(R.string.settings_verbose_logs), getString(R.string.settings_verbose_hint), "verbose_logs", false);
 
         // Maintenance.
         section(body, getString(R.string.settings_maintenance));
@@ -3813,9 +4035,11 @@ public final class MainActivity extends Activity {
     private void addSwitch(LinearLayout parent, String title, String subtitle, String key, boolean initial) {
         ToggleView sw = ui.toggle(prefs.getBoolean(key, initial), false, "switch:" + key);
         sw.setContentDescription(title);
+        if (key.equals("verbose_logs") && !prefs.getBoolean("logging", true)) { sw.setEnabled(false); sw.setAlpha(0.45f); }
         sw.setListener((v, enabled) -> {
             prefs.edit().putBoolean(key, enabled).apply();
             if (key.equals("killswitch")) applyCurrentRules();
+            if (key.equals("logging")) render();
         });
         parent.addView(ui.toggleRow(title, subtitle, sw), ui.focusRowLp());
     }
@@ -3836,6 +4060,25 @@ public final class MainActivity extends Activity {
     private long logStamp = -1;
 
     private File logFile() { return new File(getFilesDir(), LogFile.NAME); }
+
+    private void exportLog() {
+        Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("text/plain").putExtra(Intent.EXTRA_TITLE, "freetunnel.log");
+        if (!startForResult(save, EXPORT_LOG)) toast(getString(R.string.logs_no_picker));
+    }
+    private void writeLogExport(Uri uri) {
+        ioWorker.execute(() -> {
+            boolean written;
+            try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                if (out == null) throw new IOException("No stream");
+                // Preserve dates and levels in the file, not just the shortened UI text.
+                out.write(LogFile.read(logFile()).getBytes(StandardCharsets.UTF_8));
+                written = true;
+            } catch (Exception e) { written = false; }
+            final boolean ok = written;
+            runOnUiThread(() -> { if (!isDestroyed()) toast(getString(ok ? R.string.logs_exported : R.string.export_failed)); });
+        });
+    }
 
     private void logs(LinearLayout body) {
         Theme t = t();
@@ -3904,9 +4147,18 @@ public final class MainActivity extends Activity {
         // The foot: Auto-scroll, at the right. The label and the toggle are one small row, which fills round them with the focus and
         // is no wider than they are.
         LinearLayout foot = row();
+        TextView export = ui.link("freetunnel.log", 11, Ui.LinkKind.FAINT, "logs:export");
+        export.setContentDescription(getString(R.string.logs_export));
+        export.setOnClickListener(v -> exportLog());
+        LinearLayout.LayoutParams exportLp = ui.linkLp(false);
+        exportLp.leftMargin = -dp(Ui.LINK_PAD_H_DP);
+        foot.addView(export, exportLp);
         foot.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         ToggleView auto = ui.toggle(logAutoScroll, true, "logs:autoscroll");
         auto.setContentDescription(getString(R.string.logs_auto_scroll));
+        // Keep the remote's exit from the log stable when the export link is present.
+        if (auto.getId() == View.NO_ID) auto.setId(View.generateViewId());
+        logBox.setNextFocusDownId(auto.getId());
         auto.setListener((v, on) -> { logAutoScroll = on; if (on) scrollLogToEnd(); });
         LinearLayout.LayoutParams autoLp = lp(-2, -2);
         // The track ends at the margin: the row's 6 of padding on its right, which the fill shows, go beyond it. The row is 28 high to fill
@@ -3984,6 +4236,7 @@ public final class MainActivity extends Activity {
         if (page == 4 && resumed) host.postDelayed(logTicker, 1000);
     }
     @Override protected void onDestroy() {
+        localImports.clear();
         toastHandler.removeCallbacksAndMessages(null);
         stopReceiver();
         dropReceived();
@@ -4000,7 +4253,9 @@ public final class MainActivity extends Activity {
             JSONArray array = new JSONArray(ConfigStore.read(prefs));
             for (int i = 0; i < array.length(); i++) {
                 JSONObject o = array.getJSONObject(i);
-                configs.add(new Config(o.getString("name"), o.getString("toml"), SavedProfile.profileOf(o)));
+                Config config = new Config(o.getString("name"), o.getString("toml"), SavedProfile.profileOf(o));
+                config.subscription = o.optString("subscription", null); config.subscriptionUpdated = o.optLong("subscription_updated", 0);
+                configs.add(config);
             }
         } catch (Exception error) {
             storageFailed = true;
@@ -4031,6 +4286,7 @@ public final class MainActivity extends Activity {
             JSONObject o = new JSONObject();
             try {
                 o.put("name", config.name); o.put("toml", config.toml);
+                if (config.subscription != null) { o.put("subscription", config.subscription); o.put("subscription_updated", config.subscriptionUpdated); }
                 // Only a profile other than Default is written: a config saved before there were profiles has none, and
                 // is Default, and so is one that names no profile.
                 if (!SplitProfiles.DEFAULT.equals(config.profile)) o.put("profile", config.profile);

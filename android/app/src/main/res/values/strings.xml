@@ -225,6 +225,10 @@
     <string name="settings_core">"TrustTunnel core "</string>
     <string name="update_check_failed">"Update check failed: %1$s"</string>
     <string name="update_latest">"You have the latest version"</string>
+    <string name="import_batch_too_large">"Choose up to 100 links or files, no larger than 1 MB each."</string>
+    <string name="logs_export">"Export log"</string>
+    <string name="logs_exported">"Log exported"</string>
+    <string name="logs_no_picker">"This device has no file picker to save to. Use Copy instead."</string>
     <string name="logs_off">"Logging is off."</string>
     <string name="logs_turn_on">"Turn on"</string>
     <string name="logs_placeholder">"Logs will appear after connecting"</string>
@@ -261,4 +265,20 @@
     <string name="geo_every_5_hours">"Every 5 hours"</string>
     <string name="geo_every_24_hours">"Every 24 hours"</string>
     <string name="geo_never">"Never"</string>
+    <string name="settings_verbose_logs">Verbose logs</string>
+    <string name="settings_verbose_hint">full VPN core detail for debugging (noisy)</string>
+    <string name="qr_scan">Scan QR code</string>
+    <string name="qr_hint">Point the camera at a TrustTunnel QR code.</string>
+    <string name="qr_unavailable">Camera unavailable. Paste a link or import a file instead.</string>
+    <string name="subscription_title">Subscription</string>
+    <string name="subscription_url">HTTPS subscription URL</string>
+    <string name="subscription_fetch">Fetch subscription from %1$s?</string>
+    <string name="subscription_failed">Could not update subscription. Saved configuration was kept.</string>
+    <string name="subscription_updating">Updating subscription…</string>
+    <string name="subscription_updated">Subscription updated</string>
+    <string name="subscription_refresh">Refresh subscription</string>
+    <string name="subscription_stop">Stop updates</string>
+    <string name="subscription_stop_question">Stop subscription updates?</string>
+    <string name="subscription_host_changed">The subscription changes the server from %1$s to %2$s. Apply?</string>
+    <string name="subscription_review">Subscription changed its server. Refresh it to review.</string>
 </resources>

@@ -1,15 +1,15 @@
 // cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
-// The TrustTunnel subscriptions behind the hidden experimental/subscriptions
-// setting: which configs update from one (subscriptions.json, and each address in
+// TrustTunnel subscriptions: which configs update from one (subscriptions.json, and each address in
 // the credential store), the import waiting for the user to agree to a fetch, the
 // fetches in flight, the updates fetched and not applied yet, and when each linked
 // config is refreshed next. Owned by Backend, which decides what a document does
 // to a config and to the tunnel (BackendSubscriptions.cpp). Nothing here writes a
-// config, and none of it is exposed to QML.
+// config; Backend exposes user actions to QML.
 
 #include <QHash>
+#include <QMap>
 #include <QList>
 #include <QObject>
 #include <QSet>
@@ -108,7 +108,7 @@ public:
     void setBusy(const QString &path, bool busy);
     bool isBusy(const QString &path) const { return m_busy.contains(path); }
 
-    // ---- the import waiting for the user, one at a time
+    // ---- imports waiting for the user, bounded and independently cancellable
     QString open(SubscriptionImport import, const QVariantMap &details);
     SubscriptionImport *pendingImport(const QString &token); // nullptr once closed or expired
     void close(const QString &token);
@@ -179,7 +179,7 @@ private:
     QHash<QString, HeldSubscriptionUpdate> m_held;
     QHash<QString, QString> m_acceptedHostnames;
     QSet<QString> m_busy;
-    std::optional<SubscriptionImport> m_import;
+    QMap<QString, SubscriptionImport> m_imports;
     QList<Fetch> m_queued;
     QList<Fetch> m_running;
     QTimer m_firstCheck; // 0 to 10 minutes after start-up

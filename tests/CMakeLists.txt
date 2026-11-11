@@ -665,6 +665,10 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
+# The same popup pixel checks on Qt Quick's optional CPU renderer.
+add_test(NAME qml_popups_software COMMAND test_qml_ui popupContentsAreRendered
+    -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_popups_software.txt,txt)
+set_tests_properties(qml_popups_software PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 
 # The Inter font (assets/fonts): that Qt's font database gives back each of its two
 # weights as the file it came from, that every character the interface draws is in

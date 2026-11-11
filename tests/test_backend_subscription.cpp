@@ -1,5 +1,5 @@
 // cppcheck-suppress-file missingIncludeSystem
-// TrustTunnel subscriptions in Backend, behind experimental/subscriptions: the
+// TrustTunnel subscriptions in Backend: the
 // consent before any fetch, linking a config, what a refresh does to it, and the
 // link kept through what happens to the config. Fetches go to a stand-in
 // (fake_subscription_fetcher.h) but for one, which goes to a TLS server of the
@@ -164,7 +164,7 @@ private slots:
     void cleanupTestCase();
 
     // The setting, and adding a config from a subscription.
-    void theSettingIsOffByDefault();
+    void subscriptionsAreAvailableByDefault();
     void withTheSettingOffALinkIsTakenAsBefore();
     void aSubscriptionLinkAsksBeforeAnyFetch();
     void theConsentFetchesOnceAndAsksAboutTheFetchedServer();
@@ -255,14 +255,14 @@ void TestBackendSubscription::cleanupTestCase()
 
 // ---- the setting, and adding a config ----------------------------------------
 
-void TestBackendSubscription::theSettingIsOffByDefault()
+void TestBackendSubscription::subscriptionsAreAvailableByDefault()
 {
     QSettings().clear();
-    QVERIFY(!AppSettings().subscriptions_enabled);
-    QVERIFY(!loadAppSettings().subscriptions_enabled);
-    // And it is the hidden key, which nothing in the window writes.
-    QSettings().setValue(QStringLiteral("experimental/subscriptions"), true);
+    QVERIFY(AppSettings().subscriptions_enabled);
     QVERIFY(loadAppSettings().subscriptions_enabled);
+    // A saved opt-out is still respected.
+    QSettings().setValue(QStringLiteral("subscriptions/enabled"), false);
+    QVERIFY(!loadAppSettings().subscriptions_enabled);
 }
 
 // Off, a subscription link is what it was in 1.2.4: refused when it has no
@@ -319,9 +319,10 @@ void TestBackendSubscription::aSubscriptionLinkAsksBeforeAnyFetch()
     QCOMPARE(consent.count(), 2);
     QCOMPARE(consent.last().at(1).toMap().value(QStringLiteral("server")).toString(), QStringLiteral("vpn.example.com"));
     QCOMPARE(rig.network.fetches(), 0);
-    // One import at a time: the first one's token is gone.
-    QVERIFY(!rig.backend->fetchSubscriptionForImport(token));
-    QCOMPARE(rig.network.fetches(), 0);
+    // A batch keeps both consent tokens; only the selected one is fetched.
+    QVERIFY(rig.backend->fetchSubscriptionForImport(token));
+    QCOMPARE(rig.network.fetches(), 1);
+    QVERIFY(rig.subs()->pendingImport(consent.last().at(0).toString()));
 }
 
 void TestBackendSubscription::theConsentFetchesOnceAndAsksAboutTheFetchedServer()
@@ -416,13 +417,13 @@ void TestBackendSubscription::cancellingOrWaitingTooLongAddsNothing()
     QCOMPARE(rig.backend->configs().size(), 0);
     QVERIFY(freetunnel::loadSubscriptions().isEmpty());
 
-    // Another link while one fetches: the new one takes its place, fetch and all.
+    // Another link must not cancel a fetch already authorized by the user.
     rig.backend->importDeepLink(v2::kSubscriptionOnly);
     QVERIFY(rig.backend->fetchSubscriptionForImport(consent.last().at(0).toString()));
     QCOMPARE(rig.network.waiting(), 1);
     rig.backend->importDeepLink(v2::kFull);
-    QCOMPARE(rig.network.waiting(), 0);
-    QCOMPARE(rig.network.aborts(), 2);
+    QCOMPARE(rig.network.waiting(), 1);
+    QCOMPARE(rig.network.aborts(), 1);
 }
 
 void TestBackendSubscription::aFailedFetchOfASubscriptionOnlyLinkAddsNothing()

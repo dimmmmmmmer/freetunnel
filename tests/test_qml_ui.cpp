@@ -40,6 +40,7 @@
 #include <QQmlExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 
 #include "ui/MockBackend.h"
 #include "ui/MockDesktop.h"
@@ -54,6 +55,8 @@ class TestQmlUi : public QObject {
 private slots:
     void initTestCase();
     void cleanup();
+    void popupContentsAreRendered_data();
+    void popupContentsAreRendered();
     void homePageLoads();
     void configsPageLoads();
     void splitPageLoads();
@@ -63,10 +66,13 @@ private slots:
     void switchingProfileSwitchesTheApplicationList();
     void everyFileDialogActuallyOpens();
     void everyFileDialogActuallyOpens_data();
+    void multipleConfigFilesReachTheBackend();
     void settingsPageLoads();
     void logsPageLoads();
     void createConfigOverlayLoads();
     void mainWindowLoads();
+    void subscriptionConsentIsQueuedAndCancellationDoesNotFetch();
+    void subscriptionRefreshAsksBeforeDiscardingEditorChanges();
     void mainWindowPageNavigation();
     void closingTheWindowQuitsWhenThereIsNoTray();
     void everythingTheWindowsAgentLooksForCanBeFound();
@@ -81,6 +87,7 @@ private slots:
     void theTrayMenuShowsConfigNamesAsTyped_data();
     void theTrayMenuShowsConfigNamesAsTyped();
     void doubleClickingTheLogoTogglesOnce();
+    void theLogoIsGreenWhileConnected();
     void aToastWaitsForAWindowThatIsAway();
     void aWindowHiddenWithTheAppIsAway();
     void onlyATrayActionsFailureIsNotified();
@@ -474,6 +481,29 @@ void TestQmlUi::everyFileDialogActuallyOpens_data()
 // AA_DontUseNativeDialogs is set for the whole test binary, so this exercises
 // the drawn dialog — the one that has to exist when the desktop offers nothing —
 // rather than opening a native modal window on a CI runner.
+void TestQmlUi::multipleConfigFilesReachTheBackend()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("configImportDialog"));
+    QVERIFY(dialog);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QList<QUrl> files{QUrl::fromLocalFile(directory.filePath(QStringLiteral("Work #1.toml"))),
+                           QUrl::fromLocalFile(directory.filePath(QStringLiteral("Second.txt")))};
+    for (const QUrl &url : files) {
+        QFile file(url.toLocalFile());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    QCOMPARE(dialog->property("fileMode").toInt(), 1); // FileDialog.OpenFiles
+    // currentFiles is Qt's writable compatibility alias for selectedFiles.
+    // Exercise our accepted handler with both URLs, including an escaped name.
+    QVERIFY(dialog->setProperty("currentFiles", QVariant::fromValue(files)));
+    QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
+    QCOMPARE(m_backend.importedFiles, QStringList({files[0].toString(), files[1].toString()}));
+    delete root;
+}
+
 void TestQmlUi::everyFileDialogActuallyOpens()
 {
     QFETCH(QString, page);
@@ -1445,6 +1475,40 @@ void TestQmlUi::doubleClickingTheLogoTogglesOnce()
     delete root;
 }
 
+// Green while connected, as the tray icon is: the same mark, logo-green.svg, over
+// the grey one. It was grey in every state, brighter when connected and no more.
+void TestQmlUi::theLogoIsGreenWhileConnected()
+{
+    m_backend.setConnected(false);
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    auto *green = root->findChild<QQuickItem *>(QStringLiteral("connectedLogo"));
+    QVERIFY2(green, "no green mark on Home");
+    QCOMPARE(green->property("source").toUrl(), QUrl(QStringLiteral("qrc:/assets/logo-green.svg")));
+    QCOMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 1.0);
+    QVERIFY(green->property("visible").toBool());
+    // It has loaded: a mark that failed to load would leave the grey one showing.
+    QTRY_COMPARE(green->property("status").toInt(), 1); // Image.Ready
+
+    // Disconnect is optimistic: the helper may still report Connected until
+    // its first state notification, but Home must already stop showing green.
+    m_backend.setDisconnecting(true);
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+    m_backend.setDisconnecting(false);
+    QTRY_COMPARE(green->opacity(), 1.0);
+
+    m_backend.setConnected(false);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+    delete root;
+}
+
 // An action started from the tray while the window is hidden or minimised
 // reports its failure in a toast nobody can see, and the toast used to be gone
 // three seconds later. It now waits for the window to be back.
@@ -2412,6 +2476,87 @@ void TestQmlUi::theSelectPopupElidesWhatTheWindowCannotHold()
 
 // Both are placed and sized when they open, and after a resize they hung away
 // from the control they drop from.
+// A shader-only layer can load, lay out and accept clicks while drawing nothing
+// with QT_QUICK_BACKEND=software. Check pixels in all three actual popup cards.
+void TestQmlUi::popupContentsAreRendered_data()
+{
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("popupKind");
+    for (const QString &mode : {QStringLiteral("light"), QStringLiteral("dark")}) {
+        for (int kind = 0; kind < 3; ++kind)
+            QTest::newRow(qPrintable(mode + QString::number(kind))) << mode << kind;
+    }
+}
+
+void TestQmlUi::popupContentsAreRendered()
+{
+    QFETCH(QString, mode);
+    QFETCH(int, popupKind);
+    const QString savedTheme = m_backend.themeMode();
+    const QStringList savedConfigs = m_backend.configs();
+    const auto restore = qScopeGuard([this, savedTheme, savedConfigs] {
+        m_backend.setThemeMode(savedTheme);
+        m_backend.setConfigs(savedConfigs);
+    });
+    m_backend.setThemeMode(mode);
+    m_backend.setConfigs({QStringLiteral("Home"), QStringLiteral("Work")});
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    const auto deleteRoot = qScopeGuard([root] { delete root; });
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    QVERIFY(window);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QQuickItem *popup = nullptr;
+    if (popupKind == 2) {
+        auto *anchor = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+        QVERIFY(anchor);
+        const QVariantList options{QVariantMap{{QStringLiteral("v"), QStringLiteral("a")},
+                                              {QStringLiteral("t"), QStringLiteral("First")}},
+                                   QVariantMap{{QStringLiteral("v"), QStringLiteral("b")},
+                                              {QStringLiteral("t"), QStringLiteral("Second")}}};
+        QVERIFY(QMetaObject::invokeMethod(root, "showSelect",
+            Q_ARG(QVariant, QVariant::fromValue(static_cast<QObject *>(anchor))),
+            Q_ARG(QVariant, options), Q_ARG(QVariant, QStringLiteral("a")), Q_ARG(QVariant, QVariant())));
+        popup = qobject_cast<QQuickItem *>(evaluateIn(root, QStringLiteral("selectPopup")).value<QObject *>());
+    } else {
+        root->setProperty("currentPage", popupKind);
+        const QString name = popupKind == 0 ? QStringLiteral("configPicker") : QStringLiteral("importMenu");
+        QTRY_VERIFY((popup = root->findChild<QQuickItem *>(name)) != nullptr);
+        if (popupKind == 0) {
+            auto *label = root->findChild<QQuickItem *>(QStringLiteral("activeConfigLabel"));
+            QVERIFY(label);
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(label));
+        } else {
+            popup->setProperty("open", true);
+        }
+    }
+    QVERIFY(popup);
+    QTRY_VERIFY(popup->opacity() > 0.99);
+    const QString captureDir = qEnvironmentVariable("FT_UI_SCREENSHOT_DIR");
+    if (!captureDir.isEmpty()) {
+        QVERIFY(QDir().mkpath(captureDir));
+        QTest::qWait(160); // Let the popup's slide animation finish as well.
+        QVERIFY(window->grabWindow().save(captureDir + QLatin1Char('/') + mode
+                                         + QString::number(popupKind) + QStringLiteral(".png")));
+    }
+    // Distinguish the card from the identical page background beneath it. The
+    // sample is inside the top padding, away from the border and menu labels.
+    const QColor markerColor(QStringLiteral("#e71bc5"));
+    popup->setProperty("color", markerColor);
+    const auto cardIsDrawn = [&] {
+        const QImage frame = window->grabWindow();
+        if (frame.isNull())
+            return false;
+        const QPoint pixel = (popup->mapToScene(QPointF(popup->width() / 2, 3))
+                              * frame.devicePixelRatio()).toPoint();
+        return frame.rect().contains(pixel) && frame.pixelColor(pixel) == markerColor;
+    };
+    QTRY_VERIFY2(cardIsDrawn(), "the popup exists but its background is not rendered");
+    if (qEnvironmentVariable("QT_QUICK_BACKEND") == QStringLiteral("software"))
+        QCOMPARE(window->rendererInterface()->graphicsApi(), QSGRendererInterface::Software);
+}
+
 void TestQmlUi::popupsCloseWhenTheWindowIsResized()
 {
     {
@@ -2561,6 +2706,66 @@ void TestQmlUi::chipsAreCutOnlyWhereTheRowEnds()
     QVERIFY(page);
     const QString problem = check(page, route);
     QVERIFY2(problem.isEmpty(), qPrintable(problem));
+    delete root;
+}
+
+void TestQmlUi::subscriptionRefreshAsksBeforeDiscardingEditorChanges()
+{
+    const QStringList previousConfigs = m_backend.configs();
+    m_backend.setConfigs({QStringLiteral("Subscribed")});
+    const QString path = m_backend.configPath(0);
+    m_backend.subscriptionPaths = {path};
+    m_backend.refreshedSubscriptions.clear();
+    auto restore = qScopeGuard([&] { m_backend.subscriptionPaths.clear(); m_backend.setConfigs(previousConfigs); });
+    QScopedPointer<QObject> root(createMainWindow(m_engine));
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root.data());
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    root->setProperty("editIndex", 0);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *field = nullptr;
+    QTRY_VERIFY((field = root->findChild<QObject *>(QStringLiteral("nameField"))) != nullptr);
+    field->setProperty("text", QStringLiteral("Unsaved name"));
+    QObject *refresh = root->findChild<QObject *>(QStringLiteral("refreshSubscriptionAction"));
+    QVERIFY(refresh);
+    QObject *form = root->findChild<QObject *>(QStringLiteral("editorForm"));
+    QVERIFY(form);
+    form->setProperty("contentY", qMax(0.0, form->property("contentHeight").toDouble() - form->property("height").toDouble()));
+    QCoreApplication::processEvents();
+    QQmlExpression click(QQmlEngine::contextForObject(refresh), refresh, QStringLiteral("clicked(null)"));
+    click.evaluate();
+    QVERIFY2(!click.hasError(), qPrintable(click.error().toString()));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt->property("visible").toBool());
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+    QMetaObject::invokeMethod(prompt, "cancel");
+    QCOMPARE(field->property("text").toString(), QStringLiteral("Unsaved name"));
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+}
+
+void TestQmlUi::subscriptionConsentIsQueuedAndCancellationDoesNotFetch()
+{
+    m_backend.fetchedSubscriptions.clear();
+    m_backend.canceledSubscriptions.clear();
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("first"), {{QStringLiteral("origin"), QStringLiteral("https://one.example")}});
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("second"), {{QStringLiteral("origin"), QStringLiteral("https://two.example")}});
+    QVERIFY(prompt->property("text").toString().contains(QStringLiteral("one.example")));
+    QVERIFY(m_backend.fetchedSubscriptions.isEmpty());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QCOMPARE(m_backend.canceledSubscriptions, QStringList{QStringLiteral("first")});
+    QTRY_VERIFY(prompt->property("visible").toBool());
+    QTRY_VERIFY(prompt->property("text").toString().contains(QStringLiteral("two.example")));
+    QMetaObject::invokeMethod(prompt, "close");
+    QMetaObject::invokeMethod(prompt, "confirmed");
+    QCOMPARE(m_backend.fetchedSubscriptions, QStringList{QStringLiteral("second")});
     delete root;
 }
 

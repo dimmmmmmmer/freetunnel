@@ -4,6 +4,7 @@
     <file alias="Main.qml">qml/Main.qml</file>
     <file alias="Toggle.qml">qml/Toggle.qml</file>
     <file alias="Field.qml">qml/Field.qml</file>
+    <file alias="SubscriptionOverlay.qml">qml/SubscriptionOverlay.qml</file>
     <file alias="CreateConfigOverlay.qml">qml/CreateConfigOverlay.qml</file>
     <file alias="AppPickerOverlay.qml">qml/AppPickerOverlay.qml</file>
     <file alias="pages/HomePage.qml">qml/pages/HomePage.qml</file>
@@ -22,5 +23,6 @@
     <file alias="components/WindowControls.qml">qml/components/WindowControls.qml</file>
     <file alias="components/UpdateArrow.qml">qml/components/UpdateArrow.qml</file>
     <file alias="components/BusyDots.qml">qml/components/BusyDots.qml</file>
+    <file alias="components/PopupShadow.qml">qml/components/PopupShadow.qml</file>
   </qresource>
 </RCC>
