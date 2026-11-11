@@ -81,7 +81,6 @@ import XCTest
         tab("servers")
         app.buttons["server-add"].tap()
         app.buttons["Paste from clipboard"].tap()
-        app.buttons["confirm-action"].tap()
         XCTAssertTrue(app.staticTexts["notification"].waitForExistence(timeout: 5))
         XCTAssertEqual(
             app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-edit-'")).count,
@@ -92,6 +91,32 @@ import XCTest
         XCTAssertEqual(
             app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-edit-'")).count,
             0)
+    }
+    func testDuplicateImportOffersCopyAndReplacement() {
+        app.launch()
+        importConfig()
+        app.buttons["server-add"].tap()
+        app.buttons["Paste from clipboard"].tap()
+        XCTAssertTrue(app.buttons["confirm-copy"].waitForExistence(timeout: 5))
+        capture("import-replace-or-copy")
+        app.buttons["confirm-action"].tap()
+        XCTAssertEqual(app.buttons.matching(identifier: "server-edit-UI import").count, 1)
+        app.buttons["server-add"].tap()
+        app.buttons["Paste from clipboard"].tap()
+        app.buttons["confirm-copy"].tap()
+        XCTAssertEqual(app.buttons.matching(identifier: "server-edit-UI import").count, 2)
+    }
+    func testSubscriptionAsksBeforeFetching() {
+        app.launchEnvironment["FT_UI_TEST_CLIPBOARD"] = "subscription_url = \"https://user:secret@example.invalid/sub\""
+        app.launch()
+        tab("servers")
+        app.buttons["server-add"].tap()
+        app.buttons["Paste from clipboard"].tap()
+        XCTAssertTrue(app.buttons["confirm-action"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Fetch subscription from example.invalid?"].exists)
+        capture("subscription-consent")
+        app.buttons["Cancel"].tap()
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-edit-'")).count, 0)
     }
     func testManualRulesPersistAndRemove() {
         app.launch()

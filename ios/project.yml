@@ -9,6 +9,8 @@ settings:
     SWIFT_VERSION: '5.0'
     IPHONEOS_DEPLOYMENT_TARGET: '17.0'
     MARKETING_VERSION: '1.2.4'
+    FT_DISTRIBUTION_CHANNEL: development
+    FT_TESTFLIGHT_URL: ''
     CURRENT_PROJECT_VERSION: '1'
     FT_APP_ID: org.freetunnel.ios
     FT_APP_GROUP: group.org.freetunnel.ios
@@ -45,6 +47,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: FreeTunnel
+        FreeTunnelDistributionChannel: $(FT_DISTRIBUTION_CHANNEL)
+        FreeTunnelTestFlightURL: $(FT_TESTFLIGHT_URL)
         FreeTunnelAppGroup: $(FT_APP_GROUP)
         FreeTunnelKeychainGroup: $(FT_KEYCHAIN_GROUP)
         FreeTunnelTunnelIdentifier: $(FT_APP_ID).tunnel

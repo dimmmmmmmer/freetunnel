@@ -88,6 +88,25 @@ struct ServerEditor: View {
                             )
                             .frame(height: 84).appEditor()
                         }
+                        if let profile, state.preferences.profiles.first(where: { $0.id == profile.id })?.subscriptionEnabled == true {
+                            HStack {
+                                Button("Refresh subscription") {
+                                    let refresh: () -> Void = {
+                                        state.dialog = nil
+                                        Task { await state.refreshSubscription(profile) }
+                                    }
+                                    if changed {
+                                        state.confirm("Discard unsaved changes?", actionTitle: "Discard", action: refresh)
+                                    } else { refresh() }
+                                }
+                                Spacer(minLength: 8)
+                                Button("Stop updates") {
+                                    state.confirm("Stop subscription updates?", actionTitle: "Stop updates") {
+                                        state.detachSubscription(profile)
+                                    }
+                                }.foregroundStyle(AppStyle.danger)
+                            }.font(AppStyle.caption).buttonStyle(.plain)
+                        }
                         HStack(spacing: 8) {
                             Spacer()
                             Button("Cancel", action: close).buttonStyle(

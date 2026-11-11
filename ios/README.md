@@ -94,3 +94,7 @@ only with `--ui-testing` in Debug simulator builds. They exercise the production
 forms, config parser and preference/cache serialization. They **do not** validate
 Keychain entitlements, Network Extension permission, actual VPN traffic or the
 reachability of list servers; those remain signed-device acceptance checks.
+
+### Update channel
+
+Development builds never offer desktop GitHub releases as iOS updates. When archiving for Apple distribution, set `FT_DISTRIBUTION_CHANNEL=testflight` or `appstore`. For TestFlight also set `FT_TESTFLIGHT_URL` to the app's public `https://testflight.apple.com/join/...` invitation once it exists; without a public invitation the app directs testers to TestFlight. App Store builds look up this app's bundle identifier in Apple's catalogue and open its verified App Store page. The default remains `development` for unsigned builds and local device testing.

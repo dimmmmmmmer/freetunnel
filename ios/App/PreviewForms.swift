@@ -8,6 +8,7 @@ struct PreviewForms: ViewModifier {
                 guard state.isPreview else { return }
                 switch ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] {
                 case "import": state.openAddMenu = true
+                case "subscription": state.dialog = .subscription
                 case "new-server": state.dialog = .server(nil)
                 case "edit-server": state.dialog = .server(state.selected?.id)
                 default: break

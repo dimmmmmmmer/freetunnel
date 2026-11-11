@@ -13,7 +13,11 @@ import VpnClientFramework
     @Published var loaded = false
     @Published var importText = ""
     @Published var dialog: AppDialogRoute?
-    @Published var confirmation: AppConfirmation?
+    @Published var confirmation: AppConfirmation? {
+        didSet {
+            if confirmation == nil { Task { @MainActor in self.nextImport() } }
+        }
+    }
     @Published var openAddMenu = false
     @Published var pings: [UUID: String] = [:]
     @Published var pinging = false
@@ -21,6 +25,8 @@ import VpnClientFramework
     @Published var updateStatus = "Check for updates"
     @Published var updateURL: URL?
     @Published var checkingUpdate = false
+    var pendingImports: [ImportDocument.Document] = []
+    var importing = false
     var reconnectTask: Task<Void, Never>?
     let vpn = VPNController()
     var isPreview: Bool {
@@ -148,17 +154,10 @@ extension AppState {
     }
     private func parseImport(_ text: String, allowInsecure: Bool) throws -> [String] {
         guard text.utf8.count <= Configuration.maximumBytes else { throw ClientError.tooLarge }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let documents: [String]
-        if trimmed.hasPrefix("tt://") {
-            let links = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-            guard links.count <= 100 else { throw ClientError.tooLarge }
-            documents = try links.map { link in
-                guard link.hasPrefix("tt://") else { throw ClientError.invalidConfig }
-                return try TrustTunnelDeepLink.decodeDeeplink(link)
-            }
-        } else {
-            documents = [trimmed]
+        let documents = try ImportDocument.split(text).map { value -> String in
+            let imported = try ImportDocument.parse(value)
+            guard let toml = imported.toml else { throw ClientError.invalidConfig }
+            return toml
         }
         return try documents.map { document in
             let config = try Configuration(document)
@@ -205,26 +204,24 @@ extension AppState {
         return documents.count
     }
     func importFiles(_ urls: [URL]) {
-        do {
-            guard urls.count <= 100 else { throw ClientError.tooLarge }
-            var documents: [String] = []
-            for url in urls {
+        guard urls.count <= 100 else { report(ClientError.tooLarge); return }
+        var batch: [ImportDocument.Document] = []
+        for url in urls {
+            do {
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size <= Configuration.maximumBytes else { throw ClientError.tooLarge }
                 let data = try Data(contentsOf: url)
-                guard data.count <= Configuration.maximumBytes,
-                    let text = String(data: data, encoding: .utf8)
-                else {
-                    throw ClientError.invalidConfig
+                guard let text = String(data: data, encoding: .utf8) else { throw ClientError.invalidConfig }
+                for item in try ImportDocument.split(text) {
+                    guard batch.count < 100 else { throw ClientError.tooLarge }
+                    do { batch.append(try ImportDocument.parse(item)) } catch { report(error) }
                 }
-                documents += try parseImport(text, allowInsecure: false)
-                guard documents.count <= 100 else { throw ClientError.tooLarge }
-            }
-            try storeImport(documents)
-            message = NSLocalizedString("Imported", comment: "")
-        } catch { report(error) }
+            } catch { report(error) }
+            if batch.count >= 100 { break }
+        }
+        enqueueImports(batch)
     }
     func remove(_ profile: Profile) throws {
         // An unrelated saved server is editable while the selected VPN runs.
@@ -278,7 +275,7 @@ extension AppState {
             if profile.subscriptionEnabled
                 && Date().timeIntervalSince(
                     profile.subscriptionUpdated ?? .distantPast) >= 86400 {
-                await refreshSubscription(profile)
+                await refreshSubscription(profile, manual: false)
             }
         }
         for profile in preferences.splitProfiles {
@@ -313,31 +310,50 @@ extension AppState {
         request.earliestBeginDate = Date().addingTimeInterval(Double(hours * 3600))
         try? BGTaskScheduler.shared.submit(request)
     }
-    func subscribe(_ url: String) async {
-        guard busy.insert("subscription").inserted else { return }
-        defer { busy.remove("subscription") }
+    func subscribe(_ url: String) {
         do {
-            let data = try await Downloads.read(
-                Subscription.request(url), limit: Subscription.maximumBytes)
-            try add(toml: Subscription.apply(data), subscription: url)
-            message = NSLocalizedString("Imported", comment: "")
+            _ = try Subscription.request(url)
+            enqueueImports([ImportDocument.Document(toml: nil, subscription: url)])
         } catch { report(error) }
     }
-    func refreshSubscription(_ profile: Profile) async {
+    func refreshSubscription(_ profile: Profile, manual: Bool = true) async {
         let key = "subscription-" + profile.id.uuidString
-        guard busy.insert(key).inserted else { return }
+        guard openDialogs.isEmpty, dialog == nil, confirmation == nil, busy.insert(key).inserted else { return }
         defer { busy.remove(key) }
         do {
-            var record = try secret(profile)
+            let record = try secret(profile)
             guard let url = record.subscription else { throw ClientError.invalidSource }
-            let data = try await Downloads.read(
-                Subscription.request(url), limit: Subscription.maximumBytes)
-            record.toml = try Subscription.apply(data, previous: record.toml)
-            guard var updated = preferences.profiles.first(where: { $0.id == profile.id }) else {
-                return
+            let previous = try Configuration(record.toml)
+            if !manual && !(previous.endpoint["custom_sni"] as? String ?? "").isEmpty { return }
+            let data = try await Downloads.read(Subscription.request(url), limit: Subscription.maximumBytes)
+            let text = try Subscription.apply(data, previous: record.toml)
+            let changed = try Configuration(text)
+            let apply = {
+                do {
+                    guard var latest = self.preferences.profiles.first(where: { $0.id == profile.id }), self.openDialogs.isEmpty, self.dialog == nil else { return }
+                    let current = try self.secret(latest)
+                    guard current.toml == record.toml, current.subscription == url else { return }
+                    try Vault.write(JSONEncoder().encode(Secret(toml: text, subscription: url)), key: profile.id.uuidString)
+                    latest.subscriptionUpdated = Date()
+                    self.update(latest)
+                    if self.selected?.id == profile.id && text != record.toml { self.reapplySelected() }
+                    if manual { self.message = "Subscription updated" }
+                } catch { self.report(error) }
             }
+            if previous.hostname.caseInsensitiveCompare(changed.hostname) != .orderedSame {
+                guard manual else { message = "Subscription changed its server. Refresh it to review."; return }
+                confirm(String(format: NSLocalizedString("The subscription changes the server from %@ to %@. Apply?", comment: ""), previous.hostname, changed.hostname), actionTitle: "Apply", action: apply)
+            } else { apply() }
+        } catch { report(error) }
+    }
+    func detachSubscription(_ profile: Profile) {
+        do {
+            var record = try secret(profile)
+            record.subscription = nil
             try Vault.write(encoder.encode(record), key: profile.id.uuidString)
-            updated.subscriptionUpdated = Date()
+            var updated = profile
+            updated.subscriptionEnabled = false
+            updated.subscriptionUpdated = nil
             update(updated)
         } catch { report(error) }
     }
