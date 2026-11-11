@@ -137,6 +137,18 @@ import NetworkExtension
             logs = LogLines.shownText((try? String(contentsOf: url, encoding: .utf8)) ?? "")
         }
     }
+    func exportLogs() async throws -> String {
+        #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--ui-preview") { return logs }
+        #endif
+        if let data = await send(Data("logs-raw".utf8)),
+            let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        let url = try Identity.directory().appendingPathComponent("freetunnel.log")
+        guard FileManager.default.fileExists(atPath: url.path) else { return "" }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
     func configureLogging(enabled: Bool, verbose: Bool) async {
         if let data = try? JSONSerialization.data(withJSONObject: [
             "loggingEnabled": enabled, "verboseLogs": verbose

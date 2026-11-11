@@ -187,11 +187,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.lines.removeAll()
                 self.flushLogs()
             }
-            guard command == "clear" || command == "logs" else {
+            guard command == "clear" || command == "logs" || command == "logs-raw" else {
                 completionHandler?(nil)
                 return
             }
-            completionHandler?(Data(LogLines.shownText(self.lines.joined(separator: "\n")).utf8))
+            let text = self.lines.joined(separator: "\n")
+            completionHandler?(Data((command == "logs-raw" ? text : LogLines.shownText(text)).utf8))
         }
     }
 }
