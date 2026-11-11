@@ -168,7 +168,12 @@ struct HomeView: View {
                             }
                         }
                     } label: {
-                        Image("TunnelLogo").resizable().scaledToFit().frame(width: 132, height: 132)
+                        ZStack {
+                            Image("TunnelLogo").resizable().scaledToFit()
+                            Image("TunnelLogoGreen").resizable().scaledToFit()
+                                .opacity(vpn.status == .connected ? 1 : 0)
+                                .animation(.linear(duration: 0.22), value: vpn.status)
+                        }.frame(width: 132, height: 132)
                             .opacity(vpn.isDisconnected ? 0.5 : transitioning ? 0.7 : 1)
                             .scaleEffect(pulse ? 1.05 : 1)
                             .animation(
