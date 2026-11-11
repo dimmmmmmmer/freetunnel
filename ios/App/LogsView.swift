@@ -6,6 +6,8 @@ struct LogsView: View {
     @ObservedObject var vpn: VPNController
     @State private var autoScroll = true
     @State private var exporting = false
+    @State private var preparingExport = false
+    @State private var exportText = ""
     var body: some View {
         VStack(spacing: 8) {
             HStack {
@@ -57,7 +59,16 @@ struct LogsView: View {
             (typeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                 : AnyLayout(HStackLayout(spacing: 8))) {
-                Button("freetunnel.log") { exporting = true }.buttonStyle(.plain).font(
+                Button("freetunnel.log") {
+                    preparingExport = true
+                    Task {
+                        defer { preparingExport = false }
+                        do {
+                            exportText = try await vpn.exportLogs()
+                            exporting = true
+                        } catch { state.report(error) }
+                    }
+                }.disabled(preparingExport).buttonStyle(.plain).font(
                     .system(size: 11)
                 )
                 .foregroundStyle(AppStyle.faint).accessibilityLabel("Export log")
@@ -71,7 +82,7 @@ struct LogsView: View {
             AppStyle.background
         )
         .fileExporter(
-            isPresented: $exporting, document: ConfigDocument(text: vpn.logs),
+            isPresented: $exporting, document: ConfigDocument(text: exportText),
             contentType: .plainText,
             defaultFilename: "freetunnel.log"
         ) { result in if case .failure(let error) = result { state.report(error) } }

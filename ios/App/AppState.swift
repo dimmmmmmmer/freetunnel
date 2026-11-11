@@ -227,7 +227,8 @@ extension AppState {
         } catch { report(error) }
     }
     func remove(_ profile: Profile) throws {
-        guard vpn.isDisconnected else { throw ClientError.tunnelFailed }
+        // An unrelated saved server is editable while the selected VPN runs.
+        guard vpn.isDisconnected || selected?.id != profile.id else { throw ClientError.tunnelFailed }
         try Vault.remove(profile.id.uuidString)
         preferences.profiles.removeAll { $0.id == profile.id }
         if preferences.selectedID == profile.id {
