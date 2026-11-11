@@ -4156,6 +4156,9 @@ public final class MainActivity extends Activity {
         foot.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         ToggleView auto = ui.toggle(logAutoScroll, true, "logs:autoscroll");
         auto.setContentDescription(getString(R.string.logs_auto_scroll));
+        // Keep the remote's exit from the log stable when the export link is present.
+        if (auto.getId() == View.NO_ID) auto.setId(View.generateViewId());
+        logBox.setNextFocusDownId(auto.getId());
         auto.setListener((v, on) -> { logAutoScroll = on; if (on) scrollLogToEnd(); });
         LinearLayout.LayoutParams autoLp = lp(-2, -2);
         // The track ends at the margin: the row's 6 of padding on its right, which the fill shows, go beyond it. The row is 28 high to fill

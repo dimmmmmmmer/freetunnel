@@ -418,7 +418,7 @@ class TvDeviceTest {
             render(a, page)
             onMain {
                 val content = root(a)
-                val keys = descendants(content).filter { it.isShown && it.isFocusable }.mapNotNull { it.tag as? String }.toMutableSet()
+                val keys = descendants(content).filter { it.isShown && it.isEnabled && it.isFocusable }.mapNotNull { it.tag as? String }.toMutableSet()
                 // On a phone the log's text is selectable, so a stop of its own inside the box, and a ScrollView is offered to the arrows only
                 // where none of what is in it is a stop: the text is the stop there, and the box is on a TV.
                 if (content.findViewWithTag<TextView?>("log:text")?.isTextSelectable == true) keys.remove("log:box")
@@ -1811,9 +1811,10 @@ class TvDeviceTest {
                 .map { it.tag as String to descendants(it).filterIsInstance<TextView>().first().text.toString() }.toList()
         }
         val others = listOf("add:paste" to context.getString(R.string.text_paste_from_clipboard),
-            "add:file" to context.getString(R.string.add_from_file), "add:create" to context.getString(R.string.add_create_new))
+            "add:file" to context.getString(R.string.add_from_file), "add:create" to context.getString(R.string.add_create_new),
+            "add:subscription" to context.getString(R.string.subscription_title))
         if (!isTv) {
-            assertEquals(others, rows)
+            assertEquals(others + ("add:qr" to context.getString(R.string.qr_scan)), rows)
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             eventually("Back closes the menu") { overlayTag(a, "addmenu") == null }
             // Create new… opens the editor, as the desktop's does.
@@ -3802,12 +3803,31 @@ class TvDeviceTest {
             // The desktop's own texts: no About section.
             assertFalse(descendants(body).filterIsInstance<TextView>().any { it.text.toString() == "About" })
             // The desktop's switches that this has, and no switch for checking updates on launch, which the app does by itself.
-            assertEquals(listOf("switch:auto_connect", "switch:killswitch", "switch:logging"),
+            assertEquals(listOf("switch:auto_connect", "switch:killswitch", "switch:logging", "switch:verbose_logs"),
                 descendants(body).mapNotNull { it.tag as? String }.filter { it.startsWith("switch:") }.distinct().sorted().toList())
         }
         assertTrue("Kill switch has its subtitle", shows(a, context.getString(R.string.settings_kill_switch_hint)))
         // What only the desktop has is not here.
-        for (text in listOf("Launch at system startup", "Hotkeys", "Verbose logs", "Let the VPN config open ports")) assertFalse("$text is the desktop's alone", shows(a, text))
+        for (text in listOf("Launch at system startup", "Hotkeys", "Let the VPN config open ports")) assertFalse("$text is the desktop's alone", shows(a, text))
+    }
+
+    @Test fun detailedLoggingIsAvailableOnlyWhileLoggingIsOn() {
+        val a = open()
+        render(a, 3)
+        onMain {
+            assertFalse(root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled)
+        }
+        click(a, "switch:logging")
+        eventually("Logging enables the detail toggle") {
+            onMain { root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled }
+        }
+        click(a, "switch:verbose_logs")
+        assertTrue(prefs.getBoolean("verbose_logs", false))
+        click(a, "switch:logging")
+        eventually("Turning logging off disables detail without losing the preference") {
+            onMain { !root(a).findViewWithTag<View>("switch:verbose_logs").isEnabled }
+        }
+        assertTrue(prefs.getBoolean("verbose_logs", false))
     }
 
     // The toggles' tracks, the dropdowns' values and the links at the end of a row end where the page's margin does, as the desktop's do. A
@@ -4242,7 +4262,7 @@ class TvDeviceTest {
             }
             onMain {
                 method("onActivityResult", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java)
-                    .invoke(a, 21, android.app.Activity.RESULT_OK, Intent().setClipData(picked))
+                    .invoke(a, 21, android.app.Activity.RESULT_OK, Intent().apply { clipData = picked })
             }
             eventually("First file is offered", 30_000) { overlayTag(a, "confirm") != null }
             val question = overlayTag(a, "confirm")
