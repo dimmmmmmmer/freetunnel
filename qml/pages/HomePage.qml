@@ -112,6 +112,18 @@ Item {
                             }
                             NumberAnimation { id: pulseSettle; target: pulse; property: "value"; to: 1.0
                                               duration: 120; easing.type: Easing.OutCubic }
+                            // Green while connected, as the tray icon is: the same
+                            // mark, logo-green.svg, faded in over the grey one so it
+                            // moves, pulses and shrinks with it.
+                            Image {
+                                objectName: "connectedLogo"
+                                anchors.fill: parent
+                                source: "qrc:/assets/logo-green.svg"
+                                sourceSize: Qt.size(264, 264)
+                                opacity: backend.connected && !backend.disconnecting ? 1.0 : 0.0
+                                visible: opacity > 0
+                                Behavior on opacity { NumberAnimation { duration: 220 } }
+                            }
                         }
                         // The logo, not the whole hero: the hero is wider than the
                         // logo and holds the session line under it, and a click on

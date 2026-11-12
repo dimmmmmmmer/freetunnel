@@ -733,8 +733,14 @@ jobs:
           # To refresh: download upstream, review, upload under a new
           # build-tools-<date> tag, update the URLs and digests here.
           tools=https://github.com/${{ github.repository }}/releases/download/build-tools-2026-08-02
-          curl -fsSL -o "$ld" "$tools/$ld"
-          curl -fsSL -o "$ldqt" "$tools/$ldqt"
+          # Retried: GitHub's release downloads answer 5xx now and then (a 504 on
+          # 2026-11-09 failed this leg on main), and curl retries 408, 429, 5xx,
+          # timeouts and refused connections, waiting between attempts.
+          # scripts/fetch-appimage-runtime.sh fetches from the same place with
+          # --retry too. The digests below still decide what is used.
+          dl() { curl -fsSL --retry 5 --retry-delay 15 --retry-connrefused -o "$1" "$2"; }
+          dl "$ld" "$tools/$ld"
+          dl "$ldqt" "$tools/$ldqt"
           echo "421ca71d5c69ea97c6309276232990d43df1dcece0edfaa26bbf926ff96ed12e  $ld"   | sha256sum -c - \
             || { echo "::error::$ld does not match its pinned digest"; exit 1; }
           echo "be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f  $ldqt" | sha256sum -c - \

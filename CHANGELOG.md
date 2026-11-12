@@ -5,6 +5,8 @@
 - Fixed desktop menus disappearing when using software rendering.
 
 - Restored macOS 13 support for Intel and Apple Silicon.
+- The Home logo turns green while connected on desktop, Android and Android TV.
+- Desktop and Android can import multiple links/files; Android can export the connection log.
 
 ## 1.2.4
 

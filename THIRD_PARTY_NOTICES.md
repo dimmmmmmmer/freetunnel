@@ -850,3 +850,10 @@ Qt-6.11.3-third-party, Wintun.
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
 checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, slf4j,
 ThreeTen-Backport, winnow.
+
+### ZXing Core (Android QR scanner)
+
+- Version: 3.5.4 (`com.google.zxing:core:3.5.4`)
+- License: Apache-2.0 ([LICENSE](LICENSE)).
+- Source: <https://github.com/zxing/zxing/tree/zxing-3.5.4>
+- Copyright ZXing authors. Used for local QR decoding; no cloud service is involved.

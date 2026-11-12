@@ -1186,7 +1186,7 @@ public final class LinkReceiverTest {
 
     @Test public void aTextTakenJustBeforeStopIsNotHandedOverAndItsPlaceIsGivenBack() throws Exception {
         // stop() comes after a text is taken and before it is handed over, which no socket can be timed to
-        // do: the phone has had its answer, but the listener hears nothing, and the place the text took is
+        // do: no success response may be sent, the listener hears nothing, and the place the text took is
         // given back, as no one will answer it. The step is private, so it is called as serve() does.
         LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
         List<String> heard = new ArrayList<>();
@@ -1223,7 +1223,10 @@ public final class LinkReceiverTest {
             }
             @Override public void stopped(LinkReceiver.Stop reason) { texts.add("stopped " + reason); }
         });
-        assertTrue(send(port, loopbackPost(port, "/K7QM-4XHD", form("one"))).endsWith(PAGES.sent));
+        Thread firstPhone = new Thread(() -> {
+            try { send(port, loopbackPost(port, "/K7QM-4XHD", form("one"))); } catch (IOException gone) { /* stopped */ }
+        });
+        firstPhone.start();
         assertTrue(inside.await(5, TimeUnit.SECONDS));
         // A second text is on its way while the first is being handed over, and the owner stops the receiver.
         Thread phone = new Thread(() -> {
@@ -1238,9 +1241,42 @@ public final class LinkReceiverTest {
         owner.join(5_000);
         assertFalse(owner.isAlive());
         phone.join(5_000);
+        firstPhone.join(5_000);
         assertClosed(port);
         Thread.sleep(300);
         assertEquals("Only the one that was being handed over", Arrays.asList("one"), texts);
+    }
+
+    @Test public void successIsSentOnlyAfterTheTextIsHandedOver() throws Exception {
+        LinkReceiver receiver = loopback(CODE, 60_000, 2_000, 5_000);
+        int port = port(receiver);
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger delivered = new AtomicInteger();
+        receiver.start(new LinkReceiver.Listener() {
+            @Override public void received(String text, String fileName, String sender) {
+                inside.countDown();
+                try { release.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+                delivered.incrementAndGet();
+            }
+            @Override public void stopped(LinkReceiver.Stop reason) { }
+        });
+        try (Socket phone = connect(port)) {
+            phone.getOutputStream().write(utf8(loopbackPost(port, "/K7QM-4XHD", form("one"))));
+            assertTrue(inside.await(5, TimeUnit.SECONDS));
+            phone.setSoTimeout(200);
+            assertThrows(java.net.SocketTimeoutException.class, () -> phone.getInputStream().read());
+            release.countDown();
+            phone.setSoTimeout(5_000);
+            String response = new String(phone.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(response.startsWith("HTTP/1.1 200 "));
+            assertTrue(response.endsWith(PAGES.sent));
+            receiver.stop();
+            assertEquals("Closing after success must not lose the accepted text", 1, delivered.get());
+            assertEquals("Its queue slot belongs to the owner until answered", 1, waiting.get());
+        } finally {
+            release.countDown();
+        }
     }
 
     // A whole send made by a client that leaves at once, without reading the answer:

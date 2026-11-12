@@ -481,7 +481,7 @@ final class LinkReceiver {
                     long deadline = System.nanoTime() + connectionDeadlineMs * 1_000_000L;
                     InputStream in = new BufferedInputStream(new DeadlineInput(open, firstByteTimeoutMs, readTimeoutMs, deadline));
                     OutputStream out = open.getOutputStream();
-                    outcome = handle(in, out, code, host, pages, wrongCodes + 1 >= MAX_WRONG_CODES, waiting, listener::accepts);
+                    outcome = handleAndDeliver(in, out, listener, sender, wrongCodes + 1 >= MAX_WRONG_CODES);
                     out.flush();
                     if (outcome.bodyUnread) drain(open, deadline);
                 } catch (IOException slowOrGone) {
@@ -492,7 +492,6 @@ final class LinkReceiver {
                     current = null;
                 }
                 if (outcome.kind == Kind.RECEIVED) {
-                    deliver(listener, outcome, sender);
                     continue;
                 }
                 if (outcome.kind == Kind.WRONG_CODE && ++wrongCodes >= MAX_WRONG_CODES) {
@@ -506,14 +505,29 @@ final class LinkReceiver {
         }
     }
 
+    private Outcome handleAndDeliver(InputStream in, OutputStream out, Listener listener, String sender,
+                                     boolean lastStrike) throws IOException {
+        // Do not tell the phone "Sent" until the owner has the text. Otherwise stop() can
+        // win between the HTTP response and delivery, silently losing an accepted import.
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        Outcome outcome = handle(in, response, code, host, pages, lastStrike, waiting, listener::accepts);
+        if (outcome.kind == Kind.RECEIVED && !deliver(listener, outcome, sender)) {
+            response.reset();
+            answer(response, 503, "Service Unavailable", pages.retry);
+        }
+        try { response.writeTo(out); }
+        catch (IOException gone) { /* Keep the outcome: received texts and wrong-code strikes still count. */ }
+        return outcome;
+    }
+
     // Hands a text taken to the listener, unless stop() came first, or was called while an earlier
     // text was being handed over, when it is not taken after all: the place it holds in the waiting
-    // count is given back, and the phone, which was told it was sent, has sent it to a TV that
-    // stopped listening a moment before.
-    private void deliver(Listener listener, Outcome outcome, String sender) {
+    // count is given back. The success response is written only after this returns true.
+    private boolean deliver(Listener listener, Outcome outcome, String sender) {
         synchronized (delivery) {
-            if (stopped.get() || stopRequested) { waiting.decrementAndGet(); return; }
+            if (stopped.get() || stopRequested) { waiting.decrementAndGet(); return false; }
             listener.received(outcome.text, outcome.fileName, sender);
+            return true;
         }
     }
 

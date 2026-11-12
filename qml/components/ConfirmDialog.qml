@@ -11,6 +11,7 @@ Item {
     property string altText: ""
     signal confirmed()
     signal alternate()
+    signal canceled()
     anchors.fill: parent
     visible: false
     z: 2000
@@ -26,6 +27,7 @@ Item {
         forceActiveFocus()
     }
     function close() { visible = false }
+    function cancel() { visible = false; canceled() }
     onVisibleChanged: {
         armed = false
         if (visible) {
@@ -66,7 +68,7 @@ Item {
     // Takes hover as well as clicks: the page under the dim is out of reach, and
     // its rows and tiles lit up under the pointer as if they were not.
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
-        MouseArea { anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
+        MouseArea { anchors.fill: parent; hoverEnabled: true; onClicked: cd.cancel() } }
     Rectangle {
         objectName: "confirmCard"
         anchors.centerIn: parent
@@ -113,7 +115,7 @@ Item {
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Text { id: c1t; anchors.centerIn: parent; text: qsTr("Cancel"); color: theme.text; font.pixelSize: 14
                            width: Math.min(implicitWidth, parent.width - 8); elide: Text.ElideRight }
-                    MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.visible = false } }
+                    MouseArea { id: c1; anchors.fill: parent; hoverEnabled: true; onClicked: cd.cancel() } }
                 Rectangle { objectName: "alternateButton"
                     visible: cd.altText !== ""
                     width: visible ? cd.buttonWidth(c3t) : 0; height: 32; radius: 8
@@ -143,7 +145,7 @@ Item {
     property bool escapeOwner: true
     Shortcut { sequences: ["Escape"]
                enabled: cd.visible && cd.escapeOwner
-               onActivated: cd.visible = false }
+               onActivated: cd.cancel() }
 
     // Return confirms — but not the instant the dialog appears. A deep link can
     // put this dialog on screen with no warning while the user is typing, and a

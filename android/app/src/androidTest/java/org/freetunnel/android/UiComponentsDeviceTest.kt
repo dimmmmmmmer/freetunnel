@@ -659,7 +659,7 @@ class UiComponentsDeviceTest {
     @Test fun everyVectorDrawableLoads() {
         for ((id, size) in listOf(R.drawable.ic_connection to 24f, R.drawable.ic_network to 24f, R.drawable.ic_settings to 24f,
                 R.drawable.ic_log to 24f, R.drawable.ic_ping to 24f, R.drawable.ic_export to 24f, R.drawable.ic_edit to 24f,
-                R.drawable.ic_close to 24f, R.drawable.ic_logo to 100f, R.drawable.ic_add to 22f, R.drawable.ic_add_home to 14f,
+                R.drawable.ic_close to 24f, R.drawable.ic_logo to 100f, R.drawable.ic_logo_green to 100f, R.drawable.ic_add to 22f, R.drawable.ic_add_home to 14f,
                 // The characters the desktop draws as text (▾ ✓ ↓ ↑ ←): ▾ at the size its system font gives it, the others as Inter
                 // draws them at the sizes the desktop's QML sets them in (✓ 14 px, ↓ and ↑ 14, ← 20), each as wide as its ink.
                 R.drawable.ic_dropdown to 8f, R.drawable.ic_check to 9.6f, R.drawable.ic_arrow_down to 8.9f, R.drawable.ic_arrow_up to 8.9f,

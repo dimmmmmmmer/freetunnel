@@ -66,10 +66,13 @@ private slots:
     void switchingProfileSwitchesTheApplicationList();
     void everyFileDialogActuallyOpens();
     void everyFileDialogActuallyOpens_data();
+    void multipleConfigFilesReachTheBackend();
     void settingsPageLoads();
     void logsPageLoads();
     void createConfigOverlayLoads();
     void mainWindowLoads();
+    void subscriptionConsentIsQueuedAndCancellationDoesNotFetch();
+    void subscriptionRefreshAsksBeforeDiscardingEditorChanges();
     void mainWindowPageNavigation();
     void closingTheWindowQuitsWhenThereIsNoTray();
     void everythingTheWindowsAgentLooksForCanBeFound();
@@ -84,6 +87,7 @@ private slots:
     void theTrayMenuShowsConfigNamesAsTyped_data();
     void theTrayMenuShowsConfigNamesAsTyped();
     void doubleClickingTheLogoTogglesOnce();
+    void theLogoIsGreenWhileConnected();
     void aToastWaitsForAWindowThatIsAway();
     void aWindowHiddenWithTheAppIsAway();
     void onlyATrayActionsFailureIsNotified();
@@ -477,6 +481,29 @@ void TestQmlUi::everyFileDialogActuallyOpens_data()
 // AA_DontUseNativeDialogs is set for the whole test binary, so this exercises
 // the drawn dialog — the one that has to exist when the desktop offers nothing —
 // rather than opening a native modal window on a CI runner.
+void TestQmlUi::multipleConfigFilesReachTheBackend()
+{
+    QObject *root = loadPage("pages/ConfigsPage.qml");
+    QVERIFY(root);
+    QObject *dialog = root->findChild<QObject *>(QStringLiteral("configImportDialog"));
+    QVERIFY(dialog);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QList<QUrl> files{QUrl::fromLocalFile(directory.filePath(QStringLiteral("Work #1.toml"))),
+                           QUrl::fromLocalFile(directory.filePath(QStringLiteral("Second.txt")))};
+    for (const QUrl &url : files) {
+        QFile file(url.toLocalFile());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    QCOMPARE(dialog->property("fileMode").toInt(), 1); // FileDialog.OpenFiles
+    // currentFiles is Qt's writable compatibility alias for selectedFiles.
+    // Exercise our accepted handler with both URLs, including an escaped name.
+    QVERIFY(dialog->setProperty("currentFiles", QVariant::fromValue(files)));
+    QVERIFY(QMetaObject::invokeMethod(dialog, "accepted"));
+    QCOMPARE(m_backend.importedFiles, QStringList({files[0].toString(), files[1].toString()}));
+    delete root;
+}
+
 void TestQmlUi::everyFileDialogActuallyOpens()
 {
     QFETCH(QString, page);
@@ -1445,6 +1472,40 @@ void TestQmlUi::doubleClickingTheLogoTogglesOnce()
     QVERIFY(m_backend.connecting());
 
     m_backend.setConnecting(false);
+    delete root;
+}
+
+// Green while connected, as the tray icon is: the same mark, logo-green.svg, over
+// the grey one. It was grey in every state, brighter when connected and no more.
+void TestQmlUi::theLogoIsGreenWhileConnected()
+{
+    m_backend.setConnected(false);
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    auto *green = root->findChild<QQuickItem *>(QStringLiteral("connectedLogo"));
+    QVERIFY2(green, "no green mark on Home");
+    QCOMPARE(green->property("source").toUrl(), QUrl(QStringLiteral("qrc:/assets/logo-green.svg")));
+    QCOMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 1.0);
+    QVERIFY(green->property("visible").toBool());
+    // It has loaded: a mark that failed to load would leave the grey one showing.
+    QTRY_COMPARE(green->property("status").toInt(), 1); // Image.Ready
+
+    // Disconnect is optimistic: the helper may still report Connected until
+    // its first state notification, but Home must already stop showing green.
+    m_backend.setDisconnecting(true);
+    m_backend.setConnected(true);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
+    m_backend.setDisconnecting(false);
+    QTRY_COMPARE(green->opacity(), 1.0);
+
+    m_backend.setConnected(false);
+    QTRY_COMPARE(green->opacity(), 0.0);
+    QVERIFY(!green->property("visible").toBool());
     delete root;
 }
 
@@ -2645,6 +2706,66 @@ void TestQmlUi::chipsAreCutOnlyWhereTheRowEnds()
     QVERIFY(page);
     const QString problem = check(page, route);
     QVERIFY2(problem.isEmpty(), qPrintable(problem));
+    delete root;
+}
+
+void TestQmlUi::subscriptionRefreshAsksBeforeDiscardingEditorChanges()
+{
+    const QStringList previousConfigs = m_backend.configs();
+    m_backend.setConfigs({QStringLiteral("Subscribed")});
+    const QString path = m_backend.configPath(0);
+    m_backend.subscriptionPaths = {path};
+    m_backend.refreshedSubscriptions.clear();
+    auto restore = qScopeGuard([&] { m_backend.subscriptionPaths.clear(); m_backend.setConfigs(previousConfigs); });
+    QScopedPointer<QObject> root(createMainWindow(m_engine));
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root.data());
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    root->setProperty("editIndex", 0);
+    root->setProperty("overlay", QStringLiteral("create"));
+    QObject *field = nullptr;
+    QTRY_VERIFY((field = root->findChild<QObject *>(QStringLiteral("nameField"))) != nullptr);
+    field->setProperty("text", QStringLiteral("Unsaved name"));
+    QObject *refresh = root->findChild<QObject *>(QStringLiteral("refreshSubscriptionAction"));
+    QVERIFY(refresh);
+    QObject *form = root->findChild<QObject *>(QStringLiteral("editorForm"));
+    QVERIFY(form);
+    form->setProperty("contentY", qMax(0.0, form->property("contentHeight").toDouble() - form->property("height").toDouble()));
+    QCoreApplication::processEvents();
+    QQmlExpression click(QQmlEngine::contextForObject(refresh), refresh, QStringLiteral("clicked(null)"));
+    click.evaluate();
+    QVERIFY2(!click.hasError(), qPrintable(click.error().toString()));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt->property("visible").toBool());
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+    QMetaObject::invokeMethod(prompt, "cancel");
+    QCOMPARE(field->property("text").toString(), QStringLiteral("Unsaved name"));
+    QVERIFY(m_backend.refreshedSubscriptions.isEmpty());
+}
+
+void TestQmlUi::subscriptionConsentIsQueuedAndCancellationDoesNotFetch()
+{
+    m_backend.fetchedSubscriptions.clear();
+    m_backend.canceledSubscriptions.clear();
+    QObject *root = createMainWindow(m_engine);
+    QVERIFY(root);
+    auto *window = qobject_cast<QQuickWindow *>(root);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QObject *prompt = root->findChild<QObject *>(QStringLiteral("windowConfirm"));
+    QVERIFY(prompt);
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("first"), {{QStringLiteral("origin"), QStringLiteral("https://one.example")}});
+    emit m_backend.subscriptionConsentRequired(QStringLiteral("second"), {{QStringLiteral("origin"), QStringLiteral("https://two.example")}});
+    QVERIFY(prompt->property("text").toString().contains(QStringLiteral("one.example")));
+    QVERIFY(m_backend.fetchedSubscriptions.isEmpty());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QCOMPARE(m_backend.canceledSubscriptions, QStringList{QStringLiteral("first")});
+    QTRY_VERIFY(prompt->property("visible").toBool());
+    QTRY_VERIFY(prompt->property("text").toString().contains(QStringLiteral("two.example")));
+    QMetaObject::invokeMethod(prompt, "close");
+    QMetaObject::invokeMethod(prompt, "confirmed");
+    QCOMPARE(m_backend.fetchedSubscriptions, QStringList{QStringLiteral("second")});
     delete root;
 }
 

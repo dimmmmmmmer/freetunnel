@@ -30,6 +30,24 @@ final class LogLines {
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT);
     private static final Pattern WRITTEN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2} (\\d{2}:\\d{2}:\\d{2})\t([A-Z]+)\t(.*)$");
 
+    private static final Pattern CORE = Pattern.compile("^(\\d{2})\\.(\\d{2})\\.(\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d+\\s+(\\w+)\\s+(.*)$");
+
+    static String coreEntry(long millis, ZoneId zone, String level, String message) {
+        Matcher core = CORE.matcher(message);
+        if (core.matches()) {
+            return core.group(3) + "-" + core.group(2) + "-" + core.group(1) + " " + core.group(4)
+                    + "\t" + coreLevel(core.group(5)) + "\t" + oneLine(core.group(6));
+        }
+        return entry(millis, zone, coreLevel(level), message);
+    }
+    private static String coreLevel(String level) {
+        switch (level.toUpperCase(Locale.ROOT)) {
+            case "ERROR": case "ERR": case "FATAL": return ERROR;
+            case "WARN": case "WARNING": return WARN;
+            default: return "CORE";
+        }
+    }
+
     private LogLines() { }
 
     /** A line as it is written to the file, without its line break. */
