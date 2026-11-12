@@ -22,7 +22,7 @@ def coreVersion = coreVersionMatch.group(1)
 dependencies {
     implementation files("libs/${coreAar}")
     implementation 'org.slf4j:slf4j-api:1.7.25'
-    implementation 'com.github.tony19:logback-android:2.0.0'
+    implementation 'com.github.tony19:logback-android:3.0.0'
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
     implementation 'com.akuleshov7:ktoml-core:0.7.1'
     implementation 'org.tomlj:tomlj:1.1.1'
