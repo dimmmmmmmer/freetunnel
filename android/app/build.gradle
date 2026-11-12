@@ -25,7 +25,7 @@ dependencies {
     implementation 'com.github.tony19:logback-android:2.0.0'
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
     implementation 'com.akuleshov7:ktoml-core:0.7.1'
-    implementation 'org.tomlj:tomlj:1.1.1'
+    implementation 'org.tomlj:tomlj:2.2.0'
     // Tomlj exposes these annotations in its API but declares them runtime-only.
     // Kotlin 2.4 also needs them on the compilation classpath.
     compileOnly 'org.checkerframework:checker-qual:3.21.2'
