@@ -3,6 +3,7 @@ package org.freetunnel.android;
 import org.json.JSONObject;
 import org.json.JSONArray;
 import org.tomlj.Toml;
+import org.tomlj.TomlVersion;
 import org.tomlj.TomlTable;
 import java.net.URI;
 import java.net.HttpURLConnection;
@@ -33,7 +34,7 @@ final class SubscriptionData {
     }
     static String source(String text) throws Exception {
         if (DeepLinkImport.looksLikeLink(text)) return DeepLinkImport.subscription(text);
-        org.tomlj.TomlParseResult root = Toml.parse(text);
+        org.tomlj.TomlParseResult root = Toml.parse(text, TomlVersion.V1_0_0);
         if (root.hasErrors()) throw new IOException("Invalid subscription configuration");
         TomlTable endpoint = root.getTable("endpoint");
         TomlTable table = endpoint == null ? root : endpoint;

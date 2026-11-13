@@ -236,9 +236,16 @@ class VpnDeviceTest {
             val properties = cm.getLinkProperties(network()!!)!!
             assertFalse(properties.linkAddresses.any { it.address is java.net.Inet6Address })
             assertFalse(properties.routes.any { it.destination.address is java.net.Inet6Address && it.type == RouteInfo.RTN_UNICAST })
-            // Android sets the VPN's capabilities on its own schedule, after the
-            // network itself appears.
-            eventually { network()?.let { cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } == true }
+            // setMetered(false) inherits the underlying network's metering. The
+            // app is excluded from its VPN, so activeNetwork is the underlying
+            // network; Android publishes VPN capabilities asynchronously.
+            eventually {
+                val underlying = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                val vpn = network()?.let { cm.getNetworkCapabilities(it) }
+                underlying != null && vpn != null && !underlying.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    vpn.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ==
+                    underlying.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            }
             instrumentation.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
                 .putExtra("tile_connect", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             instrumentation.waitForIdleSync()

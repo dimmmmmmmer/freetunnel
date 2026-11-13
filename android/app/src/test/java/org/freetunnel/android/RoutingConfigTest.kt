@@ -32,6 +32,14 @@ class RoutingConfigTest {
     private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
         "192.168.0.0/16", "255.255.255.255/32")
 
+    @Test fun rejectsToml11EscapesUnsupportedByStableCore() {
+        for (escape in listOf("\\x74", "\\e")) {
+            val input = source.replace("username = \"test\"", "username = \"${escape}est\"")
+            assertFalse("Tomlj defaults to TOML 1.1", Toml.parse(input).hasErrors())
+            assertThrows(IllegalArgumentException::class.java) { RoutingConfig.validate(input) }
+        }
+    }
+
     @Test fun verboseLoggingOverridesImportedLevelWithoutDroppingGeoRules() {
         val input = "loglevel = \"error\"\n" + source
         val geo = listOf("@2:geo.example")

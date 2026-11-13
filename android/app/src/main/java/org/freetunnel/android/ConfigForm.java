@@ -1,6 +1,7 @@
 package org.freetunnel.android;
 
 import org.tomlj.Toml;
+import org.tomlj.TomlVersion;
 import org.tomlj.TomlArray;
 import org.tomlj.TomlParseResult;
 import org.tomlj.TomlTable;
@@ -99,7 +100,7 @@ final class ConfigForm {
     private static TomlTable parse(String toml) {
         if (toml == null) return null;
         try {
-            TomlParseResult parsed = Toml.parse(toml);
+            TomlParseResult parsed = Toml.parse(toml, TomlVersion.V1_0_0);
             return parsed.hasErrors() ? null : parsed;
         } catch (RuntimeException e) {
             return null;

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated the VPN core to stable TrustTunnel 1.1.12 with an updated Chrome TLS profile.
+
 - Made connection logs on Android and Android TV as readable as on desktop, including saved logs and copied text.
 
 ## 1.2.4

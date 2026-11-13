@@ -12,24 +12,24 @@ def appVersion = '1.2.4'
 def appVersionCode = appVersion.tokenize('.').collect { it as int }.with { it[0] * 10000 + it[1] * 100 + it[2] }
 
 // The TrustTunnel core the app is built on: one source-built AAR, checked against core-source.json and its build manifest. Its version
-// is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.11", as the desktop's
+// is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.12", as the desktop's
 // says which core it carries.
-def coreAar = 'trusttunnel-client-android-1.1.11.aar'
+def coreAar = 'trusttunnel-client-android-1.1.12.aar'
 def coreVersionMatch = coreAar =~ /^trusttunnel-client-android-(\d+(?:\.\d+)*)\.aar$/
 if (!coreVersionMatch.matches()) throw new GradleException("The core AAR's name must be trusttunnel-client-android-<version>.aar, not ${coreAar}")
 def coreVersion = coreVersionMatch.group(1)
 
 dependencies {
     implementation files("libs/${coreAar}")
-    implementation 'org.slf4j:slf4j-api:1.7.25'
-    implementation 'com.github.tony19:logback-android:2.0.0'
-    implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
+    implementation 'org.slf4j:slf4j-api:2.0.20'
+    implementation 'com.github.tony19:logback-android:3.0.0'
+    implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'
     implementation 'com.akuleshov7:ktoml-core:0.7.1'
-    implementation 'org.tomlj:tomlj:1.1.1'
-    // Tomlj exposes these annotations in its API but declares them runtime-only.
-    // Kotlin 2.4 also needs them on the compilation classpath.
-    compileOnly 'org.checkerframework:checker-qual:3.21.2'
-    androidTestCompileOnly 'org.checkerframework:checker-qual:3.21.2'
+    implementation 'org.tomlj:tomlj:2.2.0'
+    // Tomlj exposes these annotations in its API without a transitive dependency.
+    // Kotlin 2.4 needs them on the compilation classpath.
+    compileOnly 'org.checkerframework:checker-qual:4.4.0'
+    androidTestCompileOnly 'org.checkerframework:checker-qual:4.4.0'
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
     // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
     // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.
