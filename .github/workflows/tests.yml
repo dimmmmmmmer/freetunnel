@@ -176,11 +176,28 @@ jobs:
         run: windeployqt --release --no-translations build-tests/freetunnel_test_helper.exe
 
       - name: Test
+        timeout-minutes: 20
         if: needs.changes.outputs.desktop != 'false'
         env:
           QT_QPA_PLATFORM: offscreen
           FT_GEO_PREVIEW_DIR: ${{ github.workspace }}/ui-previews
-        run: bash scripts/run-ctest.sh build-tests
+          # windeployqt relocates the helper's QtCore beside all test binaries;
+          # GUI tests still need the SDK's offscreen and QML plugins.
+          QT_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins
+          QML_IMPORT_PATH: ${{ env.QT_ROOT_DIR }}/qml
+          QT_DEBUG_PLUGINS: ${{ runner.os == 'Windows' && '1' || '0' }}
+        run: bash scripts/run-ctest.sh build-tests --timeout 180
+
+      - name: Upload unit test diagnostics
+        if: always() && needs.changes.outputs.desktop != 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unit-test-diagnostics-${{ runner.os }}
+          path: |
+            build-tests/Testing/Temporary/
+            build-tests/report-*.txt
+            build-tests/failed-*.txt
+          if-no-files-found: warn
 
       - name: Upload geo-list UI preview
         if: always() && needs.changes.outputs.desktop != 'false'
