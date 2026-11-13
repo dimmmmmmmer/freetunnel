@@ -172,7 +172,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build clang-tidy-18 libssl-dev libsecret-1-dev pkg-config \
-            libxcb1-dev
+            libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
       - name: Install Qt
         uses: ./.github/actions/qt
