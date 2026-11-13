@@ -418,7 +418,7 @@ void ProcessLookup::refreshIfStale()
     m_report = fresh;
     ++m_walks;
     walk(now);
-    m_credit -= m_report.elapsedUs;
+    m_credit = std::max(-kLookCreditCapUs, m_credit - m_report.elapsedUs);
 }
 
 // How long a table that contains the flow is trusted without asking again.
@@ -502,14 +502,16 @@ void ProcessLookup::accrueLookCredit(std::chrono::steady_clock::time_point now)
 // third time would find the same nothing. Otherwise the table simply predates
 // the question and is worth rebuilding.
 //
-// That leaves cost as the only reason to decline, which is what the credit is.
+// A healthy scan must not be skipped because of its cost: that would make
+// machine load change routing policy. Credit only limits retries after a failed
+// system query; cached hits still share a scan.
 bool ProcessLookup::shouldLookAgain(std::chrono::steady_clock::time_point asked) const
 {
     if (!m_everBuilt)
         return false; // the last walk did not complete; refreshIfStale() retries it
     if (m_builtAt >= asked)
         return false;
-    return m_credit >= std::max<qint64>(m_report.elapsedUs, 0);
+    return true;
 }
 
 // Whether a row the table found is the answer, or only looks like one.
@@ -563,6 +565,8 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
             *lookWasSkipped = true;
         }
     }
+    if (!owner.found && !m_everBuilt && lookWasSkipped != nullptr)
+        *lookWasSkipped = true;
     if (!owner.found || owner.pid == kUnattributed)
         return {};
     const qint64 pid = owner.pid;

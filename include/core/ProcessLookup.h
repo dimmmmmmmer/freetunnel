@@ -154,16 +154,12 @@ SocketAddress v4MappedAddress(quint32 hostOrder);
 // So the socket is always already in the system's tables when the question is
 // put: a lookup that fails to find it has not discovered a race, it has
 // discovered that our copy of those tables is older than the question. That is
-// the whole design here — a miss is never accepted as an answer while a fresher
-// look is affordable, and how fresh the look needs to be is decided by
-// comparing timestamps, not by trusting an interval to have been long enough.
+// a cache miss needs a completed, fresh scan. Machine load must not decide
+// whether an application uses VPN. Cached hits share a scan; failed system
+// queries are retried with a backoff and reported as unavailable.
 //
-// Affordable is the other half. Walking every process's descriptors to find one
-// socket is far too expensive to repeat per connection, but it is also far more
-// than the question needs: the decision is "does this belong to a program the
-// user wrote a rule about", and there are usually one or two of those. So only
-// those processes are walked — see setWatchList — which is what turns a fresh
-// look from something to be rationed into something to be taken every time.
+// Only watched processes' descriptors are walked on Linux. Other sockets are
+// recorded as unlisted, so repeated connections from them share the snapshot.
 class ProcessLookup {
 public:
     explicit ProcessLookup(std::chrono::milliseconds ttl = std::chrono::milliseconds(1500));
@@ -182,15 +178,9 @@ public:
     // it is not one of the watched ones — or, on the rare occasions the system
     // will not say, when it cannot be attributed at all.
     //
-    // `lookWasSkipped`, when given, separates the last two. An empty identity
-    // usually means the walk looked and no watched program owns this socket,
-    // which is a real answer. It can also mean the walk had no budget left to
-    // look again — in a burst long enough to exhaust it, which is measurable:
-    // on this machine a walk costs about 2.8 ms, so a few dozen back-to-back
-    // connections spend the lot. Those two look identical to the caller and are
-    // not the same thing at all: one is "not yours", the other is "not known",
-    // and in "Through VPN" mode answering the second as the first sends traffic
-    // out of the tunnel that may well have belonged in it.
+    // `lookWasSkipped` distinguishes an unavailable system query from a
+    // completed scan with no matching app. Only failures are rate-limited;
+    // a healthy scan is never skipped because of a connection burst.
     AppIdentity resolve(const LocalFlow &flow, bool *lookWasSkipped = nullptr);
 
     // Drop the cached table. For tests, and for reconnects, where every socket
@@ -265,8 +255,7 @@ private:
     void walk(std::chrono::steady_clock::time_point startedAt);
     // Whether to look again for a flow the table does not have. See the note at
     // the definition: the answer is yes unless the table is already newer than
-    // the question, or unless looking again would spend more of this machine
-    // than the feature is worth.
+    // the question. Failed queries are retried separately with a backoff.
     bool shouldLookAgain(std::chrono::steady_clock::time_point asked) const;
     // Whether a row the table found for a flow asked at `asked` is the answer.
     bool settles(const SocketOwnerTable::Match &match, std::chrono::steady_clock::time_point asked) const;
@@ -283,8 +272,7 @@ private:
     bool m_walkFailed = false;
     std::chrono::milliseconds m_ttl;
     QStringList m_watch;
-    // Microseconds of walking this object is still entitled to, and when that
-    // was last worked out.
+    // Retry budget for failed system queries, and when it was accrued.
     qint64 m_credit = 0;
     qint64 m_walks = 0;
     std::chrono::steady_clock::time_point m_creditAt{};

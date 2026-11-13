@@ -119,7 +119,8 @@ private slots:
     void selectiveModeSendsAMatchedAppTheOtherWay();
     void aRuleAddedMidSessionDecidesTheNextConnection();
     void withNoAppRulesNothingIsForcedAndNothingIsLookedUp();
-    void aBurstPastTheLookupBudgetIsKeptInTheTunnel();
+    void aFailedLookupDoesNotChangeRoutingPolicy();
+    void importedRulesAreNotReversedByModeChanges();
     void staleEventFromPreviousSessionIsIgnored();
     void failedAttemptSchedulesWorkingRetry();
     void coreDropTriggersAutoReconnect();
@@ -250,10 +251,10 @@ private:
     // Connected, and adopted: the first live edit is how a test knows the client
     // holds the session, since a CONNECTED event can be handled before the
     // finished attempt is. Returns the session's id.
-    quint64 connectedWithLiveSession()
+    quint64 connectedWithLiveSession(const QString &toml = validConfigToml())
     {
         auto &ctl = mockcore::Controller::instance();
-        beginConnect();
+        beginConnect(toml);
         if (!QTest::qWaitFor([&ctl]() { return ctl.connectCallCount() >= 1; }, kLongWaitMs))
             return 0;
         const quint64 id = ctl.lastClientId();
@@ -1676,43 +1677,49 @@ void TestQtTrustTunnelClient::offlineLooksKeepThePace()
 }
 
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)
-// What happens once the lookup has spent its budget, which a long enough burst
-// will do: on this machine a walk costs about 2.8 ms, and a few dozen
-// back-to-back connections exhaust the credit that pays for them.
-//
-// Before this, such a connection was answered exactly like one the walk had
-// examined and found unlisted — VPN_CA_DEFAULT — and in "Through VPN" the core's
-// default is to leave the tunnel. So a burst from a listed program put its own
-// traffic on the open network, which is the one thing the rule was written to
-// prevent, and nothing said so. An unexamined connection is kept in the tunnel
-// instead: wrong only for a program nobody listed, and wrong there in the
-// direction that costs bandwidth rather than privacy.
-void TestQtTrustTunnelClient::aBurstPastTheLookupBudgetIsKeptInTheTunnel()
+// Failure to identify a socket must neither expose a selected app directly
+// nor send an unselected one through VPN. Reject only that connection.
+void TestQtTrustTunnelClient::aFailedLookupDoesNotChangeRoutingPolicy()
 {
     auto &ctl = mockcore::Controller::instance();
-
-    m_client->setVpnMode(true); // "Through VPN": default means OUT of the tunnel
-    m_client->setAppRules({QFileInfo(QCoreApplication::applicationFilePath()).fileName()});
-
+    qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
+    qputenv("FT_TEST_PROCESS_WALK_COST_US", "400000");
+    const auto restore = qScopeGuard([] {
+        qunsetenv("FT_TEST_PROCESS_WALK_FAILS");
+        qunsetenv("FT_TEST_PROCESS_WALK_COST_US");
+    });
+    m_client->setVpnMode(true);
+    m_client->setAppRules({ownProgram()});
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
     const quint64 id = ctl.lastClientId();
+    QTcpServer first;
+    QVERIFY(first.listen(QHostAddress::LocalHost, 0));
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(first, 10)).action, ag::VPN_CA_FORCE_REDIRECT);
+    QTcpServer later;
+    QVERIFY(later.listen(QHostAddress::LocalHost, 0));
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(later, 11)).action, ag::VPN_CA_REJECT);
+    qunsetenv("FT_TEST_PROCESS_WALK_FAILS");
+    qunsetenv("FT_TEST_PROCESS_WALK_COST_US");
+    // Changing rules invalidates the failed snapshot and retries immediately.
+    m_client->setAppRules({ownProgram(), QStringLiteral("unused-program")});
+    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(later, 12)).action, ag::VPN_CA_FORCE_REDIRECT);
+}
 
-    // Ports nobody holds, so every one of them is a miss that buys a fresh walk
-    // until there is nothing left to buy one with.
-    bool keptIn = false;
-    QElapsedTimer clock;
-    clock.start();
-    for (int i = 0; i < 4000 && !keptIn && clock.elapsed() < 20000; ++i) {
-        ag::VpnConnectRequestSnapshot req;
-        req.id = static_cast<std::uint64_t>(100 + i);
-        req.proto = IPPROTO_TCP;
-        req.family = AF_INET;
-        req.src_port = static_cast<std::uint16_t>(20000 + i);
-        req.src_ip = "127.0.0.1";
-        keptIn = ctl.fireConnectRequest(id, req).action == ag::VPN_CA_FORCE_REDIRECT;
-    }
-    QVERIFY2(keptIn, "the budget must run out and unexamined connections stay in the tunnel");
+void TestQtTrustTunnelClient::importedRulesAreNotReversedByModeChanges()
+{
+    auto &ctl = mockcore::Controller::instance();
+    const quint64 id = connectedWithLiveSession(
+        QStringLiteral("vpn_mode = \"general\"\nexclusions = [\"intranet.example\"]\n") + validConfigToml());
+    QVERIFY(id != 0);
+    QVERIFY(has(ctl.exclusionUpdates().back(), "intranet.example"));
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+        Q_ARG(QStringList, QStringList({QStringLiteral("selected.example")})),
+        Q_ARG(bool, true), Q_ARG(QStringList, QStringList()));
+    QVERIFY(has(ctl.exclusionUpdates().back(), "selected.example"));
+    QVERIFY(!has(ctl.exclusionUpdates().back(), "intranet.example"));
+    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection, Q_ARG(bool, false));
+    QVERIFY(has(ctl.exclusionUpdates().back(), "intranet.example"));
 }
 
 // The core logs through one callback for the whole process. Left to itself, the

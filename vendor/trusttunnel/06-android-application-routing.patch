@@ -1,0 +1,144 @@
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
++++ b/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -32,6 +32,8 @@
+     int family = 0;         // AF_INET / AF_INET6, 0 if the source was absent
+     uint16_t src_port = 0;  // host byte order
+     std::string src_ip;     // presentation form, empty if the source was absent
++    uint16_t dst_port = 0;
++    std::string dst_ip; // numeric address, empty for a hostname destination
+     std::string app_name;   // what the core already knew; empty on the TUN path
+ };
+ 
+--- a/trusttunnel/src/client.cpp
++++ b/trusttunnel/src/client.cpp
+@@ -35,6 +35,19 @@
+     out->id = event->id;
+     out->proto = event->proto;
+     out->app_name = safe_to_string_view(event->app_name);
++    if (event->dst != nullptr && event->dst->type == VPN_AT_ADDR) {
++        const auto *dst = reinterpret_cast<const sockaddr *>(&event->dst->addr);
++        char address[INET6_ADDRSTRLEN] = {};
++        if (dst->sa_family == AF_INET) {
++            const auto *v4 = reinterpret_cast<const sockaddr_in *>(dst);
++            out->dst_port = ntohs(v4->sin_port);
++            if (inet_ntop(AF_INET, &v4->sin_addr, address, sizeof(address))) out->dst_ip = address;
++        } else if (dst->sa_family == AF_INET6) {
++            const auto *v6 = reinterpret_cast<const sockaddr_in6 *>(dst);
++            out->dst_port = ntohs(v6->sin6_port);
++            if (inet_ntop(AF_INET6, &v6->sin6_addr, address, sizeof(address))) out->dst_ip = address;
++        }
++    }
+     if (event->src == nullptr) {
+         return;
+     }
+--- a/platform/android/lib/src/main/cpp/lib.cpp
++++ b/platform/android/lib/src/main/cpp/lib.cpp
+@@ -11,11 +11,13 @@
+ class VpnCtx {
+ public:
+     VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback,
+-            jmethodID state_changed_callback, jmethodID connection_info_callback, ag::TrustTunnelConfig &&config)
++            jmethodID state_changed_callback, jmethodID connection_info_callback,
++            jmethodID connect_request_callback, ag::TrustTunnelConfig &&config)
+             : m_protect_socket_callback(protect_socket_callback)
+             , m_verify_callback(verify_callback)
+             , m_state_changed_callback(state_changed_callback)
+             , m_connection_info_callback(connection_info_callback)
++            , m_connect_request_callback(connect_request_callback)
+             , m_native_client(std::move(config), create_callbacks()) {
+         env->GetJavaVM(&m_vm);
+         this->m_callback_object = {m_vm, callback_object};
+@@ -32,6 +34,7 @@
+     jmethodID m_verify_callback = nullptr;
+     jmethodID m_state_changed_callback = nullptr;
+     jmethodID m_connection_info_callback = nullptr;
++    jmethodID m_connect_request_callback = nullptr;
+ 
+     ag::TrustTunnelClient m_native_client;
+ 
+@@ -106,6 +109,31 @@
+         std::string json = ag::ConnectionInfo::to_json(info);
+         LocalRef<jstring> str(env.get(), env->NewStringUTF(json.data()));
+         env->CallVoidMethod(m_callback_object.get(), m_connection_info_callback, str.get());
++    }
++
++    void onConnectRequest(const ag::VpnConnectRequestSnapshot &request, ag::VpnConnectDecision *decision) {
++        ScopedJniEnv env{m_vm, 4};
++        LocalRef<jstring> local(env.get(), env->NewStringUTF(request.src_ip.c_str()));
++        LocalRef<jstring> remote(env.get(), env->NewStringUTF(request.dst_ip.c_str()));
++        if (!local || !remote) {
++            if (env->ExceptionCheck()) env->ExceptionClear();
++            decision->action = ag::VPN_CA_REJECT;
++            return;
++        }
++        jint action = env->CallIntMethod(m_callback_object.get(), m_connect_request_callback,
++                request.proto, local.get(), request.src_port, remote.get(), request.dst_port);
++        if (env->ExceptionCheck()) {
++            env->ExceptionClear();
++            errlog(g_logger, "Application routing callback failed");
++            decision->action = ag::VPN_CA_REJECT;
++            return;
++        }
++        switch (action) {
++        case 0: decision->action = ag::VPN_CA_DEFAULT; break;
++        case 1: decision->action = ag::VPN_CA_FORCE_BYPASS; break;
++        case 2: decision->action = ag::VPN_CA_FORCE_REDIRECT; break;
++        default: decision->action = ag::VPN_CA_REJECT; break;
++        }
+     }
+ 
+     ag::VpnCallbacks create_callbacks() {
+@@ -126,6 +154,9 @@
+                         [this](auto event) {
+                             onConnectionInfo(event);
+                         },
++                .connect_request_handler = [this](const auto &request, auto *decision) {
++                    onConnectRequest(request, decision);
++                },
+         };
+     }
+ };
+@@ -163,6 +194,10 @@
+         return 0;
+     }
+ 
++    jmethodID connect_request_method_id = env->GetMethodID(callback_class, "onConnectRequest",
++            "(ILjava/lang/String;ILjava/lang/String;I)I");
++    if (!connect_request_method_id) return 0;
++
+     std::string_view conf = env->GetStringUTFChars(config, nullptr);
+     toml::parse_result parse_result = toml::parse(conf);
+     if (!parse_result) {
+@@ -178,7 +213,7 @@
+     ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
+ 
+     auto ctx = std::make_unique<VpnCtx>(env, thiz, protect_socket_method_id, verify_certificate_method_id,
+-            state_changed_method_id, connection_info_method_id, std::move(*trusttunnel_config));
++            state_changed_method_id, connection_info_method_id, connect_request_method_id, std::move(*trusttunnel_config));
+ 
+     return (jlong) ctx.release();
+ }
+--- a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
++++ b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
+@@ -81,6 +81,10 @@
+         callbacks?.onConnectionInfo(info)
+     }
+ 
++    fun onConnectRequest(protocol: Int, localAddress: String, localPort: Int,
++                         remoteAddress: String, remotePort: Int): Int =
++        callbacks?.onConnectRequest(protocol, localAddress, localPort, remoteAddress, remotePort) ?: 0
++
+     // Native methods
+     private external fun createNative(config: String): Long;
+     private external fun startNative(nativePtr: Long, tunFd: Int): Boolean;
+--- a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt
++++ b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt
+@@ -5,4 +5,7 @@
+     fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?): Boolean;
+     fun onStateChanged(state: Int);
+     fun onConnectionInfo(info: String);
++    // 0: destination rules, 1: direct, 2: VPN, 3: reject. Numeric endpoints only.
++    fun onConnectRequest(protocol: Int, localAddress: String, localPort: Int,
++                         remoteAddress: String, remotePort: Int): Int = 0
+ }
+\ No newline at end of file

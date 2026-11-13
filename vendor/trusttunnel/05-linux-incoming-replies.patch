@@ -1,0 +1,60 @@
+--- a/net/src/os_tunnel_linux.cpp
++++ b/net/src/os_tunnel_linux.cpp
+@@ -12,6 +12,16 @@
+ static const ag::Logger logger("OS_TUNNEL_LINUX");
+ 
+ static constexpr auto TABLE_ID = 880;
++// Local replies to connections initiated outside the tunnel must keep their
++// original sockets. Proxying them creates a different UDP source port and
++// cannot reproduce an accepted TCP connection. Reserve one packet-mark bit;
++// do not overwrite other firewall marks or use a source-port allowlist.
++static constexpr std::string_view REPLY_MARK = "0x00800000/0x00800000";
++static constexpr std::string_view REPLY_RULESET = R"nft(
++add table inet freetunnel_reply
++add chain inet freetunnel_reply output { type route hook output priority mangle; policy accept; }
++add rule inet freetunnel_reply output meta l4proto { tcp, udp } ct direction reply counter meta mark set meta mark | 0x00800000
++)nft";
+ static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
+ static constexpr std::string_view VNC_PORTS = "5900-5920";
+ 
+@@ -27,7 +37,7 @@
+         if (result.value().status != 0) {
+             dbglog(logger, "Exit code: {}", result.value().status);
+         }
+-        return output.empty();
++        return result.value().status == 0;
+     }
+     dbglog(logger, "{}", result.error()->str());
+     return false;
+@@ -277,6 +287,21 @@
+         }
+     }
+ 
++    // Install reply handling before redirecting traffic to the TUN. nftables
++    // loads the transaction atomically; init failure is cleaned up by deinit.
++    if (m_sport_supported && (!ipv4_routes.empty() || !ipv6_routes.empty())) {
++        if (!sys_cmd_netns(m_netns, "nft " + ag::utils::escape_argument_for_shell(REPLY_RULESET))) {
++            errlog(logger, "Unable to preserve incoming connection replies; nftables is required");
++            return false;
++        }
++        if ((!ipv4_routes.empty() && !sys_cmd_netns(m_netns,
++                    AG_FMT("ip rule add prio 30799 fwmark {} lookup main", REPLY_MARK)))
++                || (!ipv6_routes.empty() && !sys_cmd_netns(m_netns,
++                    AG_FMT("ip -6 rule add prio 30799 fwmark {} lookup main", REPLY_MARK)))) {
++            return false;
++        }
++    }
++
+     // Apply routing rules (in netns if specified)
+     if (m_sport_supported) {
+         if (!ipv4_routes.empty()) {
+@@ -350,6 +375,9 @@
+ }
+ 
+ void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
++    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
++    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
++    sys_cmd_netns_ignore_errors(m_netns, "nft delete table inet freetunnel_reply");
+     // Flush all routes from the project-owned table (stale routes may remain
+     // when the TUN device is externally created and survives client shutdown).
+     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip route flush table {}", table_id));

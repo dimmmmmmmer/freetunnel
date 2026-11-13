@@ -122,7 +122,7 @@ public:
         if (!m_process.waitForFinished(10000))
             m_process.kill();
         m_process.waitForFinished(10000);
-        QFile::remove(m_copy);
+        if (!m_copy.isEmpty()) QFile::remove(m_copy);
     }
 
 private:
@@ -177,6 +177,8 @@ private slots:
     void aBurstFromTheWatchedProgramSharesOneWalk();
     void aWalkThatKeepsFailingIsRetriedOutOfTheCredit();
     void newRulesAreLookedAtEvenWithTheCreditOverspent();
+    void newSocketsAreResolvedAfterAnExpensiveScan_data();
+    void newSocketsAreResolvedAfterAnExpensiveScan();
     void bothWaysOfReadingTheSocketTablesAgree();
     void anIpv6SocketIsFoundWhicheverFamilyTheFlowClaims();
     void aConnectionFromAnIpv6SocketToAnIpv4AddressIsFound();
@@ -574,6 +576,54 @@ void TestProcessLookup::aWalkThatKeepsFailingIsRetriedOutOfTheCredit()
                      .executablePath.isEmpty());
     QVERIFY(!skipped);
     QVERIFY(lookup.lastScan().ok);
+}
+
+// A healthy but expensive scan must not change the routing of later sockets.
+void TestProcessLookup::newSocketsAreResolvedAfterAnExpensiveScan_data()
+{
+    QTest::addColumn<bool>("udp");
+    QTest::addColumn<bool>("v6");
+    QTest::addColumn<bool>("watched");
+    for (bool udp : {false, true})
+        for (bool v6 : {false, true})
+            for (bool watched : {false, true})
+                QTest::newRow(qPrintable(QString("%1-%2-%3").arg(udp).arg(v6).arg(watched)))
+                        << udp << v6 << watched;
+}
+
+void TestProcessLookup::newSocketsAreResolvedAfterAnExpensiveScan()
+{
+    QFETCH(bool, udp);
+    QFETCH(bool, v6);
+    QFETCH(bool, watched);
+    qputenv("FT_TEST_PROCESS_WALK_COST_US", "400000");
+    const auto restore = qScopeGuard([] { qunsetenv("FT_TEST_PROCESS_WALK_COST_US"); });
+    ProcessLookup lookup;
+    lookup.setWatchList(watchSelf());
+    QTcpServer first;
+    QVERIFY(first.listen(QHostAddress::LocalHost, 0));
+    lookup.resolve({AF_INET, IPPROTO_TCP, first.serverPort(), QStringLiteral("127.0.0.1")});
+    QVERIFY(lookup.lastScan().ok);
+    const auto address = v6 ? QHostAddress::LocalHostIPv6 : QHostAddress::LocalHost;
+    QTcpServer tcp;
+    QUdpSocket datagrams;
+    AnotherProgram other;
+    quint16 port = 0;
+    if (!watched) {
+        port = other.start(address, 0, udp ? "udp" : "tcp");
+    } else if (udp) {
+        QVERIFY(datagrams.bind(address, 0));
+        port = datagrams.localPort();
+    } else {
+        QVERIFY(tcp.listen(address, 0));
+        port = tcp.serverPort();
+    }
+    QVERIFY(port != 0);
+    bool skipped = true;
+    const auto id = lookup.resolve({v6 ? AF_INET6 : AF_INET, udp ? IPPROTO_UDP : IPPROTO_TCP,
+                                    port, QHostAddress(address).toString()}, &skipped);
+    QVERIFY2(!skipped, "scan cost must never decide whether a new socket uses VPN");
+    QCOMPARE(!id.executablePath.isEmpty(), watched);
 }
 
 // A change of rules is a new question, and is looked at at once, even when the
