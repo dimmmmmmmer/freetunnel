@@ -21,7 +21,8 @@ internal object AppConnectionRouting {
 
     fun owner(manager: ConnectivityManager, protocol: Int, local: String, localPort: Int,
               remote: String, remotePort: Int): Int {
-        if (protocol != 6 && protocol != 17 || localPort !in 1..65535 || remotePort !in 1..65535) return -1
+        if (protocol != 6 && protocol != 17 || localPort !in 1..65535 || remotePort !in 1..65535 ||
+            local.isBlank() || remote.isBlank()) return -1
         return try {
             // These come from inet_ntop in JNI, never a hostname or user input.
             val source = InetAddress.getByName(local)

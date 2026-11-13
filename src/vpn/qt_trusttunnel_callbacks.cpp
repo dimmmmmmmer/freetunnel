@@ -217,7 +217,7 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         lookup->setWatchList(rules);
 
         const freetunnel::LocalFlow flow{req.family, req.proto, req.src_port,
-                                         QString::fromStdString(req.src_ip)};
+                                         QString::fromStdString(req.src_ip), req.dst_port, QString::fromStdString(req.dst_ip)};
         bool lookWasSkipped = false;
         const freetunnel::AppIdentity app = lookup->resolve(flow, &lookWasSkipped);
         decision->action = lookWasSkipped ? ag::VPN_CA_REJECT

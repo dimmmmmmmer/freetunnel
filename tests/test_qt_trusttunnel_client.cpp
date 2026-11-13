@@ -121,6 +121,7 @@ private slots:
     void withNoAppRulesNothingIsForcedAndNothingIsLookedUp();
     void aFailedLookupDoesNotChangeRoutingPolicy();
     void importedRulesAreNotReversedByModeChanges();
+    void appCallbacksMatchTheRemoteEndpoint();
     void anIncompleteScanCannotProveAnApplicationIsUnlisted();
     void staleEventFromPreviousSessionIsIgnored();
     void failedAttemptSchedulesWorkingRetry();
@@ -1719,6 +1720,31 @@ void TestQtTrustTunnelClient::anIncompleteScanCannotProveAnApplicationIsUnlisted
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
     QCOMPARE(ctl.fireConnectRequest(ctl.lastClientId(), ownConnection(socket, 1)).action, ag::VPN_CA_REJECT);
+}
+
+void TestQtTrustTunnelClient::appCallbacksMatchTheRemoteEndpoint()
+{
+    auto &ctl = mockcore::Controller::instance();
+    m_client->setVpnMode(true);
+    m_client->setAppRules({ownProgram()});
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    QVERIFY(socket.waitForConnected(5000));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    ag::VpnConnectRequestSnapshot req;
+    req.id = 1;
+    req.proto = IPPROTO_TCP;
+    req.family = AF_INET;
+    req.src_port = socket.localPort();
+    req.src_ip = "127.0.0.1";
+    req.dst_port = server.serverPort();
+    req.dst_ip = "127.0.0.1";
+    QCOMPARE(ctl.fireConnectRequest(ctl.lastClientId(), req).action, ag::VPN_CA_FORCE_REDIRECT);
+    req.dst_port = req.dst_port == 65535 ? 65534 : req.dst_port + 1;
+    QCOMPARE(ctl.fireConnectRequest(ctl.lastClientId(), req).action, ag::VPN_CA_DEFAULT);
 }
 
 void TestQtTrustTunnelClient::importedRulesAreNotReversedByModeChanges()

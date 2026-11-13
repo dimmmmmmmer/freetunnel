@@ -8,6 +8,7 @@
 
 #include <QHash>
 #include <QHashFunctions>
+#include <QHostAddress>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -18,14 +19,15 @@
 
 namespace freetunnel {
 
-// One end of a connection as the VPN core describes it: the local socket the
-// traffic came from. That is all we need to find the program, because the local
-// port is what the operating system indexes its socket tables by.
+// Both endpoints as the VPN core describes them. A local port can be shared
+// by connections to different peers, so attribution also uses the destination.
 struct LocalFlow {
     int family = 0;      // AF_INET / AF_INET6
     int proto = 0;       // IPPROTO_TCP / IPPROTO_UDP
     std::uint16_t port = 0; // local port, host byte order
     QString ip;          // local address, presentation form; may be empty
+    std::uint16_t remotePort = 0;
+    QString remoteIp{};
 };
 
 // A local address in network byte order: IPv4 in the first four bytes, IPv6 in
@@ -43,11 +45,14 @@ struct SocketOwner {
     // An IPv6 socket that takes no IPv4 (IPV6_V6ONLY), where the system says so:
     // Linux over netlink, and macOS. Elsewhere false, as if it did.
     bool v6only = false;
+    std::uint16_t remotePort = 0;
+    SocketAddress remoteAddress{};
 };
 
 // The pid recorded for a socket the walk saw and could not attribute to any
 // watched program. See SocketOwnerTable.
 constexpr qint64 kUnattributed = -1;
+constexpr qint64 kAmbiguousOwner = -2;
 
 // Which program, if any a rule names, holds each socket the last walk saw.
 //
@@ -61,9 +66,6 @@ constexpr qint64 kUnattributed = -1;
 // watched one. Measured here at one question in three hundred.
 //
 // What this still cannot settle:
-// - Two connections on the same local address and port, to different
-//   destinations, which the kernel allows for ports picked by connect(). Only the
-//   destination tells them apart, and the core does not pass it.
 // - An IPv6-only socket on [::] where the system does not say it is one — the
 //   /proc/net fallback and Windows. It is taken to carry IPv4 as well, and so
 //   answers an IPv4 socket on the same port number.
@@ -72,17 +74,15 @@ constexpr qint64 kUnattributed = -1;
 //   address matches no socket, and it is answered "nobody".
 class SocketOwnerTable {
 public:
-    // One socket, and who holds it: a pid, or kUnattributed for "seen, and no
-    // watched program holds it". A second row for the same socket — a listener
-    // and the connections accepted on it share one — does not displace the
-    // first, except that a real owner displaces kUnattributed: on Linux, which
-    // records unwatched sockets that way, the program being asked about wins
-    // over the ones that are not. macOS and Windows record every socket's real
-    // owner, and there the first one stays.
+    // Record full endpoint pairs separately. Conflicting owners of the same
+    // pair are ambiguous. Legacy queries without a destination retain the
+    // first watched owner, but live TUN requests provide both endpoints.
     void record(int family, int proto, std::uint16_t port, const SocketAddress &address, qint64 pid,
-                bool v6only = false);
+                bool v6only = false, std::uint16_t remotePort = 0,
+                const SocketAddress &remoteAddress = {});
     void clear();
-    int size() const { return static_cast<int>(m_sockets.size()); }
+    int size() const { return static_cast<int>(m_connections.size() + m_unconnected.size()); }
+    // Count only owners that can be attributed unambiguously.
     int distinctPids() const;
 
     struct Match {
@@ -110,7 +110,22 @@ private:
             return qHashMulti(seed, key.endpoint, qHashBits(key.address.data(), key.address.size()));
         }
     };
+    QList<Key> localCandidates(const LocalFlow &flow, const QHostAddress &address) const;
+    Match findConnection(const QList<Key> &candidates, const LocalFlow &flow) const;
+    struct ConnectionKey {
+        Key local;
+        SocketAddress remote{};
+        std::uint16_t remotePort = 0;
+        friend bool operator==(const ConnectionKey &, const ConnectionKey &) = default;
+        friend size_t qHash(const ConnectionKey &key, size_t seed = 0) noexcept
+        {
+            return qHashMulti(seed, key.local, key.remotePort,
+                              qHashBits(key.remote.data(), key.remote.size()));
+        }
+    };
     QHash<Key, qint64> m_sockets;
+    QHash<ConnectionKey, qint64> m_connections;
+    QHash<Key, qint64> m_unconnected;
     // The same, by port number alone, for a flow that arrives without its
     // address. The core always gives one; this is what a flow that did not
     // would have to be matched by.
@@ -138,7 +153,7 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int fam
 //
 // Defined in ProcessLookupSockets.cpp — a different question, asked of a
 // different interface, from the walk that decides which process owns what.
-QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno);
+QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno, bool *complete);
 #endif
 
 // How an IPv6 socket spells an IPv4 address, given in host byte order:
