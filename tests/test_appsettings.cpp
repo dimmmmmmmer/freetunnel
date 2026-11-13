@@ -48,7 +48,7 @@ void TestAppSettings::defaultsWhenEmpty() {
     // Fresh, empty scope yields the documented defaults.
     AppSettings s = loadAppSettings();
     QCOMPARE(s.language, QStringLiteral("en"));
-    QCOMPARE(s.theme_mode, QStringLiteral("system"));
+    QCOMPARE(s.theme_mode, QStringLiteral("dark"));
     // Off: the ✕ keeps minimising to the taskbar, as it always did.
     QCOMPARE(s.minimize_to_tray, false);
     QCOMPARE(s.auto_connect_on_start, false);
@@ -118,7 +118,7 @@ void TestAppSettings::theDefaultExcludedRoutesAreExactlyTheSharedFile() {
 void TestAppSettings::roundTrip() {
     AppSettings in;
     in.language = QStringLiteral("ru");
-    in.theme_mode = QStringLiteral("dark");
+    in.theme_mode = QStringLiteral("light");
     in.minimize_to_tray = true;
     in.auto_connect_on_start = true;
     in.killswitch_enabled = true;

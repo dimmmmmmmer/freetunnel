@@ -109,7 +109,7 @@ final class Theme {
         return 0xFF000000 | r << 16 | g << 8 | b;
     }
 
-    // The theme setting: "system" (the default), "light" or "dark", as the desktop's
+    // The theme setting: "system", "light" or "dark" (the default), as the desktop's
     // theme_mode, with the old "dark" boolean this app kept before it had one.
 
     static final String SYSTEM = "system";
@@ -124,7 +124,7 @@ final class Theme {
     static String mode(String stored, Boolean legacyDark) {
         if (LIGHT_MODE.equals(stored) || DARK_MODE.equals(stored) || SYSTEM.equals(stored)) return stored;
         if (legacyDark != null) return legacyDark ? DARK_MODE : LIGHT_MODE;
-        return SYSTEM;
+        return DARK_MODE;
     }
 
     /**

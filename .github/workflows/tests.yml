@@ -36,9 +36,7 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.11.3'
-  # Upstream fix for Qt 6.11's split Windows SDK repositories (not in aqt 3.3.0).
-  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4'
+  QT_VER: '6.9.3'
   # Exact pin, same as build.yml: conan drives every native dependency fetch.
   CONAN_VER: '2.31.1'
 
@@ -125,14 +123,7 @@ jobs:
 
       - name: Install Qt (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Install build deps (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
@@ -150,14 +141,7 @@ jobs:
       # could not reach them.
       - name: Install Qt (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: mac
-          target: desktop
-          arch: clang_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Set up MSVC (Windows)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
@@ -167,14 +151,7 @@ jobs:
 
       - name: Install Qt (Windows)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: windows
-          target: desktop
-          arch: win64_msvc2022_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Configure
         if: needs.changes.outputs.desktop != 'false'
@@ -253,14 +230,7 @@ jobs:
           pip install "conan==${CONAN_VER}"
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Build, test, and report coverage
         env:
@@ -324,14 +294,7 @@ jobs:
             dbus-x11 gnome-keyring libxcb1-dev
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Configure
         run: cmake -S tests -B build-asan -G Ninja -DFT_ENABLE_SANITIZERS=ON

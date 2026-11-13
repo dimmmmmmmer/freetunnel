@@ -130,9 +130,9 @@ public final class MainActivity extends Activity {
     }
     private int activeIndex;
     private int page;
-    // The theme setting, "system" (the default), "light" or "dark", and the theme in
+    // The theme setting, "system", "light" or "dark" (the default), and the theme in
     // use: for "system" it follows the device's night mode (see Theme.isDark).
-    private String themeMode = Theme.SYSTEM;
+    private String themeMode = Theme.DARK_MODE;
     private boolean dark = true;
     private Ui ui;
     // The window's one view, set once. render() rebuilds pageRoot, the nav and the page,

@@ -11,7 +11,7 @@ struct AppSettings {
     QString log_path = "";
     bool logging_enabled = true;
     bool verbose_logs = false; // run the VPN core at info level (debug); else warn
-    QString theme_mode = "system";
+    QString theme_mode = "dark";
     QString language = "en";
     bool auto_connect_on_start = false;
     // Whether the window's ✕ hides it to the tray instead of minimising it to the

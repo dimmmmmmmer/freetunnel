@@ -30,7 +30,7 @@ If SmartScreen warns: **More info** → **Run anyway**.
 
 ### macOS
 
-Version 1.2.4 requires macOS 14.4 or newer.
+Version 1.2.4 requires macOS 14.4 or newer. The upcoming 1.2.5 restores macOS 12 support.
 
 Right-click the app → **Open**. Or clear the quarantine flag:
 

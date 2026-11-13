@@ -224,7 +224,7 @@ AppSettings loadAppSettings() {
     // Migrate the old insecure /tmp default to the per-user app data dir.
     if (out.log_path == legacyTmpLogPath())
         out.log_path = defaultLogPath();
-    out.theme_mode = s.value("ui/theme_mode", "system").toString();
+    out.theme_mode = s.value("ui/theme_mode", "dark").toString();
     out.language = s.value("ui/language", "en").toString();
     out.minimize_to_tray = s.value("ui/minimize_to_tray", false).toBool();
     out.auto_connect_on_start = s.value("vpn/auto_connect_on_start", false).toBool();

@@ -1,0 +1,68 @@
+name: Patched desktop Qt
+description: Build and cache the same macOS-12-compatible Qt for releases and tests.
+inputs:
+  setup-python:
+    description: Install Python unless the caller already pinned its interpreter.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      if: inputs.setup-python == 'true'
+      with:
+        python-version: '3.13'
+    - name: Qt paths and platform
+      id: paths
+      shell: bash
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      run: |
+        python - <<'PY'
+        import json, os, pathlib, platform
+        root = pathlib.Path(os.environ['ACTION_DIR']).resolve().parents[2]
+        pin = json.loads((root / 'vendor/qt/source.json').read_text())
+        assert pin['version'] == os.environ['QT_VER'], 'Qt manifest and workflow disagree'
+        prefix = pathlib.Path(os.environ['RUNNER_TEMP']) / 'freetunnel-qt'
+        system = platform.system()
+        variant = 'xcode26.3' if system == 'Darwin' else 'msvc2022'
+        if system == 'Linux':
+            values = dict(line.split('=', 1) for line in pathlib.Path('/etc/os-release').read_text().splitlines() if '=' in line)
+            variant = values['ID'].strip('"') + '-' + values['VERSION_ID'].strip('"')
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'prefix={prefix}\nvariant={variant}\nroot={root}\n')
+        with open(os.environ['GITHUB_ENV'], 'a') as f:
+            f.write(f'QT_ROOT_DIR={prefix}\nQTDIR={prefix}\nCMAKE_PREFIX_PATH={prefix}\n')
+            if system == 'Darwin':
+                f.write('DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer\n')
+                f.write('MACOSX_DEPLOYMENT_TARGET=' + pin['macos_deployment_target'] + '\n')
+        with open(os.environ['GITHUB_PATH'], 'a') as f:
+            f.write(str(prefix / 'bin') + '\n')
+        PY
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      id: cache
+      with:
+        path: ${{ steps.paths.outputs.prefix }}
+        key: patched-qt-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.variant }}-${{ hashFiles('**/vendor/qt/**', '**/scripts/build-qt.py', '**/.github/actions/qt/action.yml') }}
+    - name: Qt source build dependencies (Linux)
+      if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ninja-build cmake pkg-config libssl-dev \
+          libgl1-mesa-dev libegl1-mesa-dev libfontconfig1-dev libfreetype6-dev \
+          libdbus-1-dev libglib2.0-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
+          libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev \
+          libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
+          libxcb-shape0-dev libxcb-xinerama0-dev libxcb-xfixes0-dev libxcb-sync-dev libxcb-xkb-dev \
+          libxcb-util-dev libxcb-render0-dev libxcb-glx0-dev libxcb-shm0-dev
+    - name: Build patched Qt
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        QT_SOURCE_ROOT: ${{ steps.paths.outputs.root }}
+      run: python "$QT_SOURCE_ROOT/scripts/build-qt.py" --prefix "$QT_ROOT_DIR" --work "$RUNNER_TEMP/qt-source"
+    - name: Verify Qt SDK
+      shell: bash
+      run: |
+        qmake -query QT_VERSION
+        lrelease -version

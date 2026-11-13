@@ -14,7 +14,7 @@ def version(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle', type=pathlib.Path)
-    parser.add_argument('--target', default='13.0')
+    parser.add_argument('--target', default='12.0')
     args = parser.parse_args()
     args.bundle = args.bundle.resolve(strict=True)
     target = version(args.target)

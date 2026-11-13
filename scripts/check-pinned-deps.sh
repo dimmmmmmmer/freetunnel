@@ -106,7 +106,7 @@ while read -r use; do
     echo "pinned-deps: action not pinned to a full commit SHA: $use" >&2
     fail=1
   fi
-done < <(grep -rhoE 'uses:[[:space:]]*[^[:space:]]+@[^[:space:]]+' .github/workflows \
+done < <(grep -rhoE 'uses:[[:space:]]*[^[:space:]]+@[^[:space:]]+' .github/workflows .github/actions \
          | sed -E 's/uses:[[:space:]]*//')
 
 # One toolchain version per repository, not per workflow. Qt and conan were each
@@ -129,15 +129,25 @@ check_one_value() {
 }
 
 check_one_value QT_VER
-check_one_value AQT_SOURCE
 check_one_value CONAN_VER
 
-while read -r line; do
-  if ! [[ "$line" =~ aqtinstall.git@[0-9a-f]{40}\' ]]; then
-    echo "pinned-deps: aqt source must use a full commit SHA: $line" >&2
-    fail=1
-  fi
-done < <(grep -rh '^  AQT_SOURCE:' .github/workflows)
+if ! python3 - <<'PYQT'
+import json, re
+from pathlib import Path
+pin = json.loads(Path('vendor/qt/source.json').read_text())
+version = re.search(r"QT_VER: '([^']+)'", Path('.github/workflows/build.yml').read_text())[1]
+assert pin['version'] == version
+assert set(pin['modules']) == {'qtbase', 'qtshadertools', 'qtsvg', 'qtdeclarative', 'qttools', 'qttranslations'}
+for name, module in pin['modules'].items():
+    assert re.fullmatch('[0-9a-f]{40}', module['commit'])
+    assert re.fullmatch('[0-9a-f]{64}', module['sha256'])
+    assert module['url'] == f"https://codeload.github.com/qt/{name}/tar.gz/{module['commit']}"
+for name in ['qtbase', 'qtdeclarative', 'qtsvg']:
+    assert Path(f'vendor/qt/{name}.patch').is_file()
+PYQT
+then
+  fail=1
+fi
 
 # ...and that nothing reintroduces a literal alongside the declaration.
 while read -r line; do
@@ -149,7 +159,7 @@ done < <(grep -rnE "^ +version: '[0-9]" .github/workflows)
 # unit tests ran on `brew install qt`, Homebrew's Qt of the week, while the
 # macOS release was built against QT_VER.
 while read -r line; do
-  echo "pinned-deps: Qt from Homebrew, use install-qt-action with \${{ env.QT_VER }}: $line" >&2
+  echo "pinned-deps: Qt from Homebrew, use the patched Qt action with \${{ env.QT_VER }}: $line" >&2
   fail=1
 done < <(grep -rnE 'brew (install|reinstall|upgrade)( [^#]*)? qt(@[0-9]+)?([[:space:];|&]|$)' .github/workflows)
 
