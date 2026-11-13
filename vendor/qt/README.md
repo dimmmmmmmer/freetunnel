@@ -53,6 +53,11 @@ Networking regression fixes from [qtbase](https://github.com/qt/qtbase):
   Schannel SNI encoding, certificate name validation, concurrent handshakes,
   certificate lifetime and leaf-certificate selection.
 
+SVG allocation fix from [qtsvg commit 6d74ff9892](https://github.com/qt/qtsvg/commit/6d74ff9892b7484132f416171c62edbfd015e9fc):
+Gaussian blur checks its working buffer against the image allocation limit.
+Adapted to 6.9's `QVarLengthArray<uint64_t>` instead of the newer `ColorValues`
+buffer; widened multiplication prevents integer overflow.
+
 The application keeps its TLS, connection-error and certificate-pinning tests.
 Before release, run all desktop tests, inspect rendered UI previews, and audit
 every Mach-O dependency with `scripts/check-macos-target.py --target 12.0`.

@@ -2,6 +2,36 @@ SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 Qt 6.9.3 compatibility and security backports. See README.md for upstream sources.
 
+diff --git a/src/svg/qsvgfilter.cpp b/src/svg/qsvgfilter.cpp
+index 9ef006b8..1b03fa37 100644
+--- a/src/svg/qsvgfilter.cpp
++++ b/src/svg/qsvgfilter.cpp
+@@ -10,6 +10,7 @@
+
+ #include <QLoggingCategory>
+ #include <QtGui/qimageiohandler.h>
++#include <QtGui/qimagereader.h>
+ #include <QVector4D>
+
+ QT_BEGIN_NAMESPACE
+@@ -333,7 +334,16 @@ QImage QSvgFeGaussianBlur::apply(const QMap<QString, QImage> &sources, QPainter
+     copyPainter.drawImage(source.offset(), source);
+     copyPainter.end();
+
+-    QVarLengthArray<uint64_t, 32 * 32> buffer(tempSource.width() * tempSource.height());
++    const qint64 bufferSize = qint64(tempSource.width()) * tempSource.height();
++    if (const int allocationLimitMb = QImageReader::allocationLimit()) {
++        const qint64 allocationLimit = qint64(allocationLimitMb) << 20;
++        const qint64 bufferSizeBytes = bufferSize * sizeof(uint64_t);
++        if (bufferSizeBytes > allocationLimit) {
++            qCWarning(lcSvgDraw) << "The requested filter buffer is too big, ignoring";
++            return QImage();
++        }
++    }
++    QVarLengthArray<uint64_t, 32 * 32> buffer(bufferSize);
+
+     const int sourceHeight = tempSource.height();
+     const int sourceWidth = tempSource.width();
 diff --git a/src/svg/qsvghandler.cpp b/src/svg/qsvghandler.cpp
 index edbad898..088c8635 100644
 --- a/src/svg/qsvghandler.cpp
