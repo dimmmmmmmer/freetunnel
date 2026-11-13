@@ -565,7 +565,7 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
             *lookWasSkipped = true;
         }
     }
-    if (!owner.found && !m_everBuilt && lookWasSkipped != nullptr)
+    if ((!owner.found || owner.pid == kUnattributed) && !m_everBuilt && lookWasSkipped != nullptr)
         *lookWasSkipped = true;
     if (!owner.found || owner.pid == kUnattributed)
         return {};

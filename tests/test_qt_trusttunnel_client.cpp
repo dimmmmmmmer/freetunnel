@@ -121,6 +121,7 @@ private slots:
     void withNoAppRulesNothingIsForcedAndNothingIsLookedUp();
     void aFailedLookupDoesNotChangeRoutingPolicy();
     void importedRulesAreNotReversedByModeChanges();
+    void anIncompleteScanCannotProveAnApplicationIsUnlisted();
     void staleEventFromPreviousSessionIsIgnored();
     void failedAttemptSchedulesWorkingRetry();
     void coreDropTriggersAutoReconnect();
@@ -1704,6 +1705,20 @@ void TestQtTrustTunnelClient::aFailedLookupDoesNotChangeRoutingPolicy()
     // Changing rules invalidates the failed snapshot and retries immediately.
     m_client->setAppRules({ownProgram(), QStringLiteral("unused-program")});
     QCOMPARE(ctl.fireConnectRequest(id, ownConnection(later, 12)).action, ag::VPN_CA_FORCE_REDIRECT);
+}
+
+void TestQtTrustTunnelClient::anIncompleteScanCannotProveAnApplicationIsUnlisted()
+{
+    auto &ctl = mockcore::Controller::instance();
+    qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
+    const auto restore = qScopeGuard([] { qunsetenv("FT_TEST_PROCESS_WALK_FAILS"); });
+    m_client->setVpnMode(true);
+    m_client->setAppRules({QStringLiteral("unavailable-program")});
+    QTcpServer socket;
+    QVERIFY(socket.listen(QHostAddress::LocalHost, 0));
+    beginConnect();
+    QTRY_VERIFY(ctl.connectCallCount() >= 1);
+    QCOMPARE(ctl.fireConnectRequest(ctl.lastClientId(), ownConnection(socket, 1)).action, ag::VPN_CA_REJECT);
 }
 
 void TestQtTrustTunnelClient::importedRulesAreNotReversedByModeChanges()
