@@ -249,6 +249,32 @@ struct AppPicker<Value: Hashable>: View {
             }
     }
 }
+private struct ScrollContentHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+// A short form takes only its content height; a smaller window or the keyboard
+// still constrains the scroll view, keeping the last controls reachable.
+struct ContentSizedScrollView<Content: View>: View {
+    @ViewBuilder let content: Content
+    @State private var contentHeight: CGFloat?
+    var body: some View {
+        ScrollView {
+            content.background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ScrollContentHeight.self, value: geometry.size.height)
+                }
+            }
+        }
+        .onPreferenceChange(ScrollContentHeight.self) { contentHeight = $0 }
+        .frame(idealHeight: contentHeight, maxHeight: contentHeight)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+}
+
 struct AppDialog<Content: View>: View {
     let title: LocalizedStringKey
     let close: () -> Void
@@ -269,6 +295,8 @@ struct AppDialog<Content: View>: View {
             }.padding(16).frame(maxWidth: 372)
                 .background(AppStyle.background, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("app-dialog")
                 .padding(.horizontal, 14).padding(.vertical, 12)
         }.buttonStyle(AppButtonStyle()).toggleStyle(AppToggleStyle())
     }

@@ -26,8 +26,8 @@ struct ServersView: View {
                 Button {
                     Task { await state.pingServers() }
                 } label: {
-                    Image(systemName: "speedometer").font(.system(size: 19)).frame(
-                        width: 40, height: 32)
+                    Image("ActionPing").resizable().scaledToFit().frame(width: 22, height: 22)
+                        .frame(width: 40, height: 32)
                 }.buttonStyle(.plain).disabled(state.pinging).accessibilityLabel("Check latency")
             }.padding(.top, 8)
             ScrollView {

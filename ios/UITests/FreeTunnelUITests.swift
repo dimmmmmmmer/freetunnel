@@ -206,6 +206,11 @@ import XCTest
             XCTAssertTrue(app.textFields["server-name"].waitForExistence(timeout: 5))
             capture(label + "-editor")
             reveal(app.buttons["server-save"])
+            let dialog = app.otherElements["app-dialog"].firstMatch
+            XCTAssertTrue(dialog.exists)
+            XCTAssertLessThanOrEqual(
+                dialog.frame.maxY - app.buttons["server-save"].frame.maxY, 28,
+                "The editor must end just below its action buttons, without an empty tablet-sized footer")
             capture(label + "-editor-bottom")
             app.buttons["server-save"].tap()
         }

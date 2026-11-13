@@ -23,7 +23,7 @@ struct ServerEditor: View {
     var body: some View {
         AppDialog(title: profile == nil ? "New config" : "Edit config", close: close) {
             ScrollViewReader { reader in
-                ScrollView {
+                ContentSizedScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         LabeledField(
                             title: "Config name", text: $fields.name,
