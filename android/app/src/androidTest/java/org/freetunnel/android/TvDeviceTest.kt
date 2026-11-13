@@ -2941,7 +2941,13 @@ class TvDeviceTest {
         }
         val names = listOf(R.string.text_theme_system, R.string.text_light_78, R.string.text_dark_79).map { context.getString(it) }
         assertEquals(listOf(names[0], names[1], names[2]), rows())
-        eventually("The current choice has the focus") { focusedKey(a) == "select:0" }
+        eventually("The default dark choice has the focus") { focusedKey(a) == "select:2" }
+        click(a, "select:1")
+        eventually("Light is the theme") { prefs.getString("theme_mode", null) == "light" }
+        eventually("The popup closes") { overlayTag(a, "select") == null }
+        eventually("The focus is back on the Theme row") { focusedKey(a) == "settings:theme" }
+        ok(a, "settings:theme")
+        eventually("The saved light choice has the focus") { focusedKey(a) == "select:1" }
         click(a, "select:2")
         eventually("Dark is the theme") { prefs.getString("theme_mode", null) == "dark" }
         eventually("The popup closes") { overlayTag(a, "select") == null }
