@@ -6,25 +6,49 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - Only allowlisted build tools, argument arrays, no shell.
 import tarfile
 import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
+MODULES = frozenset({'qtbase', 'qtshadertools', 'qtsvg', 'qtdeclarative', 'qttools', 'qttranslations'})
 
 
-def run(*args):
-    subprocess.run([str(arg) for arg in args], check=True)
+def run(command, *args):
+    if command not in {'git', 'cmake'}:
+        raise ValueError('Only git and cmake are permitted build tools')
+    executable = shutil.which(command)
+    if executable is None:
+        raise RuntimeError(f'{command}: build tool not found')
+    # Paths are separate argv entries, never shell syntax; the executable is allowlisted.
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
+    subprocess.run([executable, *map(str, args)], check=True, shell=False)  # nosec B603
+
+
+def archive_url(module, pin):
+    if module not in MODULES:
+        raise ValueError('Unknown Qt module')
+    if not re.fullmatch(r'[0-9a-f]{40}', pin['commit']):
+        raise ValueError('Qt source must use an immutable commit')
+    if not re.fullmatch(r'[0-9a-f]{64}', pin['sha256']):
+        raise ValueError('Qt source must have a SHA-256 digest')
+    url = f"https://codeload.github.com/qt/{module}/tar.gz/{pin['commit']}"
+    if pin['url'] != url:
+        raise ValueError('Qt source URL must match the pinned official HTTPS archive')
+    return url
 
 
 def source(module, pin, workspace):
+    url = archive_url(module, pin)
     archive = workspace / (module + '.tar.gz')
     if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != pin['sha256']:
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(pin['url'], timeout=120) as response, archive.open('wb') as target:
+                # archive_url permits only the exact official HTTPS URL; the digest is checked below.
+                with urllib.request.urlopen(url, timeout=120) as response, archive.open('wb') as target:  # nosec B310
                     shutil.copyfileobj(response, target)
                 break
             except OSError:
