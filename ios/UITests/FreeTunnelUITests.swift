@@ -143,9 +143,22 @@ import XCTest
     func testThemeAndIntervalPersist() {
         app.launch()
         tab("settings")
-        app.buttons["picker-theme"].tap()
-        app.buttons["Dark"].tap()
         XCTAssertEqual(app.buttons["picker-theme"].value as? String, "Dark")
+        app.buttons["picker-theme"].tap()
+        let currentTheme = app.buttons["picker-theme-option-Dark"]
+        currentTheme.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: currentTheme)
+        waitForExpectations(timeout: 5)
+        // Selecting the default again must dismiss the menu and leave navigation usable.
+        tab("routing")
+        XCTAssertTrue(app.textFields["manual-rules"].waitForExistence(timeout: 5))
+        tab("settings")
+        app.buttons["picker-theme"].tap()
+        let lightTheme = app.buttons["picker-theme-option-Light"]
+        lightTheme.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: lightTheme)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(app.buttons["picker-theme"].value as? String, "Light")
         tab("routing")
         reveal(app.buttons["picker-interval"])
         app.buttons["picker-interval"].tap()
@@ -153,7 +166,7 @@ import XCTest
         app.buttons["Every 2 hours"].tap()
         relaunch()
         tab("settings")
-        XCTAssertEqual(app.buttons["picker-theme"].value as? String, "Dark")
+        XCTAssertEqual(app.buttons["picker-theme"].value as? String, "Light")
         tab("routing")
         reveal(app.buttons["picker-interval"])
         XCTAssertEqual(app.buttons["picker-interval"].value as? String, "Every 2 hours")
