@@ -153,9 +153,11 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
         uses: ./.github/actions/qt
 
+      # The source-built SDK contains release Qt DLLs. Keep test CRT/library
+      # selection explicit while retaining symbols for failure diagnostics.
       - name: Configure
         if: needs.changes.outputs.desktop != 'false'
-        run: cmake -S tests -B build-tests -G Ninja
+        run: cmake -S tests -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
       - name: Build
         if: needs.changes.outputs.desktop != 'false'
@@ -171,7 +173,7 @@ jobs:
 
       - name: Deploy Qt beside the Windows service test helper
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
-        run: windeployqt --no-translations build-tests/freetunnel_test_helper.exe
+        run: windeployqt --release --no-translations build-tests/freetunnel_test_helper.exe
 
       - name: Test
         if: needs.changes.outputs.desktop != 'false'
