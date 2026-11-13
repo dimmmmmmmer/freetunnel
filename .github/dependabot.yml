@@ -12,6 +12,11 @@ updates:
   # scripts/check-desktop-changes.sh).
   - package-ecosystem: gradle
     directory: /android
+    groups:
+      android-logging:
+        patterns:
+          - "org.slf4j:slf4j-api"
+          - "com.github.tony19:logback-android"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

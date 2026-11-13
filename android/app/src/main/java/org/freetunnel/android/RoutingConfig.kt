@@ -3,6 +3,7 @@ package org.freetunnel.android
 import org.tomlj.Toml
 import org.tomlj.TomlArray
 import org.tomlj.TomlTable
+import org.tomlj.TomlVersion
 
 object RoutingConfig {
     internal val platformExcludedRoutes = listOf("0.0.0.0/8", "224.0.0.0/3")
@@ -54,7 +55,8 @@ object RoutingConfig {
     }
     private fun parse(source: String, limit: Int = 1_048_576): TomlTable {
         require(source.length <= limit) { "Конфигурация слишком большая (максимум 1 МБ)" }
-        val parsed = Toml.parse(source)
+        // Keep the parser aligned with the stable core, even when Tomlj adds newer TOML syntax.
+        val parsed = Toml.parse(source, TomlVersion.V1_0_0)
         require(!parsed.hasErrors()) { "Ошибка TOML: ${parsed.errors().firstOrNull()?.position()}" }
         require(parsed.getTable("endpoint") != null) { "В конфигурации отсутствует раздел [endpoint]" }
         return parsed
@@ -226,7 +228,7 @@ object RoutingConfig {
     @JvmStatic fun cleanImport(source: String): Import {
         // Anything unreadable is left to validate(), which says what is wrong.
         if (source.length > 1_048_576) return Import(source, false)
-        val parsed = Toml.parse(source)
+        val parsed = Toml.parse(source, TomlVersion.V1_0_0)
         if (parsed.hasErrors()) return Import(source, false)
         val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return endpointExport(parsed) ?: Import(source, false)
         // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
@@ -250,7 +252,7 @@ object RoutingConfig {
         // out again without what was taken out: every other value stays, its layout
         // does not.
         val lines: String? = TomlLines.edit(source, drop, replace)
-        val kept = lines?.let { Toml.parse(it) }
+        val kept = lines?.let { Toml.parse(it, TomlVersion.V1_0_0) }
         if (lines != null && kept != null && !kept.hasErrors() && same(parsed, kept, emptyList(), drop, replace.keys) &&
             (certificate == null || lookup(kept, certificatePath) == certificate.pem))
             return Import(lines, subscription, certificate != null)

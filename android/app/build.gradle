@@ -21,15 +21,15 @@ def coreVersion = coreVersionMatch.group(1)
 
 dependencies {
     implementation files("libs/${coreAar}")
-    implementation 'org.slf4j:slf4j-api:1.7.25'
-    implementation 'com.github.tony19:logback-android:2.0.0'
-    implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
+    implementation 'org.slf4j:slf4j-api:2.0.20'
+    implementation 'com.github.tony19:logback-android:3.0.0'
+    implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'
     implementation 'com.akuleshov7:ktoml-core:0.7.1'
-    implementation 'org.tomlj:tomlj:1.1.1'
-    // Tomlj exposes these annotations in its API but declares them runtime-only.
-    // Kotlin 2.4 also needs them on the compilation classpath.
-    compileOnly 'org.checkerframework:checker-qual:3.21.2'
-    androidTestCompileOnly 'org.checkerframework:checker-qual:3.21.2'
+    implementation 'org.tomlj:tomlj:2.2.0'
+    // Tomlj exposes these annotations in its API without a transitive dependency.
+    // Kotlin 2.4 needs them on the compilation classpath.
+    compileOnly 'org.checkerframework:checker-qual:4.4.0'
+    androidTestCompileOnly 'org.checkerframework:checker-qual:4.4.0'
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
     // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
     // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.

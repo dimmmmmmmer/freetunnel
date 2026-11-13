@@ -662,14 +662,14 @@ Maven coordinates; the others come in as their dependencies.
 
 #### SLF4J API
 
-- Version: 1.7.25 (`org.slf4j:slf4j-api:1.7.25`)
+- Version: 2.0.20 (`org.slf4j:slf4j-api:2.0.20`)
 - License: MIT, [licenses/android/slf4j.txt](licenses/android/slf4j.txt)
-- Copyright: Copyright (c) 2004-2017 QOS.ch
-- Source: <https://github.com/qos-ch/slf4j/tree/v_1.7.25>
+- Copyright: Copyright (c) 2004-2023 QOS.ch
+- Source: <https://github.com/qos-ch/slf4j/tree/v_2.0.20>
 
 #### logback-android
 
-- Version: 2.0.0 (`com.github.tony19:logback-android:2.0.0`)
+- Version: 3.0.0 (`com.github.tony19:logback-android:3.0.0`)
 - License: Apache-2.0, as published. It is derived from QOS.ch's logback,
   which is EPL-1.0 OR LGPL-2.1-only. To the extent that logback's code in it
   remains under those terms, FreeTunnel distributes it under the Eclipse
@@ -683,19 +683,19 @@ Maven coordinates; the others come in as their dependencies.
   EPL are offered by FreeTunnel alone.
 - Copyright: Copyright 2019 Anthony Trinh; Copyright (C) 2011-2012, Anthony
   Trinh; Copyright (C) 1999-2011, QOS.ch
-- Source: <https://github.com/tony19/logback-android/tree/v_2.0.0>
+- Source: <https://github.com/tony19/logback-android/tree/v_3.0.0>
 
 #### RxAndroid and RxJava
 
-- Version: RxAndroid 3.0.0 (`io.reactivex.rxjava3:rxandroid:3.0.0`), with
-  RxJava 3.0.0 and Reactive Streams 1.0.3
-- License: Apache-2.0 (RxAndroid, RxJava); Reactive Streams is CC0-1.0 (public
-  domain dedication)
+- Version: RxAndroid 3.0.2 (`io.reactivex.rxjava3:rxandroid:3.0.2`), with
+  RxJava 3.1.5 and Reactive Streams 1.0.4
+- License: Apache-2.0 (RxAndroid, RxJava); Reactive Streams is MIT-0
+  ([licenses/android/reactive-streams.txt](licenses/android/reactive-streams.txt))
 - Copyright: RxJava: Copyright (c) 2016-present, RxJava Contributors; RxAndroid:
   the RxAndroid authors
-- Source: <https://github.com/ReactiveX/RxAndroid/tree/3.0.0>,
-  <https://github.com/ReactiveX/RxJava/tree/v3.0.0>,
-  <https://github.com/reactive-streams/reactive-streams-jvm/tree/v1.0.3>
+- Source: <https://github.com/ReactiveX/RxAndroid/tree/3.0.2>,
+  <https://github.com/ReactiveX/RxJava/tree/v3.1.5>,
+  <https://github.com/reactive-streams/reactive-streams-jvm/tree/v1.0.4>
 
 #### ktoml
 
@@ -721,29 +721,29 @@ ktoml's dependencies.
 
 #### Tomlj
 
-- Version: 1.1.1 (`org.tomlj:tomlj:1.1.1`)
+- Version: 2.2.0 (`org.tomlj:tomlj:2.2.0`)
 - License: Apache-2.0. Its source files carry the Apache Software Foundation's
   license header; the project has no NOTICE file.
 - Copyright: the Tomlj authors
-- Source: <https://github.com/tomlj/tomlj/tree/1.1.1>
+- Source: <https://github.com/tomlj/tomlj/tree/2.2.0>
 
 #### ANTLR 4 runtime
 
-A dependency of Tomlj.
+Bundled and shaded inside Tomlj.
 
-- Version: 4.11.1
+- Version: 4.13.2
 - License: BSD-3-Clause, [licenses/android/ANTLR-4.txt](licenses/android/ANTLR-4.txt)
 - Copyright: Copyright (c) 2012-2022 The ANTLR Project
-- Source: <https://github.com/antlr/antlr4/tree/4.11.1>
+- Source: <https://github.com/antlr/antlr4/tree/4.13.2>
 
 #### Checker Framework qualifiers
 
-A dependency of Tomlj.
+Compile-time annotations for the Tomlj API; not packaged in the app.
 
-- Version: checker-qual 3.21.2 (`org.checkerframework:checker-qual:3.21.2`)
+- Version: checker-qual 4.4.0 (`org.checkerframework:checker-qual:4.4.0`)
 - License: MIT, [licenses/android/checker-qual.txt](licenses/android/checker-qual.txt)
 - Copyright: Copyright 2004-present by the Checker Framework developers
-- Source: <https://github.com/typetools/checker-framework/tree/checker-framework-3.21.2/checker-qual>
+- Source: <https://github.com/typetools/checker-framework/tree/checker-framework-4.4.0/checker-qual>
 
 #### Bouncy Castle
 
@@ -848,7 +848,7 @@ Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
 Qt-6.11.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
-checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, slf4j,
+checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, reactive-streams, slf4j,
 ThreeTen-Backport, winnow.
 
 ### ZXing Core (Android QR scanner)
