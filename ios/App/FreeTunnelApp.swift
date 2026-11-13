@@ -238,6 +238,7 @@ struct HomeView: View {
                                             }
                                         }
                                         .padding(.horizontal, 12).frame(minHeight: 40)
+                                        .contentShape(Rectangle())
                                     }.buttonStyle(.plain)
                                 }
                             }.padding(6)

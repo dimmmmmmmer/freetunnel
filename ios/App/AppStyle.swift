@@ -238,6 +238,7 @@ struct AppPicker<Value: Hashable>: View {
                                     }
                                 }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(
                                     minHeight: rowHeight)
+                                    .contentShape(Rectangle())
                             }.buttonStyle(.plain)
                                 .accessibilityIdentifier(
                                     previewID.map { "picker-" + $0 + "-option-" + option.title } ?? "")
