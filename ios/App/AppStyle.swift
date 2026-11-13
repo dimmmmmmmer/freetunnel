@@ -224,8 +224,10 @@ struct AppPicker<Value: Hashable>: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(options) { option in
                             Button {
-                                selection = option.value
                                 open = false
+                                if selection != option.value {
+                                    selection = option.value
+                                }
                             } label: {
                                 HStack(spacing: 12) {
                                     Text(LocalizedStringKey(option.title)).fixedSize(
@@ -237,6 +239,8 @@ struct AppPicker<Value: Hashable>: View {
                                 }.foregroundStyle(AppStyle.text).padding(.horizontal, 12).frame(
                                     minHeight: rowHeight)
                             }.buttonStyle(.plain)
+                                .accessibilityIdentifier(
+                                    previewID.map { "picker-" + $0 + "-option-" + option.title } ?? "")
                         }
                     }.font(AppStyle.body).padding(6)
                 }.scrollBounceBehavior(.basedOnSize)
