@@ -145,6 +145,7 @@ struct RootView: View {
                 .opacity(tab == id ? 1 : 0.8).frame(width: 46, height: 38)
                 .background(
                     tab == id ? AppStyle.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("tab-" + id).accessibilityLabel(title)
             .accessibilityAddTraits(tab == id ? [.isSelected] : [])
     }
