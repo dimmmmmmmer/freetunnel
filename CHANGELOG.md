@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated the VPN core to stable TrustTunnel 1.1.12 with an updated Chrome TLS profile.
+
 - Fixed desktop menus disappearing when using software rendering.
 
 - Restored macOS 13 support for Intel and Apple Silicon.

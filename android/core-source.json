@@ -1,6 +1,6 @@
 {
-  "version": "1.1.11",
-  "commit": "c0990e174fc75b2e52acd15882c62e69a3022581",
+  "version": "1.1.12",
+  "commit": "067deb837ed994d6ae902e3bb40b69f6266af216",
   "patches": ["vendor/trusttunnel/04-priority-geo-rules.patch"],
   "abis": ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 }
