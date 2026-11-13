@@ -3,6 +3,15 @@ import XCTest
 @testable import FreeTunnelCore
 
 final class DesktopParityTests: XCTestCase {
+    func testDefaultThemeIsDarkAndSavedChoicesArePreserved() throws {
+        XCTAssertEqual(Preferences().theme, "dark")
+        XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: Data("{}".utf8)).theme, "dark")
+        for theme in ["system", "light", "dark"] {
+            let data = Data("{\"theme\":\"\(theme)\"}".utf8)
+            XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: data).theme, theme)
+        }
+    }
+
     let source = """
         dns_upstreams = ["1.1.1.1"]
         custom_root_option = "keep"

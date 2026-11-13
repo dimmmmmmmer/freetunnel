@@ -79,7 +79,7 @@ public struct Preferences: Codable {
     public var profiles: [Profile] = []
     public var selectedID: UUID?
     public var killSwitch = true
-    public var theme = "system"
+    public var theme = "dark"
     public var language = "system"
     public var splitProfiles = [SplitProfile(name: "Default")]
     public var activeSplitProfile = "Default"
@@ -104,7 +104,7 @@ public struct Preferences: Codable {
         profiles = try container.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
         selectedID = try container.decodeIfPresent(UUID.self, forKey: .selectedID)
         killSwitch = try container.decodeIfPresent(Bool.self, forKey: .killSwitch) ?? true
-        theme = try container.decodeIfPresent(String.self, forKey: .theme) ?? "system"
+        theme = try container.decodeIfPresent(String.self, forKey: .theme) ?? "dark"
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "system"
         autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? false
         loggingEnabled = try container.decodeIfPresent(Bool.self, forKey: .loggingEnabled) ?? true
