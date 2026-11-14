@@ -71,7 +71,11 @@ public final class MainActivity extends Activity {
                 while (true) {
                     DatagramPacket packet = new DatagramPacket(new byte[128], 128);
                     socket.receive(packet);
-                    try { socket.send(packet); } catch (Exception e) { Log.w(TAG, "UDP exchange " + port, e); }
+                    Log.i(TAG, "UDP request port=" + port + " peer=" + packet.getSocketAddress());
+                    try {
+                        socket.send(packet);
+                        Log.i(TAG, "UDP reply port=" + port + " local=" + socket.getLocalSocketAddress());
+                    } catch (Exception e) { Log.w(TAG, "UDP exchange " + port, e); }
                 }
             } catch (Exception e) { Log.e(TAG, "UDP server " + port, e); }
         }, "probe-udp-" + port).start();

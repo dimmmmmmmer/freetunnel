@@ -28,6 +28,10 @@ def ready():
 
 
 def probe(active, bypass=False):
+    # Android 15 can freeze a cached background Activity and suspend its
+    # networking. Keep the server visible while measuring incoming traffic;
+    # only the brief outgoing control measurement uses the other Activity.
+    adb("shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity")
     results = []
     for port, protocol, binding in [(18081, "tcp", "local-address"), (18082, "tcp", "wildcard"),
                                     (18083, "udp", "local-address"), (18084, "udp", "wildcard")]:
@@ -64,6 +68,7 @@ def main():
             command = ["shell", "am", "start", "-n", "org.freetunnel.incomingprobe.control/org.freetunnel.incomingprobe.MainActivity", "--es", "command", "outgoing"]
             adb(*command)
             assert outgoing.recv(128) == b"new-outgoing", "Outgoing baseline failed"
+            adb("shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity")
             for bypass in (False, True):
                 adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
                 log_path = Path(f"incoming-android-instrumentation-{bypass}.txt")
