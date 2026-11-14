@@ -1,0 +1,40 @@
+name: Incoming routing investigation
+
+on:
+  push:
+    branches: [codex/cross-platform-incoming-replies]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Incoming OS probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Obtain the shipped Wintun driver
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://www.wintun.net/builds/wintun-0.14.1.zip -OutFile wintun.zip
+          if ((Get-FileHash wintun.zip -Algorithm SHA256).Hash -ne '07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51') { throw 'Wintun checksum mismatch' }
+          Expand-Archive wintun.zip wintun_extract
+          "WINTUN_DLL=$pwd\wintun_extract\wintun\bin\amd64\wintun.dll" >> $env:GITHUB_ENV
+      - name: Probe Windows routing
+        if: runner.os == 'Windows'
+        run: python tests/incoming_os_probe.py
+      - name: Probe macOS routing
+        if: runner.os == 'macOS'
+        run: sudo python3 tests/incoming_os_probe.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: incoming-${{ matrix.os }}
+          path: incoming-os-results.json
