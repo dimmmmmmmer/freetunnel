@@ -63,7 +63,8 @@ public final class MainActivity extends Activity {
     }
     private static void tcp(InetAddress local, int port, CountDownLatch ready) {
         new Thread(() -> {
-            try (ServerSocket server = new ServerSocket()) {
+            // Deliberately plain TCP: this fixture measures kernel reply routing using synthetic echo data.
+            try (ServerSocket server = new ServerSocket()) { // nosemgrep: java.lang.security.audit.crypto.unencrypted-socket.unencrypted-socket
                 server.bind(new InetSocketAddress(local, port)); ready.countDown();
                 while (true) try (Socket socket = server.accept()) {
                     socket.setSoTimeout(3000);

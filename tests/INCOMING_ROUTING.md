@@ -39,6 +39,8 @@ The Android test starts the real production service and native core, connects
 to the official TrustTunnel endpoint 1.1.0 over TLS/HTTP2, verifies a temporary
 pinned certificate and waits for the production service's connected state.
 The endpoint listens only on runner loopback and is reached via `adb reverse`.
+The workflow verifies the release archive, and the probe verifies the extracted
+Linux executable's SHA-256 before running a private copy of those checked bytes.
 A separate
 application UID hosts the servers because FreeTunnel excludes its own UID.
 The emulator forwards host traffic to `10.0.2.15`; Wi-Fi is disabled to avoid

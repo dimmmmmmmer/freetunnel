@@ -5,14 +5,14 @@ import os
 from pathlib import Path
 import secrets
 import socket
-import subprocess
+import subprocess  # nosec B404 - Fixed adb test commands, argument arrays, no host shell.
 import time
 
 from incoming_endpoint import endpoint
 
 
 def adb(*args):
-    return subprocess.run(["adb", *args], check=True, text=True, capture_output=True).stdout.strip()
+    return subprocess.run(["adb", *args], check=True, text=True, capture_output=True).stdout.strip()  # nosec B603 - Test-owned adb commands and hex tokens only.
 
 
 def wait_for(condition, seconds=45):
@@ -96,7 +96,7 @@ def main():
         results += probe(False)
         assert all(row["echo"] for row in results), "Baseline incoming traffic failed"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as outgoing:
-            outgoing.bind(("0.0.0.0", 19999))
+            outgoing.bind(("0.0.0.0", 19999))  # nosec B104 - Receives both loopback aliases on a disposable runner; only synthetic probe data.
             outgoing.settimeout(5)
             for package in ("org.freetunnel.incomingprobe", "org.freetunnel.incomingprobe.control"):
                 results.append(outgoing_probe(outgoing, package, False))
@@ -105,15 +105,15 @@ def main():
                 adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
                 log_path = Path(f"incoming-android-instrumentation-{bypass}.txt")
                 with log_path.open("w") as log:
-                    process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",
+                    process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",  # nosec B603 - Fixed instrumentation command; only a boolean varies.
                         "org.freetunnel.android.IncomingRoutingDeviceTest", "-e", "incoming_probe", "true",
                         "-e", "bypass_probe_app", str(bypass).lower(),
                         "org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner"], stdout=log, stderr=subprocess.STDOUT)
                     wait_for(lambda: adb("shell", "if test -f /data/local/tmp/incoming-vpn-ready; then echo ready; fi").strip() == "ready")
                     rows = probe(True, bypass)
                     results += rows
-                    # The user requires NEW connections of this same server
-                    # application to stay in the VPN. A separate UID alone is
+                    # NEW connections of this same server application must
+                    # stay in the VPN. A separate UID alone is
                     # not sufficient to verify that requirement.
                     for package in ("org.freetunnel.incomingprobe", "org.freetunnel.incomingprobe.control"):
                         results.append(outgoing_probe(outgoing, package, True, bypass))

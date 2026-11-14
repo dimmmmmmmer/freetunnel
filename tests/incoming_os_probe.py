@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Probe real TCP/UDP reply routing with two disposable OS tunnel interfaces.
+"""
+Probe real TCP/UDP reply routing with two disposable OS tunnel interfaces.
 
 The first interface injects packets from a synthetic remote peer. The second
 has a more specific route to that peer, like a VPN overriding the uplink's
@@ -18,14 +19,14 @@ import os
 from pathlib import Path
 import socket
 import struct
-import subprocess
+import subprocess  # nosec B404 - Fixed test tools and argument arrays on disposable OS runners.
 import sys
 import threading
 import time
 
 
 def run(*args):
-    result = subprocess.run(args, check=True, capture_output=True, text=True)
+    result = subprocess.run(args, check=True, capture_output=True, text=True)  # nosec B603 - Only test-owned commands/addresses.
     return result.stdout.strip()
 
 
@@ -36,6 +37,7 @@ def ps(command):
 
 class MacTun:
     def __init__(self, label, v4, v6):
+        """Create a test-owned utun interface with the supplied fixed addresses."""
         import fcntl
         self.sock = socket.socket(32, socket.SOCK_DGRAM, 2)
         info = fcntl.ioctl(self.sock, 0xc0644e03,
@@ -81,6 +83,7 @@ class WinTun:
     dll = None
 
     def __init__(self, label, v4, v6):
+        """Create a test-owned Wintun adapter and narrowly scoped firewall rule."""
         if WinTun.dll is None:
             dll = ctypes.WinDLL(str(Path(os.environ["WINTUN_DLL"]).resolve()), use_last_error=True)
             signatures = {
@@ -121,7 +124,7 @@ class WinTun:
 
     def route(self, prefix, add):
         if add:
-            next_hop = "::" if ":" in prefix else "0.0.0.0"
+            next_hop = "::" if ":" in prefix else "0.0.0.0"  # nosec B104 - On-link route gateway, not a listening address.
             ps(f"New-NetRoute -InterfaceIndex {self.index} -DestinationPrefix '{prefix}' "
                f"-NextHop '{next_hop}' -RouteMetric 0 -PolicyStore ActiveStore | Out-Null")
         else:
@@ -224,7 +227,7 @@ def receive(tunnels, predicate, timeout=2):
 def exercise(tunnels, family, udp, wildcard, port):
     local, remote = (("198.18.0.1", "198.19.0.2") if family == socket.AF_INET
                      else ("2001:db8:10::1", "2001:db8:11::2"))
-    wildcard_address = "0.0.0.0" if family == socket.AF_INET else "::"
+    wildcard_address = "0.0.0.0" if family == socket.AF_INET else "::"  # nosec B104 - Wildcard listening is the case under test on disposable runners.
     server = socket.socket(family, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
     server.settimeout(3)
     if family == socket.AF_INET6:

@@ -21,7 +21,7 @@ def exercise(peer_pid, ipv6, udp, expect_reply, wildcard=False):
     server = socket.socket(family, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.settimeout(2)
-    server.bind((("::" if ipv6 else "0.0.0.0") if wildcard else server_ip, port))
+    server.bind((("::" if ipv6 else "0.0.0.0") if wildcard else server_ip, port))  # nosec B104 - Wildcard behavior is tested inside an isolated network namespace.
     if not udp:
         server.listen()
     failures = []
