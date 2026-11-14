@@ -256,6 +256,8 @@ jobs:
           # its exit status, if Gradle copied no picture. (Gradle makes the folders of its output before the run, so an empty
           # folder is no sign that it copied anything: the test is for a picture.) A run whose process crashes says only "Process
           # crashed" in Gradle's output, so the device's warnings and its crash buffer are saved after it (the buffer made 16 MB first).
+          # The emulator may disappear after a successful test run. Bound optional diagnostic reads:
+          # adb logcat otherwise waits forever for a device, hiding the completed test result.
           # A freshly booted phone image can have the launcher not respond, and the "isn't responding" dialog it puts up has the input
           # focus for minutes (CI run 10, phone leg: the clipboard was refused to the app, and a remote's OK did not reach it).
           # hide_error_dialogs keeps every such dialog down.
@@ -269,7 +271,7 @@ jobs:
             adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
             if [ "${{ matrix.target }}" = android-tv ]; then adb shell pm list features | grep -qx 'feature:android.software.leanback'; fi
             if [ "${{ matrix.target }}" = android-tv ]; then mkdir -p android/app/build/reports/tv-screens && adb shell monkey -p org.freetunnel.android -c android.intent.category.LEANBACK_LAUNCHER 1 && sleep 5 && adb exec-out screencap -p > android/app/build/reports/tv-screens/app.png && adb shell input keyevent KEYCODE_HOME && sleep 3 && adb exec-out screencap -p > android/app/build/reports/tv-screens/launcher.png; fi
-            status=0; ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/36.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')" || status=$?; if [ -z "$(find android/app/build/outputs/connected_android_test_additional_output -type f -name '*.png' 2>/dev/null | head -n 1)" ]; then adb pull /data/local/tmp/uitour android/app/build/reports/uitour || true; fi; mkdir -p android/app/build/reports/logcat; adb logcat -d -v threadtime '*:W' > android/app/build/reports/logcat/warnings.txt || true; adb logcat -d -b crash -v threadtime > android/app/build/reports/logcat/crash.txt || true; exit $status
+            status=0; ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/36.0.0/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')" || status=$?; if [ -z "$(find android/app/build/outputs/connected_android_test_additional_output -type f -name '*.png' 2>/dev/null | head -n 1)" ]; then timeout --kill-after=5s 30s adb pull /data/local/tmp/uitour android/app/build/reports/uitour || true; fi; mkdir -p android/app/build/reports/logcat; timeout --kill-after=5s 30s adb logcat -d -v threadtime '*:W' > android/app/build/reports/logcat/warnings.txt || true; timeout --kill-after=5s 30s adb logcat -d -b crash -v threadtime > android/app/build/reports/logcat/crash.txt || true; exit $status
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
