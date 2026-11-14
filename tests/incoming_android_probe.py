@@ -3,9 +3,12 @@
 import json
 import os
 from pathlib import Path
+import secrets
 import socket
 import subprocess
 import time
+
+from incoming_endpoint import endpoint
 
 
 def adb(*args):
@@ -26,6 +29,35 @@ def ready():
         return bool(adb("shell", "run-as", "org.freetunnel.incomingprobe", "cat", "files/ready"))
     except subprocess.CalledProcessError:
         return False
+
+
+def outgoing_probe(receiver, package, active, bypass=False):
+    token = secrets.token_hex(8)
+    component = package + "/org.freetunnel.incomingprobe.MainActivity"
+    adb("shell", "am", "start", "-W", "-n", component, "--es", "command", "outgoing", "--es", "token", token)
+    data, peer = receiver.recvfrom(128)
+    assert data == ("new-outgoing:" + token).encode(), (data, peer)
+    # The endpoint routes its copy to a runner-local 10.0.2.2/32 address.
+    # Emulator-direct traffic comes from 127.0.0.1, so both paths deliver real
+    # data but remain distinguishable. Do not equate a timeout with VPN success.
+    assert peer[0] in ("127.0.0.1", "10.0.2.2"), peer
+    direct = peer[0] == "127.0.0.1"
+    receiver.sendto(data, peer)
+
+    def received_echo():
+        try:
+            return adb("shell", "run-as", package, "cat", "files/outgoing-" + token) == "ok"
+        except subprocess.CalledProcessError:
+            return False
+
+    wait_for(received_echo, seconds=8)
+    row = {"vpn_route": active, "server_app_bypassed": bypass,
+           "kind": "new-outgoing", "application": package,
+           "direct": direct, "echo": True, "peer": list(peer)}
+    print(json.dumps(row), flush=True)
+    expected_direct = not active or (bypass and package == "org.freetunnel.incomingprobe")
+    assert direct == expected_direct, row
+    return row
 
 
 def probe(active, bypass=False):
@@ -65,13 +97,9 @@ def main():
         assert all(row["echo"] for row in results), "Baseline incoming traffic failed"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as outgoing:
             outgoing.bind(("0.0.0.0", 19999))
-            outgoing.settimeout(3)
-            command = ["shell", "am", "start", "-n", "org.freetunnel.incomingprobe.control/org.freetunnel.incomingprobe.MainActivity", "--es", "command", "outgoing"]
-            adb(*command)
-            assert outgoing.recv(128) == b"new-outgoing", "Outgoing baseline failed"
-            server_command = ["shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity", "--es", "command", "outgoing"]
-            adb(*server_command)
-            assert outgoing.recv(128) == b"new-outgoing", "Server application's outgoing baseline failed"
+            outgoing.settimeout(5)
+            for package in ("org.freetunnel.incomingprobe", "org.freetunnel.incomingprobe.control"):
+                results.append(outgoing_probe(outgoing, package, False))
             adb("shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity")
             for bypass in (False, True):
                 adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
@@ -87,22 +115,8 @@ def main():
                     # The user requires NEW connections of this same server
                     # application to stay in the VPN. A separate UID alone is
                     # not sufficient to verify that requirement.
-                    adb(*server_command)
-                    try:
-                        direct = outgoing.recv(128) == b"new-outgoing"
-                    except socket.timeout:
-                        direct = False
-                    outgoing_row = {"vpn_route": True, "server_app_bypassed": bypass,
-                                    "kind": "new-server-outgoing", "direct": direct}
-                    results.append(outgoing_row)
-                    print(json.dumps(outgoing_row), flush=True)
-                    assert direct == bypass, "Unexpected routing for new server-app connections"
-                    adb(*command)
-                    try:
-                        data = outgoing.recv(128)
-                        raise AssertionError(f"The included control app bypassed the VPN: {data!r}")
-                    except socket.timeout:
-                        print("New outgoing traffic from the control app is captured by the VPN", flush=True)
+                    for package in ("org.freetunnel.incomingprobe", "org.freetunnel.incomingprobe.control"):
+                        results.append(outgoing_probe(outgoing, package, True, bypass))
                     adb("shell", "echo stopped > /data/local/tmp/incoming-vpn-stop")
                     assert process.wait(timeout=45) == 0
                 output = log_path.read_text()
@@ -133,4 +147,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with endpoint() as certificate:
+        adb("push", str(certificate), "/data/local/tmp/incoming-endpoint.pem")
+        adb("reverse", "tcp:29443", "tcp:29443")
+        try:
+            main()
+        finally:
+            adb("reverse", "--remove", "tcp:29443")
+            adb("shell", "rm", "-f", "/data/local/tmp/incoming-endpoint.pem")

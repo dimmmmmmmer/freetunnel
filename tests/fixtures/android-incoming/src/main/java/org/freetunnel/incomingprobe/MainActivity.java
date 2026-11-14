@@ -21,7 +21,7 @@ public final class MainActivity extends Activity {
         TextView view = new TextView(this);
         view.setText("Incoming TCP/UDP routing probe");
         setContentView(view);
-        if ("outgoing".equals(getIntent().getStringExtra("command"))) { outgoing(); return; }
+        if ("outgoing".equals(getIntent().getStringExtra("command"))) { outgoing(getIntent()); return; }
         new Thread(() -> {
             try {
                 InetAddress local = null;
@@ -42,14 +42,22 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if ("outgoing".equals(intent.getStringExtra("command"))) outgoing();
+        if ("outgoing".equals(intent.getStringExtra("command"))) outgoing(intent);
     }
-    private static void outgoing() {
+    private void outgoing(Intent intent) {
+        String token = intent.getStringExtra("token");
         new Thread(() -> {
             try (DatagramSocket socket = new DatagramSocket()) {
-                byte[] data = "new-outgoing".getBytes(StandardCharsets.UTF_8);
+                socket.setSoTimeout(5000);
+                byte[] data = ("new-outgoing:" + token).getBytes(StandardCharsets.UTF_8);
                 socket.send(new DatagramPacket(data, data.length, InetAddress.getByName("10.0.2.2"), 19999));
                 Log.i(TAG, "New outgoing UDP sent uid=" + android.os.Process.myUid());
+                DatagramPacket reply = new DatagramPacket(new byte[128], 128);
+                socket.receive(reply);
+                if (!new String(reply.getData(), 0, reply.getLength(), StandardCharsets.UTF_8).equals("new-outgoing:" + token))
+                    throw new IllegalStateException("Incorrect outgoing UDP echo");
+                Files.write(new File(getFilesDir(), "outgoing-" + token).toPath(), new byte[] {'o', 'k'});
+                Log.i(TAG, "New outgoing UDP echo received uid=" + android.os.Process.myUid());
             } catch (Exception e) { Log.e(TAG, "outgoing", e); }
         }, "probe-outgoing").start();
     }
