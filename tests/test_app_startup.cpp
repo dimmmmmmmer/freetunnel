@@ -68,6 +68,8 @@ private slots:
     void aLaunchSaysWhenItsMessageWasNotTaken();
     void aHandOverGivesUpWhenTheBudgetRunsOut();
     void aLaunchToAnInstanceThatIsQuittingStartsInstead();
+    void aLaunchRetriesRefusedConnections_data();
+    void aLaunchRetriesRefusedConnections();
     void wireInstanceServerWithoutTokenRefusesEveryCommand();
     void aLinkSentWhileStartingIsHandled();
     void aSecondLaunchNeverStartsBesideALiveInstance();
@@ -941,7 +943,7 @@ void TestAppStartup::aHandOverGivesUpWhenTheBudgetRunsOut()
     }
 }
 
-// A launch whose message is refused unread asks again, once. FreeTunnel closes
+// A launch whose message is refused unread asks again. FreeTunnel closes
 // its listener as it quits, connections it has not accepted yet included, so a
 // launch made just then used to report an instance it could not reach and start
 // nothing. The name is gone when it asks again, and it starts instead. On Unix
@@ -980,6 +982,74 @@ void TestAppStartup::aLaunchToAnInstanceThatIsQuittingStartsInstead()
 #else
     QCOMPARE(result, freetunnel::ForwardResult::Forwarded);
 #endif
+}
+
+void TestAppStartup::aLaunchRetriesRefusedConnections_data()
+{
+    QTest::addColumn<bool>("listenerQuits");
+    QTest::newRow("quitting listener") << true;
+    QTest::newRow("live refusing listener") << false;
+}
+
+// Windows closes a listener's pending pipe instances separately. Reconnecting
+// can reach another pipe being closed. Refuse several messages before removing
+// the name to exercise that sequence on every platform. An oversized message
+// cannot be reported as taken by Unix's socket buffer before the peer closes.
+void TestAppStartup::aLaunchRetriesRefusedConnections()
+{
+    QFETCH(bool, listenerQuits);
+    QString token;
+    QVERIFY(freetunnel::writeInstanceAuthToken(&token));
+    const auto dropToken = qScopeGuard([] { freetunnel::removeInstanceAuthToken(); });
+    const QString name = instanceSocketName(QStringLiteral("refused"));
+    QLocalServer::removeServer(name);
+    std::atomic<bool> listening{false};
+    std::atomic<bool> done{false};
+    std::atomic<bool> messagesArrived{true};
+    std::atomic<int> connections{0};
+    std::unique_ptr<QThread> instance(QThread::create([&] {
+        QLocalServer server;
+        server.setSocketOptions(QLocalServer::UserAccessOption);
+        if (!server.listen(name))
+            return;
+        listening = true;
+        while (!done) {
+            if (!server.waitForNewConnection(50))
+                continue;
+            std::unique_ptr<QLocalSocket> peer(server.nextPendingConnection());
+            if (!peer)
+                continue;
+            ++connections;
+            if (!peer->waitForReadyRead(2000)) {
+                messagesArrived = false;
+                return;
+            }
+            peer->abort();
+            if (listenerQuits && connections == 3) {
+                server.close();
+                return;
+            }
+        }
+    }));
+    instance->start();
+    const auto joinInstance = qScopeGuard([&] {
+        done = true;
+        instance->wait();
+    });
+    for (int i = 0; i < 5000 && !listening; ++i)
+        QThread::msleep(1);
+    QVERIFY(listening);
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const auto result = freetunnel::forwardToRunningInstance(
+            {name}, QString(8 * 1024 * 1024, QLatin1Char('x')));
+    QCOMPARE(result, listenerQuits ? freetunnel::ForwardResult::NoInstance
+                                  : freetunnel::ForwardResult::Unreachable);
+    QVERIFY(messagesArrived);
+    QVERIFY(connections >= 3);
+    QVERIFY2(elapsed.elapsed() < freetunnel::kInstanceHandOverMs + 3000,
+             qPrintable(QString::number(elapsed.elapsed())));
 }
 
 // A control message is not framed by length, so the listener has to decide when it

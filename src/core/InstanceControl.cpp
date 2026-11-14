@@ -722,13 +722,43 @@ std::optional<ForwardResult> connectToInstance(QLocalSocket &probe, const QStrin
     return std::nullopt;
 }
 
-HandOver sendToInstance(QLocalSocket &probe, const QString &token, const QString &controlArg)
+HandOver sendToInstance(QLocalSocket &probe, const QString &token, const QString &controlArg, int budgetMs)
 {
 #if defined(Q_OS_WIN)
     letPipeServerTakeForeground(reinterpret_cast<HANDLE>(probe.socketDescriptor()));
 #endif
     const QString payload = controlArg.isEmpty() ? QStringLiteral("focus") : controlArg;
-    return handOverInstanceMessage(probe, formatInstanceMessage(token, payload));
+    return handOverInstanceMessage(probe, formatInstanceMessage(token, payload), budgetMs);
+}
+
+ForwardResult forwardToInstance(const QString &socketName, bool ownName, const QString &token,
+                                bool haveToken, const QString &controlArg)
+{
+    const QDeadlineTimer budget(kInstanceHandOverMs);
+    for (int retry = 0; retry <= kBusyRetries; ++retry) {
+        if (retry != 0) {
+            if (budget.remainingTime() <= qint64(kBusyRetryPauseMs))
+                return ForwardResult::Unreachable;
+            QThread::msleep(kBusyRetryPauseMs);
+        }
+        QLocalSocket probe;
+        if (const std::optional<ForwardResult> failed = connectToInstance(probe, socketName, ownName))
+            return *failed;
+        // Still ours and listening. Neither a missing token nor an expired
+        // budget permits another instance to start beside it.
+        if (!haveToken || budget.hasExpired())
+            return ForwardResult::Unreachable;
+        const HandOver sent = sendToInstance(probe, token, controlArg, int(budget.remainingTime()));
+        if (sent == HandOver::Taken)
+            return ForwardResult::Forwarded;
+        if (sent == HandOver::NotTaken)
+            return ForwardResult::Unreachable;
+        // Refused without being read: Qt closes the Windows listener's pipe
+        // handles one by one. An immediate retry can reach another handle
+        // still being closed. Give that shutdown a turn, then check the name
+        // and peer again. All retries share the original handover budget.
+    }
+    return ForwardResult::Unreachable;
 }
 
 } // namespace
@@ -791,37 +821,11 @@ ForwardResult forwardToRunningInstance(const QStringList &socketNames, const QSt
     QString token;
     const bool haveToken = readInstanceAuthToken(&token);
     for (qsizetype i = 0; i < socketNames.size(); ++i) {
-        QLocalSocket probe;
         const bool ownName = i == 0; // see instanceServerNames()
-        if (const std::optional<ForwardResult> failed =
-                    connectToInstance(probe, socketNames.at(i), ownName)) {
-            if (*failed == ForwardResult::NoInstance)
-                continue;
-            return *failed;
-        }
-        // Ours and listening. Without the token it can be told nothing, and
-        // that is still no reason to start a second copy beside it.
-        if (!haveToken)
-            return ForwardResult::Unreachable;
-        HandOver sent = sendToInstance(probe, token, controlArg);
-        if (sent == HandOver::Refused) {
-            // Closed without being read, most likely by an instance that is
-            // quitting: FreeTunnel closes its listener as it quits, the
-            // connections it has not accepted yet with it. So ask again, once.
-            // A name that is gone now means no instance, and this launch is to
-            // be it. One still there is told again.
-            QLocalSocket again;
-            if (const std::optional<ForwardResult> failed =
-                        connectToInstance(again, socketNames.at(i), ownName)) {
-                if (*failed == ForwardResult::NoInstance)
-                    continue;
-                return *failed;
-            }
-            sent = sendToInstance(again, token, controlArg);
-        }
-        // Not taken means the command is lost, and this launch is not the
-        // instance either: one of ours is running. It must not start beside it.
-        return sent == HandOver::Taken ? ForwardResult::Forwarded : ForwardResult::Unreachable;
+        const ForwardResult result =
+                forwardToInstance(socketNames.at(i), ownName, token, haveToken, controlArg);
+        if (result != ForwardResult::NoInstance)
+            return result;
     }
     return ForwardResult::NoInstance;
 }

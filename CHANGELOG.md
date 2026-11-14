@@ -7,6 +7,7 @@
 - Linux: incoming TCP and UDP services remain reachable while the VPN is connected.
 - Improved configuration imports, subscriptions and connection logs across desktop and Android.
 - Windows connections now use a background service to reduce repeated administrator prompts.
+- Windows: launching while the previous instance is closing no longer sometimes leaves the app closed.
 - Restored macOS 12 support; fixed menus and made dark mode the default for new installations.
 - Updated the VPN core to stable TrustTunnel 1.1.12 and refreshed dependencies.
 
