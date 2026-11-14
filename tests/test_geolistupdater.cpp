@@ -14,8 +14,9 @@ public:
         setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
         if (!redirect.isEmpty()) setAttribute(QNetworkRequest::RedirectionTargetAttribute, redirect);
         open(QIODevice::ReadOnly);
-        QTimer::singleShot(0, this, [this] { emit readyRead(); setFinished(true); emit finished(); });
+        QTimer::singleShot(0, this, &Reply::complete);
     }
+    void complete() { emit readyRead(); setFinished(true); emit finished(); }
     void abort() override {}
     qint64 bytesAvailable() const override { return m_body.size() - m_pos + QNetworkReply::bytesAvailable(); }
 protected:
@@ -34,16 +35,38 @@ public:
     QUrl redirect;
     QList<QUrl> requests;
     bool redirectOnce = false;
+    Reply *lastReply = nullptr;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &req, QIODevice *) override {
         requests.append(req.url());
         const bool redirected = redirectOnce && requests.size() > 1;
-        return new Reply(req, body, redirected ? 200 : status, redirected ? QUrl{} : redirect, this);
+        lastReply = new Reply(req, body, redirected ? 200 : status, redirected ? QUrl{} : redirect, this);
+        return lastReply;
     }
 };
 class TestGeoListUpdater : public QObject {
     Q_OBJECT
 private slots:
+    void destructionFinishesPendingCacheWrite() {
+        QTemporaryDir dir; Manager manager;
+        manager.body.clear();
+        for (int i = 0; i < 10000; ++i)
+            manager.body += "full:site" + QByteArray::number(i) + ".example\n";
+        GeoListDefinition definition;
+        definition.source = QStringLiteral("https://example.com/sites.txt");
+        {
+            GeoListUpdater updater(dir.path(), nullptr, &manager);
+            QVERIFY(updater.start(definition));
+            // Deliver the download synchronously, then tear down while its
+            // parser is working. No event-loop wait may hide an orphan worker.
+            QVERIFY(manager.lastReply);
+            manager.lastReply->complete();
+        }
+        CachedGeoList cached; QString error;
+        QVERIFY2(GeoListCache(dir.path()).load(definition.source, definition.kind,
+                  definition.direction, &cached, &error), qPrintable(error));
+        QCOMPARE(cached.entries.size(), size_t(10000));
+    }
     void downloadAndFailedRefresh() {
         QTemporaryDir dir; Manager manager;
         GeoListUpdater updater(dir.path(), nullptr, &manager);
