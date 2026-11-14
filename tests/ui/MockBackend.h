@@ -88,7 +88,12 @@ public:
     QVariantList geoPresets;
     int geoUpdateHours = 24;
     bool geoLimitExceeded = false;
-    Q_INVOKABLE bool addGeoList(const QString &, const QString &, bool, bool) { return true; }
+    QVariantList lastGeoAddition;
+    bool acceptGeoAddition = true;
+    Q_INVOKABLE bool addGeoList(const QString &name, const QString &source, bool ips, bool bypass) {
+        lastGeoAddition = {name, source, ips, bypass};
+        return acceptGeoAddition;
+    }
     Q_INVOKABLE void setGeoListEnabled(const QString &, bool) {}
     Q_INVOKABLE void setGeoListDirection(const QString &, bool) {}
     Q_INVOKABLE void removeGeoList(const QString &) {}

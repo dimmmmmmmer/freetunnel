@@ -198,11 +198,11 @@ the profile of the config that is selected, so they route alike. Editing that pr
 tunnelling is on builds a running session again (the rules reach a session only that way);
 editing another profile, or choosing which to edit, restarts nothing.
 
-**Rules.** *Recommended for Russia* adds the list to the profile being edited, skipping what it has.
-The list is `data/split/recommended-russia.txt`, one file for this app and the desktop: the build copies
-it into the APK's assets, and the desktop has it compiled in. A new installation starts with split
-tunnelling on and Default holding that list, as the desktop's does. An update from 1.0.0 puts the one
-list of domains and the one of applications it kept into Default, sorted. Words typed into the field are
+**Rules.** A new installation starts with split tunnelling on and two geo lists in Default:
+**Russian sites** and **Russian IP addresses**, both using **Bypass VPN**. Their sources
+come from `data/geo/presets.json`, shared with the desktop. Existing installations keep
+their profiles; removing a default list does not add it back. An update from 1.0.0 puts
+the saved domains and applications into Default, sorted. Words typed into the field are
 added if they are rules, and the ones that are not are named in the desktop's words. Applications
 are added from the picker, one to a visit; one that is no longer installed is listed by its package
 name, so that it can be removed.

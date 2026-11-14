@@ -91,6 +91,7 @@ void TestBackendSplit::init()
     QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("FreeTunnelTest"),
               QStringLiteral("BackendSplitTest"))
             .clear();
+    QSettings().setValue(QStringLiteral("geo/profiles/Default"), QVariantList{});
 }
 
 void TestBackendSplit::geoListsBelongToProfilesAndCountAsVpnRules()

@@ -3,6 +3,9 @@
 
 #include <QSettings>
 #include <QStandardPaths>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "core/BypassRules.h"
 
@@ -48,6 +51,23 @@ QStringList recommendedRussiaDomains() {
     });
 }
 
+QList<freetunnel::GeoListDefinition> defaultGeoLists()
+{
+    const QByteArray presets{
+#include "geo_presets_json.inc"
+    };
+    QList<freetunnel::GeoListDefinition> lists;
+    for (const auto &value : QJsonDocument::fromJson(presets).array()) {
+        const auto row = value.toObject();
+        const QString id = row.value("id").toString();
+        if (id != QStringLiteral("ru-sites") && id != QStringLiteral("ru-ips")) continue;
+        lists.append({id, row.value("name").toString(), row.value("source").toString(),
+                      id == QStringLiteral("ru-ips") ? freetunnel::GeoListKind::Ips : freetunnel::GeoListKind::Sites,
+                      freetunnel::GeoDirection::Bypass, true});
+    }
+    return lists;
+}
+
 static QStringList domainsForProfileName(const QSettings &s, const QString &n,
                                          const QStringList &names, const QStringList &legacy)
 {
@@ -57,7 +77,7 @@ static QStringList domainsForProfileName(const QSettings &s, const QString &n,
     if (n == QStringLiteral("Default")) {
         if (!legacy.isEmpty() && names == QStringList{QStringLiteral("Default")})
             return legacy;
-        return recommendedRussiaDomains();
+        return s.allKeys().isEmpty() ? QStringList{} : recommendedRussiaDomains();
     }
     return {};
 }
@@ -70,7 +90,7 @@ static void loadProfileMap(const QSettings &s, AppSettings &out)
     for (const QString &n : names)
         out.profiles.insert(n, sanitizedBypassRules(domainsForProfileName(s, n, names, legacy)));
     if (out.profiles.isEmpty())
-        out.profiles.insert(QStringLiteral("Default"), recommendedRussiaDomains());
+        out.profiles.insert(QStringLiteral("Default"), s.allKeys().isEmpty() ? QStringList{} : recommendedRussiaDomains());
     if (!legacy.isEmpty() && out.profiles.value(QStringLiteral("Default")).isEmpty()
             && names == QStringList{QStringLiteral("Default")})
         out.profiles[QStringLiteral("Default")] = sanitizedBypassRules(legacy);
@@ -147,6 +167,8 @@ static int loadGeoUpdateHours(const QSettings &s)
 static void loadProfileGeoLists(const QSettings &s, AppSettings &out)
 {
     out.geo_update_hours = loadGeoUpdateHours(s);
+    // Existing profiles, including deliberately empty lists, keep their routing.
+    const bool fresh = s.allKeys().isEmpty();
     for (auto profile = out.profiles.cbegin(); profile != out.profiles.cend(); ++profile) {
         QList<freetunnel::GeoListDefinition> lists;
         QStringList ids;
@@ -165,6 +187,7 @@ static void loadProfileGeoLists(const QSettings &s, AppSettings &out)
                           direction == "bypass" ? freetunnel::GeoDirection::Bypass : freetunnel::GeoDirection::ThroughVpn,
                           row.value("enabled", false).toBool()});
         }
+        if (fresh && profile.key() == QStringLiteral("Default")) lists = defaultGeoLists();
         out.profile_geo_lists.insert(profile.key(), lists);
     }
 }

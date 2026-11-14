@@ -57,7 +57,9 @@ option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)
 option(FT_ENABLE_SANITIZERS "Build tests with ASan+UBSan (Linux/clang recommended)" OFF)
 
 if (FT_ENABLE_COVERAGE)
-    add_compile_options(--coverage)
+    # Geo cache workers execute the same parser concurrently. Keep their gcov
+    # counters consistent so lcov does not fail on negative reconstructed counts.
+    add_compile_options(--coverage -fprofile-update=atomic)
     add_link_options(--coverage)
 endif ()
 if (FT_ENABLE_SANITIZERS)

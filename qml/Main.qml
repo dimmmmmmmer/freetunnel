@@ -346,7 +346,7 @@ Window {
     }
 
     property int currentPage: 0
-    property string overlay: "" // "", "create", "apps"
+    property string overlay: "" // "", "create", "apps", "subscription", "geo"
     property int editIndex: -1  // config being edited in the create overlay (-1 = new)
     // Home's + and "Add a config": the Configs page opens with its add menu. Set
     // before currentPage, which loads the page at once; the page clears it.
@@ -371,7 +371,8 @@ Window {
     onOverlayChanged: {
         var src = overlay === "create" ? "CreateConfigOverlay.qml"
                 : overlay === "apps" ? "AppPickerOverlay.qml"
-                : overlay === "subscription" ? "SubscriptionOverlay.qml" : ""
+                : overlay === "subscription" ? "SubscriptionOverlay.qml"
+                : overlay === "geo" ? "GeoListOverlay.qml" : ""
         overlayLoader.setSource(src, src === "" ? {} : pageProps())
     }
 

@@ -7,9 +7,6 @@ ColumnLayout {
     required property var backend
     required property var shell
     required property var theme
-    property bool customOpen: false
-    property string customKind: "sites"
-    property string customDirection: "vpn"
     spacing: 8
 
     function presetName(preset) {
@@ -49,6 +46,7 @@ ColumnLayout {
     }
     Dropdown {
         Layout.fillWidth: true; shell: geo.shell; theme: geo.theme
+        objectName: "geoAddList"
         label: qsTr("Add list"); value: ""
         model: {
             var choices = [{v:"", t:qsTr("Choose…")}]
@@ -59,7 +57,7 @@ ColumnLayout {
             return choices
         }
         onPicked: function(id) {
-            if (id === "__custom__") { geo.customOpen = true; return }
+            if (id === "__custom__") { geo.shell.overlay = "geo"; return }
             var presets = backend.geoPresets
             for (var i = 0; i < presets.length; ++i) {
                 var p = presets[i]
@@ -108,26 +106,6 @@ ColumnLayout {
                 }
             }
         }
-    }
-    ColumnLayout {
-        visible: customOpen; Layout.fillWidth: true; spacing: 8
-        SectionLabel { theme: geo.theme; text: qsTr("Add your own list") }
-        Action { text: qsTr("Cancel"); onClicked: geo.customOpen = false }
-        Field { id: customName; Layout.fillWidth: true; label: qsTr("Name"); labelColor: theme.textDim; textColor: theme.text
-            fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent }
-        Field { id: customSource; Layout.fillWidth: true; label: qsTr("HTTPS address"); placeholder: "https://…/geosite.dat#category"
-            labelColor: theme.textDim; textColor: theme.text; fieldBg: theme.inputBg; fieldBorder: theme.border; fieldFocus: theme.accent }
-        Dropdown { shell: geo.shell; theme: geo.theme; label: qsTr("List type"); value: customKind
-            model: [{v:"sites",t:qsTr("Sites")},{v:"ips",t:qsTr("IP addresses")}]
-            onPicked: function(v) { customKind = v } }
-        Dropdown { shell: geo.shell; theme: geo.theme; label: qsTr("Route"); value: customDirection
-            model: [{v:"vpn",t:qsTr("Through VPN")},{v:"bypass",t:qsTr("Bypass VPN")}]
-            onPicked: function(v) { customDirection = v } }
-        Action { text: qsTr("Add"); onClicked: {
-            if (backend.addGeoList(customName.text, customSource.text, customKind === "ips", customDirection === "bypass")) {
-                customName.text = ""; customSource.text = ""; customOpen = false
-            }
-        } }
     }
     Dropdown {
         shell: geo.shell; theme: geo.theme; label: qsTr("Update lists"); maximumValueWidth: 180

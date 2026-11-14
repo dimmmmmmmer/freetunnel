@@ -140,11 +140,6 @@ Item {
                 SectionLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; theme: splitRoot.theme
                     text: backend.vpnMode === "selective" ? qsTr("Rules — via VPN") : qsTr("Rules — bypass VPN") }
                 Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
-                       text: qsTr("Recommended for Russia"); font.pixelSize: 12
-                       color: recMa.containsMouse ? theme.text : theme.accent; font.underline: recMa.containsMouse
-                    MouseArea { id: recMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor; onClicked: backend.addRecommendedRussia() } }
-                Text { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth); elide: Text.ElideRight
                        text: qsTr("Clear all"); font.pixelSize: 12; visible: backend.domains.length > 0
                        color: clrDomMa.containsMouse ? Qt.lighter(theme.danger, 1.25) : theme.danger
                        font.underline: clrDomMa.containsMouse
