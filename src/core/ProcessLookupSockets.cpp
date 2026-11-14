@@ -93,6 +93,7 @@ DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
     const auto *entry = static_cast<const inet_diag_msg *>(NLMSG_DATA(header));
     SocketOwner owner;
     owner.port = ntohs(entry->id.idiag_sport);
+    owner.remotePort = ntohs(entry->id.idiag_dport);
     owner.proto = proto;
     // From the kernel's own answer rather than from which table was asked: the
     // dump is per family, so the two agree, and reading it here means the field
@@ -103,6 +104,8 @@ DiagStep readDiagMessage(const nlmsghdr *header, std::uint32_t seq, int proto,
     // IPv4.
     std::copy_n(reinterpret_cast<const std::uint8_t *>(entry->id.idiag_src), owner.family == AF_INET6 ? 16 : 4,
                 owner.address.begin());
+    std::copy_n(reinterpret_cast<const std::uint8_t *>(entry->id.idiag_dst), owner.family == AF_INET6 ? 16 : 4,
+                owner.remoteAddress.begin());
     owner.v6only = owner.family == AF_INET6 && ipv6OnlyOf(header);
     if (owner.port != 0)
         out->append(owner);
@@ -249,10 +252,11 @@ bool socketsViaNetlink(QList<SocketOwner> *out, QByteArray *buffer, int *lastErr
 
 } // namespace
 
-QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno)
+QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno, bool *complete)
 {
     QByteArray buffer(256 * 1024, Qt::Uninitialized);
     QList<SocketOwner> sockets;
+    *complete = true;
     *viaNetlink = socketsViaNetlink(&sockets, &buffer, lastErrno);
     if (*viaNetlink)
         return sockets;
@@ -263,11 +267,26 @@ QList<SocketOwner> allInetSockets(bool *viaNetlink, int *lastErrno)
     // the diag modules, and a hand-rolled read loop over a growing buffer is a
     // thing a reader — and a security scanner — has to take on trust.
     for (const SocketTable &table : kSocketTables) {
-        QFile file(QString::fromLatin1(table.path));
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        QString path = QString::fromLatin1(table.path);
+#ifdef FT_ENABLE_TEST_HOOKS
+        const QString root = qEnvironmentVariable("FT_TEST_SOCKET_PROC_ROOT");
+        if (!root.isEmpty()) path = root + QLatin1Char('/') + path.section(QLatin1Char('/'), -1);
+#endif
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            // Kernels without IPv6 have no corresponding proc tables.
+            if (errno == ENOENT && table.family == AF_INET6) continue;
+            *complete = false;
+            *lastErrno = errno;
             continue;
-        sockets.append(parseProcNetTable(QString::fromLatin1(file.readAll()), table.proto,
-                                         table.family));
+        }
+        const auto contents = file.readAll();
+        if (file.error() != QFileDevice::NoError) {
+            *complete = false;
+            *lastErrno = EIO;
+            continue;
+        }
+        sockets.append(parseProcNetTable(QString::fromLatin1(contents), table.proto, table.family));
     }
     return sockets;
 }

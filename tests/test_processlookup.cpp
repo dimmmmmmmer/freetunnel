@@ -122,7 +122,7 @@ public:
         if (!m_process.waitForFinished(10000))
             m_process.kill();
         m_process.waitForFinished(10000);
-        QFile::remove(m_copy);
+        if (!m_copy.isEmpty()) QFile::remove(m_copy);
     }
 
 private:
@@ -177,7 +177,13 @@ private slots:
     void aBurstFromTheWatchedProgramSharesOneWalk();
     void aWalkThatKeepsFailingIsRetriedOutOfTheCredit();
     void newRulesAreLookedAtEvenWithTheCreditOverspent();
+    void destinationsDisambiguateSharedLocalPorts();
+    void connectedTcpLookupUsesTheRemoteEndpoint_data();
+    void connectedTcpLookupUsesTheRemoteEndpoint();
+    void newSocketsAreResolvedAfterAnExpensiveScan_data();
+    void newSocketsAreResolvedAfterAnExpensiveScan();
     void bothWaysOfReadingTheSocketTablesAgree();
+    void unreadableSocketTablesAreNotAnEmptySuccessfulScan();
     void anIpv6SocketIsFoundWhicheverFamilyTheFlowClaims();
     void aConnectionFromAnIpv6SocketToAnIpv4AddressIsFound();
     void theTableMatchesAFlowToItsOwnSocket_data();
@@ -576,6 +582,99 @@ void TestProcessLookup::aWalkThatKeepsFailingIsRetriedOutOfTheCredit()
     QVERIFY(lookup.lastScan().ok);
 }
 
+void TestProcessLookup::destinationsDisambiguateSharedLocalPorts()
+{
+    SocketOwnerTable table;
+    const auto local = addressOf("127.0.0.1");
+    table.record(AF_INET, IPPROTO_TCP, 12345, local, 101, false, 443, addressOf("192.0.2.1"));
+    table.record(AF_INET, IPPROTO_TCP, 12345, local, 202, false, 443, addressOf("192.0.2.2"));
+    QCOMPARE(table.find({AF_INET, IPPROTO_TCP, 12345, "127.0.0.1", 443, "192.0.2.1"}).pid, 101);
+    QCOMPARE(table.find({AF_INET, IPPROTO_TCP, 12345, "127.0.0.1", 443, "192.0.2.2"}).pid, 202);
+    QVERIFY(!table.find({AF_INET, IPPROTO_TCP, 12345, "127.0.0.1", 443, "192.0.2.3"}).found);
+    table.record(AF_INET, IPPROTO_TCP, 12345, local, 303, false, 443, addressOf("192.0.2.2"));
+    QCOMPARE(table.find({AF_INET, IPPROTO_TCP, 12345, "127.0.0.1", 443, "192.0.2.2"}).pid,
+             freetunnel::kAmbiguousOwner);
+    // An unconnected UDP socket remains a valid owner for arbitrary peers.
+    table.record(AF_INET, IPPROTO_UDP, 12345, {}, 404);
+    QCOMPARE(table.find({AF_INET, IPPROTO_UDP, 12345, "127.0.0.1", 443, "192.0.2.3"}).pid, 404);
+}
+
+void TestProcessLookup::connectedTcpLookupUsesTheRemoteEndpoint_data()
+{
+    QTest::addColumn<bool>("v6");
+    QTest::newRow("IPv4") << false;
+    QTest::newRow("IPv6") << true;
+}
+
+void TestProcessLookup::connectedTcpLookupUsesTheRemoteEndpoint()
+{
+    QFETCH(bool, v6);
+    const auto address = v6 ? QHostAddress::LocalHostIPv6 : QHostAddress::LocalHost;
+    QTcpServer server;
+    QVERIFY(server.listen(address, 0));
+    QTcpSocket client;
+    client.connectToHost(QHostAddress(address), server.serverPort());
+    QVERIFY(client.waitForConnected(5000));
+    ProcessLookup lookup;
+    lookup.setWatchList(watchSelf());
+    LocalFlow flow{v6 ? AF_INET6 : AF_INET, IPPROTO_TCP, client.localPort(), client.localAddress().toString(),
+                   server.serverPort(), QHostAddress(address).toString()};
+    bool skipped = true;
+    QVERIFY(!lookup.resolve(flow, &skipped).executablePath.isEmpty());
+    QVERIFY(!skipped);
+    flow.remotePort = server.serverPort() == 65535 ? 65534 : server.serverPort() + 1;
+    QVERIFY(lookup.resolve(flow, &skipped).executablePath.isEmpty());
+    QVERIFY(!skipped);
+}
+
+// A healthy but expensive scan must not change the routing of later sockets.
+void TestProcessLookup::newSocketsAreResolvedAfterAnExpensiveScan_data()
+{
+    QTest::addColumn<bool>("udp");
+    QTest::addColumn<bool>("v6");
+    QTest::addColumn<bool>("watched");
+    for (bool udp : {false, true})
+        for (bool v6 : {false, true})
+            for (bool watched : {false, true})
+                QTest::newRow(qPrintable(QString("%1-%2-%3").arg(udp).arg(v6).arg(watched)))
+                        << udp << v6 << watched;
+}
+
+void TestProcessLookup::newSocketsAreResolvedAfterAnExpensiveScan()
+{
+    QFETCH(bool, udp);
+    QFETCH(bool, v6);
+    QFETCH(bool, watched);
+    qputenv("FT_TEST_PROCESS_WALK_COST_US", "400000");
+    const auto restore = qScopeGuard([] { qunsetenv("FT_TEST_PROCESS_WALK_COST_US"); });
+    ProcessLookup lookup;
+    lookup.setWatchList(watchSelf());
+    QTcpServer first;
+    QVERIFY(first.listen(QHostAddress::LocalHost, 0));
+    lookup.resolve({AF_INET, IPPROTO_TCP, first.serverPort(), QStringLiteral("127.0.0.1")});
+    QVERIFY(lookup.lastScan().ok);
+    const auto address = v6 ? QHostAddress::LocalHostIPv6 : QHostAddress::LocalHost;
+    QTcpServer tcp;
+    QUdpSocket datagrams;
+    AnotherProgram other;
+    quint16 port = 0;
+    if (!watched) {
+        port = other.start(address, 0, udp ? "udp" : "tcp");
+    } else if (udp) {
+        QVERIFY(datagrams.bind(address, 0));
+        port = datagrams.localPort();
+    } else {
+        QVERIFY(tcp.listen(address, 0));
+        port = tcp.serverPort();
+    }
+    QVERIFY(port != 0);
+    bool skipped = true;
+    const auto id = lookup.resolve({v6 ? AF_INET6 : AF_INET, udp ? IPPROTO_UDP : IPPROTO_TCP,
+                                    port, QHostAddress(address).toString()}, &skipped);
+    QVERIFY2(!skipped, "scan cost must never decide whether a new socket uses VPN");
+    QCOMPARE(!id.executablePath.isEmpty(), watched);
+}
+
 // A change of rules is a new question, and is looked at at once, even when the
 // last walk failed and cost more than the whole credit, as one walk on a slow
 // machine can: kept from walking until the credit came back, a program just
@@ -702,6 +801,32 @@ void TestProcessLookup::withNoRulesNothingIsWalkedAtAll()
 // So it is run here, against the same question, and the two must agree. They
 // were measured to agree row for row — same inodes, protocols and ports — but
 // that was measured once, by hand; this is the part that keeps being true.
+void TestProcessLookup::unreadableSocketTablesAreNotAnEmptySuccessfulScan()
+{
+#ifndef Q_OS_LINUX
+    QSKIP("Linux /proc fallback");
+#else
+    QTemporaryDir unavailable;
+    QVERIFY(unavailable.isValid());
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    qputenv("FT_TEST_NO_SOCKET_NETLINK", "1");
+    qputenv("FT_TEST_SOCKET_PROC_ROOT", unavailable.path().toUtf8());
+    const auto restore = qScopeGuard([] {
+        qunsetenv("FT_TEST_NO_SOCKET_NETLINK");
+        qunsetenv("FT_TEST_SOCKET_PROC_ROOT");
+    });
+    ProcessLookup lookup;
+    lookup.setWatchList(watchSelf());
+    bool unavailableOwner = false;
+    const auto owner = lookup.resolve({AF_INET, IPPROTO_TCP, server.serverPort(),
+                                      QStringLiteral("127.0.0.1")}, &unavailableOwner);
+    QVERIFY(owner.executablePath.isEmpty());
+    QVERIFY(unavailableOwner);
+    QVERIFY(!lookup.lastScan().ok);
+#endif
+}
+
 void TestProcessLookup::bothWaysOfReadingTheSocketTablesAgree()
 {
 #ifndef Q_OS_LINUX
@@ -969,14 +1094,14 @@ void TestProcessLookup::aSocketsFirstOwnerIsKeptUnlessItWasNobody()
     table.record(AF_INET, IPPROTO_TCP, 4242, lo, freetunnel::kUnattributed);
     QCOMPARE(table.find(flow).pid, qint64(10)); // and keeps it
     QCOMPARE(table.size(), 1);
-    QCOMPARE(table.distinctPids(), 1);
+    QCOMPARE(table.distinctPids(), 0); // conflicting full tuples are not attributable
 
     // An exact address is preferred to a socket bound to every address.
     table.record(AF_INET, IPPROTO_TCP, 5000, SocketAddress{}, 30);
     table.record(AF_INET, IPPROTO_TCP, 5000, lo, freetunnel::kUnattributed);
     QCOMPARE(table.find(LocalFlow{AF_INET, IPPROTO_TCP, 5000, QStringLiteral("127.0.0.1")}).pid,
              freetunnel::kUnattributed);
-    QCOMPARE(table.distinctPids(), 2);
+    QCOMPARE(table.distinctPids(), 1);
 
     table.clear();
     QCOMPARE(table.size(), 0);

@@ -159,44 +159,18 @@ QString decisionLine(const ag::VpnConnectRequestSnapshot &req, const freetunnel:
     const QString who = app.name.isEmpty()
             ? QStringLiteral("unknown (%1)").arg(sourceEndpoint(req))
             : app.name;
-    const QString what = action == ag::VPN_CA_FORCE_BYPASS ? QStringLiteral("bypass")
+    const QString what = action == ag::VPN_CA_REJECT ? QStringLiteral("blocked (ownership unknown)")
+            : action == ag::VPN_CA_FORCE_BYPASS ? QStringLiteral("bypass")
             : action == ag::VPN_CA_FORCE_REDIRECT          ? QStringLiteral("tunnel")
                                                            : QStringLiteral("no rule");
     return QStringLiteral("app %1 → %2").arg(who, what);
 }
 
-// What the rules decided for one connection, given what the walk saw of it.
-freetunnel::AppAction connectionAction(const freetunnel::AppIdentity &app, const QStringList &rules,
-                                       bool selective, bool lookWasSkipped)
+// A failed ownership lookup must not silently change the user's policy.
+// Reject only the undecidable connection, allowing the application to retry.
+QString skipWarningLine()
 {
-    freetunnel::AppAction act = freetunnel::appActionFor(app, rules, selective);
-    // A connection we could not afford to look at is not a connection we
-    // established nothing about — it is one we know nothing about, and the
-    // two must not be answered the same way.
-    //
-    // In "Through VPN" the core's default is to leave the tunnel, so
-    // answering "no rule" for an unexamined connection puts it on the open
-    // network; if it did belong to a listed program, that is the exact leak
-    // this feature exists to prevent. Keeping it in the tunnel is the wrong
-    // answer only for a program nobody listed, and being wrong in that
-    // direction costs bandwidth rather than privacy. It is also what the
-    // rest of this client already does when it cannot tell: an empty rule
-    // set falls back to the full tunnel for the same reason.
-    //
-    // Only in selective mode. In bypass mode the default already keeps the
-    // connection inside the tunnel, so there is nothing to correct.
-    if (lookWasSkipped && selective && act == freetunnel::AppAction::Default)
-        act = freetunnel::AppAction::ForceTunnel;
-    return act;
-}
-
-// Said once per session, when the walk's budget runs out; see where it is used.
-QString skipWarningLine(bool selective)
-{
-    return QStringLiteral("app rules: no budget left to look again — connections are "
-                          "being answered without one%1")
-            .arg(selective ? QStringLiteral(", and kept in the tunnel")
-                           : QString());
+    return QStringLiteral("app rules: socket ownership lookup failed; undecidable connections are blocked");
 }
 
 } // namespace
@@ -243,10 +217,11 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         lookup->setWatchList(rules);
 
         const freetunnel::LocalFlow flow{req.family, req.proto, req.src_port,
-                                         QString::fromStdString(req.src_ip)};
+                                         QString::fromStdString(req.src_ip), req.dst_port, QString::fromStdString(req.dst_ip)};
         bool lookWasSkipped = false;
         const freetunnel::AppIdentity app = lookup->resolve(flow, &lookWasSkipped);
-        decision->action = coreAction(connectionAction(app, rules, selective, lookWasSkipped));
+        decision->action = lookWasSkipped ? ag::VPN_CA_REJECT
+                : coreAction(freetunnel::appActionFor(app, rules, selective));
         // decision->app_name is deliberately NOT set. It looks like a harmless way
         // to get the program into the core's own log, and it is not: the core
         // passes it to the upstream, which puts it in the CONNECT request sent
@@ -256,13 +231,10 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // telling anyone. The line below puts it in the local log instead, which
         // is where the user was going to look anyway.
 
-        // Once per session, and only when it happens. Without this the budget
-        // running out is invisible: the rules keep being listed, the walk keeps
-        // reporting success, and the only symptom is that the feature works for
-        // the first few dozen connections of a burst and then appears not to.
+        // Report a system lookup failure once per session.
         if (lookWasSkipped && !*skipWarned) {
             *skipWarned = true;
-            const QString line = skipWarningLine(selective);
+            const QString line = skipWarningLine();
             postConnectionInfoIfAlive(this, guard, session, line);
         }
 
@@ -277,7 +249,7 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
         // A connection nobody wrote a rule for is the overwhelming majority, and
         // logging those buries the handful that matter under every program on
         // the machine. Verbose is where that question gets answered.
-        if (!routed && !verbose)
+        if (!routed && !lookWasSkipped && !verbose)
             return;
         const QString line = decisionLine(req, app, decision->action);
         // The lookup above may be slow; the guard is taken only now, and only

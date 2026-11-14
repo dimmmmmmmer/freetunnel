@@ -3554,8 +3554,8 @@ class TvDeviceTest {
         eventually("with its link") { !pageKeys(a).contains("apps:clear") }
     }
 
-    // The notice, only where it applies, worked out by the code that builds the VPN: nothing to go through, or apps and domains together.
-    @Test fun theNoticeIsThereOnlyWhereThroughVpnWouldRouteNothingOrCannotRouteBoth() {
+    // The notice comes from the VPN plan: an empty policy is unsafe; mixed rules are supported.
+    @Test fun theNoticeIsThereOnlyWhereThroughVpnWouldRouteNothing() {
         editProfiles { p -> p.clearDomains("Default"); p.clearApps("Default") }
         val nothing = context.getString(R.string.split_notice_nothing, "Profile 0", context.getString(R.string.split_profile_default))
         val both = context.getString(R.string.split_notice_both, "Profile 0", context.getString(R.string.split_profile_default))
@@ -3574,10 +3574,10 @@ class TvDeviceTest {
         editProfiles { it.addDomains("Default", "home.example") }
         render(a, 2)
         assertFalse(shows(a, nothing)); assertFalse(shows(a, both))
-        // Applications and domains: Android's own.
+        // Applications and domains work together without a full-tunnel fallback.
         editProfiles { it.addApp("Default", installed) }
         render(a, 2)
-        assertTrue("Both kinds say that Android cannot add them", shows(a, both))
+        assertFalse("Mixed rules no longer need the unsupported-policy warning", shows(a, both))
         assertFalse(shows(a, nothing))
         // Applications that are not installed are no rules: the desktop's again.
         editProfiles { p -> p.clearApps("Default"); p.clearDomains("Default"); p.addApp("Default", "not.installed.package") }

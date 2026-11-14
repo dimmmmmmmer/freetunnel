@@ -254,6 +254,7 @@ private:
     std::vector<std::string> m_originalExcludedRoutes; // routes from config file before our additions
     std::vector<std::string> m_extraExclusions;
     std::string m_originalExclusions; // exclusions from config file before our additions
+    ag::VpnMode m_originalMode = ag::VPN_MODE_GENERAL;
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)
     bool m_killSwitch = false;
     bool m_killSwitchPortsFromConfig = false;

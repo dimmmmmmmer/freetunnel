@@ -220,6 +220,7 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     // Save original exclusions before we touch them so they can be restored
     // if the user changes bypass rules later.
     m_originalExclusions = m_config->exclusions;
+    m_originalMode = m_config->mode;
     m_config->exclusions = exclusionsLocked();
     // Routing policy: general = bypass the exclusions, selective = route only them.
     m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
@@ -230,7 +231,11 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
 // The config's own exclusions, then ours. What a session is built with and what
 // a running one is handed live, so both come from here.
 std::string QtTrustTunnelClient::exclusionsLocked() const {
-    std::string out = m_originalExclusions;
+    // An imported general-mode exclusion means bypass, not "through VPN".
+    // Match Android: UI rules replace incompatible imported-mode rules instead
+    // of reversing their direction when the mode changes.
+    const auto mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+    std::string out = mode == m_originalMode ? m_originalExclusions : std::string();
     for (const auto &ex : m_extraExclusions) {
         if (!out.empty() && out.back() != ' ')
             out.push_back(' ');

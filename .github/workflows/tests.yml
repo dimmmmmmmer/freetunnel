@@ -119,7 +119,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
+            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2
+
+      - name: Incoming TCP and UDP routing (isolated Linux namespaces)
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
+        run: sudo unshare --net python3 tests/test_linux_reply_routing.py --isolated
 
       - name: Install Qt (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
@@ -310,7 +314,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
+            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2
 
       - name: Install Qt
         uses: ./.github/actions/qt
