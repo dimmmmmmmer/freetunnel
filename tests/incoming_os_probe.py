@@ -56,6 +56,12 @@ class MacTun:
         if ":" in prefix:
             args.append("-inet6")
         run(*args, "-net", prefix, "-interface", self.name)
+        # A physical macOS uplink has an interface-scoped default route as well
+        # as the global one. A socket with a fixed source uses that scoped
+        # route even after the VPN replaces the global default. Include the
+        # corresponding scoped test-prefix route in this synthetic uplink.
+        if prefix.endswith(("/16", "/64")):
+            run(*args, "-net", prefix, "-interface", self.name, "-ifscope", self.name)
 
     def inject(self, packet):
         family = socket.AF_INET6 if packet[0] >> 4 == 6 else socket.AF_INET
