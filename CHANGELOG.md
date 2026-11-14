@@ -11,7 +11,7 @@
 
 - Added ready-made and custom geo lists, with manual routing rules taking priority.
 - Fixed selective routing on desktop and Android, including combined app and destination rules.
-- Linux: incoming TCP and UDP services remain reachable while the VPN is connected.
+- Linux: fixed reply routing for incoming TCP connections and UDP services bound to a specific local IP.
 - Improved configuration imports, subscriptions and connection logs across desktop and Android.
 - Windows connections now use a background service to reduce repeated administrator prompts.
 - Windows: launching while the previous instance is closing no longer sometimes leaves the app closed.

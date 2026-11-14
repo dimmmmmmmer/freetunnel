@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """External emulator peer: real incoming traffic to a separate application's UID."""
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -118,6 +119,17 @@ def main():
             Path("incoming-android-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
             adb("shell", "am", "force-stop", "org.freetunnel.incomingprobe")
             adb("shell", "am", "force-stop", "org.freetunnel.incomingprobe.control")
+    udp_ok = all(row["echo"] for row in results if row.get("protocol") == "UDP"
+                 and row["vpn_route"] and not row["server_app_bypassed"])
+    report = ("Incoming Android UDP while the server stays in VPN: "
+              + ("PASS" if udp_ok else "UNRESOLVED — replies time out")
+              + ". App-wide bypass is not a fix for this requirement.\n")
+    print(report, flush=True)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+            summary.write(report)
+    if os.environ.get("REQUIRE_ANDROID_UDP") == "true":
+        assert udp_ok, report
 
 
 if __name__ == "__main__":
