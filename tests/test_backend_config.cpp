@@ -692,8 +692,9 @@ void TestBackendConfig::theConnectConfigIsBuiltOffTheGuiThread()
     // the credential read there is microseconds and the worker always won the
     // race. The same window is reachable in the app — quitting while macOS has
     // its authorization dialog up, which is the very situation this worker exists
-    // for.
-    QVERIFY2(backend.findChildren<QThread *>().isEmpty(),
+    // for. Only inspect direct children: geo controllers own QThread::create
+    // workers whose destruction safely joins them, unlike this plain QThread.
+    QVERIFY2(backend.findChildren<QThread *>(QString(), Qt::FindDirectChildrenOnly).isEmpty(),
              "the config-build worker must not be parented to Backend: ~QObject would "
              "delete it mid-read and QThread's destructor calls qFatal");
 
