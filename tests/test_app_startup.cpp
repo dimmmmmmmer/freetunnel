@@ -993,10 +993,25 @@ void TestAppStartup::aLaunchRetriesRefusedConnections_data()
 
 // Windows closes a listener's pending pipe instances separately. Reconnecting
 // can reach another pipe being closed. Refuse several messages before removing
-// the name to exercise that sequence on every platform. An oversized message
-// cannot be reported as taken by Unix's socket buffer before the peer closes.
+// the name to exercise that sequence on every platform. Limit the read buffer
+// before attaching the descriptor: Windows starts its background pipe reader
+// at that point and would otherwise consume the whole message before abort().
+// An oversized message also keeps Unix's socket buffer from taking it in full.
 void TestAppStartup::aLaunchRetriesRefusedConnections()
 {
+    class ReadLimitedServer final : public QLocalServer {
+        void incomingConnection(quintptr descriptor) override
+        {
+            auto *peer = new QLocalSocket(this);
+            peer->setReadBufferSize(1);
+            if (!peer->setSocketDescriptor(descriptor)) {
+                delete peer;
+                return;
+            }
+            addPendingConnection(peer);
+        }
+    };
+
     QFETCH(bool, listenerQuits);
     QString token;
     QVERIFY(freetunnel::writeInstanceAuthToken(&token));
@@ -1008,7 +1023,7 @@ void TestAppStartup::aLaunchRetriesRefusedConnections()
     std::atomic<bool> messagesArrived{true};
     std::atomic<int> connections{0};
     std::unique_ptr<QThread> instance(QThread::create([&] {
-        QLocalServer server;
+        ReadLimitedServer server;
         server.setSocketOptions(QLocalServer::UserAccessOption);
         if (!server.listen(name))
             return;
@@ -1020,7 +1035,8 @@ void TestAppStartup::aLaunchRetriesRefusedConnections()
             if (!peer)
                 continue;
             ++connections;
-            if (!peer->waitForReadyRead(2000)) {
+            if ((peer->bytesAvailable() == 0 && !peer->waitForReadyRead(2000))
+                || peer->bytesAvailable() != 1) {
                 messagesArrived = false;
                 return;
             }
