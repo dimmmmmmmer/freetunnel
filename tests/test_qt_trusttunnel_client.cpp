@@ -122,7 +122,7 @@ private slots:
     void aFailedLookupDoesNotChangeRoutingPolicy();
     void importedRulesAreNotReversedByModeChanges();
     void appCallbacksMatchTheRemoteEndpoint();
-    void anIncompleteScanCannotProveAnApplicationIsUnlisted();
+    void aPartialScanUsesOnlyTheOwnershipItProved();
     void staleEventFromPreviousSessionIsIgnored();
     void failedAttemptSchedulesWorkingRetry();
     void coreDropTriggersAutoReconnect();
@@ -1708,7 +1708,7 @@ void TestQtTrustTunnelClient::aFailedLookupDoesNotChangeRoutingPolicy()
     QCOMPARE(ctl.fireConnectRequest(id, ownConnection(later, 12)).action, ag::VPN_CA_FORCE_REDIRECT);
 }
 
-void TestQtTrustTunnelClient::anIncompleteScanCannotProveAnApplicationIsUnlisted()
+void TestQtTrustTunnelClient::aPartialScanUsesOnlyTheOwnershipItProved()
 {
     auto &ctl = mockcore::Controller::instance();
     qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
@@ -1719,7 +1719,16 @@ void TestQtTrustTunnelClient::anIncompleteScanCannotProveAnApplicationIsUnlisted
     QVERIFY(socket.listen(QHostAddress::LocalHost, 0));
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
-    QCOMPARE(ctl.fireConnectRequest(ctl.lastClientId(), ownConnection(socket, 1)).action, ag::VPN_CA_REJECT);
+    const auto action = ctl.fireConnectRequest(ctl.lastClientId(), ownConnection(socket, 1)).action;
+#ifdef Q_OS_LINUX
+    // Linux records unselected sockets as unattributed. An incomplete scan
+    // cannot prove that an unseen selected process did not own this socket.
+    QCOMPARE(action, ag::VPN_CA_REJECT);
+#else
+    // Windows/macOS recorded the actual owner of this socket. A failed scan
+    // elsewhere does not invalidate that positive identity: it is unselected.
+    QCOMPARE(action, ag::VPN_CA_DEFAULT);
+#endif
 }
 
 void TestQtTrustTunnelClient::appCallbacksMatchTheRemoteEndpoint()
