@@ -839,13 +839,14 @@ pins all three asset URLs to that repository and tag. Desktop tags, drafts,
 prereleases, foreign URLs and incomplete assets are ignored. The desktop
 updater's `/releases/latest` endpoint is never used.
 
-An Android release must provide `freetunnel-android.apk`,
+An Android release publishes one APK, `freetunnel-android-X.Y.Z.apk`,
 `SHA256SUMS-android.txt`, and the raw 64-byte Ed25519 signature
 `SHA256SUMS-android.txt.sig`. The manifest's first line must be `#version=X.Y.Z`,
 followed by an unambiguous SHA-256 entry for the APK.
-A byte-identical `freetunnel-android-X.Y.Z.apk` compatibility asset and its checksum
-are also published so installed versions through 1.2.4 can discover updates.
-New clients prefer the unversioned filename and also accept older releases. The public verification key
+The versioned filename is accepted by both older and current clients, so an
+unversioned duplicate is unnecessary. Clients from 1.2.5 also accept
+`freetunnel-android.apk` for compatibility with releases that used that name.
+The public verification key
 is taken at build time from `include/core/ReleaseSigning.h`; no private signing
 key is shipped. Verification uses Bouncy Castle's lightweight Ed25519 implementation
 on all supported Android versions, including API 26.
