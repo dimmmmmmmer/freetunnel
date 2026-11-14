@@ -545,7 +545,7 @@ class UiComponentsDeviceTest {
         onMain {
             val theme = Theme.DARK
             val ui = ui()
-            val link = measured(ui.link("Recommended for Russia", 12f, Ui.LinkKind.ACCENT, "domains:russia"), dp(400)) as TextView
+            val link = measured(ui.link("Choose…", 12f, Ui.LinkKind.ACCENT, "apps:choose"), dp(400)) as TextView
             val words = Math.ceil(link.paint.measureText(link.text.toString()).toDouble()).toInt()
             assertNear("A link is its words and a little around them", words + link.paddingLeft + link.paddingRight, link.measuredWidth, 2)
             val focused = intArrayOf(android.R.attr.state_focused)
