@@ -53,9 +53,9 @@ QStringList recommendedRussiaDomains() {
 
 QList<freetunnel::GeoListDefinition> defaultGeoLists()
 {
-    const QByteArray presets =
+    const QByteArray presets{
 #include "geo_presets_json.inc"
-    ;
+    };
     QList<freetunnel::GeoListDefinition> lists;
     for (const auto &value : QJsonDocument::fromJson(presets).array()) {
         const auto row = value.toObject();
