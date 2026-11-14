@@ -12,7 +12,7 @@ from incoming_endpoint import endpoint
 
 
 def adb(*args):
-    return subprocess.run(["adb", *args], check=True, text=True, capture_output=True).stdout.strip()  # nosec B603 - Test-owned adb commands and hex tokens only.
+    return subprocess.run(["adb", *args], check=True, text=True, capture_output=True).stdout.strip()  # nosec B603 - Test-owned argv and hex tokens.
 
 
 def wait_for(condition, seconds=45):
@@ -105,7 +105,7 @@ def main():
                 adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
                 log_path = Path(f"incoming-android-instrumentation-{bypass}.txt")
                 with log_path.open("w") as log:
-                    process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",  # nosec B603 - Fixed instrumentation command; only a boolean varies.
+                    process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",  # nosec B603 - Fixed test argv, boolean flag.
                         "org.freetunnel.android.IncomingRoutingDeviceTest", "-e", "incoming_probe", "true",
                         "-e", "bypass_probe_app", str(bypass).lower(),
                         "org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner"], stdout=log, stderr=subprocess.STDOUT)

@@ -38,7 +38,7 @@ def endpoint():
                                       'credentials_file = "credentials.toml"\n'
                                       '[listen_protocols.http2]\n[forward_protocol]\ndirect = {}\n')
         with Path("incoming-android-endpoint.log").open("w") as log:
-            process = subprocess.Popen([str(executable), "vpn.toml", "hosts.toml", "-l", "debug"],  # nosec B603 - Private copy of verified bytes, fixed arguments, no shell.
+            process = subprocess.Popen([str(executable), "vpn.toml", "hosts.toml", "-l", "debug"],  # nosec B603 - Verified private copy, fixed argv.
                                        cwd=root, stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 10

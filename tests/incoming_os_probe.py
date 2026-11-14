@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""
-Probe real TCP/UDP reply routing with two disposable OS tunnel interfaces.
+"""Probe TCP/UDP reply routing with two disposable OS tunnel interfaces."""
 
-The first interface injects packets from a synthetic remote peer. The second
-has a more specific route to that peer, like a VPN overriding the uplink's
-default route. Only documentation/benchmark addresses are routed. No default
-route, DNS configuration, or existing firewall rule is changed.
-
-This is an OS-level diagnostic, not an end-to-end VPN transport test. Run as
-administrator on a disposable Windows/macOS runner. JSON records which
-interface actually carried each response; baseline failure aborts the probe.
-"""
+# The first interface injects packets from a synthetic remote peer. The second
+# has a more specific route to that peer, like a VPN overriding the uplink's
+# default route. Only documentation/benchmark addresses are routed. No default
+# route, DNS configuration, or existing firewall rule is changed.
+#
+# This is an OS-level diagnostic, not an end-to-end VPN transport test. Run as
+# administrator on a disposable Windows/macOS runner. JSON records which
+# interface actually carried each response; baseline failure aborts the probe.
 import argparse
 import ctypes
 import ipaddress
