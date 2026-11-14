@@ -1,0 +1,657 @@
+SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+Qt 6.9.3 compatibility and security backports. See README.md for upstream sources.
+
+diff --git a/src/svg/qsvgfilter.cpp b/src/svg/qsvgfilter.cpp
+index 9ef006b8..1b03fa37 100644
+--- a/src/svg/qsvgfilter.cpp
++++ b/src/svg/qsvgfilter.cpp
+@@ -10,6 +10,7 @@
+
+ #include <QLoggingCategory>
+ #include <QtGui/qimageiohandler.h>
++#include <QtGui/qimagereader.h>
+ #include <QVector4D>
+
+ QT_BEGIN_NAMESPACE
+@@ -333,7 +334,16 @@ QImage QSvgFeGaussianBlur::apply(const QMap<QString, QImage> &sources, QPainter
+     copyPainter.drawImage(source.offset(), source);
+     copyPainter.end();
+
+-    QVarLengthArray<uint64_t, 32 * 32> buffer(tempSource.width() * tempSource.height());
++    const qint64 bufferSize = qint64(tempSource.width()) * tempSource.height();
++    if (const int allocationLimitMb = QImageReader::allocationLimit()) {
++        const qint64 allocationLimit = qint64(allocationLimitMb) << 20;
++        const qint64 bufferSizeBytes = bufferSize * sizeof(uint64_t);
++        if (bufferSizeBytes > allocationLimit) {
++            qCWarning(lcSvgDraw) << "The requested filter buffer is too big, ignoring";
++            return QImage();
++        }
++    }
++    QVarLengthArray<uint64_t, 32 * 32> buffer(bufferSize);
+
+     const int sourceHeight = tempSource.height();
+     const int sourceWidth = tempSource.width();
+diff --git a/src/svg/qsvghandler.cpp b/src/svg/qsvghandler.cpp
+index edbad898..088c8635 100644
+--- a/src/svg/qsvghandler.cpp
++++ b/src/svg/qsvghandler.cpp
+@@ -900,7 +900,7 @@ static void parseBrush(QSvgNode *node,
+                 } else {
+                     QString id = idFromUrl(value);
+                     prop->setPaintStyleId(id);
+-                    prop->setPaintStyleResolved(false);
++                    handler->pushUnresolvedStyle(prop);
+                 }
+             } else if (attributes.fill != QLatin1String("none")) {
+                 QColor color;
+@@ -1070,7 +1070,7 @@ static void parsePen(QSvgNode *node,
+                     } else {
+                         QString id = idFromUrl(value);
+                         prop->setPaintStyleId(id);
+-                        prop->setPaintStyleResolved(false);
++                        handler->pushUnresolvedStyle(prop);
+                     }
+             } else if (attributes.stroke != QLatin1String("none")) {
+                 QColor color;
+@@ -4543,7 +4543,7 @@ void QSvgHandler::init()
+     parse();
+ }
+ 
+-static bool detectPatternCycles(const QSvgNode *node, QList<const QSvgNode *> active = {})
++static bool detectPatternCycles(const QSvgNode *node, QList<const QSvgNode *> &active)
+ {
+     QSvgFillStyle *fillStyle = static_cast<QSvgFillStyle*>
+         (node->styleProperty(QSvgStyleProperty::FILL));
+@@ -4564,54 +4564,84 @@ static bool detectPatternCycles(const QSvgNode *node, QList<const QSvgNode *> ac
+     return false;
+ }
+ 
+-static bool detectCycles(const QSvgNode *node, QList<const QSvgNode *> active = {})
+-{
+-    if (Q_UNLIKELY(!node))
++/* The function goes through a node and its descendants to
++ * find any circular references in the parsed SVG file. It
++ * is important for this to happen non-recursively to avoid
++ * stack overflows.
++ * The function maintains two lists of nodes. The active list
++ * is used to track patterns and uses because these are the nodes
++ * that can reference or be referenced by other nodes.
++ * Example :
++ * <pattern id="pat1" />
++ *  <rect fill="url(#pat1)" />
++ * </pattern>
++ *
++ * The other list of nodes is a stack to traverse the tree
++ * non-recursively, the std::pair stored in the stack will
++ * indicate whether a pattern or use has been visited and
++ * added to the active list or not. If the bool is set to true,
++ * this element can be popped out from the active list. */
++static bool detectCycles(const QSvgNode *n)
++{
++    if (Q_UNLIKELY(!n))
+         return false;
+-    switch (node->type()) {
+-    case QSvgNode::Doc:
+-    case QSvgNode::Group:
+-    case QSvgNode::Defs:
+-    case QSvgNode::Pattern:
+-    {
+-        if (node->type() == QSvgNode::Pattern)
+-            active.append(node);
+ 
+-        auto *g = static_cast<const QSvgStructureNode*>(node);
+-        for (auto *r : g->renderers()) {
+-            if (detectCycles(r, active))
+-                return true;
++    QList<const QSvgNode *> active;
++    using NodeState = std::pair<const QSvgNode *, bool>;
++    QStack<NodeState> nodes;
++    nodes.push({n, false});
++
++    do {
++        auto current = nodes.pop();
++        if (current.second) {
++            Q_ASSERT(!active.isEmpty() && current.first == active.back());
++            active.pop_back();
++            continue;
+         }
+-    }
+-    break;
+-    case QSvgNode::Use:
+-    {
+-        if (active.contains(node))
+-            return true;
+ 
+-        auto *u = static_cast<const QSvgUse*>(node);
+-        auto *target = u->link();
+-        if (target) {
+-            active.append(u);
+-            if (detectCycles(target, active))
+-                return true;
++        switch (current.first->type()) {
++        case QSvgNode::Doc:
++        case QSvgNode::Group:
++        case QSvgNode::Defs:
++        case QSvgNode::Pattern:
++        {
++            if (current.first->type() == QSvgNode::Pattern) {
++                active.append(current.first);
++                nodes.push({current.first, true});
++            }
++            auto *g = static_cast<const QSvgStructureNode*>(current.first);
++            for (auto it = g->renderers().crbegin(); it != g->renderers().crend(); it++)
++                nodes.push({*it, false});
+         }
+-    }
+-    break;
+-    case QSvgNode::Rect:
+-    case QSvgNode::Ellipse:
+-    case QSvgNode::Circle:
+-    case QSvgNode::Line:
+-    case QSvgNode::Path:
+-    case QSvgNode::Polygon:
+-    case QSvgNode::Polyline:
+-    case QSvgNode::Tspan:
+-        if (detectPatternCycles(node, active))
+-            return true;
+         break;
+-    default:
++        case QSvgNode::Use:
++        {
++            if (active.contains(current.first))
++                return true;
++            auto *u = static_cast<const QSvgUse*>(current.first);
++            auto *target = u->link();
++            if (target) {
++                active.append(u);
++                nodes.push({u, true});
++                nodes.push({target, false});
++            }
++        }
+         break;
+-    }
++        case QSvgNode::Rect:
++        case QSvgNode::Ellipse:
++        case QSvgNode::Circle:
++        case QSvgNode::Line:
++        case QSvgNode::Path:
++        case QSvgNode::Polygon:
++        case QSvgNode::Polyline:
++        case QSvgNode::Tspan:
++            if (detectPatternCycles(current.first, active))
++                return true;
++            break;
++        default:
++            break;
++        }
++    } while (!nodes.isEmpty());
+     return false;
+ }
+ 
+@@ -4669,7 +4699,7 @@ void QSvgHandler::parse()
+             break;
+         }
+     }
+-    resolvePaintServers(m_doc);
++    resolvePaintServers();
+     resolveNodes();
+     if (detectCyclesAndWarn(m_doc)) {
+         delete m_doc;
+@@ -4914,33 +4944,27 @@ bool QSvgHandler::endElement(const QStringView localName)
+     return ((localName == QLatin1String("svg")) && (node != Doc));
+ }
+ 
+-void QSvgHandler::resolvePaintServers(QSvgNode *node, int nestedDepth)
++void QSvgHandler::resolvePaintServers()
+ {
+-    if (!node || (node->type() != QSvgNode::Doc && node->type() != QSvgNode::Group
+-        && node->type() != QSvgNode::Defs && node->type() != QSvgNode::Switch)) {
+-        return;
+-    }
+-
+-    QSvgStructureNode *structureNode = static_cast<QSvgStructureNode *>(node);
+-
+-    const QList<QSvgNode *> ren = structureNode->renderers();
+-    for (auto it = ren.begin(); it != ren.end(); ++it) {
+-        QSvgFillStyle *fill = static_cast<QSvgFillStyle *>((*it)->styleProperty(QSvgStyleProperty::FILL));
+-        if (fill && !fill->isPaintStyleResolved()) {
++    for (QSvgStyleProperty *prop : std::as_const(m_unresolvedStyles)) {
++        if (prop->type() == QSvgStyleProperty::FILL) {
++            QSvgFillStyle *fill = static_cast<QSvgFillStyle *>(prop);
+             QString id = fill->paintStyleId();
+-            QSvgPaintStyleProperty *style = structureNode->styleProperty(id);
++            if (id.startsWith(QLatin1Char('#')))
++                id.slice(1);
++            QSvgPaintStyleProperty *style = m_doc->namedStyle(id);
+             if (style) {
+                 fill->setFillStyle(style);
+             } else {
+                 qCWarning(lcSvgHandler, "%s", msgCouldNotResolveProperty(id, xml).constData());
+                 fill->setBrush(Qt::NoBrush);
+             }
+-        }
+-
+-        QSvgStrokeStyle *stroke = static_cast<QSvgStrokeStyle *>((*it)->styleProperty(QSvgStyleProperty::STROKE));
+-        if (stroke && !stroke->isPaintStyleResolved()) {
++        } else if (prop->type() == QSvgStyleProperty::STROKE) {
++            QSvgStrokeStyle *stroke = static_cast<QSvgStrokeStyle *>(prop);
+             QString id = stroke->paintStyleId();
+-            QSvgPaintStyleProperty *style = structureNode->styleProperty(id);
++            if (id.startsWith(QLatin1Char('#')))
++                id.slice(1);
++            QSvgPaintStyleProperty *style = m_doc->namedStyle(id);
+             if (style) {
+                 stroke->setStyle(style);
+             } else {
+@@ -4948,10 +4972,9 @@ void QSvgHandler::resolvePaintServers(QSvgNode *node, int nestedDepth)
+                 stroke->setStroke(Qt::NoBrush);
+             }
+         }
+-
+-        if (nestedDepth < 2048)
+-            resolvePaintServers(*it, nestedDepth + 1);
+     }
++
++    m_unresolvedStyles.clear();
+ }
+ 
+ void QSvgHandler::resolveNodes()
+@@ -5073,6 +5096,11 @@ QColor QSvgHandler::currentColor() const
+         return QColor(0, 0, 0);
+ }
+ 
++void QSvgHandler::pushUnresolvedStyle(QSvgStyleProperty *prop)
++{
++    m_unresolvedStyles.append(prop);
++}
++
+ #ifndef QT_NO_CSSPARSER
+ 
+ void QSvgHandler::setInStyle(bool b)
+diff --git a/src/svg/qsvghandler_p.h b/src/svg/qsvghandler_p.h
+index 10ac19fc..d1324026 100644
+--- a/src/svg/qsvghandler_p.h
++++ b/src/svg/qsvghandler_p.h
+@@ -75,6 +75,8 @@ public:
+     void popColor();
+     QColor currentColor() const;
+ 
++    void pushUnresolvedStyle(QSvgStyleProperty *prop);
++
+ #ifndef QT_NO_CSSPARSER
+     void setInStyle(bool b);
+     bool inStyle() const;
+@@ -113,6 +115,7 @@ private:
+     // - <use> nodes which haven't been resolved yet.
+     // - <filter> nodes to be checked for unsupported filter primitives.
+     QList<QSvgNode *> m_toBeResolved;
++    QList<QSvgStyleProperty *> m_unresolvedStyles;
+ 
+     enum CurrentNode
+     {
+@@ -146,7 +149,7 @@ private:
+     QSvgCssHandler m_cssHandler;
+ #endif
+     void parse();
+-    void resolvePaintServers(QSvgNode *node, int nestedDepth = 0);
++    void resolvePaintServers();
+     void resolveNodes();
+ 
+     QPen m_defaultPen;
+diff --git a/src/svg/qsvgnode.cpp b/src/svg/qsvgnode.cpp
+index 2d7ba6a9..57476895 100644
+--- a/src/svg/qsvgnode.cpp
++++ b/src/svg/qsvgnode.cpp
+@@ -13,6 +13,8 @@
+ #include "qstack.h"
+ 
+ #include <QtGui/private/qoutlinemapper_p.h>
++#include <QtCore/qscopedvaluerollback.h>
++#include <vector>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -43,6 +45,14 @@ void QSvgNode::draw(QPainter *p, QSvgExtraStates &states)
+ #endif
+ 
+     if (shouldDrawNode(p, states)) {
++        const quint8 remainingDepth = states.trustedSource ? states.remainingNestedNodes
++                                                          : states.remainingNestedNodes - 1;
++        QScopedValueRollback<quint8> nestedNodesGuard(states.remainingNestedNodes, remainingDepth);
++        if (states.remainingNestedNodes == 0) {
++            qCWarning(lcSvgDraw) << "Too many nested nodes at" << type()
++                                 << "exceeding max nested limit of" << QtSvg::renderingMaxNestedNodes;
++            return;
++        }
+         applyStyle(p, states);
+         applyAnimatedStyle(p, states);
+         QSvgNode *maskNode = this->hasMask() ? document()->namedNode(this->maskId()) : nullptr;
+@@ -256,9 +266,16 @@ void QSvgNode::applyStyle(QPainter *p, QSvgExtraStates &states) const
+ */
+ void QSvgNode::applyStyleRecursive(QPainter *p, QSvgExtraStates &states) const
+ {
+-    if (parent())
+-        parent()->applyStyleRecursive(p, states);
+-    applyStyle(p, states);
++    std::vector<const QSvgNode *> parents;
++
++    const QSvgNode *current = this;
++    do {
++        parents.push_back(current);
++        current = current->parent();
++    } while (current);
++
++    for (auto i = parents.crbegin(); i != parents.crend(); ++i)
++        (*i)->applyStyle(p, states);
+ }
+ 
+ void QSvgNode::revertStyle(QPainter *p, QSvgExtraStates &states) const
+@@ -268,9 +285,11 @@ void QSvgNode::revertStyle(QPainter *p, QSvgExtraStates &states) const
+ 
+ void QSvgNode::revertStyleRecursive(QPainter *p, QSvgExtraStates &states) const
+ {
+-    revertStyle(p, states);
+-    if (parent())
+-        parent()->revertStyleRecursive(p, states);
++    const QSvgNode *current = this;
++    do {
++        current->revertStyle(p, states);
++        current = current->parent();
++    } while (current);
+ }
+ 
+ void QSvgNode::applyAnimatedStyle(QPainter *p, QSvgExtraStates &states) const
+@@ -674,7 +693,7 @@ bool QSvgNode::shouldDrawNode(QPainter *p, QSvgExtraStates &states) const
+     if (m_displayMode == DisplayMode::NoneMode)
+         return false;
+ 
+-    if (document() && document()->options().testFlag(QtSvg::AssumeTrustedSource))
++    if (document() && states.trustedSource)
+         return true;
+ 
+     QRectF brect = internalFastBounds(p, states);
+diff --git a/src/svg/qsvgstructure.cpp b/src/svg/qsvgstructure.cpp
+index d073b1c4..f6d503a5 100644
+--- a/src/svg/qsvgstructure.cpp
++++ b/src/svg/qsvgstructure.cpp
+@@ -417,9 +417,10 @@ void QSvgMarker::drawHelper(const QSvgNode *node, QPainter *p,
+     const bool isPainting = (boundingRect == nullptr);
+     const auto markers = markersForNode(node);
+     for (auto &i : markers) {
+-        QSvgMarker *markNode = static_cast<QSvgMarker*>(node->document()->namedNode(i.markerId));
+-        if (!markNode)
++        QSvgNode *referencedNode = node->document()->namedNode(i.markerId);
++        if (!referencedNode || referencedNode->type() != QSvgNode::Marker)
+             continue;
++        QSvgMarker *markNode = static_cast<QSvgMarker *>(referencedNode);
+ 
+         p->save();
+         p->translate(i.x, i.y);
+@@ -684,6 +685,50 @@ QSvgNode* QSvgStructureNode::previousSiblingNode(QSvgNode *n) const
+     return prev;
+ }
+ 
++void QSvgStructureNode::releaseDescendants()
++{
++    // This function will release the descendants of a QSvgStructureNode from bottom to top.
++    // Destructors are never called recursively in this case and stack overflow will not
++    // happen in deeply nested trees.
++    // This function does not allocate any memory at the cost of sacrificing some performance to
++    // make it safe to be called from a destructor.
++    QSvgNode *currentParent = this;
++    while (currentParent) {
++        switch (currentParent->type()) {
++        case QSvgNode::Doc:
++        case QSvgNode::Defs:
++        case QSvgNode::Group:
++        case QSvgNode::Mask:
++        case QSvgNode::Pattern:
++        case QSvgNode::Symbol:
++        case QSvgNode::Switch:
++        case QSvgNode::Filter:
++        {
++            QSvgStructureNode *currentParentSN = static_cast<QSvgStructureNode *>(currentParent);
++            if (currentParentSN->m_renderers.empty()) {
++                currentParent = currentParent->parent();
++                if (currentParent) {
++                    delete static_cast<QSvgStructureNode *>(currentParent)->m_renderers.first();
++                    static_cast<QSvgStructureNode *>(currentParent)->m_renderers.pop_front();
++                }
++            } else {
++                Q_ASSERT(currentParentSN->m_renderers.first()->parent() == currentParent);
++                currentParent = currentParentSN->m_renderers.first();
++            }
++        }
++            break;
++        default:
++            currentParent = currentParent->parent();
++            if (currentParent) {
++                delete static_cast<QSvgStructureNode *>(currentParent)->m_renderers.first();
++                static_cast<QSvgStructureNode *>(currentParent)->m_renderers.pop_front();
++            }
++            break;
++        }
++    }
++    Q_ASSERT(this->m_renderers.empty());
++}
++
+ QSvgMask::QSvgMask(QSvgNode *parent, QSvgRectF bounds,
+                    QtSvg::UnitTypes contentUnits)
+     : QSvgStructureNode(parent)
+@@ -724,8 +769,9 @@ QImage QSvgMask::createMask(QPainter *p, QSvgExtraStates &states, const QRectF &
+ 
+     // Chrome seems to return the mask of the mask if a mask is set on the mask
+     if (this->hasMask()) {
+-        QSvgMask *maskNode = static_cast<QSvgMask*>(document()->namedNode(this->maskId()));
+-        if (maskNode) {
++        QSvgNode *referencedNode = document()->namedNode(this->maskId());
++        if (referencedNode && referencedNode->type() == QSvgNode::Mask) {
++            QSvgMask *maskNode = static_cast<QSvgMask *>(referencedNode);
+             QRectF boundsRect;
+             return maskNode->createMask(p, states, localRect, &boundsRect);
+         }
+@@ -742,6 +788,8 @@ QImage QSvgMask::createMask(QPainter *p, QSvgExtraStates &states, const QRectF &
+     initPainter(&painter);
+ 
+     QSvgExtraStates maskNodeStates;
++    maskNodeStates.trustedSource = states.trustedSource;
++    maskNodeStates.remainingNestedNodes = states.remainingNestedNodes;
+     applyStyleRecursive(&painter, maskNodeStates);
+ 
+     // The transformation of the mask node is not relevant. What matters are the contentUnits
+@@ -865,7 +913,7 @@ QImage QSvgPattern::patternImage(QPainter *p, QSvgExtraStates &states, const QSv
+     imageSize.setHeight(qCeil(patternBoundingBox.height() * t.m22() * m_transform.m22()));
+ 
+     calculateAppliedTransform(t, peBoundingBox, imageSize);
+-    return renderPattern(imageSize, contentScaleFactorX, contentScaleFactorY);
++    return renderPattern(imageSize, std::make_pair(contentScaleFactorX, contentScaleFactorY), states);
+ }
+ 
+ QSvgNode::Type QSvgPattern::type() const
+@@ -873,9 +921,9 @@ QSvgNode::Type QSvgPattern::type() const
+     return Pattern;
+ }
+ 
+-QImage QSvgPattern::renderPattern(QSize size, qreal contentScaleX, qreal contentScaleY)
++QImage QSvgPattern::renderPattern(QSize size, std::pair<qreal, qreal> scale, const QSvgExtraStates &states)
+ {
+-    if (size.isEmpty() || !qIsFinite(contentScaleX) || !qIsFinite(contentScaleY))
++    if (size.isEmpty() || !qIsFinite(scale.first) || !qIsFinite(scale.second))
+         return defaultPattern();
+ 
+     // Allocate a QImage to draw the pattern in with the calculated size.
+@@ -896,6 +944,8 @@ QImage QSvgPattern::renderPattern(QSize size, qreal contentScaleX, qreal content
+     // Draw the pattern using our QPainter.
+     QPainter patternPainter(&pattern);
+     QSvgExtraStates patternStates;
++    patternStates.trustedSource = states.trustedSource;
++    patternStates.remainingNestedNodes = states.remainingNestedNodes;
+     initPainter(&patternPainter);
+     applyStyleRecursive(&patternPainter, patternStates);
+     patternPainter.resetTransform();
+@@ -903,13 +953,13 @@ QImage QSvgPattern::renderPattern(QSize size, qreal contentScaleX, qreal content
+     // According to the <pattern> definition, if viewBox exists then patternContentUnits
+     // is ignored
+     if (m_viewBox.isNull())
+-        patternPainter.scale(contentScaleX, contentScaleY);
++        patternPainter.scale(scale.first, scale.second);
+     else
+         patternPainter.setWindow(m_viewBox.toRect());
+ 
+     // Draw all this Pattern children nodes with our QPainter,
+     // no need to use any Extra States
+-    for (QSvgNode *node : m_renderers)
++    for (QSvgNode *node : std::as_const(m_renderers))
+         node->draw(&patternPainter, patternStates);
+ 
+     revertStyleRecursive(&patternPainter, patternStates);
+diff --git a/src/svg/qsvgstructure_p.h b/src/svg/qsvgstructure_p.h
+index f95508f4..a5ada885 100644
+--- a/src/svg/qsvgstructure_p.h
++++ b/src/svg/qsvgstructure_p.h
+@@ -19,6 +19,7 @@
+ 
+ #include "QtCore/qlist.h"
+ #include "QtCore/qhash.h"
++#include <utility>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -38,6 +39,10 @@ public:
+     QRectF decoratedInternalBounds(QPainter *p, QSvgExtraStates &states) const override;
+     QSvgNode *previousSiblingNode(QSvgNode *n) const;
+     QList<QSvgNode*> renderers() const { return m_renderers; }
++
++protected:
++    void releaseDescendants();
++
+ protected:
+     QList<QSvgNode*>          m_renderers;
+     QHash<QString, QSvgNode*> m_scope;
+@@ -233,7 +238,7 @@ public:
+     const QTransform& appliedTransform() const { return m_appliedTransform; }
+ 
+ private:
+-    QImage renderPattern(QSize size, qreal contentScaleX, qreal contentScaleY);
++    QImage renderPattern(QSize size, std::pair<qreal, qreal> contentScale, const QSvgExtraStates &states);
+     void calculateAppliedTransform(QTransform& worldTransform, QRectF peLocalBB, QSize imageSize);
+ 
+ private:
+diff --git a/src/svg/qsvgstyle.cpp b/src/svg/qsvgstyle.cpp
+index 84887300..05936c77 100644
+--- a/src/svg/qsvgstyle.cpp
++++ b/src/svg/qsvgstyle.cpp
+@@ -111,7 +111,6 @@ QSvgFillStyle::QSvgFillStyle()
+     , m_oldFillRule(Qt::WindingFill)
+     , m_fillOpacity(1.0)
+     , m_oldFillOpacity(0)
+-    , m_paintStyleResolved(1)
+     , m_fillRuleSet(0)
+     , m_fillOpacitySet(0)
+     , m_fillSet(0)
+@@ -266,7 +265,6 @@ QSvgStrokeStyle::QSvgStrokeStyle()
+     , m_strokeDashOffset(0)
+     , m_oldStrokeDashOffset(0)
+     , m_style(0)
+-    , m_paintStyleResolved(1)
+     , m_vectorEffect(0)
+     , m_oldVectorEffect(0)
+     , m_strokeSet(0)
+diff --git a/src/svg/qsvgstyle_p.h b/src/svg/qsvgstyle_p.h
+index 0bab0717..0f943068 100644
+--- a/src/svg/qsvgstyle_p.h
++++ b/src/svg/qsvgstyle_p.h
+@@ -115,6 +115,8 @@ struct Q_SVG_EXPORT QSvgExtraStates
+     qreal strokeDashOffset;
+     int nestedUseLevel = 0;
+     int nestedUseCount = 0;
++    bool trustedSource = false;
++    quint8 remainingNestedNodes = QtSvg::renderingMaxNestedNodes;
+     bool vectorEffect; // true if pen is cosmetic
+     qint8 imageRendering; // QSvgQualityStyle::ImageRendering
+     bool inUse = false; // true if currently in QSvgUseNode
+@@ -255,16 +257,6 @@ public:
+         return m_paintStyleId;
+     }
+ 
+-    void setPaintStyleResolved(bool resolved)
+-    {
+-        m_paintStyleResolved = resolved;
+-    }
+-
+-    bool isPaintStyleResolved() const
+-    {
+-        return m_paintStyleResolved;
+-    }
+-
+ private:
+     // fill            v 	v 	'inherit' | <Paint.datatype>
+     // fill-opacity    v 	v 	'inherit' | <OpacityValue.datatype>
+@@ -278,7 +270,6 @@ private:
+     qreal m_oldFillOpacity;
+ 
+     QString m_paintStyleId;
+-    uint m_paintStyleResolved : 1;
+ 
+     uint m_fillRuleSet : 1;
+     uint m_fillOpacitySet : 1;
+@@ -479,16 +470,6 @@ public:
+         return m_paintStyleId;
+     }
+ 
+-    void setPaintStyleResolved(bool resolved)
+-    {
+-        m_paintStyleResolved = resolved;
+-    }
+-
+-    bool isPaintStyleResolved() const
+-    {
+-        return m_paintStyleResolved;
+-    }
+-
+     QPen stroke() const
+     {
+         return m_stroke;
+@@ -512,7 +493,6 @@ private:
+ 
+     QSvgPaintStyleProperty *m_style;
+     QString m_paintStyleId;
+-    uint m_paintStyleResolved : 1;
+     uint m_vectorEffect : 1;
+     uint m_oldVectorEffect : 1;
+ 
+diff --git a/src/svg/qsvgtinydocument.cpp b/src/svg/qsvgtinydocument.cpp
+index 8fd699ea..9daf22e0 100644
+--- a/src/svg/qsvgtinydocument.cpp
++++ b/src/svg/qsvgtinydocument.cpp
+@@ -31,6 +31,7 @@ QSvgTinyDocument::QSvgTinyDocument(QtSvg::Options options, QtSvg::AnimatorType t
+     , m_fps(30)
+     , m_options(options)
+ {
++    m_states.trustedSource = m_options.testFlag(QtSvg::AssumeTrustedSource);
+     bool animationEnabled = !m_options.testFlag(QtSvg::DisableAnimations);
+     switch (type) {
+         case QtSvg::AnimatorType::Automatic:
+@@ -45,6 +46,8 @@ QSvgTinyDocument::QSvgTinyDocument(QtSvg::Options options, QtSvg::AnimatorType t
+ 
+ QSvgTinyDocument::~QSvgTinyDocument()
+ {
++    if (!m_states.trustedSource)
++        releaseDescendants();
+ }
+ 
+ static bool hasSvgHeader(const QByteArray &buf)
+diff --git a/src/svg/qtsvgglobal_p.h b/src/svg/qtsvgglobal_p.h
+index 3a5494c5..3ae8187b 100644
+--- a/src/svg/qtsvgglobal_p.h
++++ b/src/svg/qtsvgglobal_p.h
+@@ -28,6 +28,8 @@ enum class UnitTypes : quint32 {
+     userSpaceOnUse
+ };
+ 
++constexpr quint8 renderingMaxNestedNodes = 32;
++
+ enum class AnimatorType : quint32 {
+     Controlled,
+     Automatic,

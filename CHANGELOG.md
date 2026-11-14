@@ -1,14 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.2.5
 
-- Updated the VPN core to stable TrustTunnel 1.1.12 with an updated Chrome TLS profile.
-
-- Fixed desktop menus disappearing when using software rendering.
-
-- Restored macOS 13 support for Intel and Apple Silicon.
-- The Home logo turns green while connected on desktop, Android and Android TV.
-- Desktop and Android can import multiple links/files; Android can export the connection log.
+- Added ready-made and custom geo lists, with manual routing rules taking priority.
+- Fixed selective routing on desktop and Android, including combined app and destination rules.
+- Linux: incoming TCP and UDP services remain reachable while the VPN is connected.
+- Improved configuration imports, subscriptions and connection logs across desktop and Android.
+- Windows connections now use a background service to reduce repeated administrator prompts.
+- Windows: launching while the previous instance is closing no longer sometimes leaves the app closed.
+- Restored macOS 12 support; fixed menus and made dark mode the default for new installations.
+- Updated the VPN core to stable TrustTunnel 1.1.12 and refreshed dependencies.
 
 ## 1.2.4
 

@@ -1,0 +1,36 @@
+{
+  "version": "6.9.3",
+  "macos_deployment_target": "12.0",
+  "modules": {
+    "qtbase": {
+      "commit": "be09b211db70e1b0155d05c18668ad76e7e3df51",
+      "url": "https://codeload.github.com/qt/qtbase/tar.gz/be09b211db70e1b0155d05c18668ad76e7e3df51",
+      "sha256": "1192066258984197815cc9344a61e5fe217bb762d2ee29a00c6b4c47db56de9d"
+    },
+    "qtshadertools": {
+      "commit": "d02f2a004353044596123e2eaa877af2245587d4",
+      "url": "https://codeload.github.com/qt/qtshadertools/tar.gz/d02f2a004353044596123e2eaa877af2245587d4",
+      "sha256": "24206c93139538e3003df45ed80060ab687532d26334214bf7ef4ae7716780f3"
+    },
+    "qtsvg": {
+      "commit": "84a5bad7715ac1a05043014a0f81f636117290da",
+      "url": "https://codeload.github.com/qt/qtsvg/tar.gz/84a5bad7715ac1a05043014a0f81f636117290da",
+      "sha256": "9d14d5a4a0ba14b91c30a7171a0fe745139b1cee899f4c131f1964e0d4675983"
+    },
+    "qtdeclarative": {
+      "commit": "c1640ba76059882e1d2bc978b6904a19333be4a9",
+      "url": "https://codeload.github.com/qt/qtdeclarative/tar.gz/c1640ba76059882e1d2bc978b6904a19333be4a9",
+      "sha256": "2f9d5ccd77b4711f308d6eaf817b2e80b4de2106425ad9aad3eeecaf4993a3e7"
+    },
+    "qttools": {
+      "commit": "89031fa54058af5e4d92ee08d31642ca338e9c0c",
+      "url": "https://codeload.github.com/qt/qttools/tar.gz/89031fa54058af5e4d92ee08d31642ca338e9c0c",
+      "sha256": "da8210cb66c6f8b21a32682c50833268b0a28c9bb368081efbc713f819af83e4"
+    },
+    "qttranslations": {
+      "commit": "59bf5e665fd9629e06564fdd9ceed5c3197c7eca",
+      "url": "https://codeload.github.com/qt/qttranslations/tar.gz/59bf5e665fd9629e06564fdd9ceed5c3197c7eca",
+      "sha256": "6637fdd9739d28e25982fcd4a4e08f5bb044c883f4036a1c988764b5776d735e"
+    }
+  }
+}

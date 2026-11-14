@@ -45,7 +45,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   the Windows build uses), [QHotkey](#qhotkey), [QWindowKit](#qwindowkit), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- Next to it: [Qt 6.11.3](#qt) with [the third-party code inside
+- Next to it: [Qt 6.9.3](#qt) with [the third-party code inside
   Qt](#third-party-code-inside-qt), [Wintun](#wintun) (`wintun.dll`),
   [Mesa llvmpipe](#mesa-llvmpipe) (`opengl32sw.dll`) and [Microsoft's
   redistributable files](#microsoft-redistributable-files) (the Visual C++
@@ -61,7 +61,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries), [QHotkey](#qhotkey), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- In `Contents/Frameworks` and `Contents/PlugIns`: [Qt 6.11.3](#qt) with [the
+- In `Contents/Frameworks` and `Contents/PlugIns`: [Qt 6.9.3](#qt) with [the
   third-party code inside Qt](#third-party-code-inside-qt).
 
 ### Linux
@@ -73,7 +73,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries), [QHotkey](#qhotkey), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- In `lib/` and `plugins/`: [Qt 6.11.3](#qt) with [the third-party code inside
+- In `lib/` and `plugins/`: [Qt 6.9.3](#qt) with [the third-party code inside
   Qt](#third-party-code-inside-qt), [ICU 73](#icu), [Ubuntu 22.04 system
   libraries](#ubuntu-2204-system-libraries) and [the GCC runtime
   libraries](#gcc-runtime-libraries).
@@ -367,8 +367,9 @@ the desktop's shapes; they are covered by the same license.
 
 ### Qt
 
-FreeTunnel's desktop interface is built with Qt 6.11.3: The Qt Company's
-official binaries, built from unmodified source. On Windows, windeployqt
+FreeTunnel's desktop interface is built with Qt 6.9.3: a source build with the compatibility and security backports in
+[vendor/qt](vendor/qt/README.md). The exact source commits and archive hashes
+are recorded in [vendor/qt/source.json](vendor/qt/source.json). On Windows, windeployqt
 copies Qt's DLLs and plugins unchanged. On macOS, macdeployqt rewrites the
 install names that say where Qt's frameworks are and strips their debugging
 symbols, and the bundle's ad-hoc signature is added to each of them. On Linux,
@@ -381,18 +382,18 @@ which incorporates the GNU General Public License version 3
 also available under other licenses: `LicenseRef-Qt-Commercial OR
 LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`.
 
-- Version: Qt 6.11.3: the libraries, plugins and QML modules of qtbase,
+- Version: Qt 6.9.3: the libraries, plugins and QML modules of qtbase,
   qtdeclarative and qtsvg that FreeTunnel needs, and Qt's Russian translations
   from qttranslations
 - License: LGPL-3.0-only
 - Copyright: Copyright (C) The Qt Company Ltd. and other contributors
-- Source: the complete source of Qt 6.11.3 is at
-  <https://download.qt.io/archive/qt/6.11/6.11.3/single/qt-everywhere-src-6.11.3.tar.xz>,
-  and module by module (`qtbase-everywhere-src-6.11.3.tar.xz` and so on) at
-  <https://download.qt.io/archive/qt/6.11/6.11.3/submodules/>
+- Source: the complete source of Qt 6.9.3 is at
+  <https://download.qt.io/archive/qt/6.9/6.9.3/single/qt-everywhere-src-6.9.3.tar.xz>,
+  and module by module (`qtbase-everywhere-src-6.9.3.tar.xz` and so on) at
+  <https://download.qt.io/archive/qt/6.9/6.9.3/submodules/>
 
 FreeTunnel links Qt dynamically, so you can replace the Qt libraries with your
-own build of Qt 6.11.3, modified or not:
+own build of Qt 6.9.3, modified or not:
 
 - Windows: the `Qt6*.dll` files and the plugin and `qml` folders next to
   `FreeTunnel.exe` (Qt built with MSVC 2022 for x64).
@@ -409,9 +410,9 @@ reverse engineering FreeTunnel to debug such modifications.
 ### Third-party code inside Qt
 
 Qt contains code from other projects, compiled into its libraries and plugins.
-[licenses/desktop/Qt-6.11.3-third-party.txt](licenses/desktop/Qt-6.11.3-third-party.txt)
+[licenses/desktop/Qt-6.9.3-third-party.txt](licenses/desktop/Qt-6.9.3-third-party.txt)
 lists each one with its version, license, copyright and license text, as Qt's
-own attribution files at tag v6.11.3 give them: among them FreeType, HarfBuzz,
+own attribution files at tag v6.9.3 give them: among them FreeType, HarfBuzz,
 libpng, libjpeg-turbo, PCRE2, zlib, double-conversion, TinyCBOR, MD4C, the
 Unicode Character Database and CLDR, the Public Suffix List, the
 JavaScriptCore macro assembler and XSVG.
@@ -469,7 +470,7 @@ through the API of `wintun.h`.
 Windows only: `opengl32sw.dll`, a software OpenGL renderer that comes with
 Qt's Windows binaries, for systems whose own OpenGL Qt cannot use.
 
-- Version: as shipped with Qt 6.11.3 for Windows
+- Version: as shipped with Qt 6.9.3 for Windows
 - License: MIT AND BSL-1.0, [licenses/desktop/Mesa-llvmpipe.txt](licenses/desktop/Mesa-llvmpipe.txt)
 - Copyright: Copyright (C) 1999-2007 Brian Paul; Copyright (c) 2013-2016 The
   Khronos Group Inc.; (C) Copyright yohhoy 2012
@@ -818,7 +819,7 @@ the desktop's `assets/icons/*.svg` and `assets/logo.svg`:
 FreeTunnel ships these components as binaries built from source that it has
 not changed:
 
-- Qt 6.11.3 (LGPL-3.0, all desktop downloads): the source is at the addresses
+- Qt 6.9.3 (LGPL-3.0, all desktop downloads): the source is at the addresses
   given under [Qt](#qt).
 - The LGPL-licensed Ubuntu 22.04 libraries in the Linux packages:
   `bundled-system-packages.txt` names each source package and its version, and
@@ -845,7 +846,7 @@ ngtcp2, nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
 Under [licenses/desktop/](licenses/desktop/): AFL-2.1, AppImage-runtime,
 Detours, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1, LGPL-3.0,
 Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
-Qt-6.11.3-third-party, Wintun.
+Qt-6.9.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
 checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, reactive-streams, slf4j,

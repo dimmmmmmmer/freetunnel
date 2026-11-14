@@ -215,6 +215,31 @@ class VpnDeviceTest {
         val unused = RoutingConfig.prepare(context, source, "Default")
         assertTrue("Default lists none", unused.apps.isEmpty()); assertNotNull("so Through VPN has nothing", unused.warning)
     }
+    @Test fun mixedRulesReachTheRunningNativeAdapterWithoutEnablingFullVpn() {
+        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        val other = context.packageManager.getInstalledApplications(0).map { it.packageName }
+            .first { it != context.packageName }
+        SplitStore.edit(splitStore(), null) { p ->
+            p.addApp("Default", other)
+            p.addDomains("Default", "selected.example")
+        }
+        withSink { config ->
+            FreeTunnelVpnService.start(context, config)
+            eventually { network() != null && nativeClient() != null }
+            awaitWorker()
+            val plan = serviceField("activePlan").get(serviceOwner()) as RoutingConfig.Plan
+            assertTrue(plan.routeAppsInCore)
+            assertFalse(plan.allowApps)
+            assertNull(plan.warning)
+            assertEquals("selective", org.tomlj.Toml.parse(plan.toml).getString("vpn_mode"))
+            assertTrue(exclusions(plan.toml).contains("selected.example"))
+            // The running adapter must use its application callback. A missing
+            // callback returns DEFAULT; an invalid endpoint must be rejected.
+            assertEquals(AppConnectionRouting.REJECT,
+                nativeClient()!!.onConnectRequest(17, "127.0.0.1", 0, "192.0.2.1", 443))
+        }
+    }
+
     @Test fun replacesTunWithoutDisconnectedStateAndBlocksUnsupportedIpv6() {
         assertNull("Grant ACTIVATE_VPN before running device tests", VpnService.prepare(context))
         val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))

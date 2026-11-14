@@ -1,10 +1,12 @@
 # Android changes
 
-## Unreleased
+## 1.2.5
 
-- Updated the VPN core to stable TrustTunnel 1.1.12 with an updated Chrome TLS profile.
-
-- Made connection logs on Android and Android TV as readable as on desktop, including saved logs and copied text.
+- Added geo lists, subscriptions and easier bulk configuration imports.
+- Fixed routing when selected apps and destinations are used together, so unselected traffic stays outside the VPN.
+- Improved phone and TV controls, routing settings and readable, exportable logs.
+- The connection logo turns green when connected; new installations start in dark mode.
+- Updated the VPN core to stable TrustTunnel 1.1.12 and refreshed dependencies.
 
 ## 1.2.4
 

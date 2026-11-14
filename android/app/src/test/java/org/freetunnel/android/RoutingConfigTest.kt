@@ -98,13 +98,15 @@ class RoutingConfigTest {
             emptyList(), listOf("@3:example.org"))
         assertEquals(listOf("intranet.example"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
     }
-    @Test fun appsAndGeoDestinationsKeepAndroidUnionFallback() {
+    @Test fun appsAndGeoDestinationsUseConnectionOwnerRouting() {
         val result = RoutingConfig.prepare(source, true, true, emptyList(), listOf("test.browser"), true,
             emptyList(), listOf("@2:example.org"))
-        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, result.warning)
-        assertEquals("general", Toml.parse(result.toml).getString("vpn_mode"))
-        assertTrue(Toml.parse(result.toml).getArray("exclusions")!!.isEmpty)
-        assertTrue(result.apps.isEmpty())
+        assertNull(result.warning)
+        assertEquals("selective", Toml.parse(result.toml).getString("vpn_mode"))
+        assertEquals(listOf("@2:example.org"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
+        assertEquals(listOf("test.browser"), result.apps)
+        assertTrue(result.routeAppsInCore)
+        assertFalse(result.allowApps)
     }
     @Test fun oversizedGeoRulesFallBackToFullTunnel() {
         val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true,
@@ -132,12 +134,13 @@ class RoutingConfigTest {
         assertFalse(result.allowApps); assertTrue(result.apps.isEmpty())
         assertEquals(listOf("example.org"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
     }
-    @Test fun mixedThroughRulesProtectAllTrafficWithAnExplicitWarning() {
+    @Test fun mixedThroughRulesUseTheUnionOfAppsAndDomains() {
         val result = plan(domains = listOf("example.org"), apps = listOf("test.browser"))
         val parsed = Toml.parse(result.toml)
-        assertEquals("general", parsed.getString("vpn_mode"))
-        assertTrue(parsed.getArray("exclusions")!!.isEmpty)
-        assertTrue(result.apps.isEmpty()); assertFalse(result.allowApps); assertNotNull(result.warning)
+        assertEquals("selective", parsed.getString("vpn_mode"))
+        assertEquals(listOf("example.org"), parsed.getArray("exclusions")!!.toList())
+        assertEquals(listOf("test.browser"), result.apps)
+        assertFalse(result.allowApps); assertNull(result.warning); assertTrue(result.routeAppsInCore)
     }
     @Test fun emptySelectiveFallsBackToFullVpnWithWarning() {
         val result = plan()
@@ -722,12 +725,13 @@ class RoutingConfigTest {
         assertNull(home.warning); assertNull(work.warning)
     }
 
-    @Test fun aProfileWithApplicationsAndDomainsStillCannotGoThroughVpnWithBoth() {
+    @Test fun aProfileWithApplicationsAndDomainsUsesBoth() {
         val backing = profileRules { p -> p.addDomains("Default", "home.example"); p.addApp("Default", "org.home") }
         val plan = planFor(backing, "Default", true)
-        assertEquals("general", Toml.parse(plan.toml).getString("vpn_mode"))
-        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, plan.warning)
-        assertTrue(plan.apps.isEmpty())
+        assertEquals("selective", Toml.parse(plan.toml).getString("vpn_mode"))
+        assertNull(plan.warning)
+        assertEquals(listOf("org.home"), plan.apps)
+        assertTrue(plan.routeAppsInCore)
     }
 
     @Test fun theOldListsHoldTheRulesOfTheProfileInUseSoGoingBackToTheFirstVersionRoutesTheSame() {

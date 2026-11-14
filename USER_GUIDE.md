@@ -30,7 +30,7 @@ If SmartScreen warns: **More info** → **Run anyway**.
 
 ### macOS
 
-Version 1.2.4 requires macOS 14.4 or newer.
+Version 1.2.4 requires macOS 14.4 or newer. The upcoming 1.2.5 restores macOS 12 support.
 
 Right-click the app → **Open**. Or clear the quarantine flag:
 
@@ -207,10 +207,17 @@ downloads keep the last valid copy. The list card shows its last update and
 any error. A list that has never loaded cannot route traffic yet.
 
 Android and Android TV use the same lists and priorities. Updating active
-routing rules there may briefly reconnect the VPN. Android cannot combine
-app selection with destination selection in the same way as desktop: if both
-are selected, FreeTunnel uses the full tunnel and shows a notice. Very large
-combined lists also fall back to the full tunnel with a notice.
+routing rules there may briefly reconnect the VPN. In **Through VPN** mode,
+selected applications use VPN; other applications follow the destination rules.
+If the operating system cannot identify an application's connection, that
+connection is blocked instead of being sent through an arbitrary route.
+Very large combined lists fall back to the full tunnel with a notice.
+
+On Linux, incoming TCP and UDP connections keep their direct reply path;
+this includes services listening on nonstandard ports. Linux requires `iproute2`
+and `nftables` (installed automatically by the Debian package). The counter on
+`tun0` includes intercepted traffic that the core subsequently sends directly;
+it does not measure only traffic to the VPN server.
 
 ### Changes while connected
 

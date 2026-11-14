@@ -262,7 +262,7 @@ object RoutingConfig {
         return Import(document(root, subscriptionKeys, overrides), subscription, certificate != null)
     }
 
-    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?)
+    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?, val routeAppsInCore: Boolean = false)
 
     /**
      * The plan for a session on this config with the rules of [profile], the split profile it uses: the
@@ -308,6 +308,7 @@ object RoutingConfig {
         var allowApps = enabled && through && selectedApps.isNotEmpty()
         var mode = requestedMode
         var warning: Int? = null
+        var routeAppsInCore = false
         val geoTooLarge = geoRules.sumOf { it.length.toLong() + 3 } > 8 * 1024 * 1024
         val geo = if (enabled && !geoTooLarge) geoRules.distinct() else emptyList()
         if (enabled && geoTooLarge) {
@@ -317,11 +318,10 @@ object RoutingConfig {
         if (mode == "selective") {
             when {
                 selectedApps.isNotEmpty() && (rules.isNotEmpty() || geo.isNotEmpty()) -> {
-                    // Android's per-app allowlist intersects with destination routing.
-                    // The adapter cannot express a union. Protect all traffic and tell
-                    // the user explicitly instead of silently losing either ruleset.
-                    mode = "general"; rules = emptyList(); selectedApps = emptyList(); allowApps = false
-                    warning = R.string.text_applications_and_addresses_are_selected_full_vpn_pro
+                    // Intercept all apps, then route a selected UID through VPN
+                    // and let destination rules decide for every other app.
+                    routeAppsInCore = true
+                    allowApps = false
                 }
                 selectedApps.isNotEmpty() -> mode = "general"
                 rules.isEmpty() && geo.none { it.startsWith("@2:") } -> {
@@ -330,7 +330,7 @@ object RoutingConfig {
                 }
             }
         }
-        if (geo.isNotEmpty() && warning != R.string.text_applications_and_addresses_are_selected_full_vpn_pro) {
+        if (geo.isNotEmpty()) {
             // Keep manual rules' direction even if an empty selective policy fell back to full VPN.
             val manualPrefix = if (requestedMode == "selective") "@0:" else "@1:"
             rules = rules.map { manualPrefix + it } + geo
@@ -353,6 +353,6 @@ object RoutingConfig {
         // the core does nothing with it, so it is not handed the password in it.
         val result = document(root, subscriptionKeys, mapOf(listOf("listener", "tun", "excluded_routes") to excluded))
         validateGenerated(result)
-        return Plan(result, selectedApps, allowApps, warning)
+        return Plan(result, selectedApps, allowApps, warning, routeAppsInCore)
     }
 }

@@ -1,0 +1,196 @@
+SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+Qt 6.9.3 compatibility and security backports. See README.md for upstream sources.
+
+diff --git a/src/quick/items/qquicktextdocument.cpp b/src/quick/items/qquicktextdocument.cpp
+index d11bae5919..798b0d0599 100644
+--- a/src/quick/items/qquicktextdocument.cpp
++++ b/src/quick/items/qquicktextdocument.cpp
+@@ -590,9 +590,9 @@ QSizeF QQuickTextImageHandler::intrinsicSize(
+ {
+     if (format.isImageFormat()) {
+         QTextImageFormat imageFormat = format.toImageFormat();
+-        int width = qRound(imageFormat.width());
++        int width = qRound(qBound(qreal(INT_MIN), imageFormat.width(), qreal(INT_MAX)));
+         const bool hasWidth = imageFormat.hasProperty(QTextFormat::ImageWidth) && width > 0;
+-        const int height = qRound(imageFormat.height());
++        const int height = qRound(qBound(qreal(INT_MIN), imageFormat.height(), qreal(INT_MAX)));
+         const bool hasHeight = imageFormat.hasProperty(QTextFormat::ImageHeight) && height > 0;
+         const auto maxWidth = imageFormat.maximumWidth();
+         const bool hasMaxWidth = imageFormat.hasProperty(QTextFormat::ImageMaxWidth) && maxWidth.type() != QTextLength::VariableLength;
+diff --git a/src/quick/items/qquicktextnodeengine.cpp b/src/quick/items/qquicktextnodeengine.cpp
+index 32de7c45ba..a7cfa08b26 100644
+--- a/src/quick/items/qquicktextnodeengine.cpp
++++ b/src/quick/items/qquicktextnodeengine.cpp
+@@ -11,6 +11,7 @@
+ #include <QtGui/qtextobject.h>
+ #include <QtGui/qtexttable.h>
+ #include <QtGui/qtextlist.h>
++#include <QtGui/qimageiohandler.h>
+ 
+ #include <private/qquicktext_p.h>
+ #include <private/qtextdocumentlayout_p.h>
+@@ -434,12 +435,15 @@ void QQuickTextNodeEngine::addTextObject(const QTextBlock &block, const QPointF
+         }
+ 
+         if (image.isNull()) {
+-            image = QImage((size * m_devicePixelRatio).toSize(), QImage::Format_ARGB32_Premultiplied);
+-            image.setDevicePixelRatio(m_devicePixelRatio);
+-            image.fill(Qt::transparent);
+-            {
+-                QPainter painter(&image);
+-                handler->drawObject(&painter, QRectF({}, size), textDocument, pos, format);
++            if (QImageIOHandler::allocateImage((size * m_devicePixelRatio).toSize(),
++                                               QImage::Format_ARGB32_Premultiplied,
++                                               &image)) {
++                image.setDevicePixelRatio(m_devicePixelRatio);
++                image.fill(Qt::transparent);
++                {
++                    QPainter painter(&image);
++                    handler->drawObject(&painter, QRectF({}, size), textDocument, pos, format);
++                }
+             }
+         }
+ 
+diff --git a/src/quick/util/qquickstyledtext.cpp b/src/quick/util/qquickstyledtext.cpp
+index bb003c19a6..7d21c8999f 100644
+--- a/src/quick/util/qquickstyledtext.cpp
++++ b/src/quick/util/qquickstyledtext.cpp
+@@ -11,6 +11,11 @@
+ #include "qquickstyledtext_p.h"
+ #include <QQmlContext>
+ #include <QtGui/private/qtexthtmlparser_p.h>
++#include <QtGui/private/qoutlinemapper_p.h>
++
++#ifndef QQUICKSTYLEDPARSER_COORD_LIMIT
++#  define QQUICKSTYLEDPARSER_COORD_LIMIT QT_RASTER_COORD_LIMIT
++#endif
+ 
+ Q_STATIC_LOGGING_CATEGORY(lcStyledText, "qt.quick.styledtext")
+ 
+@@ -660,9 +665,19 @@ void QQuickStyledTextPrivate::parseImageAttributes(const QChar *&ch, const QStri
+             if (is_equal_ignoring_case(attr.first, QLatin1String("src"))) {
+                 image->url = QUrl(attr.second.toString());
+             } else if (is_equal_ignoring_case(attr.first, QLatin1String("width"))) {
+-                image->size.setWidth(attr.second.toString().toInt());
++                bool ok;
++                int v = attr.second.toString().toInt(&ok);
++                if (ok && v <= QQUICKSTYLEDPARSER_COORD_LIMIT)
++                    image->size.setWidth(v);
++                else
++                    qCWarning(lcStyledText) << "Invalid width provided for <img>";
+             } else if (is_equal_ignoring_case(attr.first, QLatin1String("height"))) {
+-                image->size.setHeight(attr.second.toString().toInt());
++                bool ok;
++                int v = attr.second.toString().toInt(&ok);
++                if (ok && v <= QQUICKSTYLEDPARSER_COORD_LIMIT)
++                    image->size.setHeight(v);
++                else
++                    qCWarning(lcStyledText) << "Invalid height provided for <img>";
+             } else if (is_equal_ignoring_case(attr.first, QLatin1String("align"))) {
+                 if (is_equal_ignoring_case(attr.second, QLatin1String("top"))) {
+                     image->align = QQuickStyledTextImgTag::Top;
+diff --git a/src/quick/util/qquicksvgparser.cpp b/src/quick/util/qquicksvgparser.cpp
+index 59a976b65a..84efe061ec 100644
+--- a/src/quick/util/qquicksvgparser.cpp
++++ b/src/quick/util/qquicksvgparser.cpp
+@@ -19,7 +19,7 @@ static inline bool isDigit(ushort ch)
+     return ((ch >> 4) == 3) && (magic >> (ch & 15));
+ }
+ 
+-static qreal toDouble(const QChar *&str)
++static qreal toDouble(const QChar *&str, const QChar *end)
+ {
+     const int maxLen = 255;//technically doubles can go til 308+ but whatever
+     char temp[maxLen+1];
+@@ -31,28 +31,28 @@ static qreal toDouble(const QChar *&str)
+     } else if (*str == QLatin1Char('+')) {
+         ++str;
+     }
+-    while (isDigit(str->unicode()) && pos < maxLen) {
++    while (str != end && isDigit(str->unicode()) && pos < maxLen) {
+         temp[pos++] = str->toLatin1();
+         ++str;
+     }
+-    if (*str == QLatin1Char('.') && pos < maxLen) {
++    if (str != end && *str == QLatin1Char('.') && pos < maxLen) {
+         temp[pos++] = '.';
+         ++str;
+     }
+-    while (isDigit(str->unicode()) && pos < maxLen) {
++    while (str != end && isDigit(str->unicode()) && pos < maxLen) {
+         temp[pos++] = str->toLatin1();
+         ++str;
+     }
+     bool exponent = false;
+-    if ((*str == QLatin1Char('e') || *str == QLatin1Char('E')) && pos < maxLen) {
++    if (str != end && (*str == QLatin1Char('e') || *str == QLatin1Char('E')) && pos < maxLen) {
+         exponent = true;
+         temp[pos++] = 'e';
+         ++str;
+-        if ((*str == QLatin1Char('-') || *str == QLatin1Char('+')) && pos < maxLen) {
++        if (str != end && (*str == QLatin1Char('-') || *str == QLatin1Char('+')) && pos < maxLen) {
+             temp[pos++] = str->toLatin1();
+             ++str;
+         }
+-        while (isDigit(str->unicode()) && pos < maxLen) {
++        while (str != end && isDigit(str->unicode()) && pos < maxLen) {
+             temp[pos++] = str->toLatin1();
+             ++str;
+         }
+@@ -96,24 +96,28 @@ static qreal toDouble(const QChar *&str)
+     return val;
+ 
+ }
+-static inline void parseNumbersArray(const QChar *&str, QVarLengthArray<qreal, 8> &points)
++static inline void parseNumbersArray(const QChar *&str, const QChar *end, QVarLengthArray<qreal, 8> &points)
+ {
+-    while (str->isSpace())
+-        ++str;
+-    while (isDigit(str->unicode()) ||
++    auto eatWhitespace = [&]{
++        while (str != end && str->isSpace())
++            ++str;
++        return str != end;
++    };
++    if (!eatWhitespace())
++        return;
++    while (str != end && (isDigit(str->unicode()) ||
+            *str == QLatin1Char('-') || *str == QLatin1Char('+') ||
+-           *str == QLatin1Char('.')) {
++           *str == QLatin1Char('.'))) {
+ 
+-        points.append(toDouble(str));
++        points.append(toDouble(str, end));
+ 
+-        while (str->isSpace())
+-            ++str;
++        if (!eatWhitespace())
++            return;
+         if (*str == QLatin1Char(','))
+             ++str;
+ 
+-        //eat the rest of space
+-        while (str->isSpace())
+-            ++str;
++        if (!eatWhitespace())
++            return;
+     }
+ }
+ 
+@@ -253,12 +257,12 @@ bool QQuickSvgParser::parsePathDataFast(const QString &dataStr, QPainterPath &pa
+     const QChar *end = str + dataStr.size();
+ 
+     while (str != end) {
+-        while (str->isSpace())
+-            ++str;
+         QChar pathElem = *str;
+         ++str;
++        if (pathElem.isSpace())
++            continue;
+         QVarLengthArray<qreal, 8> arg;
+-        parseNumbersArray(str, arg);
++        parseNumbersArray(str, end, arg);
+         if (pathElem == QLatin1Char('z') || pathElem == QLatin1Char('Z'))
+             arg.append(0);//dummy
+         const qreal *num = arg.constData();

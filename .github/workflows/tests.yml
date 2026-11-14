@@ -36,9 +36,7 @@ concurrency:
 
 env:
   # Kept identical across workflows; scripts/check-pinned-deps.sh enforces that.
-  QT_VER: '6.11.3'
-  # Upstream fix for Qt 6.11's split Windows SDK repositories (not in aqt 3.3.0).
-  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4'
+  QT_VER: '6.9.3'
   # Exact pin, same as build.yml: conan drives every native dependency fetch.
   CONAN_VER: '2.31.1'
 
@@ -121,18 +119,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring libxcb1-dev
+            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2
+
+      - name: Incoming TCP and UDP routing (isolated Linux namespaces)
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
+        run: sudo unshare --net python3 tests/test_linux_reply_routing.py --isolated
 
       - name: Install Qt (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Install build deps (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
@@ -150,14 +145,7 @@ jobs:
       # could not reach them.
       - name: Install Qt (macOS)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: mac
-          target: desktop
-          arch: clang_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Set up MSVC (Windows)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
@@ -167,18 +155,13 @@ jobs:
 
       - name: Install Qt (Windows)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: windows
-          target: desktop
-          arch: win64_msvc2022_64
-          cache: true
+        uses: ./.github/actions/qt
 
+      # The source-built SDK contains release Qt DLLs. Keep test CRT/library
+      # selection explicit while retaining symbols for failure diagnostics.
       - name: Configure
         if: needs.changes.outputs.desktop != 'false'
-        run: cmake -S tests -B build-tests -G Ninja
+        run: cmake -S tests -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
       - name: Build
         if: needs.changes.outputs.desktop != 'false'
@@ -194,14 +177,31 @@ jobs:
 
       - name: Deploy Qt beside the Windows service test helper
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
-        run: windeployqt --no-translations build-tests/freetunnel_test_helper.exe
+        run: windeployqt --release --no-translations build-tests/freetunnel_test_helper.exe
 
       - name: Test
+        timeout-minutes: 20
         if: needs.changes.outputs.desktop != 'false'
         env:
           QT_QPA_PLATFORM: offscreen
           FT_GEO_PREVIEW_DIR: ${{ github.workspace }}/ui-previews
-        run: bash scripts/run-ctest.sh build-tests
+          # windeployqt relocates the helper's QtCore beside all test binaries;
+          # GUI tests still need the SDK's offscreen and QML plugins.
+          QT_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins
+          QML_IMPORT_PATH: ${{ env.QT_ROOT_DIR }}/qml
+          QT_DEBUG_PLUGINS: ${{ runner.os == 'Windows' && '1' || '0' }}
+        run: bash scripts/run-ctest.sh build-tests --timeout 180
+
+      - name: Upload unit test diagnostics
+        if: always() && needs.changes.outputs.desktop != 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unit-test-diagnostics-${{ runner.os }}
+          path: |
+            build-tests/Testing/Temporary/
+            build-tests/report-*.txt
+            build-tests/failed-*.txt
+          if-no-files-found: warn
 
       - name: Upload geo-list UI preview
         if: always() && needs.changes.outputs.desktop != 'false'
@@ -253,14 +253,7 @@ jobs:
           pip install "conan==${CONAN_VER}"
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Build, test, and report coverage
         env:
@@ -321,17 +314,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
-            dbus-x11 gnome-keyring libxcb1-dev
+            dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
-        with:
-          version: ${{ env.QT_VER }}
-          aqtsource: ${{ env.AQT_SOURCE }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
+        uses: ./.github/actions/qt
 
       - name: Configure
         run: cmake -S tests -B build-asan -G Ninja -DFT_ENABLE_SANITIZERS=ON

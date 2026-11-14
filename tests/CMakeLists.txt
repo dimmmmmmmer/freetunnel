@@ -163,6 +163,14 @@ target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME deeplink COMMAND test_deeplink -o ${CMAKE_CURRENT_BINARY_DIR}/report-deeplink.txt,txt)
 
+add_executable(test_qt_http_limits test_qt_http_limits.cpp)
+target_link_libraries(test_qt_http_limits PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME qt_http_limits COMMAND test_qt_http_limits -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_http_limits.txt,txt)
+
+add_executable(test_qt_svg_limits test_qt_svg_limits.cpp)
+target_link_libraries(test_qt_svg_limits PRIVATE Qt6::Core Qt6::Gui Qt6::Svg Qt6::Test)
+add_test(NAME qt_svg_limits COMMAND test_qt_svg_limits -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_svg_limits.txt,txt)
+
 add_executable(test_safe_fileread
     test_safe_fileread.cpp
     ../src/core/AppUiUtils.cpp

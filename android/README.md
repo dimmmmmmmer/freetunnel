@@ -159,7 +159,7 @@ Android-only list.
   the only control, so the texts that tell what to do next say "this line", and there is no *Install update* button
   on the screen (that is what a screen reader adds to the line, and the red button of the question). Outside the
   official build the section says it doesn't come from the official channel.
-- The footer, **FreeTunnel 1.2.4 · TrustTunnel core 1.1.12**, each name a link to its page (a toast where there is no
+- The footer, **FreeTunnel 1.2.5 · TrustTunnel core 1.1.12**, each name a link to its page (a toast where there is no
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 

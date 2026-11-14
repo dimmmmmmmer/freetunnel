@@ -66,7 +66,7 @@ fi
 assignments="$(grep -nE '(^|[^[:alnum:]_])appVersion[[:space:]]*=([^=]|$)' "$gradle" || true)"
 count=0
 if [[ -n "$assignments" ]]; then
-  count="$(wc -l <<<"$assignments")"
+  count="$(wc -l <<<"$assignments" | tr -d '[:space:]')"
 fi
 if [[ "$count" -ne 1 ]]; then
   fail "Cannot read appVersion" "$gradle must assign appVersion exactly once, and does $count times."

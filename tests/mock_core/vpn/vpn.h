@@ -145,6 +145,8 @@ struct VpnConnectRequestSnapshot {
     int proto = 0;
     int family = 0;
     uint16_t src_port = 0;
+    uint16_t dst_port = 0;
+    std::string dst_ip;
     std::string src_ip;
     std::string app_name;
 };

@@ -88,6 +88,12 @@ struct TrustTunnelConfig {
         TrustTunnelConfig c;
         if (!readEndpointTls(t, c))
             return std::nullopt;
+        c.mode = t["vpn_mode"].value<std::string>().value_or("general") == "selective"
+                ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL;
+        for (const auto &entry : stringArray(t["exclusions"].value<std::string>())) {
+            if (!c.exclusions.empty()) c.exclusions += ' ';
+            c.exclusions += entry;
+        }
         c.ssl_session_storage_path = t["ssl_session_cache_path"].value<std::string>();
         // Kept as the raw array text: the wrapper only has to empty it, or pass it
         // on untouched when the user lets the config decide.

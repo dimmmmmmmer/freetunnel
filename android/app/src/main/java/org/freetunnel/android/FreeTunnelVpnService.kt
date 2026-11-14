@@ -323,7 +323,22 @@ class FreeTunnelVpnService : VpnService() {
     /** Starts a core on a duplicate of [tun], the retained TUN built from [plan]. */
     private fun startCore(plan: RoutingConfig.Plan, tun: ParcelFileDescriptor, verifier: CertificateVerificator = CertificateVerificator()) {
         val token = generation + 1
+        val selectedUids = if (plan.routeAppsInCore) plan.apps.map {
+            packageManager.getApplicationInfo(it, 0).uid
+        }.toSet() else emptySet()
+        val connectionManager = getSystemService(ConnectivityManager::class.java)
+        val ownerWarning = java.util.concurrent.atomic.AtomicBoolean(false)
         val listener = object : VpnClientListener {
+            override fun onConnectRequest(protocol: Int, localAddress: String, localPort: Int,
+                                          remoteAddress: String, remotePort: Int): Int {
+                if (!plan.routeAppsInCore) return AppConnectionRouting.DEFAULT
+                val uid = AppConnectionRouting.owner(connectionManager, protocol, localAddress, localPort,
+                    remoteAddress, remotePort)
+                val action = AppConnectionRouting.decide(uid, selectedUids)
+                if (action == AppConnectionRouting.REJECT && ownerWarning.compareAndSet(false, true))
+                    logEvent("Application routing: ownership lookup failed; undecidable connections are blocked", LogLines.ERROR)
+                return action
+            }
             override fun protectSocket(socket: Int) = protect(socket)
             override fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?) = verifier.verifyCertificate(certificate, rawChain)
             // Each connection the core makes, as the desktop logs them (Backend: connectionInfo): at INFO, when logging is on.
@@ -390,7 +405,7 @@ class FreeTunnelVpnService : VpnService() {
             installed.forEach(builder::addAllowedApplication)
         } else {
             // If every saved app was uninstalled, the safe fallback is full VPN.
-            if (!plan.allowApps) installed.forEach(builder::addDisallowedApplication)
+            if (!plan.allowApps && !plan.routeAppsInCore) installed.forEach(builder::addDisallowedApplication)
             builder.addDisallowedApplication(packageName)
         }
         return builder.establish() ?: error("Android could not establish VPN")
