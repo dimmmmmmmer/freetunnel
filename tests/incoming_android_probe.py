@@ -68,6 +68,9 @@ def main():
             command = ["shell", "am", "start", "-n", "org.freetunnel.incomingprobe.control/org.freetunnel.incomingprobe.MainActivity", "--es", "command", "outgoing"]
             adb(*command)
             assert outgoing.recv(128) == b"new-outgoing", "Outgoing baseline failed"
+            server_command = ["shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity", "--es", "command", "outgoing"]
+            adb(*server_command)
+            assert outgoing.recv(128) == b"new-outgoing", "Server application's outgoing baseline failed"
             adb("shell", "am", "start", "-W", "-n", "org.freetunnel.incomingprobe/.MainActivity")
             for bypass in (False, True):
                 adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
@@ -80,6 +83,19 @@ def main():
                     wait_for(lambda: adb("shell", "if test -f /data/local/tmp/incoming-vpn-ready; then echo ready; fi").strip() == "ready")
                     rows = probe(True, bypass)
                     results += rows
+                    # The user requires NEW connections of this same server
+                    # application to stay in the VPN. A separate UID alone is
+                    # not sufficient to verify that requirement.
+                    adb(*server_command)
+                    try:
+                        direct = outgoing.recv(128) == b"new-outgoing"
+                    except socket.timeout:
+                        direct = False
+                    outgoing_row = {"vpn_route": True, "server_app_bypassed": bypass,
+                                    "kind": "new-server-outgoing", "direct": direct}
+                    results.append(outgoing_row)
+                    print(json.dumps(outgoing_row), flush=True)
+                    assert direct == bypass, "Unexpected routing for new server-app connections"
                     adb(*command)
                     try:
                         data = outgoing.recv(128)

@@ -49,6 +49,7 @@ public final class MainActivity extends Activity {
             try (DatagramSocket socket = new DatagramSocket()) {
                 byte[] data = "new-outgoing".getBytes(StandardCharsets.UTF_8);
                 socket.send(new DatagramPacket(data, data.length, InetAddress.getByName("10.0.2.2"), 19999));
+                Log.i(TAG, "New outgoing UDP sent uid=" + android.os.Process.myUid());
             } catch (Exception e) { Log.e(TAG, "outgoing", e); }
         }, "probe-outgoing").start();
     }
