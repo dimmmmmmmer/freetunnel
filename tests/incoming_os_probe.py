@@ -272,6 +272,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="incoming-os-results.json")
     args = parser.parse_args()
+    if sys.platform not in ("darwin", "win32"):
+        parser.error("Run on Windows or macOS; Linux has test_linux_reply_routing.py")
     implementation = MacTun if sys.platform == "darwin" else WinTun
     tunnels, routes, results = [], [], []
     try:
@@ -297,6 +299,8 @@ def main():
                         print(json.dumps(result), flush=True)
                         if not active and (result["route"] != "uplink" or not result["echo"]):
                             raise AssertionError("Baseline cannot deliver real echo traffic")
+                        if active and not (udp and wildcard):
+                            assert result["route"] == "uplink" and result["echo"], result
             if active:
                 for family, remote in [(socket.AF_INET, "198.19.0.2"), (socket.AF_INET6, "2001:db8:11::2")]:
                     with socket.socket(family, socket.SOCK_DGRAM) as outgoing:

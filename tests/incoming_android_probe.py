@@ -27,7 +27,7 @@ def ready():
         return False
 
 
-def probe(active):
+def probe(active, bypass=False):
     results = []
     for port, protocol, binding in [(18081, "tcp", "local-address"), (18082, "tcp", "wildcard"),
                                     (18083, "udp", "local-address"), (18084, "udp", "wildcard")]:
@@ -39,7 +39,7 @@ def probe(active):
                 ok, error = peer.recv(128) == b"incoming-peer", None
             except OSError as exc:
                 ok, error = False, str(exc)
-        row = {"vpn_route": active, "family": 4, "protocol": protocol.upper(), "binding": binding,
+        row = {"vpn_route": active, "server_app_bypassed": bypass, "family": 4, "protocol": protocol.upper(), "binding": binding,
                "echo": ok, "error": error}
         print(json.dumps(row), flush=True)
         results.append(row)
@@ -61,33 +61,42 @@ def main():
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as outgoing:
             outgoing.bind(("0.0.0.0", 19999))
             outgoing.settimeout(3)
-            command = ["shell", "am", "start", "-n", "org.freetunnel.incomingprobe/.MainActivity", "--es", "command", "outgoing"]
+            command = ["shell", "am", "start", "-n", "org.freetunnel.incomingprobe.control/org.freetunnel.incomingprobe.MainActivity", "--es", "command", "outgoing"]
             adb(*command)
             assert outgoing.recv(128) == b"new-outgoing", "Outgoing baseline failed"
-            with open("incoming-android-instrumentation.txt", "w") as log:
-                process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",
-                    "org.freetunnel.android.IncomingRoutingDeviceTest", "-e", "incoming_probe", "true",
-                    "org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner"], stdout=log, stderr=subprocess.STDOUT)
-                wait_for(lambda: adb("shell", "if test -f /data/local/tmp/incoming-vpn-ready; then echo ready; fi").strip() == "ready")
-                results += probe(True)
-                adb(*command)
-                try:
-                    data = outgoing.recv(128)
-                    raise AssertionError(f"New outgoing traffic bypassed the VPN: {data!r}")
-                except socket.timeout:
-                    print("New outgoing traffic is captured by the VPN", flush=True)
-                adb("shell", "touch", "/data/local/tmp/incoming-vpn-stop")
-                assert process.wait(timeout=40) == 0
-            output = Path("incoming-android-instrumentation.txt").read_text()
-            print(output)
-            assert "OK (1 test)" in output and "FAILURES" not in output
+            for bypass in (False, True):
+                adb("shell", "rm", "-f", "/data/local/tmp/incoming-vpn-ready", "/data/local/tmp/incoming-vpn-stop")
+                log_path = Path(f"incoming-android-instrumentation-{bypass}.txt")
+                with log_path.open("w") as log:
+                    process = subprocess.Popen(["adb", "shell", "am", "instrument", "-w", "-e", "class",
+                        "org.freetunnel.android.IncomingRoutingDeviceTest", "-e", "incoming_probe", "true",
+                        "-e", "bypass_probe_app", str(bypass).lower(),
+                        "org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner"], stdout=log, stderr=subprocess.STDOUT)
+                    wait_for(lambda: adb("shell", "if test -f /data/local/tmp/incoming-vpn-ready; then echo ready; fi").strip() == "ready")
+                    rows = probe(True, bypass)
+                    results += rows
+                    adb(*command)
+                    try:
+                        data = outgoing.recv(128)
+                        raise AssertionError(f"The included control app bypassed the VPN: {data!r}")
+                    except socket.timeout:
+                        print("New outgoing traffic from the control app is captured by the VPN", flush=True)
+                    adb("shell", "echo stopped > /data/local/tmp/incoming-vpn-stop")
+                    assert process.wait(timeout=45) == 0
+                output = log_path.read_text()
+                print(output)
+                assert "OK (1 test)" in output and "FAILURES" not in output
+                assert all(row["echo"] for row in rows if bypass or row["protocol"] == "TCP"), rows
     finally:
-        adb("shell", "touch", "/data/local/tmp/incoming-vpn-stop")
-        if process and process.poll() is None:
-            process.wait(timeout=40)
         Path("incoming-android-results.json").write_text(json.dumps(results, indent=2) + "\n")
-        Path("incoming-android-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
-        adb("shell", "am", "force-stop", "org.freetunnel.incomingprobe")
+        try:
+            adb("shell", "echo stopped > /data/local/tmp/incoming-vpn-stop")
+            if process and process.poll() is None:
+                process.wait(timeout=45)
+        finally:
+            Path("incoming-android-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
+            adb("shell", "am", "force-stop", "org.freetunnel.incomingprobe")
+            adb("shell", "am", "force-stop", "org.freetunnel.incomingprobe.control")
 
 
 if __name__ == "__main__":

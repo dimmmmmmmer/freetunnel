@@ -77,7 +77,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           script: |
-            ./android/gradlew -p android --no-daemon -PincomingProbe :app:installDebug :app:installDebugAndroidTest :incomingProbe:installDebug
+            ./android/gradlew -p android --no-daemon -PincomingProbe :app:installDebug :app:installDebugAndroidTest :incomingProbe:installDebug :incomingProbe:installControl
             adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
             adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
             adb shell svc wifi disable

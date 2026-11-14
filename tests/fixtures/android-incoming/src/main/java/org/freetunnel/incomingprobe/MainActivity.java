@@ -21,6 +21,7 @@ public final class MainActivity extends Activity {
         TextView view = new TextView(this);
         view.setText("Incoming TCP/UDP routing probe");
         setContentView(view);
+        if ("outgoing".equals(getIntent().getStringExtra("command"))) { outgoing(); return; }
         new Thread(() -> {
             try {
                 InetAddress local = null;
@@ -41,7 +42,10 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if ("outgoing".equals(intent.getStringExtra("command"))) new Thread(() -> {
+        if ("outgoing".equals(intent.getStringExtra("command"))) outgoing();
+    }
+    private static void outgoing() {
+        new Thread(() -> {
             try (DatagramSocket socket = new DatagramSocket()) {
                 byte[] data = "new-outgoing".getBytes(StandardCharsets.UTF_8);
                 socket.send(new DatagramPacket(data, data.length, InetAddress.getByName("10.0.2.2"), 19999));

@@ -33,6 +33,10 @@ class IncomingRoutingDeviceTest {
             // Deliberately include that peer to test replies, not the default LAN exclusion.
             prefs.edit().clear().putBoolean("logging", true).putBoolean("split_enabled", false)
                 .putString(ExcludedRoutes.KEY, "[]").commit()
+            if (InstrumentationRegistry.getArguments().getString("bypass_probe_app") == "true") {
+                prefs.edit().putBoolean("split_enabled", true).putBoolean("through", false).commit()
+                SplitStore.edit(SplitPrefs(prefs), null) { it.addApp(SplitProfiles.DEFAULT, "org.freetunnel.incomingprobe") }
+            }
             val source = """
                 vpn_mode = "general"
                 killswitch_enabled = true
@@ -66,7 +70,8 @@ class IncomingRoutingDeviceTest {
             val stopDeadline = SystemClock.elapsedRealtime() + 120_000
             var stopped = false
             while (SystemClock.elapsedRealtime() < stopDeadline) {
-                stopped = shell("test -f /data/local/tmp/incoming-vpn-stop && echo stopped").trim() == "stopped"
+                // executeShellCommand executes argv, not shell operators such as &&.
+                stopped = shell("cat /data/local/tmp/incoming-vpn-stop").trim() == "stopped"
                 if (stopped) break
                 SystemClock.sleep(100)
             }
@@ -74,7 +79,11 @@ class IncomingRoutingDeviceTest {
         } finally {
             FreeTunnelVpnService.stop(context)
             sink.close(); accepting.join(500); sockets.forEach { runCatching { it.close() } }
-            SystemClock.sleep(1000)
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val deadline = SystemClock.elapsedRealtime() + 35_000
+            while (SystemClock.elapsedRealtime() < deadline && cm.allNetworks.any {
+                cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            }) SystemClock.sleep(100)
             val editor = prefs.edit().clear()
             previous.forEach { (key, value) -> when (value) {
                 is Boolean -> editor.putBoolean(key, value)
