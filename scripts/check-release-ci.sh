@@ -95,7 +95,7 @@ while :; do
     echo "::error title=Still running::${still[*]} had not finished on $sha after ${wait_minutes} minutes. Re-run this job once they pass."
     exit 1
   fi
-  echo "Waiting for ${still[*]} to finish on $sha…"
+  echo "Waiting for ${still[*]} to finish on ${sha}…"
   sleep "$poll"
   pending=("${still[@]}")
 done

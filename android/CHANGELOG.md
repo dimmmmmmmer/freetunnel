@@ -3,6 +3,7 @@
 ## 1.2.5
 
 - Added geo lists, subscriptions and easier bulk configuration imports.
+- Fixed routing when selected apps and destinations are used together, so unselected traffic stays outside the VPN.
 - Improved phone and TV controls, routing settings and readable, exportable logs.
 - The connection logo turns green when connected; new installations start in dark mode.
 - Updated the VPN core to stable TrustTunnel 1.1.12 and refreshed dependencies.

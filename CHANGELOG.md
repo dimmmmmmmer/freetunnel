@@ -3,6 +3,8 @@
 ## 1.2.5
 
 - Added ready-made and custom geo lists, with manual routing rules taking priority.
+- Fixed selective routing on desktop and Android, including combined app and destination rules.
+- Linux: incoming TCP and UDP services remain reachable while the VPN is connected.
 - Improved configuration imports, subscriptions and connection logs across desktop and Android.
 - Windows connections now use a background service to reduce repeated administrator prompts.
 - Restored macOS 12 support; fixed menus and made dark mode the default for new installations.
