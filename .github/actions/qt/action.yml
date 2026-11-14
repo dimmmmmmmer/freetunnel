@@ -38,7 +38,7 @@ runs:
         with open(os.environ['GITHUB_PATH'], 'a') as f:
             f.write(str(prefix / 'bin') + '\n')
         PY
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       id: cache
       with:
         path: ${{ steps.paths.outputs.prefix }}
@@ -66,3 +66,11 @@ runs:
       run: |
         qmake -query QT_VERSION
         lrelease -version
+    # Save the verified SDK before application tests run. Their failures must
+    # not discard a successful Qt build and make the next run rebuild it.
+    - name: Cache verified Qt SDK
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ${{ steps.paths.outputs.prefix }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
