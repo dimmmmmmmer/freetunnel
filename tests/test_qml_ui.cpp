@@ -61,6 +61,7 @@ private slots:
     void configsPageLoads();
     void splitPageLoads();
     void geoListsShowStatusAndDirection();
+    void customGeoListUsesAModalDialog();
     void splitPageNamesApplicationsTheWayThePickerDoes();
     void typingAProgramNameOffersTheProgram();
     void switchingProfileSwitchesTheApplicationList();
@@ -1886,6 +1887,91 @@ QPoint centreOf(QQuickItem *item)
 }
 
 } // namespace
+
+void TestQmlUi::customGeoListUsesAModalDialog()
+{
+    const auto oldLists = m_backend.geoLists;
+    const auto oldDomains = m_backend.domains();
+    const auto oldApps = m_backend.appRules();
+    const auto oldLabels = m_backend.appRuleLabels();
+    const bool oldSplit = m_backend.splitEnabled();
+    const auto reset = qScopeGuard([&] {
+        m_backend.geoLists = oldLists;
+        m_backend.setDomains(oldDomains);
+        m_backend.setAppRules(oldApps, oldLabels);
+        m_backend.setSplitEnabled(oldSplit);
+        m_backend.acceptGeoAddition = true;
+        m_backend.lastGeoAddition.clear();
+    });
+    m_backend.setDomains({});
+    m_backend.setAppRules({}, {});
+    m_backend.setSplitEnabled(true);
+    m_backend.geoLists.clear();
+    for (const auto &pair : {qMakePair(QStringLiteral("ru-sites"), QStringLiteral("Russian sites")),
+                             qMakePair(QStringLiteral("ru-ips"), QStringLiteral("Russian IP addresses"))}) {
+        m_backend.geoLists.append(QVariantMap{{"id", pair.first}, {"name", pair.second},
+            {"enabled", true}, {"bypass", true}, {"busy", false}, {"entries", 0},
+            {"skipped", 0}, {"updated", QString{}}, {"error", QString{}}});
+    }
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    QVERIFY(window);
+    window->resize(480, 900);
+    QVERIFY(root->setProperty("currentPage", 2));
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *addList = root->findChild<QQuickItem *>(QStringLiteral("geoAddList"));
+    QVERIFY(addList);
+    QVERIFY(!everyText(root.get()).contains(QStringLiteral("Recommended for Russia")));
+    QVERIFY(!root->findChild<QQuickItem *>(QStringLiteral("geoListDialog")));
+    const QString preview = qEnvironmentVariable("FT_GEO_PREVIEW_DIR");
+    auto capture = [&](const QString &name) {
+        if (preview.isEmpty()) return true;
+        QDir().mkpath(preview);
+        QTest::qWait(150);
+        return window->grabWindow().save(QDir(preview).filePath(name));
+    };
+    QVERIFY(capture(QStringLiteral("geo-defaults.png")));
+    QVERIFY(QMetaObject::invokeMethod(addList, "picked", Q_ARG(QString, QStringLiteral("__custom__"))));
+    QTRY_COMPARE(root->property("overlay").toString(), QStringLiteral("geo"));
+    auto *dialog = root->findChild<QQuickItem *>(QStringLiteral("geoListDialog"));
+    QVERIFY(dialog);
+    auto *name = dialog->findChild<QQuickItem *>(QStringLiteral("geoNameField"));
+    auto *source = dialog->findChild<QQuickItem *>(QStringLiteral("geoSourceField"));
+    auto *add = dialog->findChild<QQuickItem *>(QStringLiteral("geoAddButton"));
+    QVERIFY(name && source && add);
+    QVERIFY(!add->isEnabled());
+    name->setProperty("text", QStringLiteral("  My sites  "));
+    source->setProperty("text", QStringLiteral("  https://example.org/geosite.dat#custom  "));
+    dialog->setProperty("direction", QStringLiteral("bypass"));
+    QVERIFY(add->isEnabled());
+    QVERIFY(capture(QStringLiteral("geo-add-dialog.png")));
+    // A rejected source stays editable; success sends trimmed values and closes the modal.
+    m_backend.acceptGeoAddition = false;
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(add));
+    QCOMPARE(root->property("overlay").toString(), QStringLiteral("geo"));
+    QCOMPARE(m_backend.lastGeoAddition, QVariantList({QStringLiteral("My sites"),
+        QStringLiteral("https://example.org/geosite.dat#custom"), false, true}));
+    m_backend.acceptGeoAddition = true;
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(add));
+    QTRY_COMPARE(root->property("overlay").toString(), QString{});
+    root->setProperty("overlay", QStringLiteral("geo"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_COMPARE(root->property("overlay").toString(), QString{});
+    // The form also fits the minimum window; the fields scroll, the buttons stay available.
+    window->resize(400, 460);
+    root->setProperty("overlay", QStringLiteral("geo"));
+    dialog = root->findChild<QQuickItem *>(QStringLiteral("geoListDialog"));
+    QVERIFY(dialog);
+    auto *cancel = dialog->findChild<QQuickItem *>(QStringLiteral("geoCancelButton"));
+    QVERIFY(cancel);
+    QTRY_VERIFY(centreOf(cancel).y() < window->height());
+    QVERIFY(capture(QStringLiteral("geo-add-dialog-small.png")));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(cancel));
+    QTRY_COMPARE(root->property("overlay").toString(), QString{});
+}
 
 // The empty list filled the same area as the "Add a config" hint and, being a
 // Flickable, took its click; only the small + in the header worked.

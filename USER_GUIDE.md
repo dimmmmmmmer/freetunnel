@@ -184,10 +184,11 @@ tunnel and the page says so, rather than send everything around it.
 ### Geo lists
 
 In the **Geo lists** block, open **Add list** and choose a ready-made list or
-**Add your own list**.
+**Add your own list**, which opens a dialog.
 Each list has its own **Through VPN / Bypass VPN** choice and can be turned off
-without removing it. Lists belong to the selected split profile. Nothing is
-added until you choose it.
+without removing it. Lists belong to the selected split profile. A new installation
+starts with **Russian sites** and **Russian IP addresses**, both enabled with
+**Bypass VPN**. Existing profiles and lists you remove are kept as you left them.
 
 Custom sources use an HTTPS download address. Choose **Sites** for domains or
 **IP addresses** for subnets. Plain text lists contain one entry per line;

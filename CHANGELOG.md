@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Moved custom geo list creation into a dialog.
+- New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
+- Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
+- Android releases now contain one APK, with the version in its filename.
+
 ## 1.2.5
 
 - Added ready-made and custom geo lists, with manual routing rules taking priority.

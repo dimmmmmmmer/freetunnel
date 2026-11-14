@@ -629,14 +629,14 @@ public final class MainActivity extends Activity {
             switch (numbered.group(1)) {
                 case "config": return new String[]{"configs:hint", "configs:add"};
                 case "profile": return new String[]{"profile:" + Math.max(0, n - 1), "profile:add"};
-                case "domain": return new String[]{"domains:russia", "domains:input"};
+                case "domain": return new String[]{"domains:input"};
                 case "app": return new String[]{"apps:choose"};
                 case "route": return new String[]{"routes:restore", "routes:input"};
                 default: return new String[0];
             }
         }
         switch (key) {
-            case "domains:clear": return new String[]{"domains:russia", "domains:input"};
+            case "domains:clear": return new String[]{"domains:input"};
             case "apps:clear": return new String[]{"apps:choose"};
             case "routes:clear": return new String[]{"routes:restore", "routes:input"};
             default: return new String[0];
@@ -2827,10 +2827,10 @@ public final class MainActivity extends Activity {
 
     // The Split page (qml/pages/SplitPage.qml), top to bottom: the Split Tunneling switch; the Mode, as a value and its ▾; the
     // notices that apply; Profile and its chips, the edited one in accent, with a + that opens the field for a new name;
-    // the rules header, with Recommended for Russia and Clear all, the domains as chips and the field to add them; and the
+    // the rules header, with Clear all, the domains as chips and the field to add them; and the
     // applications header, with Choose… and Clear all, the applications as chips and the field to type one's name in. The chips are the profile being edited
     // (SplitProfiles.edited), which is not the profile the selected config uses: that is chosen in the editor.
-    // Keys: split:enabled, split:mode, profile:N, profile:N:remove, profile:add, profile:name, domains:russia, domains:clear,
+    // Keys: split:enabled, split:mode, profile:N, profile:N:remove, profile:add, profile:name, domains:clear,
     // domain:N, domains:input, apps:choose, apps:clear, app:N and apps:input (with the suggestions under it: AppSuggestions).
     private void split(LinearLayout body) {
         SplitProfiles model = splitModel();
@@ -2918,10 +2918,6 @@ public final class MainActivity extends Activity {
         rulesTitle.setSingleLine(true);
         rulesTitle.setEllipsize(TextUtils.TruncateAt.END);
         domainHeader.addView(rulesTitle, weighted());
-        TextView recommended = ui.link(getString(R.string.split_recommended), 12, Ui.LinkKind.ACCENT, "domains:russia");
-        recommended.setOnClickListener(v -> addRecommendedRussia());
-        // The links add none to the row's height, and the last ends at the page's margin.
-        domainHeader.addView(recommended, ui.linkLp(domainRules.isEmpty()));
         if (!domainRules.isEmpty()) {
             TextView clearDomains = ui.link(getString(R.string.split_clear_all), 12, Ui.LinkKind.DANGER, "domains:clear");
             clearDomains.setOnClickListener(v -> showConfirm(getString(R.string.split_clear_domains_question), getString(R.string.text_clear),
@@ -3194,9 +3190,9 @@ public final class MainActivity extends Activity {
 
     // The profiles.
 
-    private SplitProfiles splitModel() { return SplitStore.load(splitPrefs, RussiaList.seed(this)); }
+    private SplitProfiles splitModel() { return SplitStore.load(splitPrefs, GeoPresets.seed(this)); }
     private boolean splitEdit(Consumer<SplitProfiles> change) {
-        boolean saved = SplitStore.edit(splitPrefs, RussiaList.seed(this), change);
+        boolean saved = SplitStore.edit(splitPrefs, GeoPresets.seed(this), change);
         if (!saved) toast(getString(R.string.text_storage_is_unavailable_data_has_not_been_changed));
         return saved;
     }
@@ -3307,13 +3303,6 @@ public final class MainActivity extends Activity {
         GeoRepository.get(this).refreshEnabled();
         if (prefs.getBoolean("split_enabled", false) && profile.equals(activeProfileName())) applyCurrentRules();
         render();
-    }
-
-    private void addRecommendedRussia() {
-        final List<String> list;
-        try { list = RussiaList.read(this); }
-        catch (IOException unreadable) { toast(getString(R.string.text_could_not_open_file)); return; }
-        editRules(m -> m.addRecommended(m.edited(), list));
     }
 
     // What was typed in the domains field: the words that are rules are added, and the ones that are not are named. The field is

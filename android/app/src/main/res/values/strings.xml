@@ -182,7 +182,6 @@
     <string name="split_profile_name_hint">"profile name, then Enter"</string>
     <string name="split_profile_delete_question">"Delete profile “%1$s”?"</string>
     <string name="split_profile_exists">"A profile called “%1$s” already exists"</string>
-    <string name="split_recommended">"Recommended for Russia"</string>
     <string name="split_clear_all">"Clear all"</string>
     <string name="split_clear_domains_question">"Clear all domains?"</string>
     <string name="split_clear_apps_question">"Clear all applications?"</string>

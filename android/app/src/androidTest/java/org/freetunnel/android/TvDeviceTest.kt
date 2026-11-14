@@ -2993,7 +2993,7 @@ class TvDeviceTest {
         assertEquals("a new one replaces the old", listOf(context.getString(R.string.text_this_server_needs_a_newer_trusttunnel_core)), toastTexts(a))
     }
 
-    // ---- Split: profiles, each config's profile, Recommended for Russia (qml/pages/SplitPage.qml) ----
+    // ---- Split: profiles, each config's profile, geo defaults (qml/pages/SplitPage.qml) ----
 
     private fun splitStore() = SplitPrefs(prefs)
     private fun profiles(): SplitProfiles = SplitStore.load(splitStore(), null)
@@ -3075,27 +3075,30 @@ class TvDeviceTest {
         assertEquals(setOf("example.com", "example.org"), prefs.getStringSet("domains", emptySet()))
     }
 
-    // A new installation, with nothing saved: split tunnelling on, and Default holds the recommended list, as the desktop's does.
-    @Test fun aNewInstallationHasSplitOnAndDefaultHoldsTheRecommendedList() {
+    // New installations use geo presets; clearing them is a saved choice.
+    @Test fun aNewInstallationHasTwoBypassGeoLists() {
         prefs.edit().clear().commit()
         val a = open()
-        val rules = RussiaList.read(context)
-        assertTrue(rules.size > 50)
+        val lists = profiles().geoLists("Default")
+        assertEquals(listOf("ru-sites", "ru-ips"), lists.map { it.id })
+        assertTrue(lists.all { it.enabled && it.bypass })
+        assertTrue(profiles().domains("Default").isEmpty())
         assertTrue("Split tunnelling is on", prefs.getBoolean("split_enabled", false))
         assertFalse("and it is Bypass VPN", prefs.getBoolean("through", false))
-        assertEquals(rules, profiles().domains("Default"))
         render(a, 2)
-        assertEquals(rules[0], chipLabel(a, "domain:0"))
-        assertEquals(rules.last(), chipLabel(a, "domain:${rules.size - 1}"))
-        assertFalse(pageKeys(a).contains("domain:${rules.size}"))
-        assertTrue(onMain { (root(a).findViewWithTag<ToggleView>("split:enabled")).isChecked })
-        // Opened again, it is not made again.
+        assertFalse(pageKeys(a).contains("domains:russia"))
+        assertFalse(pageKeys(a).contains("domain:0"))
+        assertTrue(onMain { root(a).findViewWithTag<ToggleView>("geo:ru-sites:enabled").isChecked })
+        assertTrue(onMain { root(a).findViewWithTag<ToggleView>("geo:ru-ips:enabled").isChecked })
         onMain { a.finish() }
-        editProfiles { it.clearDomains("Default") }
+        editProfiles {
+            it.removeGeoList("Default", "ru-sites")
+            it.removeGeoList("Default", "ru-ips")
+        }
         val again = open()
-        assertTrue("Cleared, it stays cleared", profiles().domains("Default").isEmpty())
+        assertTrue("Cleared, they stay cleared", profiles().geoLists("Default").isEmpty())
         render(again, 2)
-        assertFalse(pageKeys(again).contains("domain:0"))
+        assertFalse(pageKeys(again).contains("geo:ru-sites:enabled"))
     }
 
     @Test fun thePageIsTheDesktopsInItsOrderAndTheEditedProfileIsTheOneInAccent() {
@@ -3106,7 +3109,7 @@ class TvDeviceTest {
         // Top to bottom: the switch, the mode, Profile with its chips, the rules and the applications.
         // The page is a column, and its rows and flows are in the order they read: the views are in the order they are shown.
         val order = onMain { descendants(pageRoot(a)).filter { it.isShown && it.tag is String }.map { it.tag as String }.toList() }
-        val expected = listOf("split:enabled", "split:mode", "profile:0", "profile:1", "profile:2", "profile:add", "domains:russia", "domains:clear")
+        val expected = listOf("split:enabled", "split:mode", "profile:0", "profile:1", "profile:2", "profile:add", "domains:clear")
         val positions = expected.map { order.indexOf(it) }
         assertTrue("$expected must come in this order, but are at $positions in $order", positions.none { it < 0 } && positions == positions.sorted())
         assertEquals(listOf(context.getString(R.string.split_profile_default), "Work", "Home"),
@@ -3141,7 +3144,7 @@ class TvDeviceTest {
         leaveTouchMode(a)
         render(a, 2)
         val expected = setOf("profile:0", "profile:1", "profile:1:remove", "profile:2", "profile:2:remove", "profile:add",
-            "domains:russia", "domains:clear", "domain:0", "domain:1", "domain:2", "domains:input", "apps:choose", "apps:clear", "app:0", "apps:input")
+            "domains:clear", "domain:0", "domain:1", "domain:2", "domains:input", "apps:choose", "apps:clear", "app:0", "apps:input")
         assertTrue("These must be on the page: ${expected - pageKeys(a)}", pageKeys(a).containsAll(expected))
         val reached = reachable(a, "tab:2")
         assertEquals("Controls the arrows never reach", emptySet<String>(), expected - reached)
@@ -3336,18 +3339,18 @@ class TvDeviceTest {
         // The only rule, taken out with OK on its X, and the only application.
         ok(a, "domain:0")
         eventually("The rule is gone") { profiles().domains("Work").isEmpty() }
-        eventually("and the focus is on the link above the chips, not on the tab") { focusedKey(a) == "domains:russia" }
+        eventually("and the focus is on the domain input") { focusedKey(a) == "domains:input" }
         ok(a, "app:0")
         eventually("The application is gone") { profiles().apps("Work").isEmpty() }
         eventually("and the focus is on Choose…") { focusedKey(a) == "apps:choose" }
         // Clear all takes itself away with the rules.
-        ok(a, "domains:russia")
-        eventually("The recommended list is added") { profiles().domains("Work").size > 50 }
+        enter(a, "domains:input", "one.example two.example")
+        eventually("The rules are added") { profiles().domains("Work").size == 2 }
         ok(a, "domains:clear")
         eventually("Clear all asks") { confirmMessage(a) == context.getString(R.string.split_clear_domains_question) }
         answerYes(a)
         eventually("The rules are cleared") { profiles().domains("Work").isEmpty() }
-        eventually("and the focus is on the link beside it") { focusedKey(a) == "domains:russia" }
+        eventually("and the focus returns to the input") { focusedKey(a) == "domains:input" }
         // The only custom profile: the chip before it.
         ok(a, "profile:1:remove")
         eventually("Delete asks") { confirmMessage(a) == context.getString(R.string.split_profile_delete_question, "Work") }
@@ -3448,21 +3451,14 @@ class TvDeviceTest {
         eventually("A rule of the profile edited and in use is in them") { prefs.getStringSet("domains", emptySet()) == setOf("work.example", "more.example") }
     }
 
-    // Recommended for Russia adds the list to the profile being edited, those it does not have, at the end, and a second time nothing.
-    @Test fun recommendedForRussiaAddsTheSharedListOnceAndClearAllAsksFirst() {
-        editProfiles { p -> p.add("Work"); p.addDomains("Work", "mine.example *.yandex.ru") }
+    @Test fun clearingManualRulesAsksFirstAndLeavesOtherProfilesAlone() {
+        editProfiles { p -> p.add("Work"); p.addDomains("Work", "mine.example *.example.org") }
         val a = open()
         leaveTouchMode(a)
         render(a, 2)
-        val rules = RussiaList.read(context)
-        click(a, "domains:russia")
-        val expected = listOf("mine.example", "*.yandex.ru") + rules.filter { it != "*.yandex.ru" }
-        eventually("It is added, without what the profile has") { profiles().domains("Work") == expected }
+        val expected = listOf("mine.example", "*.example.org")
+        assertFalse(pageKeys(a).contains("domains:russia"))
         assertEquals("Default is untouched", listOf("example.com", "example.org"), profiles().domains("Default"))
-        assertEquals(expected.last(), chipLabel(a, "domain:${expected.size - 1}"))
-        click(a, "domains:russia")
-        SystemClock.sleep(300)
-        assertEquals("A second time there is nothing new", expected, profiles().domains("Work"))
         // Clear all asks.
         click(a, "domains:clear")
         eventually("It asks") { confirmMessage(a) == context.getString(R.string.split_clear_domains_question) }

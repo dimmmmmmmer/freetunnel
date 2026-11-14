@@ -25,24 +25,34 @@ public final class SplitStoreTest {
     private static Set<String> set(String... items) { return new HashSet<>(Arrays.asList(items)); }
     private static SplitProfiles load(MemoryBacking f) { return SplitStore.load(f, null); }
 
-    // The recommended list asks to be read; whoever has none to give says so with null.
-    private static final class Counting implements java.util.function.Supplier<List<String>> {
+    // Default geo lists are loaded only for a new installation.
+    private static final class Counting implements java.util.function.Supplier<List<GeoDefinition>> {
         final AtomicInteger calls = new AtomicInteger();
-        final List<String> rules;
-        Counting(String... rules) { this.rules = Arrays.asList(rules); }
-        @Override public List<String> get() { calls.incrementAndGet(); return rules; }
+        final List<GeoDefinition> rules = Arrays.asList(
+                new GeoDefinition("ru-sites", "Russian sites", "https://example.test/sites.dat#ru",
+                        GeoLists.Kind.SITES, true, true),
+                new GeoDefinition("ru-ips", "Russian IP addresses", "https://example.test/ips.dat#ru",
+                        GeoLists.Kind.IPS, true, true));
+        @Override public List<GeoDefinition> get() { calls.incrementAndGet(); return rules; }
     }
 
     // A new installation.
 
-    @Test public void aNewInstallationIsSplitOnAndDefaultHoldsTheRecommendedList() {
+    @Test public void aNewInstallationStartsWithTwoBypassGeoLists() {
         MemoryBacking f = new MemoryBacking();
-        Counting recommended = new Counting("yandex.ru", "*.yandex.ru");
+        Counting recommended = new Counting();
         SplitProfiles p = SplitStore.load(f, recommended);
-        assertEquals(list("yandex.ru", "*.yandex.ru"), p.domains("Default"));
+        assertTrue(p.domains("Default").isEmpty());
+        assertEquals(2, p.geoLists("Default").size());
+        assertEquals("ru-sites", p.geoLists("Default").get(0).id);
+        assertEquals("ru-ips", p.geoLists("Default").get(1).id);
+        for (GeoDefinition definition : p.geoLists("Default")) {
+            assertTrue(definition.enabled);
+            assertTrue(definition.bypass);
+        }
         assertEquals("Split tunnelling is on, as on the desktop", Boolean.TRUE, f.data.get("split_enabled"));
         assertNotNull(f.getString(SplitStore.KEY));
-        assertEquals("the old lists are a copy of Default", set("yandex.ru", "*.yandex.ru"), f.set("domains"));
+        assertEquals("the old lists are a copy of Default", set(), f.set("domains"));
         assertEquals(new HashSet<String>(), f.set("apps"));
         assertNull("the mode is left to its default, the desktop's Bypass VPN", f.data.get("through"));
         // Made once: the next read is what was saved, and does not ask for the list.
@@ -57,9 +67,10 @@ public final class SplitStoreTest {
             if (key.equals("domains") || key.equals("apps")) f.with(key, set());
             else if (key.equals("split_enabled") || key.equals("through")) f.with(key, Boolean.FALSE);
             else f.with(key, "[]");
-            Counting recommended = new Counting("yandex.ru");
+            Counting recommended = new Counting();
             SplitProfiles p = SplitStore.load(f, recommended);
             assertEquals(key, 0, recommended.calls.get());
+            assertTrue(p.geoLists("Default").isEmpty());
             assertTrue(key + ": Default is empty", p.domains("Default").isEmpty());
             assertEquals(key + ": split tunnelling is as it was", key.equals("split_enabled") ? Boolean.FALSE : null, f.data.get("split_enabled"));
         }
@@ -76,9 +87,21 @@ public final class SplitStoreTest {
 
     @Test public void aNewInstallationThatCannotReadTheListIsStillAnInstallation() {
         MemoryBacking f = new MemoryBacking();
-        SplitProfiles p = SplitStore.load(f, () -> Collections.<String>emptyList());
+        SplitProfiles p = SplitStore.load(f, () -> Collections.<GeoDefinition>emptyList());
         assertTrue(p.domains("Default").isEmpty());
         assertEquals("and split tunnelling is on", Boolean.TRUE, f.data.get("split_enabled"));
+    }
+
+    @Test public void deletingDefaultGeoListsDoesNotRestoreThemOnNextLoad() {
+        MemoryBacking f = new MemoryBacking();
+        Counting defaults = new Counting();
+        SplitStore.load(f, defaults);
+        assertTrue(SplitStore.edit(f, defaults, p -> {
+            p.removeGeoList("Default", "ru-sites");
+            p.removeGeoList("Default", "ru-ips");
+        }));
+        assertTrue(SplitStore.load(f, defaults).geoLists("Default").isEmpty());
+        assertEquals(1, defaults.calls.get());
     }
 
     // An update from 1.0.0.
@@ -86,7 +109,7 @@ public final class SplitStoreTest {
     @Test public void anUpdateMakesDefaultOfTheTwoOldListsSortedAndTouchesNothingElse() {
         MemoryBacking f = new MemoryBacking().with("domains", set("b.example", "a.example")).with("apps", set("org.z", "org.a"))
             .with("split_enabled", Boolean.FALSE).with("through", Boolean.TRUE).with("configs_encrypted", "x");
-        Counting recommended = new Counting("yandex.ru");
+        Counting recommended = new Counting();
         SplitProfiles p = SplitStore.load(f, recommended);
         assertEquals(0, recommended.calls.get());
         assertEquals(list("a.example", "b.example"), p.domains("Default"));

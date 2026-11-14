@@ -66,7 +66,7 @@ final class GeoRepository {
         return state == null ? new State(null, false, "") : state;
     }
     void refreshEnabled() {
-        SplitProfiles profiles = SplitStore.load(new SplitPrefs(prefs), RussiaList.seed(context));
+        SplitProfiles profiles = SplitStore.load(new SplitPrefs(prefs), GeoPresets.seed(context));
         for (String profile : profiles.names())
             for (GeoDefinition definition : profiles.geoLists(profile))
                 if (definition.enabled) refresh(definition, false);

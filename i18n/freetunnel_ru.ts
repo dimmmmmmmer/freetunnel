@@ -730,6 +730,53 @@
     </message>
 </context>
 <context>
+    <name>GeoListOverlay</name>
+    <message>
+        <source>Add your own list</source>
+        <translation>Добавить свой список</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Название</translation>
+    </message>
+    <message>
+        <source>HTTPS address</source>
+        <translation>HTTPS-ссылка</translation>
+    </message>
+    <message>
+        <source>List type</source>
+        <translation>Тип списка</translation>
+    </message>
+    <message>
+        <source>Sites</source>
+        <translation>Сайты</translation>
+    </message>
+    <message>
+        <source>IP addresses</source>
+        <translation>IP-адреса</translation>
+    </message>
+    <message>
+        <source>Route</source>
+        <translation>Направление</translation>
+    </message>
+    <message>
+        <source>Through VPN</source>
+        <translation>Через VPN</translation>
+    </message>
+    <message>
+        <source>Bypass VPN</source>
+        <translation>Без VPN</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Добавить</translation>
+    </message>
+</context>
+<context>
     <name>GeoListsBlock</name>
     <message>
         <source>Blocked sites in Russia</source>
@@ -804,36 +851,8 @@
         <translation>Удалить</translation>
     </message>
     <message>
-        <source>Cancel</source>
-        <translation>Отмена</translation>
-    </message>
-    <message>
         <source>Add your own list</source>
         <translation>Добавить свой список</translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation>Название</translation>
-    </message>
-    <message>
-        <source>HTTPS address</source>
-        <translation>HTTPS-ссылка</translation>
-    </message>
-    <message>
-        <source>List type</source>
-        <translation>Тип списка</translation>
-    </message>
-    <message>
-        <source>Sites</source>
-        <translation>Сайты</translation>
-    </message>
-    <message>
-        <source>IP addresses</source>
-        <translation>IP-адреса</translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation>Добавить</translation>
     </message>
     <message>
         <source>Update lists</source>
@@ -1309,10 +1328,6 @@
     <message>
         <source>Rules — bypass VPN</source>
         <translation>Правила — мимо VPN</translation>
-    </message>
-    <message>
-        <source>Recommended for Russia</source>
-        <translation>Рекомендовано для РФ</translation>
     </message>
     <message>
         <source>Clear all</source>

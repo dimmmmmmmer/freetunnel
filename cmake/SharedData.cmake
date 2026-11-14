@@ -80,4 +80,11 @@ freetunnel_rule_list_include("${_FT_DATA_DIR}/split/recommended-russia.txt"
                              "${_FT_SHARED_DATA_OUT}/recommended_russia.inc")
 freetunnel_rule_list_include("${_FT_DATA_DIR}/split/default-excluded-routes.txt"
                              "${_FT_SHARED_DATA_OUT}/default_excluded_routes.inc")
+# The fresh profile uses the same geo sources as the preset picker and Android.
+# Compile the JSON as byte escapes so settings-only tools need no QML resources.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_FT_DATA_DIR}/geo/presets.json")
+file(READ "${_FT_DATA_DIR}/geo/presets.json" geo_presets_hex HEX)
+string(REGEX REPLACE "(..)" "\\\\x\\1" geo_presets_literal "${geo_presets_hex}")
+file(GENERATE OUTPUT "${_FT_SHARED_DATA_OUT}/geo_presets_json.inc"
+     CONTENT "\"${geo_presets_literal}\"\n")
 include_directories("${_FT_SHARED_DATA_OUT}")

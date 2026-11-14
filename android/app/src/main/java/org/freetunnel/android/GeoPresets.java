@@ -8,6 +8,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 final class GeoPresets {
     private GeoPresets() {}
+    static java.util.function.Supplier<List<GeoDefinition>> seed(Context context) {
+        return () -> {
+            List<GeoDefinition> defaults = new ArrayList<>();
+            for (GeoDefinition definition : read(context)) {
+                if (definition.id.equals("ru-sites") || definition.id.equals("ru-ips"))
+                    defaults.add(definition);
+            }
+            return defaults;
+        };
+    }
     static List<GeoDefinition> read(Context context) {
         List<GeoDefinition> result = new ArrayList<>();
         try (InputStream input = context.getAssets().open("geo/presets.json")) {

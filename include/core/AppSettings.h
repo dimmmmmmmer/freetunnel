@@ -59,7 +59,8 @@ struct AppSettings {
     QMap<QString, QStringList> profile_app_rules{{"Default", {}}};
     QStringList profile_order{"Default"};
     // Lists belong to the same routing profile as its manual domain/app rules.
-    // Empty on upgrade: existing routing is unchanged until a list is added.
+    // A fresh Default starts with Russian sites and IP addresses bypassing VPN.
+    // Existing profiles retain their saved lists, including an empty selection.
     QMap<QString, QList<freetunnel::GeoListDefinition>> profile_geo_lists;
     int geo_update_hours = 24;
     // Which split profile each config uses (config path -> profile name). A
@@ -90,3 +91,4 @@ void saveAppSettings(const AppSettings &cfg);
 QStringList defaultExcludedRoutes();
 // Built-in "Recommended for Russia" domain bypass set.
 QStringList recommendedRussiaDomains();
+QList<freetunnel::GeoListDefinition> defaultGeoLists();
