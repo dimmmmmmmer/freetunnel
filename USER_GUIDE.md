@@ -227,7 +227,8 @@ sockets bound to the service's local IP. On Windows, the kill switch also
 controls whether an incoming connection is allowed: see
 [ports a config opens](#windows-ports-a-config-opens).
 
-Android preserved the incoming TCP reply path in the API 35 emulator probe.
+Android preserved the incoming TCP reply path in the API 35 and Android TV
+API 34 emulator probes with an authenticated VPN connection.
 An application's incoming UDP
 replies can instead enter the VPN, even when its UDP socket is bound to a local
 IP. To keep a UDP server reachable from clients whose addresses are routed

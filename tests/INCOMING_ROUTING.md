@@ -6,17 +6,20 @@ VPN**. Excluding the whole application does not satisfy this requirement.
 
 ## Results and scope
 
-Probes on 2026-11-14 used the routing code from main `81d7b4e`, stable core
+Probes on 2026-11-14/15 (Moscow time) used the routing code from main `81d7b4e`, stable core
 1.1.12, and these environments:
 
 | Environment | TCP, local-IP or wildcard listener | UDP, local-IP listener | UDP, wildcard listener |
 | --- | --- | --- | --- |
 | Windows Server 2022, Wintun 0.14.1, IPv4/IPv6 | Direct reply | Direct reply | Selects VPN source/interface |
 | macOS 15, utun, IPv4/IPv6 | Direct reply | Direct reply | Selects VPN source/interface |
-| Android API 35 emulator, production VpnService, IPv4 | Direct reply | Reply times out | Reply times out |
+| Android API 35 emulator, connected production VpnService, IPv4 | Direct reply | Reply times out | Reply times out |
+| Android TV API 34 emulator, connected production VpnService, IPv4 | Direct reply | Reply times out | Reply times out |
 
 [Recorded desktop and Android measurements, including new connections from
 the server application](https://github.com/dimmmmmmmer/freetunnel/actions/runs/43639402686).
+[Android and TV with an authenticated HTTP/2 endpoint and real outgoing UDP
+round trips](https://github.com/dimmmmmmmer/freetunnel/actions/runs/43640628076).
 Android logs confirm that both UDP requests reach the server and its send
 calls complete. With the server application's UID excluded, all four incoming
 cases work. That comparison diagnoses the interception; it is not a proposed
@@ -32,21 +35,29 @@ own Windows kill switch deliberately blocks incoming connections unless the
 VPN config's allowed ports are enabled; these tests do not disable that policy
 in the application.
 
-The Android test starts the real production service and native core. A local
-TLS sink holds the upstream connection attempt while the VPN routes are
-installed; this is **not** a successfully authenticated VPN session. A separate
+The Android test starts the real production service and native core, connects
+to the official TrustTunnel endpoint 1.1.0 over TLS/HTTP2, verifies a temporary
+pinned certificate and waits for the production service's connected state.
+The endpoint listens only on runner loopback and is reached via `adb reverse`.
+A separate
 application UID hosts the servers because FreeTunnel excludes its own UID.
 The emulator forwards host traffic to `10.0.2.15`; Wi-Fi is disabled to avoid
 confusing it with `10.0.2.16`. The test explicitly captures peer `10.0.2.2/32`
 instead of allowing the default LAN exclusion to mask the problem. Keep the
 server Activity visible so Android's cached-process freezing does not create
 false failures. New outgoing UDP is checked from both the server UID and a
-second control UID. The app-bypass comparison demonstrates why it is unsuitable
+second control UID. Each must receive its matching echo through the tunnel;
+a timeout is a failure, not evidence that tunnelling worked. A runner-local
+`10.0.2.2/32` address makes the endpoint's datagrams distinguishable from the
+emulator's direct traffic (`127.0.0.1`). This address is confined to a disposable
+runner. The app-bypass comparison demonstrates why it is unsuitable
 when the same server's new connections must remain captured.
 
-The Android result is IPv4 on one emulator API level. Physical Android
-devices, IPv6, carrier NAT, Windows desktop editions and a connected live VPN
-endpoint are not covered by this investigation.
+The earlier Android measurements used a stalled TLS socket. The connected
+phone/TV run supersedes that limitation and reproduces the same incoming UDP
+failure while proving that new outgoing UDP still works through the VPN.
+Physical Android devices, Android IPv6, carrier NAT and Windows desktop
+editions are not covered by this investigation.
 
 The Linux 1.2.5 conntrack fix has the same wildcard UDP limitation as the
 desktop probes. An isolated Linux comparison with actual tunnel IP addresses
@@ -55,6 +66,15 @@ source address before the reply rule matches. The release wording therefore
 specifies local-IP UDP listeners. A server on multiple interfaces should bind
 the intended IP or preserve each request's destination when choosing its reply
 source address.
+
+The Linux regression now assigns actual tunnel IP addresses to its dummy
+interface so it cannot hide this source-selection problem. Its normal
+local-IP listener cases still pass for TCP/UDP and IPv4/IPv6. The explicit
+`--wildcard` mode requires wildcard replies to work and currently reproduces
+the UDP failure. An experimental preferred physical source on the VPN route
+restored wildcard replies on a static single-uplink setup, but retained the
+old source after that physical address was removed. It is not a production
+fix for changing or multiple uplinks and is not applied by this branch.
 
 ## Why there is no automatic Android UDP fix here
 
@@ -86,7 +106,9 @@ Use **Incoming routing investigation** via `workflow_dispatch`. Supply
 manifest verifier rejects stale or changed cores. This reuses an already
 checked artifact instead of starting the full native build or hourly CI suite.
 For the recorded source, run `43630686639` supplied that artifact; choose a new
-matching run once its artifact expires or the core changes.
+matching run once its artifact expires or the core changes. Set
+`run_desktop=false` when only the Android/TV probe changed; both Android
+environments run in parallel.
 
 The workflow is manual and uses disposable runners. It emits JSON measurements
 and Android logcat/instrumentation logs. By default, a successful workflow
@@ -100,9 +122,13 @@ For local reproduction on disposable machines:
 - macOS: `sudo python3 tests/incoming_os_probe.py`.
 - Windows: set `WINTUN_DLL` to the verified x64 Wintun 0.14.1 DLL, then run
   `python tests/incoming_os_probe.py` from an administrator terminal.
+- Linux: `python3 tests/test_linux_reply_routing.py` runs in disposable network
+  namespaces; add `--wildcard` to require support for wildcard UDP listeners.
 - Android: follow the emulator setup in `.github/workflows/incoming-routing.yml`,
   including `-PincomingProbe` when installing the test APKs, then run
-  `python3 tests/incoming_android_probe.py`. Set `REQUIRE_ANDROID_UDP=true` for
+  `python3 tests/incoming_android_probe.py`. Set `INCOMING_ENDPOINT_BIN` to the
+  verified endpoint binary and prepare the runner-only loopback address as
+  shown in the workflow. Set `REQUIRE_ANDROID_UDP=true` for
   the strict incoming-UDP requirement. The instrumentation holder is skipped
   in the ordinary Android suite unless `incoming_probe=true` is supplied.
 
