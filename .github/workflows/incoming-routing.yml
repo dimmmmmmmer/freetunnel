@@ -80,6 +80,8 @@ jobs:
             ./android/gradlew -p android --no-daemon -PincomingProbe :app:installDebug :app:installDebugAndroidTest :incomingProbe:installDebug
             adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
             adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
+            adb shell svc wifi disable
+            sleep 3
             python3 tests/incoming_android_probe.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

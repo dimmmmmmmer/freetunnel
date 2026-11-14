@@ -26,7 +26,9 @@ public final class MainActivity extends Activity {
                 InetAddress local = null;
                 for (NetworkInterface iface : Collections.list(NetworkInterface.getNetworkInterfaces()))
                     for (InetAddress address : Collections.list(iface.getInetAddresses()))
-                        if (address instanceof Inet4Address && address.getHostAddress().startsWith("10.0.2.")) local = address;
+                        // Emulator console redirection targets the Ethernet/cellular
+                        // address, not the separate 10.0.2.16 Wi-Fi interface.
+                        if (address instanceof Inet4Address && address.getHostAddress().equals("10.0.2.15")) local = address;
                 if (local == null) throw new IllegalStateException("No emulator uplink address");
                 CountDownLatch ready = new CountDownLatch(4);
                 tcp(local, 18081, ready); tcp(null, 18082, ready);
