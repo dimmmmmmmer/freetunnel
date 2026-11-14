@@ -49,6 +49,10 @@ Networking regression fixes from [qtbase](https://github.com/qt/qtbase):
 
 - `9c1e2057ccbe516ef3d02053b4512b532e5f42ca` and
   `e09fcc87f0f16c9ce6413d81b4e752fc7dec82f3`: Unix socket error handling.
+- [`949bebaec69d908ca842e8ef7d3e3800d8c2f7b5`](https://github.com/qt/qtbase/commit/949bebaec69d908ca842e8ef7d3e3800d8c2f7b5):
+  complete HTTP replies when the peer closes TLS without a Content-Length.
+  This prevents Schannel from turning a closed 401 response or an empty
+  server reply into a timeout. Existing native-TLS tests cover both cases.
 - `69e1037be2`, `d3bff721a9`, `2e4ab09ba3`, `9d57800a8f`, `4db11b10bb`:
   Schannel SNI encoding, certificate name validation, concurrent handshakes,
   certificate lifetime and leaf-certificate selection.
