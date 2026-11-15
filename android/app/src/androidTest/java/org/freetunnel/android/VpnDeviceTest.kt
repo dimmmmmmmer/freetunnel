@@ -278,6 +278,7 @@ class VpnDeviceTest {
             // The TUN and state 1 are published before native.start returns.
             // Finish that first start before timing the burst of replacements.
             awaitWorker()
+            assertFalse("A plain VPN start must not enable split tunnelling", prefs.getBoolean("split_enabled", false))
             states.clear()
             repeat(4) { FreeTunnelVpnService.start(context, config.replace("1350", (1400 + it).toString())) }
             eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1403 } == true }
@@ -802,11 +803,23 @@ class VpnDeviceTest {
         NativeConfigValidator.validate(context, work.toml)
     }
     // A new installation is not made by the VPN: with nothing saved, the service is given no recommended list, and builds from what there is.
-    @Test fun theServiceNeverMakesANewInstallationsDefaults() {
-        val plan = RoutingConfig.prepare(context, source, "Default")
+    @Test fun theServiceNeverMakesANewInstallationsDefaults() = withSink { config ->
+        // Refresh is also invoked from onCreate and the periodic worker. It
+        // must not seed defaults before the service prepares its routing plan.
+        GeoRepository.get(context).refreshEnabled()
+        assertFalse("Background refresh must not initialize profiles", prefs.contains(SplitStore.KEY))
+        assertFalse("Background refresh must not enable split tunnelling", prefs.contains("split_enabled"))
+        val plan = RoutingConfig.prepare(context, config, "Default")
         assertTrue(exclusions(plan.toml).isEmpty())
         assertFalse("split tunnelling is not turned on behind the app's back", prefs.contains("split_enabled"))
         assertTrue(profiles().domains("Default").isEmpty())
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        awaitWorker()
+        val running = serviceField("activePlan").get(serviceOwner()) as RoutingConfig.Plan
+        assertTrue("The running service must keep the supplied full-VPN policy", exclusions(running.toml).isEmpty())
+        assertFalse(prefs.contains("split_enabled"))
+        assertTrue(profiles().geoLists("Default").isEmpty())
     }
 
     @Test fun validationUsesPrivateIsolatedProcessAndExitsAfterEachRequest() {

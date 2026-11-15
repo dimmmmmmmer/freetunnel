@@ -38,6 +38,40 @@ public final class SplitStoreTest {
 
     // A new installation.
 
+    @Test public void backgroundReadsDoNotInitializeMigrateOrRepairSettings() {
+        for (MemoryBacking f : Arrays.asList(new MemoryBacking(),
+                new MemoryBacking().with("domains", set("legacy.example")),
+                new MemoryBacking().with(SplitStore.KEY, "{ broken").with("domains", set("legacy.example")))) {
+            Map<String, Object> before = new HashMap<>(f.data);
+            int commits = f.commits;
+            assertNull(SplitStore.readSaved(f));
+            assertEquals("A background read must not write preferences", before, f.data);
+            assertEquals(commits, f.commits);
+        }
+    }
+
+    @Test public void backgroundReadsPreserveFirstLaunchAndSavedGeoChoices() {
+        MemoryBacking f = new MemoryBacking();
+        assertNull(SplitStore.readSaved(f));
+        Counting defaults = new Counting();
+        SplitStore.load(f, defaults);
+        Map<String, Object> before = new HashMap<>(f.data);
+        int commits = f.commits;
+        SplitProfiles saved = SplitStore.readSaved(f);
+        assertNotNull(saved);
+        assertEquals(2, saved.geoLists("Default").size());
+        assertTrue(saved.geoLists("Default").stream().allMatch(g -> g.enabled && g.bypass));
+        assertEquals(before, f.data);
+        assertEquals(commits, f.commits);
+        assertEquals(1, defaults.calls.get());
+        assertTrue(SplitStore.edit(f, defaults, p -> {
+            p.removeGeoList("Default", "ru-sites");
+            p.removeGeoList("Default", "ru-ips");
+        }));
+        assertTrue(SplitStore.readSaved(f).geoLists("Default").isEmpty());
+        assertEquals(1, defaults.calls.get());
+    }
+
     @Test public void aNewInstallationStartsWithTwoBypassGeoLists() {
         MemoryBacking f = new MemoryBacking();
         Counting recommended = new Counting();
