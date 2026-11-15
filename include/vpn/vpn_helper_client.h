@@ -128,6 +128,7 @@ private:
     QProcess *m_proc = nullptr;
     // This attempt's helper was started through the Windows helper service.
     bool m_viaService = false;
+    bool m_preparingInstalledHelper = false;
     QTcpSocket *m_sock = nullptr;
     quint16 m_tcpPort = 0;
     QString m_token;

@@ -3,10 +3,17 @@
 
 #include "app/AppStartup.h"
 #include "vpn/vpn_helper_server.h"
+#if defined(Q_OS_UNIX)
+#include "vpn/installed_helper.h"
+#endif
 
 int main(int argc, char *argv[])
 {
     freetunnel::raiseFdLimit();
+#if defined(Q_OS_UNIX)
+    if (argc > 1 && freetunnel::installed_helper::isCommand(QString::fromLocal8Bit(argv[1])))
+        return freetunnel::installed_helper::runCommand(argc, argv, [&] { return runVpnHelper(argc, argv); });
+#endif
     // Icon.qml reads bundled SVGs through backend.readBundledText (qrc-only),
     // so QML XHR local-file access stays disabled engine-wide.
     qputenv("QML_DISABLE_DISK_CACHE", "1");

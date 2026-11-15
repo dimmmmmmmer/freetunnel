@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- macOS and Linux: install the VPN helper once, then connect and apply signed helper updates without repeated administrator prompts.
+- Documented and tested upstream DNS routing in full, selective and bypass modes.
 - Moved custom geo list creation into a dialog.
 - New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
 - Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.

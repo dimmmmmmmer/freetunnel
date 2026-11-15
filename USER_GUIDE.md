@@ -58,8 +58,35 @@ The VPN requires elevated privileges:
 
 | Platform | What you see |
 | --- | --- |
-| Windows | A UAC prompt |
-| macOS, Linux | A prompt for an admin password, the first time you connect in a session |
+| Windows, installed | UAC during installation; connections use the installed helper service |
+| Windows, portable or development build | A UAC prompt when the helper starts |
+| macOS, Linux, signed releases | One administrator confirmation to install or authorize the helper for your account; subsequent connections and signed helper updates need no password |
+
+The Debian package installs the helper with the application. macOS and AppImage
+downloads prepare it on first connection. The first setup needs access to the
+release downloads; if a matching helper archive is unavailable, the usual
+session password prompt remains available. Development builds also use that
+prompt. The VPN still stops when you **Quit** FreeTunnel.
+
+The `freetunnel-helper-*.tar.gz` release files are downloaded automatically by
+FreeTunnel. Install the usual DMG, AppImage or Debian package yourself.
+
+To remove the installed helper, quit FreeTunnel first. On macOS:
+
+```sh
+sudo /Library/PrivilegedHelperTools/org.freetunnel.helper/current/runtime/FreeTunnel.app/Contents/MacOS/FreeTunnel --remove-helper
+```
+
+For an AppImage installation:
+
+```sh
+sudo /opt/freetunnel-helper/current/runtime/bin/FreeTunnel --remove-helper
+```
+
+Removing the Debian package removes its helper too. Removal revokes all accounts'
+FreeTunnel helper grants; a later connection asks for administrator authorization
+again. A failed or interrupted update keeps the last active runtime, and setup
+can be retried on the next connection.
 
 ## Android and Android TV
 
@@ -213,6 +240,13 @@ selected applications use VPN; other applications follow the destination rules.
 If the operating system cannot identify an application's connection, that
 connection is blocked instead of being sent through an arbitrary route.
 Very large combined lists fall back to the full tunnel with a notice.
+
+DNS follows the core's domain-routing policy. A domain routed through VPN uses
+the configured VPN DNS; a bypassed domain uses system DNS directly. An application
+rule does not necessarily cover queries made by a shared OS resolver on that
+application's behalf. In selective mode, add the required domain to **Through
+VPN** as well when its DNS must use the tunnel. See the
+[DNS investigation](docs/dns-routing.md) for the tested behavior and limits.
 
 On Linux, incoming TCP connections and UDP sockets bound to a local IP keep
 their direct reply path, including services on nonstandard ports. Linux requires `iproute2`

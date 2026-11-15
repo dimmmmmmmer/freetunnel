@@ -134,6 +134,10 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FreetunnelDeps.cmake)
 
+if(UNIX AND OpenSSL_FOUND)
+    add_subdirectory(installed-helper)
+endif()
+
 # data/ is shared with the Android app: the lists the app has compiled in (AppSettings.cpp
 # includes what this generates, from a directory this puts on the include path of
 # every target below).
