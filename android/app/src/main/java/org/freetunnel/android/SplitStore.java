@@ -63,6 +63,16 @@ final class SplitStore {
         synchronized (LOCK) { return loadLocked(backing, defaults); }
     }
 
+    /** Background work reads saved choices only; initialization and repair belong to load(). */
+    static SplitProfiles readSaved(Backing backing) {
+        synchronized (LOCK) {
+            String saved = backing.getString(KEY);
+            if (saved == null) return null;
+            try { return SplitProfiles.fromJson(saved); }
+            catch (JSONException | RuntimeException unreadable) { return null; }
+        }
+    }
+
     private static SplitProfiles loadLocked(Backing backing, Supplier<List<GeoDefinition>> defaults) {
         String saved = backing.getString(KEY);
         if (saved != null) {
