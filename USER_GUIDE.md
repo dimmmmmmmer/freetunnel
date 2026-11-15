@@ -214,11 +214,44 @@ If the operating system cannot identify an application's connection, that
 connection is blocked instead of being sent through an arbitrary route.
 Very large combined lists fall back to the full tunnel with a notice.
 
-On Linux, incoming TCP and UDP connections keep their direct reply path;
-this includes services listening on nonstandard ports. Linux requires `iproute2`
+On Linux, incoming TCP connections and UDP sockets bound to a local IP keep
+their direct reply path, including services on nonstandard ports. Linux requires `iproute2`
 and `nftables` (installed automatically by the Debian package). The counter on
 `tun0` includes intercepted traffic that the core subsequently sends directly;
 it does not measure only traffic to the VPN server.
+
+### Incoming services while connected
+
+Windows and macOS preserve the direct reply path for TCP connections and UDP
+sockets bound to the service's local IP. On Windows, the kill switch also
+controls whether an incoming connection is allowed: see
+[ports a config opens](#windows-ports-a-config-opens).
+
+Android preserved the incoming TCP reply path in the API 35 and Android TV
+API 34 emulator probes with an authenticated VPN connection.
+An application's incoming UDP
+replies can instead enter the VPN, even when its UDP socket is bound to a local
+IP. To keep a UDP server reachable from clients whose addresses are routed
+through the VPN, add its application to **Applications** in **Bypass VPN** mode
+in the active config's split profile. This excludes that application's outgoing
+connections too; other applications keep their existing routing rules. Clients
+already covered by **Excluded routes**, including the default private LAN
+ranges, do not need this application exception. If the server application's
+new outgoing connections must stay in the VPN, application bypass does not
+meet that requirement: a transparent incoming-UDP exception is not currently
+supported on Android.
+
+A UDP server listening on every address (`0.0.0.0` or `::`) must choose the
+correct source address for its replies on a computer with multiple interfaces.
+Otherwise the operating system can choose the VPN address. This also applies
+to Linux with the reply-routing fix. Set the server's listening address to
+the appropriate local IP, or use a server that preserves the destination
+address of each request when replying. On Android, binding to a local IP alone
+does not replace the application exception described above.
+
+These are reply-routing checks, not a guarantee of reachability through an
+upstream firewall or carrier NAT. The tested environments and remaining gaps
+are listed in [the incoming routing probe notes](tests/INCOMING_ROUTING.md).
 
 ### Changes while connected
 

@@ -14,14 +14,14 @@ def run(*args):
     return subprocess.run(args, check=True, text=True, capture_output=True).stdout  # nosec B603 - test-owned argv only
 
 
-def exercise(peer_pid, ipv6, udp, expect_reply):
+def exercise(peer_pid, ipv6, udp, expect_reply, wildcard=False):
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
     server_ip, peer_ip = ("2001:db8:1::1", "2001:db8:1::2") if ipv6 else ("192.0.2.1", "192.0.2.2")
     port = 18081 if udp else 18080
     server = socket.socket(family, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.settimeout(2)
-    server.bind((server_ip, port))
+    server.bind((("::" if ipv6 else "0.0.0.0") if wildcard else server_ip, port))  # nosec B104 - Wildcard test in an isolated network namespace.
     if not udp:
         server.listen()
     failures = []
@@ -69,7 +69,7 @@ except TimeoutError:
           f"{'reply preserved' if expect_reply else 'interception reproduced'}", flush=True)
 
 
-def isolated():
+def isolated(wildcard=False):
     # The outer unshare creates a user namespace too: no host root or network
     # changes are needed. A second network namespace supplies the remote peer.
     ready_r, ready_w = os.pipe()
@@ -99,12 +99,16 @@ def isolated():
         run("sysctl", "-qw", "net.ipv4.conf.all.rp_filter=0", "net.ipv4.conf.uplink.rp_filter=0")
         run("ip", "link", "add", "tun0", "type", "dummy")
         run("ip", "link", "set", "tun0", "up")
+        # An addressless dummy hides the real source-address selection issue:
+        # a wildcard UDP reply can select the VPN address before conntrack.
+        run("ip", "addr", "add", "172.20.2.13/32", "dev", "tun0")
+        run("ip", "-6", "addr", "add", "fdfd:29::2/128", "dev", "tun0", "nodad")
         for family in [[], ["-6"]]:
             run("ip", *family, "route", "add", "default", "dev", "tun0", "table", "880")
             run("ip", *family, "rule", "add", "prio", "30801", "lookup", "880")
         for v6 in [False, True]:
             for udp in [False, True]:
-                exercise(pid, v6, udp, False)
+                exercise(pid, v6, udp, False, wildcard)
 
         # Read the exact shipped rules, not a copy maintained only by the test.
         patch = (Path(__file__).resolve().parents[1] / "vendor/trusttunnel/05-linux-incoming-replies.patch").read_text()
@@ -117,7 +121,7 @@ def isolated():
             run("ip", *family, "rule", "add", "prio", "30799", "fwmark", mark, "lookup", "main")
         for v6 in [False, True]:
             for udp in [False, True]:
-                exercise(pid, v6, udp, True)
+                exercise(pid, v6, udp, True, wildcard)
         for family, address in [([], "192.0.2.2"), (["-6"], "2001:db8:1::2")]:
             route = run("ip", *family, "route", "get", address)
             assert "dev tun0" in route, route  # new outgoing connections stay intercepted
@@ -134,7 +138,7 @@ def isolated():
 
 if __name__ == "__main__":
     if "--isolated" in sys.argv:
-        isolated()
+        isolated("--wildcard" in sys.argv)
     else:
         raise SystemExit(subprocess.call(["unshare", "--user", "--map-root-user", "--net",  # nosec B603 - re-exec this test without a shell
-                                         sys.executable, __file__, "--isolated"]))
+                                         sys.executable, __file__, "--isolated", *sys.argv[1:]]))

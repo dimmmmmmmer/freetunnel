@@ -5,13 +5,14 @@
 - Moved custom geo list creation into a dialog.
 - New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
 - Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
+- Finish pending geo list cache work when closing the desktop app.
 - Android releases now contain one APK, with the version in its filename.
 
 ## 1.2.5
 
 - Added ready-made and custom geo lists, with manual routing rules taking priority.
 - Fixed selective routing on desktop and Android, including combined app and destination rules.
-- Linux: incoming TCP and UDP services remain reachable while the VPN is connected.
+- Linux: fixed reply routing for incoming TCP connections and UDP services bound to a specific local IP.
 - Improved configuration imports, subscriptions and connection logs across desktop and Android.
 - Windows connections now use a background service to reduce repeated administrator prompts.
 - Windows: launching while the previous instance is closing no longer sometimes leaves the app closed.

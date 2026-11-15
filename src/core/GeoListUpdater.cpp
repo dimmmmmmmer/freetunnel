@@ -97,6 +97,9 @@ void GeoListUpdater::downloaded()
         GeoListCache(directory).store(definition.source, definition.kind,
                 definition.direction, body, &result->list, &result->error);
     });
+    // Qt joins a QThread::create worker when it is deleted (Qt 6.3+).
+    // Finish an in-progress cache write before this updater is destroyed.
+    worker->setParent(this);
     connect(worker, &QThread::finished, this, [this, result] {
         finish(result->list, result->error);
     });

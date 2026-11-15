@@ -79,6 +79,9 @@ void GeoListController::pump()
                 GeoListCache(directory).load(definition.source, definition.kind,
                                              definition.direction, result.get(), &ignored);
             });
+            // Qt joins a QThread::create worker when it is deleted (Qt 6.3+).
+            // Own it so shutdown cannot leave a parser running past this object.
+            worker->setParent(this);
             connect(worker, &QThread::finished, this, [this, identity, result] {
                 auto &loaded = m_states[identity];
                 loaded.list = std::move(*result);
