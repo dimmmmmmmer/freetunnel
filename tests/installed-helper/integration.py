@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as temporary:
     hard.unlink()
 
     update = package("1.2.6", "update", b"\nnew signed runtime\n")
-    active = subprocess.Popen(["runuser", "-u", "helper-a", "--", "sudo", "-n", "--",  # nosec B603 - Fixed test account and verified installed fixture, no shell.
+    active = subprocess.Popen(["runuser", "-u", "helper-a", "--", "sudo", "-n", "--",  # nosec B603 - Fixed account and installed fixture, no shell.
                                str(installed), "--installed-helper", *start])
     deadline = time.monotonic() + 5
     with Path(str(root) + ".lock").open("r") as lock:
