@@ -65,8 +65,8 @@ class VpnDeviceTest {
         fail("Condition did not become true in $timeoutMs ms. Seen, oldest first:\n$omitted" + seen.takeLast(20).joinToString("\n"))
     }
     @Before fun setup() {
-        context.getSystemService(android.app.NotificationManager::class.java).run { cancel(48); cancel(49) }
         oldPreferences = prefs.all
+        cancelAlerts(48, 49)
         prefs.edit().clear().putBoolean("logging", false).commit()
     }
     // A service that is up and not on its way out. A stop sent to one that is going, or to none, makes a new one for the moment it takes to be
@@ -275,6 +275,9 @@ class VpnDeviceTest {
                 .putExtra("tile_connect", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             instrumentation.waitForIdleSync()
             assertNotNull("Exported launcher must not stop VPN", network())
+            // The TUN and state 1 are published before native.start returns.
+            // Finish that first start before timing the burst of replacements.
+            awaitWorker()
             states.clear()
             repeat(4) { FreeTunnelVpnService.start(context, config.replace("1350", (1400 + it).toString())) }
             eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1403 } == true }
@@ -300,6 +303,13 @@ class VpnDeviceTest {
 
     private fun alert(id: Int) = context.getSystemService(android.app.NotificationManager::class.java)
         .activeNotifications.firstOrNull { it.id == id }
+    private fun cancelAlerts(vararg ids: Int) {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        ids.forEach { manager.cancel(it) }
+        // cancel() queues work in NotificationManagerService. An old alert must
+        // not satisfy the next wait and then disappear under the new assertion.
+        eventually { manager.activeNotifications.none { it.id in ids } }
+    }
     private fun tunName() = network()?.let { context.getSystemService(ConnectivityManager::class.java).getLinkProperties(it)?.interfaceName }
     private fun serviceField(name: String) = FreeTunnelVpnService::class.java.getDeclaredField(name).apply { isAccessible = true }
     private fun useBackoff(backoff: ReconnectBackoff) = serviceField("backoff").set(serviceOwner(), backoff)
@@ -329,7 +339,7 @@ class VpnDeviceTest {
         driven.add("${identity(client)}<-$state")
         client.onStateChanged(state)
     }
-    private fun alertKind() = alert(49)?.notification?.let {
+    private fun alertKind(id: Int = 49) = alert(id)?.notification?.let {
         // What NotificationCompat's setSilent sets on a notification outside a group.
         if (it.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY) "silent" else "alerting"
     } ?: "none"
@@ -342,7 +352,7 @@ class VpnDeviceTest {
             "blocked=${read("blocked")} generation=${read("generation")} attempts=${read("attempts")} client=${identity(read("client"))}"
         }
         return "state=${FreeTunnelVpnService.state(context)} $service driven=${driven.takeLast(3).ifEmpty { listOf("none") }.joinToString(",")}" +
-            " alert49=${alertKind()} vpn=${network() != null}"
+            " alert48=${alertKind(48)} alert49=${alertKind()} vpn=${network() != null}"
     }
     // Reports 2 from client's core and returns once the service has handled
     // it. Android removes a cancelled notification asynchronously, so alert 49
@@ -464,9 +474,6 @@ class VpnDeviceTest {
     // is on the screen it is silent, and the reason is sent to the app, which says it in its toast as the desktop's window does (Main.qml:
     // toast.show, with the tray told as well only when the window is not in view); with the app away nothing is sent.
     @Test fun aFailureIsSentToTheOpenAppAndAlertsOnlyWhenTheAppIsAway() {
-        fun kind() = alert(48)?.notification?.let {
-            if (it.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY) "silent" else "alerting"
-        } ?: "none"
         fun gone() = eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
         val reasons = ConcurrentLinkedQueue<String>()
         val receiver = object : android.content.BroadcastReceiver() {
@@ -478,22 +485,25 @@ class VpnDeviceTest {
             FreeTunnelVpnService.setAppVisible(true)
             FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
             eventually { alert(48) != null && reasons.isNotEmpty() }
-            assertEquals("Silent while the app is on the screen", "silent", kind())
+            assertEquals("Silent while the app is on the screen", "silent", alertKind(48))
             assertEquals("and the app is told what the notice says", alert(48)!!.notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString(),
                 reasons.first())
             gone()
-            context.getSystemService(android.app.NotificationManager::class.java).cancel(48)
+            cancelAlerts(48)
             reasons.clear()
             FreeTunnelVpnService.setAppVisible(false)
             FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
             eventually { alert(48) != null }
+            assertEquals("It alerts when the app is away", "alerting", alertKind(48))
+            gone()
+            // Keep a bounded observation window for the negative broadcast check;
+            // notification readiness above is determined by its actual presence.
             SystemClock.sleep(500)
-            assertEquals("It alerts when the app is away", "alerting", kind())
             assertTrue("and tells no app: $reasons", reasons.isEmpty())
         } finally {
             context.unregisterReceiver(receiver)
             FreeTunnelVpnService.setAppVisible(false)
-            FreeTunnelVpnService.stop(context)
+            if (serviceIsUp()) FreeTunnelVpnService.stop(context)
             gone()
         }
     }
@@ -747,7 +757,10 @@ class VpnDeviceTest {
     }
 
     @Test fun failedSynchronousStartRetainsNewTunWhenKillSwitchIsEnabled() {
-        FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "does-not-exist.invalid:443"))
+        // The config factory accepts this nonempty address, but native.start's
+        // resolver rejects its empty host without consulting external DNS.
+        // This still exercises the real failure after Builder.establish().
+        FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "[]:443"))
         eventually { FreeTunnelVpnService.state(context) == 6 }
         val tun = serviceField("retainedTun").get(serviceOwner()) as? android.os.ParcelFileDescriptor
         assertNotNull("Resolution failure must retain the service's TUN descriptor", tun)
