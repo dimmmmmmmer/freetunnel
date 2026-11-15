@@ -5,7 +5,7 @@ import fcntl
 import os
 from pathlib import Path
 import shutil
-import subprocess
+import subprocess  # nosec B404 - Deliberately exercise a test binary in the guarded disposable container.
 import sys
 import tarfile
 import tempfile
@@ -22,7 +22,10 @@ assert not root.exists(), "The container must have no installed helper"
 
 
 def run(*args, success=True, env=None):
-    result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, env=env)
+    # The fixture supplied by the test runner is intentionally executed as root
+    # only after the disposable-container guard. No application input reaches it.
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
+    result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, env=env)  # nosec B603 - Test-controlled argv, no shell.
     assert (result.returncode == 0) == success, (args, result.returncode, result.stdout, result.stderr)
     return result
 
@@ -79,9 +82,15 @@ with tempfile.TemporaryDirectory() as temporary:
     as_user("helper-a", "remove", success=False)
     as_user("helper-a", "--authorize-helper", "1002", success=False)
     as_user("helper-a", "check", "--helper", success=False)
+    # Prove the joined string matches sudoers: rejection must come from our
+    # dispatcher, not accidentally from sudo denying the test command.
+    run("runuser", "-u", "helper-a", "--", "sudo", "-n", "-l", "--", installed,
+        "--installed-helper start", "--helper")
+    run("runuser", "-u", "helper-a", "--", "sudo", "-n", "--", installed,
+        "--installed-helper start", "--helper", success=False)
     run("runuser", "-u", "helper-a", "--", installed, "--remove-helper", success=False)
 
-    token = Path("/tmp/.fthelper-a")
+    token = work / ".fthelper-a"
     token.write_text("0123456789abcdef0123456789abcdef")
     token.chmod(0o600)
     os.chown(token, 1001, 1001)
@@ -90,21 +99,21 @@ with tempfile.TemporaryDirectory() as temporary:
     as_user("helper-a", *start, success=False)
     token.chmod(0o600)
     as_user("helper-a", *start, "--helper", success=False)
-    other = Path("/tmp/.fthelper-b")
+    other = work / ".fthelper-b"
     other.write_text("abcdef0123456789abcdef0123456789")
     other.chmod(0o600)
     os.chown(other, 1002, 1002)
     as_user("helper-a", *start[:-1], other, success=False)
-    link = Path("/tmp/.fthelper-link")
+    link = work / ".fthelper-link"
     link.symlink_to(token)
     as_user("helper-a", *start[:-1], link, success=False)
-    hard = Path("/tmp/.fthelper-hard")
+    hard = work / ".fthelper-hard"
     os.link(token, hard)
     as_user("helper-a", *start, success=False)
     hard.unlink()
 
     update = package("1.2.6", "update", b"\nnew signed runtime\n")
-    active = subprocess.Popen(["runuser", "-u", "helper-a", "--", "sudo", "-n", "--",
+    active = subprocess.Popen(["runuser", "-u", "helper-a", "--", "sudo", "-n", "--",  # nosec B603 - Fixed test account and verified installed fixture, no shell.
                                str(installed), "--installed-helper", *start])
     deadline = time.monotonic() + 5
     with Path(str(root) + ".lock").open("r") as lock:

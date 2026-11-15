@@ -12,8 +12,10 @@ namespace with no external network. No host DNS, routes or firewall changed.
 | Selective, domain in the inclusion list | Configured DNS through the endpoint |
 | General, explicitly bypassed domain | System DNS directly |
 
-Each case received a real DNS answer and checked which responder saw the query;
-the endpoint and client logs were retained. This exercises UDP DNS through the
+Each case received a real DNS answer, checked which responder saw the query and
+matched the sending UDP socket to the client or endpoint process in `/proc`;
+the endpoint and client logs were retained. The VPN DNS uses `192.0.2.54`, since
+upstream can access a `127/8` DNS upstream directly. This exercises UDP DNS through the
 SOCKS listener, which reaches the same core DNS handler as TUN. It is not a
 complete desktop/Android test of OS resolver attribution or encrypted DNS.
 
@@ -70,6 +72,6 @@ docker run --rm --network none --cap-add NET_ADMIN --dns 192.0.2.53 \
   ft-helper-tests python3 /src/dns_policy_probe.py
 ```
 
-`NET_ADMIN` is used only to add `192.0.2.53/32` to this container's loopback:
-upstream ignores system resolvers in `127/8` to prevent routing loops. Never use
+`NET_ADMIN` is used only to add `192.0.2.53/32` and `192.0.2.54/32` to this
+container's loopback: upstream treats `127/8` DNS addresses specially. Never use
 host networking for this probe. No TUN device or privileged container is needed.

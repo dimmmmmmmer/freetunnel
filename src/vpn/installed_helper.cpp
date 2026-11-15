@@ -210,18 +210,8 @@ bool installPackaged()
 }
 #endif
 
-bool install(const QStringList &args, bool update)
+bool installSnapshot(const QStringList &args, bool update, quint32 uid, const QTemporaryDir &stage)
 {
-    // archive, signed manifest, signature, expected executable SHA-256, uid
-    if (args.size() != 5) return false;
-    quint32 uid = 0;
-    if (!validUserId(args[4], &uid)) return false;
-    if (update && qEnvironmentVariable("SUDO_UID") != args[4]) return false;
-    if (args[3].size() != 64 || QByteArray::fromHex(args[3].toLatin1()).size() != 32) return false;
-    const Lock lock;
-    if (!lock.ok()) return false;
-    QTemporaryDir stage(rootDirectory() + QStringLiteral("/stage-XXXXXX"));
-    if (!stage.isValid()) return false;
     const QString archive = stage.path() + QStringLiteral("/archive.tar.gz");
     const QString sumsPath = stage.path() + QStringLiteral("/sums");
     const QString sigPath = stage.path() + QStringLiteral("/signature");
@@ -245,26 +235,28 @@ bool install(const QStringList &args, bool update)
     return activate(unpacked, args[3], uid);
 }
 
+bool install(const QStringList &args, bool update)
+{
+    // archive, signed manifest, signature, expected executable SHA-256, uid
+    if (args.size() != 5) return false;
+    quint32 uid = 0;
+    if (!validUserId(args[4], &uid)) return false;
+    if (update && qEnvironmentVariable("SUDO_UID") != args[4]) return false;
+    if (args[3].size() != 64 || QByteArray::fromHex(args[3].toLatin1()).size() != 32) return false;
+    const Lock lock;
+    if (!lock.ok()) return false;
+    QTemporaryDir stage(rootDirectory() + QStringLiteral("/stage-XXXXXX"));
+    return stage.isValid() && installSnapshot(args, update, uid, stage);
+}
+
 bool ownToken(const QString &path, quint32 uid)
 {
     struct stat st{};
     return ::lstat(QFile::encodeName(path).constData(), &st) == 0 && S_ISREG(st.st_mode)
             && st.st_uid == uid && st.st_nlink == 1 && (st.st_mode & 0077) == 0;
 }
-} // namespace
-
-bool isCommand(const QString &arg)
+void resetRootEnvironment()
 {
-    return arg == QLatin1String("--launch-installed-helper") || arg == QLatin1String("--installed-helper")
-            || arg == QLatin1String("--install-helper") || arg == QLatin1String("--remove-helper")
-            || arg == QLatin1String("--authorize-helper") || arg == QLatin1String("--install-packaged-helper");
-}
-
-int runCommand(int argc, char **argv, const std::function<int()> &runSession)
-{
-    const QString mode = QString::fromLocal8Bit(argv[1]);
-    if (mode == QLatin1String("--launch-installed-helper")) return launch(argc, argv);
-    if (::geteuid() != 0) return 1;
     // sudo normally resets the environment; do not depend on a machine's
     // env_keep policy for Qt plugins, OpenSSL configuration or tar options.
     const QByteArray caller = qgetenv("SUDO_UID");
@@ -279,43 +271,82 @@ int runCommand(int argc, char **argv, const std::function<int()> &runSession)
     qputenv("HOME", "/root");
     qputenv("LANG", "C.UTF-8");
 #endif
+}
+
+int startInstalled(const QStringList &args, const std::function<int()> &runSession)
+{
+    quint32 uid = 0;
+    if (!validUserId(qEnvironmentVariable("SUDO_UID"), &uid)
+        || !validStartArguments(args) || !ownToken(args[3], uid)) return 1;
+    const Lock lock;
+    return lock.ok() ? runSession() : 1;
+}
+
+bool authorize(const QStringList &args)
+{
+    quint32 uid = 0;
+    const Lock lock;
+    return lock.ok() && args.size() == 1 && validUserId(args[0], &uid)
+            && QFileInfo(executablePath()).isExecutable() && grant(uid);
+}
+
+bool removeInstalled()
+{
+    const Lock lock;
+    if (!lock.ok()) return false;
+    const QDir rules(QFileInfo(rulePath(1)).absolutePath());
+    for (const QString &name : rules.entryList({QStringLiteral("freetunnel-helper-*")}, QDir::Files)) {
+        quint32 uid = 0;
+        if (validUserId(name.mid(QStringLiteral("freetunnel-helper-").size()), &uid)
+            && !QFile::remove(rules.filePath(name))) return false;
+    }
+    return QDir(rootDirectory()).removeRecursively();
+}
+
+int adminCommand(const QString &mode, const QStringList &args)
+{
+    if (mode == QLatin1String("--install-helper")) return install(args, false) ? 0 : 1;
+#ifdef Q_OS_LINUX
+    if (mode == QLatin1String("--install-packaged-helper")) return args.isEmpty() && installPackaged() ? 0 : 1;
+#endif
+    if (mode == QLatin1String("--authorize-helper")) return authorize(args) ? 0 : 1;
+    if (mode == QLatin1String("--remove-helper")) return args.isEmpty() && removeInstalled() ? 0 : 1;
+    return 1;
+}
+} // namespace
+
+bool isCommand(const QString &arg)
+{
+    // sudoers matches a joined argument string, not individual argv elements.
+    // A first argument such as "--installed-helper start" must also enter this
+    // restricted dispatcher and be rejected, never fall through to GUI/--helper.
+    return arg == QLatin1String("--launch-installed-helper") || arg.startsWith(QLatin1String("--installed-helper"))
+            || arg == QLatin1String("--install-helper") || arg == QLatin1String("--remove-helper")
+            || arg == QLatin1String("--authorize-helper") || arg == QLatin1String("--install-packaged-helper");
+}
+
+int runCommand(int argc, char **argv, const std::function<int()> &runSession)
+{
+    const QString mode = QString::fromLocal8Bit(argv[1]);
+    if (mode == QLatin1String("--launch-installed-helper")) return launch(argc, argv);
+    if (::geteuid() != 0) return 1;
+    resetRootEnvironment();
     QStringList args;
     for (int i = 2; i < argc; ++i) args << QString::fromLocal8Bit(argv[i]);
     // Restrict the one passwordless entry point before any normal CLI dispatch.
-    if (mode == QLatin1String("--installed-helper") && args.value(0) == QLatin1String("start")) {
-        quint32 uid = 0;
-        args.removeFirst();
-        if (!validUserId(qEnvironmentVariable("SUDO_UID"), &uid)
-            || !validStartArguments(args) || !ownToken(args[3], uid)) return 1;
-        const Lock lock;
-        return lock.ok() ? runSession() : 1;
-    }
-    QCoreApplication app(argc, argv);
+    if (mode == QLatin1String("--installed-helper") && args.value(0) == QLatin1String("start"))
+        return startInstalled(args.mid(1), runSession);
+    // Maintenance arguments are data for our parser, never Qt command-line
+    // options. Session starts above already validated every argument.
+    int coreArgc = 1;
+    char *coreArgv[] = {argv[0], nullptr};
+    QCoreApplication app(coreArgc, coreArgv);
     if (mode == QLatin1String("--installed-helper")) {
         if (args == QStringList{QStringLiteral("check")}) return 0;
         if (args.value(0) != QLatin1String("update")) return 1;
         return install(args.mid(1), true) ? 0 : 1;
     }
-    if (mode == QLatin1String("--install-helper")) return install(args, false) ? 0 : 1;
-#ifdef Q_OS_LINUX
-    if (mode == QLatin1String("--install-packaged-helper")) return args.isEmpty() && installPackaged() ? 0 : 1;
-#endif
-    if (mode == QLatin1String("--authorize-helper")) {
-        quint32 uid = 0;
-        const Lock lock;
-        return lock.ok() && args.size() == 1 && validUserId(args[0], &uid)
-                && QFileInfo(executablePath()).isExecutable() && grant(uid) ? 0 : 1;
-    }
-    if (mode != QLatin1String("--remove-helper") || !args.isEmpty()) return 1;
-    const Lock lock;
-    if (!lock.ok()) return 1;
-    const QDir rules(QFileInfo(rulePath(1)).absolutePath());
-    for (const QString &name : rules.entryList({QStringLiteral("freetunnel-helper-*")}, QDir::Files)) {
-        quint32 uid = 0;
-        if (validUserId(name.mid(QStringLiteral("freetunnel-helper-").size()), &uid)
-            && !QFile::remove(rules.filePath(name))) return 1;
-    }
-    return QDir(rootDirectory()).removeRecursively() ? 0 : 1;
+    return adminCommand(mode, args);
 }
 
 } // namespace freetunnel::installed_helper

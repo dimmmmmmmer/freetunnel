@@ -7,7 +7,10 @@
 
 int main(int argc, char **argv)
 {
-    if (argc < 2 || !freetunnel::installed_helper::isCommand(QString::fromLocal8Bit(argv[1]))) return 1;
+    if (argc < 2) return 1;
+    // Catch a joined-argument sudoers match escaping into ordinary CLI dispatch:
+    // the real main would otherwise continue looking for --helper/GUI options.
+    if (!freetunnel::installed_helper::isCommand(QString::fromLocal8Bit(argv[1]))) return 0;
     return freetunnel::installed_helper::runCommand(argc, argv, [&] {
         QCoreApplication app(argc, argv);
         const auto cfg = freetunnel::parseHelperLaunchArgs(app.arguments());

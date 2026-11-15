@@ -102,10 +102,47 @@ bool download(QNetworkAccessManager &manager, const QUrl &url, const QString &pa
     return ok;
 }
 
-QByteArray read(const QString &path)
+QByteArray readManifestFile(const QString &path)
 {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.read(65537) : QByteArray();
+}
+
+enum class Preparation { Ready, Unavailable, Refused };
+
+Preparation prepareRuntime(const QTemporaryDir &cache, const QString &ownHash)
+{
+    const QString base = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v%1/")
+            .arg(QStringLiteral(FREETUNNEL_VERSION));
+    QNetworkAccessManager manager;
+    const QString sums = cache.filePath(QStringLiteral("SHA256SUMS.txt"));
+    const QString sig = cache.filePath(QStringLiteral("SHA256SUMS.txt.sig"));
+    const QString archive = cache.filePath(assetName());
+    if (!download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt")), sums, 65536)
+        || !download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt.sig")), sig, 64)
+        || !download(manager, QUrl(base + assetName()), archive, 768LL * 1024 * 1024))
+        return Preparation::Unavailable;
+    QString error;
+    if (!verifyArchive(archive, readManifestFile(sums), readManifestFile(sig),
+                       QStringLiteral(FREETUNNEL_VERSION), true, &error))
+        return Preparation::Refused;
+    // A locally built executable may share the published version number. Check
+    // compatibility as the user, before presenting an administrator prompt.
+    // Root independently repeats all verification on its own private copy.
+    const QString unpacked = cache.filePath(QStringLiteral("unpacked"));
+    if (!QDir().mkdir(unpacked)
+        || execute(QStringLiteral("/usr/bin/tar"), {QStringLiteral("-xzf"), archive,
+                   QStringLiteral("-C"), unpacked}, 120000) != 0) return Preparation::Refused;
+    return sha256HexOfFile(unpacked + QStringLiteral("/runtime/") + executableRelativePath()) == ownHash
+            ? Preparation::Ready : Preparation::Unavailable;
+}
+
+int authorizeAndStart(const QStringList &args, const QString &uid)
+{
+    if (sudoHelper({QStringLiteral("check")}, 5000) != 0
+        && elevated({QStringLiteral("--authorize-helper"), uid}) != 0) return 1;
+    progress("starting");
+    return sudoHelper(QStringList{QStringLiteral("start")} + args);
 }
 
 int transient(const QStringList &args)
@@ -139,42 +176,19 @@ int launch(int argc, char **argv)
     const QString ownHash = sha256HexOfFile(app.applicationFilePath());
     if (ownHash.isEmpty()) return 1;
     const QString uid = QString::number(::getuid());
-    if (sha256HexOfFile(executablePath()) == ownHash) {
-        if (sudoHelper({QStringLiteral("check")}, 5000) != 0
-            && elevated({QStringLiteral("--authorize-helper"), uid}) != 0) return 1;
-        progress("starting");
-        return sudoHelper(QStringList{QStringLiteral("start")} + args);
-    }
+    if (sha256HexOfFile(executablePath()) == ownHash) return authorizeAndStart(args, uid);
     // Only release builds can install a permanent runtime. Development builds
     // keep the existing prompted helper; they must never silently replace the
     // administrator's installed copy with unsigned code.
     progress("preparing");
     QTemporaryDir cache;
     if (!cache.isValid()) return 1;
-    const QString base = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v%1/")
-            .arg(QStringLiteral(FREETUNNEL_VERSION));
-    QNetworkAccessManager manager;
-    const QString sums = cache.filePath(QStringLiteral("SHA256SUMS.txt"));
-    const QString sig = cache.filePath(QStringLiteral("SHA256SUMS.txt.sig"));
-    const QString archive = cache.filePath(assetName());
-    if (!download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt")), sums, 65536)
-        || !download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt.sig")), sig, 64)
-        || !download(manager, QUrl(base + assetName()), archive, 768LL * 1024 * 1024))
-        return transient(args);
-    QString error;
-    if (!verifyArchive(archive, read(sums), read(sig), QStringLiteral(FREETUNNEL_VERSION), true, &error))
-        return 1;
-    // A locally built executable may share the published version number. Check
-    // compatibility as the user, before presenting an administrator prompt.
-    // Root independently repeats all verification on its own private copy.
-    const QString unpacked = cache.filePath(QStringLiteral("unpacked"));
-    if (!QDir().mkdir(unpacked)
-        || execute(QStringLiteral("/usr/bin/tar"), {QStringLiteral("-xzf"), archive,
-                   QStringLiteral("-C"), unpacked}, 120000) != 0) return 1;
-    if (sha256HexOfFile(unpacked + QStringLiteral("/runtime/") + executableRelativePath()) != ownHash)
-        return transient(args);
+    const Preparation prepared = prepareRuntime(cache, ownHash);
+    if (prepared == Preparation::Unavailable) return transient(args);
+    if (prepared == Preparation::Refused) return 1;
     progress("installing");
-    const QStringList installation{archive, sums, sig, ownHash, uid};
+    const QStringList installation{cache.filePath(assetName()), cache.filePath(QStringLiteral("SHA256SUMS.txt")),
+                                   cache.filePath(QStringLiteral("SHA256SUMS.txt.sig")), ownHash, uid};
     if (QFileInfo::exists(executablePath()) && sudoHelper({QStringLiteral("check")}, 5000) == 0) {
         if (sudoHelper(QStringList{QStringLiteral("update")} + installation, 120000) != 0)
             return transient(args);

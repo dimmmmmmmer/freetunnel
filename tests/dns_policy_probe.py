@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import socket
 import struct
-import subprocess
+import subprocess  # nosec B404 - Fixed network tool and digest-verified client, in an isolated container.
 import tempfile
 import threading
 import time
@@ -14,9 +14,28 @@ import time
 from incoming_endpoint import endpoint
 
 
+def udp_sender(port):
+    """Name the process that sent the datagram, not just the DNS destination."""
+    sockets = set()
+    for line in Path("/proc/net/udp").read_text().splitlines()[1:]:
+        fields = line.split()
+        if int(fields[1].rsplit(":", 1)[1], 16) == port:
+            sockets.add(f"socket:[{fields[9]}]")
+    for process in Path("/proc").iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            for descriptor in (process / "fd").iterdir():
+                if os.readlink(descriptor) in sockets:
+                    return Path(os.readlink(process / "exe")).name
+        except (FileNotFoundError, PermissionError):
+            continue
+    return "unknown"
+
+
 def serve_dns(port, label, observed):
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server.bind(("192.0.2.53" if port == 53 else "127.0.0.1", port))
+    server.bind(("192.0.2.53" if port == 53 else "192.0.2.54", port))
 
     def receive():
         while True:
@@ -27,7 +46,7 @@ def serve_dns(port, label, observed):
                 labels.append(query[offset + 1:offset + 1 + size].decode("ascii"))
                 offset += size + 1
             name = ".".join(labels)
-            observed.append((label, name))
+            observed.append((label, name, udp_sender(peer[1])))
             question = query[12:offset + 5]
             answer = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 30, 4) + socket.inet_aton("192.0.2.123")
             server.sendto(query[:2] + struct.pack("!HHHHH", 0x8180, 1, 1, 0, 0) + question + answer, peer)
@@ -64,7 +83,8 @@ def main():
     assert hashlib.sha256(data).hexdigest() == "34efac45a4e52c2b30f2bec266c2f81068d7160a1fb8b7da350e22013b619122"
     # Upstream deliberately ignores 127/8 resolvers to prevent routing loops.
     # This address exists only in this container's isolated network namespace.
-    subprocess.run(["ip", "address", "add", "192.0.2.53/32", "dev", "lo"], check=True)
+    subprocess.run(["ip", "address", "add", "192.0.2.53/32", "dev", "lo"], check=True)  # nosec B603 - Literal argv, isolated network namespace only.
+    subprocess.run(["ip", "address", "add", "192.0.2.54/32", "dev", "lo"], check=True)  # nosec B603 - Literal argv, isolated network namespace only.
     observed = []
     servers = [serve_dns(53, "system/direct", observed), serve_dns(5354, "VPN", observed)]
     with tempfile.TemporaryDirectory(prefix="ft-dns-") as directory, endpoint() as certificate:
@@ -80,7 +100,7 @@ def main():
             config = root / "client.toml"
             config.write_text(f'vpn_mode = "{mode}"\nkillswitch_enabled = true\n'
                               f'exclusions = {json.dumps(exclusions)}\nexclusions_preresolve_enabled = false\n'
-                              'dns_upstreams = ["127.0.0.1:5354"]\n'
+                              'dns_upstreams = ["192.0.2.54:5354"]\n'
                               '[endpoint]\nhostname = "vpn.invalid"\naddresses = ["127.0.0.1:29443"]\n'
                               'has_ipv6 = false\nusername = "test"\npassword = "probe-only"\n'
                               'upstream_protocol = "http2"\n'
@@ -88,7 +108,7 @@ def main():
                               '[listener.socks]\naddress = "127.0.0.1:21080"\n')
             log_path = Path(f"dns-policy-{index}.log")
             with log_path.open("w") as log:
-                process = subprocess.Popen([str(executable), "-c", str(config), "-l", "debug"],
+                process = subprocess.Popen([str(executable), "-c", str(config), "-l", "debug"],  # nosec B603 - Digest-verified private copy and fixed argv.
                                            stdout=log, stderr=subprocess.STDOUT)
                 try:
                     deadline = time.monotonic() + 15
@@ -101,8 +121,11 @@ def main():
                             if time.monotonic() >= deadline:
                                 raise AssertionError(log_path.read_text()[-5000:]) from None
                             time.sleep(0.2)
-                    routes = {label for label, name in observed if name == domain}
+                    routes = {label for label, name, _ in observed if name == domain}
                     assert routes == {expected}, (mode, domain, routes, expected)
+                    senders = {sender for _, name, sender in observed if name == domain}
+                    expected_sender = "trusttunnel_endpoint" if expected == "VPN" else "client"
+                    assert senders == {expected_sender}, (domain, senders, expected_sender)
                     print(f"PASS: {mode}, {domain} -> {expected}", flush=True)
                 finally:
                     process.terminate()
