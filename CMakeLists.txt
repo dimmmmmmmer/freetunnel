@@ -202,6 +202,12 @@ target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
 )
 
+if(UNIX)
+    target_sources(FreeTunnel PRIVATE src/vpn/installed_helper.cpp
+        src/vpn/installed_helper_policy.cpp src/vpn/installed_helper_launcher.cpp)
+    target_compile_definitions(FreeTunnel PRIVATE FT_INSTALLED_HELPER)
+endif()
+
 # --- Build hardening -------------------------------------------------------
 # Defense-in-depth for a process that parses untrusted network/IPC/TLV input in
 # C++. Scoped to the FreeTunnel target only (PRIVATE) so the VPN core, built as a

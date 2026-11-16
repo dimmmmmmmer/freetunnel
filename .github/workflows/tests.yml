@@ -175,6 +175,19 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'macOS'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
 
+      - name: Installed helper lifecycle (disposable Linux container)
+        if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          . /etc/os-release
+          docker build --build-arg "UBUNTU_VERSION=$VERSION_ID" \
+            -t ft-helper-tests -f tests/installed-helper/Dockerfile tests/installed-helper
+          docker run --rm --network none -e FT_HELPER_CONTAINER_TEST=1 \
+            -v "$PWD:/src:ro" -v "$QT_ROOT_DIR:$QT_ROOT_DIR:ro" ft-helper-tests \
+            python3 /src/tests/installed-helper/integration.py \
+              /src/build-tests/installed-helper/installed_helper_fixture \
+              /src/tests/resources/installed-helper/test-key.pem
+
       - name: Deploy Qt beside the Windows service test helper
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Windows'
         run: windeployqt --release --no-translations build-tests/freetunnel_test_helper.exe

@@ -42,6 +42,17 @@ bool openOwnFile(QFile &f, const QString &path)
         ::close(fd);
         return false;
     }
+    // The installed Unix helper is started by sudo. Bind its actual opened
+    // token descriptor to that caller, including if a path changed after the
+    // launcher's preliminary check. Never read another account's token.
+    if (::geteuid() == 0 && qEnvironmentVariableIsSet("SUDO_UID")) {
+        bool ok = false;
+        const auto caller = qEnvironmentVariable("SUDO_UID").toUInt(&ok);
+        if (!ok || caller == 0 || st.st_uid != caller || (st.st_mode & 0077) != 0) {
+            f.close();
+            return false;
+        }
+    }
     return true;
 #else
     const QFileInfo fi(path);

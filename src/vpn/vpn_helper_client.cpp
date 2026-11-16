@@ -294,6 +294,7 @@ void VpnHelperClient::resetHelperTransport()
 {
     m_buf.clear();
     m_viaService = false;
+    m_preparingInstalledHelper = false;
     if (m_sock) {
         m_sock->deleteLater();
         m_sock = nullptr;
@@ -426,10 +427,10 @@ void VpnHelperClient::startHelperConnectRetry()
                          .arg(stoppedWhy));
             return;
         }
-        // 240 × 250 ms = 60 s. The elevation dialog blocks the helper from even
-        // starting until the user finishes typing the admin password — the old
-        // 20 s window expired mid-typing for anyone without Touch ID.
-        if (++m_tries > 240) {
+        // 60 s for a normal start or password prompt; allow up to four minutes
+        // while a signed installed runtime is downloaded and prepared. The
+        // launcher resets the deadline when it starts the session itself.
+        if (++m_tries > (m_preparingInstalledHelper ? 960 : 240)) {
             m_attempt->stop();
             m_attempt->deleteLater();
             m_attempt = nullptr;

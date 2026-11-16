@@ -801,7 +801,8 @@ jobs:
       # .deb for Debian/Ubuntu/Pop!_OS. Self-contained: ships the bundled
       # runtime (binary + Qt libs/plugins/qml) from linuxdeploy's AppDir under
       # /opt/freetunnel. A /usr/bin symlink + .desktop entry integrate it into
-      # the launcher; the privileged VPN helper runs via pkexec (polkit).
+      # the launcher; the privileged VPN runtime is installed separately so
+      # package replacement cannot remove files used by an active VPN session.
       - name: Package .deb (Linux)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash -e {0}
@@ -813,6 +814,8 @@ jobs:
           fi
           ver="${{ steps.ver.outputs.version }}"
           root=debpkg
+          python3 client/scripts/package-unix-helper.py AppDir/usr \
+            out/freetunnel-helper-linux-x86_64.tar.gz linux
           rm -rf "$root"
           mkdir -p "$root/opt/freetunnel" "$root/usr/bin" \
                    "$root/usr/share/applications" \
@@ -882,15 +885,19 @@ jobs:
           Architecture: amd64
           Maintainer: FreeTunnel <noreply@freetunnel.app>
           Installed-Size: ${installed_kb}
-          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, iproute2, nftables, pkexec | policykit-1
+          Depends: libc6 (>= ${glibc_dep}), libgl1, libopengl0, libegl1, libsm6, libfontconfig1, libcom-err2, libgpg-error0, libxkbcommon0, libxcb-cursor0, iproute2, nftables, sudo, pkexec | policykit-1
           Description: FreeTunnel VPN client
            A simple, modern desktop client for the TrustTunnel VPN core.
            Bundles its own Qt runtime; the privileged VPN helper is started on
-           demand via pkexec (polkit).
+           demand, with one-time administrator authorization per user.
           EOF
           cat > "$root/DEBIAN/postinst" <<'EOF'
           #!/bin/sh
           set -e
+          if [ "$1" = configure ]; then
+            /opt/freetunnel/bin/FreeTunnel --install-packaged-helper || \
+              echo 'FreeTunnel helper was not installed; setup will be retried on the next connection.'
+          fi
           command -v update-desktop-database >/dev/null 2>&1 && \
             update-desktop-database -q /usr/share/applications || true
           command -v gtk-update-icon-cache >/dev/null 2>&1 && \
@@ -898,6 +905,17 @@ jobs:
           exit 0
           EOF
           chmod 0755 "$root/DEBIAN/postinst"
+          cat > "$root/DEBIAN/prerm" <<'EOF'
+          #!/bin/sh
+          set -e
+          if [ "$1" = remove ] && [ -x /opt/freetunnel-helper/current/runtime/bin/FreeTunnel ]; then
+            /opt/freetunnel-helper/current/runtime/bin/FreeTunnel --remove-helper || {
+              echo 'Close FreeTunnel before removing its VPN helper.' >&2
+              exit 1
+            }
+          fi
+          EOF
+          chmod 0755 "$root/DEBIAN/prerm"
           # Does the package ask for everything the binaries actually need? It
           # did not: libgl1 was declared, libOpenGL.so.0 is linked, and libgl1
           # does not pull libopengl0 — so dpkg reported every dependency
@@ -1064,6 +1082,8 @@ jobs:
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
           mkdir -p out
+          python3 client/scripts/package-unix-helper.py "$APP" \
+            out/freetunnel-helper-macos-universal.tar.gz macos
           RW=out/rw.dmg
           # Sized from what goes in, rather than a fixed 200m that the bundle
           # would one day outgrow (create then fails with "No space left on
@@ -1550,7 +1570,7 @@ jobs:
           # fields, which makes this invisible to them rather than something they
           # mistake for an asset name.
           echo "#version=${GITHUB_REF_NAME#v}" > SHA256SUMS.txt
-          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' \) \
+          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' -o -name 'freetunnel-helper-*.tar.gz' \) \
             -exec sha256sum {} + \
             | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
             | sort -k2 >> SHA256SUMS.txt
@@ -1624,6 +1644,8 @@ jobs:
             echo
             echo "[Downloads and installation help](${{ github.server_url }}/${{ github.repository }}/blob/${GITHUB_REF_NAME}/README.md)"
             echo
+            echo 'The freetunnel-helper-*.tar.gz files are used automatically by FreeTunnel; use the regular installer for your platform.'
+            echo
             if [ -n "$prev" ]; then
               echo
               echo "**Every commit in this release**: ${{ github.server_url }}/${{ github.repository }}/compare/$prev...${GITHUB_REF_NAME}"
@@ -1640,6 +1662,7 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*-Setup.exe
             artifacts/**/*.AppImage
+            artifacts/**/freetunnel-helper-*.tar.gz
             artifacts/SHA256SUMS.txt
             artifacts/SHA256SUMS.txt.sig
           body_path: notes.md

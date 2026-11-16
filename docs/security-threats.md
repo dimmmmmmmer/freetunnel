@@ -11,6 +11,7 @@ report a vulnerability, is in [SECURITY.md](../SECURITY.md).
 - [Threat summary](#threat-summary)
 - [Processes running as the same user](#processes-running-as-the-same-user)
 - [Privileged helper and its IPC](#privileged-helper-and-its-ipc)
+- [Installed helpers on macOS and Linux](#installed-helpers-on-macos-and-linux)
 - [AppImage elevation on Linux](#appimage-elevation-on-linux)
 - [Config files reaching root](#config-files-reaching-root)
 - [Updates and signatures](#updates-and-signatures)
@@ -193,9 +194,51 @@ through UAC as before.
   clients, as other VPN clients run, would have needed a new protocol and a new
   way to tell callers apart; this one reuses the handshake that already does.
 
+## Installed helpers on macOS and Linux
+
+- **Threat:** retaining authorization after the first connection could turn a
+  user-writable application, its dependencies, arguments or update files into
+  arbitrary root execution.
+- **Mitigation:** the authorized executable and its complete deployed runtime
+  live in root-owned directories, under `/Library/PrivilegedHelperTools` on
+  macOS and `/opt/freetunnel-helper` on Linux. Every parent must be a real
+  root-owned directory without group/world write access. A per-UID sudoers rule
+  grants only the fixed `--installed-helper` entry point, with `NOSETENV`.
+  That entry point accepts only a status check, a strictly parsed session start
+  or a verified newer release. Installation, adding another user and removal
+  still require explicit administrator authorization.
+- **Update boundary:** root first snapshots the archive and signed manifest in
+  a private directory, verifies the Ed25519 release signature, asset SHA-256,
+  increasing release version and expected executable hash, then extracts the
+  authenticated copy. Only ordinary files, directories and internal symlinks
+  are accepted; write permissions and setuid/setgid bits are removed. An atomic
+  `current` symlink selects the runtime. A lock held for the whole VPN session
+  prevents updates/removal while it is running. The root-owned lock file lives
+  beside the runtime and survives removal, preventing concurrent installers
+  from locking different inodes. Debian's root package-manager scripts can
+  install their already-installed runtime without a second download.
+- **Session boundary:** the token's opened descriptor must belong to the actual
+  `SUDO_UID`, have no group/world access and have exactly one hard link. The
+  existing HMAC handshake, config restrictions and GUI-disconnect shutdown are
+  unchanged. Root clears the inherited environment before Qt initialization or
+  starting external tools; only the invoking UID and fixed system paths remain.
+- **Residual risk:** processes running as an authorized account may start VPN
+  sessions and change machine-wide routing, just as the Windows service allows.
+  They cannot grant other accounts access or install arbitrary unsigned code
+  through this entry point. The initial administrator prompt still authorizes
+  the application the user is running; replacing that user-owned application
+  before initial authorization is outside this protection. A development build,
+  or a release whose helper archive cannot be obtained, falls back to the
+  existing prompted session helper.
+- **Lifecycle:** authorization persists, not an always-running root daemon.
+  The helper exits with the GUI. Removal revokes all FreeTunnel per-UID grants;
+  it does not edit unrelated sudoers files. See the removal commands in the
+  [user guide](../USER_GUIDE.md#administrator-prompt).
+
 ## AppImage elevation on Linux
 
-An AppImage build has to re-exec the `.AppImage` file as root rather than the
+Initial installation and the prompted fallback for an AppImage have to re-exec
+the `.AppImage` file as root rather than the
 executable inside its FUSE mount, since root cannot read that user-private
 mount. Root does not mount the AppImage; it unpacks it, with the runtime's
 extract-and-run, which also works where there is no FUSE.

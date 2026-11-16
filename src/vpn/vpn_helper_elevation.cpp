@@ -326,6 +326,30 @@ ServiceStart startHelperService(const QString &exe, quint16 port, const QString 
 bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath, QString *err) {
     const QString exe = QCoreApplication::applicationFilePath();
 
+#if defined(FT_INSTALLED_HELPER) && defined(Q_OS_UNIX)
+    m_proc = new QProcess(this);
+    m_preparingInstalledHelper = true;
+    connect(m_proc, &QProcess::readyReadStandardOutput, this, [this] {
+        while (m_proc && m_proc->canReadLine()) {
+            const QByteArray line = m_proc->readLine().trimmed();
+            if (line == "starting") {
+                m_preparingInstalledHelper = false;
+                m_tries = 0;
+            } else if (line == "preparing") {
+                emit connectProgress(tr("Preparing VPN helper..."));
+            } else if (line == "installing") {
+                emit connectProgress(tr("Installing VPN helper..."));
+            }
+        }
+    });
+    m_proc->setStandardErrorFile(QProcess::nullDevice());
+    m_proc->start(exe, {QStringLiteral("--launch-installed-helper"), QStringLiteral("--port"),
+                        QString::number(port), QStringLiteral("--token-file"), tokenPath});
+    if (m_proc->waitForStarted(5000)) return true;
+    if (err) *err = tr("Could not start the VPN helper");
+    return false;
+#endif
+
 #if defined(Q_OS_MACOS)
     return launchMacElevatedHelper(&m_proc, this, exe, port, tokenPath, err);
 #elif defined(Q_OS_WIN)

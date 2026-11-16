@@ -1522,6 +1522,14 @@
 <context>
     <name>VpnHelperClient</name>
     <message>
+        <source>Preparing VPN helper...</source>
+        <translation>Подготовка VPN-помощника...</translation>
+    </message>
+    <message>
+        <source>Installing VPN helper...</source>
+        <translation>Установка VPN-помощника...</translation>
+    </message>
+    <message>
         <source>Could not start the VPN helper</source>
         <translation>Не удалось запустить VPN-помощник</translation>
     </message>
