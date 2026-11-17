@@ -382,7 +382,9 @@ jobs:
             sleep 20
           done
           sudo apt-get update
-          sudo apt-get install -y g++-13
+          # Launchpad occasionally returns HTTP 503 for a package download.
+          # Retry the fetch; a persistent failure must still fail the build.
+          sudo apt-get -o Acquire::Retries=5 install -y g++-13
           # jammy also has GCC 11 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
           # clang prints the path through its own directory (/usr/bin/../lib/…),
@@ -646,6 +648,14 @@ jobs:
       - name: Build
         if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
+
+      - name: Verify core domain and DNS routing (Linux)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
+        shell: bash
+        run: |
+          cmake --build build --target test_domain_filter test_dns_routing -j 4
+          build/core/test_domain_filter
+          timeout 180 build/core/test_dns_routing --gtest_filter='*FreeTunnel*:*DnsRoutingCustomAction*:*NoProxy*:*NotConnectedNoKillSwitch*:*AppInitiatedDnsRouting*'
 
       # Whether the binary came out CET-marked. -fcf-protection reaches only what
       # FreeTunnel's own CMakeLists compiles, and the linker marks the image only
