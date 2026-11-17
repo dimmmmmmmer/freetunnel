@@ -63,6 +63,29 @@ priority, both split modes, forced application routes and explicit rejection.
 Linux build CI runs the domain-filter and relevant DNS-routing tests against
 the patched core.
 
+## Shared addresses and address-family availability
+
+The network audit on 2026-11-18 reproduced another routing defect: the core
+cached a hostname by destination address, port and application. A later flow
+from the same browser to another hostname on that shared CDN address could
+inherit the previous hostname's direct route before its own hostname was read.
+
+`12-current-connection-hostname.patch` prevents a new connection from treating
+that cached name as its identity. Scannable traffic waits for its own HTTP
+hostname, TLS SNI or supported QUIC hostname before applying domain rules.
+Explicit application routing and higher-priority IP rules retain their existing
+precedence. If no hostname can be extracted, IP/default rules apply; an older
+flow's cached name is not a fallback. This does not inspect encrypted DNS or
+separate multiple HTTP/2 origins multiplexed inside one encrypted connection.
+
+The same tests reproduced premature rejection when the selected route supported
+IPv6 but the other route did not. Classification now waits if either route can
+carry the address family, then checks the selected route before opening it.
+An unavailable selected route fails closed; it is never replaced with the other
+route. The native matrix covers IPv4/IPv6, both split modes, plain and priority
+rules, direct/VPN destinations, opaque traffic and asymmetric route availability.
+The patch is included in both desktop builds and the stable Android adapter.
+
 ## Decision
 
 Keep domain-based DNS routing and the existing Russian-sites bypass behavior. Do not

@@ -8,7 +8,8 @@
     "vendor/trusttunnel/06-android-application-routing.patch",
     "vendor/trusttunnel/07-preserve-connection-hostnames.patch",
     "vendor/trusttunnel/08-canonical-domain-routing.patch",
-    "vendor/trusttunnel/09-direct-dns-during-reconnect.patch"
+    "vendor/trusttunnel/09-direct-dns-during-reconnect.patch",
+    "vendor/trusttunnel/12-current-connection-hostname.patch"
   ],
   "abis": [
     "arm64-v8a",

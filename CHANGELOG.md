@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
+
 - Prevent mixed split-tunnel rules during live edits and connection setup on desktop.
 - Linux: preserve incoming UDP replies from services listening on all addresses and remove the blanket VPN bypass for outgoing connections using service source ports.
 - Keep bypass-domain DNS working during VPN reconnection while the kill switch continues to block VPN-domain DNS.
