@@ -53,10 +53,15 @@
              action = TDLA_SHUTDOWN;
          }
          domain_extractor->reset();
-@@ -951,6 +951,15 @@
+@@ -951,6 +951,20 @@
          return -1;
      }
 
++    if (upstream.get() == self->vpn->endpoint_upstream.get() && !self->endpoint_upstream_connected) {
++        log_conn(self, conn, dbg, "Selected VPN route is disconnected; refusing migration");
++        return -1;
++    }
++
 +    // The actual route is known only after inspecting this flow's hostname.
 +    // Never substitute the other route when this one lacks the address family.
 +    if (const auto *dst = std::get_if<SocketAddress>(&conn->addr.dst)) {
@@ -69,7 +74,7 @@
      log_conn(self, conn, dbg, "Migrating to {} upstream",
              (upstream.get() == self->vpn->endpoint_upstream.get())         ? "VPN endpoint"
                      : (upstream.get() == self->vpn->bypass_upstream.get()) ? "direct"
-@@ -1034,7 +1043,8 @@
+@@ -1034,7 +1048,8 @@
              || conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
          conn->action = request_result.action;
      } else if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst); dst != nullptr) {
@@ -79,7 +84,7 @@
          switch (filter_result.status) {
          case DFMS_DEFAULT:
              conn->action = request_result.action;
-@@ -1086,7 +1096,8 @@
+@@ -1086,7 +1101,8 @@
          VpnConnectAction action = VPN_CA_DEFAULT;
          // if the action was default, check if the address matches exclusions
          if (!conn->flags.test(CONNF_FORCIBLY_BYPASSED) && !conn->flags.test(CONNF_FORCIBLY_REDIRECTED)) {
@@ -89,7 +94,7 @@
              switch (filter_result.status) {
              case DFMS_DEFAULT:
                  // neither the domain name nor resolved address matched against exclusions,
-@@ -1169,7 +1180,7 @@
+@@ -1169,7 +1185,7 @@
      } else if (conn->flags.test(CONNF_FORCIBLY_REDIRECTED)) {
          action = VPN_CA_FORCE_REDIRECT;
      } else {
@@ -98,7 +103,7 @@
          switch (filter_result.status) {
          case DFMS_DEFAULT:
              // neither the domain name nor resolved address matched against exclusions,
-@@ -1256,22 +1267,14 @@
+@@ -1256,22 +1272,14 @@
          return false;
      }
 
@@ -129,7 +134,25 @@
      }
 
      if (upstream != nullptr && !upstream->ip_version_availability.test(*ipv)) {
-@@ -1764,7 +1767,11 @@
+@@ -1506,12 +1514,12 @@
+
+ bool Tunnel::should_complete_immediately(uint64_t client_id) const {
+     const VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, client_id);
+-    // In general mode, conection requests suspected to be to an exclusion host should be completed
+-    // immediately -- don't wait for recovery to bypass a connection. In selective mode, it's the opposite.
+-    // Connections to the plain DNS port should be completed immediately: PlainDnsManager should decide
+-    // whether to reject or bypass a plain DNS request.
++    // A local fake connection must be allowed to inspect its hostname in both
++    // modes: only then can it tell a direct site from a VPN site. Migration
++    // refuses a disconnected endpoint instead of falling back to direct.
++    // Selective-mode defaults and ordinary DNS also remain available locally.
+     return conn
+-            && (conn->flags.test(CONNF_SUSPECT_EXCLUSION) == (vpn->exclusions_mode == VPN_MODE_GENERAL)
++            && (conn->flags.test(CONNF_SUSPECT_EXCLUSION) || vpn->exclusions_mode == VPN_MODE_SELECTIVE
+                     || conn->addr.dstport() == utils::PLAIN_DNS_PORT_NUMBER);
+ }
+
+@@ -1764,7 +1772,11 @@
              conn->flags.reset(CONNF_SUSPECT_EXCLUSION);
              auto fallback_action = VPN_CA_DEFAULT;
              if (this->vpn->domain_filter.has_policy_rules()
@@ -142,7 +165,7 @@
                  fallback_action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
              }
              event->result = static_cast<int>(initiate_connection_migration(
-@@ -1875,7 +1882,7 @@
+@@ -1875,7 +1887,7 @@
          switch (this->icmp_manager.register_request(event->request)) {
          case IM_MSGS_PASS: {
              VpnConnectAction action = VPN_CA_DEFAULT;
@@ -153,18 +176,19 @@
                  break;
 --- a/core/test/test_dns_routing.cpp
 +++ b/core/test/test_dns_routing.cpp
-@@ -1474,3 +1474,76 @@
+@@ -1474,3 +1474,90 @@
                          CanonicalDnsSample{VPN_MODE_GENERAL, "@0:vpn.example @3:*.example", "vpn.example", true},
                          CanonicalDnsSample{VPN_MODE_SELECTIVE, "@0:vpn.example @3:*.example", "vpn.example", true}),
                  testing::Bool()));
 +
 +// Hostnames learned from one TCP flow are hints about an address, not the
 +// identity of every future connection to the same CDN address and application.
-+class FreeTunnelSharedAddress : public DnsRoutingBase,
-+                                public testing::WithParamInterface<std::tuple<bool, bool, bool, bool, bool, bool>> {};
++class FreeTunnelSharedAddress
++        : public DnsRoutingBase,
++          public testing::WithParamInterface<std::tuple<bool, bool, bool, bool, bool, bool, bool>> {};
 +
 +TEST_P(FreeTunnelSharedAddress, ClassifiesEachNewConnectionBeforeSendingPayload) {
-+    const auto [ipv6, selective, policy_rules, direct, opaque, other_available] = GetParam();
++    const auto [ipv6, selective, policy_rules, direct, opaque, other_available, endpoint_down] = GetParam();
 +    const auto mode = selective ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL;
 +    const std::string rules = policy_rules ? "@1:direct.example @0:vpn.example"
 +            : selective                    ? "vpn.example"
@@ -173,6 +197,12 @@
 +    vpn.exclusions_scannable_ports = ag::parse_scannable_ports("80,443").value();
 +    const SocketAddress shared(ipv6 ? "2001:db8::1" : "192.0.2.1", 80);
 +    const bool expected_direct = opaque ? selective : direct;
++    if (endpoint_down) {
++        vpn.kill_switch_on = true;
++        vpn.tunnel->on_before_endpoint_disconnect(redirect_upstream.get());
++        vpn.tunnel->upstream_handler(redirect_upstream, SERVER_EVENT_SESSION_CLOSED, nullptr);
++        vpn.tunnel->on_after_endpoint_disconnect(redirect_upstream.get());
++    }
 +    if (!other_available) {
 +        (expected_direct ? redirect_upstream : bypass_upstream)->ip_version_availability.reset();
 +    }
@@ -185,6 +215,10 @@
 +    ClientConnectRequest event = {id, IPPROTO_TCP, &src, &destination};
 +    vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
 +    const auto action = vpn.tunnel->finalize_connect_action({.id = id, .action = VPN_CA_DEFAULT, .appname = "browser"});
++    if (endpoint_down) {
++        ASSERT_TRUE(vpn.tunnel->should_complete_immediately(id))
++                << "Hostname classification must not wait for the VPN endpoint";
++    }
 +    vpn.tunnel->complete_connect_request(id, action);
 +    run_event_loop_once();
 +    ASSERT_TRUE(bypass_upstream->connections.empty()) << "Previous hostname caused a premature direct connection";
@@ -196,12 +230,15 @@
 +    ClientRead read = {id, reinterpret_cast<const uint8_t *>(request.data()), request.size(), 0};
 +    vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_READ, &read);
 +    EXPECT_EQ(expected_direct ? 1 : 0, bypass_upstream->connections.size());
-+    EXPECT_EQ(expected_direct ? 0 : 1, redirect_upstream->connections.size());
++    EXPECT_EQ(expected_direct || endpoint_down ? 0 : 1, redirect_upstream->connections.size());
++    if (endpoint_down && !expected_direct) {
++        EXPECT_LT(read.result, 0);
++    }
 +}
 +
 +INSTANTIATE_TEST_SUITE_P(FreeTunnel, FreeTunnelSharedAddress,
-+        testing::Combine(
-+                testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool()));
++        testing::Combine(testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(),
++                testing::Bool(), testing::Bool()));
 +
 +TEST_F(DnsRoutingBase, FreeTunnelUnavailableSelectedFamilyNeverFallsBackToOtherRoute) {
 +    for (bool selective : {false, true}) {

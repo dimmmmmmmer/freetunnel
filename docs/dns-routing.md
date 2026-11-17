@@ -84,6 +84,9 @@ carry the address family, then checks the selected route before opening it.
 An unavailable selected route fails closed; it is never replaced with the other
 route. The native matrix covers IPv4/IPv6, both split modes, plain and priority
 rules, direct/VPN destinations, opaque traffic and asymmetric route availability.
+During endpoint recovery, local hostname inspection remains available in both
+split modes: direct sites can connect, while VPN sites fail closed before any
+payload is forwarded.
 The patch is included in both desktop builds and the stable Android adapter.
 
 ## Decision
