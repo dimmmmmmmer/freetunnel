@@ -254,12 +254,14 @@ void QtTrustTunnelClient::storeExclusionsLocked(std::vector<std::string> exclusi
 
 void QtTrustTunnelClient::storeModeLocked(bool selective) {
     m_selectiveMode = selective;
-    if (m_config.has_value())
+    if (m_config.has_value()) {
         m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+        m_config->exclusions = exclusionsLocked();
+    }
 }
 
 void QtTrustTunnelClient::setVpnMode(bool selective) {
-    // On this thread only, for the order below; see setSplitRouting().
+    // Publish a complete policy on the owning thread.
     if (QThread::currentThread() != thread()) {
         QMetaObject::invokeMethod(this, [this, selective]() { setVpnMode(selective); },
                                   Qt::QueuedConnection);
@@ -269,27 +271,25 @@ void QtTrustTunnelClient::setVpnMode(bool selective) {
         std::lock_guard<std::mutex> lk(m_configMutex);
         storeModeLocked(selective);
     }
-    applyRoutingToSession(); // the core first, as in setSplitRouting()
-    // App rules read the mode the same way the routes and domains lists do, so
-    // it has to reach their snapshot too — otherwise switching mode would flip
-    // every list except this one.
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->selective = selective;
+    applyRoutingToSession();
 }
 
 void QtTrustTunnelClient::setAppRules(const QStringList &rules) {
     // Sanitized here rather than trusted from the IPC: this runs in the
     // elevated helper, and a rule that cannot match is better dropped than
     // carried into a routing decision.
-    const QStringList clean = freetunnel::sanitizedAppRules(rules);
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->rules = clean;
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, rules]() { setAppRules(rules); }, Qt::QueuedConnection);
+        return;
+    }
+    m_appRuleList = freetunnel::sanitizedAppRules(rules);
+    applyRoutingToSession();
 }
 
 void QtTrustTunnelClient::setSplitRouting(const QStringList &domains, bool selective,
                                           const QStringList &appRules) {
-    // The order of the two steps below is what keeps an edit safe, and it holds
-    // only if both run here, on the thread that owns the session.
+    // The config, application snapshot and version are published by one owner;
+    // asynchronous decisions are checked against that version on the core loop.
     if (QThread::currentThread() != thread()) {
         QMetaObject::invokeMethod(
                 this, [this, domains, selective, appRules]() {
@@ -308,26 +308,8 @@ void QtTrustTunnelClient::setSplitRouting(const QStringList &domains, bool selec
         storeExclusionsLocked(std::move(exclusions));
         storeModeLocked(selective);
     }
-    // A connection is routed in two places: the program rules decide it when it
-    // arrives, on the core wrapper's own thread, and the core applies the mode
-    // and the address rules when it completes the connection, on the core's
-    // thread, in the order its queue was filled. So the core is handed the new
-    // mode and addresses first, in one update, and the program rules change
-    // after: any connection decided by the new program rules is completed after
-    // the update, and takes the new mode with them. Taking the last program out
-    // of "Through VPN" is the case this is for; the other order would complete
-    // such a connection with no rule under the old selective mode, which sends it
-    // around the tunnel. What is left: a connection decided by the OLD program
-    // rules in the very moment of the change can still be completed under the
-    // new mode. That routes it as the old or the new settings would, or keeps it
-    // in the tunnel, except when one edit both turns "Through VPN" on and lists a
-    // program in it, as adding the first program with no addresses listed does:
-    // a connection that program starts in that same instant can leave the tunnel
-    // once. Nothing can change both places at once.
+    m_appRuleList = clean;
     applyRoutingToSession();
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->rules = clean;
-    m_appRules->selective = selective;
 }
 
 void QtTrustTunnelClient::applyRoutingToSession() {
@@ -337,37 +319,31 @@ void QtTrustTunnelClient::applyRoutingToSession() {
                                   Qt::QueuedConnection);
         return;
     }
-    if (!m_client)
-        return; // the next session is built from the working set, which has it
     Routing wanted;
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         wanted.mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
         wanted.exclusions = exclusionsLocked();
     }
-    // The GUI sends every list again after any split-tunnelling edit, a program
-    // rule included. The core resets every connection it carries when it takes
-    // new exclusions, so passing on one that changes nothing would cut them all
-    // for an edit that did not concern them.
-    if (wanted == m_sessionRouting)
+    wanted.appRules = m_appRuleList;
+    wanted.generation = m_publishedRouting.generation;
+    if (wanted != m_publishedRouting) {
+        ++wanted.generation;
+        // Publish mode, app rules and their version in one critical section.
+        // The core validates that version when it consumes the asynchronous
+        // decision, so neither an old nor a future snapshot can leak traffic.
+        std::lock_guard<std::mutex> lk(m_appRules->mutex);
+        m_appRules->rules = wanted.appRules;
+        m_appRules->selective = wanted.mode == ag::VPN_MODE_SELECTIVE;
+        m_appRules->generation = wanted.generation;
+        m_publishedRouting = wanted;
+    }
+    if (!m_client || wanted == m_sessionRouting)
         return;
-    // Outside the lock: the core takes its own, and m_configMutex is never held
-    // across a call into it.
-    //
-    // The core keeps one pending update, not a queue: vpn_update_exclusions()
-    // holds its task in a single slot, so an update handed over before the core's
-    // loop has run the previous one cancels that one. Two edits in quick
-    // succession (a burst of commands from the GUI, or an edit right after the
-    // hand-over at adoption) can reach the session as the second alone. For what
-    // the session ends up routing by, that loses nothing: every update carries
-    // the whole of it, the mode and the full list, never just what one edit
-    // changed, and m_sessionRouting is the last update handed over, which is the
-    // one the core keeps, so the check above stays right. What it can cost is
-    // the order the program rules rely on (setSplitRouting()): a connection
-    // decided by the overtaken edit's program rules is completed under the mode
-    // from before it. That is the same instant an edit already has, and it needs
-    // two edits within one turn of the core's loop.
-    m_client->update_exclusions(wanted.mode, wanted.exclusions);
+    // Always submit the complete snapshot: the native queue coalesces updates.
+    // The core compares the applied mode/domains before deciding to reset flows;
+    // an app-only edit cannot accidentally cancel a pending domain/mode edit.
+    m_client->update_routing(wanted.mode, wanted.exclusions, wanted.generation);
     m_sessionRouting = std::move(wanted);
 }
 
@@ -555,6 +531,10 @@ void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excl
 }
 
 void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, exclusions]() { setExtraExclusions(exclusions); }, Qt::QueuedConnection);
+        return;
+    }
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         storeExclusionsLocked(exclusions);

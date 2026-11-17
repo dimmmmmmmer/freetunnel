@@ -47,6 +47,7 @@ struct TrustTunnelConfig {
     } location;
     std::string exclusions;
     VpnMode mode = VPN_MODE_GENERAL;
+    uint64_t routing_generation = 0;
     bool killswitch_enabled = false;
     std::string killswitch_allow_ports;
     std::string log_file_path;

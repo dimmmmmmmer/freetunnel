@@ -97,6 +97,13 @@ public:
                                                            std::string(exclusions));
     }
 
+    void update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation)
+    {
+        if (m_running)
+            mockcore::Controller::instance().onUpdateExclusions(m_id, static_cast<int>(mode),
+                                                               std::string(exclusions), generation);
+    }
+
     void notify_network_change(VpnNetworkState state)
     {
         mockcore::Controller::instance().onNetworkChange(m_id, state);
@@ -139,6 +146,7 @@ private:
         snap.client_random_mask = cfg.location.client_random_mask;
         snap.killswitch_enabled = cfg.killswitch_enabled;
         snap.mode = static_cast<int>(cfg.mode);
+        snap.routing_generation = cfg.routing_generation;
         snap.loglevel = static_cast<int>(cfg.loglevel);
         snap.exclusions = cfg.exclusions;
         snap.ssl_session_storage_path = cfg.ssl_session_storage_path;

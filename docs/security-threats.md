@@ -654,11 +654,14 @@ FreeTunnel's own.
   - its tunnel device keeps the routes, and on Windows the filters that block
     untunnelled traffic are installed with that device and removed with it, so
     what the block covers is exactly how long one session lasts;
-  - the address rules and the mode are handed to the running session (the
-    core's own `vpn_update_exclusions()`, reached through FreeTunnel's third
-    vendor patch) in one update per edit, and before the program rules change,
-    so that no connection decided by the new program rules is completed under
-    the old mode;
+  - live domain, mode and application edits carry a common generation. The
+    app callback reads its rules and generation together; the core checks that
+    generation when consuming the asynchronous decision and rejects mismatches.
+    Each queued update carries the full mode/domain snapshot, including app-only
+    edits, so coalescing updates cannot lose a pending mode change. App-only
+    edits preserve established connections. Postponed decisions from recovery
+    are rejected when the policy changes. Domain/mode edits also reset direct
+    connections while the VPN endpoint is disconnected;
   - with the kill switch on, a first connect that fails stays in the core's
     recovery loop inside its session instead of ending it after a few attempts,
     so it no longer passes through FreeTunnel's own backoff, which took the
@@ -674,19 +677,14 @@ FreeTunnel's own.
     its address before a session can start) all leave traffic unblocked.
   - **The helper quits with the GUI**, and the block with the session it holds,
     so that an elevated process never outlives the app that started it.
-  - **An instant per edit.** Program rules are decided as a connection arrives
-    and the mode when the core completes it, and the two cannot change together:
-    - an edit that turns "Through VPN" on and lists a program in the same step,
-      as adding the first program with no addresses listed does, can let a
-      connection that program starts in that instant leave the tunnel;
-    - so can taking the last program out of "Through VPN" while a session is
-      still being built, in the moment before the new session is handed the
-      change;
-    - and so can two edits that land before the core has taken the first: it
-      keeps only the latest update, which carries the whole of the rules and the
-      mode, so the session ends up routed by the second edit, but a connection
-      the first edit's program rules decided in between is completed under the
-      mode from before it.
+
+A connection attempted during a policy change can be rejected and require the
+application to retry; it is never completed using app rules from one generation
+and core routing from another. This applies during session construction as well:
+the initial config carries its version and adoption submits any newer snapshot.
+The version check also precedes recovery fallbacks when the kill switch is off.
+These guarantees cover the desktop Qt wrapper; they do not turn a session-based
+kill switch into a system-wide firewall when no VPN session exists.
 
 **Why:** the block covers exactly how long one session lasts, so a session must
 not be rebuilt for something it can take while it runs. That is why edits go to
