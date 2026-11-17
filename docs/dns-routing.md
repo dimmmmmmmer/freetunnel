@@ -142,3 +142,26 @@ docker run --rm --network none --cap-add NET_ADMIN --dns 192.0.2.53 \
 `NET_ADMIN` is used only to add `192.0.2.53/32` and `192.0.2.54/32` to this
 container's loopback: upstream treats `127/8` DNS addresses specially. Never use
 host networking for this probe. No TUN device or privileged container is needed.
+
+
+## Direct connections during endpoint recovery
+
+An isolated native regression test reproduced unconditional closure of direct
+TCP/UDP connections in `Tunnel::on_before_endpoint_disconnect`. This happened
+even though their direct upstream and physical network were still usable.
+`13-preserve-direct-recovery.patch` retains direct connections (including a
+pending direct connect) while closing endpoint-dependent and unresolved flows.
+It marks the endpoint unavailable before callbacks can initiate another flow.
+
+Tests cover both IP families, both split modes, TCP/UDP, pending and established
+direct connections, bidirectional payload while the endpoint is down, repeated
+recovery, and explicit teardown. Existing DNS and shared-address tests continue
+to verify that VPN traffic does not fall back to the direct upstream. Desktop
+and Android builds apply the same patch.
+
+This fixes recovery inside a running core session. Manually switching servers
+still recreates the session and is a separate remaining task: it must preserve
+the listener, direct sockets and routing protection while updating endpoint
+credentials and OS routes. A blanket traffic block during that handover is not
+acceptable because direct connections must continue. A physical uplink loss
+can independently interrupt those connections; this patch cannot prevent that.

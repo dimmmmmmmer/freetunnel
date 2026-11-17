@@ -1,0 +1,125 @@
+--- a/core/src/tunnel.cpp
++++ b/core/src/tunnel.cpp
+@@ -1437,6 +1437,7 @@
+     if (this->vpn->endpoint_upstream.get() != upstream) {
+         return;
+     }
++    this->endpoint_upstream_connected = false;
+     this->dns_resolver->stop_resolving();
+     this->repeat_exclusions_resolve_task.reset();
+
+@@ -1447,12 +1448,15 @@
+
+     for (uint64_t id : ids) {
+         VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, id);
+-        if (conn != nullptr) {
++        // Only the endpoint is going away. Keep independently routed sockets
++        // alive, including direct connections still waiting for their peer.
++        // Unclassified/migrating flows must not inherit a direct route here.
++        if (conn != nullptr
++                && (conn->upstream.lock() != this->vpn->bypass_upstream || conn->state == CONNS_CONNECTED_MIGRATING
++                        || conn->state == CONNS_WAITING_RESPONSE_MIGRATING)) {
+             close_client_side_connection(this, conn, -1, false);
+         }
+     }
+-
+-    this->endpoint_upstream_connected = false;
+ }
+
+ void Tunnel::on_after_endpoint_disconnect(ServerUpstream *upstream) { // NOLINT(readability-make-member-function-const)
+--- a/core/test/test_tunnel.cpp
++++ b/core/test/test_tunnel.cpp
+@@ -109,6 +109,7 @@
+     };
+
+     std::unordered_map<size_t, Connection> connections;
++    size_t received_bytes = 0;
+
+     TestListener() = default;
+     ~TestListener() override = default;
+@@ -137,6 +138,7 @@
+     }
+
+     ssize_t send(uint64_t, const uint8_t *, size_t length) override {
++        received_bytes += length;
+         return static_cast<ssize_t>(length);
+     }
+
+@@ -1036,3 +1038,77 @@
+
+     ASSERT_EQ(pending_count(), 3) << "Only max_queries=3 resolves must be queued out of 10 exclusions";
+ }
++
++// Endpoint recovery must affect only flows that depend on that endpoint.
++// The direct stream/datagram socket and its client-side connection stay alive.
++class FreeTunnelDirectRecovery : public TunnelTest,
++                                 public testing::WithParamInterface<std::tuple<bool, bool, bool, bool>> {};
++
++TEST_P(FreeTunnelDirectRecovery, KeepsEstablishedDirectTrafficAcrossEndpointRecovery) {
++    const auto [ipv6, udp, selective, pending_direct] = GetParam();
++    vpn.kill_switch_on = true;
++    connection_protocol = udp ? IPPROTO_UDP : IPPROTO_TCP;
++    src = SocketAddress(ipv6 ? "[2001:db8::2]:42000" : "192.0.2.2:42000");
++    dst = SocketAddress(ipv6 ? "[2001:db8::1]:777" : "192.0.2.1:777");
++    vpn.exclusions_mode = selective ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL;
++    ASSERT_TRUE(vpn.domain_filter.update_exclusions(selective ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL,
++            selective ? "198.51.100.1 2001:db8:1::1" : "192.0.2.1 2001:db8::1"));
++    uint64_t direct_id = vpn.listener_conn_id_generator.get();
++    ASSERT_NO_FATAL_FAILURE(raise_client_connection(direct_id));
++    auto action = tun.finalize_connect_action({direct_id, VPN_CA_DEFAULT, "server", -1});
++    tun.complete_connect_request(direct_id, action);
++    ASSERT_EQ(1, bypass_upstream->connections.size());
++    uint64_t direct_server_id = bypass_upstream->connections.back();
++    if (!pending_direct) {
++        tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &direct_server_id);
++        tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &direct_id);
++    }
++
++    for (int attempt = 0; attempt < 2; ++attempt) {
++        dst = SocketAddress(ipv6 ? "[2001:db8:1::1]:777" : "198.51.100.1:777");
++        uint64_t vpn_id = vpn.listener_conn_id_generator.get();
++        ASSERT_NO_FATAL_FAILURE(raise_client_connection(vpn_id));
++        action = tun.finalize_connect_action({vpn_id, VPN_CA_DEFAULT, "server", -1});
++        tun.complete_connect_request(vpn_id, action);
++        ASSERT_EQ(1, redirect_upstream->connections.size());
++        uint64_t vpn_server_id = redirect_upstream->connections.back();
++        tun.upstream_handler(redirect_upstream, SERVER_EVENT_CONNECTION_OPENED, &vpn_server_id);
++        tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &vpn_id);
++
++        tun.on_before_endpoint_disconnect(redirect_upstream.get());
++        tun.upstream_handler(redirect_upstream, SERVER_EVENT_SESSION_CLOSED, nullptr);
++        tun.on_after_endpoint_disconnect(redirect_upstream.get());
++        ASSERT_FALSE(tun.endpoint_upstream_connected);
++        if (pending_direct && attempt == 0) {
++            // A direct connect completing while the endpoint is down is valid too.
++            tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &direct_server_id);
++            ASSERT_EQ(client_listener->connections.at(direct_id).result, CCR_PASS);
++            tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &direct_id);
++        }
++        ASSERT_EQ(1, client_listener->connections.count(direct_id));
++        ASSERT_EQ(0, client_listener->connections.count(vpn_id));
++        ASSERT_EQ(std::vector<uint64_t>{direct_server_id}, bypass_upstream->connections);
++        ASSERT_TRUE(redirect_upstream->connections.empty());
++
++        const uint8_t payload[] = {'d', 'i', 'r', 'e', 'c', 't'};
++        ClientRead upload{direct_id, payload, sizeof(payload), 0};
++        tun.listener_handler(client_listener, CLIENT_EVENT_READ, &upload);
++        EXPECT_EQ(sizeof(payload), upload.result);
++        EXPECT_EQ(sizeof(payload), bypass_upstream->last_send);
++        const size_t received = client_listener->received_bytes;
++        ServerReadEvent download{direct_server_id, payload, sizeof(payload), 0};
++        tun.upstream_handler(bypass_upstream, SERVER_EVENT_READ, &download);
++        EXPECT_EQ(received + sizeof(payload), client_listener->received_bytes);
++        EXPECT_TRUE(redirect_upstream->connections.empty());
++
++        tun.upstream_handler(redirect_upstream, SERVER_EVENT_SESSION_OPENED, nullptr);
++        EXPECT_EQ(1, client_listener->connections.count(direct_id));
++    }
++    // Explicit disconnect/teardown must still close the surviving direct flow.
++    tun.reset_connections(client_listener.get());
++    EXPECT_TRUE(client_listener->connections.empty());
++    EXPECT_TRUE(bypass_upstream->connections.empty());
++}
++
++INSTANTIATE_TEST_SUITE_P(FreeTunnel, FreeTunnelDirectRecovery,
++        testing::Combine(testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool()));

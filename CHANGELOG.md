@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
+
 - Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
 
 - Prevent mixed split-tunnel rules during live edits and connection setup on desktop.
