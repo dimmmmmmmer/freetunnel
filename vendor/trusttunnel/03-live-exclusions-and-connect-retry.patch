@@ -43,10 +43,10 @@
 +    // to build the next one. Errors the core treats as final (authentication,
 +    // the server's certificate) still end it. Without the kill switch the core's
 +    // default stays: a session that never came up ends, and the app says so and
-+    // starts over. One of the core's transitions under this policy, the network
-+    // coming back before the first connect, goes through retry_connect(), which
-+    // asserts that the default policy is in use; it is harmless where NDEBUG is
-+    // defined, as in release builds, and aborts a build without it.
++    // starts over. Recovery must also handle a network that returns before
++    // the first successful connection. The WAITING_FOR_NETWORK transition
++    // must preserve this policy instead of entering the finite-attempt path
++    // (see the in-session endpoint/recovery patch).
 +    if (m_config.killswitch_enabled) {
 +        parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;
 +    }
