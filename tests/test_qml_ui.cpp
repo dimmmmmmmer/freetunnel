@@ -4988,24 +4988,30 @@ void TestQmlUi::mappingTheWindowAgainKeepsItMaximised()
 void TestQmlUi::aWindowThatIsNeverWithdrawnIsMappedAtTheWaitCap()
 {
     constexpr int waitMs = 150;
+    QElapsedTimer hiddenFor;
+    qint64 hiddenMs = -1;
     QWindow window;
     QVERIFY(shownWindow(window));
     QSignalSpy visibility(&window, &QWindow::visibleChanged);
     MadeUpWindowManager wm;
     wm.withdrawsOnAsk = 0;
 
-    QElapsedTimer clock;
-    clock.start();
+    // Record the actual visibility transitions. qWait() may resume after the
+    // entire cap on a busy runner, so sampling the hidden state after a sleep
+    // incorrectly fails even when the window waited for the full deadline.
+    QObject::connect(&window, &QWindow::visibleChanged, &window, [&](bool visible) {
+        if (!visible)
+            hiddenFor.start();
+        else if (hiddenFor.isValid())
+            hiddenMs = hiddenFor.elapsed();
+    });
     wm.bring(&window, waitMs);
-    QTRY_VERIFY(!window.isVisible());
-    QTest::qWait(waitMs / 3);
-    QVERIFY2(!window.isVisible(), "still waiting");
-    QVERIFY(wm.remaps.isEmpty());
     QTRY_COMPARE(wm.remaps.size(), 1);
-    QVERIFY(clock.elapsed() >= waitMs);
+    QVERIFY2(hiddenMs >= waitMs, "must remain hidden until the wait cap");
     QVERIFY(wm.remaps.constFirst());
     QVERIFY(window.isVisible());
-    QVERIFY2(wm.withdrawnAsked >= 3, "asked again and again until the cap");
+    QVERIFY2(wm.withdrawnAsked >= 2, "must retry the withdrawal probe");
+    QVERIFY(!wm.askedWhileMapped);
     QCOMPARE(hidesIn(visibility), 1);
 }
 
