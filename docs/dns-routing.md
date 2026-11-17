@@ -155,7 +155,9 @@ It marks the endpoint unavailable before callbacks can initiate another flow.
 
 Tests cover both IP families, both split modes, TCP/UDP, pending and established
 direct connections, bidirectional payload while the endpoint is down, repeated
-recovery, and explicit teardown. Existing DNS and shared-address tests continue
+recovery, physical-network changes, and explicit teardown. Network-change
+notifications still reset connections so sockets bound to an old interface do
+not stall applications until their TCP timeout. Existing DNS and shared-address tests continue
 to verify that VPN traffic does not fall back to the direct upstream. Desktop
 and Android builds apply the same patch.
 
