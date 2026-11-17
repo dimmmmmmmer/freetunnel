@@ -1,6 +1,6 @@
 --- a/net/src/os_tunnel_linux.cpp
 +++ b/net/src/os_tunnel_linux.cpp
-@@ -14,16 +14,23 @@
+@@ -14,17 +14,25 @@
  static constexpr auto TABLE_ID = 880;
  // Local replies to connections initiated outside the tunnel must keep their
  // original sockets. Proxying them creates a different UDP source port and
@@ -19,29 +19,33 @@
 +add rule inet freetunnel_reply output meta l4proto udp ct direction reply return
 +add rule inet freetunnel_reply output meta l4proto udp counter meta mark set meta mark | 0x00400000
  )nft";
++// Legacy source-port exceptions are retained only for stale-rule cleanup.
  static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
  static constexpr std::string_view VNC_PORTS = "5900-5920";
  
  static bool sys_cmd_bool(std::string cmd) {
      cmd += " 2>&1";
-@@ -304,20 +311,22 @@
+     dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
+@@ -302,22 +310,20 @@
+         }
+     }
  
      // Apply routing rules (in netns if specified)
      if (m_sport_supported) {
          if (!ipv4_routes.empty()) {
-             if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
-                     || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", VNC_PORTS))
+-            if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", VNC_PORTS))
 -                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
-+                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))
++            if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))
 +                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add {}", UDP_INITIAL_RULE))) {
                  return false;
              }
          }
          if (!ipv6_routes.empty()) {
-             if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
-                     || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", VNC_PORTS))
+-            if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", VNC_PORTS))
 -                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
-+                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))
++            if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))
 +                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add {}", UDP_INITIAL_RULE))) {
                  return false;
              }
@@ -49,7 +53,7 @@
      }
      return true;
  }
-@@ -372,12 +381,15 @@
+@@ -372,12 +378,15 @@
          warnlog(logger, "System DNS servers are set but not applied, retrying");
          std::this_thread::sleep_for(Secs{1});
      }

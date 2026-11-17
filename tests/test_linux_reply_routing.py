@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shlex
 import socket
+import struct
 import subprocess  # nosec B404 - fixed argv in disposable network namespaces, never a shell
 import sys
 import threading
@@ -16,10 +17,10 @@ def run(*args):
     return subprocess.run(args, check=True, text=True, capture_output=True).stdout  # nosec B603 - test-owned argv only
 
 
-def exercise(peer_pid, ipv6, udp, expect_reply, wildcard=False):
+def exercise(peer_pid, ipv6, udp, expect_reply, wildcard=False, server_port=None):
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
     server_ip, peer_ip = ("2001:db8:1::1", "2001:db8:1::2") if ipv6 else ("192.0.2.1", "192.0.2.2")
-    port = 18081 if udp else 18080
+    port = server_port or (18081 if udp else 18080)
     server = socket.socket(family, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.settimeout(2)
@@ -71,13 +72,13 @@ except TimeoutError:
           f"{'reply preserved' if expect_reply else 'interception reproduced'}", flush=True)
 
 
-def outgoing_capture():
+def outgoing_capture(low_port_device="tun0"):
     # Inspect real packets after OUTPUT, not `ip route get`, which only sees the
     # initial source-selection route. Reuse the incoming service's local port
     # too: a reply exception must never become an exemption for the whole port.
     for family, address in [(socket.AF_INET, "192.0.2.2"), (socket.AF_INET6, "2001:db8:1::2")]:
-        for local_port, bound_interface in [(0, None), (18081, None), (0, "uplink")]:
-            expected_device = bound_interface or "tun0"
+        for local_port, bound_interface in [(0, None), (18081, None), (443, None), (5901, None), (0, "uplink")]:
+            expected_device = bound_interface or (low_port_device if local_port in (443, 5901) else "tun0")
             payload = b"freetunnel-outgoing-capture-check"
             with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3)) as capture:
                 capture.bind((expected_device, 0))
@@ -105,6 +106,49 @@ def outgoing_capture():
                             raise AssertionError(f"Outgoing UDP missing from {expected_device}")
             print(f"IPv{4 if family == socket.AF_INET else 6} UDP port={local_port} "
                   f"bound={bound_interface}: captured on {expected_device}", flush=True)
+
+
+def outgoing_tcp_capture(device="tun0"):
+    for family, address in [(socket.AF_INET, "192.0.2.2"), (socket.AF_INET6, "2001:db8:1::2")]:
+        for port in (443, 5901):
+            with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3)) as capture:
+                capture.bind((device, 0))
+                capture.settimeout(2)
+                with socket.socket(family, socket.SOCK_STREAM) as outgoing:
+                    outgoing.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    outgoing.bind(("0.0.0.0" if family == socket.AF_INET else "::", port))  # nosec B104 - Isolated test.
+                    outgoing.setblocking(False)
+                    outgoing.connect_ex((address, 20000))
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        packet = capture.recv(4096)
+                        version = packet[14] >> 4
+                        offset = 14 + ((packet[14] & 15) * 4 if version == 4 else 40)
+                        protocol = packet[23] if version == 4 else packet[20]
+                        if protocol == socket.IPPROTO_TCP and struct.unpack_from("!HH", packet, offset) == (port, 20000):
+                            break
+                    else:
+                        raise AssertionError(f"TCP SYN missing from {device}")
+            print(f"IPv{4 if family == socket.AF_INET else 6} TCP source port {port}: captured on {device}", flush=True)
+
+
+def forwarded_capture(peer):
+    run("sysctl", "-qw", "net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1")
+    for family, address, gateway in [(socket.AF_INET, "198.51.100.2", "192.0.2.1"),
+                                     (socket.AF_INET6, "2001:db8:2::2", "2001:db8:1::1")]:
+        run(*peer, "ip", *(["-6"] if family == socket.AF_INET6 else []), "route", "add", address, "via", gateway)
+        with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3)) as capture:
+            capture.bind(("tun0", 0))
+            capture.settimeout(2)
+            program = "import socket,sys; s=socket.socket(int(sys.argv[1]),socket.SOCK_DGRAM); s.sendto(b'forwarded-udp-capture',(sys.argv[2],20001))"
+            run(*peer, sys.executable, "-c", program, str(int(family)), address)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                if b"forwarded-udp-capture" in capture.recv(4096):
+                    break
+            else:
+                raise AssertionError("Forwarded UDP escaped TUN")
+        print(f"IPv{4 if family == socket.AF_INET else 6} forwarded UDP: captured on tun0", flush=True)
 
 
 def isolated(wildcard=False):
@@ -158,6 +202,17 @@ def isolated(wildcard=False):
             for udp in [False, True]:
                 exercise(pid, v6, udp, False, wildcard)
 
+        # Reproduce the old source-port bypass with actual outgoing packets,
+        # then remove the stale rules exactly as tunnel teardown does.
+        for family in [[], ["-6"]]:
+            for ports in ("1-1024", "5900-5920"):
+                run("ip", *family, "rule", "add", "prio", "30800", "sport", ports, "lookup", "main")
+        outgoing_tcp_capture("uplink")
+        outgoing_capture("uplink")
+        for family in [[], ["-6"]]:
+            for ports in ("1-1024", "5900-5920"):
+                run("ip", *family, "rule", "del", "prio", "30800", "sport", ports, "lookup", "main")
+
         # Read the exact shipped rules, not a copy maintained only by the test.
         patch = (Path(__file__).resolve().parents[1] / "vendor/trusttunnel/10-wildcard-udp-replies.patch").read_text()
         # This patch contains the complete resulting ruleset as context/additions.
@@ -175,7 +230,13 @@ def isolated(wildcard=False):
         for v6 in [False, True]:
             for udp in [False, True]:
                 exercise(pid, v6, udp, True, wildcard)
+        for port in (443, 5901):
+            for v6 in (False, True):
+                for udp in (False, True):
+                    exercise(pid, v6, udp, True, wildcard, port)
+        outgoing_tcp_capture()
         outgoing_capture()
+        forwarded_capture(peer)
         # NOTRACK must not turn into an accidental bypass of the capture rule.
         run("nft", "add chain inet unrelated raw { type filter hook output priority raw; policy accept; }")
         run("nft", "add rule inet unrelated raw udp dport 20000 notrack")
@@ -186,6 +247,10 @@ def isolated(wildcard=False):
         run("nft", "delete table inet freetunnel_reply")
         assert "unrelated" in run("nft", "list tables")
         assert "freetunnel_reply" not in run("nft", "list tables")
+        # During teardown, capture must remain fail-closed until the TUN routes
+        # themselves are removed. The initial UDP exception is already gone.
+        outgoing_tcp_capture()
+        outgoing_capture()
         print("Outgoing capture and unrelated firewall table preserved; cleanup passed", flush=True)
     finally:
         os.close(ready_r)

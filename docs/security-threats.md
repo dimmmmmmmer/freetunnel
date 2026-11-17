@@ -700,6 +700,8 @@ address, so conntrack no longer recognizes the packet as an incoming flow's
 reply. Source-port exemptions cannot safely distinguish that reply from a new
 outgoing connection using the same port.
 
+The old blanket exceptions for source ports 1–1024 and 5900–5920 are removed;
+incoming service replies are identified by connection direction instead.
 The initial lookup for local, unmarked UDP uses the normal routing table.
 The nftables OUTPUT route chain then marks non-reply UDP for the existing TUN
 routing table. Replies retain the incoming-reply mark and their physical source
@@ -711,7 +713,9 @@ OUTPUT capture chain.
 `tests/test_linux_reply_routing.py` checks real reply traffic for both explicit
 and wildcard binds. It also captures actual outgoing packets, including a new
 flow on the incoming service's port, connected UDP sends, untracked UDP and
-core-style interface-bound sockets. A plain `ip route get` only shows the initial
+core-style interface-bound sockets. Outgoing TCP/UDP on service ports is
+checked before and after removing the legacy source-port exemptions; forwarded
+UDP and capture during teardown are checked too. A plain `ip route get` only shows the initial
 lookup and cannot verify the subsequent OUTPUT reroute.
 
 ### Server latency probes
