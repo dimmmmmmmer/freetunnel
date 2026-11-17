@@ -4,10 +4,12 @@ import ctypes
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess  # nosec B404 - fixed argv in disposable network namespaces, never a shell
 import sys
 import threading
+import time
 
 
 def run(*args):
@@ -69,6 +71,42 @@ except TimeoutError:
           f"{'reply preserved' if expect_reply else 'interception reproduced'}", flush=True)
 
 
+def outgoing_capture():
+    # Inspect real packets after OUTPUT, not `ip route get`, which only sees the
+    # initial source-selection route. Reuse the incoming service's local port
+    # too: a reply exception must never become an exemption for the whole port.
+    for family, address in [(socket.AF_INET, "192.0.2.2"), (socket.AF_INET6, "2001:db8:1::2")]:
+        for local_port, bound_interface in [(0, None), (18081, None), (0, "uplink")]:
+            expected_device = bound_interface or "tun0"
+            payload = b"freetunnel-outgoing-capture-check"
+            with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3)) as capture:
+                capture.bind((expected_device, 0))
+                capture.settimeout(2)
+                with socket.socket(family, socket.SOCK_DGRAM) as outgoing:
+                    outgoing.setsockopt(socket.SOL_SOCKET, socket.SO_MARK, 0x01000000)
+                    if bound_interface:
+                        # The core protects its direct/endpoint sockets this way.
+                        outgoing.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, bound_interface.encode() + b"\0")
+                    outgoing.bind(("0.0.0.0" if family == socket.AF_INET else "::", local_port))  # nosec B104 - Isolated test network.
+                    # Test both sendto and repeated sends on a connected socket;
+                    # the latter can reuse a cached initial route.
+                    for connected in (False, True, True):
+                        if connected:
+                            outgoing.connect((address, 20000))
+                            outgoing.send(payload)
+                        else:
+                            outgoing.sendto(payload, (address, 20000))
+                        deadline = time.monotonic() + 2
+                        while time.monotonic() < deadline:
+                            packet = capture.recv(4096)
+                            if payload in packet:
+                                break
+                        else:
+                            raise AssertionError(f"Outgoing UDP missing from {expected_device}")
+            print(f"IPv{4 if family == socket.AF_INET else 6} UDP port={local_port} "
+                  f"bound={bound_interface}: captured on {expected_device}", flush=True)
+
+
 def isolated(wildcard=False):
     # The outer unshare creates a user namespace too: no host root or network
     # changes are needed. A second network namespace supplies the remote peer.
@@ -79,6 +117,16 @@ def isolated(wildcard=False):
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.unshare(0x40000000) != 0:  # CLONE_NEWNET
             os._exit(3)
+        # Keep a receiver open for direct core-style probes. Otherwise the peer
+        # sends ICMP port-unreachable, making later connected sends fail even
+        # though their routing is correct.
+        sinks = []
+        for family, address in [(socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")]:  # nosec B104 - Isolated test peer.
+            sink = socket.socket(family, socket.SOCK_DGRAM)
+            if family == socket.AF_INET6:
+                sink.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            sink.bind((address, 20000))
+            sinks.append(sink)
         os.write(ready_w, b"ready")
         os.close(ready_w)
         threading.Event().wait(120)
@@ -111,20 +159,29 @@ def isolated(wildcard=False):
                 exercise(pid, v6, udp, False, wildcard)
 
         # Read the exact shipped rules, not a copy maintained only by the test.
-        patch = (Path(__file__).resolve().parents[1] / "vendor/trusttunnel/05-linux-incoming-replies.patch").read_text()
-        added = "\n".join(line[1:] for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++"))
-        rules = re.search(r'REPLY_RULESET = R"nft\((.*?)\)nft"', added, re.S).group(1)
-        mark = re.search(r'REPLY_MARK = "([^"]+)"', added).group(1)
+        patch = (Path(__file__).resolve().parents[1] / "vendor/trusttunnel/10-wildcard-udp-replies.patch").read_text()
+        # This patch contains the complete resulting ruleset as context/additions.
+        # Patch verification checks that the context matches the pinned core.
+        resulting = "\n".join(line[1:] for line in patch.splitlines()
+                              if line.startswith(("+", " ")) and not line.startswith("+++"))
+        rules = re.search(r'REPLY_RULESET = R"nft\((.*?)\)nft"', resulting, re.S).group(1)
+        mark = re.search(r'REPLY_MARK = "([^"]+)"', resulting).group(1)
+        initial = shlex.split(re.search(r'UDP_INITIAL_RULE =\s*"([^"]+)"', resulting).group(1))
         run("nft", "add table inet unrelated")
         run("nft", rules)
         for family in [[], ["-6"]]:
             run("ip", *family, "rule", "add", "prio", "30799", "fwmark", mark, "lookup", "main")
+            run("ip", *family, "rule", "add", *initial)
         for v6 in [False, True]:
             for udp in [False, True]:
                 exercise(pid, v6, udp, True, wildcard)
-        for family, address in [([], "192.0.2.2"), (["-6"], "2001:db8:1::2")]:
-            route = run("ip", *family, "route", "get", address)
-            assert "dev tun0" in route, route  # new outgoing connections stay intercepted
+        outgoing_capture()
+        # NOTRACK must not turn into an accidental bypass of the capture rule.
+        run("nft", "add chain inet unrelated raw { type filter hook output priority raw; policy accept; }")
+        run("nft", "add rule inet unrelated raw udp dport 20000 notrack")
+        outgoing_capture()
+        for family in [[], ["-6"]]:
+            run("ip", *family, "rule", "del", *initial)
             run("ip", *family, "rule", "del", "prio", "30799", "fwmark", mark, "lookup", "main")
         run("nft", "delete table inet freetunnel_reply")
         assert "unrelated" in run("nft", "list tables")

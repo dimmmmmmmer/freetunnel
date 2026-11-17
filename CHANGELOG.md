@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Linux: preserve incoming UDP replies from services listening on all addresses, while keeping new outgoing UDP under the VPN routing rules.
 - Keep ordinary DNS on its domain's direct or VPN route regardless of letter case, a trailing root dot or application routing rules.
 - macOS and Linux: install the VPN helper once, then connect and apply signed helper updates without repeated administrator prompts.
 - Documented and tested upstream DNS routing in full, selective and bypass modes.
