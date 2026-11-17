@@ -6,7 +6,8 @@
     "vendor/trusttunnel/02-connect-request-handler.patch",
     "vendor/trusttunnel/04-priority-geo-rules.patch",
     "vendor/trusttunnel/06-android-application-routing.patch",
-    "vendor/trusttunnel/07-preserve-connection-hostnames.patch"
+    "vendor/trusttunnel/07-preserve-connection-hostnames.patch",
+    "vendor/trusttunnel/08-canonical-domain-routing.patch"
   ],
   "abis": [
     "arm64-v8a",

@@ -647,6 +647,14 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
 
+      - name: Verify core domain and DNS routing (Linux)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
+        shell: bash
+        run: |
+          cmake --build build --target test_domain_filter test_dns_routing -j 4
+          build/core/test_domain_filter
+          timeout 180 build/core/test_dns_routing --gtest_filter='*FreeTunnel*:*DnsRoutingCustomAction*:*NoProxy*:*NotConnectedNoKillSwitch*:*AppInitiatedDnsRouting*'
+
       # Whether the binary came out CET-marked. -fcf-protection reaches only what
       # FreeTunnel's own CMakeLists compiles, and the linker marks the image only
       # when every object in it carries the property, the core's and the conan

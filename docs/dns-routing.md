@@ -31,19 +31,54 @@ a guarantee that its OS-managed DNS travels through VPN. This is a limitation
 inferred from the application callback and the reproduced core behavior, not a
 claim that every OS/application combination leaks DNS.
 
+## Corrections to the upstream policy
+
+On 2026-11-17, the same isolated probe reproduced a case-sensitive routing bug
+in the official 1.1.12 client: in general mode, the exclusion `bypass.example`
+sent `bypass.example` directly, but sent `ByPaSs.ExAmPlE` through the endpoint.
+Both queries received answers, and the sender-process check distinguished the
+client from the endpoint. This demonstrates a core defect; it does not prove
+the cause of any particular query on a user's machine.
+
+FreeTunnel's `08-canonical-domain-routing.patch` normalizes ASCII letter case
+and a terminal root dot when matching domain rules. It covers imported rules,
+manual rules, geo lists and names learned from responses; it does not rewrite
+the DNS packet or the hostname displayed in connection logs.
+
+The patch also prevents application force-bypass/force-VPN decisions from
+skipping the DNS domain handler for intercepted TCP/UDP port 53 connections.
+Each query follows the domain policy, even when one resolver socket carries
+queries for both direct and VPN destinations. Explicit rejection is preserved.
+The kill-switch and disconnected-state handling are unchanged. A failed direct
+DNS request must not be retried through the VPN as a fallback.
+
+Native regression tests cover case variants, wildcard boundaries, manual/geo
+priority, both split modes, forced application routes and explicit rejection.
+Linux build CI runs the domain-filter and relevant DNS-routing tests against
+the patched core.
+
 ## Decision
 
-Keep the upstream policy and the existing Russian-sites bypass behavior. Do not
+Keep domain-based DNS routing and the existing Russian-sites bypass behavior. Do not
 port Netlane's global DNS override as a default: it would also tunnel DNS for
 bypassed destinations and could break local names. There is no general DNS
-failure in the tested full-tunnel or domain-based selective cases.
+failure in the original lower-case full-tunnel or domain-based selective cases;
+the corrections above address additional cases those tests did not cover.
 
 A separate opt-in policy could address shared-resolver application routing, but
 it needs a real OS/application reproducer and explicit local-name behavior
 before adding another core option. For now, include the needed domains in
 Through VPN as well, or use full-tunnel mode when all ordinary DNS must be
-tunnelled. Browser/application DoH and DoT follow their own connection routing
-and are outside this UDP DNS experiment.
+tunnelled. This policy governs intercepted ordinary DNS. An Android app excluded
+from the VPN by the OS does not reach this handler. Browser/application DoH and
+DoT follow their encrypted connection's routing; the queried names cannot be
+read by this handler.
+
+On desktop, system DNS may still enter the local TUN interface before this
+decision. Entering TUN does not mean sending the query to the VPN endpoint.
+Removing the interception globally would also prevent domain-based routing and
+DNS-derived destination matching. Direct-domain queries leave through the
+system DNS path; VPN-domain queries use the VPN DNS path.
 
 ## Reproduce
 
