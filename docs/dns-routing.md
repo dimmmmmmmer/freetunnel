@@ -49,8 +49,14 @@ The patch also prevents application force-bypass/force-VPN decisions from
 skipping the DNS domain handler for intercepted TCP/UDP port 53 connections.
 Each query follows the domain policy, even when one resolver socket carries
 queries for both direct and VPN destinations. Explicit rejection is preserved.
-The kill-switch and disconnected-state handling are unchanged. A failed direct
-DNS request must not be retried through the VPN as a fallback.
+A failed direct DNS request must not be retried through the VPN as a fallback.
+
+`09-direct-dns-during-reconnect.patch` evaluates the domain policy before the
+endpoint-disconnected guard. With the kill switch enabled, bypass-domain DNS
+continues directly during reconnection; VPN-domain DNS remains blocked. Both
+split modes and manual-over-geo priorities are covered, including the alternate
+DNS exclusion route. Existing endpoint-bootstrap exceptions and the behavior
+with the kill switch disabled are preserved.
 
 Native regression tests cover case variants, wildcard boundaries, manual/geo
 priority, both split modes, forced application routes and explicit rejection.
