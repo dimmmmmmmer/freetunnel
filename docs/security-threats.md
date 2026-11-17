@@ -690,6 +690,32 @@ kill switch into a system-wide firewall when no VPN session exists.
 not be rebuilt for something it can take while it runs. That is why edits go to
 the running session and a failed first connect stays inside it.
 
+### Incoming UDP replies on Linux
+
+A wildcard UDP listener chooses its reply source address before the OUTPUT
+conntrack hook. Routing the initial lookup straight to TUN can choose the TUN
+address, so conntrack no longer recognizes the packet as an incoming flow's
+reply. Source-port exemptions cannot safely distinguish that reply from a new
+outgoing connection using the same port.
+
+The old blanket exceptions for source ports 1–1024 and 5900–5920 are removed;
+incoming service replies are identified by connection direction instead.
+The initial lookup for local, unmarked UDP uses the normal routing table.
+The nftables OUTPUT route chain then marks non-reply UDP for the existing TUN
+routing table. Replies retain the incoming-reply mark and their physical source
+address. This applies to IPv4 and IPv6; forwarded traffic keeps its existing
+routing. Other mark bits are preserved. Core sockets bound to the uplink still
+bypass TUN. Removal disables the initial lookup exception before removing the
+OUTPUT capture chain.
+
+`tests/test_linux_reply_routing.py` checks real reply traffic for both explicit
+and wildcard binds. It also captures actual outgoing packets, including a new
+flow on the incoming service's port, connected UDP sends, untracked UDP and
+core-style interface-bound sockets. Outgoing TCP/UDP on service ports is
+checked before and after removing the legacy source-port exemptions; forwarded
+UDP and capture during teardown are checked too. A plain `ip route get` only shows the initial
+lookup and cannot verify the subsequent OUTPUT reroute.
+
 ### Server latency probes
 
 The Configs page shows a latency figure per server. Those probes are meant to
