@@ -382,7 +382,9 @@ jobs:
             sleep 20
           done
           sudo apt-get update
-          sudo apt-get install -y g++-13
+          # Launchpad occasionally returns HTTP 503 for a package download.
+          # Retry the fetch; a persistent failure must still fail the build.
+          sudo apt-get -o Acquire::Retries=5 install -y g++-13
           # jammy also has GCC 11 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
           # clang prints the path through its own directory (/usr/bin/../lib/…),

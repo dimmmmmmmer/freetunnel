@@ -914,14 +914,21 @@ class VpnDeviceTest {
             assertNotNull("The $name must be an overlay of the activity's window", layer)
             check(layer!!)
         }
-        // With the soft keyboard up, which the app picker puts up on a phone (the CI emulator has no hardware keyboard), the first Back only
-        // takes the keyboard away, as for any app: Back is sent until the overlay is gone, three times at most.
+        // The IME processes Back in another process. waitForIdleSync only waits for our
+        // main queue, so sending all three keys in one burst can give all of them to
+        // the keyboard while it is still hiding. Wait for the actual overlay removal
+        // after each key before sending another; a broken Back handler still fails.
         repeat(3) {
             var open = false
             onMain { open = activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name") != null }
             if (!open) return@repeat
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            instrumentation.waitForIdleSync()
+            val deadline = SystemClock.elapsedRealtime() + 2_000
+            while (SystemClock.elapsedRealtime() < deadline) {
+                onMain { open = activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name") != null }
+                if (!open) return@repeat
+                SystemClock.sleep(50)
+            }
         }
         onMain { assertNull("Back must close the $name", activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name")) }
     }
