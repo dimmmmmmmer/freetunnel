@@ -6,7 +6,7 @@
  target_link_libraries(test_dns_routing PRIVATE vpnlibs_core mock_dns_server)
 +add_unit_test(test_routing_generation "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 +target_link_libraries(test_routing_generation PRIVATE vpnlibs_core)
- 
+
  set(MOCKED_SOURCE_FILES
          ${SOURCE_FILES}
 --- a/core/include/vpn/internal/utils.h
@@ -16,7 +16,7 @@
      std::string appname;
      int uid = 0;
 +    std::optional<uint64_t> routing_generation;
- 
+
      [[nodiscard]] std::string to_string() const {
          return str_format("ID=%" PRIu64 " action=%s appname=%s", this->id,
 --- a/core/include/vpn/internal/vpn_client.h
@@ -27,7 +27,7 @@
      VpnMode exclusions_mode = VPN_MODE_GENERAL;
 +    uint64_t routing_generation = 0; // Accessed only on the core loop after init.
 +    std::string routing_exclusions;
- 
+
      // One of these is handed off from the pinger. An upstream can then snatch it up.
      std::unique_ptr<QuicConnectorResult> quic_connector;
 --- a/core/include/vpn/vpn.h
@@ -39,12 +39,12 @@
 +    /** FreeTunnel: version of the initial routing snapshot (not a TOML setting). */
 +    uint64_t routing_generation;
  } VpnSettings;
- 
+
  /**
 @@ -747,6 +749,13 @@
   */
  WIN_EXPORT void vpn_update_exclusions(Vpn *vpn, VpnMode mode, ag::VpnStr exclusions);
- 
+
 +/** FreeTunnel: atomically install a routing generation on the core loop.
 + * Preserve established flows if only the application policy generation changes.
 + */
@@ -63,7 +63,7 @@
      this->exclusions_scannable_ports = parsed_scannable_ports.value();
 +    this->routing_generation = settings->routing_generation;
      update_exclusions(settings->mode, {settings->exclusions.data, settings->exclusions.size});
- 
+
      if (settings->tmp_files_base_path != nullptr) {
 @@ -611,6 +612,7 @@
  void VpnClient::update_exclusions(VpnMode mode, std::string_view exclusions) {
@@ -75,7 +75,7 @@
          this->tunnel->on_exclusions_updated();
 @@ -618,7 +620,9 @@
  }
- 
+
  void VpnClient::reset_connections(int uid) {
 -    if (this->fsm.get_state() == vpn_client::S_CONNECTED) {
 +    // Direct flows can remain alive while the endpoint is reconnecting. A
@@ -86,7 +86,7 @@
  }
 @@ -769,6 +773,10 @@
  }
- 
+
  std::optional<VpnConnectAction> VpnClient::finalize_connect_action(ConnectRequestResult request_result) const {
 +    if (request_result.routing_generation.has_value()
 +            && request_result.routing_generation.value() != this->routing_generation) {
@@ -94,12 +94,12 @@
 +    }
      return this->tunnel->finalize_connect_action(std::move(request_result));
  }
- 
+
 --- a/core/src/vpn_manager.cpp
 +++ b/core/src/vpn_manager.cpp
 @@ -482,11 +482,17 @@
      log_vpn(vpn, dbg, "{}", result.to_string());
- 
+
      result.action = vpn->client.finalize_connect_action(result);
 +    // Reject before recovery's permissive fallbacks can turn the decision into
 +    // a bypass when the kill switch is off.
@@ -107,14 +107,14 @@
 +        vpn->client.complete_connect_request(result.id, VPN_CA_REJECT);
 +        return;
 +    }
- 
+
      vpn->fsm.perform_transition(vpn_fsm::CE_COMPLETE_REQUEST, &result);
  }
- 
+
 -void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
 +static void complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info, std::optional<uint64_t> generation) {
      std::unique_lock l(vpn->stop_guard);
- 
+
      if (vpn->ev_loop.get() == nullptr) {
 @@ -499,6 +505,7 @@
              info->action,
@@ -122,12 +122,12 @@
              info->uid,
 +            generation,
      };
- 
+
      vpn->submit([vpn, result = std::move(result)]() mutable {
 @@ -506,7 +513,15 @@
      });
  }
- 
+
 -void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
 +void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
 +    complete_connect_request(vpn, info, std::nullopt);
@@ -139,7 +139,7 @@
 +
 +static void update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, std::optional<uint64_t> generation) {
      log_vpn(vpn, info, "...");
- 
+
      std::unique_lock l(vpn->stop_guard);
 @@ -520,12 +535,14 @@
          Vpn *vpn;
@@ -147,14 +147,14 @@
          std::string exclusions;
 +        std::optional<uint64_t> generation;
      };
- 
+
      auto *ctx = new Ctx{
              .vpn = vpn,
              .mode = mode,
              .exclusions = {exclusions.data, exclusions.size},
 +            .generation = generation,
      };
- 
+
      vpn->update_exclusions_task = event_loop::submit(vpn->ev_loop.get(),
 @@ -535,8 +552,20 @@
                              [](void *arg, TaskId) {
@@ -181,7 +181,7 @@
                              [](void *arg) {
 @@ -545,6 +574,14 @@
              });
- 
+
      log_vpn(vpn, info, "Done");
 +}
 +
@@ -192,14 +192,14 @@
 +void vpn_update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, uint64_t generation) {
 +    update_routing(vpn, mode, exclusions, generation);
  }
- 
+
  void vpn_reset_connections(Vpn *vpn, int uid) {
 --- a/core/test/test_dns_routing.cpp
 +++ b/core/test/test_dns_routing.cpp
 @@ -1372,6 +1372,46 @@
      ASSERT_EQ(0, bypass_upstream->connections.size());
  }
- 
+
 +TEST_F(DnsRoutingBase, FreeTunnelStaleAndFutureAppDecisionsAreRejected) {
 +    for (int proto : {IPPROTO_TCP, IPPROTO_UDP}) {
 +        for (auto mode : {VPN_MODE_GENERAL, VPN_MODE_SELECTIVE}) {
@@ -251,20 +251,20 @@
      int uid = -1;
 +    std::optional<uint64_t> routing_generation;
  };
- 
+
  struct VpnCallbacks {
 @@ -126,6 +127,7 @@
      // that calls disconnect(), and never from inside a callback: the core takes
      // the lock that vpn_stop() holds while it waits for the core's thread.
      void update_exclusions(VpnMode mode, std::string_view exclusions);
 +    void update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation);
- 
+
      bool process_client_packets(VpnPackets packets);
- 
+
 --- a/trusttunnel/include/vpn/trusttunnel/config.h
 +++ b/trusttunnel/include/vpn/trusttunnel/config.h
 @@ -57,6 +57,7 @@
- 
+
      ag::LogLevel loglevel = ag::LOG_LEVEL_INFO;
      ag::VpnMode mode = ag::VPN_MODE_GENERAL;
 +    uint64_t routing_generation = 0; // FreeTunnel internal; never loaded from TOML.
@@ -276,7 +276,7 @@
 @@ -137,6 +137,12 @@
      }
  }
- 
+
 +void TrustTunnelClient::update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation) {
 +    if (Vpn *vpn = m_vpn.load()) {
 +        vpn_update_routing(vpn, mode, {exclusions.data(), (uint32_t) exclusions.size()}, generation);
@@ -289,7 +289,7 @@
 @@ -182,6 +188,7 @@
          settings.ssl_sessions_storage_path = m_config.ssl_session_storage_path->c_str();
      }
- 
+
 +    settings.routing_generation = m_config.routing_generation;
      m_vpn = vpn_open(&settings);
      if (m_vpn == nullptr) {
