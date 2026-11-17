@@ -104,7 +104,7 @@
 +        });
 +    }
 +    ASSERT_NO_FATAL_FAILURE(raise_dns_request(domain));
-+    vpn_event_loop_exit(ev_loop.get(), Millis{500});
++    vpn_event_loop_exit(ev_loop.get(), !through_vpn && !alt_route ? DEFAULT_TIMEOUT : Millis{500});
 +    vpn_event_loop_run(ev_loop.get());
 +    EXPECT_EQ(0, redirect_upstream->connections.size());
 +    EXPECT_EQ(0, system_unexpected);
