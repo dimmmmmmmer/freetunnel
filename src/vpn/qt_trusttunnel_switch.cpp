@@ -115,6 +115,34 @@ void QtTrustTunnelClient::prepareEndpointSwitch(EndpointSwitchRequest request)
     worker->start();
 }
 
+std::pair<QtTrustTunnelClient::Routing, std::vector<std::string>>
+QtTrustTunnelClient::routingForEndpoint(const EndpointSwitchRequest &request, const ag::TrustTunnelConfig &config) const
+{
+    // An explicit rule edit made during preparation wins over the staged pick.
+    const bool edited = request.baseGeneration != m_publishedRouting.generation;
+    const bool selective = edited ? m_selectiveMode : request.selective;
+    std::vector<std::string> domains;
+    if (edited) {
+        domains = m_extraExclusions;
+    } else {
+        for (const auto &domain : request.domains)
+            domains.push_back(domain.toStdString());
+    }
+    Routing wanted;
+    wanted.mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+    wanted.exclusions = wanted.mode == config.mode ? config.exclusions : std::string();
+    for (const auto &domain : domains) {
+        if (!wanted.exclusions.empty() && wanted.exclusions.back() != ' ')
+            wanted.exclusions += ' ';
+        wanted.exclusions += domain;
+    }
+    wanted.appRules = edited ? m_appRuleList : request.apps;
+    wanted.generation = m_publishedRouting.generation;
+    if (wanted != m_publishedRouting)
+        ++wanted.generation;
+    return {std::move(wanted), std::move(domains)};
+}
+
 void QtTrustTunnelClient::finishEndpointPreparation(const EndpointSwitchRequest &request, quint64 session,
         const std::shared_ptr<ag::TrustTunnelClient::PreparedEndpoint> &prepared, const QString &error)
 {
@@ -134,28 +162,7 @@ void QtTrustTunnelClient::finishEndpointPreparation(const EndpointSwitchRequest 
     QString ignored;
     auto config = parseConfig(request.toml, &ignored);
     Q_ASSERT(config);
-    // An explicit rule edit made during preparation wins over the staged pick.
-    const bool edited = request.baseGeneration != m_publishedRouting.generation;
-    const bool selective = edited ? m_selectiveMode : request.selective;
-    std::vector<std::string> domains;
-    if (edited) {
-        domains = m_extraExclusions;
-    } else {
-        for (const auto &domain : request.domains)
-            domains.push_back(domain.toStdString());
-    }
-    Routing wanted;
-    wanted.mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
-    wanted.exclusions = wanted.mode == config->mode ? config->exclusions : std::string();
-    for (const auto &domain : domains) {
-        if (!wanted.exclusions.empty() && wanted.exclusions.back() != ' ')
-            wanted.exclusions += ' ';
-        wanted.exclusions += domain;
-    }
-    wanted.appRules = edited ? m_appRuleList : request.apps;
-    wanted.generation = m_publishedRouting.generation;
-    if (wanted != m_publishedRouting)
-        ++wanted.generation;
+    auto [wanted, domains] = routingForEndpoint(request, *config);
     const ag::TrustTunnelClient::EndpointRouting routing{wanted.mode, wanted.exclusions, wanted.generation};
     const auto failure = m_client->replace_endpoint(prepared, [this, &wanted]() noexcept {
         // This runs at the core's commit boundary, between the old handshake
@@ -178,7 +185,7 @@ void QtTrustTunnelClient::finishEndpointPreparation(const EndpointSwitchRequest 
         m_originalExcludedRoutes = std::get<ag::TrustTunnelConfig::TunListener>(config->listener).excluded_routes;
         m_configAllowPorts = config->killswitch_allow_ports;
         m_extraExclusions = std::move(domains);
-        m_selectiveMode = selective;
+        m_selectiveMode = wanted.mode == ag::VPN_MODE_SELECTIVE;
         m_config.reset();
     }
     m_appRuleList = wanted.appRules;

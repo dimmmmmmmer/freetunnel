@@ -12,6 +12,8 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 // Windows SDK doesn't define POSIX iovec; define a minimal version before vpn.h uses it.
@@ -201,6 +203,8 @@ private:
         quint64 serial = 0;
         quint64 baseGeneration = 0;
     };
+    std::pair<Routing, std::vector<std::string>> routingForEndpoint(
+            const EndpointSwitchRequest &request, const ag::TrustTunnelConfig &config) const;
     void prepareEndpointSwitch(EndpointSwitchRequest request);
     void resumePendingEndpoint();
     void finishEndpointPreparation(const EndpointSwitchRequest &request, quint64 session,
