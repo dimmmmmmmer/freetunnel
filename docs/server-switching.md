@@ -28,13 +28,23 @@ The recovery FSM also handles a network returning before the first successful
 connection under the unlimited recovery policy. Previously that case selected
 the finite-attempt path (and asserted in debug builds).
 
+TLS sessions are scoped to a random endpoint-configuration identity plus the
+endpoint address, remote ID, SNI and transport. Recovery keeps the identity;
+replacement generates a fresh one. Late tickets retain their original identity,
+and calls without an explicit scope do not resume sessions. This prevents a
+cached TLS session from skipping a changed certificate policy, including for
+profiles with the same hostname. TLS 1.2 and TLS 1.3 memory-BIO tests exercise real
+handshakes with accepting and rejecting certificate callbacks. Sessions from a
+previous process are intentionally not reused because that process's policy
+identity no longer exists.
+
 ## Required before enabling application switching
 
 - Resolve the new endpoint and read credentials before modifying the live session.
 - Preserve desktop OS routes without leaving obsolete endpoint-wide bypasses;
   verify protected endpoint sockets on Linux, macOS and Windows.
-- Update DNS upstreams and certificate policy together with the endpoint. Check
-  TLS session-cache isolation when profiles use different certificate policies.
+- Update DNS upstreams and certificate policy together with the endpoint; assign
+  the new certificate policy in the synchronous commit callback.
 - Wire desktop helper IPC and mobile adapters to the new operation. Keep the
   previous connection on validation failure, and make cancel/newer requests win.
 - Apply the intended split-rule generation consistently across a switch, and

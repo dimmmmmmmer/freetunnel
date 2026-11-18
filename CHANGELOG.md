@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Core: add in-session endpoint replacement and preserve the recovery policy when the network returns before the first connection. Application server switching is not yet wired to this API.
+- Core: add in-session endpoint replacement with isolated TLS session caches and preserve the recovery policy when the network returns before the first connection. Application server switching is not yet wired to this API.
 
 - Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
 
