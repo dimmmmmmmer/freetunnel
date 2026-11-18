@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
+
 - Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
 
 - Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
