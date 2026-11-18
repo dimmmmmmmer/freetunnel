@@ -133,6 +133,9 @@ QtTrustTunnelClient::~QtTrustTunnelClient() {
 }
 
 void QtTrustTunnelClient::teardownClient() {
+    ++m_endpointRequest;
+    m_pendingEndpoint.reset();
+    m_preserveEndpointSession = false;
     // If teardownClient is called from the object's thread (handleCoreStateChanged,
     // checkFdHealth, disconnectVpn) the connect thread may currently be inside
     // m_client->connect() or set_system_dns(), so resetting m_client while it
@@ -162,6 +165,7 @@ void QtTrustTunnelClient::teardownClient() {
         m_client->disconnect();
     }
     m_client.reset();
+    emit sessionPresenceChanged(false);
 #ifdef Q_OS_WIN
     m_winPhysicalIfIndex.store(0);
 #endif
@@ -190,7 +194,7 @@ void QtTrustTunnelClient::teardownClient() {
 // starts reading is caught by scripts/verify_upstream_patch.sh, not here. Cleared
 // rather than checked: FreeTunnel writes none of them, and an interface the
 // system names works just as well as one the file named.
-static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
+void QtTrustTunnelClient::clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
 {
     config.ssl_session_storage_path.reset();
     config.killswitch_allow_ports.clear();
@@ -205,6 +209,7 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
     m_configAllowPorts = m_config->killswitch_allow_ports;
     clearKeysRootMustNotTakeFromAConfig(*m_config);
+    m_config->endpoint_sockets_protected = true;
     // m_logLevel is set from the config TOML's loglevel in the load functions
     // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
     m_config->loglevel = m_logLevel;
@@ -397,37 +402,40 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
     return fallback;
 }
 
-bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
-    if (tomlContent.isEmpty()) {
-        setState(State::Error);
-        emit vpnError(tr("Empty config"));
-        return false;
+std::optional<ag::TrustTunnelConfig> QtTrustTunnelClient::parseConfig(const QString &text, QString *error, ag::LogLevel fallbackLevel)
+{
+    if (text.isEmpty()) {
+        *error = tr("Empty config");
+        return std::nullopt;
     }
-    toml::parse_result parsed = toml::parse(tomlContent.toStdString());
+    auto parsed = toml::parse(text.toStdString());
     if (!parsed) {
-        // Copy immediately: description() hands back a view owned by the parse
-        // result, and keeping a view alive across statements is a lifetime trap.
-        const std::string descr{parsed.error().description()};
-        setState(State::Error);
-        emit vpnError(tr("Failed parsing config: %1").arg(QString::fromStdString(descr)));
-        return false;
+        *error = tr("Failed parsing config: %1").arg(QString::fromStdString(std::string(parsed.error().description())));
+        return std::nullopt;
     }
-
     auto config = ag::TrustTunnelConfig::build_config(parsed.table());
-    // FreeTunnel only ever writes a [listener.tun]. A SOCKS listener instead is a
-    // proxy that root would open on whatever address the TOML names, with no
-    // tunnel interface for routes, DNS or the kill switch to hold on to.
-    if (!config.has_value()
-        || !std::holds_alternative<ag::TrustTunnelConfig::TunListener>(config->listener)) {
+    // An elevated SOCKS listener could bind an arbitrary config-supplied address
+    // and has no TUN for routes, DNS or the kill switch. Accept TUN configs only.
+    if (!config || !std::holds_alternative<ag::TrustTunnelConfig::TunListener>(config->listener)) {
+        *error = tr("Invalid TrustTunnel config structure");
+        return std::nullopt;
+    }
+    config->loglevel = logLevelFromTomlTable(parsed.table(), fallbackLevel);
+    return config;
+}
+
+bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
+    QString error;
+    auto config = parseConfig(tomlContent, &error, m_logLevel);
+    if (!config) {
         setState(State::Error);
-        emit vpnError(tr("Invalid TrustTunnel config structure"));
+        emit vpnError(error);
         return false;
     }
-
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         m_lastConfigToml = tomlContent;
-        m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
+        m_logLevel = config->loglevel;
         setConfigLocked(std::move(*config));
     }
     setState(State::Disconnected);
@@ -656,8 +664,15 @@ void QtTrustTunnelClient::handleCoreDisconnected(int errCode, const QString &err
     m_networkWaitTimer.stop();
     if (m_stopRequested)
         return;
-    scheduleReconnect(
-            buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt.load()));
+    const QString reason = buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt.load());
+    if (m_preserveEndpointSession && m_client) {
+        // A fatal endpoint error ends the VPN handshake, not the direct side of
+        // this session. Keep the TUN and kill switch until an explicit stop.
+        setState(State::Error);
+        emit vpnError(reason);
+        return;
+    }
+    scheduleReconnect(reason);
 }
 
 void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, int errCode,

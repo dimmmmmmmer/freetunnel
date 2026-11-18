@@ -21,10 +21,11 @@
 void QtTrustTunnelClient::postCoreStateChanged(quint64 session, int coreState, int errCode,
                                                const QString &errText)
 {
+    const quint64 endpointEpoch = m_endpointEpoch.load();
     QMetaObject::invokeMethod(
             this,
-            [this, session, coreState, errCode, errText]() {
-                if (session != m_sessionGen)
+            [this, session, endpointEpoch, coreState, errCode, errText]() {
+                if (session != m_sessionGen || endpointEpoch != m_endpointEpoch)
                     return;
                 handleCoreStateChanged(static_cast<ag::VpnSessionState>(coreState), errCode,
                                        errText);

@@ -12,7 +12,8 @@
     "vendor/trusttunnel/12-current-connection-hostname.patch",
     "vendor/trusttunnel/13-preserve-direct-recovery.patch",
     "vendor/trusttunnel/14-in-session-endpoint-switch.patch",
-    "vendor/trusttunnel/15-scope-tls-session-cache.patch"
+    "vendor/trusttunnel/15-scope-tls-session-cache.patch",
+    "vendor/trusttunnel/16-preserve-pending-direct-dns.patch"
   ],
   "abis": [
     "arm64-v8a",

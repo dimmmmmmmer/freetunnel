@@ -46,6 +46,7 @@ private slots:
     void togglingTheKillSwitchWhileConnectedReachesTheCore();
     void theConfigsKillSwitchPortsSettingReachesTheHelperAndTheLiveSession();
     void configSwitchSuppressesCoreDisconnectToast();
+    void aRejectedSwitchRestoresTheRunningServer();
     void aSwitchToAFailingServerSaysSoAndTheNextPickStillSwitches();
     void aSecondPickWhileTheFirstReadsItsPasswordWins();
     void anEditMadeWhileConnectingReachesTheSession();
@@ -462,6 +463,8 @@ void TestIntegrationBackendVpn::configSwitchSuppressesCoreDisconnectToast()
     // for the second connect, or the check below runs before the switch has.
     QVERIFY(QTest::qWaitFor([&]() { return server.connectCount() == 2 && backend.connected(); }, 10000));
     QCOMPARE(backend.activeIndex(), 1);
+    QCOMPARE(server.countFor(QStringLiteral("disconnect")), 0);
+    QVERIFY(server.lastMessageFor(QStringLiteral("connect")).value("stagedRouting").toBool());
 
     // A QSignalSpy row is the argument LIST, not the argument. Binding it to a
     // const QVariant& built a temporary QVariant wrapping the whole list, so this
@@ -2033,3 +2036,40 @@ int main(int argc, char *argv[])
 }
 
 #include "test_integration_backend_vpn.moc"
+
+void TestIntegrationBackendVpn::aRejectedSwitchRestoresTheRunningServer()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("accepted.example")));
+    QVERIFY(configs.add(QStringLiteral("rejected.example")));
+    configs.install();
+    AppSettings settings = loadAppSettings();
+    settings.domain_bypass_enabled = true;
+    settings.profiles[QStringLiteral("Default")] = {QStringLiteral("accepted-direct.example")};
+    settings.profiles[QStringLiteral("Other")] = {QStringLiteral("rejected-direct.example")};
+    settings.profile_order.append(QStringLiteral("Other"));
+    settings.config_profiles[configs.paths.at(1)] = QStringLiteral("Other");
+    saveAppSettings(settings);
+    MockHelperEnv env(QStringLiteral("backend-rejected-switch-token"));
+    QVERIFY(env.start());
+    env.server.refuseConnectsWith(QStringLiteral("rejected.example"),
+                                  QStringLiteral("Could not resolve server"));
+    Backend backend;
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.connectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
+    backend.selectConfig(1);
+    QVERIFY(QTest::qWaitFor([&]() { return env.server.connectCount() == 2 && !errors.isEmpty(); }, 5000));
+    QVERIFY(backend.connected());
+    QVERIFY(!backend.connecting());
+    QCOMPARE(backend.activeIndex(), 0);
+    QTRY_VERIFY(env.server.lastMessageFor(QStringLiteral("setSplitRouting"))
+            .value("domains").toArray().contains(QStringLiteral("accepted-direct.example")));
+    QVERIFY(!env.server.lastMessageFor(QStringLiteral("setSplitRouting"))
+            .value("domains").toArray().contains(QStringLiteral("rejected-direct.example")));
+    QCOMPARE(env.server.countFor(QStringLiteral("disconnect")), 0);
+    backend.disconnectVpn();
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.connected(); }, 5000));
+    backend.prepareQuit();
+}

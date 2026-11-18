@@ -88,6 +88,7 @@ Backend::~Backend()
 void Backend::wireVpnClientSignals()
 {
     connect(&m_client, &VpnHelperClient::stateChanged, this, &Backend::onVpnClientStateChanged);
+    connect(&m_client, &VpnHelperClient::endpointRequestFinished, this, &Backend::onEndpointRequestFinished);
     connect(&m_client, &VpnHelperClient::tunnelStats, this,
             [this](quint64 up, quint64 down) {
                 m_accUp += up;
@@ -121,7 +122,7 @@ void Backend::applyVpnClientState(VpnHelperClient::State st)
     const bool nowConnected = st == VpnHelperClient::State::Connected;
     if (nowConnected && !m_connected)
         m_session.restart();
-    m_connected = nowConnected;
+    m_connected = nowConnected && !m_endpointAckPending && !m_awaitingToml;
     clearReapplyingIfDone(st, nowConnected);
     // A config-switch / rule-reapply teardown is the first half of a reconnect,
     // not an "Off" state. Reporting connected=connecting=disconnecting=false for
@@ -135,7 +136,7 @@ void Backend::applyVpnClientState(VpnHelperClient::State st)
     m_connecting = st == VpnHelperClient::State::Connecting
                    || st == VpnHelperClient::State::Reconnecting
                    || st == VpnHelperClient::State::WaitingForNetwork
-                   || switching;
+                   || switching || m_endpointAckPending || m_awaitingToml;
     m_disconnecting = st == VpnHelperClient::State::Disconnecting && !m_reapplying;
 }
 
@@ -302,6 +303,7 @@ void Backend::settleRefusedConnect()
     if (st != VpnHelperClient::State::Disconnected && st != VpnHelperClient::State::Error)
         return;
     m_connecting = false;
+    m_endpointAckPending = false;
     emit stateChanged();
 }
 
@@ -314,6 +316,8 @@ void Backend::onStatsTick()
 }
 
 QString Backend::statusText() const {
+    if (m_endpointAckPending || (m_awaitingToml && m_connecting))
+        return tr("Connecting…");
     switch (m_client.state()) {
     case VpnHelperClient::State::Connected: return tr("Connected");
     case VpnHelperClient::State::Connecting: return tr("Connecting…");
@@ -521,8 +525,8 @@ void Backend::selectConfig(int index) {
     // An update held for the config the tunnel was coming up from need not wait
     // for the tunnel any more.
     flushHeldSubscriptionUpdates();
-    if (m_connected || m_connecting)
-        reconnectActiveConfig();
+    if (m_connected || m_connecting || m_client.sessionActive())
+        reconnectActiveConfig(true);
 }
 
 void Backend::removeConfig(int index) {
@@ -534,7 +538,8 @@ void Backend::removeConfig(int index) {
     // server that no longer has a config, and the active slot silently shifts to
     // whatever config lands first below — leaving m_connected true, so its
     // "connected" badge would jump onto a config that isn't actually up.
-    if (path == m_activePath && (m_connected || m_connecting))
+    if ((path == m_activePath || path == m_sessionConfigPath)
+        && (m_connected || m_connecting || m_client.sessionActive()))
         disconnectVpn();
     freetunnel::CredentialStore::deletePassword(freetunnel::CredentialStore::keyForConfigPath(path));
     forgetSubscription(path); // and its subscription's address, which also holds the password

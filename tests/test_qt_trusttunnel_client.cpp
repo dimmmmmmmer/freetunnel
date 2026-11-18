@@ -53,6 +53,16 @@ class TestQtTrustTunnelClient : public QObject {
     Q_OBJECT
 
 private slots:
+    void endpointSwitchKeepsClient();
+    void endpointSwitchDropsQueuedOldServerState();
+    void endpointSwitchStagesRulesUntilCommit();
+    void endpointSwitchKeepsNewerRuleEdits();
+    void endpointSwitchRejectedRulesStayUnpublished();
+    void endpointPreparationFailureKeepsClient();
+    void endpointSwitchCancelDoesNotResurrect();
+    void endpointSwitchCoalescesRapidPicks();
+    void endpointSwitchRejectsTunnelChanges();
+    void endpointSwitchFatalFailureKeepsClient();
     void initTestCase()
     {
         qputenv("FT_TEST_SKIP_PRIVILEGE_CHECK", "1");
@@ -103,6 +113,7 @@ private slots:
 
     void cleanup()
     {
+        mockcore::Controller::instance().blockEndpointPreparation(false);
         mockcore::Controller::instance().releaseConnect(); // unstick any blocked connect
         QPointer<QtTrustTunnelClient> guard(m_client);
         QMetaObject::invokeMethod(m_client, "deleteLater", Qt::QueuedConnection);
@@ -1692,6 +1703,100 @@ void TestQtTrustTunnelClient::offlineLooksKeepThePace()
     QCOMPARE(ctl.networkChanges(id).at(1).state, ag::VPN_NS_CONNECTED);
 }
 
+void TestQtTrustTunnelClient::endpointSwitchKeepsClient()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const auto id = ctl.lastClientId();
+    const int connections = ctl.connectCallCount();
+    const QString config = validConfigToml() + "skip_verification = true\n";
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection, Q_ARG(QString, config));
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    QCOMPARE(ctl.lastClientId(), id);
+    QCOMPARE(ctl.connectCallCount(), connections);
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    QVERIFY(ctl.lastCoreConfig().skip_verification);
+    QTRY_COMPARE(m_lastState, State::Reconnecting);
+}
+
+void TestQtTrustTunnelClient::endpointPreparationFailureKeepsClient()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const auto id = ctl.lastClientId();
+    ctl.setEndpointPreparationError("Could not resolve server");
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QCOMPARE(ctl.endpointReplacementCount(), 0);
+    QCOMPARE(ctl.lastClientId(), id);
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchCancelDoesNotResurrect()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    ctl.blockEndpointPreparation(true);
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_COMPARE(ctl.endpointPreparationCount(), 1);
+    requestDisconnect();
+    QTRY_COMPARE(m_lastState, State::Disconnected);
+    ctl.blockEndpointPreparation(false);
+    QTest::qWait(100);
+    QCOMPARE(ctl.endpointReplacementCount(), 0);
+    QCOMPARE(m_lastState, State::Disconnected);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchCoalescesRapidPicks()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    ctl.blockEndpointPreparation(true);
+    for (int i = 0; i < 5; ++i) {
+        const QString toml = validConfigToml() + QStringLiteral("certificate = \"pin-%1\"\n").arg(i);
+        QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                                  Q_ARG(QString, toml));
+    }
+    QTRY_COMPARE(ctl.endpointPreparationCount(), 1);
+    ctl.blockEndpointPreparation(false);
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    QCOMPARE(ctl.endpointPreparationCount(), 2);
+    QCOMPARE(ctl.lastCoreConfig().certificate, std::string("pin-4"));
+}
+
+void TestQtTrustTunnelClient::endpointSwitchRejectsTunnelChanges()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const QString config = validConfigToml() + "[listener.tun]\nexcluded_routes = [\"192.0.2.1/32\"]\n";
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection, Q_ARG(QString, config));
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QCOMPARE(ctl.endpointReplacementCount(), 0);
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchFatalFailureKeepsClient()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const auto id = ctl.lastClientId();
+    const int connections = ctl.connectCallCount();
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    ctl.fireStateChanged(id, ag::VPN_SS_DISCONNECTED);
+    QTRY_COMPARE(m_lastState, State::Error);
+    QTest::qWait(600);
+    QCOMPARE(ctl.connectCallCount(), connections);
+    // A new pick still uses the same living client after a fatal handshake.
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 2);
+    QCOMPARE(ctl.lastClientId(), id);
+}
+
 QTEST_GUILESS_MAIN(TestQtTrustTunnelClient)
 // Failure to identify a socket must neither expose a selected app directly
 // nor send an unselected one through VPN. Reject only that connection.
@@ -1889,3 +1994,75 @@ void TestQtTrustTunnelClient::loggingOffFromTheFirstSessionWritesNowhere()
 }
 
 #include "test_qt_trusttunnel_client.moc"
+
+void TestQtTrustTunnelClient::endpointSwitchStagesRulesUntilCommit()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const auto before = ctl.exclusionUpdates().size();
+    ctl.blockEndpointPreparation(true);
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->beginConnectConfigured(validConfigToml(), {"staged.example"}, true, {}, 42);
+    }, Qt::QueuedConnection);
+    QTRY_COMPARE(ctl.endpointPreparationCount(), 1);
+    QCOMPARE(ctl.exclusionUpdates().size(), before);
+    ctl.blockEndpointPreparation(false);
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    const auto updates = ctl.exclusionUpdates();
+    QVERIFY(updates.size() > before);
+    QCOMPARE(updates.back().mode, int(ag::VPN_MODE_SELECTIVE));
+    QVERIFY(updates.back().exclusions.find("staged.example") != std::string::npos);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchKeepsNewerRuleEdits()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    ctl.blockEndpointPreparation(true);
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->beginConnectConfigured(validConfigToml(), {"staged.example"}, true, {}, 43);
+    }, Qt::QueuedConnection);
+    QTRY_COMPARE(ctl.endpointPreparationCount(), 1);
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->setSplitRouting({"newer.example"}, false, {});
+    }, Qt::BlockingQueuedConnection);
+    const auto generation = ctl.exclusionUpdates().back().generation;
+    ctl.blockEndpointPreparation(false);
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    const auto updates = ctl.exclusionUpdates();
+    QCOMPARE(updates.back().mode, int(ag::VPN_MODE_GENERAL));
+    QCOMPARE(updates.back().generation, generation);
+    QVERIFY(updates.back().exclusions.find("newer.example") != std::string::npos);
+    QVERIFY(updates.back().exclusions.find("staged.example") == std::string::npos);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchRejectedRulesStayUnpublished()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    const auto before = ctl.exclusionUpdates().size();
+    ctl.setEndpointPreparationError("Could not resolve server");
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->beginConnectConfigured(validConfigToml(), {"rejected.example"}, true, {}, 44);
+    }, Qt::QueuedConnection);
+    QTRY_VERIFY(!m_errors.isEmpty());
+    QCOMPARE(ctl.exclusionUpdates().size(), before);
+    QCOMPARE(ctl.endpointReplacementCount(), 0);
+    QCOMPARE(m_lastState, State::Connected);
+}
+
+void TestQtTrustTunnelClient::endpointSwitchDropsQueuedOldServerState()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setUpdateHook([&ctl](uint64_t id) { ctl.fireStateChanged(id, ag::VPN_SS_CONNECTED); });
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    QTRY_COMPARE(m_lastState, State::Reconnecting);
+    // Flush the owner queue after the replacement: the old Connected callback
+    // was queued from inside the transaction, before the new epoch committed.
+    QMetaObject::invokeMethod(m_client, [] {}, Qt::BlockingQueuedConnection);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_lastState, State::Reconnecting);
+}

@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Core: add in-session endpoint replacement with isolated TLS session caches and preserve the recovery policy when the network returns before the first connection. Application server switching is not yet wired to this API.
+- Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
+
+- Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.
+- Core: isolate TLS session caches between servers and preserve the recovery policy when the network returns before the first connection.
 
 - Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
 

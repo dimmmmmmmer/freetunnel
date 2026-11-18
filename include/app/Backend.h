@@ -368,7 +368,9 @@ private:
     void syncGeoLists();
     bool geoRulesFit(const QString &profile) const;
     void applyProfileEdit(); // persist, apply and announce an edit to the Split page's profile
-    void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
+    void reconnectActiveConfig(bool endpointOnly = false);
+    void onEndpointRequestFinished(bool accepted);
+    void restoreSessionSelection();
     void startConnectAttempt();   // connectVpn() past its "already busy" check
     void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
     void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
@@ -558,6 +560,9 @@ private:
     bool m_reapplying = false;
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
     quint64 m_reconnectGen = 0; // per rebuild: only the latest one's safety net may fire
+    QString m_sessionConfigPath;
+    QString m_sentConfigPath;
+    bool m_endpointAckPending = false;
     bool m_awaitingToml = false;  // credential read in flight; nothing sent to the helper yet
     bool m_inConnect = false;     // inside onConnectTomlReady(): suppress live-reapply
     // Bumped by anything that supersedes an in-flight connect, so a credential

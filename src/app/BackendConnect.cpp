@@ -16,7 +16,7 @@
 void Backend::toggle() {
     // A click while connecting cancels the attempt; while connected it
     // disconnects; otherwise it starts connecting.
-    if (m_connected || m_connecting)
+    if (m_connected || m_connecting || m_client.sessionActive())
         disconnectVpn();
     else
         connectVpn();
@@ -45,6 +45,8 @@ void Backend::logConnectAttempt()
 void Backend::failConnectNoPassword()
 {
     m_connecting = false;
+    restoreSessionSelection();
+    applyVpnClientState(m_client.state());
     // Nothing further will report Connected or Error for this attempt, so
     // clearReapplyingIfDone() would never run: a reapply that dies here used to
     // latch m_reapplying forever, masking m_disconnecting, swallowing every
@@ -76,7 +78,8 @@ void Backend::startConnectAttempt()
     // Show "Connecting…" immediately — the helper handshake (and any elevation
     // prompt) can take a few seconds before the core reports a real state.
     // A subsequent state change (Connected / Error / Disconnected) overrides it.
-    if (!m_connecting) {
+    if (!m_connecting || m_connected) {
+        m_connected = false;
         m_connecting = true;
         emit stateChanged();
     }
@@ -166,6 +169,8 @@ void Backend::onConnectTomlReady(quint64 generation, const QString &toml)
     // config pick a silent no-op.
     m_reapplying = false;
     m_inConnect = true;
+    m_sentConfigPath = m_activePath;
+    m_endpointAckPending = true;
     m_client.loadConfigFromToml(toml);
     applySplitRules(); // push domain-bypass rules to the core before connecting
     m_client.setKillSwitch(m_settings.killswitch_enabled);
@@ -182,10 +187,13 @@ void Backend::disconnectVpn() {
     // found nothing up to take down, and the auto-connect brought the tunnel up
     // 600 ms later all the same.
     m_autoConnectTimer.stop();
-    if (!m_connected && !m_connecting)
+    if (!m_connected && !m_connecting && !m_client.sessionActive())
         return; // nothing to disconnect or cancel
     ++m_connectGen; // a credential read still in flight must not start a session
     m_awaitingToml = false;
+    m_endpointAckPending = false;
+    m_sessionConfigPath.clear();
+    m_sentConfigPath.clear();
     m_reapplying = false;
     m_pendingReconnect = false; // an explicit disconnect cancels a config-switch reconnect
     // Show "Disconnecting…" right away; clear the optimistic "Connecting…".
@@ -193,4 +201,29 @@ void Backend::disconnectVpn() {
     m_disconnecting = true;
     emit stateChanged();
     m_client.disconnectVpn(); // aborts a pending startup, or stops a live tunnel
+}
+
+void Backend::restoreSessionSelection()
+{
+    if ((!m_client.sessionActive() && m_client.state() != VpnHelperClient::State::Connected)
+            || m_sessionConfigPath.isEmpty() || !m_paths.contains(m_sessionConfigPath))
+        return;
+    m_activePath = m_sessionConfigPath;
+    m_settings.last_config_path = m_activePath;
+    persistSettings();
+    applySplitRules(false);
+    emit configChanged();
+    emit splitChanged();
+}
+
+void Backend::onEndpointRequestFinished(bool accepted)
+{
+    m_endpointAckPending = false;
+    if (accepted) {
+        m_sessionConfigPath = m_sentConfigPath;
+    } else if (!m_awaitingToml && m_activePath == m_sentConfigPath) {
+        restoreSessionSelection();
+        applyVpnClientState(m_client.state());
+    }
+    emit stateChanged();
 }

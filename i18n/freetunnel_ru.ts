@@ -1139,6 +1139,10 @@
         <source>Your internet connection is a PPP link (PPPoE or a modem), which the VPN can&apos;t run over on Windows. Connect through a router, Ethernet or Wi-Fi instead.</source>
         <translation>Интернет подключён через PPP (PPPoE или модем), а через такое подключение VPN на Windows работать не может. Подключитесь через роутер, Ethernet или Wi-Fi.</translation>
     </message>
+    <message>
+        <source>No running VPN session</source>
+        <translation>Нет активного VPN-подключения</translation>
+    </message>
 </context>
 <context>
     <name>SettingsPage</name>

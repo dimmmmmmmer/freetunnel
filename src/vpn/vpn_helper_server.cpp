@@ -97,6 +97,19 @@ public:
         : m_port(port), m_token(std::move(token)) {
         m_client.moveToThread(&m_vpnThread);
         m_vpnThread.start();
+        connect(&m_client, &QtTrustTunnelClient::sessionPresenceChanged, this,
+                [this](bool active) {
+                    if (m_reportsSession)
+                        send(QJsonObject{{"ev", "sessionPresence"}, {"active", active}});
+                }, Qt::QueuedConnection);
+        connect(&m_client, &QtTrustTunnelClient::endpointRequestFinished, this,
+                [this](quint64 requestId, bool accepted) {
+                    QJsonObject event;
+                    event["ev"] = "endpointRequest";
+                    event["requestId"] = QString::number(requestId);
+                    event["accepted"] = accepted;
+                    send(event);
+                }, Qt::QueuedConnection);
         connect(&m_client, &QtTrustTunnelClient::stateChanged, this,
                 [this](QtTrustTunnelClient::State s) {
                     QJsonObject e; e["ev"] = "state"; e["state"] = stateName(s); send(e);
@@ -431,12 +444,19 @@ private:
     }
 
     void handleConnect(const QJsonObject &c) {
+        m_reportsSession = c.value("stagedRouting").toBool();
+        const auto reject = [this, &c]() {
+            if (c.value("stagedRouting").toBool())
+                send(QJsonObject{{"ev", "endpointRequest"}, {"requestId", c.value("requestId")},
+                                 {"accepted", false}});
+        };
 #if defined(Q_OS_WIN)
         QString wintunErr;
         if (!prepareWindowsHelperRuntime(&wintunErr)) {
             QJsonObject e;
             e["ev"] = "error";
             e["msg"] = wintunErr;
+            reject();
             send(e);
             return;
         }
@@ -449,6 +469,7 @@ private:
             QJsonObject e;
             e["ev"] = "error";
             e["msg"] = QStringLiteral("connect requires inline configToml");
+            reject();
             send(e);
             return;
         }
@@ -459,8 +480,21 @@ private:
         const bool loggingEnabled = c.value(QStringLiteral("loggingEnabled")).toBool(true);
         QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
                                   Q_ARG(bool, loggingEnabled));
-        QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
-                                  Q_ARG(QString, toml));
+        if (c.value("stagedRouting").toBool()) {
+            QStringList domains, apps;
+            for (const auto &item : c.value("domains").toArray()) domains.append(item.toString());
+            for (const auto &item : c.value("rules").toArray()) apps.append(item.toString());
+            const bool selective = c.value("selective").toBool();
+            const quint64 requestId = c.value("requestId").toString().toULongLong();
+            QMetaObject::invokeMethod(&m_client, [this, toml, domains, selective, apps, requestId]() {
+                m_client.beginConnectConfigured(toml, domains, selective, apps, requestId);
+            }, Qt::QueuedConnection);
+        } else {
+            // Compatibility for older callers/test harnesses. New app requests
+            // carry a complete routing snapshot and an acknowledgement token.
+            QMetaObject::invokeMethod(&m_client, "beginConnect", Qt::QueuedConnection,
+                                      Q_ARG(QString, toml));
+        }
     }
 
     quint16 m_port = 0;
@@ -473,6 +507,7 @@ private:
     QHash<QTcpSocket *, QByteArray> m_pendingBuf;
     QHash<QTcpSocket *, QString> m_pendingNonce; // our challenge, per pending socket
     bool m_authed = false;
+    bool m_reportsSession = false;
     QThread m_vpnThread;
     QtTrustTunnelClient m_client;
 };
