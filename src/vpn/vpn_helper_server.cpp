@@ -481,7 +481,8 @@ private:
         QMetaObject::invokeMethod(&m_client, "setSessionLogging", Qt::QueuedConnection,
                                   Q_ARG(bool, loggingEnabled));
         if (c.value("stagedRouting").toBool()) {
-            QStringList domains, apps;
+            QStringList domains;
+            QStringList apps;
             for (const auto &item : c.value("domains").toArray()) domains.append(item.toString());
             for (const auto &item : c.value("rules").toArray()) apps.append(item.toString());
             const bool selective = c.value("selective").toBool();
