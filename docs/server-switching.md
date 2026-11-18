@@ -61,7 +61,7 @@ edits continue to use the existing full rebuild path. Actual routing-policy chan
 retain the existing connection-reset behavior; the no-interruption guarantee here
 covers server changes with unchanged routing rules.
 
-Local validation: 23 core state-machine cases, 7 real wrapper tests, 67 Qt adapter
+Local validation: 23 core state-machine cases, 7 real wrapper tests, 68 Qt adapter
 cases and desktop/helper integration suites. The direct-DNS fix has a separate
 207-case native DNS run. These checks do not substitute for real device testing.
 

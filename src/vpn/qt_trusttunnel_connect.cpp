@@ -442,24 +442,25 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
         // over here or not at all.
         m_sessionRouting = ctx->routing;
         applyRoutingToSession();
-        return;
+        break;
     case ConnectAttempt::Outcome::Retry:
         scheduleReconnect(ctx->error);
-        return;
+        break;
     case ConnectAttempt::Outcome::FatalStop:
         if (ctx->privilegeHint) {
             failConnectFatal(ctx->error, true);
-            return;
+            break;
         }
         m_stopRequested = true;
         setState(State::Error);
         emit vpnError(ctx->error);
-        return;
+        break;
     case ConnectAttempt::Outcome::FatalKeepGoing:
         setState(State::Error);
         emit vpnError(ctx->error);
-        return;
+        break;
     }
+    resumePendingEndpoint();
 }
 
 void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHint)

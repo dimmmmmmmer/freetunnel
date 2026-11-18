@@ -16,7 +16,7 @@
 void Backend::toggle() {
     // A click while connecting cancels the attempt; while connected it
     // disconnects; otherwise it starts connecting.
-    if (m_connected || m_connecting || m_client.sessionActive())
+    if (m_connected || m_connecting)
         disconnectVpn();
     else
         connectVpn();

@@ -54,6 +54,7 @@ class TestQtTrustTunnelClient : public QObject {
 
 private slots:
     void endpointSwitchKeepsClient();
+    void endpointPickDuringInitialConnectKeepsTheSession();
     void endpointSwitchDropsQueuedOldServerState();
     void endpointSwitchStagesRulesUntilCommit();
     void endpointSwitchKeepsNewerRuleEdits();
@@ -2065,4 +2066,24 @@ void TestQtTrustTunnelClient::endpointSwitchDropsQueuedOldServerState()
     QMetaObject::invokeMethod(m_client, [] {}, Qt::BlockingQueuedConnection);
     QCoreApplication::processEvents();
     QCOMPARE(m_lastState, State::Reconnecting);
+}
+
+void TestQtTrustTunnelClient::endpointPickDuringInitialConnectKeepsTheSession()
+{
+    auto &ctl = mockcore::Controller::instance();
+    ctl.setBlockConnect(true);
+    beginConnect();
+    QTRY_COMPARE(ctl.connectCallCount(), 1);
+    const auto id = ctl.lastClientId();
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->beginConnectConfigured(validConfigToml() + "certificate = \"latest-pin\"\n",
+                                         {}, false, {}, 100);
+    }, Qt::BlockingQueuedConnection);
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    ctl.releaseConnect();
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    QCOMPARE(ctl.lastClientId(), id);
+    QCOMPARE(ctl.connectCallCount(), 1);
+    QCOMPARE(ctl.disconnectCalls(id), 0);
+    QCOMPARE(ctl.lastCoreConfig().certificate, std::string("latest-pin"));
 }

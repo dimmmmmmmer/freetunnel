@@ -17,10 +17,10 @@ void QtTrustTunnelClient::reportEndpointRejection(const QString &error, quint64 
 void QtTrustTunnelClient::beginConnectConfigured(const QString &toml, const QStringList &domains,
         bool selective, const QStringList &apps, quint64 requestId)
 {
-    if (m_client && !m_stopRequested) {
+    if (!m_stopRequested && (m_client || (m_connectThread && m_connectThread->isRunning()))) {
         EndpointSwitchRequest request{toml, domains, selective, freetunnel::sanitizedAppRules(apps), requestId,
                 ++m_endpointRequest, m_publishedRouting.generation};
-        if (m_endpointPreparationActive) {
+        if (m_endpointPreparationActive || !m_client) {
             m_pendingEndpoint = std::move(request);
             return;
         }
@@ -35,6 +35,25 @@ void QtTrustTunnelClient::beginConnectConfigured(const QString &toml, const QStr
     setSplitRouting(domains, selective, apps);
     beginConnect(toml);
     emit endpointRequestFinished(requestId, true);
+}
+
+void QtTrustTunnelClient::resumePendingEndpoint()
+{
+    if (!m_pendingEndpoint || m_endpointPreparationActive)
+        return;
+    if (!m_client && m_connectThread && m_connectThread->isRunning()) {
+        QTimer::singleShot(20, this, &QtTrustTunnelClient::resumePendingEndpoint);
+        return;
+    }
+    auto request = std::exchange(m_pendingEndpoint, std::nullopt);
+    if (m_client && !m_stopRequested) {
+        prepareEndpointSwitch(std::move(*request));
+    } else {
+        // The initial attempt failed before owning a usable session. Its worker
+        // is finished, so the latest explicit pick may start a fresh one now.
+        beginConnectConfigured(request->toml, request->domains, request->selective,
+                               request->apps, request->id);
+    }
 }
 
 void QtTrustTunnelClient::switchEndpoint(const QString &toml)

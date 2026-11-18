@@ -197,6 +197,7 @@ private:
         quint64 baseGeneration = 0;
     };
     void prepareEndpointSwitch(EndpointSwitchRequest request);
+    void resumePendingEndpoint();
     void finishEndpointPreparation(const EndpointSwitchRequest &request, quint64 session,
             const std::shared_ptr<ag::TrustTunnelClient::PreparedEndpoint> &prepared, const QString &error);
     void reportEndpointRejection(const QString &error, quint64 requestId);

@@ -487,7 +487,8 @@ bool Backend::linkWouldTurnVpnOff(const freetunnel::ControlCommand &cmd) const
     const bool up = m_connected || m_connecting;
     if (cmd.action == ControlAction::Toggle)
         return up;
-    return cmd.action == ControlAction::Disconnect && (up || m_autoConnectTimer.isActive());
+    return cmd.action == ControlAction::Disconnect
+            && (up || m_client.sessionActive() || m_autoConnectTimer.isActive());
 }
 
 bool Backend::handleControl(const QString &command) {

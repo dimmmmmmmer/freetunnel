@@ -47,6 +47,7 @@ private slots:
     void theConfigsKillSwitchPortsSettingReachesTheHelperAndTheLiveSession();
     void configSwitchSuppressesCoreDisconnectToast();
     void aRejectedSwitchRestoresTheRunningServer();
+    void aRetainedFailedSessionRetriesWithoutDisconnectAndGuardsLinks();
     void aSwitchToAFailingServerSaysSoAndTheNextPickStillSwitches();
     void aSecondPickWhileTheFirstReadsItsPasswordWins();
     void anEditMadeWhileConnectingReachesTheSession();
@@ -2071,5 +2072,32 @@ void TestIntegrationBackendVpn::aRejectedSwitchRestoresTheRunningServer()
     QCOMPARE(env.server.countFor(QStringLiteral("disconnect")), 0);
     backend.disconnectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return !backend.connected(); }, 5000));
+    backend.prepareQuit();
+}
+
+void TestIntegrationBackendVpn::aRetainedFailedSessionRetriesWithoutDisconnectAndGuardsLinks()
+{
+    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    TestConfigs configs;
+    QVERIFY(configs.add(QStringLiteral("retained.example")));
+    configs.install();
+    MockHelperEnv env(QStringLiteral("backend-retained-token"));
+    QVERIFY(env.start());
+    Backend backend;
+    backend.connectVpn();
+    QTRY_VERIFY(backend.connected());
+    env.server.reportState(QStringLiteral("Error"));
+    QTRY_VERIFY(!backend.connected() && !backend.connecting());
+    QSignalSpy asked(&backend, &Backend::deepLinkDisconnectConfirmationRequired);
+    QVERIFY(backend.handleControl(freetunnel::linkControlString(QStringLiteral("freetunnel://disconnect"))));
+    QCOMPARE(asked.size(), 1);
+    QCOMPARE(env.server.countFor(QStringLiteral("disconnect")), 0);
+    // The visible Connect button retries the retained session, rather than
+    // silently stopping its kill switch and requiring a second click.
+    backend.toggle();
+    QTRY_VERIFY(env.server.connectCount() == 2 && backend.connected());
+    QCOMPARE(env.server.countFor(QStringLiteral("disconnect")), 0);
+    backend.disconnectVpn();
+    QTRY_VERIFY(!backend.connected());
     backend.prepareQuit();
 }
