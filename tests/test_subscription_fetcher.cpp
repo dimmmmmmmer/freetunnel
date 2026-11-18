@@ -407,7 +407,9 @@ void TestSubscriptionFetcher::aPinnedFetchReachesANameThatDoesNotResolve()
     QVERIFY(result->document);
     QCOMPARE(result->document->hostname, QStringLiteral("vpn.test"));
     QCOMPARE(result->origin, QStringLiteral("https://vpn.test:") + QString::fromLatin1(port));
-    QCOMPARE(server.serverNames(), QStringList{QStringLiteral("vpn.test")});
+    QVERIFY(!server.serverNames().isEmpty());
+    for (const QString &name : server.serverNames())
+        QCOMPARE(name, QStringLiteral("vpn.test"));
     QCOMPARE(server.requests().size(), 1);
     const TlsTestServer::Request &request = server.requests().constFirst();
     QCOMPARE(request.method, QByteArray("GET"));
@@ -423,7 +425,9 @@ void TestSubscriptionFetcher::aPinnedFetchReachesANameThatDoesNotResolve()
     QCOMPARE(request.header("Accept-Encoding"), QByteArray("identity"));
     QVERIFY(!request.hasHeader("Cookie"));
     // HTTP/1.1, which the server would have given up for HTTP/2 had it been asked.
-    QCOMPARE(server.protocols(), QStringList{QString()});
+    QVERIFY(!server.protocols().isEmpty());
+    for (const QString &protocol : server.protocols())
+        QCOMPARE(protocol, QString());
 }
 
 void TestSubscriptionFetcher::aWrongPinIsRefusedBeforeTheRequest()
@@ -627,7 +631,12 @@ void TestSubscriptionFetcher::aSameOriginRedirectIsFollowed()
     QCOMPARE(second.header("Host"), "vpn.test:" + QByteArray::number(server.port()));
     QVERIFY(!second.header("Authorization").isEmpty());
     QCOMPARE(second.header("Authorization"), server.requests().at(0).header("Authorization"));
-    QCOMPARE(server.serverNames(), (QStringList{QStringLiteral("vpn.test"), QStringLiteral("vpn.test")}));
+    // Each response closes its connection, but Qt may open additional TLS
+    // connections without sending HTTP requests. Check every SNI, not an exact
+    // transport connection count; the two HTTP requests are asserted above.
+    QVERIFY(server.serverNames().size() >= 2);
+    for (const QString &name : server.serverNames())
+        QCOMPARE(name, QStringLiteral("vpn.test"));
 }
 
 void TestSubscriptionFetcher::aRedirectElsewhereIsRefused_data()

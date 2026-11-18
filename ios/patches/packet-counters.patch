@@ -1,0 +1,69 @@
+--- a/platform/apple/VpnClient/VpnClient.h
++++ b/platform/apple/VpnClient/VpnClient.h
+@@ -17,6 +17,8 @@
+ - (instancetype)init NS_UNAVAILABLE;
+ - (bool)start:(NEPacketTunnelFlow *)tunnelFlow;
+ - (bool)stop;
++- (uint64_t)uploadedBytes;
++- (uint64_t)downloadedBytes;
+ - (void)notify_sleep;
+ - (void)notify_wake;
+ + (NSArray<NSString *> *)excludeCidr:(NSArray<NSString *> *)includeRoutes
+--- a/platform/apple/VpnClient/VpnClient.mm
++++ b/platform/apple/VpnClient/VpnClient.mm
+@@ -13,6 +13,8 @@
+ #import <netinet/in.h>
+ #import <ifaddrs.h>
+ #import <os/log.h>
++
++#include <atomic>
+ 
+ static ag::Logger g_logger("VPN_CLIENT");
+ 
+@@ -156,6 +158,8 @@
+     std::unique_ptr<ag::TrustTunnelClient> _native_client;
+     std::unique_ptr<ag::AutoNetworkMonitor> _network_monitor;
+     NEPacketTunnelFlow *_tunnelFlow;
++    std::atomic<uint64_t> _uploadedBytes;
++    std::atomic<uint64_t> _downloadedBytes;
+     id _readPacketsHandler;
+ }
+ @end
+@@ -168,6 +172,7 @@
+     std::vector<ag::VpnPacket> buf(nativePackets.size);
+     nativePackets.data = buf.data();
+     for (size_t i = 0; i < nativePackets.size; ++i) {
++        _uploadedBytes.fetch_add(packets[i].length, std::memory_order_relaxed);
+         nativePackets.data[i] = ag::VpnPacket{
+             .data = (uint8_t *) packets[i].bytes,
+             .size = (size_t) packets[i].length,
+@@ -184,6 +189,8 @@
+             stateChangeHandler:(StateChangeHandler)stateChangeHandler {
+     self = [super init];
+     if (self) {
++        _uploadedBytes.store(0, std::memory_order_relaxed);
++        _downloadedBytes.store(0, std::memory_order_relaxed);
+         toml::parse_result parse_result = toml::parse(config.UTF8String);
+         if (!parse_result) {
+             errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description());
+@@ -215,7 +222,9 @@
+                     for (size_t i = 0; i < event->packet.chunks_num; ++i) {
+                         [packet appendBytes:event->packet.chunks[i].iov_base length:event->packet.chunks[i].iov_len];
+                     }
+-                    [self->_tunnelFlow writePackets:@[packet] withProtocols:@[@(event->family)]];
++                    if ([self->_tunnelFlow writePackets:@[packet] withProtocols:@[@(event->family)]]) {
++                        self->_downloadedBytes.fetch_add(length, std::memory_order_relaxed);
++                    }
+                 }
+             },
+             .state_changed_handler = [stateChangeHandler](ag::VpnStateChangedEvent *event) {
+@@ -275,6 +284,9 @@
+     return _native_client->disconnect();
+ }
+ 
++- (uint64_t)uploadedBytes { return _uploadedBytes.load(std::memory_order_relaxed); }
++- (uint64_t)downloadedBytes { return _downloadedBytes.load(std::memory_order_relaxed); }
++
+ - (void)notify_sleep {
+     _native_client->notify_sleep();
+ }
