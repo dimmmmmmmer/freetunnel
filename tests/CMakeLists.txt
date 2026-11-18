@@ -1287,6 +1287,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
     find_program(FT_OPENSSL_CLI openssl)
+    find_program(FT_PYTHON3 python3)
+    if (FT_BASH AND FT_PYTHON3)
+        add_test(NAME clang_tidy_runner
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_clang_tidy_runner.sh)
+    endif ()
     if (FT_BASH)
         add_test(NAME android_release_tag
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_tag.sh)
