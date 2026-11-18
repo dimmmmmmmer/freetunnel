@@ -120,9 +120,9 @@ void QtTrustTunnelClient::finishEndpointPreparation(const EndpointSwitchRequest 
 {
     m_endpointPreparationActive = false;
     if (m_pendingEndpoint) {
-        auto pending = std::exchange(m_pendingEndpoint, std::nullopt);
-        if (!m_stopRequested && m_client)
-            prepareEndpointSwitch(std::move(*pending));
+        // The old preparation can finish after disconnect and a fresh startup.
+        // Keep that new session's pick queued until its client can be adopted.
+        resumePendingEndpoint();
         return;
     }
     if (request.serial != m_endpointRequest || session != m_sessionGen || m_stopRequested || !m_client)

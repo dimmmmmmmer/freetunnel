@@ -85,6 +85,11 @@ public:
     // it is never accepted from outside, see the note in the .cpp.
     Q_INVOKABLE void setSessionLogging(bool enabled);
 
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Read only on the owner thread; lets race tests wait for a worker result.
+    bool endpointPreparationActiveForTest() const { return m_endpointPreparationActive; }
+#endif
+
 signals:
     void endpointRequestFinished(quint64 requestId, bool accepted);
     void sessionPresenceChanged(bool active);

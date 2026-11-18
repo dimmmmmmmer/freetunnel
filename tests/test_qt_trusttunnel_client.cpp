@@ -55,6 +55,7 @@ class TestQtTrustTunnelClient : public QObject {
 private slots:
     void endpointSwitchKeepsClient();
     void endpointPickDuringInitialConnectKeepsTheSession();
+    void anOldPreparationDoesNotConsumeANewSessionsPendingPick();
     void endpointSwitchDropsQueuedOldServerState();
     void endpointSwitchStagesRulesUntilCommit();
     void endpointSwitchKeepsNewerRuleEdits();
@@ -2086,4 +2087,40 @@ void TestQtTrustTunnelClient::endpointPickDuringInitialConnectKeepsTheSession()
     QCOMPARE(ctl.connectCallCount(), 1);
     QCOMPARE(ctl.disconnectCalls(id), 0);
     QCOMPARE(ctl.lastCoreConfig().certificate, std::string("latest-pin"));
+}
+
+void TestQtTrustTunnelClient::anOldPreparationDoesNotConsumeANewSessionsPendingPick()
+{
+    connectAndSettle();
+    auto &ctl = mockcore::Controller::instance();
+    ctl.blockEndpointPreparation(true);
+    QMetaObject::invokeMethod(m_client, "switchEndpoint", Qt::QueuedConnection,
+                              Q_ARG(QString, validConfigToml()));
+    QTRY_COMPARE(ctl.endpointPreparationCount(), 1);
+    requestDisconnect();
+    QTRY_COMPARE(m_lastState, State::Disconnected);
+    ctl.setBlockConnect(true);
+    beginConnect();
+    QTRY_COMPARE(ctl.connectCallCount(), 2);
+    const auto newSession = ctl.lastClientId();
+    QMetaObject::invokeMethod(m_client, [this]() {
+        m_client->beginConnectConfigured(validConfigToml() + "certificate = \"new-session-pin\"\n",
+                                         {}, false, {}, 101);
+    }, Qt::BlockingQueuedConnection);
+    ctl.blockEndpointPreparation(false);
+    // Let the cancelled session's result return while the new session is
+    // still in connect(). It must not consume the new session's pending pick.
+    const auto preparationFinished = [this]() {
+        bool active = true;
+        QMetaObject::invokeMethod(m_client, [this, &active]() {
+            active = m_client->endpointPreparationActiveForTest();
+        }, Qt::BlockingQueuedConnection);
+        return !active;
+    };
+    QTRY_VERIFY(preparationFinished());
+    ctl.releaseConnect();
+    QTRY_COMPARE(ctl.endpointReplacementCount(), 1);
+    QCOMPARE(ctl.lastClientId(), newSession);
+    QCOMPARE(ctl.disconnectCalls(newSession), 0);
+    QCOMPARE(ctl.lastCoreConfig().certificate, std::string("new-session-pin"));
 }
