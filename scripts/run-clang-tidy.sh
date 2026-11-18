@@ -85,15 +85,31 @@ if [[ ${#SOURCES[@]} -eq 0 ]]; then
 fi
 
 echo "clang-tidy: ${#SOURCES[@]} translation units"
-fail=0
-for src in "${SOURCES[@]}"; do
-  echo "  $src"
-  if ! "$TIDY" -p "$BUILD" "$src" --quiet; then
-    fail=1
-  fi
-done
+python3 - "$TIDY" "$BUILD" "${SOURCES[@]}" <<'PY'
+import concurrent.futures
+import os
+import subprocess
+import sys
 
-if [[ "$fail" -ne 0 ]]; then
-  exit 1
-fi
+tidy, build, *sources = sys.argv[1:]
+# Each translation unit is independent. Bound parallelism to keep memory use
+# reasonable on smaller runners; retain every diagnostic and every exit code.
+workers = min(4, os.cpu_count() or 1)
+print(f"clang-tidy: {workers} workers", flush=True)
+
+def check(source):
+    return subprocess.run([tidy, "-p", build, source, "--quiet"],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+failed = False
+with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+    jobs = {pool.submit(check, source): source for source in sources}
+    for job in concurrent.futures.as_completed(jobs):
+        print(f"  {jobs[job]}", flush=True)
+        result = job.result()
+        # Print a complete file's report together, never interleaved with another.
+        print(result.stdout, end="", flush=True)
+        failed |= result.returncode != 0
+sys.exit(1 if failed else 0)
+PY
 echo "clang-tidy: OK"

@@ -79,8 +79,10 @@ public:
     // such connect: none has gone out, or the GUI has ended its session or lost
     // the helper since.
     bool sessionSettingsChanged() const;
+    bool sessionActive() const { return m_liveSession; }
 
 signals:
+    void endpointRequestFinished(bool accepted);
     void stateChanged(VpnHelperClient::State state);
     void tunnelStats(quint64 upload, quint64 download);
     void connectionInfo(const QString &msg);
@@ -136,6 +138,11 @@ private:
     bool m_peerProven = false; // peer answered our challenge with a valid proof
     QString m_tokenPath;
     QString m_configToml;
+    QString m_sessionConfigToml;
+    QString m_requestedConfigToml;
+    quint64 m_endpointRequestId = 0;
+    bool m_stageRoutingForConnect = false;
+    bool m_liveSession = false;
     std::vector<std::string> m_exclusions;
     std::vector<std::string> m_excludedRoutes;
     bool m_selective = false;
@@ -146,6 +153,7 @@ private:
     // gave up on) leaves it set until the next connect replaces it; nothing is
     // built in between for it to be wrong about.
     std::optional<SessionSettings> m_sessionBuiltWith;
+    std::optional<SessionSettings> m_committedSessionSettings;
     bool m_killSwitchPortsFromConfig = false;
     QString m_logLevel = QStringLiteral("warn");
     bool m_loggingEnabled = true;

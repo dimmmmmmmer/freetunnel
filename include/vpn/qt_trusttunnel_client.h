@@ -12,6 +12,8 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 // Windows SDK doesn't define POSIX iovec; define a minimal version before vpn.h uses it.
@@ -55,6 +57,9 @@ public:
     Q_INVOKABLE void connectVpn();
     Q_INVOKABLE void beginConnect(const QString &configToml);
     Q_INVOKABLE void disconnectVpn();
+    Q_INVOKABLE void switchEndpoint(const QString &configToml);
+    Q_INVOKABLE void beginConnectConfigured(const QString &configToml, const QStringList &domains,
+            bool selective, const QStringList &apps, quint64 requestId);
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
     Q_INVOKABLE void setLogLevel(const QString &level); // applied live (no reconnect)
@@ -82,7 +87,14 @@ public:
     // it is never accepted from outside, see the note in the .cpp.
     Q_INVOKABLE void setSessionLogging(bool enabled);
 
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Read only on the owner thread; lets race tests wait for a worker result.
+    bool endpointPreparationActiveForTest() const { return m_endpointPreparationActive; }
+#endif
+
 signals:
+    void endpointRequestFinished(quint64 requestId, bool accepted);
+    void sessionPresenceChanged(bool active);
     void stateChanged(QtTrustTunnelClient::State state);
     void vpnConnected();
     void vpnDisconnected();
@@ -179,6 +191,30 @@ private:
     void handleCoreWaitingForNetwork();
     void handleCoreDisconnected(int errCode, const QString &errText);
     void setConfigLocked(ag::TrustTunnelConfig config);
+    static std::optional<ag::TrustTunnelConfig> parseConfig(const QString &toml, QString *error,
+            ag::LogLevel fallbackLevel = ag::LOG_LEVEL_INFO);
+    static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config);
+    struct EndpointSwitchRequest {
+        QString toml;
+        QStringList domains;
+        bool selective = false;
+        QStringList apps;
+        quint64 id = 0;
+        quint64 serial = 0;
+        quint64 baseGeneration = 0;
+    };
+    std::pair<Routing, std::vector<std::string>> routingForEndpoint(
+            const EndpointSwitchRequest &request, const ag::TrustTunnelConfig &config) const;
+    void prepareEndpointSwitch(EndpointSwitchRequest request);
+    void resumePendingEndpoint();
+    void finishEndpointPreparation(const EndpointSwitchRequest &request, quint64 session,
+            const std::shared_ptr<ag::TrustTunnelClient::PreparedEndpoint> &prepared, const QString &error);
+    void reportEndpointRejection(const QString &error, quint64 requestId);
+    quint64 m_endpointRequest = 0;
+    std::atomic<quint64> m_endpointEpoch{0};
+    bool m_endpointPreparationActive = false;
+    bool m_preserveEndpointSession = false;
+    std::optional<EndpointSwitchRequest> m_pendingEndpoint;
     std::string exclusionsLocked() const;
     void storeExclusionsLocked(std::vector<std::string> exclusions);
     void storeModeLocked(bool selective);

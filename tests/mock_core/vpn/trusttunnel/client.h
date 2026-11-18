@@ -26,6 +26,51 @@ public:
         std::string str() const { return text; }
     };
 
+    struct EndpointRouting {
+        VpnMode mode;
+        std::string exclusions;
+        uint64_t generation;
+    };
+    struct PreparedEndpoint {
+        TrustTunnelConfig config;
+        bool consumed = false;
+    };
+    struct PreparationResult {
+        std::shared_ptr<PreparedEndpoint> candidate;
+        std::optional<Error> failure;
+        bool has_error() const { return failure.has_value(); }
+        const Error *error() const { return &*failure; }
+        std::shared_ptr<PreparedEndpoint> &value() { return candidate; }
+    };
+    static PreparationResult prepare_endpoint(TrustTunnelConfig config) {
+        const auto error = mockcore::Controller::instance().prepareEndpoint();
+        if (!error.empty()) return {nullptr, Error{error}};
+        return {std::make_shared<PreparedEndpoint>(PreparedEndpoint{std::move(config)}), std::nullopt};
+    }
+    std::optional<Error> replace_endpoint(const std::shared_ptr<PreparedEndpoint> &prepared,
+            const std::function<void()> &on_committed = {}, const EndpointRouting *routing = nullptr) {
+        if (!m_running || !prepared || prepared->consumed)
+            return Error{"No prepared endpoint or running session"};
+        const auto &config = prepared->config;
+        if (!m_config.endpoint_sockets_protected || config.listener != m_config.listener
+                || config.killswitch_enabled != m_config.killswitch_enabled
+                || config.killswitch_allow_ports != m_config.killswitch_allow_ports)
+            return Error{"Tunnel settings changed; disconnect before applying them"};
+        if (routing) {
+            m_config.mode = routing->mode;
+            m_config.exclusions = routing->exclusions;
+            m_config.routing_generation = routing->generation;
+            mockcore::Controller::instance().onUpdateExclusions(m_id, int(routing->mode), routing->exclusions,
+                                                               routing->generation);
+        }
+        m_config.location = std::move(prepared->config.location);
+        prepared->consumed = true;
+        if (on_committed) on_committed();
+        mockcore::Controller::instance().replaceEndpoint();
+        mockcore::Controller::instance().recordCoreConfig(snapshotOf(m_config));
+        return std::nullopt;
+    }
+
     // Signature mirrors the real core (vpn/trusttunnel/client.h): BOTH arguments
     // are rvalue references there. Taking them by value here let a call that
     // passes an lvalue compile against the mock and fail the real build — which

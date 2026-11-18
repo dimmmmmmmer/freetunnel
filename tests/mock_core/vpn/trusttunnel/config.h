@@ -21,11 +21,13 @@ struct MockTunListener {
     std::string device_name;
     std::vector<std::string> included_routes;
     std::vector<std::string> excluded_routes;
+    bool operator==(const MockTunListener &) const = default;
     bool use_existing = false;
     std::optional<std::string> netns;
 };
 struct MockSocksListener {
     std::string address;
+    bool operator==(const MockSocksListener &) const = default;
 };
 
 struct TrustTunnelConfig {
@@ -47,6 +49,7 @@ struct TrustTunnelConfig {
     } location;
     std::string exclusions;
     VpnMode mode = VPN_MODE_GENERAL;
+    bool endpoint_sockets_protected = false;
     uint64_t routing_generation = 0;
     bool killswitch_enabled = false;
     std::string killswitch_allow_ports;
@@ -108,6 +111,7 @@ struct TrustTunnelConfig {
         tun.use_existing = t["listener.tun.use_existing"].value<bool>().value_or(false);
         tun.netns = t["listener.tun.netns"].value<std::string>();
         tun.included_routes = stringArray(t["listener.tun.included_routes"].value<std::string>());
+        tun.excluded_routes = stringArray(t["listener.tun.excluded_routes"].value<std::string>());
         return c;
     }
 
