@@ -6,6 +6,7 @@
 
 - Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.
 - Core: isolate TLS session caches between servers and preserve the recovery policy when the network returns before the first connection.
+- Android: reject malformed native configurations without crashing and release temporary configuration strings.
 
 - Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
 
