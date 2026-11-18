@@ -42,6 +42,7 @@ struct CoreConfigSnapshot {
     bool captured = false; // false until a core client was actually built
     bool killswitch_enabled = false;
     int mode = -1;     // ag::VpnMode
+    uint64_t routing_generation = 0;
     int loglevel = -1; // ag::LogLevel
     // The endpoint's TLS settings, as ag::TrustTunnelConfig::location has them.
     bool skip_verification = false;
@@ -68,6 +69,7 @@ struct ExclusionsUpdate {
     uint64_t client = 0;
     int mode = -1; // ag::VpnMode
     std::string exclusions;
+    uint64_t generation = 0;
 };
 
 class Controller {
@@ -445,9 +447,9 @@ public:
                     NetworkChange{state, outbound, it->second.dnsReads.size()});
     }
 
-    void onUpdateExclusions(uint64_t id, int mode, std::string exclusions)
+    void onUpdateExclusions(uint64_t id, int mode, std::string exclusions, uint64_t generation = 0)
     {
-        ExclusionsUpdate update{id, mode, std::move(exclusions)};
+        ExclusionsUpdate update{id, mode, std::move(exclusions), generation};
         int count = 0;
         std::function<void(uint64_t)> hook;
         {

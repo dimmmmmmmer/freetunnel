@@ -69,7 +69,7 @@ public:
     Q_INVOKABLE void setAppRules(const QStringList &rules);
     // The three split-tunnelling settings as one change: the domain and address
     // rules, the mode and the program rules. A running session takes the rules and
-    // the mode live (vendor patch 03); each of the setters above also does, but
+    // the mode live (vendor patches 03 and 11); each of the setters above also does, but
     // one at a time, so between two of them the session would route by a mix of
     // old and new that is neither what the user had nor what they asked for.
     Q_INVOKABLE void setSplitRouting(const QStringList &domains, bool selective,
@@ -114,6 +114,8 @@ private:
     struct Routing {
         ag::VpnMode mode = ag::VPN_MODE_GENERAL;
         std::string exclusions;
+        QStringList appRules;
+        quint64 generation = 0;
         bool operator==(const Routing &) const = default;
     };
     // One connect attempt, owned entirely by the worker thread that runs it.
@@ -221,6 +223,7 @@ private:
         std::mutex mutex;
         QStringList rules;
         bool selective = false;
+        quint64 generation = 0;
         // Every connection asks the handler something, so logging all of them
         // buries the log in programs nobody wrote a rule for. Decisions that
         // actually routed something are always logged; the rest only when the
@@ -235,6 +238,8 @@ private:
     // What m_client routes by: what it was built with, then every live update.
     // Read only while m_client is set, and set whenever it is adopted.
     Routing m_sessionRouting;
+    Routing m_publishedRouting;
+    QStringList m_appRuleList; // Desired rules; owner thread only.
     // The reasons already given this session for not having connected yet, as the
     // core goes round its recovery loop: each is said once, not once per round,
     // even when two of them take turns.

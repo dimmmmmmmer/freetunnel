@@ -202,6 +202,7 @@ QtTrustTunnelClient::makeConnectRequestHandler(const GuardPtr &guard, quint64 se
             rules = appRules->rules;
             selective = appRules->selective;
             verbose = appRules->verbose;
+            decision->routing_generation = appRules->generation;
         }
         // No rules means the feature is off, and off must cost nothing: no
         // table walk, and the same VPN_CA_DEFAULT the wrapper answered before

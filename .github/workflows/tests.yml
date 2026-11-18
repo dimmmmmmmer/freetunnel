@@ -123,7 +123,9 @@ jobs:
 
       - name: Incoming TCP and UDP routing (isolated Linux namespaces)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
-        run: sudo unshare --net python3 tests/test_linux_reply_routing.py --isolated
+        run: |
+          sudo unshare --net python3 tests/test_linux_reply_routing.py --isolated
+          sudo unshare --net python3 tests/test_linux_reply_routing.py --isolated --wildcard
 
       - name: Install Qt (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'

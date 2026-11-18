@@ -63,6 +63,32 @@ priority, both split modes, forced application routes and explicit rejection.
 Linux build CI runs the domain-filter and relevant DNS-routing tests against
 the patched core.
 
+## Shared addresses and address-family availability
+
+The network audit on 2026-11-18 reproduced another routing defect: the core
+cached a hostname by destination address, port and application. A later flow
+from the same browser to another hostname on that shared CDN address could
+inherit the previous hostname's direct route before its own hostname was read.
+
+`12-current-connection-hostname.patch` prevents a new connection from treating
+that cached name as its identity. Scannable traffic waits for its own HTTP
+hostname, TLS SNI or supported QUIC hostname before applying domain rules.
+Explicit application routing and higher-priority IP rules retain their existing
+precedence. If no hostname can be extracted, IP/default rules apply; an older
+flow's cached name is not a fallback. This does not inspect encrypted DNS or
+separate multiple HTTP/2 origins multiplexed inside one encrypted connection.
+
+The same tests reproduced premature rejection when the selected route supported
+IPv6 but the other route did not. Classification now waits if either route can
+carry the address family, then checks the selected route before opening it.
+An unavailable selected route fails closed; it is never replaced with the other
+route. The native matrix covers IPv4/IPv6, both split modes, plain and priority
+rules, direct/VPN destinations, opaque traffic and asymmetric route availability.
+During endpoint recovery, local hostname inspection remains available in both
+split modes: direct sites can connect, while VPN sites fail closed before any
+payload is forwarded.
+The patch is included in both desktop builds and the stable Android adapter.
+
 ## Decision
 
 Keep domain-based DNS routing and the existing Russian-sites bypass behavior. Do not
@@ -116,3 +142,28 @@ docker run --rm --network none --cap-add NET_ADMIN --dns 192.0.2.53 \
 `NET_ADMIN` is used only to add `192.0.2.53/32` and `192.0.2.54/32` to this
 container's loopback: upstream treats `127/8` DNS addresses specially. Never use
 host networking for this probe. No TUN device or privileged container is needed.
+
+
+## Direct connections during endpoint recovery
+
+An isolated native regression test reproduced unconditional closure of direct
+TCP/UDP connections in `Tunnel::on_before_endpoint_disconnect`. This happened
+even though their direct upstream and physical network were still usable.
+`13-preserve-direct-recovery.patch` retains direct connections (including a
+pending direct connect) while closing endpoint-dependent and unresolved flows.
+It marks the endpoint unavailable before callbacks can initiate another flow.
+
+Tests cover both IP families, both split modes, TCP/UDP, pending and established
+direct connections, bidirectional payload while the endpoint is down, repeated
+recovery, physical-network changes, and explicit teardown. Network-change
+notifications still reset connections so sockets bound to an old interface do
+not stall applications until their TCP timeout. Existing DNS and shared-address tests continue
+to verify that VPN traffic does not fall back to the direct upstream. Desktop
+and Android builds apply the same patch.
+
+This fixes recovery inside a running core session. Manually switching servers
+still recreates the session and is a separate remaining task: it must preserve
+the listener, direct sockets and routing protection while updating endpoint
+credentials and OS routes. A blanket traffic block during that handover is not
+acceptable because direct connections must continue. A physical uplink loss
+can independently interrupt those connections; this patch cannot prevent that.

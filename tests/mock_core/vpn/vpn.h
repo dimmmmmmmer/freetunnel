@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 
 // Where the real vpn.h gets ag::Logger and ag::LogLevel from, too.
@@ -155,6 +156,7 @@ struct VpnConnectDecision {
     VpnConnectAction action = VPN_CA_DEFAULT;
     std::string app_name;
     int uid = -1;
+    std::optional<uint64_t> routing_generation;
 };
 
 struct VpnCallbacks {

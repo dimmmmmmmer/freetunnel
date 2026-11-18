@@ -653,8 +653,10 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash
         run: |
-          cmake --build build --target test_domain_filter test_dns_routing -j 4
+          cmake --build build --target test_domain_filter test_dns_routing test_routing_generation test_tunnel -j 4
           build/core/test_domain_filter
+          timeout 180 build/core/test_tunnel
+          timeout 60 build/core/test_routing_generation
           timeout 180 build/core/test_dns_routing --gtest_filter='*FreeTunnel*:*DnsRoutingCustomAction*:*NoProxy*:*NotConnectedNoKillSwitch*:*AppInitiatedDnsRouting*'
 
       # Whether the binary came out CET-marked. -fcf-protection reaches only what

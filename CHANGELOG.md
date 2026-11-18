@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
+
+- Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
+
+- Prevent mixed split-tunnel rules during live edits and connection setup on desktop.
+- Linux: preserve incoming UDP replies from services listening on all addresses and remove the blanket VPN bypass for outgoing connections using service source ports.
 - Keep bypass-domain DNS working during VPN reconnection while the kill switch continues to block VPN-domain DNS.
 - Keep ordinary DNS on its domain's direct or VPN route regardless of letter case, a trailing root dot or application routing rules.
 - macOS and Linux: install the VPN helper once, then connect and apply signed helper updates without repeated administrator prompts.

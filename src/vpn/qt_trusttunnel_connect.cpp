@@ -282,6 +282,9 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     if (!reloadStoredConfigIfNeeded())
         return nullptr;
 
+    // Freeze the exact initial policy version even if edits arrive while the
+    // worker builds this session. Adoption submits any newer snapshot.
+    applyRoutingToSession();
     auto ctx = std::make_shared<ConnectAttempt>();
     ctx->owner = this;
     ctx->guard = m_guard;
@@ -302,7 +305,8 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
             return nullptr;
         }
         applyCoreLogPathToConfigLocked();
-        ctx->routing = Routing{m_config->mode, m_config->exclusions};
+        ctx->routing = m_publishedRouting;
+        m_config->routing_generation = ctx->routing.generation;
         ctx->config = std::move(*m_config);
         m_config.reset();
     }

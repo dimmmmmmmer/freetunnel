@@ -163,7 +163,8 @@ private slots:
     void aRuleEditReachesTheRunningSessionWithoutANewOne();
     void anEditThatChangesNothingLeavesTheSessionAlone();
     void splitRoutingChangesTheSessionInOneStep();
-    void theCoreHasTheNewModeBeforeTheProgramRulesChange();
+    void appDecisionsCarryThePublishedRoutingGeneration();
+    void addingFirstVpnAppCannotUseAnEmptyAppPolicy();
     void anEditMadeWhileTheSessionIsBuiltReachesItOnceBuilt();
     void aBurstOfEditsLeavesTheSessionOnTheLastOne();
     void aFirstConnectTheCoreKeepsRetryingStaysConnectingAndSaysWhy();
@@ -338,7 +339,8 @@ void TestQtTrustTunnelClient::anAppRuleTakesItsOwnConnectionOutOfTheTunnel()
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
 
     m_client->setVpnMode(false); // general: a listed app leaves the tunnel
-    m_client->setAppRules({QFileInfo(QCoreApplication::applicationFilePath()).fileName()});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QFileInfo(QCoreApplication::applicationFilePath()).fileName()})));
 
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
@@ -371,7 +373,8 @@ void TestQtTrustTunnelClient::selectiveModeSendsAMatchedAppTheOtherWay()
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
 
     m_client->setVpnMode(true);
-    m_client->setAppRules({QFileInfo(QCoreApplication::applicationFilePath()).fileName()});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QFileInfo(QCoreApplication::applicationFilePath()).fileName()})));
 
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
@@ -1078,15 +1081,18 @@ void TestQtTrustTunnelClient::anEditThatChangesNothingLeavesTheSessionAlone()
                               Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})));
     QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
                               Q_ARG(bool, false));
-    // Only the program rules differ, and those are read per connection.
+    QCOMPARE(ctl.exclusionUpdates().size(), size_t(1));
+    // An app-only edit advances the generation. The native core preserves open
+    // connections because mode/domains have not changed.
     QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
                               Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
                               Q_ARG(bool, false), Q_ARG(QStringList, QStringList({ownProgram()})));
-    QCOMPARE(ctl.exclusionUpdates().size(), size_t(1));
+    QCOMPARE(ctl.exclusionUpdates().size(), size_t(2));
+    QVERIFY(ctl.exclusionUpdates().back().generation > ctl.exclusionUpdates().front().generation);
 
     QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
                               Q_ARG(bool, true));
-    QCOMPARE(ctl.exclusionUpdates().size(), size_t(2)); // and a real change still goes
+    QCOMPARE(ctl.exclusionUpdates().size(), size_t(3)); // and a real change still goes
 }
 
 // Domains, mode and programs from one edit reach the session together. Taken one
@@ -1119,58 +1125,39 @@ void TestQtTrustTunnelClient::splitRoutingChangesTheSessionInOneStep()
     QCOMPARE(ctl.connectCallCount(), 1);
 }
 
-// A connection is routed in two places: the program rules decide it as it
-// arrives, and the core applies the mode when it completes it, in the order its
-// queue was filled. Taking the last program out of "Through VPN" switches the
-// core back to the full tunnel. Were the program rules dropped before the core
-// had the new mode, that program's next connection would carry no rule into a
-// core still selective, and leave the tunnel. So at the instant the core is
-// handed the update, the old program rules must still be the ones deciding.
-void TestQtTrustTunnelClient::theCoreHasTheNewModeBeforeTheProgramRulesChange()
+// App decisions carry the exact policy version, including during the native
+// update call. Old queued decisions and future ones are rejected by the core.
+void TestQtTrustTunnelClient::appDecisionsCarryThePublishedRoutingGeneration()
 {
     auto &ctl = mockcore::Controller::instance();
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    const auto oldDecision = ctl.fireConnectRequest(id, ownConnection(server, 20));
+    QVERIFY(oldDecision.routing_generation.has_value());
+    std::vector<ag::VpnConnectDecision> duringUpdates;
+    ctl.setUpdateHook([&](uint64_t client) {
+        if (client == id)
+            duringUpdates.push_back(ctl.fireConnectRequest(id, ownConnection(server, 21)));
+    });
+    const auto clearHook = qScopeGuard([&ctl]() { ctl.setUpdateHook(nullptr); });
     QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
                               Q_ARG(QStringList, QStringList()), Q_ARG(bool, true),
                               Q_ARG(QStringList, QStringList({ownProgram()})));
-    const quint64 id = connectedWithLiveSession();
-    QVERIFY(id != 0);
-    QCOMPARE(ctl.exclusionUpdates().at(0).mode, int(ag::VPN_MODE_SELECTIVE));
+    QCOMPARE(duringUpdates.size(), size_t(1));
+    const auto update = ctl.exclusionUpdates().back();
+    QVERIFY(duringUpdates.back().routing_generation == update.generation);
+    QVERIFY(oldDecision.routing_generation != update.generation);
+    QCOMPARE(duringUpdates.back().action, ag::VPN_CA_FORCE_REDIRECT);
 
-    ag::VpnConnectAction atUpdate = ag::VPN_CA_REJECT;
-    int hooked = 0;
-    ctl.setUpdateHook([&](uint64_t client) {
-        if (client != id)
-            return;
-        atUpdate = ctl.fireConnectRequest(id, ownConnection(server, 20 + hooked)).action;
-        ++hooked;
-    });
-    const auto clearHook = qScopeGuard([&ctl]() { ctl.setUpdateHook(nullptr); });
-
-    // The last program taken out: the GUI falls back to the full tunnel.
     QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
-                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
-                              Q_ARG(bool, false), Q_ARG(QStringList, QStringList()));
-    QCOMPARE(hooked, 1);
-    QVERIFY2(atUpdate == ag::VPN_CA_FORCE_REDIRECT,
-             "the program rules changed before the core had the new mode, so the program "
-             "just taken out of Through VPN was sent around the still-selective core");
-    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 30)).action, ag::VPN_CA_DEFAULT);
-
-    // The Mode switch alone keeps the same order: back to "Through VPN" with the
-    // program listed, then to "Bypass VPN", where the listed program leaves.
-    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
-                              Q_ARG(QStringList, QStringList({QStringLiteral("seed.example")})),
-                              Q_ARG(bool, true), Q_ARG(QStringList, QStringList({ownProgram()})));
-    QCOMPARE(hooked, 2);
-    QMetaObject::invokeMethod(m_client, "setVpnMode", Qt::BlockingQueuedConnection,
-                              Q_ARG(bool, false));
-    QCOMPARE(hooked, 3);
-    QVERIFY2(atUpdate == ag::VPN_CA_FORCE_REDIRECT,
-             "setVpnMode changed the program rules' mode before the core's");
-    QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 31)).action,
-             ag::VPN_CA_FORCE_BYPASS);
+                              Q_ARG(QStringList, QStringList()), Q_ARG(bool, false),
+                              Q_ARG(QStringList, QStringList()));
+    QCOMPARE(duringUpdates.size(), size_t(2));
+    QVERIFY(duringUpdates.back().routing_generation == ctl.exclusionUpdates().back().generation);
+    QVERIFY(duringUpdates.front().routing_generation != duringUpdates.back().routing_generation);
+    QCOMPARE(duringUpdates.back().action, ag::VPN_CA_DEFAULT);
 }
 
 // The GUI no longer rebuilds a session that is still being built when a rule
@@ -1191,6 +1178,9 @@ void TestQtTrustTunnelClient::anEditMadeWhileTheSessionIsBuiltReachesItOnceBuilt
     const QString builtWith = QString::fromStdString(ctl.lastCoreConfig().exclusions);
     QVERIFY2(!builtWith.contains(QStringLiteral("late.example")), qPrintable(builtWith));
     QVERIFY(ctl.exclusionUpdates().empty()); // nothing running to hand it to yet
+    const auto waitingDecision = ctl.fireConnectRequest(id, {});
+    QVERIFY(waitingDecision.routing_generation.has_value());
+    QVERIFY(waitingDecision.routing_generation != ctl.lastCoreConfig().routing_generation);
 
     ctl.releaseConnect();
     QTRY_VERIFY_WITH_TIMEOUT(!ctl.exclusionUpdates().empty(), kLongWaitMs);
@@ -1199,6 +1189,7 @@ void TestQtTrustTunnelClient::anEditMadeWhileTheSessionIsBuiltReachesItOnceBuilt
     QCOMPARE(updates.at(0).client, id);
     QCOMPARE(updates.at(0).mode, int(ag::VPN_MODE_SELECTIVE));
     QVERIFY(has(updates.at(0), "late.example"));
+    QVERIFY(waitingDecision.routing_generation == updates.at(0).generation);
     QCOMPARE(ctl.connectCallCount(), 1);
 }
 
@@ -1243,6 +1234,29 @@ void TestQtTrustTunnelClient::aBurstOfEditsLeavesTheSessionOnTheLastOne()
     QCOMPARE(updates.back().exclusions, builtWith);
     QCOMPARE(ctl.fireConnectRequest(id, ownConnection(server, 40)).action, ag::VPN_CA_DEFAULT);
     QCOMPARE(ctl.connectCallCount(), 1);
+}
+
+
+// Reproduce the exact window between queueing the selective mode and publishing
+// its first app rule. DEFAULT at this point would bypass a VPN-selected program.
+void TestQtTrustTunnelClient::addingFirstVpnAppCannotUseAnEmptyAppPolicy()
+{
+    auto &ctl = mockcore::Controller::instance();
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const quint64 id = connectedWithLiveSession();
+    QVERIFY(id != 0);
+    ag::VpnConnectAction action = ag::VPN_CA_DEFAULT;
+    ctl.setUpdateHook([&](uint64_t client) {
+        if (client == id)
+            action = ctl.fireConnectRequest(id, ownConnection(server, 73)).action;
+    });
+    const auto clearHook = qScopeGuard([&ctl]() { ctl.setUpdateHook(nullptr); });
+    QMetaObject::invokeMethod(m_client, "setSplitRouting", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList()), Q_ARG(bool, true),
+                              Q_ARG(QStringList, QStringList({ownProgram()})));
+    QVERIFY2(action == ag::VPN_CA_FORCE_REDIRECT || action == ag::VPN_CA_REJECT,
+             "VPN-selected app had DEFAULT/bypass action while the selective mode was queued");
 }
 
 // With the kill switch on, the core keeps a first connect that fails inside its
@@ -1691,7 +1705,8 @@ void TestQtTrustTunnelClient::aFailedLookupDoesNotChangeRoutingPolicy()
         qunsetenv("FT_TEST_PROCESS_WALK_COST_US");
     });
     m_client->setVpnMode(true);
-    m_client->setAppRules({ownProgram()});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({ownProgram()})));
     beginConnect();
     QTRY_VERIFY(ctl.connectCallCount() >= 1);
     const quint64 id = ctl.lastClientId();
@@ -1704,7 +1719,8 @@ void TestQtTrustTunnelClient::aFailedLookupDoesNotChangeRoutingPolicy()
     qunsetenv("FT_TEST_PROCESS_WALK_FAILS");
     qunsetenv("FT_TEST_PROCESS_WALK_COST_US");
     // Changing rules invalidates the failed snapshot and retries immediately.
-    m_client->setAppRules({ownProgram(), QStringLiteral("unused-program")});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({ownProgram(), QStringLiteral("unused-program")})));
     QCOMPARE(ctl.fireConnectRequest(id, ownConnection(later, 12)).action, ag::VPN_CA_FORCE_REDIRECT);
 }
 
@@ -1714,7 +1730,8 @@ void TestQtTrustTunnelClient::aPartialScanUsesOnlyTheOwnershipItProved()
     qputenv("FT_TEST_PROCESS_WALK_FAILS", "1");
     const auto restore = qScopeGuard([] { qunsetenv("FT_TEST_PROCESS_WALK_FAILS"); });
     m_client->setVpnMode(true);
-    m_client->setAppRules({QStringLiteral("unavailable-program")});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({QStringLiteral("unavailable-program")})));
     QTcpServer socket;
     QVERIFY(socket.listen(QHostAddress::LocalHost, 0));
     beginConnect();
@@ -1735,7 +1752,8 @@ void TestQtTrustTunnelClient::appCallbacksMatchTheRemoteEndpoint()
 {
     auto &ctl = mockcore::Controller::instance();
     m_client->setVpnMode(true);
-    m_client->setAppRules({ownProgram()});
+    QMetaObject::invokeMethod(m_client, "setAppRules", Qt::BlockingQueuedConnection,
+                              Q_ARG(QStringList, QStringList({ownProgram()})));
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
     QTcpSocket socket;
