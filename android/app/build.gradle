@@ -30,7 +30,7 @@ dependencies {
     // Kotlin 2.4 needs them on the compilation classpath.
     compileOnly 'org.checkerframework:checker-qual:4.4.0'
     androidTestCompileOnly 'org.checkerframework:checker-qual:4.4.0'
-    implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.87'
     // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
     // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.
     implementation 'io.nayuki:qrcodegen:1.8.0'

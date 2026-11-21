@@ -1,9 +1,9 @@
 Bouncy Castle provider (bcprov-jdk15to18)
-Version: 1.86
-Source: https://github.com/bcgit/bc-java/tree/r1rv86
+Version: 1.87
+Source: https://github.com/bcgit/bc-java/tree/r1rv87
 License: MIT
 
-[bcgit/bc-java@r1rv86: LICENSE.md]
+[bcgit/bc-java@r1rv87: LICENSE.md]
 MIT License (https://opensource.org/licenses/MIT)
 
 Copyright (c) 2000-2026 The Legion of the Bouncy Castle Inc. (https://www.bouncycastle.org).
