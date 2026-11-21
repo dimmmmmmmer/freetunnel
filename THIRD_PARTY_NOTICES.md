@@ -748,10 +748,10 @@ Compile-time annotations for the Tomlj API; not packaged in the app.
 
 #### Bouncy Castle
 
-- Version: 1.86 (`org.bouncycastle:bcprov-jdk15to18:1.86`)
+- Version: 1.87 (`org.bouncycastle:bcprov-jdk15to18:1.87`)
 - License: MIT, [licenses/android/BouncyCastle.txt](licenses/android/BouncyCastle.txt)
 - Copyright: Copyright (c) 2000-2026 The Legion of the Bouncy Castle Inc.
-- Source: <https://github.com/bcgit/bc-java/tree/r1rv86>
+- Source: <https://github.com/bcgit/bc-java/tree/r1rv87>
 
 #### QR Code generator
 
