@@ -49,6 +49,24 @@ public final class ConfigFormTest {
         assertEquals(expected.certificate.trim(), read.certificate.trim());
     }
 
+    @Test public void anEditLeavesEachConnectionsTlsProfile() {
+        ConfigForm.Fields f = server();
+        String text = ConfigForm.write(null, f).replace("anti_dpi = true\n", "anti_dpi = true\ntls_profile = \"firefox\"\n");
+        f.hostname = "other.example";
+        String saved = ConfigForm.write(text, f);
+        assertTrue(saved.contains("hostname = \"other.example\""));
+        assertTrue(saved.contains("tls_profile = \"firefox\""));
+        f.tlsProfile = "default";
+        String boring = ConfigForm.write(saved, f);
+        assertTrue(boring.contains("tls_profile = \"boringssl\""));
+        assertFalse(boring.contains("\"default\""));
+        f.tlsProfile = "";
+        assertFalse(ConfigForm.write(boring, f).contains("tls_profile"));
+        f.tlsProfile = "netscape";
+        assertEquals(R.string.text_tls_profile_unknown, ConfigForm.problem(f));
+        assertNull(ConfigForm.write(saved, f));
+    }
+
     @Test public void aNewConfigIsWhatALinkMakes() {
         ConfigForm.Fields f = server();
         String text = ConfigForm.write(null, f);

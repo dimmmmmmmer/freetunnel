@@ -17,17 +17,16 @@ check() {
   fi
 }
 
-# Android stays on the reviewed stable 1.1.12 source. TrustTunnel 1.1.12 does
-# not read tls_profile. The desktop pin is 1.3.0, and its patches are the
-# rebased set in vendor/trusttunnel/. Android applies the 1.1.12 copies.
+# Android and desktop share the stable 1.3.0 core, so both read tls_profile.
+# Android applies the subset listed in core-source.json; desktop applies every
+# patch in vendor/trusttunnel/.
 if ! python3 - <<'PYCHECK'
 import json, re
 from pathlib import Path
 pin = json.loads(Path('android/core-source.json').read_text())
 assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
-assert pin['version'] == '1.1.12'
-assert pin['commit'] == '067deb837ed994d6ae902e3bb40b69f6266af216'
-assert pin['commit'] != Path('scripts/upstream_ref.txt').read_text().strip()
+assert pin['version'] == '1.3.0'
+assert pin['commit'] == Path('scripts/upstream_ref.txt').read_text().strip()
 gradle = Path('android/app/build.gradle').read_text()
 assert "def coreAar = 'trusttunnel-client-android-" + pin['version'] + ".aar'" in gradle
 assert pin['patches'] and all(Path(p).is_file() for p in pin['patches'])

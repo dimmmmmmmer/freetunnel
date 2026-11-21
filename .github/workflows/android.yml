@@ -92,7 +92,7 @@ jobs:
           path: |
             android/app/libs/trusttunnel-client-android-*.aar
             android/app/libs/trusttunnel-client-android-*.json
-          key: android-core-v1-${{ hashFiles('android/core-source.json', 'android/core-patches/*.patch', 'vendor/trusttunnel/*.patch', 'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh', 'scripts/android-core-manifest.py') }}
+          key: android-core-v1-${{ hashFiles('android/core-source.json', 'vendor/trusttunnel/*.patch', 'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh', 'scripts/android-core-manifest.py') }}
       - name: Install native build tools
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: |

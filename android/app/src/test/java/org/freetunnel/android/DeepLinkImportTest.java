@@ -425,16 +425,32 @@ public final class DeepLinkImportTest {
         refused(link(cut.toByteArray()), R.string.text_the_link_is_damaged);
     }
 
-    @Test public void unknownTagsAboveFifteenAreStillIgnored() throws Exception {
+    @Test public void unknownTagsAboveTheTlsProfileAreStillIgnored() throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] plain = withStatic(2, 0, null);
         out.write(plain, 0, plain.length);
-        field(out, 16, new byte[]{1, 2, 3});
+        field(out, 17, new byte[]{1, 2, 3});
         varint(out, 300); varint(out, 2); out.write(0xff); out.write(0xfe);
         field(out, 63, "https://ignored.example".getBytes(StandardCharsets.UTF_8));
         DeepLinkImport.Imported imported = DeepLinkImport.parse(link(out.toByteArray()));
         assertEquals(DeepLinkImport.parse(V2_PLAIN).toml, imported.toml);
         assertFalse(imported.subscriptionNotKept);
+    }
+
+    @Test public void aLinkKeepsItsOwnTlsProfile() throws Exception {
+        ByteArrayOutputStream firefox = new ByteArrayOutputStream();
+        byte[] plain = withStatic(2, 0, null);
+        firefox.write(plain, 0, plain.length);
+        field(firefox, 16, new byte[]{3});
+        assertTrue(DeepLinkImport.parse(link(firefox.toByteArray())).toml.contains("tls_profile = \"firefox\"\n"));
+        ByteArrayOutputStream chrome = new ByteArrayOutputStream();
+        chrome.write(plain, 0, plain.length);
+        field(chrome, 16, new byte[]{0});
+        assertFalse(DeepLinkImport.parse(link(chrome.toByteArray())).toml.contains("tls_profile"));
+        ByteArrayOutputStream unknown = new ByteArrayOutputStream();
+        unknown.write(plain, 0, plain.length);
+        field(unknown, 16, new byte[]{7});
+        refused(link(unknown.toByteArray()), R.string.text_the_link_is_damaged);
     }
 
     // V2_PLAIN with the given bytes in tag 0x08.

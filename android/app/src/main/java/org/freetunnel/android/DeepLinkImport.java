@@ -79,6 +79,8 @@ final class DeepLinkImport {
         // The key from tag 0x0F, empty when the link has none. Not a secret
         // baked in: Semgrep takes any "key" given a literal for one.
         String authKey = ""; // nosemgrep: codacy.java.security.hard-coded-password
+        // Empty means chrome. A non-empty value is a name the core accepts.
+        String tlsProfile = "";
     }
 
     private DeepLinkImport() { }
@@ -145,6 +147,7 @@ final class DeepLinkImport {
         // As the desktop writes it: http3 or else http2.
         fields.protocol = "http3".equals(root.get("upstream_protocol")) ? 2 : 1;
         fields.antiDpi = flag(root, "anti_dpi", false);
+        fields.tlsProfile = storedTlsProfile(string(root, "tls_profile"));
         // The endpoint calls it client_random_prefix. client_random, the client's own
         // name for it, is read when that is empty, as the desktop does.
         String prefix = string(root, "client_random_prefix");
@@ -259,6 +262,19 @@ final class DeepLinkImport {
 
     // Whole bytes of hex, checked in every copy as TrustTunnel's own decoder does.
     // Empty is valid and means no key.
+    private static String storedTlsProfile(String name) throws ParseException {
+        String stored = TlsProfiles.canonical(name);
+        if (stored == null) throw new ParseException(R.string.text_tls_profile_unknown);
+        return stored;
+    }
+
+    private static String tlsProfile(byte[] bytes, int start, int end) throws ParseException {
+        if (end - start != 1) throw new ParseException(R.string.text_the_link_is_damaged);
+        String name = TlsProfiles.fromByte(bytes[start] & 0xff);
+        if (name == null) throw new ParseException(R.string.text_the_link_is_damaged);
+        return "chrome".equals(name) ? "" : name;
+    }
+
     private static String authKey(String key) throws ParseException {
         if (!isHex(key)) throw new ParseException(R.string.text_the_link_is_damaged);
         return key;
@@ -336,7 +352,7 @@ final class DeepLinkImport {
         while (pos[0] < bytes.length) {
             long tag = readVarint(bytes, pos, bytes.length);
             int end = recordEnd(bytes, pos);
-            if (tag > 15) { pos[0] = end; continue; }
+            if (tag > 16) { pos[0] = end; continue; }
             switch ((int) tag) {
                 case 0: break; // Read and checked by declaredVersion().
                 case 1: fields.hostname = utf8(bytes, pos[0], end); break;
@@ -355,6 +371,7 @@ final class DeepLinkImport {
                 // Read in any version, as TrustTunnel's own decoder does.
                 case 14: fields.subscriptionUrl = subscriptionUrl(utf8(bytes, pos[0], end)); break;
                 case 15: fields.authKey = authKey(utf8(bytes, pos[0], end)); break;
+                case 16: fields.tlsProfile = tlsProfile(bytes, pos[0], end); break;
                 default: break; // Ignore future fields, as the official decoder does.
             }
             pos[0] = end;
@@ -512,6 +529,7 @@ final class DeepLinkImport {
         out.append("skip_verification = ").append(f.skipVerification).append('\n');
         out.append("upstream_protocol = ").append(quoted(f.protocol == 2 ? "http3" : "http2")).append('\n');
         out.append("anti_dpi = ").append(f.antiDpi).append('\n');
+        if (!f.tlsProfile.isEmpty()) out.append("tls_profile = ").append(quoted(f.tlsProfile)).append('\n');
         if (pem.isEmpty()) out.append("certificate = \"\"\n");
         else out.append("certificate = \"\"\"\n").append(pem).append("\"\"\"\n");
         return out.toString();
@@ -540,6 +558,8 @@ final class DeepLinkImport {
         String clientRandom = "";
         String name = "";
         final List<String> dnsUpstreams = new ArrayList<>();
+        // Empty means chrome. "default" is stored as boringssl.
+        String tlsProfile = "";
     }
 
     /** The version this app writes: not the newest it reads, which is MAX_READ_VERSION. See the desktop's kDeepLinkWriteVersion. */
@@ -649,6 +669,8 @@ final class DeepLinkImport {
         if (!clientRandom.isEmpty()) writeText(p, 0x0B, clientRandom);
         if (!link.name.isEmpty()) writeText(p, 0x0C, link.name);
         if (!link.dnsUpstreams.isEmpty()) writeTlv(p, 0x0D, stringList(link.dnsUpstreams));
+        int profile = TlsProfiles.byteOf(link.tlsProfile);
+        if (profile >= 0) writeTlv(p, 0x10, new byte[]{(byte) profile});
         return "tt://?" + Base64.getUrlEncoder().withoutPadding().encodeToString(p.toByteArray());
     }
 
@@ -674,6 +696,10 @@ final class DeepLinkImport {
         link.antiDpi = flag(endpoint, "anti_dpi", false);
         link.protocol = "http3".equals(endpoint.get("upstream_protocol")) ? 2 : 1;
         link.clientRandom = string(endpoint, "client_random");
+        // An unknown name is not a link this core can write. Import and connect refuse it first.
+        String stored = TlsProfiles.canonical(string(endpoint, "tls_profile"));
+        if (stored == null) return null;
+        link.tlsProfile = stored;
         link.certificate = Certificates.fromPem(string(endpoint, "certificate")).der;
         // Under [endpoint], where this app writes them; a file written by hand may keep them at the top.
         List<String> dns = strings(endpoint, "dns_upstreams");

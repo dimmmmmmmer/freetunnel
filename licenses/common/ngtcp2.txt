@@ -1,7 +1,7 @@
 ngtcp2
 Version: 1.22.1, with the patches of AdGuard's conan recipe
 Source: https://github.com/ngtcp2/ngtcp2/tree/v1.22.1
-Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/ngtcp2-1.22.1
+Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/9d05accbe1f22764350fd5dcd6726244be0b2b96/conan/recipes/ngtcp2-1.22.1
 License: MIT
 
 [ngtcp2/ngtcp2@v1.22.1: COPYING]

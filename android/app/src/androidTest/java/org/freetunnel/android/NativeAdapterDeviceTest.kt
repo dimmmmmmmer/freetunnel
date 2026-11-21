@@ -12,7 +12,7 @@ class NativeAdapterDeviceTest {
     @Test fun malformedTomlDoesNotCrashOrLeaveANativeClient() {
         for (source in listOf("[", "endpoint =", "")) {
             VpnClient(source, null).use { client ->
-                repeat(3) { assertFalse(client.start(null)) }
+                repeat(3) { assertFalse(client.start(null, false)) }
                 client.stop()
             }
         }

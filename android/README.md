@@ -1,6 +1,6 @@
 # FreeTunnel for Android
 
-Android VPN client using **TrustTunnel 1.1.12**, built from pinned upstream
+Android VPN client using **TrustTunnel 1.3.0**, built from pinned upstream
 source with FreeTunnel’s routing-priority patch, for phones, tablets and
 Android TV (Android 8.0 or later). Official
 releases are the `android-X.Y.Z` releases of
@@ -22,8 +22,7 @@ certificate is not an official release or an update compatibility contract.
   retry no sooner than one hour). A changed server hostname needs confirmation;
   local routing, DNS and transport preferences are preserved. Automatic refresh is
   suspended for configurations with custom SNI. Servers that need an auth key are
-  refused until the app
-  moves to TrustTunnel core 1.3. The rules for each version 2 field are the
+  refused: this app has no control that sets one. The rules for each version 2 field are the
   desktop's, in [DEEP_LINK.md](../DEEP_LINK.md); for TOML, only an empty
   `client_random_auth_key` counts as no key. That is stricter than the
   desktop, which also reads a blank key, or one that is not a string, as no
@@ -159,7 +158,7 @@ Android-only list.
   the only control, so the texts that tell what to do next say "this line", and there is no *Install update* button
   on the screen (that is what a screen reader adds to the line, and the red button of the question). Outside the
   official build the section says it doesn't come from the official channel.
-- The footer, **FreeTunnel 1.2.5 · TrustTunnel core 1.1.12**, each name a link to its page (a toast where there is no
+- The footer, **FreeTunnel 1.2.5 · TrustTunnel core 1.3.0**, each name a link to its page (a toast where there is no
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 
@@ -483,7 +482,7 @@ scripts/prepare-trusttunnel-android.sh
 ./android/gradlew -p android --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
 ```
 
-`android/core-source.json` pins the stable source commit and the routing patch.
+`android/core-source.json` pins the stable source commit and the patches applied to it.
 Preparation builds all four Android architectures from those sources. CI may
 reuse an adapter only when the source pin, patches and builder inputs match
 exactly; release CI disables that cache and rebuilds from source. The APK,
@@ -734,7 +733,7 @@ remote-server, DNS or HTTP/3 coverage.
 ## License
 
 FreeTunnel and TrustTunnel are Apache-2.0. See [LICENSE](../LICENSE) and
-[TrustTunnelClient v1.1.12](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.12).
+[TrustTunnelClient v1.3.0](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.3.0).
 
 The APK also contains the libraries in the Android section of
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md), under their own
@@ -803,7 +802,7 @@ reason is said in the app's own toast, as the desktop's window does with an erro
 An explicit Reconnect builds a new TUN from the current settings and hands traffic
 over to it.
 
-Each attempt also repeats two costs of the pinned TrustTunnel 1.1.12 core that
+Each attempt also repeats two costs of the pinned TrustTunnel 1.3.0 core that
 used to come once per explicit start. The core resolves a hostname given in
 `addresses` as it starts, for up to 15 s, on the service's single worker, so a
 Disconnect, Reconnect or settings change made during that lookup waits for it to

@@ -5,7 +5,7 @@ License: BSD-3-Clause
 The table it searches is built from the Public Suffix List; see MPL-2.0.txt and
 THIRD_PARTY_NOTICES.md.
 
-[AdguardTeam/NativeLibsCommon@c546b329: conan/recipes/tldregistry/chromium/LICENSE]
+[AdguardTeam/NativeLibsCommon@9d05accb: conan/recipes/tldregistry/chromium/LICENSE]
 // Copyright 2015 The Chromium Authors
 //
 // Redistribution and use in source and binary forms, with or without

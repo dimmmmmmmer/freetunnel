@@ -72,7 +72,8 @@
     <string name="text_the_link_contains_an_invalid_certificate">"The link contains an invalid certificate"</string>
     <string name="text_the_link_contains_an_invalid_subscription_address">"The link contains an invalid subscription address"</string>
     <string name="text_subscription_links_are_not_supported_yet">"Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive."</string>
-    <string name="text_this_server_needs_a_newer_trusttunnel_core">"This server needs a newer TrustTunnel core than this version of FreeTunnel uses."</string>
+    <string name="text_this_server_needs_a_newer_trusttunnel_core">"This server uses an auth key, which this version of FreeTunnel does not accept."</string>
+    <string name="text_tls_profile_unknown">"The TLS profile is not one TrustTunnel knows"</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"The configuration contains an invalid certificate"</string>
     <string name="text_the_configuration_is_missing_required_server_settings">"The configuration is missing required server settings"</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Applications and addresses are selected. Full VPN protects all selected traffic. Keep one rule type for selective routing."</string>

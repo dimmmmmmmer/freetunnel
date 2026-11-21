@@ -113,6 +113,11 @@ final class SubscriptionData {
         f.skipVerification = false;
         f.customSni = text(json, "custom_sni", ""); f.clientRandom = text(json, "client_random_prefix", "");
         f.certificate = text(json, "certificate", "");
+        if (json.has("tls_profile")) {
+            String stored = TlsProfiles.canonical(text(json, "tls_profile", ""));
+            if (stored == null) throw new IOException("Unsupported TLS profile");
+            f.tlsProfile = stored;
+        }
         String name = text(json, "name", f.hostname);
         if (json.has("dns_upstreams")) {
             Object value = json.get("dns_upstreams");

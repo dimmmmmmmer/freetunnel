@@ -72,7 +72,8 @@
     <string name="text_the_link_contains_an_invalid_certificate">"Некорректный сертификат в ссылке"</string>
     <string name="text_the_link_contains_an_invalid_subscription_address">"Некорректный адрес подписки в ссылке"</string>
     <string name="text_subscription_links_are_not_supported_yet">"Ссылки-подписки пока не поддерживаются. Попросите у провайдера обычную ссылку или обновите FreeTunnel, когда появятся подписки."</string>
-    <string name="text_this_server_needs_a_newer_trusttunnel_core">"Этому серверу нужно ядро TrustTunnel новее, чем в этой версии FreeTunnel."</string>
+    <string name="text_this_server_needs_a_newer_trusttunnel_core">"Этот сервер использует ключ авторизации, который эта версия FreeTunnel не принимает."</string>
+    <string name="text_tls_profile_unknown">"TrustTunnel не знает такой профиль TLS"</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"Некорректный сертификат в конфигурации"</string>
     <string name="text_the_configuration_is_missing_required_server_settings">"В конфигурации не хватает данных сервера"</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Выбраны и приложения, и адреса. Для защиты всего выбранного включён полный VPN. Для выборочного режима оставьте один тип правил."</string>

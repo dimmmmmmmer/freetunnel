@@ -19,6 +19,7 @@ from a script or a Stream Deck, or working on the code that reads them.
   - [DNS upstream list (tag `0x0D`)](#dns-upstream-list-tag-0x0d)
   - [Subscription address (tag `0x0E`)](#subscription-address-tag-0x0e)
   - [Client random auth key (tag `0x0F`)](#client-random-auth-key-tag-0x0f)
+  - [TLS profile (tag `0x10`)](#tls-profile-tag-0x10)
   - [Versions](#versions)
 - [Validation rules](#validation-rules)
 - [How a link becomes a config](#how-a-link-becomes-a-config)
@@ -212,8 +213,9 @@ cannot be imported in that mode. See [User guide](USER_GUIDE.md#subscriptions).
 A UTF-8 string of whole bytes in hex. The client derives its TLS client random
 from this key, and a server with an auth-key rule turns away a client that does
 not. TrustTunnel's core does this from version 1.3 on, so the desktop FreeTunnel
-that is built on it supports such a server. Older desktop versions, and the
-Android app for now, refuse it.
+that is built on it supports such a server. Older desktop versions refuse it.
+Android is built on the same core and still refuses a key: the app has no
+control that sets one.
 
 - An empty value means the server has no key, and the link imports as usual.
 - Any other value, if it is valid hex, is imported with the server. The key is a
@@ -234,6 +236,15 @@ Android app for now, refuse it.
   and FreeTunnel says why; a link without the key would be version 1 and could
   not connect.
 
+### TLS profile (tag `0x10`)
+
+One byte for this connection only, in the core's order: `0x00` chrome,
+`0x01` chrome_canary, `0x02` safari, `0x03` firefox, `0x04` okhttp, `0x05`
+openssl, `0x06` boringssl. The tag is omitted when the profile is chrome, which
+is also what an absent or empty value means. A byte outside `0x00`..`0x06`
+refuses the link. `default` is not a tag; in a config file it is the deprecated
+alias of boringssl.
+
 ### Versions
 
 | Version | What it added | FreeTunnel |
@@ -250,9 +261,9 @@ Android app for now, refuse it.
   FreeTunnel 1.2.3 and earlier, like TrustTunnel's clients up to 1.1.11, refuse
   a version 2 link outright. A link made from a config with a key is version 2
   and carries the key (`0x0F`), because a link without it could not connect to
-  that server anyway. FreeTunnel for Android reads version 2, but its core is
-  1.1.7 for now, and it refuses a server with a key ("This server needs a newer
-  TrustTunnel core than this version of FreeTunnel uses").
+  that server anyway. FreeTunnel for Android reads version 2 on TrustTunnel
+  1.3.0 and still refuses a server with a key ("This server uses an auth key,
+  which this version of FreeTunnel does not accept").
 - The version is read before any field, so a link of a newer version is
   refused for its version, not for a field that version may spell differently.
 - Every version record counts, as in TrustTunnel's own decoder. A link with
@@ -260,9 +271,8 @@ Android app for now, refuse it.
   later.
 - A version record whose value is not a whole varint, such as an empty one,
   fails the import as damaged. It is not read as version 0.
-- Tag `0x10` is this connection's TLS profile: one byte, `0x00` chrome through
-  `0x06` boringssl. It is omitted when the profile is chrome. A byte outside
-  that range refuses the link. Tags from `0x11` on are ignored.
+- Tag `0x10` is this connection's TLS profile. See
+  [tag `0x10`](#tls-profile-tag-0x10). Tags from `0x11` on are ignored.
 
 ## Validation rules
 

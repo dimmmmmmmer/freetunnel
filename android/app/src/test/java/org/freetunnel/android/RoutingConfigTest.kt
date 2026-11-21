@@ -275,6 +275,17 @@ class RoutingConfigTest {
         val topLevel = "client_random_auth_key = \"aabbccdd\"\n$source"
         assertEquals(topLevel, RoutingConfig.cleanImport(topLevel).toml)
     }
+    @Test fun aTlsProfileIsKeptPerConnectionAndAnUnknownNameIsRefused() {
+        for (line in listOf("tls_profile = \"chrome\"", "tls_profile = \"firefox\"", "tls_profile = \"default\"",
+                "tls_profile = \"boringssl\"")) {
+            val text = withEndpointKey(line)
+            assertEquals(text, RoutingConfig.cleanImport(text).toml)
+        }
+        val refused = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport(withEndpointKey("tls_profile = \"netscape\""))
+        }
+        assertEquals(R.string.text_tls_profile_unknown, refused.messageResource)
+    }
     @Test fun aRealAuthKeyIsRefusedWithItsOwnMessage() {
         // Only the empty string is no key. TrustTunnel's client reads the key as a
         // string, untrimmed, so a blank one or one of another type is not read as none.

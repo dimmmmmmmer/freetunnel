@@ -51,6 +51,12 @@ final class ConfigForm {
         boolean allowIpv6 = true;
         boolean skipVerification;
         boolean antiDpi;
+        /**
+         * The TLS profile this write should store. Null leaves the file's key, which is how the editor
+         * keeps a connection's own profile without a control for it. Empty means chrome and is not written.
+         * {@code default} is stored as {@code boringssl}.
+         */
+        String tlsProfile;
     }
 
     /** The longest config name, in characters (code points), as the desktop's kMaxConfigNameLength: the name is a file's name there. */
@@ -94,6 +100,11 @@ final class ConfigForm {
         f.allowIpv6 = flag(endpoint, "has_ipv6", true);
         f.skipVerification = flag(endpoint, "skip_verification", false);
         f.antiDpi = flag(endpoint, "anti_dpi", false);
+        Object profile = endpoint.get(Collections.singletonList("tls_profile"));
+        if (profile instanceof String) {
+            String stored = TlsProfiles.canonical((String) profile);
+            f.tlsProfile = stored == null ? (String) profile : stored;
+        }
         return f;
     }
 
@@ -144,6 +155,7 @@ final class ConfigForm {
         for (String address : addressList(f.addresses)) if (!validAddress(address)) return R.string.editor_error_address;
         for (String server : dnsList(f.dns)) if (!validDns(server)) return R.string.editor_error_dns;
         if (!f.clientRandom.trim().isEmpty() && !CLIENT_RANDOM.matcher(f.clientRandom.trim()).matches()) return R.string.editor_error_random;
+        if (f.tlsProfile != null && TlsProfiles.canonical(f.tlsProfile) == null) return R.string.text_tls_profile_unknown;
         if (!f.certificate.trim().isEmpty() && Certificates.fromPem(f.certificate.trim()).pem.trim().isEmpty()) return R.string.editor_error_certificate;
         return 0;
     }
@@ -222,8 +234,19 @@ final class ConfigForm {
             if (edited != null) return edited;
             if (parse(existing) != null) return rewrite(existing, f, certificate.pem);
         }
-        return DeepLinkImport.configText(f.hostname.trim(), addressList(f.addresses), f.username.trim(), f.password, clientRandomForCore(f.clientRandom),
-                dnsList(f.dns), f.customSni, f.allowIpv6, f.skipVerification, "http3".equals(f.protocol), f.antiDpi, certificate.pem);
+        return withProfile(DeepLinkImport.configText(f.hostname.trim(), addressList(f.addresses), f.username.trim(), f.password, clientRandomForCore(f.clientRandom),
+                dnsList(f.dns), f.customSni, f.allowIpv6, f.skipVerification, "http3".equals(f.protocol), f.antiDpi, certificate.pem), f.tlsProfile);
+    }
+
+    /** A new config's text with this connection's profile inside [endpoint]. Empty and null add no key. Null when the name is refused. */
+    private static String withProfile(String text, String profile) {
+        if (profile == null) return text;
+        String stored = TlsProfiles.canonical(profile);
+        if (stored == null) return null;
+        if (stored.isEmpty()) return text;
+        String line = "tls_profile = " + DeepLinkImport.quoted(stored) + "\n";
+        int at = text.indexOf("\n[listener.tun]\n");
+        return at < 0 ? text + line : text.substring(0, at) + "\n" + line + text.substring(at);
     }
 
     /** The endpoint's keys the form shows, which it writes: the rest of the endpoint is the file's. */
@@ -250,34 +273,51 @@ final class ConfigForm {
         if (text.length() > 0 && text.charAt(text.length() - 1) != '\n') text.append('\n');
         text.append('\n').append(DeepLinkImport.endpointText(f.hostname.trim(), addressList(f.addresses), f.username.trim(), f.password,
                 clientRandomForCore(f.clientRandom), dnsList(f.dns), f.customSni, f.allowIpv6, f.skipVerification, "http3".equals(f.protocol), f.antiDpi, pem));
+        String storedProfile = storedProfile(f.tlsProfile);
+        if (f.tlsProfile != null && storedProfile == null) return null;
+        Set<String> owned = storedProfile == null ? FORM_KEYS : ownedWithProfile();
         TomlTable endpoint = old.getTable("endpoint");
         if (endpoint != null) {
             for (String key : sorted(endpoint)) {
-                if (FORM_KEYS.contains(key)) continue;
+                if (owned.contains(key)) continue;
                 String value = valueText(endpoint.get(Collections.singletonList(key)));
                 if (value == null) return null;
                 text.append(keyText(key)).append(" = ").append(value).append('\n');
             }
         }
+        if (storedProfile != null && !storedProfile.isEmpty())
+            text.append("tls_profile = ").append(DeepLinkImport.quoted(storedProfile)).append('\n');
         boolean hadTunnel = old.get(Arrays.asList("listener", "tun")) instanceof TomlTable;
         if (!hadTunnel) text.append('\n').append(DeepLinkImport.tunnelText());
         String result = text.toString();
         TomlTable written = parse(result);
         if (written == null) return null;
-        String before = signature(old, false);
-        return before != null && before.equals(signature(written, !hadTunnel)) && same(read(result), f, pem) ? result : null;
+        String before = signature(old, false, owned);
+        return before != null && before.equals(signature(written, !hadTunnel, owned)) && same(read(result), f, pem) ? result : null;
+    }
+
+    /** The form's keys plus tls_profile, when this write is setting that key. */
+    private static Set<String> ownedWithProfile() {
+        Set<String> owned = new HashSet<>(FORM_KEYS);
+        owned.add("tls_profile");
+        return owned;
+    }
+
+    /** The profile to store, empty for chrome. Null when this write leaves the file's key, and null when the name is one the core refuses. */
+    private static String storedProfile(String profile) {
+        return profile == null ? null : TlsProfiles.canonical(profile);
     }
 
     // What the file holds that the form does not own, as one text, to tell by whether a rewrite changed any of it. The endpoint counts only
     // for the keys it has beyond the form's, and the tunnel not at all when a rewrite added the default one. Null for a value that cannot
     // be written down.
-    private static String signature(TomlTable root, boolean withoutTunnel) {
+    private static String signature(TomlTable root, boolean withoutTunnel, Set<String> owned) {
         StringBuilder out = new StringBuilder();
         for (String key : sorted(root)) {
             if (key.equals("dns_upstreams")) continue;
             Object value = root.get(Collections.singletonList(key));
             String text;
-            if (key.equals("endpoint") && value instanceof TomlTable) text = inlineTable((TomlTable) value, FORM_KEYS);
+            if (key.equals("endpoint") && value instanceof TomlTable) text = inlineTable((TomlTable) value, owned);
             else if (key.equals("listener") && withoutTunnel && value instanceof TomlTable) text = inlineTable((TomlTable) value, Collections.singleton("tun"));
             else text = valueText(value);
             if (text == null) return null;
@@ -373,6 +413,11 @@ final class ConfigForm {
         values.put("upstream_protocol", DeepLinkImport.quoted("http3".equals(f.protocol) ? "http3" : "http2"));
         values.put("anti_dpi", String.valueOf(f.antiDpi));
         values.put("certificate", pem.isEmpty() ? "\"\"" : "\"\"\"\n" + pem + "\"\"\"");
+        String storedProfile = storedProfile(f.tlsProfile);
+        if (f.tlsProfile != null && storedProfile == null) return null;
+        Set<List<String>> drop = new HashSet<>();
+        if (storedProfile != null && storedProfile.isEmpty()) drop.add(Arrays.asList("endpoint", "tls_profile"));
+        else if (storedProfile != null) values.put("tls_profile", DeepLinkImport.quoted(storedProfile));
         Map<List<String>, String> replace = new LinkedHashMap<>();
         StringBuilder added = new StringBuilder();
         for (Map.Entry<String, String> value : values.entrySet()) {
@@ -385,7 +430,7 @@ final class ConfigForm {
         else if (root.get(Collections.singletonList("dns_upstreams")) != null) replace.put(Collections.singletonList("dns_upstreams"), dns);
         else added.append("dns_upstreams = ").append(dns).append('\n');
 
-        String text = TomlLines.edit(existing, Collections.emptySet(), replace);
+        String text = TomlLines.edit(existing, drop, replace);
         if (text == null) return null;
         if (added.length() > 0) {
             Matcher header = ENDPOINT_HEADER.matcher(text);
@@ -402,6 +447,15 @@ final class ConfigForm {
                 && dnsList(read.dns).equals(dnsList(f.dns)) && read.customSni.equals(f.customSni)
                 && read.clientRandom.equals(clientRandomForCore(f.clientRandom)) && read.protocol.equals("http3".equals(f.protocol) ? "http3" : "http2")
                 && read.allowIpv6 == f.allowIpv6 && read.skipVerification == f.skipVerification && read.antiDpi == f.antiDpi
-                && read.certificate.trim().equals(pem.trim());
+                && read.certificate.trim().equals(pem.trim()) && sameProfile(read, f);
+    }
+
+    /** A null profile on the form leaves the file's key, so it is not compared. Empty matches a key the write removed. */
+    private static boolean sameProfile(Fields read, Fields f) {
+        if (f.tlsProfile == null) return true;
+        String wanted = storedProfile(f.tlsProfile);
+        if (wanted == null) return false;
+        String got = read.tlsProfile == null ? "" : read.tlsProfile;
+        return wanted.equals(got);
     }
 }

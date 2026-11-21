@@ -45,7 +45,7 @@ class AndroidCiTest(unittest.TestCase):
         core = workflow.split('  core:\n', 1)[1].split('  build:\n', 1)[0]
         self.assertIn('if: inputs.gradle-cache-disabled != true', core)
         self.assertNotIn('restore-keys:', core)
-        for source in ['android/core-source.json', 'android/core-patches/*.patch', 'vendor/trusttunnel/*.patch',
+        for source in ['android/core-source.json', 'vendor/trusttunnel/*.patch',
                        'scripts/build-trusttunnel-android.sh', 'scripts/export-patched-boringssl.sh',
                        'scripts/android-core-manifest.py']:
             self.assertIn(source, core)
