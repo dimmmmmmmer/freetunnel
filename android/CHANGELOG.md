@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Split tunnelling accepts a wildcard with one label, such as *.ru and *.su, which the TrustTunnel core already matches.
 - New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
 - Background geo list refresh no longer changes routing settings or enables split tunnelling when starting the VPN.
 - Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
