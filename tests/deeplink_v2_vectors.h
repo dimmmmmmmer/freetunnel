@@ -90,14 +90,14 @@ inline const QString kVersion3 = QStringLiteral("tt://?AAEDDiRodHRwczovL3Zwbi5le
 inline const QString kHttpSubscription =
         QStringLiteral("tt://?AAECDiNodHRwOi8vdnBuLmV4YW1wbGUuY29tL3N1YnNjcmlwdGlvbg");
 
-// Tags no version defines yet, beside both new ones: 0x10, the record the
-// endpoint's own test_tlv_parser_unknown_tag uses and the next tag TrustTunnel
-// would add, and 0x40, a tag written as a two-byte varint. Both are ignored, and
-// the server imports without its subscription address; the auth key is empty.
+// Tags no version defines yet, beside the ones it does: 0x11, and 0x40, a tag
+// written as a two-byte varint. Both are ignored. Tag 0x10 is the TLS profile
+// and is not one of these. The server imports without its subscription address;
+// the auth key is empty.
 // 00 01 02 | 01 vpn.example.com | 05 alice | 06 s3cret | 02 1.2.3.4:443 | 0f 00
-// | 10 03 01 02 03 | 40 40 02 ab cd | 0e 31 kSubscription
+// | 11 03 01 02 03 | 40 40 02 ab cd | 0e 31 kSubscription
 inline const QString kUnknownTags = QStringLiteral(
-        "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzM2NyZXQCCzEuMi4zLjQ6NDQzDwAQAwECA0BAAqvNDjFodHRwczovL2"
+        "tt://?AAECAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBgZzM2NyZXQCCzEuMi4zLjQ6NDQzDwARAwECA0BAAqvNDjFodHRwczovL2"
         "FsaWNlOnMzY3JldEB2cG4uZXhhbXBsZS5jb20vc3Vic2NyaXB0aW9u");
 
 // Two version records, 3 and then 2, before a whole server. TrustTunnel's decoder

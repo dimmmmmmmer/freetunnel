@@ -57,7 +57,9 @@ option(FT_ENABLE_COVERAGE "Instrument tests for gcov/lcov" OFF)
 option(FT_ENABLE_SANITIZERS "Build tests with ASan+UBSan (Linux/clang recommended)" OFF)
 
 if (FT_ENABLE_COVERAGE)
-    add_compile_options(--coverage)
+    # Geo cache workers execute the same parser concurrently. Keep their gcov
+    # counters consistent so lcov does not fail on negative reconstructed counts.
+    add_compile_options(--coverage -fprofile-update=atomic)
     add_link_options(--coverage)
 endif ()
 if (FT_ENABLE_SANITIZERS)
@@ -132,6 +134,10 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FreetunnelDeps.cmake)
 
+if(UNIX AND OpenSSL_FOUND)
+    add_subdirectory(installed-helper)
+endif()
+
 # data/ is shared with the Android app: the lists the app has compiled in (AppSettings.cpp
 # includes what this generates, from a directory this puts on the include path of
 # every target below).
@@ -162,6 +168,14 @@ add_executable(test_deeplink
 target_include_directories(test_deeplink PRIVATE ../include ../include/core)
 target_link_libraries(test_deeplink PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME deeplink COMMAND test_deeplink -o ${CMAKE_CURRENT_BINARY_DIR}/report-deeplink.txt,txt)
+
+add_executable(test_qt_http_limits test_qt_http_limits.cpp)
+target_link_libraries(test_qt_http_limits PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME qt_http_limits COMMAND test_qt_http_limits -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_http_limits.txt,txt)
+
+add_executable(test_qt_svg_limits test_qt_svg_limits.cpp)
+target_link_libraries(test_qt_svg_limits PRIVATE Qt6::Core Qt6::Gui Qt6::Svg Qt6::Test)
+add_test(NAME qt_svg_limits COMMAND test_qt_svg_limits -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_svg_limits.txt,txt)
 
 add_executable(test_safe_fileread
     test_safe_fileread.cpp
@@ -665,6 +679,10 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(test_qml_ui PRIVATE Qt6::Widgets)
 endif()
 add_test(NAME qml_ui COMMAND test_qml_ui -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_ui.txt,txt)
+# The same popup pixel checks on Qt Quick's optional CPU renderer.
+add_test(NAME qml_popups_software COMMAND test_qml_ui popupContentsAreRendered
+    -o ${CMAKE_CURRENT_BINARY_DIR}/report-qml_popups_software.txt,txt)
+set_tests_properties(qml_popups_software PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 
 # The Inter font (assets/fonts): that Qt's font database gives back each of its two
 # weights as the file it came from, that every character the interface draws is in
@@ -972,6 +990,7 @@ add_executable(test_qt_trusttunnel_client
     ../src/vpn/qt_trusttunnel_fdwatch.cpp
     ../src/vpn/qt_trusttunnel_uplink.cpp
     ../src/vpn/qt_trusttunnel_connect.cpp
+    ../src/vpn/qt_trusttunnel_switch.cpp
     ../src/vpn/qt_trusttunnel_callbacks.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
@@ -1110,6 +1129,7 @@ add_executable(freetunnel_test_helper
     ../src/vpn/qt_trusttunnel_fdwatch.cpp
     ../src/vpn/qt_trusttunnel_uplink.cpp
     ../src/vpn/qt_trusttunnel_connect.cpp
+    ../src/vpn/qt_trusttunnel_switch.cpp
     ../src/vpn/qt_trusttunnel_callbacks.cpp
     ../src/vpn/qt_trusttunnel_events.cpp
     ../src/vpn/qt_trusttunnel_platform.cpp
@@ -1267,6 +1287,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(FT_BASH bash)
     find_program(FT_JQ jq)
     find_program(FT_OPENSSL_CLI openssl)
+    find_program(FT_PYTHON3 python3)
+    if (FT_BASH AND FT_PYTHON3)
+        add_test(NAME clang_tidy_runner
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_clang_tidy_runner.sh)
+    endif ()
     if (FT_BASH)
         add_test(NAME android_release_tag
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_tag.sh)

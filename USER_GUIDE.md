@@ -30,7 +30,7 @@ If SmartScreen warns: **More info** → **Run anyway**.
 
 ### macOS
 
-Version 1.2.4 requires macOS 14.4 or newer.
+Version 1.2.5 requires macOS 12 or newer. Version 1.2.4 requires macOS 14.4 or newer.
 
 Right-click the app → **Open**. Or clear the quarantine flag:
 
@@ -58,8 +58,35 @@ The VPN requires elevated privileges:
 
 | Platform | What you see |
 | --- | --- |
-| Windows | A UAC prompt |
-| macOS, Linux | A prompt for an admin password, the first time you connect in a session |
+| Windows, installed | UAC during installation; connections use the installed helper service |
+| Windows, portable or development build | A UAC prompt when the helper starts |
+| macOS, Linux, signed releases | One administrator confirmation to install or authorize the helper for your account; subsequent connections and signed helper updates need no password |
+
+The Debian package installs the helper with the application. macOS and AppImage
+downloads prepare it on first connection. The first setup needs access to the
+release downloads; if a matching helper archive is unavailable, the usual
+session password prompt remains available. Development builds also use that
+prompt. The VPN still stops when you **Quit** FreeTunnel.
+
+The `freetunnel-helper-*.tar.gz` release files are downloaded automatically by
+FreeTunnel. Install the usual DMG, AppImage or Debian package yourself.
+
+To remove the installed helper, quit FreeTunnel first. On macOS:
+
+```sh
+sudo /Library/PrivilegedHelperTools/org.freetunnel.helper/current/runtime/FreeTunnel.app/Contents/MacOS/FreeTunnel --remove-helper
+```
+
+For an AppImage installation:
+
+```sh
+sudo /opt/freetunnel-helper/current/runtime/bin/FreeTunnel --remove-helper
+```
+
+Removing the Debian package removes its helper too. Removal revokes all accounts'
+FreeTunnel helper grants; a later connection asks for administrator authorization
+again. A failed or interrupted update keeps the last active runtime, and setup
+can be retried on the next connection.
 
 ## Android and Android TV
 
@@ -152,6 +179,21 @@ exports with `--format toml`, imported from file (see
 Passwords stay in the OS credential store: Keychain on macOS, Credential Manager
 on Windows, libsecret on Linux.
 
+### Subscriptions
+
+Choose **Configs → ＋ → Subscription** and paste the HTTPS address supplied by
+your provider. A subscription embedded in a link or TOML file offers the same
+confirmation before downloading. Review the fetched server before adding it.
+Subscription credentials are stored securely, outside exported configurations.
+
+Open the server editor to **Refresh subscription** or **Stop updates**. Updates
+preserve local routing, DNS and transport choices. A different server hostname
+needs your confirmation. Automatic refresh is suspended when custom SNI is set;
+use a manual refresh to decide when to contact the subscription server.
+Desktop refreshes while running; Android checks for updates at least 24 hours old
+while the app is open. Mobile background execution is subject to the operating
+system, so use **Refresh subscription** when you need an update immediately.
+
 ## Split tunnelling
 
 The **Split tunnelling** tab decides what goes through the tunnel. Rules are
@@ -169,10 +211,11 @@ tunnel and the page says so, rather than send everything around it.
 ### Geo lists
 
 In the **Geo lists** block, open **Add list** and choose a ready-made list or
-**Add your own list**.
+**Add your own list**, which opens a dialog.
 Each list has its own **Through VPN / Bypass VPN** choice and can be turned off
-without removing it. Lists belong to the selected split profile. Nothing is
-added until you choose it.
+without removing it. Lists belong to the selected split profile. A new installation
+starts with **Russian sites** and **Russian IP addresses**, both enabled with
+**Bypass VPN**. Existing profiles and lists you remove are kept as you left them.
 
 Custom sources use an HTTPS download address. Choose **Sites** for domains or
 **IP addresses** for subnets. Plain text lists contain one entry per line;
@@ -192,10 +235,57 @@ downloads keep the last valid copy. The list card shows its last update and
 any error. A list that has never loaded cannot route traffic yet.
 
 Android and Android TV use the same lists and priorities. Updating active
-routing rules there may briefly reconnect the VPN. Android cannot combine
-app selection with destination selection in the same way as desktop: if both
-are selected, FreeTunnel uses the full tunnel and shows a notice. Very large
-combined lists also fall back to the full tunnel with a notice.
+routing rules there may briefly reconnect the VPN. In **Through VPN** mode,
+selected applications use VPN; other applications follow the destination rules.
+If the operating system cannot identify an application's connection, that
+connection is blocked instead of being sent through an arbitrary route.
+Very large combined lists fall back to the full tunnel with a notice.
+
+DNS follows the core's domain-routing policy. A domain routed through VPN uses
+the configured VPN DNS; a bypassed domain uses system DNS directly. An application
+rule does not necessarily cover queries made by a shared OS resolver on that
+application's behalf. In selective mode, add the required domain to **Through
+VPN** as well when its DNS must use the tunnel. See the
+[DNS investigation](docs/dns-routing.md) for the tested behavior and limits.
+
+On Linux, incoming TCP connections and UDP sockets bound to a local IP keep
+their direct reply path, including services on nonstandard ports. Linux requires `iproute2`
+and `nftables` (installed automatically by the Debian package). The counter on
+`tun0` includes intercepted traffic that the core subsequently sends directly;
+it does not measure only traffic to the VPN server.
+
+### Incoming services while connected
+
+Windows and macOS preserve the direct reply path for TCP connections and UDP
+sockets bound to the service's local IP. On Windows, the kill switch also
+controls whether an incoming connection is allowed: see
+[ports a config opens](#windows-ports-a-config-opens).
+
+Android preserved the incoming TCP reply path in the API 35 and Android TV
+API 34 emulator probes with an authenticated VPN connection.
+An application's incoming UDP
+replies can instead enter the VPN, even when its UDP socket is bound to a local
+IP. To keep a UDP server reachable from clients whose addresses are routed
+through the VPN, add its application to **Applications** in **Bypass VPN** mode
+in the active config's split profile. This excludes that application's outgoing
+connections too; other applications keep their existing routing rules. Clients
+already covered by **Excluded routes**, including the default private LAN
+ranges, do not need this application exception. If the server application's
+new outgoing connections must stay in the VPN, application bypass does not
+meet that requirement: a transparent incoming-UDP exception is not currently
+supported on Android.
+
+A UDP server listening on every address (`0.0.0.0` or `::`) must choose the
+correct source address for its replies on a computer with multiple interfaces.
+Otherwise the operating system can choose the VPN address. This also applies
+to Linux with the reply-routing fix. Set the server's listening address to
+the appropriate local IP, or use a server that preserves the destination
+address of each request when replying. On Android, binding to a local IP alone
+does not replace the application exception described above.
+
+These are reply-routing checks, not a guarantee of reachability through an
+upstream firewall or carrier NAT. The tested environments and remaining gaps
+are listed in [the incoming routing probe notes](tests/INCOMING_ROUTING.md).
 
 ### Changes while connected
 
@@ -376,6 +466,14 @@ install. How, and what that guards against: [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
+- **A desktop window is blank or menus disappear:** close FreeTunnel completely
+  (including its tray icon), then try software rendering in a new terminal. In
+  PowerShell: `$env:QT_QUICK_BACKEND="software"; & "C:\path\to\freetunnel.exe"`;
+  on Linux: `QT_QUICK_BACKEND=software freetunnel`; on macOS:
+  `QT_QUICK_BACKEND=software /Applications/FreeTunnel.app/Contents/MacOS/freetunnel`.
+  Use your installed executable path; close that terminal after testing.
+  Hardware acceleration remains the default; this workaround only changes
+  how the window is drawn.
 - **The TV cannot receive a configuration:** keep the receive window open and check
   that both devices are on the same local network. Guest Wi-Fi or client isolation
   can prevent the phone from reaching the TV.

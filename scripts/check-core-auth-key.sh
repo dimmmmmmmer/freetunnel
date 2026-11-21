@@ -110,7 +110,7 @@ EOF2
 
 cd "$FT_SMOKE_DIR"
 [[ "$("$FT_SMOKE_ENDPOINT" --version)" == '1.3.0-beta.2' ]] || { echo 'Unexpected endpoint binary version' >&2; exit 2; }
-[[ "$("$FT_SMOKE_CLIENT" --version)" == 'trusttunnel_client 1.3.0-rc.2' ]] || { echo 'Unexpected client binary version' >&2; exit 2; }
+[[ "$("$FT_SMOKE_CLIENT" --version)" == 'trusttunnel_client 1.3.0' ]] || { echo 'Unexpected client binary version' >&2; exit 2; }
 "$FT_SMOKE_ENDPOINT" --loglvl debug endpoint.toml tls_hosts.toml > endpoint.log 2>&1 &
 FT_SMOKE_ENDPOINT_PID=$!
 python3 -m http.server "$HTTP_PORT" --bind "$FT_SMOKE_FIXTURE_IP" --directory "$FT_SMOKE_DIR/www" > http.log 2>&1 &

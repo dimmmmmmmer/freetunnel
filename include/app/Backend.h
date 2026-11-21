@@ -174,6 +174,8 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
+    Q_INVOKABLE void importFiles(const QStringList &paths);
+    bool importLinkBatch(const QString &text);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     // Parse a config for editing. With a secret the credential store could not be
     // asked for, only {path, secretError: the message}: the editor shows it and
@@ -316,23 +318,26 @@ public:
     // Ask again, and tell QML if the answer moved. See the definition.
     void recheckCredentialStorage();
 
-    // TrustTunnel subscriptions, with experimental/subscriptions on (BackendSubscriptions.cpp).
-    // None of it is Q_INVOKABLE: the window has no part in it until its screens come.
+    // TrustTunnel subscriptions (BackendSubscriptions.cpp).
+    // Window actions preserve the controller's consent and credential-storage rules.
     // Answers and status come through subscriptions()'s signals; the question about
     // what a fetch gave is deepLinkImportConfirmationRequired()'s, with a token for
     // a link, and the answer confirmDeepLinkImport()'s.
+    Q_INVOKABLE bool hasSubscription(const QString &path) const;
     SubscriptionController *subscriptions() const { return m_subscriptions; }
-    bool beginSubscriptionImport(const QString &url); // "Add from subscription URL"; asks first
-    bool fetchSubscriptionForImport(const QString &token); // the user agreed to the fetch
+    Q_INVOKABLE bool beginSubscriptionImport(const QString &url); // "Add from subscription URL"; asks first
+    Q_INVOKABLE bool fetchSubscriptionForImport(const QString &token); // the user agreed to the fetch
     bool confirmSubscriptionImport(const QString &token, bool replaceExisting, bool useLinkFallback);
-    void cancelSubscriptionImport(const QString &token);
-    bool refreshSubscription(const QString &path);
-    bool detachSubscription(const QString &path);
-    bool answerHostnameChange(const QString &path, bool accept);
+    Q_INVOKABLE void cancelSubscriptionImport(const QString &token);
+    Q_INVOKABLE bool refreshSubscription(const QString &path);
+    Q_INVOKABLE bool detachSubscription(const QString &path);
+    Q_INVOKABLE bool answerHostnameChange(const QString &path, bool accept);
     // The config the editor has open, or empty once it closes: an update to it waits.
-    void setConfigOpenInEditor(const QString &path);
+    Q_INVOKABLE void setConfigOpenInEditor(const QString &path);
 
 signals:
+    void subscriptionConsentRequired(const QString &token, const QVariantMap &details);
+    void subscriptionHostnameChanged(const QString &path, const QString &oldHostname, const QString &newHostname);
     void stateChanged();
     void tick();
     void configChanged();
@@ -374,7 +379,9 @@ private:
     void syncGeoLists();
     bool geoRulesFit(const QString &profile) const;
     void applyProfileEdit(); // persist, apply and announce an edit to the Split page's profile
-    void reconnectActiveConfig(); // disconnect then reconnect (config switch / live rule apply)
+    void reconnectActiveConfig(bool endpointOnly = false);
+    void onEndpointRequestFinished(bool accepted);
+    void restoreSessionSelection();
     void startConnectAttempt();   // connectVpn() past its "already busy" check
     void settleRefusedConnect();  // an error with no state ends the optimistic "Connecting…"
     void firePendingReconnect();  // run the deferred reconnect once the old tunnel is down
@@ -567,6 +574,9 @@ private:
     bool m_reapplying = false;
     bool m_pendingReconnect = false; // disconnect issued; reconnect once it lands on Disconnected
     quint64 m_reconnectGen = 0; // per rebuild: only the latest one's safety net may fire
+    QString m_sessionConfigPath;
+    QString m_sentConfigPath;
+    bool m_endpointAckPending = false;
     bool m_awaitingToml = false;  // credential read in flight; nothing sent to the helper yet
     bool m_inConnect = false;     // inside onConnectTomlReady(): suppress live-reapply
     // Bumped by anything that supersedes an in-flight connect, so a credential

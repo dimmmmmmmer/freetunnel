@@ -8,8 +8,8 @@
 #
 # Signing credentials come from the caller's environment, never from the repo:
 # ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_PASSWORD;
-# ANDROID_KEY_ALIAS, by default freetunnel. Android SDK 35 and Build Tools
-# 35.0.0 under ANDROID_HOME or ANDROID_SDK_ROOT.
+# ANDROID_KEY_ALIAS, by default freetunnel. Android SDK 37 and Build Tools
+# 36.0.0 under ANDROID_HOME or ANDROID_SDK_ROOT.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 for name in ANDROID_KEYSTORE_PATH ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD; do
@@ -20,7 +20,7 @@ for name in ANDROID_KEYSTORE_PATH ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD
 done
 [[ -f "$ANDROID_KEYSTORE_PATH" ]] || { echo "Signing keystore does not exist" >&2; exit 1; }
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-[[ -n "$SDK" ]] || { echo "Set ANDROID_HOME to Android SDK 35" >&2; exit 1; }
+[[ -n "$SDK" ]] || { echo "Set ANDROID_HOME to Android SDK 37" >&2; exit 1; }
 VERSION="$(sed -nE "s/^[[:space:]]*def[[:space:]]+appVersion[[:space:]]*=[[:space:]]*'([^']*)'[[:space:]]*\$/\1/p" \
   "$ROOT/android/app/build.gradle")"
 [[ -n "$VERSION" ]] || { echo "Cannot read appVersion from android/app/build.gradle" >&2; exit 1; }
@@ -45,5 +45,5 @@ trap 'rm -f "$CERT" "$PIN"' EXIT
 "$KEYTOOL" -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias "${ANDROID_KEY_ALIAS:-freetunnel}" \
   -storepass:env ANDROID_KEYSTORE_PASSWORD -file "$CERT"
 shasum -a 256 "$CERT" | awk '{print $1}' > "$PIN"
-BUILD_TOOLS="$SDK/build-tools/35.0.0" bash "$ROOT/scripts/sign-android-release.sh" "$UNSIGNED" "$APK" "$PIN" "$VERSION"
+BUILD_TOOLS="$SDK/build-tools/36.0.0" bash "$ROOT/scripts/sign-android-release.sh" "$UNSIGNED" "$APK" "$PIN" "$VERSION"
 echo "Signed release APK: $APK"

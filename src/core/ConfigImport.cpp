@@ -122,6 +122,7 @@ DeepLinkConfig serverOfExport(const EndpointExport &exported, const QString &fal
     cfg.dnsUpstreams = splitDnsList(c.dns);
     cfg.clientRandomPrefix = c.clientRandom;
     cfg.clientRandomAuthKey = exported.clientRandomAuthKey;
+    cfg.tlsProfile = c.tlsProfile;
     cfg.name = exported.name.isEmpty() ? fallbackName.trimmed() : exported.name;
     return cfg;
 }

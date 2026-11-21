@@ -1,0 +1,128 @@
+name: Incoming routing investigation
+
+on:
+  workflow_dispatch:
+    inputs:
+      core_run_id:
+        description: 'Successful CI run containing android-patched-core matching this checkout'
+        type: string
+        required: true
+      require_android_udp:
+        description: 'Fail unless incoming UDP works while the server application stays in VPN'
+        type: boolean
+        default: false
+      run_desktop:
+        description: 'Also run the Windows/macOS OS routing probes'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    if: inputs.run_desktop
+    name: Incoming OS probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Obtain the shipped Wintun driver
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://www.wintun.net/builds/wintun-0.14.1.zip -OutFile wintun.zip
+          if ((Get-FileHash wintun.zip -Algorithm SHA256).Hash -ne '07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51') { throw 'Wintun checksum mismatch' }
+          Expand-Archive wintun.zip wintun_extract
+          "WINTUN_DLL=$pwd\wintun_extract\wintun\bin\amd64\wintun.dll" >> $env:GITHUB_ENV
+      - name: Probe Windows routing
+        if: runner.os == 'Windows'
+        run: python tests/incoming_os_probe.py
+      - name: Probe macOS routing
+        if: runner.os == 'macOS'
+        run: sudo python3 tests/incoming_os_probe.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: incoming-${{ matrix.os }}
+          path: incoming-os-results.json
+
+  android:
+    name: Incoming ${{ matrix.name }} probe
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android API 35
+            api: 35
+            target: default
+            arch: x86_64
+            profile: pixel_2
+            artifact: phone
+          - name: Android TV API 34
+            api: 34
+            target: android-tv
+            arch: x86
+            profile: tv_1080p
+            artifact: tv
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+      # Reuse a verified core instead of rebuilding it for the diagnostic.
+      # The manifest check rejects a core built from different source/patches.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: android-patched-core
+          run-id: ${{ inputs.core_run_id }}
+          github-token: ${{ github.token }}
+          path: android/app/libs
+      - run: scripts/prepare-trusttunnel-android.sh
+      - name: Prepare the isolated real VPN endpoint
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/endpoint.tar.gz" https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.3.1/trusttunnel-v1.3.1-linux-x86_64.tar.gz
+          echo "29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97  $RUNNER_TEMP/endpoint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/endpoint.tar.gz" -C "$RUNNER_TEMP"
+          echo "INCOMING_ENDPOINT_BIN=$RUNNER_TEMP/trusttunnel-v1.3.1-linux-x86_64/trusttunnel_endpoint" >> "$GITHUB_ENV"
+          sudo ip address add 10.0.2.2/32 dev lo
+          ip route get 10.0.2.2
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          REQUIRE_ANDROID_UDP: ${{ inputs.require_android_udp }}
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          profile: ${{ matrix.profile }}
+          script: |
+            ./android/gradlew -p android --no-daemon -PincomingProbe :app:installDebug :app:installDebugAndroidTest :incomingProbe:installDebug :incomingProbe:installControl
+            adb shell appops set org.freetunnel.android ACTIVATE_VPN allow
+            adb shell pm grant org.freetunnel.android android.permission.POST_NOTIFICATIONS
+            adb shell svc wifi disable
+            sleep 3
+            python3 tests/incoming_android_probe.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: incoming-android-${{ matrix.artifact }}
+          path: incoming-android-*

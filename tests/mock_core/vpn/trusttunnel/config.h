@@ -22,11 +22,13 @@ struct MockTunListener {
     std::string device_name;
     std::vector<std::string> included_routes;
     std::vector<std::string> excluded_routes;
+    bool operator==(const MockTunListener &) const = default;
     bool use_existing = false;
     std::optional<std::string> netns;
 };
 struct MockSocksListener {
     std::string address;
+    bool operator==(const MockSocksListener &) const = default;
 };
 
 struct TrustTunnelConfig {
@@ -56,6 +58,8 @@ struct TrustTunnelConfig {
     } location;
     std::string exclusions;
     VpnMode mode = VPN_MODE_GENERAL;
+    bool endpoint_sockets_protected = false;
+    uint64_t routing_generation = 0;
     bool killswitch_enabled = false;
     std::string killswitch_allow_ports;
     std::string log_file_path;
@@ -109,6 +113,12 @@ struct TrustTunnelConfig {
         TrustTunnelConfig c;
         if (!readEndpointTls(t, c))
             return std::nullopt;
+        c.mode = t["vpn_mode"].value<std::string>().value_or("general") == "selective"
+                ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL;
+        for (const auto &entry : stringArray(t["exclusions"].value<std::string>())) {
+            if (!c.exclusions.empty()) c.exclusions += ' ';
+            c.exclusions += entry;
+        }
         c.ssl_session_storage_path = t["ssl_session_cache_path"].value<std::string>();
         // Kept as the raw array text: the wrapper only has to empty it, or pass it
         // on untouched when the user lets the config decide.
@@ -122,6 +132,7 @@ struct TrustTunnelConfig {
         tun.use_existing = t["listener.tun.use_existing"].value<bool>().value_or(false);
         tun.netns = t["listener.tun.netns"].value<std::string>();
         tun.included_routes = stringArray(t["listener.tun.included_routes"].value<std::string>());
+        tun.excluded_routes = stringArray(t["listener.tun.excluded_routes"].value<std::string>());
         return c;
     }
 

@@ -65,8 +65,8 @@ class VpnDeviceTest {
         fail("Condition did not become true in $timeoutMs ms. Seen, oldest first:\n$omitted" + seen.takeLast(20).joinToString("\n"))
     }
     @Before fun setup() {
-        context.getSystemService(android.app.NotificationManager::class.java).run { cancel(48); cancel(49) }
         oldPreferences = prefs.all
+        cancelAlerts(48, 49)
         prefs.edit().clear().putBoolean("logging", false).commit()
     }
     // A service that is up and not on its way out. A stop sent to one that is going, or to none, makes a new one for the moment it takes to be
@@ -215,6 +215,31 @@ class VpnDeviceTest {
         val unused = RoutingConfig.prepare(context, source, "Default")
         assertTrue("Default lists none", unused.apps.isEmpty()); assertNotNull("so Through VPN has nothing", unused.warning)
     }
+    @Test fun mixedRulesReachTheRunningNativeAdapterWithoutEnablingFullVpn() {
+        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        val other = context.packageManager.getInstalledApplications(0).map { it.packageName }
+            .first { it != context.packageName }
+        SplitStore.edit(splitStore(), null) { p ->
+            p.addApp("Default", other)
+            p.addDomains("Default", "selected.example")
+        }
+        withSink { config ->
+            FreeTunnelVpnService.start(context, config)
+            eventually { network() != null && nativeClient() != null }
+            awaitWorker()
+            val plan = serviceField("activePlan").get(serviceOwner()) as RoutingConfig.Plan
+            assertTrue(plan.routeAppsInCore)
+            assertFalse(plan.allowApps)
+            assertNull(plan.warning)
+            assertEquals("selective", org.tomlj.Toml.parse(plan.toml).getString("vpn_mode"))
+            assertTrue(exclusions(plan.toml).contains("selected.example"))
+            // The running adapter must use its application callback. A missing
+            // callback returns DEFAULT; an invalid endpoint must be rejected.
+            assertEquals(AppConnectionRouting.REJECT,
+                nativeClient()!!.onConnectRequest(17, "127.0.0.1", 0, "192.0.2.1", 443))
+        }
+    }
+
     @Test fun replacesTunWithoutDisconnectedStateAndBlocksUnsupportedIpv6() {
         assertNull("Grant ACTIVATE_VPN before running device tests", VpnService.prepare(context))
         val sink = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
@@ -236,13 +261,24 @@ class VpnDeviceTest {
             val properties = cm.getLinkProperties(network()!!)!!
             assertFalse(properties.linkAddresses.any { it.address is java.net.Inet6Address })
             assertFalse(properties.routes.any { it.destination.address is java.net.Inet6Address && it.type == RouteInfo.RTN_UNICAST })
-            // Android sets the VPN's capabilities on its own schedule, after the
-            // network itself appears.
-            eventually { network()?.let { cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } == true }
+            // setMetered(false) inherits the underlying network's metering. The
+            // app is excluded from its VPN, so activeNetwork is the underlying
+            // network; Android publishes VPN capabilities asynchronously.
+            eventually {
+                val underlying = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                val vpn = network()?.let { cm.getNetworkCapabilities(it) }
+                underlying != null && vpn != null && !underlying.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    vpn.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ==
+                    underlying.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            }
             instrumentation.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
                 .putExtra("tile_connect", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             instrumentation.waitForIdleSync()
             assertNotNull("Exported launcher must not stop VPN", network())
+            // The TUN and state 1 are published before native.start returns.
+            // Finish that first start before timing the burst of replacements.
+            awaitWorker()
+            assertFalse("A plain VPN start must not enable split tunnelling", prefs.getBoolean("split_enabled", false))
             states.clear()
             repeat(4) { FreeTunnelVpnService.start(context, config.replace("1350", (1400 + it).toString())) }
             eventually { network()?.let { cm.getLinkProperties(it)?.mtu == 1403 } == true }
@@ -268,6 +304,13 @@ class VpnDeviceTest {
 
     private fun alert(id: Int) = context.getSystemService(android.app.NotificationManager::class.java)
         .activeNotifications.firstOrNull { it.id == id }
+    private fun cancelAlerts(vararg ids: Int) {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        ids.forEach { manager.cancel(it) }
+        // cancel() queues work in NotificationManagerService. An old alert must
+        // not satisfy the next wait and then disappear under the new assertion.
+        eventually { manager.activeNotifications.none { it.id in ids } }
+    }
     private fun tunName() = network()?.let { context.getSystemService(ConnectivityManager::class.java).getLinkProperties(it)?.interfaceName }
     private fun serviceField(name: String) = FreeTunnelVpnService::class.java.getDeclaredField(name).apply { isAccessible = true }
     private fun useBackoff(backoff: ReconnectBackoff) = serviceField("backoff").set(serviceOwner(), backoff)
@@ -297,7 +340,7 @@ class VpnDeviceTest {
         driven.add("${identity(client)}<-$state")
         client.onStateChanged(state)
     }
-    private fun alertKind() = alert(49)?.notification?.let {
+    private fun alertKind(id: Int = 49) = alert(id)?.notification?.let {
         // What NotificationCompat's setSilent sets on a notification outside a group.
         if (it.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY) "silent" else "alerting"
     } ?: "none"
@@ -310,7 +353,7 @@ class VpnDeviceTest {
             "blocked=${read("blocked")} generation=${read("generation")} attempts=${read("attempts")} client=${identity(read("client"))}"
         }
         return "state=${FreeTunnelVpnService.state(context)} $service driven=${driven.takeLast(3).ifEmpty { listOf("none") }.joinToString(",")}" +
-            " alert49=${alertKind()} vpn=${network() != null}"
+            " alert48=${alertKind(48)} alert49=${alertKind()} vpn=${network() != null}"
     }
     // Reports 2 from client's core and returns once the service has handled
     // it. Android removes a cancelled notification asynchronously, so alert 49
@@ -432,9 +475,6 @@ class VpnDeviceTest {
     // is on the screen it is silent, and the reason is sent to the app, which says it in its toast as the desktop's window does (Main.qml:
     // toast.show, with the tray told as well only when the window is not in view); with the app away nothing is sent.
     @Test fun aFailureIsSentToTheOpenAppAndAlertsOnlyWhenTheAppIsAway() {
-        fun kind() = alert(48)?.notification?.let {
-            if (it.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY) "silent" else "alerting"
-        } ?: "none"
         fun gone() = eventually { network() == null && FreeTunnelVpnService.state(context) == 0 && serviceOwner() == null }
         val reasons = ConcurrentLinkedQueue<String>()
         val receiver = object : android.content.BroadcastReceiver() {
@@ -446,22 +486,25 @@ class VpnDeviceTest {
             FreeTunnelVpnService.setAppVisible(true)
             FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
             eventually { alert(48) != null && reasons.isNotEmpty() }
-            assertEquals("Silent while the app is on the screen", "silent", kind())
+            assertEquals("Silent while the app is on the screen", "silent", alertKind(48))
             assertEquals("and the app is told what the notice says", alert(48)!!.notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString(),
                 reasons.first())
             gone()
-            context.getSystemService(android.app.NotificationManager::class.java).cancel(48)
+            cancelAlerts(48)
             reasons.clear()
             FreeTunnelVpnService.setAppVisible(false)
             FreeTunnelVpnService.start(context, source + "\ninvalid TOML")
             eventually { alert(48) != null }
+            assertEquals("It alerts when the app is away", "alerting", alertKind(48))
+            gone()
+            // Keep a bounded observation window for the negative broadcast check;
+            // notification readiness above is determined by its actual presence.
             SystemClock.sleep(500)
-            assertEquals("It alerts when the app is away", "alerting", kind())
             assertTrue("and tells no app: $reasons", reasons.isEmpty())
         } finally {
             context.unregisterReceiver(receiver)
             FreeTunnelVpnService.setAppVisible(false)
-            FreeTunnelVpnService.stop(context)
+            if (serviceIsUp()) FreeTunnelVpnService.stop(context)
             gone()
         }
     }
@@ -715,9 +758,20 @@ class VpnDeviceTest {
     }
 
     @Test fun failedSynchronousStartRetainsNewTunWhenKillSwitchIsEnabled() {
-        FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "does-not-exist.invalid:443"))
+        // The config factory accepts this nonempty address, but native.start's
+        // resolver rejects its empty host without consulting external DNS.
+        // This still exercises the real failure after Builder.establish().
+        FreeTunnelVpnService.start(context, source.replace("192.0.2.1:443", "[]:443"))
         eventually { FreeTunnelVpnService.state(context) == 6 }
+        val tun = serviceField("retainedTun").get(serviceOwner()) as? android.os.ParcelFileDescriptor
+        assertNotNull("Resolution failure must retain the service's TUN descriptor", tun)
+        assertTrue("The retained descriptor must stay open", tun!!.fileDescriptor.valid())
+        // ConnectivityService publishes the newly established VPN asynchronously;
+        // the service's blocked state can be visible before allNetworks includes it.
+        eventually { network() != null && FreeTunnelVpnService.state(context) == 6 }
         assertNotNull("Resolution failure after establish must retain TUN", network())
+        assertSame("Publishing the network must not replace the blocked TUN", tun,
+            serviceField("retainedTun").get(serviceOwner()))
         FreeTunnelVpnService.stop(context)
         eventually { network() == null }
     }
@@ -749,11 +803,23 @@ class VpnDeviceTest {
         NativeConfigValidator.validate(context, work.toml)
     }
     // A new installation is not made by the VPN: with nothing saved, the service is given no recommended list, and builds from what there is.
-    @Test fun theServiceNeverMakesANewInstallationsDefaults() {
-        val plan = RoutingConfig.prepare(context, source, "Default")
+    @Test fun theServiceNeverMakesANewInstallationsDefaults() = withSink { config ->
+        // Refresh is also invoked from onCreate and the periodic worker. It
+        // must not seed defaults before the service prepares its routing plan.
+        GeoRepository.get(context).refreshEnabled()
+        assertFalse("Background refresh must not initialize profiles", prefs.contains(SplitStore.KEY))
+        assertFalse("Background refresh must not enable split tunnelling", prefs.contains("split_enabled"))
+        val plan = RoutingConfig.prepare(context, config, "Default")
         assertTrue(exclusions(plan.toml).isEmpty())
         assertFalse("split tunnelling is not turned on behind the app's back", prefs.contains("split_enabled"))
         assertTrue(profiles().domains("Default").isEmpty())
+        FreeTunnelVpnService.start(context, config)
+        eventually { network() != null && nativeClient() != null }
+        awaitWorker()
+        val running = serviceField("activePlan").get(serviceOwner()) as RoutingConfig.Plan
+        assertTrue("The running service must keep the supplied full-VPN policy", exclusions(running.toml).isEmpty())
+        assertFalse(prefs.contains("split_enabled"))
+        assertTrue(profiles().geoLists("Default").isEmpty())
     }
 
     @Test fun validationUsesPrivateIsolatedProcessAndExitsAfterEachRequest() {
@@ -848,14 +914,21 @@ class VpnDeviceTest {
             assertNotNull("The $name must be an overlay of the activity's window", layer)
             check(layer!!)
         }
-        // With the soft keyboard up, which the app picker puts up on a phone (the CI emulator has no hardware keyboard), the first Back only
-        // takes the keyboard away, as for any app: Back is sent until the overlay is gone, three times at most.
+        // The IME processes Back in another process. waitForIdleSync only waits for our
+        // main queue, so sending all three keys in one burst can give all of them to
+        // the keyboard while it is still hiding. Wait for the actual overlay removal
+        // after each key before sending another; a broken Back handler still fails.
         repeat(3) {
             var open = false
             onMain { open = activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name") != null }
             if (!open) return@repeat
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            instrumentation.waitForIdleSync()
+            val deadline = SystemClock.elapsedRealtime() + 2_000
+            while (SystemClock.elapsedRealtime() < deadline) {
+                onMain { open = activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name") != null }
+                if (!open) return@repeat
+                SystemClock.sleep(50)
+            }
         }
         onMain { assertNull("Back must close the $name", activity.window.decorView.findViewWithTag<android.view.View?>("overlay:$name")) }
     }

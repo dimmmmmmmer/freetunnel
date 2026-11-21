@@ -382,6 +382,10 @@
         <translation>Сертификат должен быть в формате PEM: один или несколько блоков BEGIN CERTIFICATE</translation>
     </message>
     <message>
+        <source>Choose up to 100 links or files, no larger than 1 MB each.</source>
+        <translation>Выберите до 100 ссылок или файлов размером не более 1 МБ каждый.</translation>
+    </message>
+    <message>
         <source>Not a valid TrustTunnel config: %1</source>
         <translation>Это не похоже на конфиг TrustTunnel: %1</translation>
     </message>
@@ -448,6 +452,10 @@
     <message>
         <source>The auth key must be hexadecimal in whole bytes (an even number of digits)</source>
         <translation>Ключ авторизации должен быть в hex-формате целыми байтами (чётное число цифр)</translation>
+    </message>
+    <message>
+        <source>The TLS profile is not one TrustTunnel knows</source>
+        <translation>TrustTunnel не знает такой профиль TLS</translation>
     </message>
     <message>
         <source>Could not store the auth key in the system&apos;s credential store. If it asked for access or to be unlocked, allow that and try again.</source>
@@ -532,6 +540,10 @@
         <translation>Из файла…</translation>
     </message>
     <message>
+        <source>Subscription</source>
+        <translation>Подписка</translation>
+    </message>
+    <message>
         <source>Create new…</source>
         <translation>Создать новый…</translation>
     </message>
@@ -608,6 +620,18 @@
     <message>
         <source>Address(es) · host:port (comma-separated)</source>
         <translation>Адрес(а) · host:port (через запятую)</translation>
+    </message>
+    <message>
+        <source>Refresh subscription</source>
+        <translation>Обновить подписку</translation>
+    </message>
+    <message>
+        <source>Stop updates</source>
+        <translation>Остановить обновления</translation>
+    </message>
+    <message>
+        <source>Stop subscription updates?</source>
+        <translation>Остановить обновления подписки?</translation>
     </message>
     <message>
         <source>Username</source>
@@ -690,6 +714,42 @@
         <translation>Ключ авторизации (hex)</translation>
     </message>
     <message>
+        <source>TLS profile</source>
+        <translation>Профиль TLS</translation>
+    </message>
+    <message>
+        <source>Chrome</source>
+        <translation>Chrome</translation>
+    </message>
+    <message>
+        <source>Chrome Canary</source>
+        <translation>Chrome Canary</translation>
+    </message>
+    <message>
+        <source>Safari</source>
+        <translation>Safari</translation>
+    </message>
+    <message>
+        <source>Firefox</source>
+        <translation>Firefox</translation>
+    </message>
+    <message>
+        <source>OkHttp</source>
+        <translation>OkHttp</translation>
+    </message>
+    <message>
+        <source>OpenSSL</source>
+        <translation>OpenSSL</translation>
+    </message>
+    <message>
+        <source>BoringSSL</source>
+        <translation>BoringSSL</translation>
+    </message>
+    <message>
+        <source>This server only. Leave it on Chrome unless the server asks for another.</source>
+        <translation>Только для этого сервера. Оставьте Chrome, если сервер не просит другой профиль.</translation>
+    </message>
+    <message>
         <source>Client random is not used while an auth key is set</source>
         <translation>Пока задан ключ авторизации, client random не используется</translation>
     </message>
@@ -703,6 +763,10 @@
     <message>
         <source>malformed dns_upstreams list</source>
         <translation>повреждён список dns_upstreams</translation>
+    </message>
+    <message>
+        <source>malformed tls_profile value</source>
+        <translation>повреждено значение tls_profile</translation>
     </message>
     <message>
         <source>truncated TLV header</source>
@@ -747,6 +811,53 @@
     <message>
         <source>malformed certificate</source>
         <translation>повреждён сертификат</translation>
+    </message>
+</context>
+<context>
+    <name>GeoListOverlay</name>
+    <message>
+        <source>Add your own list</source>
+        <translation>Добавить свой список</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Название</translation>
+    </message>
+    <message>
+        <source>HTTPS address</source>
+        <translation>HTTPS-ссылка</translation>
+    </message>
+    <message>
+        <source>List type</source>
+        <translation>Тип списка</translation>
+    </message>
+    <message>
+        <source>Sites</source>
+        <translation>Сайты</translation>
+    </message>
+    <message>
+        <source>IP addresses</source>
+        <translation>IP-адреса</translation>
+    </message>
+    <message>
+        <source>Route</source>
+        <translation>Направление</translation>
+    </message>
+    <message>
+        <source>Through VPN</source>
+        <translation>Через VPN</translation>
+    </message>
+    <message>
+        <source>Bypass VPN</source>
+        <translation>Без VPN</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Добавить</translation>
     </message>
 </context>
 <context>
@@ -824,36 +935,8 @@
         <translation>Удалить</translation>
     </message>
     <message>
-        <source>Cancel</source>
-        <translation>Отмена</translation>
-    </message>
-    <message>
         <source>Add your own list</source>
         <translation>Добавить свой список</translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation>Название</translation>
-    </message>
-    <message>
-        <source>HTTPS address</source>
-        <translation>HTTPS-ссылка</translation>
-    </message>
-    <message>
-        <source>List type</source>
-        <translation>Тип списка</translation>
-    </message>
-    <message>
-        <source>Sites</source>
-        <translation>Сайты</translation>
-    </message>
-    <message>
-        <source>IP addresses</source>
-        <translation>IP-адреса</translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation>Добавить</translation>
     </message>
     <message>
         <source>Update lists</source>
@@ -1019,6 +1102,26 @@
         <translation>Конфиг добавлен: %1</translation>
     </message>
     <message>
+        <source>Fetch subscription from %1?</source>
+        <translation>Загрузить подписку с %1?</translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation>Продолжить</translation>
+    </message>
+    <message>
+        <source>The subscription changes the server from %1 to %2. Apply?</source>
+        <translation>Подписка меняет сервер с %1 на %2. Применить?</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Применить</translation>
+    </message>
+    <message>
+        <source>Keep current</source>
+        <translation>Оставить текущий</translation>
+    </message>
+    <message>
         <source>Import</source>
         <translation>Импортировать</translation>
     </message>
@@ -1123,6 +1226,10 @@
     <message>
         <source>The config&apos;s tls_profile &quot;%1&quot; is not one TrustTunnel knows. Use one of: %2.</source>
         <translation>TrustTunnel не знает значение tls_profile «%1» в конфиге. Допустимые значения: %2.</translation>
+    </message>
+    <message>
+        <source>No running VPN session</source>
+        <translation>Нет активного VPN-подключения</translation>
     </message>
 </context>
 <context>
@@ -1315,10 +1422,6 @@
         <translation>Правила — мимо VPN</translation>
     </message>
     <message>
-        <source>Recommended for Russia</source>
-        <translation>Рекомендовано для РФ</translation>
-    </message>
-    <message>
         <source>Clear all</source>
         <translation>Очистить</translation>
     </message>
@@ -1411,6 +1514,25 @@
     </message>
 </context>
 <context>
+    <name>SubscriptionOverlay</name>
+    <message>
+        <source>Subscription</source>
+        <translation>Подписка</translation>
+    </message>
+    <message>
+        <source>HTTPS subscription URL</source>
+        <translation>HTTPS-адрес подписки</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Добавить</translation>
+    </message>
+</context>
+<context>
     <name>UpdateChecker</name>
     <message>
         <source>Could not create the update download directory</source>
@@ -1487,6 +1609,14 @@
 </context>
 <context>
     <name>VpnHelperClient</name>
+    <message>
+        <source>Preparing VPN helper...</source>
+        <translation>Подготовка VPN-помощника...</translation>
+    </message>
+    <message>
+        <source>Installing VPN helper...</source>
+        <translation>Установка VPN-помощника...</translation>
+    </message>
     <message>
         <source>Could not start the VPN helper</source>
         <translation>Не удалось запустить VPN-помощник</translation>

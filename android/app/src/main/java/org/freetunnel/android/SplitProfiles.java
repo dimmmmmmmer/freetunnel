@@ -54,7 +54,7 @@ final class SplitProfiles {
     /** Only Default, with nothing in it. */
     static SplitProfiles empty() { return new SplitProfiles(); }
 
-    /** A new installation: Default holds the recommended list, as it does on the desktop. */
+    /** Legacy manual defaults, retained for older profile fixtures. */
     static SplitProfiles seeded(Collection<String> recommended) {
         SplitProfiles p = new SplitProfiles();
         p.addRecommended(DEFAULT, recommended);

@@ -28,6 +28,9 @@ struct ConfigToml {
     // (migrateConfigPassword moves it out), and buildConfigToml() writes it only
     // when this is set, which is for the connect path and for an export.
     QString clientRandomAuthKey;
+    // Per connection. Empty or "chrome" is the core's default and is not written.
+    // "default" is accepted on read as the deprecated alias of "boringssl".
+    QString tlsProfile;
     QString certificate; // PEM body, optional
     bool allowIpv6 = true;
     bool skipVerification = false; // accept the server's TLS cert without validation

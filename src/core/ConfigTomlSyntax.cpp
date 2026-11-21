@@ -288,6 +288,7 @@ const QStringList &knownEndpointKeys()
             QStringLiteral("client_random_mask"),
             QStringLiteral("has_ipv6"),     QStringLiteral("skip_verification"),
             QStringLiteral("upstream_protocol"), QStringLiteral("anti_dpi"),
+            QStringLiteral("tls_profile"),
             QStringLiteral("certificate"),
             // Read from here when the endpoint has it, and written at the root,
             // where the core reads it next (see readDns).

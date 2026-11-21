@@ -41,7 +41,7 @@ TOUR_SCREENS = (
     'home-disconnected', 'home-empty', 'home-selector-focused', 'home-config-dropdown', 'home-connecting', 'home-connected',
     'home-blocked', 'home-toast', 'nav-focused-tile', 'configs-list', 'configs-row-focused', 'configs-icon-focused',
     'configs-add-menu', 'configs-export-menu', 'configs-delete-confirm', 'configs-empty', 'split-profiles-rules',
-    'split-after-recommended', 'split-mode-dropdown', 'split-new-profile-input', 'split-through-vpn-notice', 'app-picker',
+    'geo-lists', 'geo-custom-list', 'split-mode-dropdown', 'split-new-profile-input', 'split-through-vpn-notice', 'app-picker',
     'settings-top', 'settings-theme-dropdown', 'settings-bottom-update-', 'logs', 'logs-off',
     'editor-new', 'editor-edit-focused', 'editor-discard-confirm', 'import-confirm', 'import-replace', 'receive-from-phone')
 

@@ -87,10 +87,19 @@ void recordWindowsRows(const TableT *table, SocketOwnerTable *owners, int family
         // displace a row that can.
         if (row.dwOwningPid == 0)
             continue;
-        // First one wins, as on the other two platforms, among rows for the same
-        // socket: a listener and the connections accepted on it share one.
+        // TCP connections sharing a local port are separated by remote endpoint.
+        // UDP owner tables expose only the local endpoint; conflicts stay ambiguous.
+        SocketAddress remote{};
+        std::uint16_t remotePort = 0;
+        if constexpr (requires { row.dwRemotePort; }) {
+            remotePort = ntohs(static_cast<u_short>(row.dwRemotePort));
+            if constexpr (requires { row.dwRemoteAddr; })
+                std::copy_n(reinterpret_cast<const std::uint8_t *>(&row.dwRemoteAddr), 4, remote.begin());
+            else
+                std::copy_n(row.ucRemoteAddr, 16, remote.begin());
+        }
         owners->record(family, proto, ntohs(static_cast<u_short>(row.dwLocalPort)),
-                       localAddressOf(row), static_cast<qint64>(row.dwOwningPid));
+                       localAddressOf(row), static_cast<qint64>(row.dwOwningPid), false, remotePort, remote);
     }
 }
 
@@ -182,7 +191,8 @@ QList<qint64> listProcessIds()
 // The protocol, local port and local address one socket descriptor is bound
 // to, or false when it is not an internet socket with a port.
 bool socketEndpointOf(const socket_fdinfo &info, int *family, int *proto, std::uint16_t *port,
-                      SocketAddress *address, bool *v6only)
+                      SocketAddress *address, bool *v6only, std::uint16_t *remotePort,
+                      SocketAddress *remoteAddress)
 {
     *family = info.psi.soi_family;
     if (*family != AF_INET && *family != AF_INET6)
@@ -212,6 +222,16 @@ bool socketEndpointOf(const socket_fdinfo &info, int *family, int *proto, std::u
         *address = v4MappedAddress(ntohl(v4.s_addr));
     } else {
         std::copy_n(reinterpret_cast<const std::uint8_t *>(&ini->insi_laddr.ina_6), 16, address->begin());
+    }
+    *remotePort = ntohs(static_cast<std::uint16_t>(ini->insi_fport));
+    const in_addr &foreignV4 = ini->insi_faddr.ina_46.i46a_addr4;
+    *remoteAddress = {};
+    if (*family == AF_INET) {
+        std::copy_n(reinterpret_cast<const std::uint8_t *>(&foreignV4), 4, remoteAddress->begin());
+    } else if ((ini->insi_vflag & INI_IPV4) != 0 && (ini->insi_vflag & INI_IPV6) == 0) {
+        *remoteAddress = v4MappedAddress(ntohl(foreignV4.s_addr));
+    } else {
+        std::copy_n(reinterpret_cast<const std::uint8_t *>(&ini->insi_faddr.ina_6), 16, remoteAddress->begin());
     }
     return *port != 0;
 }
@@ -262,16 +282,14 @@ void collectSocketsOfProcess(pid_t pid, SocketOwnerTable *owners, ProcessLookup:
         int proto = 0;
         std::uint16_t port = 0;
         SocketAddress address{};
+        SocketAddress remoteAddress{};
+        std::uint16_t remotePort = 0;
         bool v6only = false;
         if (!socketEndpointOf(*reinterpret_cast<const socket_fdinfo *>(raw), &family, &proto, &port,
-                              &address, &v6only))
+                              &address, &v6only, &remotePort, &remoteAddress))
             continue;
-        // Does not overwrite: two processes can legitimately hold the same
-        // socket address — a listener and an accepted connection, or a socket
-        // one of them is about to close — and letting whichever pid the scan
-        // happened to reach last win makes the answer depend on process
-        // enumeration order.
-        owners->record(family, proto, port, address, static_cast<qint64>(pid), v6only);
+        // Accepted connections and listeners are distinguished by remote endpoint.
+        owners->record(family, proto, port, address, static_cast<qint64>(pid), v6only, remotePort, remoteAddress);
     }
 }
 
@@ -441,7 +459,8 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
     // long as it lasted — the intermittent failure this whole change exists to
     // remove, reintroduced by the optimisation meant to pay for it.
     bool viaNetlink = false;
-    const QList<SocketOwner> sockets = allInetSockets(&viaNetlink, &m_report.lastErrno);
+    bool complete = false;
+    const QList<SocketOwner> sockets = allInetSockets(&viaNetlink, &m_report.lastErrno, &complete);
     m_report.netlink = viaNetlink;
 
     for (const SocketOwner &sock : sockets) {
@@ -459,10 +478,11 @@ void ProcessLookup::walk(std::chrono::steady_clock::time_point now)
         // were not; among watched owners the first one does, as on macOS.
         const auto owner = byInode.constFind(sock.inode);
         m_owners.record(sock.family, sock.proto, sock.port, sock.address,
-                        owner == byInode.constEnd() ? kUnattributed : owner.value(), sock.v6only);
+                        owner == byInode.constEnd() ? kUnattributed : owner.value(), sock.v6only,
+                        sock.remotePort, sock.remoteAddress);
     }
 
-    finishScan(now, true);
+    finishScan(now, complete);
 }
 
 #endif

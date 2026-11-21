@@ -15,8 +15,8 @@ public final class ThemeTest {
     private static final int NIGHT_YES = 0x20;
     private static final int NIGHT_UNDEFINED = 0;
 
-    @Test public void aFreshInstallFollowsTheSystem() {
-        assertEquals(Theme.SYSTEM, Theme.mode(null, null));
+    @Test public void aFreshInstallStartsDark() {
+        assertEquals(Theme.DARK_MODE, Theme.mode(null, null));
     }
 
     @Test public void aChoiceTheOldBooleanRecordedIsKept() {
@@ -32,7 +32,7 @@ public final class ThemeTest {
     }
 
     @Test public void anUnknownStoredModeIsAsIfNoneWasStored() {
-        assertEquals(Theme.SYSTEM, Theme.mode("sepia", null));
+        assertEquals(Theme.DARK_MODE, Theme.mode("sepia", null));
         assertEquals(Theme.LIGHT_MODE, Theme.mode("", false));
     }
 

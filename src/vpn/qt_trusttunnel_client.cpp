@@ -134,6 +134,9 @@ QtTrustTunnelClient::~QtTrustTunnelClient() {
 }
 
 void QtTrustTunnelClient::teardownClient() {
+    ++m_endpointRequest;
+    m_pendingEndpoint.reset();
+    m_preserveEndpointSession = false;
     // If teardownClient is called from the object's thread (handleCoreStateChanged,
     // checkFdHealth, disconnectVpn) the connect thread may currently be inside
     // m_client->connect() or set_system_dns(), so resetting m_client while it
@@ -163,6 +166,7 @@ void QtTrustTunnelClient::teardownClient() {
         m_client->disconnect();
     }
     m_client.reset();
+    emit sessionPresenceChanged(false);
 #ifdef Q_OS_WIN
     m_winPhysicalIfIndex.store(0);
 #endif
@@ -191,7 +195,7 @@ void QtTrustTunnelClient::teardownClient() {
 // starts reading is caught by scripts/verify_upstream_patch.sh, not here. Cleared
 // rather than checked: FreeTunnel writes none of them, and an interface the
 // system names works just as well as one the file named.
-static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
+void QtTrustTunnelClient::clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config)
 {
     config.ssl_session_storage_path.reset();
     config.killswitch_allow_ports.clear();
@@ -206,6 +210,7 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     m_config = std::move(config);
     m_configAllowPorts = m_config->killswitch_allow_ports;
     clearKeysRootMustNotTakeFromAConfig(*m_config);
+    m_config->endpoint_sockets_protected = true;
     // m_logLevel is set from the config TOML's loglevel in the load functions
     // (driven by the GUI's Verbose-logs toggle: warn by default, info when on).
     m_config->loglevel = m_logLevel;
@@ -221,6 +226,7 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
     // Save original exclusions before we touch them so they can be restored
     // if the user changes bypass rules later.
     m_originalExclusions = m_config->exclusions;
+    m_originalMode = m_config->mode;
     m_config->exclusions = exclusionsLocked();
     // Routing policy: general = bypass the exclusions, selective = route only them.
     m_config->mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
@@ -231,7 +237,11 @@ void QtTrustTunnelClient::setConfigLocked(ag::TrustTunnelConfig config) {
 // The config's own exclusions, then ours. What a session is built with and what
 // a running one is handed live, so both come from here.
 std::string QtTrustTunnelClient::exclusionsLocked() const {
-    std::string out = m_originalExclusions;
+    // An imported general-mode exclusion means bypass, not "through VPN".
+    // Match Android: UI rules replace incompatible imported-mode rules instead
+    // of reversing their direction when the mode changes.
+    const auto mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+    std::string out = mode == m_originalMode ? m_originalExclusions : std::string();
     for (const auto &ex : m_extraExclusions) {
         if (!out.empty() && out.back() != ' ')
             out.push_back(' ');
@@ -250,12 +260,14 @@ void QtTrustTunnelClient::storeExclusionsLocked(std::vector<std::string> exclusi
 
 void QtTrustTunnelClient::storeModeLocked(bool selective) {
     m_selectiveMode = selective;
-    if (m_config.has_value())
+    if (m_config.has_value()) {
         m_config->mode = selective ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
+        m_config->exclusions = exclusionsLocked();
+    }
 }
 
 void QtTrustTunnelClient::setVpnMode(bool selective) {
-    // On this thread only, for the order below; see setSplitRouting().
+    // Publish a complete policy on the owning thread.
     if (QThread::currentThread() != thread()) {
         QMetaObject::invokeMethod(this, [this, selective]() { setVpnMode(selective); },
                                   Qt::QueuedConnection);
@@ -265,27 +277,25 @@ void QtTrustTunnelClient::setVpnMode(bool selective) {
         std::lock_guard<std::mutex> lk(m_configMutex);
         storeModeLocked(selective);
     }
-    applyRoutingToSession(); // the core first, as in setSplitRouting()
-    // App rules read the mode the same way the routes and domains lists do, so
-    // it has to reach their snapshot too — otherwise switching mode would flip
-    // every list except this one.
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->selective = selective;
+    applyRoutingToSession();
 }
 
 void QtTrustTunnelClient::setAppRules(const QStringList &rules) {
     // Sanitized here rather than trusted from the IPC: this runs in the
     // elevated helper, and a rule that cannot match is better dropped than
     // carried into a routing decision.
-    const QStringList clean = freetunnel::sanitizedAppRules(rules);
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->rules = clean;
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, rules]() { setAppRules(rules); }, Qt::QueuedConnection);
+        return;
+    }
+    m_appRuleList = freetunnel::sanitizedAppRules(rules);
+    applyRoutingToSession();
 }
 
 void QtTrustTunnelClient::setSplitRouting(const QStringList &domains, bool selective,
                                           const QStringList &appRules) {
-    // The order of the two steps below is what keeps an edit safe, and it holds
-    // only if both run here, on the thread that owns the session.
+    // The config, application snapshot and version are published by one owner;
+    // asynchronous decisions are checked against that version on the core loop.
     if (QThread::currentThread() != thread()) {
         QMetaObject::invokeMethod(
                 this, [this, domains, selective, appRules]() {
@@ -304,26 +314,8 @@ void QtTrustTunnelClient::setSplitRouting(const QStringList &domains, bool selec
         storeExclusionsLocked(std::move(exclusions));
         storeModeLocked(selective);
     }
-    // A connection is routed in two places: the program rules decide it when it
-    // arrives, on the core wrapper's own thread, and the core applies the mode
-    // and the address rules when it completes the connection, on the core's
-    // thread, in the order its queue was filled. So the core is handed the new
-    // mode and addresses first, in one update, and the program rules change
-    // after: any connection decided by the new program rules is completed after
-    // the update, and takes the new mode with them. Taking the last program out
-    // of "Through VPN" is the case this is for; the other order would complete
-    // such a connection with no rule under the old selective mode, which sends it
-    // around the tunnel. What is left: a connection decided by the OLD program
-    // rules in the very moment of the change can still be completed under the
-    // new mode. That routes it as the old or the new settings would, or keeps it
-    // in the tunnel, except when one edit both turns "Through VPN" on and lists a
-    // program in it, as adding the first program with no addresses listed does:
-    // a connection that program starts in that same instant can leave the tunnel
-    // once. Nothing can change both places at once.
+    m_appRuleList = clean;
     applyRoutingToSession();
-    std::lock_guard<std::mutex> lk(m_appRules->mutex);
-    m_appRules->rules = clean;
-    m_appRules->selective = selective;
 }
 
 void QtTrustTunnelClient::applyRoutingToSession() {
@@ -333,37 +325,31 @@ void QtTrustTunnelClient::applyRoutingToSession() {
                                   Qt::QueuedConnection);
         return;
     }
-    if (!m_client)
-        return; // the next session is built from the working set, which has it
     Routing wanted;
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         wanted.mode = m_selectiveMode ? ag::VPN_MODE_SELECTIVE : ag::VPN_MODE_GENERAL;
         wanted.exclusions = exclusionsLocked();
     }
-    // The GUI sends every list again after any split-tunnelling edit, a program
-    // rule included. The core resets every connection it carries when it takes
-    // new exclusions, so passing on one that changes nothing would cut them all
-    // for an edit that did not concern them.
-    if (wanted == m_sessionRouting)
+    wanted.appRules = m_appRuleList;
+    wanted.generation = m_publishedRouting.generation;
+    if (wanted != m_publishedRouting) {
+        ++wanted.generation;
+        // Publish mode, app rules and their version in one critical section.
+        // The core validates that version when it consumes the asynchronous
+        // decision, so neither an old nor a future snapshot can leak traffic.
+        std::lock_guard<std::mutex> lk(m_appRules->mutex);
+        m_appRules->rules = wanted.appRules;
+        m_appRules->selective = wanted.mode == ag::VPN_MODE_SELECTIVE;
+        m_appRules->generation = wanted.generation;
+        m_publishedRouting = wanted;
+    }
+    if (!m_client || wanted == m_sessionRouting)
         return;
-    // Outside the lock: the core takes its own, and m_configMutex is never held
-    // across a call into it.
-    //
-    // The core keeps one pending update, not a queue: vpn_update_exclusions()
-    // holds its task in a single slot, so an update handed over before the core's
-    // loop has run the previous one cancels that one. Two edits in quick
-    // succession (a burst of commands from the GUI, or an edit right after the
-    // hand-over at adoption) can reach the session as the second alone. For what
-    // the session ends up routing by, that loses nothing: every update carries
-    // the whole of it, the mode and the full list, never just what one edit
-    // changed, and m_sessionRouting is the last update handed over, which is the
-    // one the core keeps, so the check above stays right. What it can cost is
-    // the order the program rules rely on (setSplitRouting()): a connection
-    // decided by the overtaken edit's program rules is completed under the mode
-    // from before it. That is the same instant an edit already has, and it needs
-    // two edits within one turn of the core's loop.
-    m_client->update_exclusions(wanted.mode, wanted.exclusions);
+    // Always submit the complete snapshot: the native queue coalesces updates.
+    // The core compares the applied mode/domains before deciding to reset flows;
+    // an app-only edit cannot accidentally cancel a pending domain/mode edit.
+    m_client->update_routing(wanted.mode, wanted.exclusions, wanted.generation);
     m_sessionRouting = std::move(wanted);
 }
 
@@ -419,11 +405,8 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
 
 // The [endpoint] tls_profile the core would refuse the whole config for, as the
 // message that says so, or empty when it takes it (or ignores it: it reads the key
-// only as a string). The core's own words for it are an error line in the log of a
-// session that has not opened its log yet, which on the helper's first connect
-// goes to a stderr nobody reads, so the user would be told only that the
-// structure is invalid. The value is a file's, shown to the user: cut short and
-// cleaned of line breaks and other control characters.
+// only as a string). Absent or empty means chrome. "default" is boringssl.
+// The value is a file's, shown to the user: cut short and cleaned of line breaks.
 static QString refusedTlsProfileMessage(const toml::table &t)
 {
     const auto profile = t["endpoint"]["tls_profile"].value<std::string>();
@@ -435,49 +418,51 @@ static QString refusedTlsProfileMessage(const toml::table &t)
             ch = QLatin1Char(' ');
     }
     QStringList known;
-    for (const std::string_view name : freetunnel::kTrustTunnelTlsProfiles)
+    for (const std::string_view name : freetunnel::kTrustTunnelTlsProfileChoices)
         known << QString::fromUtf8(name.data(), static_cast<int>(name.size()));
+    known << QStringLiteral("default");
     return QtTrustTunnelClient::tr("The config's tls_profile \"%1\" is not one TrustTunnel knows. Use one of: %2.")
             .arg(shown.trimmed(), known.join(QStringLiteral(", ")));
 }
 
-bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
-    if (tomlContent.isEmpty()) {
-        setState(State::Error);
-        emit vpnError(tr("Empty config"));
-        return false;
+std::optional<ag::TrustTunnelConfig> QtTrustTunnelClient::parseConfig(const QString &text, QString *error, ag::LogLevel fallbackLevel)
+{
+    if (text.isEmpty()) {
+        *error = tr("Empty config");
+        return std::nullopt;
     }
-    toml::parse_result parsed = toml::parse(tomlContent.toStdString());
+    auto parsed = toml::parse(text.toStdString());
     if (!parsed) {
-        // Copy immediately: description() hands back a view owned by the parse
-        // result, and keeping a view alive across statements is a lifetime trap.
-        const std::string descr{parsed.error().description()};
-        setState(State::Error);
-        emit vpnError(tr("Failed parsing config: %1").arg(QString::fromStdString(descr)));
-        return false;
+        *error = tr("Failed parsing config: %1").arg(QString::fromStdString(std::string(parsed.error().description())));
+        return std::nullopt;
     }
-
     if (const QString badProfile = refusedTlsProfileMessage(parsed.table()); !badProfile.isEmpty()) {
-        setState(State::Error);
-        emit vpnError(badProfile);
-        return false;
+        *error = badProfile;
+        return std::nullopt;
     }
-
     auto config = ag::TrustTunnelConfig::build_config(parsed.table());
-    // FreeTunnel only ever writes a [listener.tun]. A SOCKS listener instead is a
-    // proxy that root would open on whatever address the TOML names, with no
-    // tunnel interface for routes, DNS or the kill switch to hold on to.
-    if (!config.has_value()
-        || !std::holds_alternative<ag::TrustTunnelConfig::TunListener>(config->listener)) {
+    // An elevated SOCKS listener could bind an arbitrary config-supplied address
+    // and has no TUN for routes, DNS or the kill switch. Accept TUN configs only.
+    if (!config || !std::holds_alternative<ag::TrustTunnelConfig::TunListener>(config->listener)) {
+        *error = tr("Invalid TrustTunnel config structure");
+        return std::nullopt;
+    }
+    config->loglevel = logLevelFromTomlTable(parsed.table(), fallbackLevel);
+    return config;
+}
+
+bool QtTrustTunnelClient::loadConfigFromToml(const QString &tomlContent) {
+    QString error;
+    auto config = parseConfig(tomlContent, &error, m_logLevel);
+    if (!config) {
         setState(State::Error);
-        emit vpnError(tr("Invalid TrustTunnel config structure"));
+        emit vpnError(error);
         return false;
     }
-
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         m_lastConfigToml = tomlContent;
-        m_logLevel = logLevelFromTomlTable(parsed.table(), m_logLevel);
+        m_logLevel = config->loglevel;
         setConfigLocked(std::move(*config));
     }
     setState(State::Disconnected);
@@ -581,6 +566,10 @@ void QtTrustTunnelClient::setExcludedRoutes(const std::vector<std::string> &excl
 }
 
 void QtTrustTunnelClient::setExtraExclusions(const std::vector<std::string> &exclusions) {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, exclusions]() { setExtraExclusions(exclusions); }, Qt::QueuedConnection);
+        return;
+    }
     {
         std::lock_guard<std::mutex> lk(m_configMutex);
         storeExclusionsLocked(exclusions);
@@ -703,8 +692,15 @@ void QtTrustTunnelClient::handleCoreDisconnected(int errCode, const QString &err
     m_networkWaitTimer.stop();
     if (m_stopRequested)
         return;
-    scheduleReconnect(
-            buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt.load()));
+    const QString reason = buildDisconnectReason(errCode, errText, m_everConnected, m_lastConnectAttempt.load());
+    if (m_preserveEndpointSession && m_client) {
+        // A fatal endpoint error ends the VPN handshake, not the direct side of
+        // this session. Keep the TUN and kill switch until an explicit stop.
+        setState(State::Error);
+        emit vpnError(reason);
+        return;
+    }
+    scheduleReconnect(reason);
 }
 
 void QtTrustTunnelClient::handleCoreStateChanged(ag::VpnSessionState coreState, int errCode,

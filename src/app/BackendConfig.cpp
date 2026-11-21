@@ -195,6 +195,7 @@ QVariantMap Backend::configFields(int index)
     f[QStringLiteral("customSni")] = c.customSni;
     f[QStringLiteral("clientRandom")] = c.clientRandom;
     f[QStringLiteral("authKey")] = secrets.authKey;
+    f[QStringLiteral("tlsProfile")] = c.tlsProfile.isEmpty() ? QStringLiteral("chrome") : c.tlsProfile;
     f[QStringLiteral("allowIpv6")] = c.allowIpv6;
     f[QStringLiteral("skipVerification")] = c.skipVerification;
     f[QStringLiteral("antiDpi")] = c.antiDpi;
@@ -253,6 +254,7 @@ QString Backend::configDeepLink(int index)
     // link cannot connect. It then is version 2 (encodeDeepLink), which FreeTunnel
     // 1.2.3 and earlier and TrustTunnel's clients up to 1.1.11 refuse.
     dl.clientRandomAuthKey = secrets.authKey;
+    dl.tlsProfile = c.tlsProfile;
     dl.name = nameForPath(path);
     for (const QString &d : freetunnel::splitDnsList(c.dns))
         dl.dnsUpstreams << d.trimmed();

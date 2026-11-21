@@ -3,9 +3,7 @@ package org.freetunnel.android;
 import android.content.Context;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
-import java.util.function.Supplier;
 
 /**
  * "Recommended for Russia", the list the desktop and this app share: data/split/recommended-russia.txt, which the build
@@ -30,11 +28,4 @@ final class RussiaList {
         return list;
     }
 
-    /** The list for SplitStore, which wants one when it makes a new installation's Default; nothing, if the assets cannot be read. */
-    static Supplier<List<String>> seed(Context context) {
-        return () -> {
-            try { return read(context); }
-            catch (IOException unreadable) { return Collections.<String>emptyList(); }
-        };
-    }
 }

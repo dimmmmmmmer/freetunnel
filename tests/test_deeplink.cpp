@@ -1069,9 +1069,8 @@ void TestDeepLink::readsASelfSignedVersion2Link()
     QVERIFY2(!toml.contains(QStringLiteral("subscription")), qPrintable(toml));
 }
 
-// The format's rule for what comes next: a tag a reader does not know is skipped,
-// in version 2 as in 1. TrustTunnel's next tag will be 0x10, and refusing it would
-// refuse every link that has it.
+// A tag a reader does not know is skipped. 0x10 is the TLS profile, so the
+// next undefined tag is 0x11. A profile byte outside 0x00..0x06 refuses the link.
 void TestDeepLink::aVersion2LinkIgnoresTagsItDoesNotDefine()
 {
     QString err;
@@ -1084,9 +1083,20 @@ void TestDeepLink::aVersion2LinkIgnoresTagsItDoesNotDefine()
     QCOMPARE(cfg->password, QStringLiteral("s3cret"));
     QCOMPARE(cfg->subscriptionUrl, v2::kSubscription);
     QVERIFY(cfg->clientRandomAuthKey.isEmpty());
+    QVERIFY(cfg->tlsProfile.isEmpty());
+
+    const QString firefox = linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
+                                             {0x05, "u"}, {0x06, "p"}, {0x10, QByteArray(1, 0x03)}});
+    const auto withProfile = parseDeepLink(firefox, &err);
+    QVERIFY2(withProfile.has_value(), qPrintable(err));
+    QCOMPARE(withProfile->tlsProfile, QStringLiteral("firefox"));
+    const QString unknownProfile = linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
+                                                    {0x05, "u"}, {0x06, "p"}, {0x10, QByteArray(1, 0x07)}});
+    QVERIFY(!parseDeepLink(unknownProfile, &err).has_value());
+    QCOMPARE(err, QStringLiteral("malformed tls_profile value"));
 
     // Every one-byte tag after the last one defined, alone beside a whole server.
-    for (int tag = 0x10; tag <= 0x3F; ++tag) {
+    for (int tag = 0x11; tag <= 0x3F; ++tag) {
         const QString link = linkFromRecords({{0x00, QByteArray(1, 2)}, {0x01, "h"}, {0x02, "1.2.3.4:443"},
                                               {0x05, "u"}, {0x06, "p"}, {static_cast<char>(tag), "x"}});
         QVERIFY2(parseDeepLink(link, &err).has_value(), qPrintable(QString::number(tag, 16) + ": " + err));

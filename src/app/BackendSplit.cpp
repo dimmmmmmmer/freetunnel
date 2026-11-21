@@ -566,11 +566,10 @@ void Backend::applySplitRules(bool warnOfLeak) {
     }
 }
 
-// A config switch, and an edit to what a session is built with (the excluded
-// routes, the kill switch and its config ports), binds only when the tunnel is (re)built. If we're
-// connected, seamlessly rebuild it so edits apply immediately rather than only
-// after a manual reconnect. No-op (and no re-elevation) when disconnected.
-void Backend::reconnectActiveConfig() {
+// A manual server pick replaces the endpoint in the existing session. Changes
+// to OS routes, the kill switch or its config ports still rebuild the listener.
+// Neither path starts a VPN when the app is disconnected.
+void Backend::reconnectActiveConfig(bool endpointOnly) {
     // A teardown already under way reconnects with whatever config is active
     // when it lands.
     if (m_activePath.isEmpty() || m_pendingReconnect)
@@ -586,8 +585,13 @@ void Backend::reconnectActiveConfig() {
         buildConnectTomlAsync();
         return;
     }
-    if (!m_connected && !m_connecting)
+    if (!m_connected && !m_connecting && !m_client.sessionActive())
         return;
+    if (endpointOnly && m_client.helperReady()) {
+        m_reapplying = false;
+        startConnectAttempt();
+        return;
+    }
     m_reapplying = true;
     m_connecting = false;
     m_pendingReconnect = true;

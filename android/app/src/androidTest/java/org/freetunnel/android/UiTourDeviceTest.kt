@@ -871,18 +871,6 @@ class UiTourDeviceTest {
             awaitOverlay("select")
             shot("split-mode-dropdown", "Split's Mode dropdown: Bypass VPN with the tick, Through VPN")
         }
-        screen("split-after-recommended") {
-            goTo(2)
-            activate("domains:russia")
-            eventually("The list must be added") { onMain { descendants(root()).count { (it.tag as? String)?.startsWith("domain:") == true } } > 20 }
-            // From the top of the page, as the desktop's picture is: the header with "Recommended for Russia" and "Clear all" in danger.
-            // (The tour once scrolled to the field first, which made this picture almost the next one.)
-            onMain { (field("pageScroll").get(act()) as ScrollView?)?.scrollTo(0, 0) }
-            settle(200)
-            shot("split-after-recommended", "Split after Recommended for Russia, from the top: the rules as chips, Clear all in danger")
-            scrollPageToEnd()
-            shot("split-after-recommended-scrolled", "Split after Recommended for Russia, scrolled to the end: the applications")
-        }
         screen("geo-lists") {
             val vpn = GeoDefinition("preview-vpn", act().getString(R.string.geo_blocked_sites),
                 "https://example.invalid/preview-vpn.txt", GeoLists.Kind.SITES, false, true)

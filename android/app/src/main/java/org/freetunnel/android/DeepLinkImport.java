@@ -89,6 +89,18 @@ final class DeepLinkImport {
                 || s.startsWith("https://www.trusttunnel.org/qr.html");
     }
 
+    static String subscription(String link) throws ParseException {
+        String payload = extractPayload(link);
+        byte[] bytes;
+        try { bytes = Base64.getUrlDecoder().decode(payload); }
+        catch (IllegalArgumentException invalid) { throw new ParseException(R.string.text_invalid_trusttunnel_link); }
+        if (bytes.length == 0 || bytes.length > MAX_PAYLOAD_BYTES) throw new ParseException(R.string.text_unsupported_link_size);
+        if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
+        Fields fields = decode(bytes);
+        if (!fields.authKey.isEmpty()) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
+        return fields.subscriptionUrl;
+    }
+
     static Imported parse(String link) throws ParseException {
         String payload = extractPayload(link);
         if (payload.isEmpty() || !payload.matches("[A-Za-z0-9_-]+={0,2}"))

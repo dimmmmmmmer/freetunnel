@@ -79,6 +79,7 @@ private slots:
     void realClientRefusesAChallengeCarryingNoNonce();
     void securitySettingsAreSentAsValuesNotJustCommandNames();
     void aHelperThatGoesAwayTakesItsSessionWithIt();
+    void aRejectedReplacementKeepsAcceptedSessionSettings();
     void splitRoutingTravelsAsOneCommandAndNeedsNoNewSession();
     void theElevatedArgvComesFromItsArgumentsAndNotTheEnvironment();
     void theAppImageIsUnpackedWhereNobodyElseCanWrite();
@@ -791,3 +792,37 @@ void TestIntegrationHelperClient::onlyOldTokenFilesOfOursAreRemoved()
 }
 
 #include "test_integration_helper_client.moc"
+
+void TestIntegrationHelperClient::aRejectedReplacementKeepsAcceptedSessionSettings()
+{
+    const QString token = QStringLiteral("replacement-settings-token");
+    MockHelperServer server(token);
+    QVERIFY(server.listen());
+    qputenv("FT_TEST_HELPER_PORT", QByteArray::number(server.port()));
+    qputenv("FT_TEST_HELPER_TOKEN", token.toUtf8());
+    const auto clear = qScopeGuard([]() {
+        qunsetenv("FT_TEST_HELPER_PORT");
+        qunsetenv("FT_TEST_HELPER_TOKEN");
+    });
+    VpnHelperClient client;
+    QSignalSpy replies(&client, &VpnHelperClient::endpointRequestFinished);
+    client.setKillSwitch(true);
+    client.loadConfigFromToml(QStringLiteral("[endpoint]\nhostname = \"accepted.example\"\n"));
+    client.connectVpn();
+    QTRY_COMPARE(client.state(), VpnHelperClient::State::Connected);
+    QVERIFY(client.sessionActive());
+    QVERIFY(!client.sessionSettingsChanged());
+    server.refuseConnectsWith(QStringLiteral("rejected.example"), QStringLiteral("Rejected configuration"));
+    client.setKillSwitch(false);
+    client.loadConfigFromToml(QStringLiteral("[endpoint]\nhostname = \"rejected.example\"\n"));
+    client.connectVpn();
+    QTRY_COMPARE(replies.size(), 2);
+    QVERIFY(!replies.back().at(0).toBool());
+    QCOMPARE(client.state(), VpnHelperClient::State::Connected);
+    QVERIFY(client.sessionActive());
+    QVERIFY(client.sessionSettingsChanged());
+    client.setKillSwitch(true);
+    QVERIFY(!client.sessionSettingsChanged());
+    client.disconnectVpn();
+    QVERIFY(!client.sessionActive());
+}

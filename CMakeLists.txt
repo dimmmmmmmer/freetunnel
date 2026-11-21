@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreeTunnel VERSION 1.2.4 LANGUAGES CXX)
+project(FreeTunnel VERSION 1.2.5 LANGUAGES CXX)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -189,6 +189,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/vpn/qt_trusttunnel_fdwatch.cpp
     src/vpn/qt_trusttunnel_uplink.cpp
     src/vpn/qt_trusttunnel_connect.cpp
+    src/vpn/qt_trusttunnel_switch.cpp
     src/vpn/qt_trusttunnel_callbacks.cpp
     src/vpn/qt_trusttunnel_events.cpp
     src/vpn/qt_trusttunnel_events.h
@@ -214,6 +215,12 @@ target_compile_definitions(FreeTunnel PRIVATE
     FREETUNNEL_VERSION="${PROJECT_VERSION}"
     FREETUNNEL_CORE_REF="${FREETUNNEL_CORE_REF}"
 )
+
+if(UNIX)
+    target_sources(FreeTunnel PRIVATE src/vpn/installed_helper.cpp
+        src/vpn/installed_helper_policy.cpp src/vpn/installed_helper_launcher.cpp)
+    target_compile_definitions(FreeTunnel PRIVATE FT_INSTALLED_HELPER)
+endif()
 
 # --- Build hardening -------------------------------------------------------
 # Defense-in-depth for a process that parses untrusted network/IPC/TLV input in

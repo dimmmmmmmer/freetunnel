@@ -42,6 +42,7 @@ struct CoreConfigSnapshot {
     bool captured = false; // false until a core client was actually built
     bool killswitch_enabled = false;
     int mode = -1;     // ag::VpnMode
+    uint64_t routing_generation = 0;
     int loglevel = -1; // ag::LogLevel
     // The endpoint's TLS settings, as ag::TrustTunnelConfig::location has them.
     bool skip_verification = false;
@@ -76,6 +77,7 @@ struct ExclusionsUpdate {
     uint64_t client = 0;
     int mode = -1; // ag::VpnMode
     std::string exclusions;
+    uint64_t generation = 0;
 };
 
 class Controller {
@@ -93,6 +95,10 @@ public:
         m_connectError.clear();
         m_dnsError.clear();
         m_blockConnect = false;
+        m_blockEndpointPreparation = false;
+        m_endpointPreparationError.clear();
+        m_endpointPreparations = 0;
+        m_endpointReplacements = 0;
         m_connectCalls = 0;
         m_lastClientId = 0;
         m_nextId = 1;
@@ -111,6 +117,34 @@ public:
         ag::g_mockActiveIfLooks.store(0);
         m_updates.clear();
         m_updateHook = nullptr;
+    }
+
+    void blockEndpointPreparation(bool block) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_blockEndpointPreparation = block;
+        if (!block) m_cv.notify_all();
+    }
+    void setEndpointPreparationError(std::string error) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_endpointPreparationError = std::move(error);
+    }
+    std::string prepareEndpoint() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        ++m_endpointPreparations;
+        m_cv.wait(lock, [this] { return !m_blockEndpointPreparation; });
+        return m_endpointPreparationError;
+    }
+    void replaceEndpoint() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        ++m_endpointReplacements;
+    }
+    int endpointPreparationCount() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_endpointPreparations;
+    }
+    int endpointReplacementCount() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_endpointReplacements;
     }
 
     // ---- scripting from the test ----
@@ -476,9 +510,9 @@ public:
                     NetworkChange{state, outbound, it->second.dnsReads.size()});
     }
 
-    void onUpdateExclusions(uint64_t id, int mode, std::string exclusions)
+    void onUpdateExclusions(uint64_t id, int mode, std::string exclusions, uint64_t generation = 0)
     {
-        ExclusionsUpdate update{id, mode, std::move(exclusions)};
+        ExclusionsUpdate update{id, mode, std::move(exclusions), generation};
         int count = 0;
         std::function<void(uint64_t)> hook;
         {
@@ -529,6 +563,10 @@ public:
     }
 
 private:
+    bool m_blockEndpointPreparation = false;
+    std::string m_endpointPreparationError;
+    int m_endpointPreparations = 0;
+    int m_endpointReplacements = 0;
     struct Record {
         ag::VpnCallbacks callbacks;
         bool alive = false;

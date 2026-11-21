@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 // The app's version, X.Y.Z, set here and nowhere else. An official release is
@@ -9,40 +8,45 @@ plugins {
 // always grows with the version. The preview was 0.9.0, below the first official
 // android-1.0.0. Preview and CI builds are not signed with the release key, so
 // they are not offered updates: Android would refuse to install them anyway.
-def appVersion = '1.2.4'
+def appVersion = '1.2.5'
 def appVersionCode = appVersion.tokenize('.').collect { it as int }.with { it[0] * 10000 + it[1] * 100 + it[2] }
 
 // The TrustTunnel core the app is built on: one source-built AAR, checked against core-source.json and its build manifest. Its version
-// is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.11", as the desktop's
+// is read from that name (BuildConfig.CORE_VERSION), for the footer of Settings: "TrustTunnel core 1.1.12", as the desktop's
 // says which core it carries.
-def coreAar = 'trusttunnel-client-android-1.1.11.aar'
+def coreAar = 'trusttunnel-client-android-1.1.12.aar'
 def coreVersionMatch = coreAar =~ /^trusttunnel-client-android-(\d+(?:\.\d+)*)\.aar$/
 if (!coreVersionMatch.matches()) throw new GradleException("The core AAR's name must be trusttunnel-client-android-<version>.aar, not ${coreAar}")
 def coreVersion = coreVersionMatch.group(1)
 
 dependencies {
     implementation files("libs/${coreAar}")
-    implementation 'org.slf4j:slf4j-api:1.7.25'
-    implementation 'com.github.tony19:logback-android:2.0.0'
-    implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
-    implementation 'com.akuleshov7:ktoml-core:0.7.0'
-    implementation 'org.tomlj:tomlj:1.1.1'
+    implementation 'org.slf4j:slf4j-api:2.0.20'
+    implementation 'com.github.tony19:logback-android:3.0.0'
+    implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'
+    implementation 'com.akuleshov7:ktoml-core:0.7.1'
+    implementation 'org.tomlj:tomlj:2.2.0'
+    // Tomlj exposes these annotations in its API without a transitive dependency.
+    // Kotlin 2.4 needs them on the compilation classpath.
+    compileOnly 'org.checkerframework:checker-qual:4.4.0'
+    androidTestCompileOnly 'org.checkerframework:checker-qual:4.4.0'
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.86'
     // The QR code a TV shows for Receive from phone (LinkReceiver). MIT, no
     // dependencies of its own, about 40 KB, where zxing's core is about 550 KB.
     implementation 'io.nayuki:qrcodegen:1.8.0'
+    implementation 'com.google.zxing:core:3.5.4'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
-    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.core:core-ktx:1.19.1'
     testImplementation 'junit:junit:4.13.2'
     // The platform's org.json is a stub in unit tests (every call throws); SplitProfiles keeps its profiles as JSON.
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'org.json:json:20260814'
 }
 
 android {
     namespace 'org.freetunnel.android'
-    compileSdk 35
-    buildToolsVersion '35.0.0'
+    compileSdk 37
+    buildToolsVersion '36.0.0'
     defaultConfig {
         applicationId 'org.freetunnel.android'
         minSdk 26
@@ -80,7 +84,6 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
-    kotlinOptions { jvmTarget = '11' }
 }
 
 // The third-party notices, from the repository, into the APK's assets:

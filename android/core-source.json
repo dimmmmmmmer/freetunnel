@@ -1,6 +1,25 @@
 {
-  "version": "1.1.11",
-  "commit": "c0990e174fc75b2e52acd15882c62e69a3022581",
-  "patches": ["vendor/trusttunnel/04-priority-geo-rules.patch"],
-  "abis": ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+  "version": "1.1.12",
+  "commit": "067deb837ed994d6ae902e3bb40b69f6266af216",
+  "patches": [
+    "android/core-patches/01-tunnel-stats-handler.patch",
+    "android/core-patches/02-connect-request-handler.patch",
+    "android/core-patches/04-priority-geo-rules.patch",
+    "android/core-patches/06-android-application-routing.patch",
+    "android/core-patches/07-preserve-connection-hostnames.patch",
+    "android/core-patches/08-canonical-domain-routing.patch",
+    "android/core-patches/09-direct-dns-during-reconnect.patch",
+    "android/core-patches/12-current-connection-hostname.patch",
+    "android/core-patches/13-preserve-direct-recovery.patch",
+    "android/core-patches/14-in-session-endpoint-switch.patch",
+    "android/core-patches/15-scope-tls-session-cache.patch",
+    "android/core-patches/16-preserve-pending-direct-dns.patch",
+    "android/core-patches/18-android-native-config-lifetime.patch"
+  ],
+  "abis": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86",
+    "x86_64"
+  ]
 }

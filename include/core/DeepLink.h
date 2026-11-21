@@ -59,6 +59,9 @@ struct DeepLinkConfig {
     // the TLS client random from, and the server turns a client away without it.
     QString subscriptionUrl;                           // 0x0E https:// address
     QString clientRandomAuthKey;                       // 0x0F hex; empty = none
+    // 0x10, one byte. Empty means chrome, the core's default, and is not written.
+    // "default" is the deprecated alias of boringssl.
+    QString tlsProfile;
 };
 
 // Parse a `tt://?...` deep link. On failure returns nullopt and, if `error` is

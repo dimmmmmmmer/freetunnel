@@ -62,6 +62,10 @@ struct SubscriptionDocument {
     // document without it. Only the deep link carries it. Present and empty says
     // the server has none.
     std::optional<QString> clientRandomAuthKey;
+    // Per connection. Absent means the document did not set one, so a refresh
+    // keeps the profile this connection already has. Empty means chrome.
+    // "default" is stored as boringssl.
+    std::optional<QString> tlsProfile;
 };
 
 // Why a document was not taken. Each is a different answer to the user, and
@@ -93,7 +97,7 @@ enum class SubscriptionApplyMode { Refresh, Creation };
 
 // The fields a refresh can change.
 enum class SubscriptionField {
-    Hostname, Address, Username, Password, Certificate, CustomSni, ClientRandom, AuthKey
+    Hostname, Address, Username, Password, Certificate, CustomSni, ClientRandom, AuthKey, TlsProfile
 };
 
 struct SubscriptionChange {

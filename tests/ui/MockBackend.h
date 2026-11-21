@@ -88,7 +88,12 @@ public:
     QVariantList geoPresets;
     int geoUpdateHours = 24;
     bool geoLimitExceeded = false;
-    Q_INVOKABLE bool addGeoList(const QString &, const QString &, bool, bool) { return true; }
+    QVariantList lastGeoAddition;
+    bool acceptGeoAddition = true;
+    Q_INVOKABLE bool addGeoList(const QString &name, const QString &source, bool ips, bool bypass) {
+        lastGeoAddition = {name, source, ips, bypass};
+        return acceptGeoAddition;
+    }
     Q_INVOKABLE void setGeoListEnabled(const QString &, bool) {}
     Q_INVOKABLE void setGeoListDirection(const QString &, bool) {}
     Q_INVOKABLE void removeGeoList(const QString &) {}
@@ -107,6 +112,18 @@ public:
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
     void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
+    QStringList subscriptionPaths;
+    QStringList fetchedSubscriptions;
+    QStringList canceledSubscriptions;
+    QStringList refreshedSubscriptions;
+    Q_INVOKABLE bool hasSubscription(const QString &path) const { return subscriptionPaths.contains(path); }
+    Q_INVOKABLE bool fetchSubscriptionForImport(const QString &token) { fetchedSubscriptions.append(token); return true; }
+    Q_INVOKABLE void cancelSubscriptionImport(const QString &token) { canceledSubscriptions.append(token); }
+    Q_INVOKABLE bool answerHostnameChange(const QString &, bool) { return true; }
+    Q_INVOKABLE void setConfigOpenInEditor(const QString &) { }
+    Q_INVOKABLE bool beginSubscriptionImport(const QString &) { return true; }
+    Q_INVOKABLE bool refreshSubscription(const QString &path) { refreshedSubscriptions.append(path); return true; }
+    Q_INVOKABLE bool detachSubscription(const QString &) { return true; }
     Q_INVOKABLE QString configPath(int index) const
     {
         return index >= 0 && index < m_configs.size()
@@ -233,6 +250,8 @@ public:
     Q_INVOKABLE bool importDeepLink(const QString &link);
     Q_INVOKABLE bool confirmDeepLinkImport(const QString &link, bool replaceExisting = false);
     Q_INVOKABLE bool importFile(const QString &path);
+    Q_INVOKABLE void importFiles(const QStringList &paths) { importedFiles = paths; }
+    QStringList importedFiles;
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
     int createConfigCalls = 0;
     QVariantMap lastCreateConfig;
@@ -356,6 +375,8 @@ public:
     void setExitingSilently(bool exiting) { m_exiting = exiting; }
 
 signals:
+    void subscriptionConsentRequired(const QString &token, const QVariantMap &details);
+    void subscriptionHostnameChanged(const QString &path, const QString &oldHostname, const QString &newHostname);
     void stateChanged();
     void tick();
     void configChanged();

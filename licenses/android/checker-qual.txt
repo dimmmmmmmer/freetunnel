@@ -1,9 +1,9 @@
 Checker Framework qualifiers (checker-qual)
-Version: 3.21.2
-Source: https://github.com/typetools/checker-framework/tree/checker-framework-3.21.2/checker-qual
+Version: 4.4.0
+Source: https://github.com/typetools/checker-framework/tree/checker-framework-4.4.0/checker-qual
 License: MIT
 
-[typetools/checker-framework@checker-framework-3.21.2: checker-qual/LICENSE.txt]
+[typetools/checker-framework@checker-framework-4.4.0: checker-qual/LICENSE.txt]
 Checker Framework qualifiers
 Copyright 2004-present by the Checker Framework developers
 

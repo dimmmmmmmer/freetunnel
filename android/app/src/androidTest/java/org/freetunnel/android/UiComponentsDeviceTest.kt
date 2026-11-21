@@ -545,7 +545,7 @@ class UiComponentsDeviceTest {
         onMain {
             val theme = Theme.DARK
             val ui = ui()
-            val link = measured(ui.link("Recommended for Russia", 12f, Ui.LinkKind.ACCENT, "domains:russia"), dp(400)) as TextView
+            val link = measured(ui.link("Choose…", 12f, Ui.LinkKind.ACCENT, "apps:choose"), dp(400)) as TextView
             val words = Math.ceil(link.paint.measureText(link.text.toString()).toDouble()).toInt()
             assertNear("A link is its words and a little around them", words + link.paddingLeft + link.paddingRight, link.measuredWidth, 2)
             val focused = intArrayOf(android.R.attr.state_focused)
@@ -659,7 +659,7 @@ class UiComponentsDeviceTest {
     @Test fun everyVectorDrawableLoads() {
         for ((id, size) in listOf(R.drawable.ic_connection to 24f, R.drawable.ic_network to 24f, R.drawable.ic_settings to 24f,
                 R.drawable.ic_log to 24f, R.drawable.ic_ping to 24f, R.drawable.ic_export to 24f, R.drawable.ic_edit to 24f,
-                R.drawable.ic_close to 24f, R.drawable.ic_logo to 100f, R.drawable.ic_add to 22f, R.drawable.ic_add_home to 14f,
+                R.drawable.ic_close to 24f, R.drawable.ic_logo to 100f, R.drawable.ic_logo_green to 100f, R.drawable.ic_add to 22f, R.drawable.ic_add_home to 14f,
                 // The characters the desktop draws as text (▾ ✓ ↓ ↑ ←): ▾ at the size its system font gives it, the others as Inter
                 // draws them at the sizes the desktop's QML sets them in (✓ 14 px, ↓ and ↑ 14, ← 20), each as wide as its ink.
                 R.drawable.ic_dropdown to 8f, R.drawable.ic_check to 9.6f, R.drawable.ic_arrow_down to 8.9f, R.drawable.ic_arrow_up to 8.9f,

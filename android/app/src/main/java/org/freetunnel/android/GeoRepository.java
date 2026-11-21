@@ -40,7 +40,6 @@ final class GeoRepository {
     static String key(GeoDefinition definition) {
         return definition.source + '\0' + definition.kind + ':' + definition.bypass;
     }
-    private final Context context;
     private final SharedPreferences prefs;
     private final GeoCache cache;
     private final GeoDownloader downloader;
@@ -53,7 +52,6 @@ final class GeoRepository {
     private final Set<String> queued = ConcurrentHashMap.newKeySet();
     private final Set<Listener> listeners = new CopyOnWriteArraySet<>();
     private GeoRepository(Context context) {
-        this.context = context;
         prefs = context.getSharedPreferences("freetunnel", Context.MODE_PRIVATE);
         cache = new GeoCache(directory(context));
         downloader = new GeoDownloader(directory(context));
@@ -66,7 +64,10 @@ final class GeoRepository {
         return state == null ? new State(null, false, "") : state;
     }
     void refreshEnabled() {
-        SplitProfiles profiles = SplitStore.load(new SplitPrefs(prefs), RussiaList.seed(context));
+        // Called by the VPN service and the periodic worker too. Neither may
+        // create first-launch defaults or change routing as a side effect.
+        SplitProfiles profiles = SplitStore.readSaved(new SplitPrefs(prefs));
+        if (profiles == null) return;
         for (String profile : profiles.names())
             for (GeoDefinition definition : profiles.geoLists(profile))
                 if (definition.enabled) refresh(definition, false);

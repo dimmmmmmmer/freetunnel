@@ -15,10 +15,11 @@
 
 ## Настоящий туннель
 
-Изолированный официальный TrustTunnel endpoint 1.1.0 запущен на macOS,
-только на `127.0.0.1:29443`, с временными учётными данными и сертификатом.
-Архив `trusttunnel-v1.1.0-macos-universal.tar.gz` проверен по digest релиза:
-`126a5688e922ce8f83d4de2d8a2659b3aab97820184d30f2edbecc0ec4a32ae5`.
+Проверка 18 октября 2026 года использовала официальный TrustTunnel endpoint
+1.1.0. Текущий пин — 1.3.1. Для повторения скачайте
+`trusttunnel-v1.3.1-macos-universal.tar.gz` и проверьте digest релиза
+`d99f7ec8f363835469e658c2120e9b17190928bb525093504592896c1756f652`.
+Endpoint слушает только `127.0.0.1:29443`, с временными учётными данными и сертификатом.
 Клиентский адаптер при этом остаётся 1.1.7: номера релизов сервера и клиента
 независимы.
 
@@ -47,7 +48,7 @@ Android shell TCP → Android TUN → TrustTunnel TLS/HTTP2
 
 Для повторения на отдельном эмуляторе:
 
-1. Скачайте endpoint из [официального релиза](https://github.com/TrustTunnel/TrustTunnel/releases/tag/v1.1.0),
+1. Скачайте endpoint из [официального релиза](https://github.com/TrustTunnel/TrustTunnel/releases/tag/v1.3.1),
    проверьте digest и создайте временный TLS-сертификат и credentials.
 2. Настройте HTTP/2 listener на `127.0.0.1:29443` и
    `[forward_protocol.socks5]` с `address = "127.0.0.1:29880"`,

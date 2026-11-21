@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "ConfigToml.h"
 #include "ConfigTomlSyntax.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 #include <QRegularExpression>
 #include <QStringList>
@@ -9,6 +10,23 @@
 
 namespace freetunnel {
 using namespace toml_syntax;
+
+// Empty and chrome are the core's default and are not written. "default" is stored
+// and written as boringssl, the name the stable core uses for that profile.
+static QString storedTlsProfile(const QString &profile)
+{
+    if (profile == QLatin1String("default"))
+        return QStringLiteral("boringssl");
+    return profile;
+}
+
+static QString tlsProfileForConfig(const QString &profile)
+{
+    const QString stored = storedTlsProfile(profile);
+    if (stored.isEmpty() || stored == QLatin1String("chrome"))
+        return {};
+    return stored;
+}
 
 // Escape a value for a multi-line basic string (""" … """). Same job as
 // tomlEsc(), minus the newline stripping a PEM block needs: escaping every quote
@@ -174,6 +192,9 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     // Only when there is one: a stored config never has it (see the field).
     if (!c.clientRandomAuthKey.isEmpty())
         t += QStringLiteral("client_random_auth_key = \"%1\"\n").arg(tomlEsc(c.clientRandomAuthKey));
+    const QString tlsProfile = tlsProfileForConfig(c.tlsProfile);
+    if (!tlsProfile.isEmpty())
+        t += QStringLiteral("tls_profile = \"%1\"\n").arg(tomlEsc(tlsProfile));
     t += QStringLiteral("custom_sni = \"%1\"\n").arg(tomlEsc(c.customSni));
     t += QStringLiteral("has_ipv6 = %1\n").arg(c.allowIpv6 ? "true" : "false");
     t += QStringLiteral("skip_verification = %1\n").arg(c.skipVerification ? "true" : "false");
@@ -487,6 +508,7 @@ ConfigToml parseConfigToml(const QString &toml) {
     c.customSni = readString(endpoint, "custom_sni");
     c.clientRandom = readClientRandom(endpoint);
     c.clientRandomAuthKey = readString(endpoint, "client_random_auth_key").trimmed();
+    c.tlsProfile = storedTlsProfile(readString(endpoint, "tls_profile"));
     c.allowIpv6 = readBool(endpoint, "has_ipv6", true);
     c.skipVerification = readBool(endpoint, "skip_verification", false);
     c.antiDpi = readBool(endpoint, "anti_dpi", false);

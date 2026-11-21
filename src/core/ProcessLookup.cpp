@@ -155,11 +155,23 @@ qint64 extraWalkCostForTests()
 // ---------------------------------------------------------------------------
 
 void SocketOwnerTable::record(int family, int proto, std::uint16_t port, const SocketAddress &address,
-                              qint64 pid, bool v6only)
+                              qint64 pid, bool v6only, std::uint16_t remotePort,
+                              const SocketAddress &remoteAddress)
 {
     const std::uint32_t endpoint = ownerKey(family, proto, port);
     keepFirstOwner(&m_sockets, Key{endpoint, address}, pid);
     keepFirstOwner(&m_ports, endpoint, pid);
+    // Distinct destinations can share a local port. Keep those owners apart;
+    // if the *same* tuple has several owners, no enumeration order is safe.
+    const auto recordExact = [pid](auto &table, const auto &key) {
+        auto it = table.find(key);
+        if (it == table.end()) table.insert(key, pid);
+        else if (it.value() != pid) it.value() = kAmbiguousOwner;
+    };
+    if (remotePort != 0)
+        recordExact(m_connections, ConnectionKey{{endpoint, address}, remoteAddress, remotePort});
+    else
+        recordExact(m_unconnected, Key{endpoint, address});
     if (v6only && family == AF_INET6 && address == SocketAddress{})
         m_ipv6OnlyWildcards.insert(endpoint);
 }
@@ -167,6 +179,8 @@ void SocketOwnerTable::record(int family, int proto, std::uint16_t port, const S
 void SocketOwnerTable::clear()
 {
     m_sockets.clear();
+    m_connections.clear();
+    m_unconnected.clear();
     m_ports.clear();
     m_ipv6OnlyWildcards.clear();
 }
@@ -174,10 +188,10 @@ void SocketOwnerTable::clear()
 int SocketOwnerTable::distinctPids() const
 {
     QSet<qint64> pids;
-    for (const qint64 pid : m_sockets) {
-        if (pid != kUnattributed)
-            pids.insert(pid);
-    }
+    for (const qint64 pid : m_connections)
+        if (pid >= 0) pids.insert(pid);
+    for (const qint64 pid : m_unconnected)
+        if (pid >= 0) pids.insert(pid);
     return static_cast<int>(pids.size());
 }
 
@@ -194,6 +208,20 @@ SocketOwnerTable::Match SocketOwnerTable::find(const LocalFlow &flow) const
         return {};
     }
 
+    const auto candidates = localCandidates(flow, address);
+    if (flow.remotePort != 0 && !QHostAddress(flow.remoteIp).isNull())
+        return findConnection(candidates, flow);
+    for (const Key &candidate : candidates) {
+        const auto it = m_sockets.constFind(candidate);
+        if (it != m_sockets.constEnd())
+            return {true, it.value(), true};
+    }
+    return {};
+}
+
+QList<SocketOwnerTable::Key> SocketOwnerTable::localCandidates(
+        const LocalFlow &flow, const QHostAddress &address) const
+{
     // The address in both spellings it can be recorded under.
     bool isV4 = false;
     const quint32 v4 = address.toIPv4Address(&isV4); // also true for ::ffff:a.b.c.d
@@ -218,10 +246,27 @@ SocketOwnerTable::Match SocketOwnerTable::find(const LocalFlow &flow) const
         candidates = {{ownerKey(AF_INET6, flow.proto, flow.port), v6},
                       {ownerKey(AF_INET6, flow.proto, flow.port), any}};
     }
+    return candidates;
+}
+
+SocketOwnerTable::Match SocketOwnerTable::findConnection(
+        const QList<Key> &candidates, const LocalFlow &flow) const
+{
+    const QHostAddress remote(flow.remoteIp);
+    bool remoteV4 = false;
+    const auto v4Remote = remote.toIPv4Address(&remoteV4);
+    SocketAddress v6Remote{};
+    const auto raw = remote.toIPv6Address();
+    std::copy_n(raw.c, 16, v6Remote.begin());
     for (const Key &candidate : candidates) {
-        const auto it = m_sockets.constFind(candidate);
-        if (it != m_sockets.constEnd())
-            return {true, it.value(), true};
+        const bool four = candidate.endpoint == ownerKey(AF_INET, flow.proto, flow.port);
+        const auto peer = remoteV4 ? (four ? ipv4Address(v4Remote) : v4MappedAddress(v4Remote)) : v6Remote;
+        const auto it = m_connections.constFind({candidate, peer, flow.remotePort});
+        if (it != m_connections.constEnd()) return {true, it.value(), true};
+    }
+    for (const Key &candidate : candidates) {
+        const auto it = m_unconnected.constFind(candidate);
+        if (it != m_unconnected.constEnd()) return {true, it.value(), true};
     }
     return {};
 }
@@ -279,6 +324,11 @@ QList<SocketOwner> parseProcNetTable(const QString &contents, int proto, int fam
         SocketOwner owner;
         if (!parseProcNetAddress(local[0], family, &owner.address))
             continue;
+        const auto remote = f[2].split(QLatin1Char(':'), Qt::SkipEmptyParts);
+        if (remote.size() != 2 || !parseProcNetAddress(remote[0], family, &owner.remoteAddress)) continue;
+        const auto remotePort = remote[1].toUInt(&ok, 16);
+        if (!ok || remotePort > 0xFFFF) continue;
+        owner.remotePort = static_cast<std::uint16_t>(remotePort);
         owner.port = static_cast<std::uint16_t>(port);
         owner.proto = proto;
         owner.family = family;
@@ -418,7 +468,7 @@ void ProcessLookup::refreshIfStale()
     m_report = fresh;
     ++m_walks;
     walk(now);
-    m_credit -= m_report.elapsedUs;
+    m_credit = std::max(-kLookCreditCapUs, m_credit - m_report.elapsedUs);
 }
 
 // How long a table that contains the flow is trusted without asking again.
@@ -502,14 +552,16 @@ void ProcessLookup::accrueLookCredit(std::chrono::steady_clock::time_point now)
 // third time would find the same nothing. Otherwise the table simply predates
 // the question and is worth rebuilding.
 //
-// That leaves cost as the only reason to decline, which is what the credit is.
+// A healthy scan must not be skipped because of its cost: that would make
+// machine load change routing policy. Credit only limits retries after a failed
+// system query; cached hits still share a scan.
 bool ProcessLookup::shouldLookAgain(std::chrono::steady_clock::time_point asked) const
 {
     if (!m_everBuilt)
         return false; // the last walk did not complete; refreshIfStale() retries it
     if (m_builtAt >= asked)
         return false;
-    return m_credit >= std::max<qint64>(m_report.elapsedUs, 0);
+    return true;
 }
 
 // Whether a row the table found is the answer, or only looks like one.
@@ -563,6 +615,12 @@ AppIdentity ProcessLookup::resolve(const LocalFlow &flow, bool *lookWasSkipped)
             *lookWasSkipped = true;
         }
     }
+    if (owner.found && owner.pid == kAmbiguousOwner) {
+        if (lookWasSkipped != nullptr) *lookWasSkipped = true;
+        return {};
+    }
+    if ((!owner.found || owner.pid == kUnattributed) && !m_everBuilt && lookWasSkipped != nullptr)
+        *lookWasSkipped = true;
     if (!owner.found || owner.pid == kUnattributed)
         return {};
     const qint64 pid = owner.pid;

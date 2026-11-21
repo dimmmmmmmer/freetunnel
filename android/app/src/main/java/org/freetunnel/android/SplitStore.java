@@ -21,7 +21,7 @@ import java.util.function.Supplier;
  * whether split tunnelling was on ("split_enabled") and which way it went ("through"). With no "split_profiles"
  * yet, Default is made of those lists, sorted, and is the profile being edited.</li>
  * <li><b>A new installation</b>: no configs, and none of those settings. Split tunnelling is on and Default holds the
- * recommended list for Russia, as the desktop's does. Only a caller that gives the list asks for this; the service,
+ * two Russian geo lists, routed outside the VPN, as the desktop's does. Only a caller that gives the list asks for this; the service,
  * which has configs by the time it runs, does not, and an empty preferences file read by it is an empty one.</li>
  * <li><b>The old lists stay</b>, written together with every save as a copy of the lists of the profile the config that
  * is selected uses ({@link SplitProfiles#mirrored}), so that going back to 1.0.0 finds a working set.</li>
@@ -57,13 +57,23 @@ final class SplitStore {
 
     /**
      * The profiles as saved. If none are yet, they are made and saved now (see the class comment); with
-     * {@code recommended} null the preferences never are those of a new installation.
+     * {@code defaults} null the preferences never are those of a new installation.
      */
-    static SplitProfiles load(Backing backing, Supplier<List<String>> recommended) {
-        synchronized (LOCK) { return loadLocked(backing, recommended); }
+    static SplitProfiles load(Backing backing, Supplier<List<GeoDefinition>> defaults) {
+        synchronized (LOCK) { return loadLocked(backing, defaults); }
     }
 
-    private static SplitProfiles loadLocked(Backing backing, Supplier<List<String>> recommended) {
+    /** Background work reads saved choices only; initialization and repair belong to load(). */
+    static SplitProfiles readSaved(Backing backing) {
+        synchronized (LOCK) {
+            String saved = backing.getString(KEY);
+            if (saved == null) return null;
+            try { return SplitProfiles.fromJson(saved); }
+            catch (JSONException | RuntimeException unreadable) { return null; }
+        }
+    }
+
+    private static SplitProfiles loadLocked(Backing backing, Supplier<List<GeoDefinition>> defaults) {
         String saved = backing.getString(KEY);
         if (saved != null) {
             try { return SplitProfiles.fromJson(saved); }
@@ -77,8 +87,9 @@ final class SplitStore {
         }
         Map<String, Object> extra = new HashMap<>();
         SplitProfiles made;
-        if (recommended != null && isNewInstallation(backing)) {
-            made = SplitProfiles.seeded(recommended.get());
+        if (defaults != null && isNewInstallation(backing)) {
+            made = SplitProfiles.empty();
+            for (GeoDefinition definition : defaults.get()) made.putGeoList(SplitProfiles.DEFAULT, definition);
             extra.put("split_enabled", Boolean.TRUE);
         } else {
             made = SplitProfiles.migrated(setOf(backing, OLD_DOMAINS), setOf(backing, OLD_APPS));
@@ -104,9 +115,9 @@ final class SplitStore {
      * Runs {@code change} on the profiles as saved, and saves what it leaves. The old lists go with them. True if
      * nothing needed saving or it was saved; false if the preferences refused it.
      */
-    static boolean edit(Backing backing, Supplier<List<String>> recommended, Consumer<SplitProfiles> change) {
+    static boolean edit(Backing backing, Supplier<List<GeoDefinition>> defaults, Consumer<SplitProfiles> change) {
         synchronized (LOCK) {
-            SplitProfiles profiles = loadLocked(backing, recommended);
+            SplitProfiles profiles = loadLocked(backing, defaults);
             String before = profiles.toJson();
             change.accept(profiles);
             if (before.equals(profiles.toJson())) return true;
@@ -144,9 +155,9 @@ final class SplitStore {
      * set, so that the Split page says they went. The applications are as listed: which of them are installed is
      * for the one that knows the device.
      */
-    static Rules rules(Backing backing, Supplier<List<String>> recommended, String profile) {
+    static Rules rules(Backing backing, Supplier<List<GeoDefinition>> defaults, String profile) {
         synchronized (LOCK) {
-            SplitProfiles profiles = loadLocked(backing, recommended);
+            SplitProfiles profiles = loadLocked(backing, defaults);
             String name = profiles.effective(profile);
             if (profiles.dropUnusableDomains(name) > 0) {
                 Map<String, Object> flag = new HashMap<>();

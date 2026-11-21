@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "core/DeepLink.h"
 #include "core/ConfigToml.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 #include <QCoreApplication>
 
@@ -301,6 +302,21 @@ bool applyDeepLinkAuthKeyTlv(const QByteArray &value, DeepLinkConfig &cfg, QStri
     return false;
 }
 
+// Tag 0x10 is one byte, 0x00..0x06, the same order as the core's VpnTlsProfile.
+// Anything else is damage: the core would refuse the config, so the link is refused.
+bool applyDeepLinkTlsProfileTlv(const QByteArray &value, DeepLinkConfig &cfg, QString *error)
+{
+    if (value.size() == 1) {
+        if (const auto name = tlsProfileFromByte(static_cast<unsigned char>(value.at(0)))) {
+            cfg.tlsProfile = QString::fromUtf8(name->data(), static_cast<int>(name->size()));
+            return true;
+        }
+    }
+    if (error)
+        *error = QCoreApplication::translate("DeepLink", "malformed tls_profile value");
+    return false;
+}
+
 bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
                       DeepLinkFieldFlags &flags, QString *error)
 {
@@ -323,6 +339,8 @@ bool applyDeepLinkTlv(quint64 tag, const QByteArray &value, DeepLinkConfig &cfg,
         return applyDeepLinkSubscriptionTlv(value, cfg, error);
     if (tag == 0x0F)
         return applyDeepLinkAuthKeyTlv(value, cfg, error);
+    if (tag == 0x10)
+        return applyDeepLinkTlsProfileTlv(value, cfg, error);
     return true;
 }
 
@@ -487,6 +505,11 @@ void writeOptionalDeepLinkMetaTlvs(QByteArray &p, const DeepLinkConfig &cfg)
         writeTlv(p, 0x0C, cfg.name.toUtf8());
     if (!cfg.dnsUpstreams.isEmpty())
         writeTlv(p, 0x0D, encodeStringList(cfg.dnsUpstreams));
+    const std::string profile = cfg.tlsProfile.toStdString();
+    if (tlsProfileIsExplicit(profile)) {
+        if (const auto byte = tlsProfileByte(profile))
+            writeTlv(p, 0x10, QByteArray(1, static_cast<char>(*byte)));
+    }
 }
 
 void writeOptionalDeepLinkTlvs(QByteArray &p, const DeepLinkConfig &cfg)
@@ -592,6 +615,12 @@ static QString endpointTomlSection(const DeepLinkConfig &cfg)
     t += QStringLiteral("upstream_protocol = \"%1\"\n")
                  .arg(cfg.upstreamProtocol == UpstreamProtocol::Http3 ? "http3" : "http2");
     t += QStringLiteral("anti_dpi = %1\n").arg(cfg.antiDpi ? "true" : "false");
+    const std::string profile = cfg.tlsProfile.toStdString();
+    if (tlsProfileIsExplicit(profile)) {
+        const auto name = canonicalTlsProfile(profile);
+        t += QStringLiteral("tls_profile = \"%1\"\n")
+                     .arg(tomlEscape(QString::fromUtf8(name.data(), static_cast<int>(name.size()))));
+    }
     const QString pem = derToPem(cfg.certificate);
     if (!pem.isEmpty())
         t += QStringLiteral("certificate = \"\"\"\n%1\"\"\"\n").arg(pem);

@@ -2,7 +2,7 @@ package org.freetunnel.android;
 
 /**
  * What Home shows for the state of the VPN, as the desktop's HomePage does for its
- * backend: how bright the logo is, whether it pulses, and what the line under it says.
+ * backend: how bright the logo is, whether it is green, whether it pulses, and what the line under it says.
  * The states are FreeTunnelVpnService's: 0 off, 1 connecting, 2 connected, 3 to 5 the core
  * recovering, 6 traffic blocked by the kill switch while it reconnects. {@code stopping}
  * is the time between the user's Disconnect and the service reporting 0, which the
@@ -33,6 +33,11 @@ final class HomeState {
     static float alpha(int vpnState, boolean stopping) {
         if (vpnState == 2 && !stopping) return ON;
         return sessionActive(vpnState, stopping) ? BUSY : OFF;
+    }
+
+    /** Connected and not on its way down: the logo is the green mark, as the desktop's Home and tray icon are. */
+    static boolean green(int vpnState, boolean stopping) {
+        return vpnState == 2 && !stopping;
     }
 
     /** The desktop pulses the logo while it connects (reconnecting too) or disconnects. */

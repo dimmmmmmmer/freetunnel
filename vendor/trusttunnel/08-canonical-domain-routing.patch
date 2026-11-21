@@ -1,0 +1,262 @@
+diff --git a/core/src/domain_filter.cpp b/core/src/domain_filter.cpp
+index 2181ba4..9545864 100644
+--- a/core/src/domain_filter.cpp
++++ b/core/src/domain_filter.cpp
+@@ -12,6 +12,19 @@ namespace ag {
+ static constexpr std::string_view WWW_PREFIX = "www.";
+ static constexpr std::string_view WILDCARD_PREFIX = "*.";
+ 
++// DNS names are ASCII case-insensitive, including randomized query casing.
++// Normalize only the routing key: never rewrite the DNS packet or log label.
++static std::string canonical_domain(std::string_view domain) {
++    if (domain.ends_with('.') && !domain.ends_with("..")) {
++        domain.remove_suffix(1);
++    }
++    std::string result(domain);
++    std::transform(result.begin(), result.end(), result.begin(), [](char c) {
++        return c >= 'A' && c <= 'Z' ? char(c + ('a' - 'A')) : c;
++    });
++    return result;
++}
++
+ enum DomainFilter::MatchFlags : uint32_t {
+     DFMM_EXACT,      // match the domain itself and www. + the domain
+     DFMM_SUBDOMAINS, // match only subdomains and www. + the domain, but not the domain itself
+@@ -77,6 +90,8 @@ DomainFilter::ParseResult DomainFilter::parse_entry(std::string_view entry) {
+         last_ch = ch;
+     }
+ 
++    const std::string canonical = canonical_domain(entry);
++    entry = canonical;
+     MatchFlagsSet match_flags;
+ 
+     if (starts_with(entry, WILDCARD_PREFIX)) {
+@@ -179,6 +194,8 @@ DomainFilterMatchStatus DomainFilter::policy_action(size_t tier) const {
+ }
+ 
+ DomainFilterMatchStatus DomainFilter::match_domain(std::string_view domain) const {
++    const std::string canonical = canonical_domain(domain);
++    domain = canonical;
+     for (size_t tier = 0; tier < m_policy.size(); ++tier) {
+         if (m_policy[tier] && m_policy[tier]->match_domain(domain) == DFMS_EXCLUSION) {
+             return policy_action(tier);
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index 01c8e6e..d77055c 100644
+--- a/core/src/tunnel.cpp
++++ b/core/src/tunnel.cpp
+@@ -1055,6 +1055,14 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
+ #endif
+     conn->uid = request_result.uid;
+ 
++    // Plain DNS is routed per queried domain, not per resolver/application socket.
++    // A forced app route must not send an excluded name to the VPN (or leak an
++    // included name directly). Explicit rejection still blocks the connection.
++    if (conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)
++            && (request_result.action == VPN_CA_FORCE_BYPASS || request_result.action == VPN_CA_FORCE_REDIRECT)) {
++        request_result.action = VPN_CA_DEFAULT;
++    }
++
+     const DomainFilter *filter = &this->vpn->domain_filter;
+     if ((request_result.action.has_value() && request_result.action.value() != VPN_CA_DEFAULT)
+             || conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
+diff --git a/core/test/test_dns_routing.cpp b/core/test/test_dns_routing.cpp
+index faa4777..5443798 100644
+--- a/core/test/test_dns_routing.cpp
++++ b/core/test/test_dns_routing.cpp
+@@ -594,19 +594,26 @@ class DnsRoutingCustomAction : public CustomDnsRouting {};
+ 
+ TEST_P(DnsRoutingCustomAction, CheckCreatedUpstreams) {
+     auto [mode, action, exclusion, domain] = GetParam();
+-
+     vpn.update_exclusions(mode, exclusion);
+-
+-    ASSERT_NO_FATAL_FAILURE(open_connection(action, action));
++    ASSERT_NO_FATAL_FAILURE(open_connection(action, VPN_CA_DEFAULT));
+     ASSERT_NO_FATAL_FAILURE(raise_dns_request(domain));
+ 
+-    if (action == VPN_CA_FORCE_BYPASS) {
+-        ASSERT_EQ(bypass_upstream->connections.size(), 1);
+-        ASSERT_EQ(redirect_upstream->connections.size(), 0);
+-    } else if (action == VPN_CA_FORCE_REDIRECT) {
+-        ASSERT_EQ(redirect_upstream->connections.size(), 1);
+-        ASSERT_EQ(bypass_upstream->connections.size(), 0);
++    const bool direct = (mode == VPN_MODE_GENERAL) == (exclusion == domain);
++    if (direct) {
++        mock_system_dns_server->expect({
++                .request = MockDnsServer::Request{.tcp = false, .qtype = 1, .qname = AG_FMT("{}.", domain)},
++        });
++        vpn_event_loop_exit(ev_loop.get(), DEFAULT_TIMEOUT);
++        vpn_event_loop_run(ev_loop.get());
++        ASSERT_EQ(1, system_complete);
++        ASSERT_EQ(0, redirect_upstream->connections.size());
++    } else {
++        run_event_loop_once();
++        ASSERT_EQ(1, redirect_upstream->connections.size());
++        ASSERT_EQ(0, system_complete);
+     }
++    ASSERT_EQ(0, system_unexpected);
++    ASSERT_EQ(0, bypass_upstream->connections.size());
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(CustomAction, DnsRoutingCustomAction,
+@@ -1276,3 +1283,103 @@ TEST_F(DnsRoutingAllProxies, RemoveSvcParamsEchConfig) {
+     str.reset(ldns_rr2str(ldns_rr_list_rr(ldns_pkt_answer(pkt.get()), 0)));
+     ASSERT_STREQ("1.tls-ech.dev.\t60\tIN\tHTTPS\t1 .\n", str.get());
+ }
++
++// Route decoded DNS names, not their wire casing. The wire query is preserved.
++using CanonicalDnsSample = std::tuple<VpnMode, const char *, const char *, bool>;
++class FreeTunnelCanonicalDns : public DnsRoutingBase, public testing::WithParamInterface<CanonicalDnsSample> {};
++
++TEST_P(FreeTunnelCanonicalDns, KeepsTheSelectedRoute) {
++    const auto [mode, rules, domain, through_vpn] = GetParam();
++    vpn.update_exclusions(mode, rules);
++    ASSERT_NO_FATAL_FAILURE(open_connection());
++    ASSERT_NO_FATAL_FAILURE(raise_dns_request(domain));
++    if (through_vpn) {
++        run_event_loop_once();
++        ASSERT_EQ(1, redirect_upstream->connections.size());
++        ASSERT_EQ(0, system_complete);
++    } else {
++        mock_system_dns_server->expect({
++                .request = MockDnsServer::Request{.tcp = false, .qtype = 1, .qname = AG_FMT("{}.", domain)},
++        });
++        vpn_event_loop_exit(ev_loop.get(), DEFAULT_TIMEOUT);
++        vpn_event_loop_run(ev_loop.get());
++        ASSERT_EQ(1, system_complete);
++        ASSERT_EQ(0, redirect_upstream->connections.size());
++    }
++    ASSERT_EQ(0, system_unexpected);
++    ASSERT_EQ(0, bypass_upstream->connections.size());
++}
++
++INSTANTIATE_TEST_SUITE_P(FreeTunnel, FreeTunnelCanonicalDns,
++        testing::Values(CanonicalDnsSample{VPN_MODE_GENERAL, "bypass.example", "ByPaSs.ExAmPlE", false},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "selected.example", "SeLeCtEd.ExAmPlE", true},
++                CanonicalDnsSample{VPN_MODE_GENERAL, "ByPaSs.Example.", "bypass.example", false},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "Selected.Example.", "selected.example", true},
++                CanonicalDnsSample{VPN_MODE_GENERAL, "*.example", "SuB.ExAmPlE", false},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "*.example", "SuB.ExAmPlE", true},
++                CanonicalDnsSample{VPN_MODE_GENERAL, "@1:direct.example @2:*.example", "DiReCt.ExAmPlE", false},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "@1:direct.example @2:*.example", "DiReCt.ExAmPlE", false},
++                CanonicalDnsSample{VPN_MODE_GENERAL, "@0:vpn.example @3:*.example", "VpN.ExAmPlE", true},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "@0:vpn.example @3:*.example", "VpN.ExAmPlE", true},
++                CanonicalDnsSample{VPN_MODE_GENERAL, "bypass.example", "OtHeR.ExAmPlE", true},
++                CanonicalDnsSample{VPN_MODE_SELECTIVE, "selected.example", "OtHeR.ExAmPlE", false}));
++
++TEST_F(DnsRoutingBase, FreeTunnelDnsRejectionIsNotOverridden) {
++    ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
++    const auto action = vpn.tunnel->finalize_connect_action({.id = client_id, .action = VPN_CA_REJECT});
++    ASSERT_EQ(action, VPN_CA_REJECT);
++    vpn.tunnel->complete_connect_request(client_id, action);
++    run_event_loop_once();
++    ASSERT_EQ(client_listener->connections.at(client_id).result, CCR_REJECT);
++    ASSERT_FALSE(client_listener->connections.at(client_id).read_enabled);
++    ASSERT_EQ(0, redirect_upstream->connections.size());
++    ASSERT_EQ(0, bypass_upstream->connections.size());
++    ASSERT_EQ(0, system_complete);
++}
++
++TEST_F(DnsRoutingBase, FreeTunnelEncryptedDnsAndOtherTrafficKeepApplicationRoutes) {
++    for (uint16_t port : {uint16_t{443}, uint16_t{853}, uint16_t{22}}) {
++        for (int proto : {IPPROTO_TCP, IPPROTO_UDP}) {
++            for (auto forced : {VPN_CA_FORCE_BYPASS, VPN_CA_FORCE_REDIRECT, VPN_CA_REJECT}) {
++                const uint64_t id = vpn.listener_conn_id_generator.get();
++                const TunnelAddress destination = SocketAddress("2.2.2.2", port);
++                ClientConnectRequest event = {id, proto, &src, &destination};
++                vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
++                EXPECT_EQ(vpn.tunnel->finalize_connect_action({.id = id, .action = forced}), forced);
++            }
++        }
++    }
++}
++
++TEST_F(DnsRoutingBase, FreeTunnelSharedResolverRoutesEachQuery) {
++    vpn.update_exclusions(VPN_MODE_GENERAL, "*.bypass.example");
++    ASSERT_NO_FATAL_FAILURE(open_connection());
++    for (const char *name : {"one.bypass.example", "TWO.ByPaSs.ExAmPlE"}) {
++        mock_system_dns_server->expect({
++                .request = MockDnsServer::Request{.tcp = false, .qtype = 1, .qname = AG_FMT("{}.", name)},
++        });
++        ASSERT_NO_FATAL_FAILURE(raise_dns_request(name));
++        vpn_event_loop_exit(ev_loop.get(), DEFAULT_TIMEOUT);
++        vpn_event_loop_run(ev_loop.get());
++        ASSERT_EQ(0, redirect_upstream->connections.size());
++    }
++    ASSERT_EQ(2, system_complete);
++    ASSERT_EQ(0, system_unexpected);
++    // The same socket's next query needs the VPN; it must not inherit bypass.
++    ASSERT_NO_FATAL_FAILURE(raise_dns_request("vpn.example"));
++    run_event_loop_once();
++    ASSERT_EQ(1, redirect_upstream->connections.size());
++    ASSERT_EQ(0, bypass_upstream->connections.size());
++}
++
++TEST_F(DnsRoutingBase, FreeTunnelTcpAndUdpDnsBothUseDomainPolicy) {
++    for (int proto : {IPPROTO_TCP, IPPROTO_UDP}) {
++        for (auto requested : {VPN_CA_DEFAULT, VPN_CA_FORCE_BYPASS, VPN_CA_FORCE_REDIRECT, VPN_CA_REJECT}) {
++            const uint64_t id = vpn.listener_conn_id_generator.get();
++            ClientConnectRequest event = {id, proto, &src, &dst};
++            vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
++            const auto expected = requested == VPN_CA_REJECT ? VPN_CA_REJECT : VPN_CA_DEFAULT;
++            EXPECT_EQ(vpn.tunnel->finalize_connect_action({.id = id, .action = requested}), expected);
++        }
++    }
++}
+diff --git a/core/test/test_domain_filter.cpp b/core/test/test_domain_filter.cpp
+index e3b6b79..46eb3bd 100644
+--- a/core/test/test_domain_filter.cpp
++++ b/core/test/test_domain_filter.cpp
+@@ -42,6 +42,7 @@ TEST_P(DomainMatch, Test) {
+ }
+ 
+ static const MatchTestParam DOMAIN_MATCH_TEST_SAMPLES[] = {
++        {VPN_MODE_GENERAL, "example.com", "example.com."},
+         {VPN_MODE_GENERAL, "example.com", "example.com"},
+         {VPN_MODE_GENERAL, "example.com    example.org", "example.com"},
+         {VPN_MODE_GENERAL, "example.com example.org", "example.org"},
+@@ -72,7 +73,6 @@ static const MatchTestParam DOMAIN_NOMATCH_TEST_SAMPLES[] = {
+         {VPN_MODE_GENERAL, "example.com", "sub.sub.example.com"},
+         {VPN_MODE_GENERAL, "example.com", "www.example.org"},
+         {VPN_MODE_GENERAL, "example.com", "sub.example.org"},
+-        {VPN_MODE_GENERAL, "example.com", "example.com."},
+         {VPN_MODE_GENERAL, "example.com", "*.example.com"},
+ };
+ INSTANTIATE_TEST_SUITE_P(Simple, DomainNoMatch, testing::ValuesIn(DOMAIN_NOMATCH_TEST_SAMPLES));
+@@ -339,3 +339,36 @@ TEST(MatchTest, FreeTunnelLegacyIpRulesKeepKnownHostnames) {
+         EXPECT_EQ(*match.domain, "service.example");
+     }
+ }
++
++TEST(MatchTest, FreeTunnelCanonicalNames) {
++    for (VpnMode mode : {VPN_MODE_GENERAL, VPN_MODE_SELECTIVE}) {
++        DomainFilter filter;
++        ASSERT_TRUE(filter.update_exclusions(mode, "WWW.ExAmPlE.CoM. *.SuB.Example.NET."));
++        for (const char *name :
++                {"example.com", "EXAMPLE.COM", "WwW.Example.Com.", "a.sub.example.net", "A.SuB.ExAmPlE.NeT."}) {
++            EXPECT_EQ(filter.match_domain(name), DFMS_EXCLUSION) << name;
++        }
++        for (const char *name : {"otherexample.com", "example.com.evil", "sub.example.net", "example.com.."}) {
++            EXPECT_EQ(filter.match_domain(name), DFMS_DEFAULT) << name;
++        }
++        SockAddrTag tag{SocketAddress("192.0.2.8", 443)};
++        filter.add_resolved_tag(tag, "EXAMPLE.COM");
++        EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
++    }
++}
++
++TEST(MatchTest, FreeTunnelCanonicalNamesKeepPolicyPriority) {
++    for (VpnMode mode : {VPN_MODE_GENERAL, VPN_MODE_SELECTIVE}) {
++        DomainFilter filter;
++        ASSERT_TRUE(filter.update_exclusions(
++                mode, "@0:VPN.Example.COM. @1:DIRECT.Example.NET. @2:*.example.net @3:*.example.com"));
++        const auto tunnel = mode == VPN_MODE_GENERAL ? DFMS_DEFAULT : DFMS_EXCLUSION;
++        const auto direct = mode == VPN_MODE_GENERAL ? DFMS_EXCLUSION : DFMS_DEFAULT;
++        EXPECT_EQ(filter.match_domain("VpN.ExAmPlE.CoM"), tunnel);
++        EXPECT_EQ(filter.match_domain("DiReCt.ExAmPlE.NeT."), direct);
++        EXPECT_EQ(filter.match_domain("OtHeR.ExAmPlE.CoM"), direct);
++        EXPECT_EQ(filter.match_domain("OtHeR.ExAmPlE.NeT"), tunnel);
++        EXPECT_EQ(filter.match_domain("DiReCt.ExAmPlE.NeT.."), DFMS_DEFAULT);
++        EXPECT_EQ(filter.match_domain("VpN.ExAmPlE.CoM.."), DFMS_DEFAULT);
++    }
++}

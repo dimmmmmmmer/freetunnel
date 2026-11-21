@@ -178,10 +178,10 @@ fresh
 APKSIGNER_UNDER_TEST="$TMP/bin/no-such-apksigner" check "$TMP/f/app.apk"
 expect "no apksigner" 1 "::error title=No apksigner::"
 
-# Without APKSIGNER, Build Tools 35.0.0's under ANDROID_HOME.
+# Without APKSIGNER, Build Tools 36.0.0's under ANDROID_HOME.
 fresh
-mkdir -p "$TMP/sdk/build-tools/35.0.0"
-cp "$TMP/bin/apksigner" "$TMP/sdk/build-tools/35.0.0/apksigner"
+mkdir -p "$TMP/sdk/build-tools/36.0.0"
+cp "$TMP/bin/apksigner" "$TMP/sdk/build-tools/36.0.0/apksigner"
 rc=0
 out="$(env -u APKSIGNER FIXTURES="$TMP/f" ANDROID_HOME="$TMP/sdk" \
        bash "$CHECK" "$TMP/f/pin" "$TMP/f/app.apk" 2>&1)" || rc=$?

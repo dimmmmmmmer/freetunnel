@@ -211,11 +211,17 @@ void MockHelperServer::handle(const QJsonObject &c)
     if (cmd == QLatin1String("connect")) {
         ++m_connectCount;
         const QString toml = c.value("configToml").toString();
+        const auto acknowledge = [this, &c](bool accepted) {
+            if (c.value("stagedRouting").toBool())
+                send(QJsonObject{{"ev", "endpointRequest"}, {"requestId", c.value("requestId")},
+                                 {"accepted", accepted}});
+        };
         // The real helper refuses a connect that names a file instead of carrying
         // the config: it would open that file as root. This double used to report
         // Connected for one, so two tests asserted a session production never
         // starts. Same refusal, same words, and no state at all.
         if (toml.isEmpty()) {
+            acknowledge(false);
             send(QJsonObject{{"ev", "error"}, {"msg", "connect requires inline configToml"}});
             return;
         }
@@ -228,9 +234,13 @@ void MockHelperServer::handle(const QJsonObject &c)
         };
         const QString refusal = scripted(m_refusing);
         if (!refusal.isEmpty()) {
+            acknowledge(false);
             send(QJsonObject{{"ev", "error"}, {"msg", refusal}});
             return;
         }
+        acknowledge(true);
+        if (c.value("stagedRouting").toBool())
+            send(QJsonObject{{"ev", "sessionPresence"}, {"active", true}});
         send(QJsonObject{{"ev", "state"}, {"state", "Connecting"}});
         const QString failure = scripted(m_failing);
         if (!failure.isEmpty()) {
@@ -246,6 +256,7 @@ void MockHelperServer::handle(const QJsonObject &c)
         m_holdNextDisconnect = false;
         m_holding = true; // answered, and the rest handled, by releaseDisconnect()
     } else if (cmd == QLatin1String("disconnect")) {
+        send(QJsonObject{{"ev", "sessionPresence"}, {"active", false}});
         send(QJsonObject{{"ev", "state"}, {"state", "Disconnecting"}});
         if (m_tunnelUp && !m_teardownError.isEmpty())
             send(QJsonObject{{"ev", "error"}, {"msg", m_teardownError}});

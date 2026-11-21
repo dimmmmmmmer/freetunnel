@@ -1,0 +1,2 @@
+# Upstream source archives use LF; patches must stay identical on Windows too.
+vendor/qt/*.patch text eol=lf

@@ -5,3 +5,8 @@ dependencyResolutionManagement {
 }
 rootProject.name = 'FreeTunnelAndroid'
 include ':app'
+// A separate UID is essential: the VPN application's own sockets are exempt.
+if (providers.gradleProperty('incomingProbe').isPresent()) {
+    include ':incomingProbe'
+    project(':incomingProbe').projectDir = file('../tests/fixtures/android-incoming')
+}

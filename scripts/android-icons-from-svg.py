@@ -18,7 +18,8 @@ android/app/src/main/res/drawable/ic_*.xml from those SVG files:
   - <rect rx>, <line>, <circle> and <polyline> become path data, one to one;
   - stroke 2 on the 24 grid with round caps and joins, as the SVG says;
   - a filled <circle> stays filled (the speedometer's hub), and the logo's four
-    arches keep their own greys: the app never tints the logo.
+    arches keep their own colours: the app never tints the logo. logo-green.svg,
+    the mark while connected, is made the same way.
 
 Tinted icons are white in the file and take their colour from the view that shows
 them. The plus signs are not icons on the desktop either: it draws two rectangles,
@@ -50,7 +51,8 @@ ICONS = {
     "edit": "ic_edit",
     "close": "ic_close",
 }
-LOGO = "ic_logo"
+# The mark, and the green one Home shows while connected (the tray's on the desktop).
+LOGOS = {"ic_logo": "logo.svg", "ic_logo_green": "logo-green.svg"}
 # SVG files in assets/icons that the Android app has no use for.
 DESKTOP_ONLY = set()
 # The drawn plus signs: drawable, box, arm length, arm thickness (QML: ConfigsPage.qml
@@ -229,7 +231,7 @@ def logo(svg_path):
         paths += '    <path android:pathData="%s" android:fillColor="%s"/>\n' % (path_data(e.get("d"), svg_path), fill.lower())
     if not paths:
         raise SystemExit("%s: no arches" % svg_path)
-    return HEADER.format(source="assets/logo.svg") + VECTOR.format(
+    return HEADER.format(source="assets/" + svg_path.name) + VECTOR.format(
         w=num(box[2]), h=num(box[3]), vw=num(box[2]), vh=num(box[3]), paths=paths)
 
 
@@ -453,7 +455,8 @@ def wanted(assets, res):
             raise SystemExit("%s has no drawable: add it to ICONS (or DESKTOP_ONLY) in this script" % svg)
     for name, drawable in ICONS.items():
         out[Path(res) / (drawable + ".xml")] = icon(icons / (name + ".svg"))
-    out[Path(res) / (LOGO + ".xml")] = logo(Path(assets) / "logo.svg")
+    for drawable, svg in LOGOS.items():
+        out[Path(res) / (drawable + ".xml")] = logo(Path(assets) / svg)
     for drawable, (box, arm, thickness) in PLUSES.items():
         out[Path(res) / (drawable + ".xml")] = plus(box, arm, thickness)
     for drawable, (character, w, h, d, stroke) in GLYPHS.items():
@@ -470,7 +473,7 @@ def wanted(assets, res):
 def main():
     parser = argparse.ArgumentParser(description=HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail if a drawable differs from what the SVG files give")
-    parser.add_argument("--assets", default=str(ROOT / "assets"), help="the directory with icons/, logo.svg and fonts/inter/Inter-Regular.ttf")
+    parser.add_argument("--assets", default=str(ROOT / "assets"), help="the directory with icons/, logo.svg, logo-green.svg and fonts/inter/Inter-Regular.ttf")
     parser.add_argument("--res", default=str(ROOT / "android/app/src/main/res/drawable"), help="the drawable directory")
     args = parser.parse_args()
     made = wanted(args.assets, args.res)

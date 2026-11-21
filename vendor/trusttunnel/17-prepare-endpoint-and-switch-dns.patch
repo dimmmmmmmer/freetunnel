@@ -1,0 +1,809 @@
+diff --git a/core/include/vpn/vpn.h b/core/include/vpn/vpn.h
+index d1c08aa..d3a2838 100644
+--- a/core/include/vpn/vpn.h
++++ b/core/include/vpn/vpn.h
+@@ -669,18 +669,29 @@ WIN_EXPORT Vpn *vpn_open(const VpnSettings *settings);
+  */
+ WIN_EXPORT ag::VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters);
+ 
++/** A complete versioned routing policy committed with an endpoint replacement. */
++struct VpnRoutingConfig {
++    VpnMode mode;
++    VpnStr exclusions;
++    uint64_t generation;
++};
++
+ /**
+  * Replace the endpoint inside a running session without removing its listener,
+  * routes or direct connections. Validate before interrupting the old endpoint.
+  * The caller must already have resolved the endpoints and arranged their socket
+- * protection; this API does not change OS routes or listener/DNS settings.
++ * protection; this API does not change OS routes. When dns_config is non-null,
++ * replace DNS upstreams as part of the same transaction (other listener settings
++ * are retained). An empty upstream list clears the previous custom DNS proxy.
++ * Direct DNS clients and pending direct queries remain alive.
+  * Commit optional endpoint certificate policy on the core thread after the old
+  * handshake has stopped and before the new one starts. The callback must not
+  * call VPN APIs or throw. It runs before this function returns, only on success.
+  * Serialize with vpn_close, and never call from a VPN callback.
+  */
+-WIN_EXPORT ag::VpnError vpn_replace_endpoint(
+-        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg);
++WIN_EXPORT ag::VpnError vpn_replace_endpoint(Vpn *vpn, const VpnUpstreamConfig *config,
++        void (*commit_certificate_policy)(void *), void *arg, const VpnListenerConfig *dns_config = nullptr,
++        const VpnRoutingConfig *routing = nullptr);
+ 
+ /**
+  * Forcibly initiate the next session recovery attempt. Do nothing if the VPN client is not between
+diff --git a/core/src/vpn_manager.cpp b/core/src/vpn_manager.cpp
+index dc72f6d..2ff34b6 100644
+--- a/core/src/vpn_manager.cpp
++++ b/core/src/vpn_manager.cpp
+@@ -15,6 +15,7 @@
+ #include "socks_listener.h"
+ #include "tun_device_listener.h"
+ #include "vpn/internal/domain_filter.h"
++#include "vpn/internal/tunnel.h"
+ #include "vpn/internal/utils.h"
+ #include "vpn/utils.h"
+ #include "vpn/vpn.h"
+@@ -354,8 +355,25 @@ VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters) {
+     return error;
+ }
+ 
+-VpnError vpn_replace_endpoint(
+-        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg) {
++static void apply_routing(Vpn *vpn, VpnMode mode, std::string_view exclusions, std::optional<uint64_t> generation) {
++    if (generation.has_value()) {
++        vpn->client.routing_generation = generation.value();
++        // Decisions already postponed during recovery must not be
++        // replayed (or bypassed on timeout) under a different policy.
++        auto pending = std::exchange(vpn->postponed_requests, {});
++        for (const auto &request : pending) {
++            vpn->client.complete_connect_request(request.id, VPN_CA_REJECT);
++        }
++    }
++    if (!generation.has_value() || vpn->client.exclusions_mode != mode
++            || vpn->client.routing_exclusions != exclusions) {
++        vpn->client.reset_connections(-1);
++        vpn->client.update_exclusions(mode, exclusions);
++    }
++}
++
++VpnError vpn_replace_endpoint(Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *),
++        void *arg, const VpnListenerConfig *dns_config, const VpnRoutingConfig *routing) {
+     if (vpn == nullptr || config == nullptr) {
+         return {VPN_EC_INVALID_SETTINGS, "VPN and endpoint configuration are required"};
+     }
+@@ -363,14 +381,45 @@ VpnError vpn_replace_endpoint(
+     if (config->location.endpoints.size > 0 && config->location.endpoints.data == nullptr) {
+         return {VPN_EC_INVALID_SETTINGS, "Endpoint array is required"};
+     }
++    if (config->location.relays.size > 0 && config->location.relays.data == nullptr) {
++        return {VPN_EC_INVALID_SETTINGS, "Relay array is required"};
++    }
++    if (dns_config != nullptr) {
++        if (dns_config->dns_upstreams.size > 0 && dns_config->dns_upstreams.data == nullptr) {
++            return {VPN_EC_INVALID_SETTINGS, "DNS upstream array is required"};
++        }
++        for (size_t i = 0; i < dns_config->dns_upstreams.size; ++i) {
++            const char *upstream = dns_config->dns_upstreams.data[i];
++            if (upstream == nullptr || upstream[0] == '\0' || vpn_validate_dns_upstream(upstream) != VPN_DUVS_OK) {
++                return {VPN_EC_INVALID_SETTINGS, "Invalid DNS upstream"};
++            }
++        }
++    }
+     if (auto error = validate_upstream_config(vpn, config); error.code != VPN_EC_NOERROR) {
+         return error;
+     }
+     if (!vpn->executor_thread.joinable() || !vpn_event_loop_is_active(vpn->ev_loop.get())) {
+         return {VPN_EC_ERROR, "VPN client worker is not running"};
+     }
++    if (routing != nullptr
++            && ((routing->mode != VPN_MODE_GENERAL && routing->mode != VPN_MODE_SELECTIVE)
++                    || (routing->exclusions.size > 0 && routing->exclusions.data == nullptr))) {
++        return {VPN_EC_INVALID_SETTINGS, "Invalid routing policy"};
++    }
++    const std::string exclusions = routing != nullptr && routing->exclusions.size > 0
++            ? std::string(routing->exclusions.data, routing->exclusions.size)
++            : std::string();
++    VpnError outcome{};
+     auto replacement = vpn_upstream_config_clone(config);
++    AutoPod<VpnListenerConfig, vpn_listener_config_destroy> dns;
++    if (dns_config != nullptr) {
++        *dns.get() = vpn_listener_config_clone(dns_config);
++    }
+     const bool committed = event_loop::dispatch_sync(vpn->ev_loop.get(), [&]() mutable {
++        if (routing != nullptr && routing->generation < vpn->client.routing_generation) {
++            outcome = {VPN_EC_INVALID_SETTINGS, "Stale routing policy"};
++            return;
++        }
+         // Stop all producers that refer to the old endpoint/config first.
+         // disconnect() retains the TUN listener and bypass upstream; vpn_stop()
+         // would destroy both and must not be used for a server change.
+@@ -382,12 +431,30 @@ VpnError vpn_replace_endpoint(
+         vpn->client.quic_connector.reset();
+         vpn->pending_error.reset();
+         vpn->update_upstream_config(std::move(replacement));
++        if (dns_config != nullptr) {
++            const auto timeout = vpn->client.listener_config.timeout_ms;
++            const auto alt_route = vpn->client.listener_config.dns_alt_exclusions_route;
++            vpn_listener_config_destroy(&vpn->client.listener_config);
++            vpn->client.listener_config = dns.release();
++            vpn->client.listener_config.timeout_ms = timeout;
++            vpn->client.listener_config.dns_alt_exclusions_route = alt_route;
++            // The old SOCKS listener was stopped above. Drop only the VPN DNS
++            // proxy now, including when the new list is empty. The system/direct
++            // DNS clients belong to a separate path and are not restarted.
++            if (vpn->client.tunnel && vpn->client.tunnel->dns_handler) {
++                vpn->client.tunnel->update_dns_handler_parameters();
++            }
++        }
++        if (routing != nullptr) {
++            vpn->update_exclusions_task.reset();
++            apply_routing(vpn, routing->mode, exclusions, routing->generation);
++        }
+         if (commit_certificate_policy != nullptr) {
+             commit_certificate_policy(arg);
+         }
+         vpn->fsm.perform_transition(vpn_fsm::CE_REPLACE_ENDPOINT, nullptr);
+     });
+-    return committed ? VpnError{} : VpnError{VPN_EC_EVENT_LOOP_FAILURE, "Endpoint replacement was cancelled"};
++    return committed ? outcome : VpnError{VPN_EC_EVENT_LOOP_FAILURE, "Endpoint replacement was cancelled"};
+ }
+ 
+ void vpn_force_reconnect(Vpn *vpn) {
+@@ -607,20 +674,7 @@ static void update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, std::optio
+                             [](void *arg, TaskId) {
+                                 auto *ctx = (Ctx *) arg;
+                                 ctx->vpn->update_exclusions_task.release();
+-                                if (ctx->generation.has_value()) {
+-                                    ctx->vpn->client.routing_generation = ctx->generation.value();
+-                                    // Decisions already postponed during recovery must not be
+-                                    // replayed (or bypassed on timeout) under a different policy.
+-                                    auto pending = std::exchange(ctx->vpn->postponed_requests, {});
+-                                    for (const auto &request : pending) {
+-                                        ctx->vpn->client.complete_connect_request(request.id, VPN_CA_REJECT);
+-                                    }
+-                                }
+-                                if (!ctx->generation.has_value() || ctx->vpn->client.exclusions_mode != ctx->mode
+-                                        || ctx->vpn->client.routing_exclusions != ctx->exclusions) {
+-                                    ctx->vpn->client.reset_connections(-1);
+-                                    ctx->vpn->client.update_exclusions(ctx->mode, ctx->exclusions);
+-                                }
++                                apply_routing(ctx->vpn, ctx->mode, ctx->exclusions, ctx->generation);
+                             },
+                     .finalize =
+                             [](void *arg) {
+diff --git a/core/test/test_vpn_manager_fsm_recovery.cpp b/core/test/test_vpn_manager_fsm_recovery.cpp
+index 1688aab..98d6e6a 100644
+--- a/core/test/test_vpn_manager_fsm_recovery.cpp
++++ b/core/test/test_vpn_manager_fsm_recovery.cpp
+@@ -709,3 +709,142 @@ TEST_F(ConnectingVpnManagerTest, NetworkReturnsBeforeFirstConnectWithRecoveryPol
+     // successful handshake, rather than entering the finite-attempt path.
+     ASSERT_TRUE(await_state_change(VPN_SS_RECOVERING));
+ }
++
++TEST_F(ConnectedVpnManagerTest, ReplacementChangesAndClearsDnsWithoutChangingListenerPolicy) {
++    const char *old_dns[] = {"1.1.1.1:53"};
++    VpnListenerConfig old_listener{
++            .timeout_ms = 4567,
++            .dns_upstreams = {old_dns, 1},
++            .dns_alt_exclusions_route = true,
++    };
++    vpn->client.listener_config = vpn_listener_config_clone(&old_listener);
++    VpnEndpoint endpoint{sockaddr_from_str("127.0.0.4:443"), "new-server"};
++    VpnUpstreamConfig replacement{
++            .location = {.id = "replacement", .endpoints = {&endpoint, 1}},
++            .username = "new-user",
++            .password = "new-password",
++    };
++    const char *new_dns[] = {"9.9.9.9:53", "tls://1.0.0.1"};
++    VpnListenerConfig dns{.dns_upstreams = {new_dns, 2}};
++    for (int round = 0; round < 2; ++round) {
++        if (round == 1) {
++            dns.dns_upstreams = {};
++        }
++        VpnError result{};
++        std::thread caller([&] {
++            const auto deadline = SteadyClock::now() + Secs{2};
++            while (!vpn_event_loop_is_active(vpn->ev_loop.get()) && SteadyClock::now() < deadline) {
++                std::this_thread::yield();
++            }
++            result = vpn_replace_endpoint(vpn, &replacement, nullptr, nullptr, &dns);
++        });
++        const bool reached = await_state_change(VPN_SS_RECOVERING);
++        caller.join();
++        ASSERT_TRUE(reached);
++        ASSERT_EQ(result.code, VPN_EC_NOERROR);
++        EXPECT_EQ(vpn->client.listener_config.timeout_ms, 4567u);
++        EXPECT_TRUE(vpn->client.listener_config.dns_alt_exclusions_route);
++        EXPECT_EQ(vpn->client.listener_config.dns_upstreams.size, round == 0 ? 2u : 0u);
++        if (round == 0) {
++            EXPECT_STREQ(vpn->client.listener_config.dns_upstreams.data[0], "9.9.9.9:53");
++            EXPECT_STREQ(vpn->client.listener_config.dns_upstreams.data[1], "tls://1.0.0.1");
++            EXPECT_NE(vpn->client.listener_config.dns_upstreams.data, new_dns);
++        }
++    }
++    // The mocked VpnClient deliberately does not own listener configuration.
++    vpn_listener_config_destroy(&vpn->client.listener_config);
++}
++
++TEST_F(ConnectedVpnManagerTest, MalformedDnsReplacementKeepsOldEndpointAndCertificatePolicy) {
++    VpnEndpoint endpoint{sockaddr_from_str("127.0.0.4:443"), "new-server"};
++    VpnUpstreamConfig replacement{
++            .location = {.id = "replacement", .endpoints = {&endpoint, 1}},
++            .username = "new-user",
++            .password = "new-password",
++    };
++    const char *invalids[] = {nullptr, "", "not-a-dns-protocol://invalid"};
++    const auto *old_config = vpn->upstream_config.get();
++    const auto old_scope = vpn->session_cache_scope;
++    bool committed = false;
++    auto commit = [](void *arg) {
++        *static_cast<bool *>(arg) = true;
++    };
++    VpnListenerConfig dns{.dns_upstreams = {nullptr, 1}};
++    EXPECT_EQ(vpn_replace_endpoint(vpn, &replacement, commit, &committed, &dns).code, VPN_EC_INVALID_SETTINGS);
++    for (const char *invalid : invalids) {
++        dns.dns_upstreams = {&invalid, 1};
++        EXPECT_EQ(vpn_replace_endpoint(vpn, &replacement, commit, &committed, &dns).code, VPN_EC_INVALID_SETTINGS);
++    }
++    EXPECT_FALSE(committed);
++    EXPECT_EQ(vpn->upstream_config.get(), old_config);
++    EXPECT_EQ(vpn->session_cache_scope, old_scope);
++    EXPECT_EQ(vpn->fsm.get_state(), VPN_SS_CONNECTED);
++    EXPECT_EQ(vpn->client_state, vpn_manager::CLIS_CONNECTED);
++}
++
++TEST_F(ConnectedVpnManagerTest, ReplacementCommitsRoutingBeforeCertificateCallback) {
++    VpnEndpoint endpoint{sockaddr_from_str("127.0.0.4:443"), "new-server"};
++    VpnUpstreamConfig replacement{
++            .location = {.id = "replacement", .endpoints = {&endpoint, 1}},
++            .username = "new-user",
++            .password = "new-password",
++    };
++    const std::string domains = "direct.example";
++    VpnRoutingConfig routing{VPN_MODE_GENERAL, {domains.data(), static_cast<uint32_t>(domains.size())}, 17};
++    struct Context {
++        Vpn *vpn;
++        bool committed = false;
++    } context{vpn};
++    auto commit = [](void *arg) {
++        auto *ctx = static_cast<Context *>(arg);
++        ctx->committed = ctx->vpn->client.routing_generation == 17;
++    };
++    VpnError result{};
++    std::thread caller([&] {
++        const auto deadline = SteadyClock::now() + Secs{2};
++        while (!vpn_event_loop_is_active(vpn->ev_loop.get()) && SteadyClock::now() < deadline)
++            std::this_thread::yield();
++        result = vpn_replace_endpoint(vpn, &replacement, commit, &context, nullptr, &routing);
++    });
++    const bool reached = await_state_change(VPN_SS_RECOVERING);
++    caller.join();
++    ASSERT_TRUE(reached);
++    EXPECT_EQ(result.code, VPN_EC_NOERROR);
++    EXPECT_TRUE(context.committed);
++}
++
++TEST_F(ConnectedVpnManagerTest, StaleRoutingReplacementKeepsOldEndpoint) {
++    VpnEndpoint endpoint{sockaddr_from_str("127.0.0.4:443"), "new-server"};
++    VpnUpstreamConfig replacement{
++            .location = {.id = "replacement", .endpoints = {&endpoint, 1}},
++            .username = "new-user",
++            .password = "new-password",
++    };
++    vpn->client.routing_generation = 18;
++    const std::string domains = "stale.example";
++    VpnRoutingConfig routing{VPN_MODE_GENERAL, {domains.data(), static_cast<uint32_t>(domains.size())}, 17};
++    const auto *old_config = vpn->upstream_config.get();
++    bool committed = false;
++    auto commit = [](void *arg) {
++        *static_cast<bool *>(arg) = true;
++    };
++    // The fixture owns a paused event loop: drive it until the transaction replies.
++    std::atomic<bool> done = false;
++    VpnError result{};
++    std::thread caller([&] {
++        const auto deadline = SteadyClock::now() + Secs{2};
++        while (!vpn_event_loop_is_active(vpn->ev_loop.get()) && SteadyClock::now() < deadline)
++            std::this_thread::yield();
++        result = vpn_replace_endpoint(vpn, &replacement, commit, &committed, nullptr, &routing);
++        done = true;
++    });
++    const auto deadline = SteadyClock::now() + Secs{3};
++    while (!done && SteadyClock::now() < deadline)
++        loop_once();
++    caller.join();
++    EXPECT_NE(result.code, VPN_EC_NOERROR);
++    EXPECT_FALSE(committed);
++    EXPECT_EQ(vpn->upstream_config.get(), old_config);
++    EXPECT_EQ(vpn->client.routing_generation, 18u);
++    EXPECT_EQ(vpn->fsm.get_state(), VPN_SS_CONNECTED);
++}
+diff --git a/trusttunnel/CMakeLists.txt b/trusttunnel/CMakeLists.txt
+index 3f1f5ac..5443e8a 100644
+--- a/trusttunnel/CMakeLists.txt
++++ b/trusttunnel/CMakeLists.txt
+@@ -331,4 +331,5 @@ include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
+ set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
+ 
+ add_unit_test(test_persistent_ring_buffer "${TEST_DIR}" "" TRUE TRUE)
++add_unit_test(test_endpoint_replacement "${TEST_DIR}" "" TRUE TRUE)
+ add_unit_test(test_trusttunnel_config "${TEST_DIR}" "" TRUE TRUE)
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index 9256ab9..879c2ad 100644
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
++++ b/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <functional>
+ #include <memory>
+ #include <thread>
+ 
+@@ -119,6 +120,22 @@ public:
+     Error<ConnectResultError> connect(ListenerSettings listener_settings, ConnectOptions options);
+     Error<ConnectResultError> set_system_dns();
+ 
++    struct PreparedEndpoint;
++    struct EndpointRouting {
++        VpnMode mode;
++        std::string exclusions;
++        uint64_t generation;
++    };
++    // Resolve and validate off-thread without touching a running client. Results
++    // own all credentials/certificate data and can be discarded on cancellation.
++    static Result<std::shared_ptr<PreparedEndpoint>, ConnectResultError> prepare_endpoint(TrustTunnelConfig config);
++    // Commit on the adapter's owner thread, serialized with disconnect/update.
++    // Only endpoint/DNS settings may differ; a listener change is rejected.
++    // Run on_committed on the core thread after the old endpoint stops and
++    // before any new endpoint event; it must not throw or call VPN APIs.
++    Error<ConnectResultError> replace_endpoint(const std::shared_ptr<PreparedEndpoint> &prepared,
++            const std::function<void()> &on_committed = {}, const EndpointRouting *routing = nullptr);
++
+     int disconnect();
+ 
+     void notify_network_change(VpnNetworkState state);
+diff --git a/trusttunnel/include/vpn/trusttunnel/config.h b/trusttunnel/include/vpn/trusttunnel/config.h
+index c3da8fc..5b0905e 100644
+--- a/trusttunnel/include/vpn/trusttunnel/config.h
++++ b/trusttunnel/include/vpn/trusttunnel/config.h
+@@ -40,6 +40,7 @@ struct TrustTunnelConfig {
+         std::string username;
+         std::string password;
+         std::string address;
++        bool operator==(const SocksListener &) const = default;
+     };
+ 
+     struct TunListener {
+@@ -53,12 +54,15 @@ struct TrustTunnelConfig {
+         bool change_system_dns = true;
+         bool use_existing = false;
+         std::optional<std::string> netns;
++        bool operator==(const TunListener &) const = default;
+     };
+ 
+     using Listener = std::variant<SocksListener, TunListener>;
+ 
+     ag::LogLevel loglevel = ag::LOG_LEVEL_INFO;
+     ag::VpnMode mode = ag::VPN_MODE_GENERAL;
++    // Internal opt-in: the embedding adapter protects every core socket. Never read from TOML.
++    bool endpoint_sockets_protected = false;
+     uint64_t routing_generation = 0; // FreeTunnel internal; never loaded from TOML.
+     bool killswitch_enabled = false;
+     std::string killswitch_allow_ports;
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index ae0cc9a..c2abf06 100644
+--- a/trusttunnel/src/client.cpp
++++ b/trusttunnel/src/client.cpp
+@@ -239,26 +239,32 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(
+     return {};
+ }
+ 
+-Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server(ConnectOptions options) {
++struct TrustTunnelClient::PreparedEndpoint {
++    TrustTunnelConfig config;
+     std::vector<VpnEndpoint> endpoints;
+     std::vector<VpnRelay> relays;
+     std::vector<std::string> hostnames;
+     std::vector<std::string> remote_ids;
+-    hostnames.reserve(m_config.location.endpoints.size());
+-    remote_ids.reserve(m_config.location.endpoints.size());
+-    endpoints.reserve(m_config.location.endpoints.size());
+-
+-    auto copy_to_c_buffer = [](auto &dst, std::string_view src) {
+-        auto decoded = utils::decode_hex(src);
+-        size_t data_len = decoded.size();
+-        dst.size = data_len;
+-        if (data_len == 0) {
+-            return;
+-        }
+-        // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,hicpp-no-malloc)
+-        dst.data = static_cast<uint8_t *>(std::malloc(data_len));
+-        std::memcpy(dst.data, decoded.data(), data_len);
+-    };
++    std::vector<uint8_t> client_random;
++    std::vector<uint8_t> client_random_mask;
++    std::vector<uint8_t> client_random_auth_key;
++    VpnConnectParameters parameters{};
++    bool consumed = false;
++};
++
++static Error<TrustTunnelClient::ConnectResultError> prepare_upstream(
++        const TrustTunnelConfig::Location &location, TrustTunnelClient::PreparedEndpoint &prepared) {
++    static const Logger logger{"ENDPOINT_PREPARATION"};
++    auto &endpoints = prepared.endpoints;
++    auto &relays = prepared.relays;
++    auto &hostnames = prepared.hostnames;
++    auto &remote_ids = prepared.remote_ids;
++    hostnames.reserve(location.endpoints.size());
++    remote_ids.reserve(location.endpoints.size());
++    endpoints.reserve(location.endpoints.size());
++    prepared.client_random = utils::decode_hex(location.client_random);
++    prepared.client_random_mask = utils::decode_hex(location.client_random_mask);
++    prepared.client_random_auth_key = utils::decode_hex(location.client_random_auth_key);
+ 
+     // A single endpoint to resolve, paired with the parsed hostname/remote_id it belongs to.
+     struct ResolveTarget {
+@@ -267,13 +273,13 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
+         std::string address;
+     };
+     std::vector<ResolveTarget> targets;
+-    targets.reserve(m_config.location.endpoints.size());
++    targets.reserve(location.endpoints.size());
+ 
+-    for (const auto &endpoint : m_config.location.endpoints) {
++    for (const auto &endpoint : location.endpoints) {
+         auto pipe_pos = endpoint.hostname.find('|');
+         if (!endpoint.custom_sni.empty() && pipe_pos != std::string::npos) {
+-            return make_error(
+-                    ConnectResultError{}, "Both custom_sni and pipe syntax in hostname are specified, use only one");
++            return make_error(TrustTunnelClient::ConnectResultError{},
++                    "Both custom_sni and pipe syntax in hostname are specified, use only one");
+         }
+         if (!endpoint.custom_sni.empty()) {
+             hostnames.emplace_back(endpoint.custom_sni);
+@@ -307,23 +313,24 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
+         const auto &target = targets[i];
+         const auto &resolved = resolved_all[i];
+         if (resolved.empty()) {
+-            warnlog(m_logger, "Failed to resolve {} address: {}", target.is_relay ? "relay" : "endpoint",
+-                    target.address);
++            warnlog(logger, "Failed to resolve {} address: {}", target.is_relay ? "relay" : "endpoint", target.address);
+             continue;
+         }
+         if (target.is_relay) {
+-            // Use only the first resolved address for relay
+-            auto &relay = relays.emplace_back(resolved.front());
++            // Use only the first resolved address for relay.
+             // A relay connection used the endpoint profile before relays had their own one: keep it.
+-            relay.tls_profile = m_config.location.tls_profile;
+-            if (!m_config.location.client_random.empty()) {
+-                copy_to_c_buffer(relay.tls_client_random, m_config.location.client_random);
++            auto &relay = relays.emplace_back(resolved.front());
++            relay.tls_profile = location.tls_profile;
++            if (!location.client_random.empty()) {
++                relay.tls_client_random = {prepared.client_random.data(), uint32_t(prepared.client_random.size())};
+             }
+-            if (!m_config.location.client_random_mask.empty()) {
+-                copy_to_c_buffer(relay.tls_client_random_mask, m_config.location.client_random_mask);
++            if (!location.client_random_mask.empty()) {
++                relay.tls_client_random_mask = {
++                        prepared.client_random_mask.data(), uint32_t(prepared.client_random_mask.size())};
+             }
+-            if (!m_config.location.client_random_auth_key.empty()) {
+-                copy_to_c_buffer(relay.tls_client_random_auth_key, m_config.location.client_random_auth_key);
++            if (!location.client_random_auth_key.empty()) {
++                relay.tls_client_random_auth_key = {
++                        prepared.client_random_auth_key.data(), uint32_t(prepared.client_random_auth_key.size())};
+             }
+             continue;
+         }
+@@ -332,60 +339,131 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
+                     .address = addr,
+                     .name = hostnames[target.host_index].c_str(),
+                     .remote_id = remote_ids[target.host_index].c_str(),
+-                    .has_ipv6 = m_config.location.has_ipv6,
+-                    .tls_profile = m_config.location.tls_profile,
++                    .has_ipv6 = location.has_ipv6,
++                    .tls_profile = location.tls_profile,
+             });
+-            if (!m_config.location.client_random.empty()) {
+-                copy_to_c_buffer(last_el.tls_client_random, m_config.location.client_random);
++            if (!location.client_random.empty()) {
++                last_el.tls_client_random = {prepared.client_random.data(), uint32_t(prepared.client_random.size())};
+             }
+-            if (!m_config.location.client_random_mask.empty()) {
+-                copy_to_c_buffer(last_el.tls_client_random_mask, m_config.location.client_random_mask);
++            if (!location.client_random_mask.empty()) {
++                last_el.tls_client_random_mask = {
++                        prepared.client_random_mask.data(), uint32_t(prepared.client_random_mask.size())};
+             }
+-            if (!m_config.location.client_random_auth_key.empty()) {
+-                copy_to_c_buffer(last_el.tls_client_random_auth_key, m_config.location.client_random_auth_key);
++            if (!location.client_random_auth_key.empty()) {
++                last_el.tls_client_random_auth_key = {
++                        prepared.client_random_auth_key.data(), uint32_t(prepared.client_random_auth_key.size())};
+             }
+         }
+     }
+ 
+     if (endpoints.empty() && relays.empty()) {
+-        return make_error(ConnectResultError{},
++        return make_error(TrustTunnelClient::ConnectResultError{},
+                 "Failed to resolve any endpoint or relay addresses. Check network connectivity and configuration.");
+     }
+ 
+-    VpnConnectParameters parameters = {
++    prepared.parameters = {
+             .upstream_config =
+                     {
+-                            .main_protocol = m_config.location.upstream_protocol,
++                            .main_protocol = location.upstream_protocol,
+                             .location =
+                                     {
+                                             .id = "hello-location",
+                                             .endpoints = {endpoints.data(), uint32_t(endpoints.size())},
+                                             .relays = {relays.data(), uint32_t(relays.size())},
+                                     },
+-                            .username = m_config.location.username.c_str(),
+-                            .password = m_config.location.password.c_str(),
++                            .username = location.username.c_str(),
++                            .password = location.password.c_str(),
+                             .recovery =
+                                     {
+                                             .attempts = UINT32_MAX,
+                                     },
+-                            .anti_dpi = m_config.location.anti_dpi,
+-                    },
+-            .retry_info =
+-                    {
+-                            .policy =
+-                                    options.fall_into_recovery ? VPN_CRP_FALL_INTO_RECOVERY : VPN_CRP_SEVERAL_ATTEMPTS,
++                            .anti_dpi = location.anti_dpi,
+                     },
+     };
++    return {};
++}
+ 
+-    {
+-        VpnError err = vpn_connect(m_vpn, &parameters);
+-        if (err.code != 0) {
+-            return make_error(ConnectResultError{},
+-                    AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(err.text),
+-                            magic_enum::enum_name((VpnErrorCode) err.code)));
++Result<std::shared_ptr<TrustTunnelClient::PreparedEndpoint>, TrustTunnelClient::ConnectResultError>
++TrustTunnelClient::prepare_endpoint(TrustTunnelConfig config) {
++    auto prepared = std::make_shared<PreparedEndpoint>();
++    prepared->config = std::move(config);
++    const auto &dns = prepared->config.location.dns_upstreams.value_or(prepared->config.legacy_dns_upstreams);
++    for (const auto &upstream : dns) {
++        if (upstream.empty() || vpn_validate_dns_upstream(upstream.c_str()) != VPN_DUVS_OK) {
++            return make_error(ConnectResultError{}, "Invalid DNS upstream");
+         }
+     }
++    if (auto error = prepare_upstream(prepared->config.location, *prepared)) {
++        return error;
++    }
++    return prepared;
++}
++
++Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server(ConnectOptions options) {
++    PreparedEndpoint prepared;
++    if (auto error = prepare_upstream(m_config.location, prepared)) {
++        return error;
++    }
++    prepared.parameters.retry_info = {
++            .policy = options.fall_into_recovery ? VPN_CRP_FALL_INTO_RECOVERY : VPN_CRP_SEVERAL_ATTEMPTS,
++    };
++    if (auto error = vpn_connect(m_vpn, &prepared.parameters); error.code != 0) {
++        return make_error(ConnectResultError{},
++                AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(error.text),
++                        magic_enum::enum_name((VpnErrorCode) error.code)));
++    }
++    return {};
++}
+ 
++Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::replace_endpoint(
++        const std::shared_ptr<PreparedEndpoint> &prepared, const std::function<void()> &on_committed,
++        const EndpointRouting *routing) {
++    if (!prepared || prepared->consumed || m_vpn.load() == nullptr) {
++        return make_error(ConnectResultError{}, "No prepared endpoint or running session");
++    }
++    const auto &config = prepared->config;
++    if (!m_config.endpoint_sockets_protected || config.listener != m_config.listener
++            || config.killswitch_enabled != m_config.killswitch_enabled
++            || config.killswitch_allow_ports != m_config.killswitch_allow_ports
++            || config.post_quantum_group_enabled != m_config.post_quantum_group_enabled
++            || config.exclusions_tcp_early_ack_enabled != m_config.exclusions_tcp_early_ack_enabled
++            || config.exclusions_preresolve_enabled != m_config.exclusions_preresolve_enabled
++            || config.exclusions_preresolve_max_queries != m_config.exclusions_preresolve_max_queries
++            || config.exclusions_scannable_ports != m_config.exclusions_scannable_ports) {
++        return make_error(ConnectResultError{}, "Tunnel settings changed; disconnect before applying them");
++    }
++    const auto &effective_dns = config.location.dns_upstreams.value_or(config.legacy_dns_upstreams);
++    std::vector<const char *> upstreams;
++    for (const auto &upstream : effective_dns) {
++        upstreams.push_back(upstream.c_str());
++    }
++    VpnListenerConfig dns{.dns_upstreams = {upstreams.data(), uint32_t(upstreams.size())}};
++    struct Commit {
++        TrustTunnelClient *client;
++        PreparedEndpoint *prepared;
++        const std::function<void()> *on_committed;
++    } commit{this, prepared.get(), &on_committed};
++    VpnRoutingConfig policy{};
++    if (routing != nullptr) {
++        policy = {
++                routing->mode, {routing->exclusions.data(), uint32_t(routing->exclusions.size())}, routing->generation};
++    }
++    auto error = vpn_replace_endpoint(
++            m_vpn, &prepared->parameters.upstream_config,
++            [](void *arg) {
++                auto &context = *static_cast<Commit *>(arg);
++                context.client->m_config.location = std::move(context.prepared->config.location);
++                context.client->m_config.legacy_dns_upstreams =
++                        std::move(context.prepared->config.legacy_dns_upstreams);
++                context.prepared->consumed = true;
++                if (*context.on_committed) {
++                    (*context.on_committed)();
++                }
++            },
++            &commit, &dns, routing != nullptr ? &policy : nullptr);
++    if (error.code != 0) {
++        return make_error(ConnectResultError{}, safe_to_string_view(error.text));
++    }
+     return {};
+ }
+ 
+@@ -428,15 +505,17 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
+     }
+ 
+     std::vector<std::string> complete_excluded_routes = config.excluded_routes;
+-    for (const auto &endpoint : m_config.location.endpoints) {
+-        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
+-        if (resolved.empty()) {
+-            errlog(m_logger, "Failed to resolve endpoint address for excluded routes: {}", endpoint.address);
+-            return nullptr;
+-        }
+-        for (const auto &addr : resolved) {
+-            SocketAddress sa(addr);
+-            complete_excluded_routes.emplace_back(sa.host_str());
++    if (!m_config.endpoint_sockets_protected) {
++        for (const auto &endpoint : m_config.location.endpoints) {
++            auto resolved = resolve_endpoint_address(endpoint.address.c_str());
++            if (resolved.empty()) {
++                errlog(m_logger, "Failed to resolve endpoint address for excluded routes: {}", endpoint.address);
++                return nullptr;
++            }
++            for (const auto &addr : resolved) {
++                SocketAddress sa(addr);
++                complete_excluded_routes.emplace_back(sa.host_str());
++            }
+         }
+     }
+ 
+diff --git a/trusttunnel/test/test_endpoint_replacement.cpp b/trusttunnel/test/test_endpoint_replacement.cpp
+new file mode 100644
+index 0000000..8e01b60
+--- /dev/null
++++ b/trusttunnel/test/test_endpoint_replacement.cpp
+@@ -0,0 +1,115 @@
++#include <gtest/gtest.h>
++
++#include "vpn/trusttunnel/client.h"
++
++using namespace ag;
++
++static TrustTunnelConfig make_config() {
++    TrustTunnelConfig config;
++    config.listener = TrustTunnelConfig::TunListener{.mtu_size = 1280};
++    config.endpoint_sockets_protected = true;
++    config.killswitch_enabled = true;
++    config.location.username = "test-user";
++    config.location.password = "test-password";
++    config.location.endpoints.push_back({"test.invalid", "127.0.0.1:9", ""});
++    return config;
++}
++
++static VpnCallbacks make_callbacks() {
++    return {
++            .protect_handler =
++                    [](SocketProtectEvent *event) {
++                        event->result = 0;
++                    },
++            .verify_handler =
++                    [](VpnVerifyCertificateEvent *event) {
++                        event->result = -1;
++                    },
++            .state_changed_handler = [](VpnStateChangedEvent *) {},
++            .client_output_handler = [](VpnClientOutputEvent *) {},
++    };
++}
++
++TEST(EndpointPreparation, RejectConflictingSniBeforeTouchingClient) {
++    auto config = make_config();
++    config.location.endpoints[0].hostname = "test.invalid|remote.invalid";
++    config.location.endpoints[0].custom_sni = "custom.invalid";
++    EXPECT_TRUE(TrustTunnelClient::prepare_endpoint(std::move(config)).has_error());
++}
++
++TEST(EndpointPreparation, RejectInvalidDnsBeforeTouchingClient) {
++    auto config = make_config();
++    config.location.dns_upstreams = std::vector<std::string>{"invalid-scheme://dns.invalid"};
++    EXPECT_TRUE(TrustTunnelClient::prepare_endpoint(std::move(config)).has_error());
++}
++
++TEST(EndpointPreparation, RejectEmptyEndpoints) {
++    auto config = make_config();
++    config.location.endpoints.clear();
++    EXPECT_TRUE(TrustTunnelClient::prepare_endpoint(std::move(config)).has_error());
++}
++
++TEST(EndpointPreparation, PreparedResultDoesNotStartStoppedClient) {
++    TrustTunnelClient client(make_config(), make_callbacks());
++    auto prepared = TrustTunnelClient::prepare_endpoint(make_config());
++    ASSERT_FALSE(prepared.has_error());
++    EXPECT_TRUE(client.replace_endpoint(prepared.value()));
++    client.disconnect();
++}
++
++struct EndpointReplacementTest : testing::Test {
++    std::unique_ptr<TrustTunnelClient> client;
++
++    void SetUp() override {
++        client = std::make_unique<TrustTunnelClient>(make_config(), make_callbacks());
++        auto error = client->connect(TrustTunnelClient::UseProcessPackets{});
++        ASSERT_FALSE(error) << (error ? error->str() : "");
++    }
++
++    void TearDown() override {
++        if (client) {
++            client->disconnect();
++        }
++    }
++
++    bool replace(TrustTunnelConfig config) {
++        auto prepared = TrustTunnelClient::prepare_endpoint(std::move(config));
++        EXPECT_FALSE(prepared.has_error());
++        if (prepared.has_error()) {
++            return false;
++        }
++        return !client->replace_endpoint(prepared.value());
++    }
++};
++
++TEST_F(EndpointReplacementTest, RepeatedSwitchAndSingleUsePreparedResult) {
++    for (int i = 0; i < 3; ++i) {
++        auto config = make_config();
++        config.location.password = "replacement-password";
++        config.location.skip_verification = true;
++        auto prepared = TrustTunnelClient::prepare_endpoint(std::move(config));
++        ASSERT_FALSE(prepared.has_error());
++        EXPECT_FALSE(client->replace_endpoint(prepared.value()));
++        EXPECT_TRUE(client->replace_endpoint(prepared.value()));
++    }
++}
++
++TEST_F(EndpointReplacementTest, RejectListenerAndKillSwitchChangesThenAllowValidSwitch) {
++    auto config = make_config();
++    std::get<TrustTunnelConfig::TunListener>(config.listener).mtu_size = 1400;
++    EXPECT_FALSE(replace(std::move(config)));
++    config = make_config();
++    config.killswitch_enabled = false;
++    EXPECT_FALSE(replace(std::move(config)));
++    config = make_config();
++    config.killswitch_allow_ports = "443";
++    EXPECT_FALSE(replace(std::move(config)));
++    EXPECT_TRUE(replace(make_config()));
++}
++
++TEST_F(EndpointReplacementTest, ReplacementAfterDisconnectDoesNotRestart) {
++    auto prepared = TrustTunnelClient::prepare_endpoint(make_config());
++    ASSERT_FALSE(prepared.has_error());
++    client->disconnect();
++    EXPECT_TRUE(client->replace_endpoint(prepared.value()));
++}

@@ -7,7 +7,7 @@
 #
 #   bash tests/test_android_tv_manifest.sh            tests the checks on fixtures
 #   bash tests/test_android_tv_manifest.sh app.apk    then checks that APK, with
-#                                                     $AAPT2 or Build Tools 35.0.0's
+#                                                     $AAPT2 or Build Tools 36.0.0's
 set -euo pipefail
 
 TMP="$(mktemp -d)"
@@ -43,7 +43,7 @@ tv_ready() {
 }
 
 # What aapt2 prints for the app as it should be, trimmed to the lines checked
-# and their neighbours: Build Tools 35.0.0's aapt2 on the debug APK, features
+# and their neighbours: Build Tools 36.0.0's aapt2 on the debug APK, features
 # indented under their group as it prints them.
 cat > "$TMP/good" <<'EOF'
 package: name='org.freetunnel.android' versionCode='900' versionName='0.9.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
@@ -114,7 +114,7 @@ case_ "x86_64 but no x86" fail "s/ 'x86' / /" "no native code for x86"
 case_ "x86 last" pass "s/ 'x86' 'x86_64'/ 'x86_64' 'x86'/"
 
 if [ "$#" -gt 0 ]; then
-  aapt2=${AAPT2:-${ANDROID_HOME:-}/build-tools/35.0.0/aapt2}
+  aapt2=${AAPT2:-${ANDROID_HOME:-}/build-tools/36.0.0/aapt2}
   "$aapt2" dump badging "$1" > "$TMP/apk"
   if tv_ready "$TMP/apk"; then
     echo "ok - $1 is ready for Android TV"

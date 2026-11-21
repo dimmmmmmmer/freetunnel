@@ -1,9 +1,42 @@
 # Changelog
 
-## Unreleased — core 1.3 preview
+## Unreleased
 
-- Desktop: testing TrustTunnel 1.3.0-rc.2 with support for server authentication keys.
+- Desktop: the VPN core is stable TrustTunnel 1.3.0. Each server keeps its own TLS profile: Chrome, Chrome Canary, Safari, Firefox, OkHttp, OpenSSL or BoringSSL. Leaving it unset uses Chrome. BoringSSL is new in this core; older configs that say `default` use BoringSSL.
 - Authentication keys are stored in the system credential store and included when sharing a configuration. Links with a key require a client supporting the version 2 link format.
+
+- Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
+
+- Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.
+- Core: isolate TLS session caches between servers and preserve the recovery policy when the network returns before the first connection.
+- Android: reject malformed native configurations without crashing and release temporary configuration strings.
+
+- Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
+
+- Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
+
+- Prevent mixed split-tunnel rules during live edits and connection setup on desktop.
+- Linux: preserve incoming UDP replies from services listening on all addresses and remove the blanket VPN bypass for outgoing connections using service source ports.
+- Keep bypass-domain DNS working during VPN reconnection while the kill switch continues to block VPN-domain DNS.
+- Keep ordinary DNS on its domain's direct or VPN route regardless of letter case, a trailing root dot or application routing rules.
+- macOS and Linux: install the VPN helper once, then connect and apply signed helper updates without repeated administrator prompts.
+- Documented and tested upstream DNS routing in full, selective and bypass modes.
+- Moved custom geo list creation into a dialog.
+- New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
+- Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
+- Finish pending geo list cache work when closing the desktop app.
+- Android releases now contain one APK, with the version in its filename.
+
+## 1.2.5
+
+- Added ready-made and custom geo lists, with manual routing rules taking priority.
+- Fixed selective routing on desktop and Android, including combined app and destination rules.
+- Linux: fixed reply routing for incoming TCP connections and UDP services bound to a specific local IP.
+- Improved configuration imports, subscriptions and connection logs across desktop and Android.
+- Windows connections now use a background service to reduce repeated administrator prompts.
+- Windows: launching while the previous instance is closing no longer sometimes leaves the app closed.
+- Restored macOS 12 support; fixed menus and made dark mode the default for new installations.
+- Updated the VPN core to stable TrustTunnel 1.1.12 and refreshed dependencies.
 
 ## 1.2.4
 

@@ -1,0 +1,55 @@
+diff --git a/net/src/os_tunnel_linux.cpp b/net/src/os_tunnel_linux.cpp
+index dbccd28..5aef7e0 100644
+--- a/net/src/os_tunnel_linux.cpp
++++ b/net/src/os_tunnel_linux.cpp
+@@ -17,11 +17,19 @@ static constexpr auto TABLE_ID = 880;
+ // cannot reproduce an accepted TCP connection. Reserve one packet-mark bit;
+ // do not overwrite other firewall marks or use a source-port allowlist.
+ static constexpr std::string_view REPLY_MARK = "0x00800000/0x00800000";
++// UDP source selection happens before OUTPUT/conntrack. Let its first route
++// lookup use main, then capture non-replies in OUTPUT. A wildcard listener thus
++// replies from the physical address instead of accidentally selecting the TUN IP.
++static constexpr std::string_view UDP_INITIAL_RULE =
++        "prio 30800 iif lo ipproto udp fwmark 0x00000000/0x00400000 lookup main";
+ static constexpr std::string_view REPLY_RULESET = R"nft(
+ add table inet freetunnel_reply
+ add chain inet freetunnel_reply output { type route hook output priority mangle; policy accept; }
+ add rule inet freetunnel_reply output meta l4proto { tcp, udp } ct direction reply counter meta mark set meta mark | 0x00800000
++add rule inet freetunnel_reply output meta l4proto udp ct direction reply return
++add rule inet freetunnel_reply output meta l4proto udp counter meta mark set meta mark | 0x00400000
+ )nft";
++// Legacy source-port exceptions are retained only for stale-rule cleanup.
+ static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
+ static constexpr std::string_view VNC_PORTS = "5900-5920";
+ 
+@@ -305,16 +313,14 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
+     // Apply routing rules (in netns if specified)
+     if (m_sport_supported) {
+         if (!ipv4_routes.empty()) {
+-            if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", VNC_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
++            if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))
++                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add {}", UDP_INITIAL_RULE))) {
+                 return false;
+             }
+         }
+         if (!ipv6_routes.empty()) {
+-            if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", VNC_PORTS))
+-                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
++            if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))
++                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add {}", UDP_INITIAL_RULE))) {
+                 return false;
+             }
+         }
+@@ -375,6 +381,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
+ }
+ 
+ void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
++    // Remove the initial UDP bypass before removing its OUTPUT capture rules.
++    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del {}", UDP_INITIAL_RULE));
++    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del {}", UDP_INITIAL_RULE));
+     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
+     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
+     sys_cmd_netns_ignore_errors(m_netns, "nft delete table inet freetunnel_reply");

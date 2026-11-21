@@ -58,6 +58,7 @@ fresh() {
   mkdir -p "$TMP/assets" "$TMP/res"
   cp -R "$ROOT/assets/icons" "$TMP/assets/icons"
   cp "$ROOT/assets/logo.svg" "$TMP/assets/logo.svg"
+  cp "$ROOT/assets/logo-green.svg" "$TMP/assets/logo-green.svg"
   mkdir -p "$TMP/assets/fonts/inter"
   cp "$ROOT/assets/fonts/inter/Inter-Regular.ttf" "$TMP/assets/fonts/inter/Inter-Regular.ttf"
   python3 "$SCRIPT" --assets "$TMP/assets" --res "$TMP/res" > /dev/null
@@ -102,6 +103,10 @@ sed -i 's/fill="#d0d0d0"/fill="#d1d1d1"/' "$TMP/assets/logo.svg"
 check "the logo changed" fail "$TMP/assets" "$TMP/res"
 
 fresh
+sed -i 's/fill="#1d9e75"/fill="#1d9e76"/' "$TMP/assets/logo-green.svg"
+check "the green logo changed" fail "$TMP/assets" "$TMP/res"
+
+fresh
 rm "$TMP/res/ic_export.xml"
 check "a drawable that is missing" fail "$TMP/assets" "$TMP/res"
 
@@ -138,6 +143,13 @@ if grep -q 'android:fillColor="#d0d0d0"' "$TMP/res/ic_logo.xml" && ! grep -q 'ti
   echo "ok - the logo keeps its own greys"
 else
   echo "not ok - the logo keeps its own greys"; fail=1
+fi
+# The green one is the tray's connected mark, logo-green.svg, in its own greens.
+if grep -q 'android:fillColor="#1d9e75"' "$TMP/res/ic_logo_green.xml" && ! grep -q 'tint' "$TMP/res/ic_logo_green.xml" \
+    && grep -q 'from assets/logo-green.svg' "$TMP/res/ic_logo_green.xml"; then
+  echo "ok - the green logo is logo-green.svg"
+else
+  echo "not ok - the green logo is logo-green.svg"; fail=1
 fi
 # The speedometer's hub is filled, and the settings gear is Feather's, not a polygon.
 if grep -q 'android:pathData="M12,10.6 A1.4,1.4' "$TMP/res/ic_ping.xml" && grep -q 'a1.65 1.65 0 0 0' "$TMP/res/ic_settings.xml" \

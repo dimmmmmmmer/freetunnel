@@ -45,7 +45,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   the Windows build uses), [QHotkey](#qhotkey), [QWindowKit](#qwindowkit), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- Next to it: [Qt 6.12.0](#qt) with [the third-party code inside
+- Next to it: [Qt 6.9.3](#qt) with [the third-party code inside
   Qt](#third-party-code-inside-qt), [Wintun](#wintun) (`wintun.dll`),
   [Mesa llvmpipe](#mesa-llvmpipe) (`opengl32sw.dll`) and [Microsoft's
   redistributable files](#microsoft-redistributable-files) (the Visual C++
@@ -61,7 +61,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries), [QHotkey](#qhotkey), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- In `Contents/Frameworks` and `Contents/PlugIns`: [Qt 6.12.0](#qt) with [the
+- In `Contents/Frameworks` and `Contents/PlugIns`: [Qt 6.9.3](#qt) with [the
   third-party code inside Qt](#third-party-code-inside-qt).
 
 ### Linux
@@ -73,7 +73,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
   libraries](#the-vpn-core-and-its-libraries), [QHotkey](#qhotkey), [the
   Feather and Lucide icons](#feather-and-lucide-icons) and the [Inter](#inter)
   typeface.
-- In `lib/` and `plugins/`: [Qt 6.12.0](#qt) with [the third-party code inside
+- In `lib/` and `plugins/`: [Qt 6.9.3](#qt) with [the third-party code inside
   Qt](#third-party-code-inside-qt), [ICU 73](#icu), [Ubuntu 22.04 system
   libraries](#ubuntu-2204-system-libraries) and [the GCC runtime
   libraries](#gcc-runtime-libraries).
@@ -85,7 +85,7 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 `freetunnel-android-<version>.apk` contains:
 
 - FreeTunnel for Android.
-- [The TrustTunnel Android client](#trusttunnel-android-client) 1.1.11, whose
+- [The TrustTunnel Android client](#trusttunnel-android-client) 1.1.12, whose
   native library contains [the VPN core and its
   libraries](#the-vpn-core-and-its-libraries) and [Rust
   crates](#rust-crates-in-the-trusttunnel-native-library).
@@ -98,40 +98,40 @@ Every download carries this file, `LICENSE` and the `licenses/` folder it needs:
 Every download contains the TrustTunnel VPN core. The desktop builds compile it
 from source and link it statically into FreeTunnel. In the Android app it is
 part of the TrustTunnel Android client's native library
-(`libtrusttunnel_android.so`), built by FreeTunnel from stable 1.1.11 with its routing-priority patch.
-The desktop uses TrustTunnelClient 1.3.0-rc.2. Unless noted, each library below is compiled into the core in all
+(`libtrusttunnel_android.so`), built by FreeTunnel from stable 1.1.12 with the patches
+listed in android/core-source.json. The desktop uses TrustTunnelClient 1.3.0. Unless noted, each library below is compiled into the core in all
 downloads.
 
 ### TrustTunnel client core
 
-- Version, desktop: TrustTunnelClient 1.3.0-rc.2, commit
-  b1ddbd293e530d8ae49097727030773f964ef2cc.
-- Version, Android: TrustTunnelClient 1.1.11, commit
-  c0990e174fc75b2e52acd15882c62e69a3022581. The desktop builds apply
+- Version, desktop: TrustTunnelClient 1.3.0, commit
+  eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1.
+- Version, Android: TrustTunnelClient 1.1.12, commit
+  067deb837ed994d6ae902e3bb40b69f6266af216. The desktop builds apply
   FreeTunnel's changes to it, which are in
   [vendor/trusttunnel/](vendor/trusttunnel/) in FreeTunnel's source. Android
   applies the routing-priority patch listed in [android/core-source.json](android/core-source.json).
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
-- Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/b1ddbd293e530d8ae49097727030773f964ef2cc>
-- Source, Android: <https://github.com/TrustTunnel/TrustTunnelClient/tree/c0990e174fc75b2e52acd15882c62e69a3022581>
+- Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1>
+- Source, Android: <https://github.com/TrustTunnel/TrustTunnelClient/tree/067deb837ed994d6ae902e3bb40b69f6266af216>
 
 ### NativeLibsCommon
 
-- Version: 8.1.54, commit 00b38bb2a4b206b677ad1f2b901ccb8bb0d60372
+- Version, desktop: 8.2.1, commit 9d05accbe1f22764350fd5dcd6726244be0b2b96
+- Version, Android: 8.2.0, commit c546b329360642576cea25f10bdcbf41d52163df
 - License: Apache-2.0
 - Copyright: Copyright 2022 Adguard Software Ltd
-- Source, desktop: <https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372>
-- Android uses the same NativeLibsCommon source and version.
+- Source, desktop: <https://github.com/AdguardTeam/NativeLibsCommon/tree/9d05accbe1f22764350fd5dcd6726244be0b2b96>
+- Source, Android: <https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df>
 
 ### DnsLibs
 
-- Version, desktop: 2.10.2-9-ge27180de, commit e27180de801a8a99cde4ee81358adef499171c6a
-- Version, Android: 2.10.2-6-gc68d7dde, commit c68d7dde992a147587b8ac200ae3b7d978c3e378
+- Version, desktop: 2.11.0-alpha.2, as required by TrustTunnelClient 1.3.0
+- Version, Android: 2.11.0-alpha.1-3-g3d6359be, commit 3d6359be7b99e2eccbfe905e970dd08a7f1d9108
 - License: Apache-2.0
 - Copyright: Copyright 2022 Adguard Software Ltd
-- Source, desktop: <https://github.com/AdguardTeam/DnsLibs/tree/e27180de801a8a99cde4ee81358adef499171c6a>
-- Source, Android: <https://github.com/AdguardTeam/DnsLibs/tree/c68d7dde992a147587b8ac200ae3b7d978c3e378>
+- Source, Android: <https://github.com/AdguardTeam/DnsLibs/tree/3d6359be7b99e2eccbfe905e970dd08a7f1d9108>
 
 ### BoringSSL
 
@@ -142,7 +142,7 @@ packages uses the system's OpenSSL, if one is installed.)
 
 - Version: commit d589045a772678d5ca131f4c8087d001b9258380 (tag 0.20260508.0),
   modified by the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/boringssl>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/boringssl>)
 - License: Apache-2.0
 - Copyright: Copyright The BoringSSL Authors; Copyright 1995-2016 The OpenSSL
   Project Authors; Copyright (c) 2002, Oracle and/or its affiliates; Copyright
@@ -152,7 +152,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### nghttp2
 
 - Version: 1.56.0, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/nghttp2-1.56.0>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/nghttp2-1.56.0>)
 - License: MIT, [licenses/common/nghttp2.txt](licenses/common/nghttp2.txt)
 - Copyright: Copyright (c) 2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa;
   Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors
@@ -161,7 +161,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### nghttp3
 
 - Version: 1.0.0, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/nghttp3-1.0.0>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/nghttp3-1.0.0>)
 - License: MIT, [licenses/common/nghttp3.txt](licenses/common/nghttp3.txt)
 - Copyright: Copyright (c) 2019 nghttp3 contributors
 - Source: <https://github.com/ngtcp2/nghttp3/tree/v1.0.0>
@@ -169,7 +169,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### ngtcp2
 
 - Version: 1.22.1, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/ngtcp2-1.22.1>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/ngtcp2-1.22.1>)
 - License: MIT, [licenses/common/ngtcp2.txt](licenses/common/ngtcp2.txt)
 - Copyright: Copyright (c) 2016 ngtcp2 contributors
 - Source: <https://github.com/ngtcp2/ngtcp2/tree/v1.22.1>
@@ -177,7 +177,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### libevent
 
 - Version: 2.1.11-stable, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/libevent>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/libevent>)
 - License: BSD-3-Clause AND ISC AND MIT,
   [licenses/common/libevent.txt](licenses/common/libevent.txt)
 - Copyright: Copyright (c) 2000-2007 Niels Provos; Copyright (c) 2007-2012
@@ -227,7 +227,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### llhttp
 
 - Version: 9.3.0, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/llhttp-9.3.0>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/llhttp-9.3.0>)
 - License: MIT, [licenses/common/llhttp.txt](licenses/common/llhttp.txt)
 - Copyright: Copyright Fedor Indutny, 2018
 - Source: <https://github.com/nodejs/llhttp/tree/release/v9.3.0>
@@ -249,7 +249,7 @@ packages uses the system's OpenSSL, if one is installed.)
 ### libuv
 
 - Version: 1.41.0, with the patches of AdGuard's conan recipe
-  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/libuv>)
+  (<https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/libuv>)
 - License: MIT AND BSD-2-Clause AND BSD-3-Clause AND ISC,
   [licenses/common/libuv.txt](licenses/common/libuv.txt)
 - Copyright: Copyright (c) 2015-present libuv project contributors; Copyright
@@ -262,13 +262,13 @@ packages uses the system's OpenSSL, if one is installed.)
 AdGuard's library for looking up public suffixes. It compiles Chromium's lookup
 code and a table built from the Public Suffix List.
 
-- Version: 2022-12-26, in NativeLibsCommon 8.1.54
+- Version: 2022-12-26, in NativeLibsCommon 8.2.0
 - License: BSD-3-Clause (Chromium's code,
   [licenses/common/chromium-tldregistry.txt](licenses/common/chromium-tldregistry.txt))
   AND MPL-2.0 (the Public Suffix List, [licenses/common/MPL-2.0.txt](licenses/common/MPL-2.0.txt))
 - Copyright: Copyright 2015 The Chromium Authors; the Public Suffix List is
   maintained by its contributors at publicsuffix.org
-- Source: <https://github.com/AdguardTeam/NativeLibsCommon/tree/00b38bb2a4b206b677ad1f2b901ccb8bb0d60372/conan/recipes/tldregistry>;
+- Source: <https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/tldregistry>;
   the list's Source Code Form: <https://publicsuffix.org/list/>,
   <https://github.com/publicsuffix/list>
 
@@ -320,7 +320,7 @@ code and a table built from the Public Suffix List.
 - License: BSD-3-Clause, [licenses/common/lwip.txt](licenses/common/lwip.txt)
 - Copyright: Copyright (c) 2001, 2002 Swedish Institute of Computer Science;
   and the other holders listed in [licenses/common/lwip.txt](licenses/common/lwip.txt)
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/c0990e174fc75b2e52acd15882c62e69a3022581/third-party/lwip/lwip>
+- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/067deb837ed994d6ae902e3bb40b69f6266af216/third-party/lwip/lwip>
 
 ### pcap_savefile.h
 
@@ -331,7 +331,7 @@ A header from libpcap that the core uses to write packet captures.
   This product includes software developed by the Computer Systems Engineering
   Group at Lawrence Berkeley Laboratory.
 - Copyright: Copyright (c) 1994, 1995, 1996 The Regents of the University of California
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/blob/c0990e174fc75b2e52acd15882c62e69a3022581/third-party/pcap_savefile/include/pcap_savefile.h>
+- Source: <https://github.com/TrustTunnel/TrustTunnelClient/blob/067deb837ed994d6ae902e3bb40b69f6266af216/third-party/pcap_savefile/include/pcap_savefile.h>
 
 ### Microsoft Detours
 
@@ -373,8 +373,9 @@ the desktop's shapes; they are covered by the same license.
 
 ### Qt
 
-FreeTunnel's desktop interface is built with Qt 6.12.0: The Qt Company's
-official binaries, built from unmodified source. On Windows, windeployqt
+FreeTunnel's desktop interface is built with Qt 6.9.3: a source build with the compatibility and security backports in
+[vendor/qt](vendor/qt/README.md). The exact source commits and archive hashes
+are recorded in [vendor/qt/source.json](vendor/qt/source.json). On Windows, windeployqt
 copies Qt's DLLs and plugins unchanged. On macOS, macdeployqt rewrites the
 install names that say where Qt's frameworks are and strips their debugging
 symbols, and the bundle's ad-hoc signature is added to each of them. On Linux,
@@ -387,18 +388,18 @@ which incorporates the GNU General Public License version 3
 also available under other licenses: `LicenseRef-Qt-Commercial OR
 LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`.
 
-- Version: Qt 6.12.0: the libraries, plugins and QML modules of qtbase,
+- Version: Qt 6.9.3: the libraries, plugins and QML modules of qtbase,
   qtdeclarative and qtsvg that FreeTunnel needs, and Qt's Russian translations
   from qttranslations
 - License: LGPL-3.0-only
 - Copyright: Copyright (C) The Qt Company Ltd. and other contributors
-- Source: the complete source of Qt 6.12.0 is at
-  <https://download.qt.io/archive/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz>,
-  and module by module (`qtbase-everywhere-src-6.12.0.tar.xz` and so on) at
-  <https://download.qt.io/archive/qt/6.12/6.12.0/submodules/>
+- Source: the complete source of Qt 6.9.3 is at
+  <https://download.qt.io/archive/qt/6.9/6.9.3/single/qt-everywhere-src-6.9.3.tar.xz>,
+  and module by module (`qtbase-everywhere-src-6.9.3.tar.xz` and so on) at
+  <https://download.qt.io/archive/qt/6.9/6.9.3/submodules/>
 
 FreeTunnel links Qt dynamically, so you can replace the Qt libraries with your
-own build of Qt 6.12.0, modified or not:
+own build of Qt 6.9.3, modified or not:
 
 - Windows: the `Qt6*.dll` files and the plugin and `qml` folders next to
   `FreeTunnel.exe` (Qt built with MSVC 2022 for x64).
@@ -415,9 +416,9 @@ reverse engineering FreeTunnel to debug such modifications.
 ### Third-party code inside Qt
 
 Qt contains code from other projects, compiled into its libraries and plugins.
-[licenses/desktop/Qt-6.12.0-third-party.txt](licenses/desktop/Qt-6.12.0-third-party.txt)
+[licenses/desktop/Qt-6.9.3-third-party.txt](licenses/desktop/Qt-6.9.3-third-party.txt)
 lists each one with its version, license, copyright and license text, as Qt's
-own attribution files at tag v6.12.0 give them: among them FreeType, HarfBuzz,
+own attribution files at tag v6.9.3 give them: among them FreeType, HarfBuzz,
 libpng, libjpeg-turbo, PCRE2, zlib, double-conversion, TinyCBOR, MD4C, the
 Unicode Character Database and CLDR, the Public Suffix List, the
 JavaScriptCore macro assembler and XSVG.
@@ -475,7 +476,7 @@ through the API of `wintun.h`.
 Windows only: `opengl32sw.dll`, a software OpenGL renderer that comes with
 Qt's Windows binaries, for systems whose own OpenGL Qt cannot use.
 
-- Version: as shipped with Qt 6.12.0 for Windows
+- Version: as shipped with Qt 6.9.3 for Windows
 - License: MIT AND BSL-1.0, [licenses/desktop/Mesa-llvmpipe.txt](licenses/desktop/Mesa-llvmpipe.txt)
 - Copyright: Copyright (C) 1999-2007 Brian Paul; Copyright (c) 2013-2016 The
   Khronos Group Inc.; (C) Copyright yohhoy 2012
@@ -619,17 +620,17 @@ and links libfuse, squashfuse, zstd, zlib, musl and mimalloc statically.
 
 ### TrustTunnel Android client
 
-The VPN client library the app is built on (`trusttunnel-client-android-1.1.11.aar`):
+The VPN client library the app is built on (`trusttunnel-client-android-1.1.12.aar`):
 its Java and Kotlin classes, its `assets/logback.xml`, and its native library,
 which contains the VPN core and its libraries listed above (all but Detours and
 wintun.h), the JNI adapter, and the Rust code below. The native library is
 built with the Android NDK's LLVM libc++ (Apache-2.0 WITH LLVM-exception),
 which asks for no notice in compiled form.
 
-- Version: 1.1.11 (TrustTunnelClient commit c0990e174fc75b2e52acd15882c62e69a3022581)
+- Version: 1.1.12 (TrustTunnelClient commit 067deb837ed994d6ae902e3bb40b69f6266af216)
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.11/platform/android>
+- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.12/platform/android>
 
 ### Rust crates in the TrustTunnel native library
 
@@ -668,14 +669,14 @@ Maven coordinates; the others come in as their dependencies.
 
 #### SLF4J API
 
-- Version: 1.7.25 (`org.slf4j:slf4j-api:1.7.25`)
+- Version: 2.0.20 (`org.slf4j:slf4j-api:2.0.20`)
 - License: MIT, [licenses/android/slf4j.txt](licenses/android/slf4j.txt)
-- Copyright: Copyright (c) 2004-2017 QOS.ch
-- Source: <https://github.com/qos-ch/slf4j/tree/v_1.7.25>
+- Copyright: Copyright (c) 2004-2023 QOS.ch
+- Source: <https://github.com/qos-ch/slf4j/tree/v_2.0.20>
 
 #### logback-android
 
-- Version: 2.0.0 (`com.github.tony19:logback-android:2.0.0`)
+- Version: 3.0.0 (`com.github.tony19:logback-android:3.0.0`)
 - License: Apache-2.0, as published. It is derived from QOS.ch's logback,
   which is EPL-1.0 OR LGPL-2.1-only. To the extent that logback's code in it
   remains under those terms, FreeTunnel distributes it under the Eclipse
@@ -689,32 +690,32 @@ Maven coordinates; the others come in as their dependencies.
   EPL are offered by FreeTunnel alone.
 - Copyright: Copyright 2019 Anthony Trinh; Copyright (C) 2011-2012, Anthony
   Trinh; Copyright (C) 1999-2011, QOS.ch
-- Source: <https://github.com/tony19/logback-android/tree/v_2.0.0>
+- Source: <https://github.com/tony19/logback-android/tree/v_3.0.0>
 
 #### RxAndroid and RxJava
 
-- Version: RxAndroid 3.0.0 (`io.reactivex.rxjava3:rxandroid:3.0.0`), with
-  RxJava 3.0.0 and Reactive Streams 1.0.3
-- License: Apache-2.0 (RxAndroid, RxJava); Reactive Streams is CC0-1.0 (public
-  domain dedication)
+- Version: RxAndroid 3.0.2 (`io.reactivex.rxjava3:rxandroid:3.0.2`), with
+  RxJava 3.1.5 and Reactive Streams 1.0.4
+- License: Apache-2.0 (RxAndroid, RxJava); Reactive Streams is MIT-0
+  ([licenses/android/reactive-streams.txt](licenses/android/reactive-streams.txt))
 - Copyright: RxJava: Copyright (c) 2016-present, RxJava Contributors; RxAndroid:
   the RxAndroid authors
-- Source: <https://github.com/ReactiveX/RxAndroid/tree/3.0.0>,
-  <https://github.com/ReactiveX/RxJava/tree/v3.0.0>,
-  <https://github.com/reactive-streams/reactive-streams-jvm/tree/v1.0.3>
+- Source: <https://github.com/ReactiveX/RxAndroid/tree/3.0.2>,
+  <https://github.com/ReactiveX/RxJava/tree/v3.1.5>,
+  <https://github.com/reactive-streams/reactive-streams-jvm/tree/v1.0.4>
 
 #### ktoml
 
-- Version: 0.7.0 (`com.akuleshov7:ktoml-core:0.7.0`)
+- Version: 0.7.1 (`com.akuleshov7:ktoml-core:0.7.1`)
 - License: MIT, [licenses/android/ktoml.txt](licenses/android/ktoml.txt)
 - Copyright: Copyright (c) 2023 Andrey Kuleshov
-- Source: <https://github.com/akuleshov7/ktoml/tree/v0.7.0>
+- Source: <https://github.com/akuleshov7/ktoml/tree/v0.7.1>
 
 #### kotlinx.serialization and kotlinx-datetime
 
 ktoml's dependencies.
 
-- Version: kotlinx-serialization-core 1.8.1, kotlinx-datetime 0.6.2
+- Version: kotlinx-serialization-core 1.9.0, kotlinx-datetime 0.7.1-0.6.x-compat
 - License: Apache-2.0, with kotlinx.serialization's NOTICE
   ([licenses/android/NOTICE-files.txt](licenses/android/NOTICE-files.txt));
   kotlinx-datetime's date calculations derive from the ThreeTen backport,
@@ -722,34 +723,34 @@ ktoml's dependencies.
 - Copyright: Copyright 2017-2019 JetBrains s.r.o and respective authors and
   developers; JetBrains s.r.o. and contributors; ThreeTen backport: Copyright
   (c) 2007-present, Stephen Colebourne & Michael Nascimento Santos
-- Source: <https://github.com/Kotlin/kotlinx.serialization/tree/v1.8.1>,
-  <https://github.com/Kotlin/kotlinx-datetime/tree/v0.6.2>
+- Source: <https://github.com/Kotlin/kotlinx.serialization/tree/v1.9.0>,
+  <https://github.com/Kotlin/kotlinx-datetime/tree/v0.7.1>
 
 #### Tomlj
 
-- Version: 1.1.1 (`org.tomlj:tomlj:1.1.1`)
+- Version: 2.2.0 (`org.tomlj:tomlj:2.2.0`)
 - License: Apache-2.0. Its source files carry the Apache Software Foundation's
   license header; the project has no NOTICE file.
 - Copyright: the Tomlj authors
-- Source: <https://github.com/tomlj/tomlj/tree/1.1.1>
+- Source: <https://github.com/tomlj/tomlj/tree/2.2.0>
 
 #### ANTLR 4 runtime
 
-A dependency of Tomlj.
+Bundled and shaded inside Tomlj.
 
-- Version: 4.11.1
+- Version: 4.13.2
 - License: BSD-3-Clause, [licenses/android/ANTLR-4.txt](licenses/android/ANTLR-4.txt)
 - Copyright: Copyright (c) 2012-2022 The ANTLR Project
-- Source: <https://github.com/antlr/antlr4/tree/4.11.1>
+- Source: <https://github.com/antlr/antlr4/tree/4.13.2>
 
 #### Checker Framework qualifiers
 
-A dependency of Tomlj.
+Compile-time annotations for the Tomlj API; not packaged in the app.
 
-- Version: checker-qual 3.21.2
+- Version: checker-qual 4.4.0 (`org.checkerframework:checker-qual:4.4.0`)
 - License: MIT, [licenses/android/checker-qual.txt](licenses/android/checker-qual.txt)
 - Copyright: Copyright 2004-present by the Checker Framework developers
-- Source: <https://github.com/typetools/checker-framework/tree/checker-framework-3.21.2/checker-qual>
+- Source: <https://github.com/typetools/checker-framework/tree/checker-framework-4.4.0/checker-qual>
 
 #### Bouncy Castle
 
@@ -767,7 +768,7 @@ A dependency of Tomlj.
 
 #### AndroidX
 
-- Version: Core KTX 1.16.0 (`androidx.core:core-ktx:1.16.0`), with the
+- Version: Core KTX 1.19.1 (`androidx.core:core-ktx:1.19.1`), with the
   AndroidX libraries it depends on (Core, Core ViewTree, Annotation, Annotation
   Experimental, Collection, Concurrent Futures, Interpolator, Lifecycle, Arch
   Core, ProfileInstaller, Startup, Tracing, VersionedParcelable)
@@ -777,9 +778,9 @@ A dependency of Tomlj.
 
 #### Kotlin standard library and kotlinx.coroutines
 
-- Version: kotlin-stdlib 2.1.20, kotlinx-coroutines-core and
-  kotlinx-coroutines-android 1.6.4 (a dependency of AndroidX Lifecycle),
-  JetBrains annotations 13.0
+- Version: kotlin-stdlib 2.4.21, kotlinx-coroutines-core and
+  kotlinx-coroutines-android 1.9.0 (a dependency of AndroidX Lifecycle),
+  JetBrains annotations 23.0.0
 - License: Apache-2.0, with the NOTICE files of Kotlin and kotlinx.coroutines
   ([licenses/android/NOTICE-files.txt](licenses/android/NOTICE-files.txt)).
   `kotlin.time` derives from the ThreeTen backport, BSD-3-Clause
@@ -787,10 +788,9 @@ A dependency of Tomlj.
   a part of `kotlin.math` is under the Boost Software License 1.0, which asks for
   no notice in compiled form.
 - Copyright: Copyright 2010-2024 JetBrains s.r.o and respective authors and
-  developers; Copyright 2016-2021 JetBrains s.r.o and respective authors and
-  developers (kotlinx.coroutines)
-- Source: <https://github.com/JetBrains/kotlin/tree/v2.1.20/libraries/stdlib>,
-  <https://github.com/Kotlin/kotlinx.coroutines/tree/1.6.4>,
+  developers; Copyright 2016-2024 JetBrains s.r.o and contributors (kotlinx.coroutines)
+- Source: <https://github.com/JetBrains/kotlin/tree/v2.4.21/libraries/stdlib>,
+  <https://github.com/Kotlin/kotlinx.coroutines/tree/1.9.0>,
   <https://github.com/JetBrains/java-annotations>
 
 #### Guava ListenableFuture and JSpecify
@@ -825,7 +825,7 @@ the desktop's `assets/icons/*.svg` and `assets/logo.svg`:
 FreeTunnel ships these components as binaries built from source that it has
 not changed:
 
-- Qt 6.12.0 (LGPL-3.0, all desktop downloads): the source is at the addresses
+- Qt 6.9.3 (LGPL-3.0, all desktop downloads): the source is at the addresses
   given under [Qt](#qt).
 - The LGPL-licensed Ubuntu 22.04 libraries in the Linux packages:
   `bundled-system-packages.txt` names each source package and its version, and
@@ -852,8 +852,15 @@ ngtcp2, nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
 Under [licenses/desktop/](licenses/desktop/): AFL-2.1, AppImage-runtime,
 Detours, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1, LGPL-3.0,
 Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
-Qt-6.12.0-third-party, Wintun.
+Qt-6.9.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
-checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, slf4j,
+checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, reactive-streams, slf4j,
 ThreeTen-Backport, winnow.
+
+### ZXing Core (Android QR scanner)
+
+- Version: 3.5.4 (`com.google.zxing:core:3.5.4`)
+- License: Apache-2.0 ([LICENSE](LICENSE)).
+- Source: <https://github.com/zxing/zxing/tree/zxing-3.5.4>
+- Copyright ZXing authors. Used for local QR decoding; no cloud service is involved.

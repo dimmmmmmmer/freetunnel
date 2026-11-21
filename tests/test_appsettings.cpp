@@ -20,6 +20,7 @@ class TestAppSettings : public QObject {
 private slots:
     void initTestCase();
     void defaultsWhenEmpty();
+    void geoDefaultsAreOnlySeededOnce();
     void theRecommendedListIsExactlyTheSharedFile();
     void theDefaultExcludedRoutesAreExactlyTheSharedFile();
     void roundTrip();
@@ -48,7 +49,7 @@ void TestAppSettings::defaultsWhenEmpty() {
     // Fresh, empty scope yields the documented defaults.
     AppSettings s = loadAppSettings();
     QCOMPARE(s.language, QStringLiteral("en"));
-    QCOMPARE(s.theme_mode, QStringLiteral("system"));
+    QCOMPARE(s.theme_mode, QStringLiteral("dark"));
     // Off: the ✕ keeps minimising to the taskbar, as it always did.
     QCOMPARE(s.minimize_to_tray, false);
     QCOMPARE(s.auto_connect_on_start, false);
@@ -58,7 +59,18 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.killswitch_ports_from_config, false);
     QCOMPARE(s.domain_bypass_enabled, true);
     QCOMPARE(s.logging_enabled, true);
-    QCOMPARE(s.profiles.value(QStringLiteral("Default")), recommendedRussiaDomains());
+    QVERIFY(s.profiles.value(QStringLiteral("Default")).isEmpty());
+    const auto lists = s.profile_geo_lists.value(QStringLiteral("Default"));
+    QCOMPARE(lists.size(), 2);
+    QCOMPARE(lists[0].name, QStringLiteral("Russian sites"));
+    QCOMPARE(lists[1].name, QStringLiteral("Russian IP addresses"));
+    QCOMPARE(lists[0].kind, freetunnel::GeoListKind::Sites);
+    QCOMPARE(lists[1].kind, freetunnel::GeoListKind::Ips);
+    for (const auto &list : lists) {
+        QVERIFY(list.enabled);
+        QCOMPARE(list.direction, freetunnel::GeoDirection::Bypass);
+        QVERIFY(list.source.startsWith(QStringLiteral("https://")));
+    }
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral("*.ru")));
     QVERIFY(!recommendedRussiaDomains().contains(QStringLiteral(".ru")));
     QCOMPARE(s.hotkeys_enabled, false);
@@ -66,6 +78,22 @@ void TestAppSettings::defaultsWhenEmpty() {
     QCOMPARE(s.hotkey_connect, QStringLiteral("Ctrl+Shift+E"));
     QCOMPARE(s.hotkey_disconnect, QStringLiteral("Ctrl+Shift+D"));
     QVERIFY(s.last_config_path.isEmpty());
+}
+
+void TestAppSettings::geoDefaultsAreOnlySeededOnce() {
+    QSettings settings;
+    settings.clear();
+    AppSettings fresh = loadAppSettings();
+    fresh.profile_geo_lists[QStringLiteral("Default")].clear();
+    saveAppSettings(fresh);
+    QVERIFY(loadAppSettings().profile_geo_lists.value(QStringLiteral("Default")).isEmpty());
+    QVERIFY(loadAppSettings().profiles.value(QStringLiteral("Default")).isEmpty());
+    settings.clear();
+    settings.setValue("bypass/profile/Default", QStringList{QStringLiteral("existing.example")});
+    const AppSettings upgraded = loadAppSettings();
+    QCOMPARE(upgraded.profiles.value(QStringLiteral("Default")), QStringList{QStringLiteral("existing.example")});
+    QVERIFY(upgraded.profile_geo_lists.value(QStringLiteral("Default")).isEmpty());
+    settings.clear();
 }
 
 // data/split/recommended-russia.txt is the one list, for this app and the Android one. The
@@ -118,7 +146,7 @@ void TestAppSettings::theDefaultExcludedRoutesAreExactlyTheSharedFile() {
 void TestAppSettings::roundTrip() {
     AppSettings in;
     in.language = QStringLiteral("ru");
-    in.theme_mode = QStringLiteral("dark");
+    in.theme_mode = QStringLiteral("light");
     in.minimize_to_tray = true;
     in.auto_connect_on_start = true;
     in.killswitch_enabled = true;

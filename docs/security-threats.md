@@ -11,6 +11,7 @@ report a vulnerability, is in [SECURITY.md](../SECURITY.md).
 - [Threat summary](#threat-summary)
 - [Processes running as the same user](#processes-running-as-the-same-user)
 - [Privileged helper and its IPC](#privileged-helper-and-its-ipc)
+- [Installed helpers on macOS and Linux](#installed-helpers-on-macos-and-linux)
 - [AppImage elevation on Linux](#appimage-elevation-on-linux)
 - [Config files reaching root](#config-files-reaching-root)
 - [Updates and signatures](#updates-and-signatures)
@@ -193,9 +194,51 @@ through UAC as before.
   clients, as other VPN clients run, would have needed a new protocol and a new
   way to tell callers apart; this one reuses the handshake that already does.
 
+## Installed helpers on macOS and Linux
+
+- **Threat:** retaining authorization after the first connection could turn a
+  user-writable application, its dependencies, arguments or update files into
+  arbitrary root execution.
+- **Mitigation:** the authorized executable and its complete deployed runtime
+  live in root-owned directories, under `/Library/PrivilegedHelperTools` on
+  macOS and `/opt/freetunnel-helper` on Linux. Every parent must be a real
+  root-owned directory without group/world write access. A per-UID sudoers rule
+  grants only the fixed `--installed-helper` entry point, with `NOSETENV`.
+  That entry point accepts only a status check, a strictly parsed session start
+  or a verified newer release. Installation, adding another user and removal
+  still require explicit administrator authorization.
+- **Update boundary:** root first snapshots the archive and signed manifest in
+  a private directory, verifies the Ed25519 release signature, asset SHA-256,
+  increasing release version and expected executable hash, then extracts the
+  authenticated copy. Only ordinary files, directories and internal symlinks
+  are accepted; write permissions and setuid/setgid bits are removed. An atomic
+  `current` symlink selects the runtime. A lock held for the whole VPN session
+  prevents updates/removal while it is running. The root-owned lock file lives
+  beside the runtime and survives removal, preventing concurrent installers
+  from locking different inodes. Debian's root package-manager scripts can
+  install their already-installed runtime without a second download.
+- **Session boundary:** the token's opened descriptor must belong to the actual
+  `SUDO_UID`, have no group/world access and have exactly one hard link. The
+  existing HMAC handshake, config restrictions and GUI-disconnect shutdown are
+  unchanged. Root clears the inherited environment before Qt initialization or
+  starting external tools; only the invoking UID and fixed system paths remain.
+- **Residual risk:** processes running as an authorized account may start VPN
+  sessions and change machine-wide routing, just as the Windows service allows.
+  They cannot grant other accounts access or install arbitrary unsigned code
+  through this entry point. The initial administrator prompt still authorizes
+  the application the user is running; replacing that user-owned application
+  before initial authorization is outside this protection. A development build,
+  or a release whose helper archive cannot be obtained, falls back to the
+  existing prompted session helper.
+- **Lifecycle:** authorization persists, not an always-running root daemon.
+  The helper exits with the GUI. Removal revokes all FreeTunnel per-UID grants;
+  it does not edit unrelated sudoers files. See the removal commands in the
+  [user guide](../USER_GUIDE.md#administrator-prompt).
+
 ## AppImage elevation on Linux
 
-An AppImage build has to re-exec the `.AppImage` file as root rather than the
+Initial installation and the prompted fallback for an AppImage have to re-exec
+the `.AppImage` file as root rather than the
 executable inside its FUSE mount, since root cannot read that user-private
 mount. Root does not mount the AppImage; it unpacks it, with the runtime's
 extract-and-run, which also works where there is no FUSE.
@@ -623,11 +666,14 @@ FreeTunnel's own.
   - its tunnel device keeps the routes, and on Windows the filters that block
     untunnelled traffic are installed with that device and removed with it, so
     what the block covers is exactly how long one session lasts;
-  - the address rules and the mode are handed to the running session (the
-    core's own `vpn_update_exclusions()`, reached through FreeTunnel's third
-    vendor patch) in one update per edit, and before the program rules change,
-    so that no connection decided by the new program rules is completed under
-    the old mode;
+  - live domain, mode and application edits carry a common generation. The
+    app callback reads its rules and generation together; the core checks that
+    generation when consuming the asynchronous decision and rejects mismatches.
+    Each queued update carries the full mode/domain snapshot, including app-only
+    edits, so coalescing updates cannot lose a pending mode change. App-only
+    edits preserve established connections. Postponed decisions from recovery
+    are rejected when the policy changes. Domain/mode edits also reset direct
+    connections while the VPN endpoint is disconnected;
   - with the kill switch on, a first connect that fails stays in the core's
     recovery loop inside its session instead of ending it after a few attempts,
     so it no longer passes through FreeTunnel's own backoff, which took the
@@ -643,23 +689,44 @@ FreeTunnel's own.
     its address before a session can start) all leave traffic unblocked.
   - **The helper quits with the GUI**, and the block with the session it holds,
     so that an elevated process never outlives the app that started it.
-  - **An instant per edit.** Program rules are decided as a connection arrives
-    and the mode when the core completes it, and the two cannot change together:
-    - an edit that turns "Through VPN" on and lists a program in the same step,
-      as adding the first program with no addresses listed does, can let a
-      connection that program starts in that instant leave the tunnel;
-    - so can taking the last program out of "Through VPN" while a session is
-      still being built, in the moment before the new session is handed the
-      change;
-    - and so can two edits that land before the core has taken the first: it
-      keeps only the latest update, which carries the whole of the rules and the
-      mode, so the session ends up routed by the second edit, but a connection
-      the first edit's program rules decided in between is completed under the
-      mode from before it.
+
+A connection attempted during a policy change can be rejected and require the
+application to retry; it is never completed using app rules from one generation
+and core routing from another. This applies during session construction as well:
+the initial config carries its version and adoption submits any newer snapshot.
+The version check also precedes recovery fallbacks when the kill switch is off.
+These guarantees cover the desktop Qt wrapper; they do not turn a session-based
+kill switch into a system-wide firewall when no VPN session exists.
 
 **Why:** the block covers exactly how long one session lasts, so a session must
 not be rebuilt for something it can take while it runs. That is why edits go to
 the running session and a failed first connect stays inside it.
+
+### Incoming UDP replies on Linux
+
+A wildcard UDP listener chooses its reply source address before the OUTPUT
+conntrack hook. Routing the initial lookup straight to TUN can choose the TUN
+address, so conntrack no longer recognizes the packet as an incoming flow's
+reply. Source-port exemptions cannot safely distinguish that reply from a new
+outgoing connection using the same port.
+
+The old blanket exceptions for source ports 1–1024 and 5900–5920 are removed;
+incoming service replies are identified by connection direction instead.
+The initial lookup for local, unmarked UDP uses the normal routing table.
+The nftables OUTPUT route chain then marks non-reply UDP for the existing TUN
+routing table. Replies retain the incoming-reply mark and their physical source
+address. This applies to IPv4 and IPv6; forwarded traffic keeps its existing
+routing. Other mark bits are preserved. Core sockets bound to the uplink still
+bypass TUN. Removal disables the initial lookup exception before removing the
+OUTPUT capture chain.
+
+`tests/test_linux_reply_routing.py` checks real reply traffic for both explicit
+and wildcard binds. It also captures actual outgoing packets, including a new
+flow on the incoming service's port, connected UDP sends, untracked UDP and
+core-style interface-bound sockets. Outgoing TCP/UDP on service ports is
+checked before and after removing the legacy source-port exemptions; forwarded
+UDP and capture during teardown are checked too. A plain `ip route get` only shows the initial
+lookup and cannot verify the subsequent OUTPUT reroute.
 
 ### Server latency probes
 

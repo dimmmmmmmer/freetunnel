@@ -1,0 +1,318 @@
+--- a/core/include/vpn/internal/domain_filter.h
++++ b/core/include/vpn/internal/domain_filter.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <array>
++#include <memory>
+ #include <bitset>
+ #include <chrono>
+ #include <set>
+@@ -75,12 +77,16 @@
+      * Match address tag against exclusion list. Logic of matching is explained in
+      * `VpnSettings.exclusions` description.
+      * @param tag address tag
++     * @param defer_unknown_domain defer lower-priority IP rules while a scannable hostname is unknown
+      */
+-    [[nodiscard]] DomainFilterMatchResult match_tag(const SockAddrTag &tag) const;
++    [[nodiscard]] DomainFilterMatchResult match_tag(const SockAddrTag &tag, bool defer_unknown_domain = false) const;
++
++    [[nodiscard]] bool has_policy_rules() const;
+ 
+     /**
+      * Add resolved tag in cache
+      * @param tag address tag
++     * @param defer_unknown_domain defer lower-priority IP rules while a scannable hostname is unknown
+      * @param domain domain name
+      */
+     void add_resolved_tag(SockAddrTag tag, std::string domain);
+@@ -115,6 +121,11 @@
+     struct DomainEntryMalformed {};
+     using ParseResult = std::variant<SocketAddress, CidrRange, DomainEntryInfo, PortOnlyEntry, DomainEntryMalformed>;
+ 
++    // FreeTunnel: explicit policy tiers, first match wins. Manual rules precede
++    // downloaded lists; within a tier a tunnel rule wins a conflicting bypass.
++    // Child filters hold ordinary entries only, so policy layers never recurse.
++    std::array<std::unique_ptr<DomainFilter>, 4> m_policy;
++    [[nodiscard]] DomainFilterMatchStatus policy_action(size_t tier) const;
+     VpnMode m_mode = VPN_MODE_GENERAL;
+     std::unordered_map<std::string, MatchFlagsSet> m_domains; // key - domain name / value - set of `MatchFlags`
+     std::unordered_set<SocketAddress> m_addresses;
+--- a/core/src/domain_filter.cpp
++++ b/core/src/domain_filter.cpp
+@@ -1,4 +1,5 @@
+ #include "vpn/internal/domain_filter.h"
++#include <algorithm>
+ 
+ #include "common/defs.h"
+ #include "vpn/internal/utils.h"
+@@ -21,6 +22,9 @@
+ DomainFilter::~DomainFilter() = default;
+ 
+ DomainFilterValidationStatus DomainFilter::validate_entry(std::string_view entry) {
++    if (entry.size() > 3 && entry[0] == '@' && entry[1] >= '0' && entry[1] <= '3' && entry[2] == ':') {
++        entry.remove_prefix(3);
++    }
+     ParseResult result = parse_entry(entry);
+     static_assert(std::is_same_v<std::variant_alternative_t<DFVS_OK_ADDR, ParseResult>, SocketAddress>);
+     static_assert(std::is_same_v<std::variant_alternative_t<DFVS_OK_CIDR, ParseResult>, CidrRange>);
+@@ -96,7 +100,21 @@
+     m_exclusion_suspects.clear();
+     m_cidr_ranges.clear();
+ 
+-    auto add_entry = [this](const std::string &entry) {
++    std::array<std::string, 4> policy_entries;
++    std::string original_entries;
++    for (auto &filter : m_policy) {
++        filter.reset();
++    }
++    auto add_entry = [this, &policy_entries, &original_entries](const std::string &entry) {
++        if (entry.size() > 3 && entry[0] == '@' && entry[1] >= '0' && entry[1] <= '3' && entry[2] == ':') {
++            const std::string_view plain(entry.data() + 3, entry.size() - 3);
++            // Nested prefixes and malformed entries are never passed to a child.
++            if (parse_entry(plain).index() != DFVS_MALFORMED) {
++                policy_entries[size_t(entry[1] - '0')].append(plain).push_back(' ');
++            }
++            return;
++        }
++        original_entries.append(entry).push_back(' ');
+         ParseResult result = parse_entry(entry);
+         if (const auto *addr = std::get_if<SocketAddress>(&result); addr != nullptr) {
+             log_filter(this, trace, "Entry added in address table: {}", entry);
+@@ -132,10 +150,40 @@
+         add_entry(buffer);
+     }
+ 
++    // TOML exclusions are user-authored rules too. When a policy is present,
++    // place them beside manual UI rules, before either geo tier. Ordinary
++    // configurations (and the policy's leaf filters) retain legacy semantics.
++    const bool policy_present = std::any_of(policy_entries.begin(), policy_entries.end(),
++            [](const std::string &entries) { return !entries.empty(); });
++    if (policy_present && !original_entries.empty()) {
++        policy_entries[m_mode == VPN_MODE_GENERAL ? 1 : 0].append(original_entries);
++        m_domains.clear();
++        m_addresses.clear();
++        m_ports_only.clear();
++        m_cidr_ranges.clear();
++    }
++
++    for (size_t tier = 0; tier < policy_entries.size(); ++tier) {
++        if (!policy_entries[tier].empty()) {
++            m_policy[tier] = std::make_unique<DomainFilter>();
++            m_policy[tier]->update_exclusions(VPN_MODE_GENERAL, policy_entries[tier]);
++        }
++    }
+     return true;
+ }
+ 
++DomainFilterMatchStatus DomainFilter::policy_action(size_t tier) const {
++    const bool through_vpn = tier % 2 == 0;
++    const bool default_through_vpn = m_mode == VPN_MODE_GENERAL;
++    return through_vpn == default_through_vpn ? DFMS_DEFAULT : DFMS_EXCLUSION;
++}
++
+ DomainFilterMatchStatus DomainFilter::match_domain(std::string_view domain) const {
++    for (size_t tier = 0; tier < m_policy.size(); ++tier) {
++        if (m_policy[tier] && m_policy[tier]->match_domain(domain) == DFMS_EXCLUSION) {
++            return policy_action(tier);
++        }
++    }
+     bool www_prefixed = starts_with(domain, WWW_PREFIX);
+     std::string seek = !www_prefixed ? std::string(domain) : std::string(domain.substr(WWW_PREFIX.length()));
+ 
+@@ -165,12 +213,37 @@
+     return DFMS_DEFAULT;
+ }
+ 
+-DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag) const {
++DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool defer_unknown_domain) const {
+     DomainFilterMatchResult result{.status = DFMS_DEFAULT};
+ 
+     SocketAddress addr_no_port = tag.addr;
+     addr_no_port.set_port(0);
+ 
++    // Keep the parent DNS cache authoritative across rule updates: policy
++    // children are rebuilt, but a known hostname must keep its priority.
++    const auto known_domain = m_resolved_tags.get(tag);
++    // For a new scannable connection, defer lower-priority IP decisions until
++    // its hostname is available. Explicit manual IP rules can decide at once.
++    bool pending_domains = false;
++    for (size_t tier = 0; tier < m_policy.size(); ++tier) {
++        if (m_policy[tier]) {
++            if (known_domain && m_policy[tier]->match_domain(*known_domain) == DFMS_EXCLUSION) {
++                return {.status = policy_action(tier), .domain = *known_domain};
++            }
++            auto match = m_policy[tier]->match_tag(tag);
++            if (match.status == DFMS_EXCLUSION) {
++                if (!known_domain && defer_unknown_domain && pending_domains) {
++                    return {.status = DFMS_SUSPECT_EXCLUSION};
++                }
++                match.status = policy_action(tier);
++                return match;
++            }
++            pending_domains = pending_domains || !m_policy[tier]->m_domains.empty();
++        }
++    }
++    if (!known_domain && defer_unknown_domain && pending_domains) {
++        return {.status = DFMS_SUSPECT_EXCLUSION};
++    }
+     bool found = m_addresses.contains(tag.addr);
+     if (!found) {
+         found = m_addresses.contains(addr_no_port);
+@@ -222,7 +295,22 @@
+         }
+     }
+ 
++    for (const auto &filter : m_policy) {
++        if (filter) {
++            auto child_names = filter->get_resolvable_exclusions();
++            names.insert(names.end(), child_names.begin(), child_names.end());
++        }
++    }
+     return names;
++}
++
++bool DomainFilter::has_policy_rules() const {
++    for (const auto &filter : m_policy) {
++        if (filter) {
++            return true;
++        }
++    }
++    return false;
+ }
+ 
+ VpnMode DomainFilter::get_mode() const {
+--- a/core/src/tunnel.cpp
++++ b/core/src/tunnel.cpp
+@@ -361,15 +361,20 @@
+     switch (r.status) {
+     case DES_NOTFOUND:
+         log_conn(tunnel, conn, dbg, "Gave up to find domain name");
++        if (filter->has_policy_rules() && filter->match_tag(conn->make_tag()).status == DFMS_EXCLUSION) {
++            action = TDLA_SHUTDOWN;
++        }
+         domain_extractor->reset();
+         break;
+     case DES_FOUND: {
+         log_conn(tunnel, conn, dbg, "Found domain in {} data: {}", (dir == DEPD_OUTGOING) ? "outgoing" : "incoming",
+                 r.domain);
+-        if (DFMS_EXCLUSION == filter->match_domain(r.domain)) {
++        filter->add_resolved_tag(conn->make_tag(), r.domain);
++        const auto status = filter->has_policy_rules()
++                ? filter->match_tag(conn->make_tag()).status : filter->match_domain(r.domain);
++        if (DFMS_EXCLUSION == status) {
+             action = TDLA_SHUTDOWN;
+         }
+-        filter->add_resolved_tag(conn->make_tag(), std::move(r.domain));
+         domain_extractor->reset();
+         break;
+     }
+@@ -1021,7 +1026,7 @@
+             || conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
+         conn->action = request_result.action;
+     } else if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst); dst != nullptr) {
+-        DomainFilterMatchResult filter_result = filter->match_tag(conn->make_tag());
++        DomainFilterMatchResult filter_result = filter->match_tag(conn->make_tag(), is_domain_scannable_port(this, dst->port()));
+         switch (filter_result.status) {
+         case DFMS_DEFAULT:
+             conn->action = request_result.action;
+@@ -1749,8 +1754,13 @@
+                     encode_to_hex({event->data, std::min(event->length, size_t(517))}));
+             conn->flags.reset(CONNF_FAKE_CONNECTION);
+             conn->flags.reset(CONNF_SUSPECT_EXCLUSION);
++            auto fallback_action = VPN_CA_DEFAULT;
++            if (this->vpn->domain_filter.has_policy_rules()
++                    && this->vpn->domain_filter.match_tag(conn->make_tag()).status == DFMS_EXCLUSION) {
++                fallback_action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
++            }
+             event->result = static_cast<int>(initiate_connection_migration(
+-                    this, conn, select_upstream(this, VPN_CA_DEFAULT, conn), {event->data, event->length}));
++                    this, conn, select_upstream(this, fallback_action, conn), {event->data, event->length}));
+             if (event->result < 0) {
+                 listener->turn_read(conn->client_id, false);
+                 close_client_side_connection(this, conn, utils::AG_ECONNRESET, /*async*/ true);
+--- a/core/test/test_domain_filter.cpp
++++ b/core/test/test_domain_filter.cpp
+@@ -221,3 +221,82 @@
+     ASSERT_EQ(DFVS_OK_PORT, DomainFilter::validate_entry("*:443"));
+     ASSERT_EQ(DFVS_OK_PORT, DomainFilter::validate_entry("*:65535"));
+ }
++
++// FreeTunnel policy prefixes are generated by the application, not shown in UI.
++TEST(MatchTest, FreeTunnelManualRulesPrecedeGeoRules) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL,
++            "@0:*.example.com @3:*.com @1:direct.example.net @2:*.example.net"));
++    EXPECT_EQ(filter.match_domain("sub.example.com"), DFMS_DEFAULT);
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_EXCLUSION);
++    EXPECT_EQ(filter.match_domain("direct.example.net"), DFMS_EXCLUSION);
++    EXPECT_EQ(filter.match_domain("other.example.net"), DFMS_DEFAULT);
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_SELECTIVE,
++            "@0:*.example.com @3:*.com @1:direct.example.net @2:*.example.net"));
++    EXPECT_EQ(filter.match_domain("sub.example.com"), DFMS_EXCLUSION);
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_DEFAULT);
++    EXPECT_EQ(filter.match_domain("direct.example.net"), DFMS_DEFAULT);
++    EXPECT_EQ(filter.match_domain("other.example.net"), DFMS_EXCLUSION);
++}
++
++TEST(MatchTest, FreeTunnelManualDomainOverridesGeoSubnet) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "@0:example.com @3:192.0.2.0/24"));
++    SockAddrTag tag{SocketAddress("192.0.2.10", 443)};
++    filter.add_resolved_tag(tag, "example.com");
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_DEFAULT);
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "@1:example.com @2:192.0.2.0/24"));
++    // Updating lists must not discard a domain already learned from traffic.
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
++}
++
++TEST(MatchTest, FreeTunnelPolicyRejectsNestedEntriesAndClearsOldRules) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "@0:@3:example.com @3:other.com"));
++    EXPECT_EQ(filter.match_domain("example.com"), DFMS_DEFAULT);
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_EXCLUSION);
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, ""));
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_DEFAULT);
++}
++
++TEST(MatchTest, FreeTunnelDefersGeoSubnetUntilManualDomainIsKnown) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "@0:*.example.com @3:192.0.2.0/24"));
++    SockAddrTag tag{SocketAddress("192.0.2.10", 443)};
++    EXPECT_EQ(filter.match_tag(tag, true).status, DFMS_SUSPECT_EXCLUSION);
++    // Unscannable traffic and a failed hostname lookup use the IP rule.
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
++    filter.add_resolved_tag(tag, "sub.example.com");
++    EXPECT_EQ(filter.match_tag(tag, true).status, DFMS_DEFAULT);
++    filter.add_resolved_tag(tag, "other.net");
++    EXPECT_EQ(filter.match_tag(tag, true).status, DFMS_EXCLUSION);
++}
++
++TEST(MatchTest, FreeTunnelManualIpPrecedesGeoDomainWithoutDeferral) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "@1:192.0.2.0/24 @2:*.example.com"));
++    SockAddrTag tag{SocketAddress("192.0.2.10", 443)};
++    EXPECT_EQ(filter.match_tag(tag, true).status, DFMS_EXCLUSION);
++    filter.add_resolved_tag(tag, "sub.example.com");
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
++}
++
++TEST(MatchTest, FreeTunnelSelectiveModeDefersGeoIpForManualBypassDomain) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_SELECTIVE, "@1:*.example.com @2:192.0.2.0/24"));
++    SockAddrTag tag{SocketAddress("192.0.2.10", 443)};
++    EXPECT_EQ(filter.match_tag(tag, true).status, DFMS_SUSPECT_EXCLUSION);
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_EXCLUSION);
++    filter.add_resolved_tag(tag, "sub.example.com");
++    EXPECT_EQ(filter.match_tag(tag).status, DFMS_DEFAULT);
++}
++
++TEST(MatchTest, FreeTunnelTomlRulesPrecedeGeoLists) {
++    DomainFilter filter;
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_GENERAL, "example.com @2:*.com"));
++    EXPECT_EQ(filter.match_domain("example.com"), DFMS_EXCLUSION);
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_DEFAULT);
++    ASSERT_TRUE(filter.update_exclusions(VPN_MODE_SELECTIVE, "example.com @3:*.com"));
++    EXPECT_EQ(filter.match_domain("example.com"), DFMS_EXCLUSION);
++    EXPECT_EQ(filter.match_domain("other.com"), DFMS_DEFAULT);
++}

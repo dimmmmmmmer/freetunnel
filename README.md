@@ -27,10 +27,10 @@ Get the app from [**Releases**](https://github.com/dimmmmmmmer/freetunnel/releas
 | Device | Download |
 | --- | --- |
 | Windows 10/11 | [freetunnel-windows-x86_64-Setup.exe](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-windows-x86_64-Setup.exe) |
-| Mac — Apple Silicon or Intel, macOS 14.4+ | [freetunnel-macos-universal.dmg](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-macos-universal.dmg) |
+| Mac — Apple Silicon or Intel, macOS 12+ | [freetunnel-macos-universal.dmg](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-macos-universal.dmg) |
 | Linux — Ubuntu 22.04+, Debian 12+ | [freetunnel-linux-x86_64.deb](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-linux-x86_64.deb) |
 | Other Linux distributions with glibc 2.35+ | [freetunnel-x86_64.AppImage](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-x86_64.AppImage) |
-| Android phone, tablet or TV — Android 8.0+ | [Download APK](https://github.com/dimmmmmmmer/freetunnel/releases/download/android-1.2.4/freetunnel-android-1.2.4.apk) |
+| Android phone, tablet or TV — Android 8.0+ | [Download APK](https://github.com/dimmmmmmmer/freetunnel/releases/download/android-1.2.5/freetunnel-android-1.2.5.apk) |
 
 See [what changed](CHANGELOG.md) for release notes.
 
@@ -38,6 +38,7 @@ See [what changed](CHANGELOG.md) for release notes.
 
 - **Connect with one click:** save multiple server configurations and switch between them.
 - **Easy import:** add `tt://` links or TOML files; send several at once from your phone to Android TV.
+- **Subscriptions:** keep server settings up to date, with confirmation before downloading from a new source.
 - **Split tunnelling:** choose which apps and sites use the VPN, with a ready-made profile for Russia.
 - **Geo lists:** ready-made site and IP lists or your own HTTPS list; choose VPN or direct access, with manual rules taking priority.
 - **Kill switch:** block traffic if the VPN connection drops.

@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "core/DeepLink.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 namespace freetunnel {
 namespace {
@@ -347,15 +348,29 @@ bool isAuthKey(const QString &s)
     return isValidClientRandomAuthKey(s);
 }
 
+bool isTlsProfile(const QString &s)
+{
+    return s.isEmpty() || isKnownTlsProfile(s.toStdString());
+}
+
 bool readOptionalFields(const DocumentReader &in, SubscriptionDocument *doc)
 {
     QString clientRandom;
     if (!in.optional("custom_sni", isCustomSni, &doc->customSni)
             || !in.optional("client_random_prefix", isClientRandom, &clientRandom)
             || !in.optional("client_random_auth_key", isAuthKey, &doc->clientRandomAuthKey)
+            || !in.optional("tls_profile", isTlsProfile, &doc->tlsProfile)
             || !in.optional("name", isName, &doc->name))
         return false;
     doc->clientRandomPrefix = clientRandomForCore(clientRandom);
+    if (doc->tlsProfile) {
+        QString name = *doc->tlsProfile;
+        if (name == QLatin1String("default"))
+            name = QStringLiteral("boringssl");
+        if (name == QLatin1String("chrome"))
+            name.clear();
+        doc->tlsProfile = name;
+    }
     return readDnsUpstreams(in, doc);
 }
 
@@ -400,6 +415,9 @@ QList<SubscriptionChange> changesBetween(const ConfigToml &before, const QString
                   certificatesDer(before.certificate) != certificatesDer(after.certificate));
     withValues(SubscriptionField::CustomSni, before.customSni, after.customSni);
     withValues(SubscriptionField::ClientRandom, clientRandomForCore(before.clientRandom), after.clientRandom);
+    withValues(SubscriptionField::TlsProfile,
+            before.tlsProfile.isEmpty() ? QStringLiteral("chrome") : before.tlsProfile,
+            after.tlsProfile.isEmpty() ? QStringLiteral("chrome") : after.tlsProfile);
     return out;
 }
 
@@ -457,6 +475,8 @@ SubscriptionApplied applySubscription(const ConfigToml &current, const QString &
     // A document that does not mention the key leaves it as it is (see the header).
     out.clientRandomAuthKey =
             document.clientRandomAuthKey.value_or(creation ? QString() : current.clientRandomAuthKey);
+    if (document.tlsProfile)
+        next.tlsProfile = *document.tlsProfile;
     if (creation) {
         next.protocol = document.upstreamProtocol;
         next.allowIpv6 = document.hasIpv6;

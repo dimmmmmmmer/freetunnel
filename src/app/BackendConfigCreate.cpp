@@ -17,6 +17,7 @@
 #include "core/ConfigStore.h"
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
+#include "vpn/trusttunnel_tls_profiles.h"
 
 namespace {
 
@@ -116,6 +117,13 @@ bool validateCreateOptionalFields(const freetunnel::ConfigToml &ct, QString *err
             *err = QStringLiteral("bad_auth_key");
         return false;
     }
+    // Absent or empty is chrome. "default" is the deprecated alias of boringssl.
+    // Anything else the core does not name is refused before it is stored.
+    if (!ct.tlsProfile.isEmpty() && !freetunnel::isKnownTlsProfile(ct.tlsProfile.toStdString())) {
+        if (err)
+            *err = QStringLiteral("bad_tls_profile");
+        return false;
+    }
     return true;
 }
 
@@ -150,6 +158,7 @@ void assignOptionalCreateFields(const QVariantMap &f, ParsedCreateConfig *out)
     out->ct.customSni = f.value(QStringLiteral("customSni")).toString();
     out->ct.clientRandom = f.value(QStringLiteral("clientRandom")).toString();
     out->ct.clientRandomAuthKey = f.value(QStringLiteral("authKey")).toString().trimmed();
+    out->ct.tlsProfile = f.value(QStringLiteral("tlsProfile"), QStringLiteral("chrome")).toString().trimmed();
 }
 
 // Only the certificates of what was pasted into the certificate field. A file
@@ -293,6 +302,8 @@ void Backend::emitCreateConfigError(const QString &parseErr)
                               "digits, at most 64), optionally followed by /mask"));
     else if (parseErr == QLatin1String("bad_auth_key"))
         emit errorOccurred(tr("The auth key must be hexadecimal in whole bytes (an even number of digits)"));
+    else if (parseErr == QLatin1String("bad_tls_profile"))
+        emit errorOccurred(tr("The TLS profile is not one TrustTunnel knows"));
     else if (parseErr == QLatin1String("bad_certificate"))
         emit errorOccurred(tr("The certificate must be in PEM format, as one or more BEGIN CERTIFICATE "
                               "blocks"));

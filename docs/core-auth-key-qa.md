@@ -1,7 +1,10 @@
 # TrustTunnel 1.3 client random auth-key smoke
 
 An isolated smoke passed between the official TrustTunnelClient 1.3.0-rc.2
-console client and the official TrustTunnel 1.3.0-beta.2 endpoint. The endpoint
+console client and the official TrustTunnel 1.3.0-beta.2 endpoint. The desktop
+pin is now stable TrustTunnelClient 1.3.0
+(`eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1`) and the endpoint pin is 1.3.1.
+Repeat this smoke with those releases before tagging. The endpoint
 and SOCKS listener were bound to `127.0.0.1`; temporary credentials, an
 auth-key rule, and a one-day self-signed certificate were generated for the
 run. No production endpoint, credentials, TUN device, route change, firewall

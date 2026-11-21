@@ -17,6 +17,13 @@ public final class HomeStateTest {
         assertEquals(0.7f, HomeState.alpha(0, true), 0f);
     }
 
+    // Green only while it is up: not on the way up, not while blocked or reconnecting, not once the user has said Disconnect.
+    @Test public void theLogoIsGreenOnlyWhileConnected() {
+        assertTrue(HomeState.green(2, false));
+        for (int state : new int[]{0, 1, 3, 4, 5, 6}) assertFalse("state " + state, HomeState.green(state, false));
+        for (int state = 0; state <= 6; state++) assertFalse("state " + state, HomeState.green(state, true));
+    }
+
     // The desktop's backend is "connecting" while its tunnel reconnects, and its logo pulses then: so does a blocked one here.
     @Test public void itPulsesWhileConnectingReconnectingAndDisconnectingButNotWhileOffOrUp() {
         for (int state : new int[]{1, 3, 4, 5, 6}) assertTrue("state " + state, HomeState.pulsing(state, false));

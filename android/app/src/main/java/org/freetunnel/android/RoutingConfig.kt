@@ -3,6 +3,7 @@ package org.freetunnel.android
 import org.tomlj.Toml
 import org.tomlj.TomlArray
 import org.tomlj.TomlTable
+import org.tomlj.TomlVersion
 
 object RoutingConfig {
     internal val platformExcludedRoutes = listOf("0.0.0.0/8", "224.0.0.0/3")
@@ -54,7 +55,8 @@ object RoutingConfig {
     }
     private fun parse(source: String, limit: Int = 1_048_576): TomlTable {
         require(source.length <= limit) { "Конфигурация слишком большая (максимум 1 МБ)" }
-        val parsed = Toml.parse(source)
+        // Keep the parser aligned with the stable core, even when Tomlj adds newer TOML syntax.
+        val parsed = Toml.parse(source, TomlVersion.V1_0_0)
         require(!parsed.hasErrors()) { "Ошибка TOML: ${parsed.errors().firstOrNull()?.position()}" }
         require(parsed.getTable("endpoint") != null) { "В конфигурации отсутствует раздел [endpoint]" }
         return parsed
@@ -226,7 +228,7 @@ object RoutingConfig {
     @JvmStatic fun cleanImport(source: String): Import {
         // Anything unreadable is left to validate(), which says what is wrong.
         if (source.length > 1_048_576) return Import(source, false)
-        val parsed = Toml.parse(source)
+        val parsed = Toml.parse(source, TomlVersion.V1_0_0)
         if (parsed.hasErrors()) return Import(source, false)
         val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return endpointExport(parsed) ?: Import(source, false)
         // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
@@ -250,7 +252,7 @@ object RoutingConfig {
         // out again without what was taken out: every other value stays, its layout
         // does not.
         val lines: String? = TomlLines.edit(source, drop, replace)
-        val kept = lines?.let { Toml.parse(it) }
+        val kept = lines?.let { Toml.parse(it, TomlVersion.V1_0_0) }
         if (lines != null && kept != null && !kept.hasErrors() && same(parsed, kept, emptyList(), drop, replace.keys) &&
             (certificate == null || lookup(kept, certificatePath) == certificate.pem))
             return Import(lines, subscription, certificate != null)
@@ -260,7 +262,7 @@ object RoutingConfig {
         return Import(document(root, subscriptionKeys, overrides), subscription, certificate != null)
     }
 
-    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?)
+    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?, val routeAppsInCore: Boolean = false)
 
     /**
      * The plan for a session on this config with the rules of [profile], the split profile it uses: the
@@ -282,7 +284,8 @@ object RoutingConfig {
         } else emptyList()
         return prepare(source, prefs.getBoolean("split_enabled", false), prefs.getBoolean("through", false),
             rules.domains, apps, prefs.getBoolean("killswitch", true),
-            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo)
+            ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo,
+            prefs.getBoolean("verbose_logs", false) && prefs.getBoolean("logging", true))
     }
 
     /**
@@ -293,7 +296,8 @@ object RoutingConfig {
      */
     @JvmStatic @JvmOverloads fun prepare(source: String, enabled: Boolean, through: Boolean,
                            domains: List<String>, apps: List<String>, killSwitch: Boolean,
-                           excludedRoutes: List<String> = emptyList(), geoRules: List<String> = emptyList()): Plan {
+                           excludedRoutes: List<String> = emptyList(), geoRules: List<String> = emptyList(),
+                           verboseLogs: Boolean = false): Plan {
         val parsed = validate(source)
         val originalMode = parsed.getString("vpn_mode") ?: "general"
         val original = parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
@@ -304,6 +308,7 @@ object RoutingConfig {
         var allowApps = enabled && through && selectedApps.isNotEmpty()
         var mode = requestedMode
         var warning: Int? = null
+        var routeAppsInCore = false
         val geoTooLarge = geoRules.sumOf { it.length.toLong() + 3 } > 8 * 1024 * 1024
         val geo = if (enabled && !geoTooLarge) geoRules.distinct() else emptyList()
         if (enabled && geoTooLarge) {
@@ -313,11 +318,10 @@ object RoutingConfig {
         if (mode == "selective") {
             when {
                 selectedApps.isNotEmpty() && (rules.isNotEmpty() || geo.isNotEmpty()) -> {
-                    // Android's per-app allowlist intersects with destination routing.
-                    // The adapter cannot express a union. Protect all traffic and tell
-                    // the user explicitly instead of silently losing either ruleset.
-                    mode = "general"; rules = emptyList(); selectedApps = emptyList(); allowApps = false
-                    warning = R.string.text_applications_and_addresses_are_selected_full_vpn_pro
+                    // Intercept all apps, then route a selected UID through VPN
+                    // and let destination rules decide for every other app.
+                    routeAppsInCore = true
+                    allowApps = false
                 }
                 selectedApps.isNotEmpty() -> mode = "general"
                 rules.isEmpty() && geo.none { it.startsWith("@2:") } -> {
@@ -326,13 +330,14 @@ object RoutingConfig {
                 }
             }
         }
-        if (geo.isNotEmpty() && warning != R.string.text_applications_and_addresses_are_selected_full_vpn_pro) {
+        if (geo.isNotEmpty()) {
             // Keep manual rules' direction even if an empty selective policy fell back to full VPN.
             val manualPrefix = if (requestedMode == "selective") "@0:" else "@1:"
             rules = rules.map { manualPrefix + it } + geo
         }
         val root = linkedMapOf<String, Any>()
         parsed.keySet().forEach { root[it] = parsed.get(listOf(it))!! }
+        root["loglevel"] = if (verboseLogs) "debug" else "info"
         root["vpn_mode"] = mode
         root["exclusions"] = rules
         root["killswitch_enabled"] = killSwitch
@@ -348,6 +353,6 @@ object RoutingConfig {
         // the core does nothing with it, so it is not handed the password in it.
         val result = document(root, subscriptionKeys, mapOf(listOf("listener", "tun", "excluded_routes") to excluded))
         validateGenerated(result)
-        return Plan(result, selectedApps, allowApps, warning)
+        return Plan(result, selectedApps, allowApps, warning, routeAppsInCore)
     }
 }

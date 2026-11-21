@@ -11,7 +11,7 @@ struct AppSettings {
     QString log_path = "";
     bool logging_enabled = true;
     bool verbose_logs = false; // run the VPN core at info level (debug); else warn
-    QString theme_mode = "system";
+    QString theme_mode = "dark";
     QString language = "en";
     bool auto_connect_on_start = false;
     // Whether the window's ✕ hides it to the tray instead of minimising it to the
@@ -59,7 +59,8 @@ struct AppSettings {
     QMap<QString, QStringList> profile_app_rules{{"Default", {}}};
     QStringList profile_order{"Default"};
     // Lists belong to the same routing profile as its manual domain/app rules.
-    // Empty on upgrade: existing routing is unchanged until a list is added.
+    // A fresh Default starts with Russian sites and IP addresses bypassing VPN.
+    // Existing profiles retain their saved lists, including an empty selection.
     QMap<QString, QList<freetunnel::GeoListDefinition>> profile_geo_lists;
     int geo_update_hours = 24;
     // Which split profile each config uses (config path -> profile name). A
@@ -79,11 +80,8 @@ struct AppSettings {
     // Last used config
     QString last_config_path = "";
 
-    // TrustTunnel subscriptions (experimental/subscriptions): linking a config to
-    // one, and refreshing it from there. Off, and with nothing in the window to
-    // turn it on: the endpoint's format is still in beta, and the screens for it
-    // come once it is stable. Off, links and files behave as without it.
-    bool subscriptions_enabled = false;
+    // Linked configurations refresh after explicit consent to their source.
+    bool subscriptions_enabled = true;
 };
 
 AppSettings loadAppSettings();
@@ -93,3 +91,4 @@ void saveAppSettings(const AppSettings &cfg);
 QStringList defaultExcludedRoutes();
 // Built-in "Recommended for Russia" domain bypass set.
 QStringList recommendedRussiaDomains();
+QList<freetunnel::GeoListDefinition> defaultGeoLists();

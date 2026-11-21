@@ -129,6 +129,7 @@ static VpnHelperClient::State stateFromString(const QString &s) {
 
 bool VpnHelperClient::loadConfigFromToml(const QString &toml) {
     m_configToml = toml;
+    m_stageRoutingForConnect = true;
     return !toml.isEmpty();
 }
 
@@ -170,7 +171,7 @@ void VpnHelperClient::setSplitRouting(const std::vector<std::string> &exclusions
     m_exclusions = exclusions;
     m_selective = selective;
     m_appRules = appRules;
-    if (!m_helloAcked)
+    if (!m_helloAcked || m_stageRoutingForConnect)
         return; // handleReadyEvent() sends them all
     QJsonArray domains;
     for (const auto &d : m_exclusions) domains.append(QString::fromStdString(d));
@@ -222,6 +223,7 @@ void VpnHelperClient::setSessionLogging(bool enabled)
 }
 
 void VpnHelperClient::connectVpn() {
+    m_stageRoutingForConnect = false;
     if (!ensureHelper())
         return;
     if (!m_helloAcked) {
@@ -232,10 +234,19 @@ void VpnHelperClient::connectVpn() {
     c["cmd"] = "connect";
     c["loggingEnabled"] = m_loggingEnabled;
     c["configToml"] = m_configToml; // inline only — the helper refuses file paths
+    c["requestId"] = QString::number(++m_endpointRequestId);
+    m_requestedConfigToml = m_configToml;
+    QJsonArray domains;
+    for (const auto &domain : m_exclusions) domains.append(QString::fromStdString(domain));
+    QJsonArray apps;
+    for (const auto &app : m_appRules) apps.append(QString::fromStdString(app));
+    c["domains"] = domains;
+    c["selective"] = m_selective;
+    c["rules"] = apps;
+    c["stagedRouting"] = true;
     send(c);
-    // Every setting reached the helper before this connect did (they are sent as
-    // they change, and all of them again on "ready"), so this is what the
-    // session about to be built is built from.
+    // Keep the accepted session separately: preparing a replacement may fail.
+    // Until acknowledged this snapshot describes only the requested session.
     m_sessionBuiltWith = sessionSettings();
 }
 
@@ -248,6 +259,10 @@ bool VpnHelperClient::sessionSettingsChanged() const {
 }
 
 void VpnHelperClient::disconnectVpn() {
+    ++m_endpointRequestId;
+    m_stageRoutingForConnect = false;
+    m_sessionConfigToml.clear();
+    m_requestedConfigToml.clear();
     if (!m_helloAcked) {
         abortStartup();
         // Cancelling during helper startup/elevation: the state is still
@@ -262,11 +277,17 @@ void VpnHelperClient::disconnectVpn() {
     }
     if (!m_sock) return;
     QJsonObject c; c["cmd"] = "disconnect"; send(c);
+    m_liveSession = false;
+    m_committedSessionSettings.reset();
+    m_sessionConfigToml.clear();
     m_sessionBuiltWith.reset();
 }
 
 void VpnHelperClient::abortStartup() {
     m_connectPending = false;
+    m_liveSession = false;
+    m_committedSessionSettings.reset();
+    m_sessionConfigToml.clear();
     m_sessionBuiltWith.reset(); // a helper going away takes its session with it
     m_starting = false;
     m_helloAcked = false;
@@ -294,6 +315,7 @@ void VpnHelperClient::resetHelperTransport()
 {
     m_buf.clear();
     m_viaService = false;
+    m_preparingInstalledHelper = false;
     if (m_sock) {
         m_sock->deleteLater();
         m_sock = nullptr;
@@ -380,6 +402,12 @@ void VpnHelperClient::wireHelperSocket(bool testHelper)
         m_helloAcked = false;
         m_peerProven = false;
         m_starting = false;
+        ++m_endpointRequestId;
+        m_stageRoutingForConnect = false;
+        m_requestedConfigToml.clear();
+        m_liveSession = false;
+        m_committedSessionSettings.reset();
+        m_sessionConfigToml.clear();
         m_sessionBuiltWith.reset(); // the helper took its session with it
         if (m_state != State::Disconnected)
             setState(State::Disconnected);
@@ -426,10 +454,10 @@ void VpnHelperClient::startHelperConnectRetry()
                          .arg(stoppedWhy));
             return;
         }
-        // 240 × 250 ms = 60 s. The elevation dialog blocks the helper from even
-        // starting until the user finishes typing the admin password — the old
-        // 20 s window expired mid-typing for anyone without Touch ID.
-        if (++m_tries > 240) {
+        // 60 s for a normal start or password prompt; allow up to four minutes
+        // while a signed installed runtime is downloaded and prepared. The
+        // launcher resets the deadline when it starts the session itself.
+        if (++m_tries > (m_preparingInstalledHelper ? 960 : 240)) {
             m_attempt->stop();
             m_attempt->deleteLater();
             m_attempt = nullptr;
@@ -595,6 +623,24 @@ void VpnHelperClient::handleEvent(const QJsonObject &ev) {
     }
     if (type == "ready") {
         handleReadyEvent();
+        return;
+    }
+    if (type == "sessionPresence") {
+        m_liveSession = ev.value("active").toBool();
+        return;
+    }
+    if (type == "endpointRequest") {
+        if (ev.value("requestId").toString().toULongLong() != m_endpointRequestId)
+            return;
+        const bool accepted = ev.value("accepted").toBool();
+        if (accepted) {
+            m_sessionConfigToml = m_requestedConfigToml;
+            m_committedSessionSettings = m_sessionBuiltWith;
+        } else {
+            m_configToml = m_sessionConfigToml;
+            m_sessionBuiltWith = m_committedSessionSettings;
+        }
+        emit endpointRequestFinished(accepted);
         return;
     }
     if (type == "state") {

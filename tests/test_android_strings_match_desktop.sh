@@ -26,12 +26,15 @@ trap 'rm -rf "$TMP"' EXIT
 
 # One row for each string the desktop has too: [android name, desktop context, desktop source text].
 cat > "$TMP/table.jsonl" <<'TABLE'
+["settings_verbose_logs", "SettingsPage", "Verbose logs"]
+["settings_verbose_hint", "SettingsPage", "full VPN core detail for debugging (noisy)"]
 ["text_add_configuration", "ConfigsPage", "Add a config"]
 ["text_connecting", "HomePage", "Connecting…"]
 ["text_connected", "Backend", "Connected"]
 ["text_ms", "Backend", " ms"]
 ["text_paste_from_clipboard", "ConfigsPage", "Paste from clipboard"]
 ["text_clipboard_is_empty", "Backend", "Clipboard is empty"]
+["import_batch_too_large", "Backend", "Choose up to 100 links or files, no larger than 1 MB each."]
 ["text_cancel", "ConfirmDialog", "Cancel"]
 ["text_new_configuration", "CreateConfigOverlay", "New config"]
 ["text_edit_configuration", "CreateConfigOverlay", "Edit config"]
@@ -111,7 +114,6 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["split_profile_name_hint", "SplitPage", "profile name, then Enter"]
 ["split_profile_delete_question", "SplitPage", "Delete profile “%1”?"]
 ["split_profile_exists", "Backend", "A profile called “%1” already exists"]
-["split_recommended", "SplitPage", "Recommended for Russia"]
 ["split_clear_all", "SplitPage", "Clear all"]
 ["split_clear_domains_question", "SplitPage", "Clear all domains?"]
 ["split_clear_apps_question", "SplitPage", "Clear all applications?"]
@@ -176,8 +178,8 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["geo_every_24_hours", "GeoListsBlock", "Every 24 hours"]
 ["geo_never", "GeoListsBlock", "Never"]
 ["geo_duplicate", "Backend", "This geo list is already in the profile"]
-["geo_name", "GeoListsBlock", "Name"]
-["geo_add", "GeoListsBlock", "Add"]
+["geo_name", "GeoListOverlay", "Name"]
+["geo_add", "GeoListOverlay", "Add"]
 ["geo_bad_source", "Backend", "Enter a name and an HTTPS geo list address"]
 ["geo_limit", "GeoListsBlock", "Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."]
 TABLE
@@ -302,6 +304,23 @@ text_could_not_save_configurations_data_on_disk_is_unchan
 picker_none
 split_apps_hint
 export_no_picker
+logs_export
+logs_exported
+logs_no_picker
+qr_scan
+qr_hint
+qr_unavailable
+subscription_title
+subscription_url
+subscription_fetch
+subscription_failed
+subscription_updating
+subscription_updated
+subscription_refresh
+subscription_stop
+subscription_stop_question
+subscription_host_changed
+subscription_review
 
 ## Logs and Settings: a log that cannot be read to copy, and a link with no browser to open it
 text_could_not_read_log

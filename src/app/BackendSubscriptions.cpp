@@ -1,6 +1,5 @@
 // cppcheck-suppress-file missingIncludeSystem
-// TrustTunnel subscriptions in Backend, behind the hidden experimental/subscriptions
-// setting: adding a config from one, with the user's consent before anything is
+// TrustTunnel subscriptions in Backend: adding a config from one, with the user's consent before anything is
 // fetched; refreshing it; and keeping the link through the config's renames,
 // replacements and removal. SubscriptionController keeps the records, the
 // fetches and when each is due; what a document does to a config and to the
@@ -80,6 +79,9 @@ QString changeSummary(const QList<freetunnel::SubscriptionChange> &changes)
         case SubscriptionField::AuthKey:
             parts << QStringLiteral("client_random_auth_key");
             break;
+        case SubscriptionField::TlsProfile:
+            parts << QStringLiteral("tls_profile %1 → %2").arg(c.oldValue, c.newValue);
+            break;
         }
     }
     return parts.join(QStringLiteral(", "));
@@ -115,6 +117,9 @@ void Backend::startSubscriptions()
         if (automaticRefreshAllowed(path))
             startSubscriptionRefresh(path, false);
     });
+    connect(m_subscriptions, &SubscriptionController::consentRequired, this, &Backend::subscriptionConsentRequired);
+    connect(m_subscriptions, &SubscriptionController::hostnameChangeHeld, this, &Backend::subscriptionHostnameChanged);
+    connect(m_subscriptions, &SubscriptionController::statusChanged, this, [this] { emit configsChanged(); });
     m_subscriptions->start(m_paths, m_settings.subscriptions_enabled);
 }
 
@@ -198,7 +203,10 @@ bool Backend::offerSubscription(const QString &url, const freetunnel::ConfigToml
             {QStringLiteral("mixedScripts"),
              given && freetunnel::nameMixesScripts(QFileInfo(given->fileName).completeBaseName())},
     };
-    m_subscriptions->open(std::move(import), details);
+    if (m_subscriptions->open(std::move(import), details).isEmpty()) {
+        emit errorOccurred(tr("Choose up to 100 links or files, no larger than 1 MB each."));
+        return false;
+    }
     // In the log too, by its origin alone, so an import waiting for the answer is
     // seen to wait.
     appendLog(QStringLiteral("INFO"),
@@ -569,4 +577,9 @@ void Backend::logSubscription(const QString &path, const QString &line, const QS
 {
     const std::optional<freetunnel::SubscriptionRecord> record = m_subscriptions->record(path);
     appendLog(QStringLiteral("INFO"), line.arg(record ? record->origin : QString(), nameForPath(path), detail));
+}
+
+bool Backend::hasSubscription(const QString &path) const
+{
+    return m_subscriptions && m_subscriptions->isLinked(path);
 }

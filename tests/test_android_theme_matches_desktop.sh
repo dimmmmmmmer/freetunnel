@@ -113,7 +113,7 @@ if qml_path.endswith("Main.qml"):
     need(r'Qt\.rgba\(1,\s*0\.75,\s*0\.2,\s*theme\.dark\s*\?\s*0\.12\s*:\s*0\.18\)', "bannerFill", settings, "the banner fill rgba(1, 0.75, 0.2, 0.12 / 0.18)")
     need(r'border\.color:\s*Qt\.rgba\(1,\s*0\.75,\s*0\.2,\s*0\.45\)', "bannerBorder", settings, "the banner border at 0.45")
     need(r'color:\s*"#000000";\s*opacity:\s*0\.45', "backdrop", open(base + "AppPickerOverlay.qml", encoding="utf-8").read(), "a black backdrop at 0.45")
-    need(r'shadowOpacity:\s*theme\.dark\s*\?\s*0\.5\s*:\s*0\.2', "popupShadow", qml, "a popup shadow at 0.5 / 0.2")
+    need(r'PopupShadow\s*\{[^}]*\bstrength:\s*theme\.dark\s*\?\s*0\.5\s*:\s*0\.2', "popupShadow", qml, "a popup shadow at 0.5 / 0.2")
 
 # Every colour Theme.java has is a token or one of these.
 known = set(tokens) | set(derived)

@@ -187,6 +187,7 @@ bool QtTrustTunnelClient::joinOrAbandonConnectThread(int waitMs)
     ++m_guard->attemptGen; // the stale attempt must drop its result when it resumes
     ++m_sessionGen;        // and events from its core client are no longer ours
     auto client = std::make_shared<std::unique_ptr<ag::TrustTunnelClient>>(std::move(m_client));
+    emit sessionPresenceChanged(false);
     auto monitor =
             std::make_shared<std::unique_ptr<ag::AutoNetworkMonitor>>(std::move(m_networkMonitor));
     connect(thread, &QThread::finished, thread, [client, monitor]() {
@@ -282,6 +283,9 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     if (!reloadStoredConfigIfNeeded())
         return nullptr;
 
+    // Freeze the exact initial policy version even if edits arrive while the
+    // worker builds this session. Adoption submits any newer snapshot.
+    applyRoutingToSession();
     auto ctx = std::make_shared<ConnectAttempt>();
     ctx->owner = this;
     ctx->guard = m_guard;
@@ -302,7 +306,8 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
             return nullptr;
         }
         applyCoreLogPathToConfigLocked();
-        ctx->routing = Routing{m_config->mode, m_config->exclusions};
+        ctx->routing = m_publishedRouting;
+        m_config->routing_generation = ctx->routing.generation;
         ctx->killSwitch = m_config->killswitch_enabled;
         ctx->config = std::move(*m_config);
         m_config.reset();
@@ -322,6 +327,8 @@ QtTrustTunnelClient::AttemptPtr QtTrustTunnelClient::prepareAttempt(quint64 atte
     // The previous session goes with the attempt: retiring it blocks, and the
     // worker is where blocking belongs.
     ctx->retiredClient = std::move(m_client);
+    if (ctx->retiredClient)
+        emit sessionPresenceChanged(false);
     ctx->retiredMonitor = std::move(m_networkMonitor);
     return ctx;
 }
@@ -441,6 +448,7 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
     switch (ctx->outcome) {
     case ConnectAttempt::Outcome::Connected:
         m_client = std::move(ctx->client);
+        emit sessionPresenceChanged(true);
         m_networkMonitor = std::move(ctx->monitor);
         resetUplinkTracking();
         // The session was built from the config as the attempt found it. A rule
@@ -449,24 +457,25 @@ void QtTrustTunnelClient::adoptAttempt(const AttemptPtr &ctx)
         // over here or not at all.
         m_sessionRouting = ctx->routing;
         applyRoutingToSession();
-        return;
+        break;
     case ConnectAttempt::Outcome::Retry:
         scheduleReconnect(ctx->error);
-        return;
+        break;
     case ConnectAttempt::Outcome::FatalStop:
         if (ctx->privilegeHint) {
             failConnectFatal(ctx->error, true);
-            return;
+            break;
         }
         m_stopRequested = true;
         setState(State::Error);
         emit vpnError(ctx->error);
-        return;
+        break;
     case ConnectAttempt::Outcome::FatalKeepGoing:
         setState(State::Error);
         emit vpnError(ctx->error);
-        return;
+        break;
     }
+    resumePendingEndpoint();
 }
 
 void QtTrustTunnelClient::failConnectFatal(const QString &qErr, bool privilegeHint)

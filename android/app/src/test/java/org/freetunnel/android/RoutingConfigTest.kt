@@ -32,6 +32,25 @@ class RoutingConfigTest {
     private val defaults = listOf("10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
         "192.168.0.0/16", "255.255.255.255/32")
 
+    @Test fun rejectsToml11EscapesUnsupportedByStableCore() {
+        for (escape in listOf("\\x74", "\\e")) {
+            val input = source.replace("username = \"test\"", "username = \"${escape}est\"")
+            assertFalse("Tomlj defaults to TOML 1.1", Toml.parse(input).hasErrors())
+            assertThrows(IllegalArgumentException::class.java) { RoutingConfig.validate(input) }
+        }
+    }
+
+    @Test fun verboseLoggingOverridesImportedLevelWithoutDroppingGeoRules() {
+        val input = "loglevel = \"error\"\n" + source
+        val geo = listOf("@2:geo.example")
+        val verbose = RoutingConfig.prepare(input, true, true, listOf("manual.example"), emptyList(), true, emptyList(), geo, true)
+        val parsed = Toml.parse(verbose.toml)
+        assertEquals("debug", parsed.getString("loglevel"))
+        assertEquals(listOf("@0:manual.example", "@2:geo.example"), parsed.getArray("exclusions")!!.toList())
+        val normal = RoutingConfig.prepare(input, false, false, emptyList(), emptyList(), true)
+        assertEquals("info", Toml.parse(normal.toml).getString("loglevel"))
+    }
+
     @Test fun realWorldSizeGeoPolicyFitsGeneratedConfiguration() {
         val geo = (0 until 150_000).map { "@2:site$it.example" }
         val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true, emptyList(), geo)
@@ -79,13 +98,15 @@ class RoutingConfigTest {
             emptyList(), listOf("@3:example.org"))
         assertEquals(listOf("intranet.example"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
     }
-    @Test fun appsAndGeoDestinationsKeepAndroidUnionFallback() {
+    @Test fun appsAndGeoDestinationsUseConnectionOwnerRouting() {
         val result = RoutingConfig.prepare(source, true, true, emptyList(), listOf("test.browser"), true,
             emptyList(), listOf("@2:example.org"))
-        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, result.warning)
-        assertEquals("general", Toml.parse(result.toml).getString("vpn_mode"))
-        assertTrue(Toml.parse(result.toml).getArray("exclusions")!!.isEmpty)
-        assertTrue(result.apps.isEmpty())
+        assertNull(result.warning)
+        assertEquals("selective", Toml.parse(result.toml).getString("vpn_mode"))
+        assertEquals(listOf("@2:example.org"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
+        assertEquals(listOf("test.browser"), result.apps)
+        assertTrue(result.routeAppsInCore)
+        assertFalse(result.allowApps)
     }
     @Test fun oversizedGeoRulesFallBackToFullTunnel() {
         val result = RoutingConfig.prepare(source, true, true, emptyList(), emptyList(), true,
@@ -113,12 +134,13 @@ class RoutingConfigTest {
         assertFalse(result.allowApps); assertTrue(result.apps.isEmpty())
         assertEquals(listOf("example.org"), Toml.parse(result.toml).getArray("exclusions")!!.toList())
     }
-    @Test fun mixedThroughRulesProtectAllTrafficWithAnExplicitWarning() {
+    @Test fun mixedThroughRulesUseTheUnionOfAppsAndDomains() {
         val result = plan(domains = listOf("example.org"), apps = listOf("test.browser"))
         val parsed = Toml.parse(result.toml)
-        assertEquals("general", parsed.getString("vpn_mode"))
-        assertTrue(parsed.getArray("exclusions")!!.isEmpty)
-        assertTrue(result.apps.isEmpty()); assertFalse(result.allowApps); assertNotNull(result.warning)
+        assertEquals("selective", parsed.getString("vpn_mode"))
+        assertEquals(listOf("example.org"), parsed.getArray("exclusions")!!.toList())
+        assertEquals(listOf("test.browser"), result.apps)
+        assertFalse(result.allowApps); assertNull(result.warning); assertTrue(result.routeAppsInCore)
     }
     @Test fun emptySelectiveFallsBackToFullVpnWithWarning() {
         val result = plan()
@@ -703,12 +725,13 @@ class RoutingConfigTest {
         assertNull(home.warning); assertNull(work.warning)
     }
 
-    @Test fun aProfileWithApplicationsAndDomainsStillCannotGoThroughVpnWithBoth() {
+    @Test fun aProfileWithApplicationsAndDomainsUsesBoth() {
         val backing = profileRules { p -> p.addDomains("Default", "home.example"); p.addApp("Default", "org.home") }
         val plan = planFor(backing, "Default", true)
-        assertEquals("general", Toml.parse(plan.toml).getString("vpn_mode"))
-        assertEquals(R.string.text_applications_and_addresses_are_selected_full_vpn_pro, plan.warning)
-        assertTrue(plan.apps.isEmpty())
+        assertEquals("selective", Toml.parse(plan.toml).getString("vpn_mode"))
+        assertNull(plan.warning)
+        assertEquals(listOf("org.home"), plan.apps)
+        assertTrue(plan.routeAppsInCore)
     }
 
     @Test fun theOldListsHoldTheRulesOfTheProfileInUseSoGoingBackToTheFirstVersionRoutesTheSame() {

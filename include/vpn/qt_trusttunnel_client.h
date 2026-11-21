@@ -12,6 +12,8 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 // Windows SDK doesn't define POSIX iovec; define a minimal version before vpn.h uses it.
@@ -55,6 +57,9 @@ public:
     Q_INVOKABLE void connectVpn();
     Q_INVOKABLE void beginConnect(const QString &configToml);
     Q_INVOKABLE void disconnectVpn();
+    Q_INVOKABLE void switchEndpoint(const QString &configToml);
+    Q_INVOKABLE void beginConnectConfigured(const QString &configToml, const QStringList &domains,
+            bool selective, const QStringList &apps, quint64 requestId);
     Q_INVOKABLE bool isConnected() const;
     Q_INVOKABLE State state() const;
     Q_INVOKABLE void setLogLevel(const QString &level); // applied live (no reconnect)
@@ -69,7 +74,7 @@ public:
     Q_INVOKABLE void setAppRules(const QStringList &rules);
     // The three split-tunnelling settings as one change: the domain and address
     // rules, the mode and the program rules. A running session takes the rules and
-    // the mode live (vendor patch 03); each of the setters above also does, but
+    // the mode live (vendor patches 03 and 11); each of the setters above also does, but
     // one at a time, so between two of them the session would route by a mix of
     // old and new that is neither what the user had nor what they asked for.
     Q_INVOKABLE void setSplitRouting(const QStringList &domains, bool selective,
@@ -82,7 +87,14 @@ public:
     // it is never accepted from outside, see the note in the .cpp.
     Q_INVOKABLE void setSessionLogging(bool enabled);
 
+#ifdef FT_ENABLE_TEST_HOOKS
+    // Read only on the owner thread; lets race tests wait for a worker result.
+    bool endpointPreparationActiveForTest() const { return m_endpointPreparationActive; }
+#endif
+
 signals:
+    void endpointRequestFinished(quint64 requestId, bool accepted);
+    void sessionPresenceChanged(bool active);
     void stateChanged(QtTrustTunnelClient::State state);
     void vpnConnected();
     void vpnDisconnected();
@@ -114,6 +126,8 @@ private:
     struct Routing {
         ag::VpnMode mode = ag::VPN_MODE_GENERAL;
         std::string exclusions;
+        QStringList appRules;
+        quint64 generation = 0;
         bool operator==(const Routing &) const = default;
     };
     // One connect attempt, owned entirely by the worker thread that runs it.
@@ -180,6 +194,30 @@ private:
     void handleCoreWaitingForNetwork();
     void handleCoreDisconnected(int errCode, const QString &errText);
     void setConfigLocked(ag::TrustTunnelConfig config);
+    static std::optional<ag::TrustTunnelConfig> parseConfig(const QString &toml, QString *error,
+            ag::LogLevel fallbackLevel = ag::LOG_LEVEL_INFO);
+    static void clearKeysRootMustNotTakeFromAConfig(ag::TrustTunnelConfig &config);
+    struct EndpointSwitchRequest {
+        QString toml;
+        QStringList domains;
+        bool selective = false;
+        QStringList apps;
+        quint64 id = 0;
+        quint64 serial = 0;
+        quint64 baseGeneration = 0;
+    };
+    std::pair<Routing, std::vector<std::string>> routingForEndpoint(
+            const EndpointSwitchRequest &request, const ag::TrustTunnelConfig &config) const;
+    void prepareEndpointSwitch(EndpointSwitchRequest request);
+    void resumePendingEndpoint();
+    void finishEndpointPreparation(const EndpointSwitchRequest &request, quint64 session,
+            const std::shared_ptr<ag::TrustTunnelClient::PreparedEndpoint> &prepared, const QString &error);
+    void reportEndpointRejection(const QString &error, quint64 requestId);
+    quint64 m_endpointRequest = 0;
+    std::atomic<quint64> m_endpointEpoch{0};
+    bool m_endpointPreparationActive = false;
+    bool m_preserveEndpointSession = false;
+    std::optional<EndpointSwitchRequest> m_pendingEndpoint;
     std::string exclusionsLocked() const;
     void storeExclusionsLocked(std::vector<std::string> exclusions);
     void storeModeLocked(bool selective);
@@ -224,6 +262,7 @@ private:
         std::mutex mutex;
         QStringList rules;
         bool selective = false;
+        quint64 generation = 0;
         // Every connection asks the handler something, so logging all of them
         // buries the log in programs nobody wrote a rule for. Decisions that
         // actually routed something are always logged; the rest only when the
@@ -238,6 +277,8 @@ private:
     // What m_client routes by: what it was built with, then every live update.
     // Read only while m_client is set, and set whenever it is adopted.
     Routing m_sessionRouting;
+    Routing m_publishedRouting;
+    QStringList m_appRuleList; // Desired rules; owner thread only.
     // The reasons already given this session for not having connected yet, as the
     // core goes round its recovery loop: each is said once, not once per round,
     // even when two of them take turns.
@@ -257,6 +298,7 @@ private:
     std::vector<std::string> m_originalExcludedRoutes; // routes from config file before our additions
     std::vector<std::string> m_extraExclusions;
     std::string m_originalExclusions; // exclusions from config file before our additions
+    ag::VpnMode m_originalMode = ag::VPN_MODE_GENERAL;
     bool m_selectiveMode = false;     // route only the exclusions (vs bypass them)
     bool m_killSwitch = false;
     bool m_killSwitchPortsFromConfig = false;

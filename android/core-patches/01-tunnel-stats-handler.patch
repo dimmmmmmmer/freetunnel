@@ -1,0 +1,32 @@
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -27,6 +27,8 @@
+     std::function<void(VpnStateChangedEvent *)> state_changed_handler;
+     std::function<void(VpnClientOutputEvent *)> client_output_handler;
+     std::function<void(VpnConnectionInfoEvent *)> connection_info_handler;
++    // Added by FreeTunnel: per-connection traffic stats (upload/download deltas).
++    std::function<void(VpnTunnelConnectionStatsEvent *)> tunnel_stats_handler;
+ };
+ 
+ class TrustTunnelClient {
+
+--- a/trusttunnel/src/client.cpp
+@@ -425,12 +425,18 @@
+         auto *event = (VpnClientOutputEvent *) data;
+         if (m_callbacks.client_output_handler) {
+             m_callbacks.client_output_handler(event);
++        }
++        break;
++    }
++    case VPN_EVENT_TUNNEL_CONNECTION_STATS: {
++        auto *event = (VpnTunnelConnectionStatsEvent *) data;
++        if (m_callbacks.tunnel_stats_handler) {
++            m_callbacks.tunnel_stats_handler(event);
+         }
+         break;
+     }
+     case VPN_EVENT_ENDPOINT_CONNECTION_STATS:
+     case VPN_EVENT_DNS_UPSTREAM_UNAVAILABLE:
+-    case VPN_EVENT_TUNNEL_CONNECTION_STATS:
+     case VPN_EVENT_TUNNEL_CONNECTION_CLOSED:
+         // do nothing
+         break;

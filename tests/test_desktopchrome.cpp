@@ -57,6 +57,7 @@ private slots:
     void aChangeRightAfterTheFirstReadIsNotLost();
     void aTrayHostThatArrivesLateIsReported();
     void theTrayHostIsAskedNotAssumed();
+    void trayHostsCanBeRecreatedRepeatedly();
     void aBarThatLeftTheBusIsNoPlaceToHideTheWindow();
     void aWindowIsIconifiedWhenItsWindowManagerSaysSo();
     void aWindowIsWithdrawnWhenItsWindowManagerSaysSoOrHasNeverSeenIt();
@@ -208,8 +209,9 @@ struct PortalOnABus {
         if (present) {
             QDBusConnection side = QDBusConnection::connectToBus(bus.address, portalName);
             portal = new FakePortal(portalName, answer, delayMs, afterAnswer);
-            thread.start();
             portal->moveToThread(&thread);
+            QObject::connect(&thread, &QThread::finished, portal, &QObject::deleteLater);
+            thread.start();
             if (!side.registerObject(QStringLiteral("/org/freedesktop/portal/desktop"), portal,
                                      QDBusConnection::ExportAllSlots)
                 || !side.registerService(QStringLiteral("org.freedesktop.portal.Desktop")))
@@ -227,11 +229,14 @@ struct PortalOnABus {
 
     ~PortalOnABus()
     {
-        QDBusConnection::disconnectFromBus(clientName);
-        QDBusConnection::disconnectFromBus(portalName);
+        // disconnectFromBus schedules connection cleanup on Qt's D-Bus thread.
+        // Its object tree must no longer contain the fake when that cleanup
+        // races with its deletion (closeConnection otherwise dereferences it).
+        QDBusConnection(portalName).unregisterObject(QStringLiteral("/org/freedesktop/portal/desktop"));
         thread.quit();
         thread.wait();
-        delete portal; // its thread has finished: nothing else can touch it now
+        QDBusConnection::disconnectFromBus(clientName);
+        QDBusConnection::disconnectFromBus(portalName);
     }
 };
 
@@ -280,8 +285,9 @@ struct WatcherOnABus {
                 watcher = new FakeWatcherWithoutTheProperty;
             else
                 watcher = new FakeWatcher(kind == Watcher::HostRegistered);
-            thread.start();
             watcher->moveToThread(&thread);
+            QObject::connect(&thread, &QThread::finished, watcher, &QObject::deleteLater);
+            thread.start();
             if (!side.registerObject(QStringLiteral("/StatusNotifierWatcher"), watcher,
                                      QDBusConnection::ExportAllProperties)
                 || !side.registerService(QStringLiteral("org.kde.StatusNotifierWatcher")))
@@ -295,6 +301,9 @@ struct WatcherOnABus {
     // Returns once the bus has noticed.
     bool stopWatcher()
     {
+        // Also unregister on this path: the connection can outlive the call,
+        // and the fixture may be destroyed while its deferred cleanup runs.
+        QDBusConnection(watcherName).unregisterObject(QStringLiteral("/StatusNotifierWatcher"));
         QDBusConnection::disconnectFromBus(watcherName);
         const QDBusConnection connection = client();
         for (int waited = 0; waited < 5000; waited += 20) {
@@ -307,11 +316,11 @@ struct WatcherOnABus {
 
     ~WatcherOnABus()
     {
-        QDBusConnection::disconnectFromBus(clientName);
-        QDBusConnection::disconnectFromBus(watcherName);
+        QDBusConnection(watcherName).unregisterObject(QStringLiteral("/StatusNotifierWatcher"));
         thread.quit();
         thread.wait();
-        delete watcher; // its thread has finished: nothing else can touch it now
+        QDBusConnection::disconnectFromBus(clientName);
+        QDBusConnection::disconnectFromBus(watcherName);
     }
 };
 
@@ -725,6 +734,28 @@ void TestDesktopChrome::theTrayHostIsAskedNotAssumed()
     }
     // And no bus at all: nothing was asked.
     QVERIFY(!freetunnel::trayHostRegistered(QDBusConnection(QStringLiteral("no-such-connection"))).has_value());
+}
+
+// Exercise the asynchronous connection cleanup between successive hosts. A
+// single query can pass even when a stale fake remains in Qt's D-Bus object tree
+// and closeConnection later tries to disconnect that already deleted object.
+void TestDesktopChrome::trayHostsCanBeRecreatedRepeatedly()
+{
+    for (int iteration = 0; iteration < 256; ++iteration) {
+        WatcherOnABus setup;
+        const bool hasHost = iteration % 2 == 0;
+        if (!setup.start(hasHost ? Watcher::HostRegistered : Watcher::NoHost)) {
+            if (qEnvironmentVariableIsSet("CI"))
+                QFAIL("could not start a private dbus-daemon with a stand-in tray watcher");
+            QSKIP("no dbus-daemon to run a stand-in tray watcher on");
+        }
+        const std::optional<bool> answer = freetunnel::trayHostRegistered(setup.client());
+        QVERIFY2(answer.has_value() && *answer == hasHost, qPrintable(QString::number(iteration)));
+        if (iteration % 3 == 0) {
+            QVERIFY(setup.stopWatcher());
+            QCOMPARE(freetunnel::trayHostRegistered(setup.client()), std::optional<bool>(false));
+        }
+    }
 }
 
 // The bar that made the tray icon is gone (it crashed, or a key bound to restart it

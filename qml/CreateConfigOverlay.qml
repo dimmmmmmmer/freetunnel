@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
-import QtQuick.Effects
 // See AppPickerOverlay.qml: the labs FileDialog opens nothing where the desktop
 // has no native helper and the application does not link Qt Widgets.
 import QtQuick.Dialogs as Dialogs
@@ -21,6 +20,7 @@ Item {
     readonly property int safeTop: shell.titlebarSafeTop
     readonly property int cardWidth: Math.min(width - 28, 372)
 
+    Component.onDestruction: backend.setConfigOpenInEditor("")
     anchors.fill: parent
     // Dimmed backdrop — the main UI shows through; click to close. It takes hover
     // too: the page under the dim is out of reach, and lit up as if it were not.
@@ -51,6 +51,8 @@ Item {
         // Clicking empty card space clears focus from any text field.
         TapHandler { onTapped: cform.forceActiveFocus() }
         property string protocol: "http2"
+        // Per connection. Empty is not used: chrome is the core's default.
+        property string tlsProfile: "chrome"
         property bool ipv6: true
         property bool skipVerification: false
         property bool antiDpi: false
@@ -61,17 +63,47 @@ Item {
         // and saving against the old number then writes over whatever is at that
         // position now. See Backend::createConfig().
         property string editPath: ""
+        property bool subscriptionLinked: false
+        Connections {
+            target: backend
+            function onConfigsChanged() { cform.subscriptionLinked = backend.hasSubscription(cform.editPath) }
+        }
         readonly property bool editing: shell.editIndex >= 0
         // Join on a separator no field can contain (U+001F): a plain join() lets
         // a boundary-shifting edit (name "ab" + host "c" → name "a" + host "bc")
         // rebuild the same string, so tryClose() would drop real edits silently.
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
-                    protocol, fDns.text, fSni.text, fRandom.text, fAuthKey.text, fCert.text, ipv6,
+                    protocol, tlsProfile, fDns.text, fSni.text, fRandom.text, fAuthKey.text, fCert.text, ipv6,
                     skipVerification, antiDpi, splitProfile].join("\u001f")
+        }
+        function afterDiscard(action) {
+            if (snapshot() !== snap)
+                shell.showConfirm(qsTr("Discard unsaved changes?"), qsTr("Discard"), action)
+            else action()
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
+        // The stable core's choices. "default" is not one: it is an old alias of BoringSSL.
+        function tlsChoices() {
+            return [
+                {v:"chrome", t:qsTr("Chrome")},
+                {v:"chrome_canary", t:qsTr("Chrome Canary")},
+                {v:"safari", t:qsTr("Safari")},
+                {v:"firefox", t:qsTr("Firefox")},
+                {v:"okhttp", t:qsTr("OkHttp")},
+                {v:"openssl", t:qsTr("OpenSSL")},
+                {v:"boringssl", t:qsTr("BoringSSL")}
+            ]
+        }
+        function tlsLabel(value) {
+            const choices = tlsChoices()
+            for (let i = 0; i < choices.length; ++i) {
+                if (choices[i].v === value)
+                    return choices[i].t
+            }
+            return value
+        }
         // Prefill from the selected config when editing; snapshot for dirty-check.
         Component.onCompleted: {
             if (editing) {
@@ -86,6 +118,8 @@ Item {
                     return
                 }
                 cform.editPath = f.path || ""
+                backend.setConfigOpenInEditor(cform.editPath)
+                cform.subscriptionLinked = backend.hasSubscription(cform.editPath)
                 fName.text = f.name || ""; fHost.text = f.hostname || ""
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""
                 fPass.text = f.password || ""; fDns.text = f.dns || ""
@@ -93,6 +127,9 @@ Item {
                 fAuthKey.text = f.authKey || ""
                 fCert.text = f.certificate || ""
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
+                cform.tlsProfile = f.tlsProfile || "chrome"
+                if (cform.tlsProfile === "default")
+                    cform.tlsProfile = "boringssl"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
                 cform.skipVerification = f.skipVerification === true
                 cform.antiDpi = f.antiDpi === true
@@ -165,6 +202,19 @@ Item {
                     }
                     Field { id: fDns; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("DNS servers"); placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
                 }
+                Column { width: parent.width; spacing: 4
+                    Text { text: qsTr("TLS profile"); color: theme.textDim; font.pixelSize: 13 }
+                    Rectangle { id: tlsBox; objectName: "tlsProfileBox"; width: parent.width; height: 34; radius: 8; color: theme.inputBg
+                        border.color: tlsMa.containsMouse ? theme.accent : theme.inputBorder; border.width: 1
+                        Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                               text: cform.tlsLabel(cform.tlsProfile); color: theme.text; font.pixelSize: 14 }
+                        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                               text: "▾"; color: theme.textDim; font.pixelSize: 16 }
+                        MouseArea { id: tlsMa; anchors.fill: parent; hoverEnabled: true
+                            onClicked: shell.showSelect(tlsBox, cform.tlsChoices(), cform.tlsProfile, function(v){ cform.tlsProfile = v }) } }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; color: theme.textFaint; font.pixelSize: 12
+                           text: qsTr("This server only. Leave it on Chrome unless the server asks for another.") }
+                }
                 Row { width: parent.width; spacing: 10
                     Field { id: fSni; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Custom SNI"); width: (parent.width - 10) / 2 }
                     Field { id: fRandom; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Client random (hex)"); width: (parent.width - 10) / 2 }
@@ -234,6 +284,22 @@ Item {
                                 Keys.onBacktabPressed: function(e) { nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason); e.accepted = true } } }
                         MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; cursorShape: Qt.IBeamCursor } }
                 }
+                RowLayout {
+                    width: parent.width
+                    objectName: "subscriptionActions"
+                    visible: cform.editing && cform.subscriptionLinked
+                    spacing: 8
+                    Text { text: qsTr("Refresh subscription"); color: theme.accent; font.pixelSize: 13
+                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
+                            objectName: "refreshSubscriptionAction"
+                            onClicked: { cform.afterDiscard(function() { backend.setConfigOpenInEditor(""); backend.refreshSubscription(cform.editPath); cform.close() }) } } }
+                    Item { Layout.fillWidth: true }
+                    Text { text: qsTr("Stop updates"); color: theme.danger; font.pixelSize: 13
+                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
+                            onClicked: shell.showConfirm(qsTr("Stop subscription updates?"), qsTr("Stop updates"), function() {
+                                if (backend.detachSubscription(cform.editPath)) cform.subscriptionLinked = false
+                            }) } }
+                }
                 Dialogs.FileDialog {
                     id: certFileDlg; objectName: "certificateDialog"; title: qsTr("Select a certificate")
                     nameFilters: ["PEM (*.pem *.crt *.cer)", qsTr("All files (*)")]
@@ -266,7 +332,7 @@ Item {
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
-                                authKey: fAuthKey.text,
+                                authKey: fAuthKey.text, tlsProfile: cform.tlsProfile,
                                 allowIpv6: cform.ipv6, skipVerification: cform.skipVerification,
                                 antiDpi: cform.antiDpi, certificate: fCert.text,
                                 splitProfile: cform.splitProfile, editIndex: shell.editIndex,

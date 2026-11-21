@@ -1,3 +1,5 @@
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index 7b8fc4a..9eb2a33 100644
 --- a/trusttunnel/include/vpn/trusttunnel/client.h
 +++ b/trusttunnel/include/vpn/trusttunnel/client.h
 @@ -123,6 +123,15 @@ public:
@@ -16,6 +18,8 @@
      bool process_client_packets(VpnPackets packets);
  
      ~TrustTunnelClient();
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index d7aaefb..9ec5877 100644
 --- a/trusttunnel/src/client.cpp
 +++ b/trusttunnel/src/client.cpp
 @@ -118,6 +118,13 @@ void TrustTunnelClient::notify_wake() {

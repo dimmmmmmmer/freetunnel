@@ -1,7 +1,8 @@
 # FreeTunnel for Android
 
-Android VPN client using the official, checksum-pinned **TrustTunnel 1.1.11**
-adapter, for phones, tablets and Android TV (Android 8.0 or later). Official
+Android VPN client using **TrustTunnel 1.1.12**, built from pinned upstream
+source with FreeTunnel’s routing-priority patch, for phones, tablets and
+Android TV (Android 8.0 or later). Official
 releases are the `android-X.Y.Z` releases of
 [dimmmmmmmer/freetunnel](https://github.com/dimmmmmmmer/freetunnel), signed with
 the certificate pinned in `release-certificate.sha256`; a fork's release name or
@@ -11,11 +12,17 @@ certificate is not an official release or an update compatibility contract.
 
 - Confirmed import of TOML, `tt://` and TrustTunnel QR-page links. Import only
   adds a profile; it never starts VPN or replaces another profile implicitly.
+  Paste multiple links or select multiple TOML/text files; each configuration
+  is checked and confirmed in order. Text files can contain links too.
+  Imports are limited to 100 pending items and 1 MiB per document.
   Links of format versions 0 to 2 are read; TrustTunnel 1.3 writes version 2.
-  Subscriptions are not followed yet: a link or file with only a subscription
-  is refused, and from other links and files only the server's own settings
-  are imported. The subscription address is not kept; the rest of a file is
-  kept as written. Servers that need an auth key are refused until the app
+  HTTPS subscriptions ask before their first download; their addresses and credentials
+  stay in encrypted storage. Refresh or stop updates in the server editor. While the
+  app is open, subscriptions refresh when at least 24 hours old (failed requests
+  retry no sooner than one hour). A changed server hostname needs confirmation;
+  local routing, DNS and transport preferences are preserved. Automatic refresh is
+  suspended for configurations with custom SNI. Servers that need an auth key are
+  refused until the app
   moves to TrustTunnel core 1.3. The rules for each version 2 field are the
   desktop's, in [DEEP_LINK.md](../DEEP_LINK.md); for TOML, only an empty
   `client_random_auth_key` counts as no key. That is stricter than the
@@ -31,6 +38,9 @@ certificate is not an official release or an update compatibility contract.
   would be when it lacks the server's host name, addresses, user name or
   password. It is named after its `name`, or, when it has none, as other
   TOML files are: after the file, or "From clipboard" when pasted.
+- Scan a TrustTunnel QR code using the camera on phones and tablets. Camera access
+  is requested only when opening the scanner; decoded configurations still need confirmation.
+- Optional verbose native-core logs use the same timestamp and severity format as desktop.
 - TOML, Android adapter and native configuration checks before saving.
   The editor shows the password as dots and prevents screen capture.
 - AES-GCM encrypted profiles with Android Keystore. Read failures preserve
@@ -111,7 +121,7 @@ Both are the desktop's pages ([HomePage.qml](../qml/pages/HomePage.qml),
 
 Settings and Logs are the desktop's pages ([SettingsPage.qml](../qml/pages/SettingsPage.qml),
 [LogsPage.qml](../qml/pages/LogsPage.qml)), with what only the desktop has left out (Launch at system
-startup, Hotkeys, the Windows-only ports row, Verbose logs, the log's path) and a few rows that only Android
+startup, Hotkeys, the Windows-only ports row, Verbose logs) and a few rows that only Android
 has. Their words are the desktop's English and its Russian wherever the control is the same:
 `tests/test_android_strings_match_desktop.sh` holds every string to `i18n/freetunnel_ru.ts`, through a
 table of the strings the desktop has too, and fails for one that is neither in it nor on its
@@ -149,11 +159,12 @@ Android-only list.
   the only control, so the texts that tell what to do next say "this line", and there is no *Install update* button
   on the screen (that is what a screen reader adds to the line, and the red button of the question). Outside the
   official build the section says it doesn't come from the official channel.
-- The footer, **FreeTunnel 1.2.4 · TrustTunnel core 1.1.11**, each name a link to its page (a toast where there is no
+- The footer, **FreeTunnel 1.2.5 · TrustTunnel core 1.1.12**, each name a link to its page (a toast where there is no
   browser, as on most TVs; the core's version is read from the AAR's name by the build). There is no screen for
   the third-party notices, as the desktop has none: they are files in the APK (see License below).
 
-**Logs**: **Clear** and **Copy** as links as wide as their words (Copy says *Log copied*, and asks the
+**Logs**: **freetunnel.log** saves the complete log through the system file picker;
+TVs without a file picker can use **Copy**. **Clear** and **Copy** as links as wide as their words (Copy says *Log copied*, and asks the
 clipboard not to show what it copied, as the log lists where connections went); *Logging is off.* with **Turn on**;
 the log in a box that fills the page and scrolls in itself, *Logs will appear after connecting* in the middle of
 it while it is empty; and **Auto-scroll** at the foot. The box follows the file once a second, by changing its text
@@ -187,11 +198,11 @@ the profile of the config that is selected, so they route alike. Editing that pr
 tunnelling is on builds a running session again (the rules reach a session only that way);
 editing another profile, or choosing which to edit, restarts nothing.
 
-**Rules.** *Recommended for Russia* adds the list to the profile being edited, skipping what it has.
-The list is `data/split/recommended-russia.txt`, one file for this app and the desktop: the build copies
-it into the APK's assets, and the desktop has it compiled in. A new installation starts with split
-tunnelling on and Default holding that list, as the desktop's does. An update from 1.0.0 puts the one
-list of domains and the one of applications it kept into Default, sorted. Words typed into the field are
+**Rules.** A new installation starts with split tunnelling on and two geo lists in Default:
+**Russian sites** and **Russian IP addresses**, both using **Bypass VPN**. Their sources
+come from `data/geo/presets.json`, shared with the desktop. Existing installations keep
+their profiles; removing a default list does not add it back. An update from 1.0.0 puts
+the saved domains and applications into Default, sorted. Words typed into the field are
 added if they are rules, and the ones that are not are named in the desktop's words. Applications
 are added from the picker, one to a visit; one that is no longer installed is listed by its package
 name, so that it can be removed.
@@ -461,7 +472,7 @@ open the address in Chrome or Safari instead.
 
 ## Build and signing
 
-Requires JDK 17, Android SDK 35, Build Tools 35.0.0, Bash and Python 3.
+Requires JDK 17, Android SDK 37, Build Tools 36.0.0, Bash and Python 3.
 The patched stable adapter is built on Ubuntu 24.04 with Clang 18, GCC 13
 headers, CMake, Ninja, Conan 2.31.1, Rust 1.95, cargo-ndk 4.1.2 and
 NDK 29.0.14206865. The Android CI workflow installs these tools.
@@ -481,11 +492,13 @@ hashes, ABI inventory and AAR digest against its build manifest. This manifest
 is an integrity record, not an independent signature. No GitHub PAT is needed.
 To rebuild after changing a pin or patch, remove the old AAR and matching JSON
 from `android/app/libs` and run preparation again.
-Gradle 8.11.1 wrapper and distribution checksums are pinned too.
+Gradle 9.6.0 wrapper and distribution checksums are pinned too. The app uses
+AGP 9.5.1 with built-in Kotlin 2.4.21; debug and release JVM tests are both enabled.
+Compile SDK 37 does not change the Android 8.0 minimum or target SDK 35.
 
 Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (debug signing).
 Gradle builds release APKs unsigned, and never sees a keystore:
-`scripts/sign-android-release.sh` signs them with Build Tools 35.0.0 alone
+`scripts/sign-android-release.sh` signs them with Build Tools 36.0.0 alone
 (`apksigner`, with `zipalign` and `aapt2` to check the result), in CI and
 locally. For a signed release APK on your own machine, supply
 `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_PASSWORD`
@@ -647,7 +660,7 @@ adb shell am instrument -w -e withoutInstallPermission true \
   org.freetunnel.android.test/androidx.test.runner.AndroidJUnitRunner
 adb shell appops set org.freetunnel.android REQUEST_INSTALL_PACKAGES allow
 ./android/gradlew -p android :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/35.0.0/apksigner \
+  -Pandroid.testInstrumentationRunnerArguments.debugCertificate="$("$ANDROID_HOME"/build-tools/36.0.0/apksigner \
     verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk |
     sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
 ```
@@ -721,7 +734,7 @@ remote-server, DNS or HTTP/3 coverage.
 ## License
 
 FreeTunnel and TrustTunnel are Apache-2.0. See [LICENSE](../LICENSE) and
-[TrustTunnelClient v1.1.11](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.11).
+[TrustTunnelClient v1.1.12](https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.1.12).
 
 The APK also contains the libraries in the Android section of
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md), under their own
@@ -790,7 +803,7 @@ reason is said in the app's own toast, as the desktop's window does with an erro
 An explicit Reconnect builds a new TUN from the current settings and hands traffic
 over to it.
 
-Each attempt also repeats two costs of the pinned TrustTunnel 1.1.11 core that
+Each attempt also repeats two costs of the pinned TrustTunnel 1.1.12 core that
 used to come once per explicit start. The core resolves a hostname given in
 `addresses` as it starts, for up to 15 s, on the service's single worker, so a
 Disconnect, Reconnect or settings change made during that lookup waits for it to
@@ -826,13 +839,14 @@ pins all three asset URLs to that repository and tag. Desktop tags, drafts,
 prereleases, foreign URLs and incomplete assets are ignored. The desktop
 updater's `/releases/latest` endpoint is never used.
 
-An Android release must provide `freetunnel-android.apk`,
+An Android release publishes one APK, `freetunnel-android-X.Y.Z.apk`,
 `SHA256SUMS-android.txt`, and the raw 64-byte Ed25519 signature
 `SHA256SUMS-android.txt.sig`. The manifest's first line must be `#version=X.Y.Z`,
 followed by an unambiguous SHA-256 entry for the APK.
-A byte-identical `freetunnel-android-X.Y.Z.apk` compatibility asset and its checksum
-are also published so installed versions through 1.2.4 can discover updates.
-New clients prefer the unversioned filename and also accept older releases. The public verification key
+The versioned filename is accepted by both older and current clients, so an
+unversioned duplicate is unnecessary. Clients from 1.2.5 also accept
+`freetunnel-android.apk` for compatibility with releases that used that name.
+The public verification key
 is taken at build time from `include/core/ReleaseSigning.h`; no private signing
 key is shipped. Verification uses Bouncy Castle's lightweight Ed25519 implementation
 on all supported Android versions, including API 26.
