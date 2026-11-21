@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Desktop split tunnelling accepts a wildcard with one label, such as *.ru and *.su, which the TrustTunnel core already matches.
+- Desktop split tunnelling accepts a wildcard with one label, such as `*.ru` and `*.su`, which the TrustTunnel core already matches.
 - Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
 
 - Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.
