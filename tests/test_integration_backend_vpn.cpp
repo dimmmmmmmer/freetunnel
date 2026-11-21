@@ -2006,10 +2006,10 @@ void TestIntegrationBackendVpn::exportRoundTrips()
 void TestIntegrationBackendVpn::domainRulesAcceptTldWildcardsAndIdn()
 {
     Backend backend;
-    // TLD-only wildcards are rejected — TrustTunnel's DOMAIN_FILTER cannot use them.
-    QVERIFY(!backend.addDomain(QStringLiteral("*.ru")));
-    QVERIFY(!backend.addDomain(QStringLiteral(".su")));
-    QVERIFY(!backend.addDomain(QStringLiteral("*.рф")));   // *.рф
+    // A wildcard of one label is a rule the core matches. A bare label is not.
+    QVERIFY(backend.addDomain(QStringLiteral("*.ru")));
+    QVERIFY(backend.addDomain(QStringLiteral(".su")));
+    QVERIFY(backend.addDomain(QStringLiteral("*.рф")));   // *.рф
     QVERIFY(backend.addDomain(QStringLiteral("мвд.рф"))); // мвд.рф
     QVERIFY(backend.addDomain(QStringLiteral("yandex.ru")));
     QVERIFY(backend.addDomain(QStringLiteral("192.168.0.0/16")));
