@@ -3399,6 +3399,7 @@ public final class MainActivity extends Activity {
             });
             // Enter toggles the first match without applying the draft.
             search.setOnEditorActionListener((field, action, event) -> {
+                if (event != null && event.getAction() != KeyEvent.ACTION_DOWN) return true;
                 List<AppEntry> matches = matches();
                 if (!matches.isEmpty()) choose(matches.get(0));
                 return true;
@@ -3478,6 +3479,7 @@ public final class MainActivity extends Activity {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(dp(10), 0, dp(10), 0);
                 android.widget.CheckBox check = new android.widget.CheckBox(MainActivity.this);
+                check.setTextColor(t.text);
                 check.setChecked(selected.contains(app.pkg));
                 check.setButtonTintList(new android.content.res.ColorStateList(
                         new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{t.accent, t.textFaint}));

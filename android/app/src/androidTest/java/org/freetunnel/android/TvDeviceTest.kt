@@ -2917,7 +2917,21 @@ class TvDeviceTest {
             }.tag as String
         }
         val savedBefore = profiles().apps(profiles().edited()).toList()
-        click(a, row)
+        // setup() seeds an installed app. A preselected row must be toggled off
+        // before selecting it again; one click would deliberately remove it.
+        assertEquals("Saved choices start checked", first in savedBefore, onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$first").isChecked
+        })
+        if (first in savedBefore) click(a, row)
+        // Hardware Enter sends down and up: together they must toggle only once.
+        onMain {
+            search.requestFocus()
+            search.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+            search.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+        }
+        assertTrue("Enter selects the first choice once", onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$first").isChecked
+        })
         assertNotNull("Selecting keeps the popup open", overlayTag(a, "picker"))
         assertEquals("No rules changed before Apply", savedBefore, profiles().apps(profiles().edited()))
         onMain { search.setText("") }
@@ -2929,11 +2943,24 @@ class TvDeviceTest {
         }
         onMain { search.setText(second) }
         instrumentation.waitForIdleSync()
-        click(a, "picker:0")
+        val secondRow = onMain {
+            descendants(root(a).findViewWithTag<View>("overlay:picker")).first { v ->
+                (v.tag as? String)?.matches(Regex("picker:\\d+")) == true &&
+                    v.findViewWithTag<android.widget.CheckBox?>("picker:check:$second") != null
+            }.tag as String
+        }
+        if (second in savedBefore) click(a, secondRow)
+        click(a, secondRow)
+        onMain { search.setText("") }
+        instrumentation.waitForIdleSync()
+        for (pkg in listOf(first, second)) assertTrue("$pkg stays checked after filtering", onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$pkg").isChecked
+        })
         assertEquals("Both selections are still a draft", savedBefore, profiles().apps(profiles().edited()))
         click(a, "picker:apply")
         eventually("Apply saves the selection and closes the picker") { overlayTag(a, "picker") == null }
-        assertTrue("Both apps were saved", profiles().apps(profiles().edited()).containsAll(listOf(first, second)))
+        assertEquals("Apply preserves saved apps and adds both choices",
+            (savedBefore + first + second).toSet(), profiles().apps(profiles().edited()).toSet())
         if (isTv) eventually("The successful save returns focus to Choose") { focusedKey(a) == "apps:choose" }
         assertTrue("It is in the apps the VPN carries or leaves", profiles().apps(profiles().edited()).contains(first))
         assertTrue("and in the old list 1.0.0 reads, which copies the profile the selected config uses", prefs.getStringSet("apps", emptySet())!!.contains(first))
