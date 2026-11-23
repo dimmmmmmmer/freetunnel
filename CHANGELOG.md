@@ -4,7 +4,7 @@
 
 - Desktop and Android use stable TrustTunnel 1.3.0. Each server keeps its own TLS profile: Chrome, Chrome Canary, Safari, Firefox, OkHttp, OpenSSL or BoringSSL. Leaving it unset uses Chrome. BoringSSL is new in this core; older configs that say `default` use BoringSSL.
 - Authentication keys are stored in the system credential store and included when sharing a configuration. Links with a key require a client supporting the version 2 link format.
-
+- Desktop split tunnelling accepts a wildcard with one label, such as `*.ru` and `*.su`, which the TrustTunnel core already matches.
 - Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
 
 - Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.

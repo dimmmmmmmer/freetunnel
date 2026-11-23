@@ -207,6 +207,14 @@ public final class SplitProfilesTest {
         assertEquals(list("example.com", "*.example.org", "example.net"), p.domains("Default"));
     }
 
+    @Test public void aSingleLabelWildcardIsARule() {
+        SplitProfiles p = SplitProfiles.empty();
+        SplitProfiles.Entered in = p.addDomains("Default", "*.ru, *.su .рф *.example.com intranet google.*");
+        assertEquals(list("*.ru", "*.su", ".рф", "*.example.com"), in.added);
+        assertEquals(list("intranet", "google.*"), in.refused);
+        assertEquals("*.xn--p1ai", SplitRules.INSTANCE.core(".рф"));
+    }
+
     @Test public void wordsThatAreNoRuleAreNamedAndTheRestIsAdded() {
         SplitProfiles p = SplitProfiles.empty();
         SplitProfiles.Entered in = p.addDomains("Default", "good.example, intranet, example.com:443 also.good, 1.2.3.4.5");
@@ -251,7 +259,10 @@ public final class SplitProfilesTest {
         assertEquals("trimmed, otherwise as written", list("yandex.ru", "*.yandex.ru"), p.domains("Work"));
         assertTrue(p.domains("Default").isEmpty());
         assertEquals(0, p.addRecommended("Nope", list("yandex.ru")));
-        assertEquals("a rule the core cannot take is not added", 0, p.addRecommended("Work", list("intranet", "*.ru")));
+        assertEquals("a bare name is not added; *.ru is a wildcard the core takes", 1,
+            p.addRecommended("Work", list("intranet", "*.ru")));
+        assertTrue(p.domains("Work").contains("*.ru"));
+        assertFalse(p.domains("Work").contains("intranet"));
     }
 
     @Test public void aRuleIsRemovedByItsPlaceAndAllAreCleared() {

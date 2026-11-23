@@ -24,6 +24,29 @@ static bool isValidIpBypassRule(const QString &rule)
     return ok && p > 0 && p <= max;
 }
 
+// A wildcard may name one label. TrustTunnel 1.1.12 DomainFilter::parse_entry
+// accepts *.ru and *.google and matches subdomains of that label, not the
+// label itself. A name with no wildcard still needs a dot: the filter would
+// take "ru" only as that name and www.ru.
+static bool isSingleLabel(const QString &label)
+{
+    static const QRegularExpression one(
+        QStringLiteral("^(?=.{2,63}$)(?!\\p{N}+$)[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?$"),
+        QRegularExpression::UseUnicodePropertiesOption);
+    return one.match(label).hasMatch();
+}
+
+// "ru" and "ru." are one label. A name with an interior dot, or "..", is not.
+static QString singleLabelOf(const QString &host)
+{
+    QString label = host;
+    if (label.endsWith(QLatin1Char('.')) && !label.endsWith(QLatin1String("..")))
+        label.chop(1);
+    if (label.isEmpty() || label.contains(QLatin1Char('.')))
+        return {};
+    return label;
+}
+
 static bool isValidDomainBypassRule(const QString &rule)
 {
     // The last label is letters, or the ASCII spelling of one that is not:
@@ -58,6 +81,11 @@ bool isValidBypassRule(const QString &rule)
     // tunnel at all.
     if (isValidIpBypassRule(r))
         return !wildcard;
+    if (wildcard) {
+        const QString one = singleLabelOf(r);
+        if (!one.isEmpty())
+            return isSingleLabel(one);
+    }
     return isValidDomainBypassRule(r);
 }
 
@@ -103,6 +131,14 @@ QString coreBypassRuleFor(const QString &rule)
     }
     if (isValidIpBypassRule(r))
         return wild ? QString() : rule.trimmed(); // see isValidBypassRule()
+    if (wild) {
+        const QString one = singleLabelOf(r);
+        if (!one.isEmpty()) {
+            if (!isSingleLabel(one))
+                return {};
+            return QStringLiteral("*.") + punycodeHost(one);
+        }
+    }
     if (!r.contains(QLatin1Char('.')))
         return {};
     if (!isValidDomainBypassRule(r))
