@@ -276,10 +276,9 @@ index f4a2a7f..ea3344d 100644
 +    }
 +}
 diff --git a/core/test/test_tunnel.cpp b/core/test/test_tunnel.cpp
-index 0abeb8f..bc5bd19 100644
 --- a/core/test/test_tunnel.cpp
 +++ b/core/test/test_tunnel.cpp
-@@ -278,6 +278,9 @@ public:
+@@ -278,6 +278,9 @@
  
      void SetUp() override {
          TunnelTest::SetUp();
@@ -289,7 +288,7 @@ index 0abeb8f..bc5bd19 100644
  
          ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, "localhost"));
  
-@@ -619,18 +622,22 @@ TEST_F(FakeConnectionTest, TTL) {
+@@ -619,18 +622,22 @@
      // 1) Raise the request for connection
      ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
  
@@ -323,7 +322,19 @@ index 0abeb8f..bc5bd19 100644
  }
  
  static constexpr uint8_t HTTP3_IS_QUIC_CH[] = "\xca\x00\x00\x00\x01\x08"
-@@ -869,7 +876,7 @@ public:
+@@ -848,8 +855,10 @@
+         ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, "*.localhost"));
+     }
+
+-    // Opens a connection and routes it to the VPN endpoint (the mode default in general mode).
++    // Exercise pass-through lookup on an already established, non-fake connection.
++    // Standard HTTP/TLS ports now wait for this flow's hostname before selecting a route.
+     void connect_to_endpoint() {
++        dst = SocketAddress("1.1.1.2:777");
+         m_client_id = vpn.listener_conn_id_generator.get();
+         ASSERT_NO_FATAL_FAILURE(raise_client_connection(m_client_id));
+
+@@ -869,7 +878,7 @@
  };
  
  // Wildcard exclusion without suspects cache still works via on-wire SNI scan
@@ -332,7 +343,7 @@ index 0abeb8f..bc5bd19 100644
  TEST_F(ExternalSecureDnsTest, WildcardSniScanMigratesToBypass) {
      m_client_id = vpn.listener_conn_id_generator.get();
  
-@@ -880,12 +887,10 @@ TEST_F(ExternalSecureDnsTest, WildcardSniScanMigratesToBypass) {
+@@ -880,12 +889,10 @@
      size_t bypass_before = bypass_upstream->connections.size();
      tun.complete_connect_request(m_client_id, action);
  
@@ -342,12 +353,13 @@ index 0abeb8f..bc5bd19 100644
 +    ASSERT_EQ(redirect_upstream->connections.size(), redirect_before);
      ASSERT_EQ(bypass_upstream->connections.size(), bypass_before);
 -    m_redirect_id = redirect_upstream->connections.back();
- 
+-
 -    tun.upstream_handler(redirect_upstream, SERVER_EVENT_CONNECTION_OPENED, &m_redirect_id);
++
      ASSERT_EQ(client_listener->connections[m_client_id].result, CCR_PASS);
      tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &m_client_id);
      ASSERT_TRUE(client_listener->connections[m_client_id].read_enabled);
-@@ -898,10 +903,10 @@ TEST_F(ExternalSecureDnsTest, WildcardSniScanMigratesToBypass) {
+@@ -898,10 +905,10 @@
      m_bypass_id = bypass_upstream->connections.back();
  
      tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &m_bypass_id);
@@ -361,3 +373,41 @@ index 0abeb8f..bc5bd19 100644
  }
  
  // All port-443 connections go through fake_upstream first so SNI is read before any real endpoint
+@@ -1168,7 +1175,7 @@
+ // The lookup can discover the destination domain from the server certificate when the ClientHello
+ // has no SNI. Discovering an exclusion this way cannot migrate the connection: the client's bytes
+ // have already been forwarded to the current upstream. The connection must be closed, and the
+-// discovered tag must route the next connection to the same destination accordingly.
++// discovered tag is retained for display, but cannot choose a new flow's route.
+ TEST_F(ExternalSecureDnsTest, IncomingExclusionClosesConnection) {
+     static constexpr std::string_view EXCLUDED_DOMAIN = "excluded.example";
+     ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, EXCLUDED_DOMAIN));
+@@ -1192,10 +1199,26 @@
+     ASSERT_EQ(match.status, DFMS_EXCLUSION) << "The discovered domain must be remembered for future connections";
+     ASSERT_EQ(match.domain, EXCLUDED_DOMAIN);
+
++    // An unrelated HTTPS site can share the cached address. Its own SNI must
++    // select the route, even after an excluded server certificate was observed.
++    vpn.exclusions_scannable_ports = ag::parse_scannable_ports("777").value();
+     m_client_id = vpn.listener_conn_id_generator.get();
+     ASSERT_NO_FATAL_FAILURE(raise_client_connection(m_client_id));
+-    std::optional<VpnConnectAction> action = tun.finalize_connect_action({m_client_id, VPN_CA_DEFAULT, "app", 1});
+-    ASSERT_EQ(action, VPN_CA_FORCE_BYPASS) << "The next connection must be routed according to the exclusion";
++    const auto action = tun.finalize_connect_action({m_client_id, VPN_CA_DEFAULT, "app", 1});
++    ASSERT_FALSE(action.has_value());
++    tun.complete_connect_request(m_client_id, action);
++    run_event_loop_once();
++    ASSERT_TRUE(redirect_upstream->connections.empty());
++    ASSERT_TRUE(bypass_upstream->connections.empty());
++    ASSERT_EQ(client_listener->connections[m_client_id].result, CCR_PASS);
++    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &m_client_id);
++
++    const auto fresh_hello = make_tls_client_hello("included.example");
++    ClientRead fresh_read = {m_client_id, fresh_hello.data(), fresh_hello.size(), 0};
++    tun.listener_handler(client_listener, CLIENT_EVENT_READ, &fresh_read);
++    ASSERT_EQ(redirect_upstream->connections.size(), 1);
++    ASSERT_TRUE(bypass_upstream->connections.empty())
++            << "The cached certificate must not bypass a different hostname on the same IP";
+ }
+
+ enum class DomainDetectionFailure {
