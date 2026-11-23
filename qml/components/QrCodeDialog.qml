@@ -104,7 +104,7 @@ Item {
             }
             Text { id: qrHint; objectName: "qrHint"; width: parent.width; wrapMode: Text.Wrap
                    horizontalAlignment: Text.AlignHCenter
-                   text: qsTr("Scan it with FreeTunnel for Android: + → Scan QR code. It contains the password: show it only to the phone you are adding this server to.")
+                   text: qsTr("Scan with FreeTunnel on Android")
                    color: theme.textDim; font.pixelSize: 12 }
             Rectangle { objectName: "qrCloseButton"
                 anchors.horizontalCenter: parent.horizontalCenter

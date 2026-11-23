@@ -1188,8 +1188,8 @@
 <context>
     <name>QrCodeDialog</name>
     <message>
-        <source>Scan it with FreeTunnel for Android: + → Scan QR code. It contains the password: show it only to the phone you are adding this server to.</source>
-        <translation>Отсканируйте в FreeTunnel для Android: + → Сканировать QR-код. Код содержит пароль — показывайте его только телефону, на который добавляете сервер.</translation>
+        <source>Scan with FreeTunnel on Android</source>
+        <translation>сканируйте в freetunnel на android</translation>
     </message>
     <message>
         <source>Close</source>
