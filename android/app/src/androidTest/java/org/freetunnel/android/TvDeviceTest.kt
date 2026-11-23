@@ -3613,27 +3613,34 @@ class TvDeviceTest {
     @Test fun theNoticeIsThereOnlyWhereThroughVpnWouldRouteNothing() {
         editProfiles { p -> p.clearDomains("Default"); p.clearApps("Default") }
         val nothing = context.getString(R.string.split_notice_nothing, "Profile 0", context.getString(R.string.split_profile_default))
-        val both = context.getString(R.string.split_notice_both, "Profile 0", context.getString(R.string.split_profile_default))
         val installed = context.packageManager.getInstalledApplications(0).map { it.packageName }.first { it != context.packageName }
         val a = open()
         // Bypass VPN: no notice, whatever the lists hold.
         splitOn(false)
         render(a, 2)
-        assertFalse(shows(a, nothing)); assertFalse(shows(a, both))
+        assertFalse(shows(a, nothing))
         // Through VPN with nothing listed: the desktop's, naming the config and its profile.
         splitOn(true)
         render(a, 2)
         assertTrue("Through VPN with no rules says so", shows(a, nothing))
-        assertFalse(shows(a, both))
         // Rules that can be used: it goes.
         editProfiles { it.addDomains("Default", "home.example") }
         render(a, 2)
-        assertFalse(shows(a, nothing)); assertFalse(shows(a, both))
+        assertFalse(shows(a, nothing))
         // Applications and domains work together without a full-tunnel fallback.
         editProfiles { it.addApp("Default", installed) }
         render(a, 2)
-        assertFalse("Mixed rules no longer need the unsupported-policy warning", shows(a, both))
         assertFalse(shows(a, nothing))
+        val list = GeoDefinition("test-networks", "Office", "https://example.invalid/office.txt", GeoLists.Kind.IPS, true, true)
+        GeoCache(GeoRepository.directory(context)).store(list.source, list.kind, list.bypass, "192.0.2.0/24".toByteArray())
+        editProfiles { it.putGeoList("Default", list) }
+        GeoRepository.get(context).refreshEnabled()
+        eventually("The bypass geo list is ready") { GeoRepository.get(context).state(list).cached != null }
+        render(a, 2)
+        assertTrue("App rules and a cached geo list can route together without a warning", onMain {
+            descendants(pageRoot(a)).filterIsInstance<TextView>().none { it.currentTextColor == theme(a).warn }
+        })
+        editProfiles { it.removeGeoList("Default", list.id) }
         // Applications that are not installed are no rules: the desktop's again.
         editProfiles { p -> p.clearApps("Default"); p.clearDomains("Default"); p.addApp("Default", "not.installed.package") }
         render(a, 2)

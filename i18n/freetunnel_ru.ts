@@ -1189,11 +1189,11 @@
     <name>QrCodeDialog</name>
     <message>
         <source>Scan with FreeTunnel on Android</source>
-        <translation>сканируйте в freetunnel на android</translation>
+        <translation>Сканируйте в FreeTunnel на Android</translation>
     </message>
     <message>
-        <source>Close</source>
-        <translation>Закрыть</translation>
+        <source>Back</source>
+        <translation>Назад</translation>
     </message>
 </context>
 <context>

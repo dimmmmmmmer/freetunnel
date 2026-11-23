@@ -24,6 +24,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Before
@@ -799,6 +800,9 @@ class UiTourDeviceTest {
             activate("add:create")
             awaitOverlay("editor")
             shot("editor-new", "New config: the desktop's form, the name first, the fields two to a line, the switches, the certificate, Cancel and Save at the end")
+            activate("editor:tls")
+            awaitOverlay("select")
+            shot("editor-tls", "The seven per-server TLS profiles, with the current profile checked")
         }
         screen("editor-edit-focused") {
             goTo(1)
@@ -911,8 +915,10 @@ class UiTourDeviceTest {
             activate("select:" + GeoPresets.read(context).size)
             awaitOverlay("geoform")
             val source = "https://example.invalid/custom-networks.txt"
+            assertFalse(onMain { root().findViewWithTag<View>("geoform:add").isEnabled })
             typeInto("geoform:name", "Office")
             typeInto("geoform:source", source)
+            assertTrue(onMain { root().findViewWithTag<View>("geoform:add").isEnabled })
             shot("geo-custom-list", "A new list defaults to Sites and Through VPN")
             activate("geoform:kind")
             awaitOverlay("select")
@@ -922,6 +928,7 @@ class UiTourDeviceTest {
             awaitOverlay("select")
             shot("geo-custom-route", "Route choices in the custom geo-list form")
             activate("select:1")
+            shot("geo-custom-selected", "The draft IP list will bypass VPN when added")
             GeoCache(GeoRepository.directory(context)).store(source, GeoLists.Kind.IPS, true,
                 "192.0.2.0/24".toByteArray())
             activate("geoform:add")
@@ -955,7 +962,16 @@ class UiTourDeviceTest {
             eventually("The applications must be listed", 30_000) {
                 onMain { root().findViewWithTag<TextView?>("picker:status")?.text?.toString() != scanning }
             }
-            shot("app-picker", "The application picker: the search field, rows of name over package")
+            for (i in 0..1) {
+                val key = "picker:$i"
+                val unchecked = onMain {
+                    root().findViewWithTag<ViewGroup?>(key)?.let { row ->
+                        descendants(row).filterIsInstance<android.widget.CheckBox>().firstOrNull()?.isChecked == false
+                    } == true
+                }
+                if (unchecked) activate(key)
+            }
+            shot("app-picker", "Selected applications in the draft, with Cancel and Apply")
         }
     }
 

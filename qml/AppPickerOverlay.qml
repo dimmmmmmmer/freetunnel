@@ -211,6 +211,28 @@ Item {
                 color: theme.textFaint; font.pixelSize: 12; wrapMode: Text.WordWrap
             }
 
+            Sep { Layout.fillWidth: true; theme: pickerRoot.theme }
+
+            // No wider than its words, so it acts over them and not across the card.
+            Text {
+                id: fileLink
+                objectName: "chooseFileLink"
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Link
+                Accessible.name: text
+                Accessible.onPressAction: fileDlg.open()
+                Keys.onReturnPressed: fileDlg.open()
+                Keys.onSpacePressed: fileDlg.open()
+                Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
+                elide: Text.ElideRight
+                text: qsTr("Choose a file instead…"); font.pixelSize: 12
+                color: browseMa.containsMouse ? theme.text : theme.accent
+                font.underline: browseMa.containsMouse || activeFocus
+                MouseArea { id: browseMa; anchors.fill: parent; anchors.margins: -4
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: fileDlg.open() }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
@@ -236,28 +258,6 @@ Item {
                         MouseArea { anchors.fill: parent; onClicked: parent.activate() }
                     }
                 }
-            }
-
-            Sep { Layout.fillWidth: true; theme: pickerRoot.theme }
-
-            // No wider than its words, so it acts over them and not across the card.
-            Text {
-                id: fileLink
-                objectName: "chooseFileLink"
-                activeFocusOnTab: true
-                Accessible.role: Accessible.Link
-                Accessible.name: text
-                Accessible.onPressAction: fileDlg.open()
-                Keys.onReturnPressed: fileDlg.open()
-                Keys.onSpacePressed: fileDlg.open()
-                Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
-                elide: Text.ElideRight
-                text: qsTr("Choose a file instead…"); font.pixelSize: 12
-                color: browseMa.containsMouse ? theme.text : theme.accent
-                font.underline: browseMa.containsMouse || activeFocus
-                MouseArea { id: browseMa; anchors.fill: parent; anchors.margins: -4
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: fileDlg.open() }
             }
         }
     }

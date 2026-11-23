@@ -4402,6 +4402,8 @@ void TestQmlUi::qrDialogFitsAndClearsItsSecretOnClose()
     QQuickWindow window;
     auto *page = showInWindow(root, window, 400, 500);
     QVERIFY(page);
+    QQuickItem opener(window.contentItem());
+    opener.forceActiveFocus();
     root->setProperty("title", QStringLiteral("A configuration"));
     root->setProperty("size", 177);
     root->setProperty("modules", QString(177 * 177, QLatin1Char('1')));
@@ -4412,9 +4414,17 @@ void TestQmlUi::qrDialogFitsAndClearsItsSecretOnClose()
     QVERIFY(card && code);
     QVERIFY(code->width() > 0 && code->width() <= card->width() - 28);
     QVERIFY(card->height() <= page->height());
-    QVERIFY(QMetaObject::invokeMethod(root, "close"));
+    auto *back = root->findChild<QQuickItem *>(QStringLiteral("qrBack"));
+    QVERIFY(back);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(back));
+    QTRY_VERIFY(!page->isVisible());
+    QCOMPARE(window.activeFocusItem(), &opener);
     QCOMPARE(root->property("size").toInt(), 0);
     QVERIFY(root->property("modules").toString().isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(root, "open"));
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QTRY_VERIFY(!page->isVisible());
+    QCOMPARE(window.activeFocusItem(), &opener);
     delete root;
 }
 

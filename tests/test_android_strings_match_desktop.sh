@@ -89,6 +89,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["editor_password", "CreateConfigOverlay", "Password"]
 ["editor_protocol", "CreateConfigOverlay", "Protocol"]
 ["editor_tls_profile", "CreateConfigOverlay", "TLS profile"]
+["editor_tls_hint", "CreateConfigOverlay", "This server only. Leave it on Chrome unless the server asks for another."]
 ["editor_dns", "CreateConfigOverlay", "DNS servers"]
 ["editor_sni", "CreateConfigOverlay", "Custom SNI"]
 ["editor_random", "CreateConfigOverlay", "Client random (hex)"]
@@ -183,6 +184,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["geo_never", "GeoListsBlock", "Never"]
 ["geo_duplicate", "Backend", "This geo list is already in the profile"]
 ["geo_name", "GeoListOverlay", "Name"]
+["geo_source", "GeoListOverlay", "HTTPS address"]
 ["geo_list_type", "GeoListOverlay", "List type"]
 ["geo_sites", "GeoListOverlay", "Sites"]
 ["geo_ips", "GeoListOverlay", "IP addresses"]
@@ -229,10 +231,8 @@ vpn_blocked_title
 vpn_blocked_details
 config_validation_error
 
-## Split routing: Android cannot send applications and domains through the tunnel together, and keeps what an older preview saved
-text_applications_and_addresses_are_selected_full_vpn_pro
+## Android routing and migration notices
 text_no_through_vpn_rules_full_vpn_is_enabled
-split_notice_both
 legacy_rules_removed
 imported_routing_rules
 
