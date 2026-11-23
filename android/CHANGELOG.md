@@ -1,13 +1,16 @@
 # Android changes
 
-## Unreleased
+## 1.3.0
 
-- The VPN core is stable TrustTunnel 1.3.0. Each server keeps its own TLS profile, the same choices as the desktop. Leaving it unset uses Chrome.
-- Split tunnelling accepts a wildcard with one label, such as `*.ru` and `*.su`, which the TrustTunnel core already matches.
-- New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
-- Background geo list refresh no longer changes routing settings or enables split tunnelling when starting the VPN.
-- Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
-- Releases now contain one APK, with the version in its filename.
+- **Updated to stable TrustTunnel 1.3.0.** Choose a TLS profile for each server in the configuration editor; imported authentication keys and TLS choices remain intact.
+- **Bypass VPN and Through VPN keep separate saved lists** of domains, IPs and applications in every split profile.
+- **Select several apps in one popup on phones and TVs.** Apply saves the selection together; Cancel leaves the rules unchanged.
+- **Single-label wildcard rules such as `*.ru` and `*.su` are accepted.**
+- **New installations start with Russian sites and Russian IP addresses bypassing VPN.** Custom geo lists are added in a dialog.
+- **Known hostnames remain visible in geo-routing logs**, including IPv6 connections.
+- **VPN recovery preserves bypassed DNS and direct connections.** Shared-address routing and malformed native configurations are handled correctly.
+- **Background geo refresh preserves saved routing choices**, including whether split tunnelling is enabled.
+- **Releases contain one APK**, with the version in its filename.
 
 ## 1.2.5
 

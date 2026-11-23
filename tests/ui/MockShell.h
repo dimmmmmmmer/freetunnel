@@ -51,6 +51,9 @@ public:
         lastConfirm = message;
     }
     QString lastConfirm;
+    QString qrTitle;
+    int qrSize = 0;
+    Q_INVOKABLE void showQrCode(const QString &title, int size, const QString &) { qrTitle = title; qrSize = size; }
     Q_INVOKABLE void showSelect(QObject *, const QVariant &, const QString &, const QVariant &) {}
     Q_INVOKABLE QString elide(const QString &s, int n) const;
     Q_INVOKABLE QString elideMiddle(const QString &s, int n) const;

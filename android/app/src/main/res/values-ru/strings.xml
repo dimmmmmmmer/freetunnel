@@ -172,7 +172,7 @@
     <string name="editor_no_file_picker">На этом устройстве нет выбора файлов. Вставьте сертификат в поле.</string>
     <string name="editor_discard_question">"Закрыть без сохранения?"</string>
     <string name="editor_discard">"Не сохранять"</string>
-    <string name="picker_title">"Добавить приложение"</string>
+    <string name="picker_title">"Выбор приложений"</string>
     <string name="picker_search">"Поиск"</string>
     <string name="picker_scanning">"Ищем установленные приложения…"</string>
     <string name="picker_nothing">"Ничего не найдено."</string>
@@ -279,4 +279,7 @@
     <string name="subscription_stop_question">Остановить обновления подписки?</string>
     <string name="subscription_host_changed">Подписка меняет сервер с %1$s на %2$s. Применить?</string>
     <string name="subscription_review">В подписке изменился сервер. Обновите её вручную для проверки.</string>
+    <string name="editor_tls_profile">Профиль TLS</string>
+    <string name="picker_apply">Применить</string>
+    <string name="picker_context_changed">Режим маршрутизации или профиль изменился. Откройте выбор приложений ещё раз.</string>
 </resources>

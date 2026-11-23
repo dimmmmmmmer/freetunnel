@@ -33,12 +33,15 @@ final class SplitProfiles {
     static final String DEFAULT = "Default";
     /** A name has at most this many characters, as the desktop's name field allows. */
     static final int MAX_NAME = 16;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private final List<String> order = new ArrayList<>();
-    private final Map<String, List<String>> domains = new HashMap<>();
-    private final Map<String, List<String>> apps = new HashMap<>();
+    private Map<String, List<String>> domains = new HashMap<>();
+    private Map<String, List<String>> apps = new HashMap<>();
     private final Map<String, List<GeoDefinition>> geo = new HashMap<>();
+    private Map<String, List<String>> inactiveDomains = new HashMap<>();
+    private Map<String, List<String>> inactiveApps = new HashMap<>();
+    private boolean through;
     private String edited = DEFAULT;
     private String mirrored = DEFAULT;
 
@@ -46,6 +49,8 @@ final class SplitProfiles {
         order.add(DEFAULT);
         domains.put(DEFAULT, new ArrayList<String>());
         apps.put(DEFAULT, new ArrayList<String>());
+        inactiveDomains.put(DEFAULT, new ArrayList<String>());
+        inactiveApps.put(DEFAULT, new ArrayList<String>());
         geo.put(DEFAULT, new ArrayList<GeoDefinition>());
     }
 
@@ -66,7 +71,12 @@ final class SplitProfiles {
      * kept: Default holds them, sorted, and is the profile being edited.
      */
     static SplitProfiles migrated(Collection<String> oldDomains, Collection<String> oldApps) {
+        return migrated(oldDomains, oldApps, false);
+    }
+
+    static SplitProfiles migrated(Collection<String> oldDomains, Collection<String> oldApps, boolean legacyThrough) {
         SplitProfiles p = new SplitProfiles();
+        p.through = legacyThrough;
         List<String> sortedDomains = new ArrayList<>(oldDomains);
         Collections.sort(sortedDomains);
         for (String rule : sortedDomains) if (!rule.trim().isEmpty() && !p.domains.get(DEFAULT).contains(rule)) p.domains.get(DEFAULT).add(rule);
@@ -74,6 +84,20 @@ final class SplitProfiles {
         Collections.sort(sortedApps);
         for (String pkg : sortedApps) if (!pkg.trim().isEmpty() && !p.apps.get(DEFAULT).contains(pkg)) p.apps.get(DEFAULT).add(pkg);
         return p;
+    }
+
+    boolean through() { return through; }
+
+    /** Each mode owns its lists. Geo definitions keep their explicit directions. */
+    void setThrough(boolean value) {
+        if (through == value) return;
+        Map<String, List<String>> previousDomains = domains;
+        Map<String, List<String>> previousApps = apps;
+        domains = inactiveDomains;
+        apps = inactiveApps;
+        inactiveDomains = previousDomains;
+        inactiveApps = previousApps;
+        through = value;
     }
 
     // Names.
@@ -125,6 +149,8 @@ final class SplitProfiles {
         order.add(name);
         domains.put(name, new ArrayList<String>());
         apps.put(name, new ArrayList<String>());
+        inactiveDomains.put(name, new ArrayList<String>());
+        inactiveApps.put(name, new ArrayList<String>());
         geo.put(name, new ArrayList<GeoDefinition>());
         edited = name;
         return new NameResult(NameStatus.ADDED, name);
@@ -146,6 +172,8 @@ final class SplitProfiles {
         order.remove(name);
         domains.remove(name);
         apps.remove(name);
+        inactiveDomains.remove(name);
+        inactiveApps.remove(name);
         geo.remove(name);
         if (edited.equals(name)) edited = DEFAULT;
         if (mirrored.equals(name)) mirrored = DEFAULT;
@@ -347,6 +375,8 @@ final class SplitProfiles {
                 one.put("name", name);
                 one.put("domains", array(domains.get(name)));
                 one.put("apps", array(apps.get(name)));
+                one.put("inactive_domains", array(inactiveDomains.get(name)));
+                one.put("inactive_apps", array(inactiveApps.get(name)));
                 JSONArray geoRows = new JSONArray();
                 for (GeoDefinition list : geoLists(name)) geoRows.put(list.toJson());
                 one.put("geo", geoRows);
@@ -354,6 +384,7 @@ final class SplitProfiles {
             }
             JSONObject root = new JSONObject();
             root.put("v", VERSION);
+            root.put("through", through);
             root.put("edit", edited);
             root.put("mirror", mirrored);
             root.put("profiles", profiles);
@@ -376,10 +407,14 @@ final class SplitProfiles {
      * package that is empty or listed twice is dropped, and the profile being edited, or mirrored, that is not there
      * is Default. Text that is no JSON, or has no list of profiles, throws.
      */
-    static SplitProfiles fromJson(String json) throws JSONException {
+    static SplitProfiles fromJson(String json) throws JSONException { return fromJson(json, false); }
+
+    static SplitProfiles fromJson(String json, boolean legacyThrough) throws JSONException {
         JSONObject root = new JSONObject(json);
         JSONArray profiles = root.getJSONArray("profiles");
         SplitProfiles p = new SplitProfiles();
+        // The old lists already describe the saved mode; never swap on migration.
+        p.through = root.optBoolean("through", legacyThrough);
         boolean defaultSeen = false;
         for (int i = 0; i < profiles.length(); i++) {
             JSONObject one = profiles.optJSONObject(i);
@@ -398,11 +433,15 @@ final class SplitProfiles {
                 p.order.add(name);
                 p.domains.put(name, new ArrayList<String>());
                 p.apps.put(name, new ArrayList<String>());
+                p.inactiveDomains.put(name, new ArrayList<String>());
+                p.inactiveApps.put(name, new ArrayList<String>());
                 p.geo.put(name, new ArrayList<GeoDefinition>());
                 target = name;
             }
             fill(p.domains.get(target), one.optJSONArray("domains"));
             fill(p.apps.get(target), one.optJSONArray("apps"));
+            fill(p.inactiveDomains.get(target), one.optJSONArray("inactive_domains"));
+            fill(p.inactiveApps.get(target), one.optJSONArray("inactive_apps"));
             JSONArray geoRows = one.optJSONArray("geo");
             if (geoRows != null) {
                 for (int j = 0; j < geoRows.length(); ++j)

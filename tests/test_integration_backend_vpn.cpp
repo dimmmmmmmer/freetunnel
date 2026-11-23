@@ -769,6 +769,7 @@ void TestIntegrationBackendVpn::aModeChangeReachesTheRunningSessionWithItsRules(
     Backend backend;
     // Set as the Split page sets them, so whatever decides the mode decides it here.
     backend.setSplitEnabled(true);
+    QVERIFY(backend.addDomain(QStringLiteral("bypass.example")));
     backend.setVpnMode(QStringLiteral("selective"));
     backend.connectVpn();
     QVERIFY(QTest::qWaitFor([&]() { return backend.connected(); }, 10000));
@@ -802,12 +803,14 @@ void TestIntegrationBackendVpn::aModeChangeReachesTheRunningSessionWithItsRules(
     QVERIFY(backend.addDomain(QStringLiteral("example.com")));
     QVERIFY(QTest::qWaitFor([&]() { return sentIs(true, example, none); }, 5000));
     backend.setVpnMode(QStringLiteral("general"));
-    QVERIFY(QTest::qWaitFor([&]() { return sentIs(false, example, none); }, 5000));
+    QVERIFY(QTest::qWaitFor([&]() { return sentIs(false, QStringList{QStringLiteral("bypass.example")}, none); }, 5000));
+    backend.setVpnMode(QStringLiteral("selective"));
+    QVERIFY(QTest::qWaitFor([&]() { return sentIs(true, example, none); }, 5000));
     backend.setSplitEnabled(false);
     QVERIFY(QTest::qWaitFor([&]() { return sentIs(false, none, none); }, 5000));
 
     QTest::qWait(200); // a disconnect would follow the last edit in the same burst
-    QCOMPARE(env.server.countFor(QStringLiteral("setSplitRouting")), 5);
+    QCOMPARE(env.server.countFor(QStringLiteral("setSplitRouting")), 6);
     QCOMPARE(env.server.countFor(QStringLiteral("setMode")), modeCommands);
     QCOMPARE(env.server.countFor(QStringLiteral("setExclusions")), domainCommands);
     QCOMPARE(env.server.countFor(QStringLiteral("setAppRules")), programCommands);

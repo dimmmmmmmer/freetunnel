@@ -2111,6 +2111,9 @@ void TestBackendConfig::aShareLinkOrExportOfAPasswordInTheFileStillNeedsItsStore
     QVERIFY2(backend.configDeepLink(0).isEmpty(), "a link without the stored key was made");
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.takeFirst().at(0).toString(), freetunnel::backend_config::authKeyNotReadMessage());
+    QVERIFY2(backend.configQrCode(0).isEmpty(), "a QR code without the stored key was made");
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.takeFirst().at(0).toString(), freetunnel::backend_config::authKeyNotReadMessage());
     QVERIFY2(!backend.exportConfigToml(0, dest), "a file without the stored key was written");
     QVERIFY(!QFileInfo::exists(dest));
     QCOMPARE(errors.count(), 1);
@@ -2123,6 +2126,9 @@ void TestBackendConfig::aShareLinkOrExportOfAPasswordInTheFileStillNeedsItsStore
     QVERIFY2(dl.has_value(), qPrintable(err));
     QCOMPARE(dl->password, QStringLiteral("in-the-file"));
     QCOMPARE(dl->clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    const auto qr = backend.configQrCode(0);
+    QVERIFY(qr.value("size").toInt() > 0);
+    QCOMPARE(qr.value("modules").toString().size(), qr.value("size").toInt() * qr.value("size").toInt());
     QCOMPARE(errors.count(), 0);
 }
 

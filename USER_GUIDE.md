@@ -30,7 +30,7 @@ If SmartScreen warns: **More info** → **Run anyway**.
 
 ### macOS
 
-Version 1.2.5 requires macOS 12 or newer. Version 1.2.4 requires macOS 14.4 or newer.
+Versions 1.2.5 and later require macOS 12 or newer. Version 1.2.4 requires macOS 14.4 or newer.
 
 Right-click the app → **Open**. Or clear the quarantine flag:
 
@@ -194,6 +194,17 @@ Desktop refreshes while running; Android checks for updates at least 24 hours ol
 while the app is open. Mobile background execution is subject to the operating
 system, so use **Refresh subscription** when you need an update immediately.
 
+### TLS profiles and QR export
+
+The configuration editor on desktop and Android offers Chrome (the default),
+Chrome Canary, Safari, Firefox, OkHttp, OpenSSL and BoringSSL. Each server keeps
+its own choice. Old configurations using `default` map to BoringSSL.
+
+On desktop, open a configuration's export menu and choose **Show QR code**.
+In FreeTunnel for Android, choose **+ → Scan QR code**. The QR code includes the
+connection credentials. A configuration too large for a QR code can be transferred
+with **Export .toml…** instead.
+
 ## Split tunnelling
 
 The **Split tunnelling** tab decides what goes through the tunnel. Rules are
@@ -204,6 +215,15 @@ switch at the top of the page:
 | --- | --- |
 | *Bypass VPN* | goes around the tunnel |
 | *Through VPN* | is the only thing inside it |
+
+Each mode keeps its own domain/IP and application lists for every profile.
+Switching modes restores that mode's saved lists. On upgrade, existing rules stay
+in the mode you previously used; the other mode starts empty. Geo lists retain
+their own explicit directions.
+
+Under **Applications**, open **Choose…**, check several apps, then press **Apply**.
+Selections survive searching for another app; **Cancel** or closing the popup
+discards the draft. This works on desktop, phones and Android TV.
 
 Under *Through VPN* with no rule that can be used, FreeTunnel keeps the full
 tunnel and the page says so, rather than send everything around it.

@@ -16,6 +16,7 @@
     <file alias="components/Icon.qml">qml/components/Icon.qml</file>
     <file alias="components/GeoListsBlock.qml">qml/components/GeoListsBlock.qml</file>
     <file alias="components/Dropdown.qml">qml/components/Dropdown.qml</file>
+    <file alias="components/QrCodeDialog.qml">qml/components/QrCodeDialog.qml</file>
     <file alias="components/ConfirmDialog.qml">qml/components/ConfirmDialog.qml</file>
     <file alias="components/HotkeyField.qml">qml/components/HotkeyField.qml</file>
     <file alias="components/ChipX.qml">qml/components/ChipX.qml</file>

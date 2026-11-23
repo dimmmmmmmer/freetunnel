@@ -52,8 +52,8 @@ final class ConfigForm {
         boolean skipVerification;
         boolean antiDpi;
         /**
-         * The TLS profile this write should store. Null leaves the file's key, which is how the editor
-         * keeps a connection's own profile without a control for it. Empty means chrome and is not written.
+         * The TLS profile this write should store. Null leaves the file's key for callers
+         * that do not edit it. Empty means chrome and is not written.
          * {@code default} is stored as {@code boringssl}.
          */
         String tlsProfile;

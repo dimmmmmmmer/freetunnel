@@ -294,7 +294,7 @@ object RoutingConfig {
             val prefix = if (definition.bypass) "@3:" else "@2:"
             GeoRepository.cachedEntries(context, definition).map { prefix + it }
         } else emptyList()
-        return prepare(source, prefs.getBoolean("split_enabled", false), prefs.getBoolean("through", false),
+        return prepare(source, prefs.getBoolean("split_enabled", false), rules.through,
             rules.domains, apps, prefs.getBoolean("killswitch", true),
             ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo,
             prefs.getBoolean("verbose_logs", false) && prefs.getBoolean("logging", true))

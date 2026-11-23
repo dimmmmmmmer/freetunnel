@@ -184,7 +184,7 @@ public:
     QStringList excludedRoutes() const { return m_excludedRoutes; }
     void setExcludedRoutes(const QStringList &r) { m_excludedRoutes = r; emit splitChanged(); }
     QStringList appRules() const { return m_appRules; }
-    void setAppRules(const QStringList &rules, const QStringList &labels)
+    void setAppRules(const QStringList &rules, const QStringList &labels = {})
     {
         m_appRules = rules;
         m_appRuleLabels = labels;
@@ -267,6 +267,11 @@ public:
         lastDeepLinkRow = index;
         return linkFails ? QString() : QStringLiteral("tt://?mock");
     }
+    Q_INVOKABLE QVariantMap configQrCode(int index) {
+        lastDeepLinkRow = index;
+        if (linkFails) return {};
+        return {{"size", 21}, {"modules", QString(21 * 21, QLatin1Char('1'))}};
+    }
     Q_INVOKABLE bool exportConfigToml(int index, const QString &)
     {
         lastExportRow = index;
@@ -301,6 +306,14 @@ public:
     Q_INVOKABLE void removeExcludedRoute(int) {}
     Q_INVOKABLE void clearExcludedRoutes() {}
     Q_INVOKABLE bool addAppRule(const QString &) { return false; }
+    int appSelectionSaves = 0;
+    Q_INVOKABLE bool setAppRules(const QString &profile, const QString &mode, const QStringList &rules) {
+        if (profile != activeProfile() || mode != vpnMode()) return false;
+        ++appSelectionSaves;
+        setAppRules(rules);
+        return true;
+    }
+    Q_INVOKABLE QString applicationRuleFromPath(const QString &) { return QStringLiteral("/opt/chosen-program"); }
     Q_INVOKABLE bool addApplicationFromPath(const QString &) { return false; }
     // Two rows so the picker renders with content, one of them a long path,
     // which is what the left elide in the delegate is for.

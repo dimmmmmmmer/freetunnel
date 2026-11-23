@@ -17,6 +17,8 @@ final class SplitPrefs implements SplitStore.Backing {
 
     @Override public String getString(String key) { return prefs.getString(key, null); }
 
+    @Override public boolean getBoolean(String key) { return prefs.getBoolean(key, false); }
+
     // A copy: a set the preferences hand out must not be changed.
     @Override public Set<String> getStringSet(String key) {
         Set<String> set = prefs.getStringSet(key, null);

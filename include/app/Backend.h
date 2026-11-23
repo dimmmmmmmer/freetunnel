@@ -186,6 +186,8 @@ public:
     // errorOccurred() when it fails, so the window shows only what succeeded; and
     // neither is made at all when a secret the config has could not be read.
     Q_INVOKABLE QString configDeepLink(int index);
+    // The same credential-checked link as modules, never copied to the clipboard.
+    Q_INVOKABLE QVariantMap configQrCode(int index);
     // A row's config file, and back. An action that outlives its row — a menu, a
     // save dialog, a confirmation — remembers the file: an import prepends to the
     // list and every row below moves.
@@ -239,6 +241,8 @@ public:
 
     const QStringList &appRules() const { return m_settings.app_rules; }
     Q_INVOKABLE bool addAppRule(const QString &rule);
+    Q_INVOKABLE bool setAppRules(const QString &profile, const QString &mode, const QStringList &rules);
+    Q_INVOKABLE QString applicationRuleFromPath(const QString &pathOrUrl);
     // Whatever was dropped on the window or picked in the dialog: a program, a
     // .desktop entry, a .lnk shortcut, an .app bundle. Resolved to the program
     // it stands for, because that is the only name a rule can match.

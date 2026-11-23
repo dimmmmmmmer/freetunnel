@@ -172,7 +172,7 @@
     <string name="editor_no_file_picker">This device has no file picker. Paste the certificate into the field.</string>
     <string name="editor_discard_question">"Discard unsaved changes?"</string>
     <string name="editor_discard">"Discard"</string>
-    <string name="picker_title">"Add an application"</string>
+    <string name="picker_title">"Choose applications"</string>
     <string name="picker_search">"Search"</string>
     <string name="picker_scanning">"Looking for installed applications…"</string>
     <string name="picker_nothing">"Nothing matches that."</string>
@@ -281,4 +281,7 @@
     <string name="subscription_stop_question">Stop subscription updates?</string>
     <string name="subscription_host_changed">The subscription changes the server from %1$s to %2$s. Apply?</string>
     <string name="subscription_review">Subscription changed its server. Refresh it to review.</string>
+    <string name="editor_tls_profile">TLS profile</string>
+    <string name="picker_apply">Apply</string>
+    <string name="picker_context_changed">The routing mode or profile changed. Open the application picker again.</string>
 </resources>

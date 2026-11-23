@@ -171,6 +171,8 @@ private slots:
     void theEditorsBackArrowTakesANearMiss();
     void theEditorClosesWithOneToastWhenASecretCannotBeRead();
     void thePickerWaitsForTheScanWithoutFreezing();
+    void applicationSelectionsWaitForApplyAndSurviveFiltering();
+    void qrDialogFitsAndClearsItsSecretOnClose();
     void theSelectPopupFadesOutAndLetsGo();
     void aDoubleClickThatOpensTheAddMenuLeavesItOpen();
     void theCloseButtonAndATray();
@@ -4356,6 +4358,66 @@ void TestQmlUi::theEditorHasAMaskedAuthKeyFieldThatSavesWithTheForm()
 
 // The first open of the picker scanned on the UI thread, and on Windows the
 // window froze while every Start Menu shortcut was resolved.
+void TestQmlUi::applicationSelectionsWaitForApplyAndSurviveFiltering()
+{
+    const QStringList saved = m_backend.appRules();
+    const auto restore = qScopeGuard([this, saved] { m_backend.setAppRules(saved); });
+    m_backend.setAppRules({QStringLiteral("custom-program")});
+    QObject *root = loadPage("AppPickerOverlay.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 700));
+    const int saves = m_backend.appSelectionSaves;
+    evaluateIn(root, QStringLiteral("searchField.text = 'fire'; searchField.accepted()"));
+    evaluateIn(root, QStringLiteral("searchField.text = 'some'; searchField.accepted()"));
+    QCOMPARE(m_backend.appSelectionSaves, saves);
+    QCOMPARE(m_backend.appRules(), QStringList{QStringLiteral("custom-program")});
+    evaluateIn(root, QStringLiteral("searchField.text = ''"));
+    const QString preview = qEnvironmentVariable("FT_UI_SCREENSHOT_DIR");
+    if (!preview.isEmpty()) {
+        QVERIFY(QDir().mkpath(preview));
+        window.setColor(QColor(QStringLiteral("#181818")));
+        QTest::qWait(100);
+        QVERIFY(window.grabWindow().save(QDir(preview).filePath(QStringLiteral("application-picker.png"))));
+    }
+    evaluateIn(root, QStringLiteral("pickerRoot.applySelection()"));
+    QCOMPARE(m_backend.appSelectionSaves, saves + 1);
+    QCOMPARE(m_backend.appRules(), (QStringList{QStringLiteral("custom-program"), QStringLiteral("/usr/bin/firefox"),
+                                              QStringLiteral("/usr/lib/some/very/long/path/to/a/program")}));
+    delete root;
+    root = loadPage("AppPickerOverlay.qml");
+    QVERIFY(root);
+    evaluateIn(root, QStringLiteral("pickerRoot.toggle('/usr/bin/firefox'); pickerRoot.shell.overlay = ''"));
+    delete root;
+    QCOMPARE(m_backend.appSelectionSaves, saves + 1);
+    QVERIFY(m_backend.appRules().contains(QStringLiteral("/usr/bin/firefox")));
+}
+
+void TestQmlUi::qrDialogFitsAndClearsItsSecretOnClose()
+{
+    QQmlComponent component(&m_engine, QUrl(QStringLiteral("qrc:/components/QrCodeDialog.qml")));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QObject *root = component.createWithInitialProperties({{"theme", QVariant::fromValue(static_cast<QObject *>(&m_theme))}});
+    QVERIFY(root);
+    QQuickWindow window;
+    auto *page = showInWindow(root, window, 400, 500);
+    QVERIFY(page);
+    root->setProperty("title", QStringLiteral("A configuration"));
+    root->setProperty("size", 177);
+    root->setProperty("modules", QString(177 * 177, QLatin1Char('1')));
+    QVERIFY(QMetaObject::invokeMethod(root, "open"));
+    QCoreApplication::processEvents();
+    auto *card = root->findChild<QQuickItem *>(QStringLiteral("qrCard"));
+    auto *code = root->findChild<QQuickItem *>(QStringLiteral("qrCode"));
+    QVERIFY(card && code);
+    QVERIFY(code->width() > 0 && code->width() <= card->width() - 28);
+    QVERIFY(card->height() <= page->height());
+    QVERIFY(QMetaObject::invokeMethod(root, "close"));
+    QCOMPARE(root->property("size").toInt(), 0);
+    QVERIFY(root->property("modules").toString().isEmpty());
+    delete root;
+}
+
 void TestQmlUi::thePickerWaitsForTheScanWithoutFreezing()
 {
     m_backend.installedAppsReady = false;

@@ -21,6 +21,7 @@
 #include "core/ConfigToml.h"
 #include "core/CredentialStore.h"
 #include "core/DeepLink.h"
+#include "core/QrMatrix.h"
 #include "core/NetBind.h"
 
 namespace {
@@ -260,6 +261,14 @@ QString Backend::configDeepLink(int index)
         dl.dnsUpstreams << d.trimmed();
     const QString link = freetunnel::encodeDeepLink(dl);
     return link.isEmpty() ? failed() : link;
+}
+
+QVariantMap Backend::configQrCode(int index)
+{
+    const QString link = configDeepLink(index);
+    if (link.isEmpty()) return {};
+    const QrMatrix::Matrix code = QrMatrix::encode(link);
+    return {{QStringLiteral("size"), code.size}, {QStringLiteral("modules"), code.modules}};
 }
 
 bool Backend::exportConfigToml(int index, const QString &fileUrl)

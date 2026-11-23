@@ -48,6 +48,7 @@ final class SplitStore {
     interface Backing {
         boolean contains(String key);
         String getString(String key);
+        boolean getBoolean(String key);
         Set<String> getStringSet(String key);
         /** Writes each value (a String, a Boolean or a Set of Strings), all together or none. */
         boolean commit(Map<String, Object> writes);
@@ -68,7 +69,7 @@ final class SplitStore {
         synchronized (LOCK) {
             String saved = backing.getString(KEY);
             if (saved == null) return null;
-            try { return SplitProfiles.fromJson(saved); }
+            try { return SplitProfiles.fromJson(saved, backing.getBoolean("through")); }
             catch (JSONException | RuntimeException unreadable) { return null; }
         }
     }
@@ -76,11 +77,11 @@ final class SplitStore {
     private static SplitProfiles loadLocked(Backing backing, Supplier<List<GeoDefinition>> defaults) {
         String saved = backing.getString(KEY);
         if (saved != null) {
-            try { return SplitProfiles.fromJson(saved); }
+            try { return SplitProfiles.fromJson(saved, backing.getBoolean("through")); }
             catch (JSONException | RuntimeException unreadable) {
                 // Nothing to build on. The old lists are written with every save as a copy of the profile in use, which makes
                 // them the best there is; and the file is not left as it is to fail again.
-                SplitProfiles rebuilt = SplitProfiles.migrated(setOf(backing, OLD_DOMAINS), setOf(backing, OLD_APPS));
+                SplitProfiles rebuilt = SplitProfiles.migrated(setOf(backing, OLD_DOMAINS), setOf(backing, OLD_APPS), backing.getBoolean("through"));
                 save(backing, rebuilt, Collections.<String, Object>emptyMap());
                 return rebuilt;
             }
@@ -92,7 +93,7 @@ final class SplitStore {
             for (GeoDefinition definition : defaults.get()) made.putGeoList(SplitProfiles.DEFAULT, definition);
             extra.put("split_enabled", Boolean.TRUE);
         } else {
-            made = SplitProfiles.migrated(setOf(backing, OLD_DOMAINS), setOf(backing, OLD_APPS));
+            made = SplitProfiles.migrated(setOf(backing, OLD_DOMAINS), setOf(backing, OLD_APPS), backing.getBoolean("through"));
         }
         // If this fails the next read makes it again, and gets the same.
         save(backing, made, extra);
@@ -128,6 +129,7 @@ final class SplitStore {
     private static boolean save(Backing backing, SplitProfiles profiles, Map<String, Object> extra) {
         Map<String, Object> writes = new HashMap<>(extra);
         writes.put(KEY, profiles.toJson());
+        writes.put("through", profiles.through());
         writes.put(OLD_DOMAINS, new HashSet<>(profiles.domains(profiles.mirrored())));
         writes.put(OLD_APPS, new HashSet<>(profiles.apps(profiles.mirrored())));
         return backing.commit(writes);
@@ -142,10 +144,12 @@ final class SplitStore {
         /** The packages listed, installed or not. */
         final List<String> apps;
         final List<GeoDefinition> geoLists;
-        Rules(List<String> domains, List<String> apps, List<GeoDefinition> geoLists) {
+        final boolean through;
+        Rules(List<String> domains, List<String> apps, List<GeoDefinition> geoLists, boolean through) {
             this.domains = domains;
             this.apps = apps;
             this.geoLists = geoLists;
+            this.through = through;
         }
     }
 
@@ -165,7 +169,7 @@ final class SplitStore {
                 save(backing, profiles, flag);
             }
             return new Rules(new ArrayList<>(profiles.domains(name)), new ArrayList<>(profiles.apps(name)),
-                             new ArrayList<>(profiles.geoLists(name)));
+                             new ArrayList<>(profiles.geoLists(name)), profiles.through());
         }
     }
 }

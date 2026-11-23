@@ -355,7 +355,7 @@ Window {
     // the confirm dialog). Sub-screens must disable their own Escape shortcut
     // then: two *enabled* shortcuts on the same key make Qt report the press as
     // ambiguous and neither handler runs, so Escape would go dead entirely.
-    readonly property bool windowPopupOpen: selectPopup.open || winConfirm.visible
+    readonly property bool windowPopupOpen: selectPopup.open || winConfirm.visible || winQr.visible
     // nav order: Home, Configs, Split, Settings, Logs (configs before split)
     readonly property var navIcons: ["connection", "configs", "network", "settings", "log"]
     readonly property var pagePaths: ["pages/HomePage.qml", "pages/ConfigsPage.qml",
@@ -997,6 +997,15 @@ Window {
     // so it owns Return and Escape while it is up and that one stands down (see
     // CreateConfigOverlay). The other way round, Return meant for an import
     // prompt that had just covered the editor's discarded the edits underneath.
+    function showQrCode(title, size, modules) {
+        winQr.title = title
+        winQr.size = size
+        winQr.modules = modules
+        winQr.open()
+    }
+    QrCodeDialog { id: winQr; objectName: "windowQr"; z: 2400; theme: win.theme
+        escapeOwner: !winConfirm.visible }
+
     ConfirmDialog { id: winConfirm; objectName: "windowConfirm"; z: 2500; theme: win.theme
         onConfirmed: if (win.confirmCb) win.confirmCb()
         onAlternate: if (win.confirmAltCb) win.confirmAltCb()

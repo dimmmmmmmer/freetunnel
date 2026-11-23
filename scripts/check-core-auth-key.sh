@@ -109,7 +109,7 @@ action = "deny"
 EOF2
 
 cd "$FT_SMOKE_DIR"
-[[ "$("$FT_SMOKE_ENDPOINT" --version)" == '1.3.0-beta.2' ]] || { echo 'Unexpected endpoint binary version' >&2; exit 2; }
+[[ "$("$FT_SMOKE_ENDPOINT" --version)" == '1.3.1' ]] || { echo 'Unexpected endpoint binary version' >&2; exit 2; }
 [[ "$("$FT_SMOKE_CLIENT" --version)" == 'trusttunnel_client 1.3.0' ]] || { echo 'Unexpected client binary version' >&2; exit 2; }
 "$FT_SMOKE_ENDPOINT" --loglvl debug endpoint.toml tls_hosts.toml > endpoint.log 2>&1 &
 FT_SMOKE_ENDPOINT_PID=$!
@@ -128,7 +128,7 @@ addresses = ["127.0.0.1:${ENDPOINT_PORT}"]
 username = "$FT_SMOKE_TEST_USER"
 skip_verification = true
 upstream_protocol = "http2"
-tls_profile = "default"
+tls_profile = "boringssl"
 EOF2
   printf 'password = "%s"\n' "$FT_SMOKE_TEST_PASSWORD" >> "$FT_SMOKE_DIR/client.toml"
   if [[ "$mode" == correct ]]; then

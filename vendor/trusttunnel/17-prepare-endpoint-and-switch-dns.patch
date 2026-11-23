@@ -756,7 +756,7 @@ index 0000000..8e01b60
 +
 +    void SetUp() override {
 +        client = std::make_unique<TrustTunnelClient>(make_config(), make_callbacks());
-+        auto error = client->connect(TrustTunnelClient::UseProcessPackets{});
++        auto error = client->connect(TrustTunnelClient::UseProcessPackets{}, {.fall_into_recovery = true});
 +        ASSERT_FALSE(error) << (error ? error->str() : "");
 +    }
 +

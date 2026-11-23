@@ -2503,6 +2503,7 @@ public final class MainActivity extends Activity {
         // arrows, appends; Android's holds it at the start, and what is typed there goes before the name, the host, the user name.
         for (EditText text : new EditText[] {name, host, addresses, username, password, dns, sni, random}) text.setSelection(text.getText().length());
         final String[] protocol = {initial.protocol};
+        final String[] tlsProfile = {initial.tlsProfile == null ? "" : initial.tlsProfile};
         // The profile the config uses; a new one uses Default.
         final String[] chosenProfile = {editing == null ? SplitProfiles.DEFAULT : splitModel().effective(editing.profile)};
         ToggleView ipv6 = ui.toggle(initial.allowIpv6, false, "editor:ipv6");
@@ -2520,6 +2521,7 @@ public final class MainActivity extends Activity {
             f.username = username.getText().toString();
             f.password = password.getText().toString();
             f.protocol = protocol[0];
+            f.tlsProfile = tlsProfile[0];
             f.dns = dns.getText().toString();
             f.customSni = sni.getText().toString();
             f.clientRandom = random.getText().toString();
@@ -2531,7 +2533,7 @@ public final class MainActivity extends Activity {
         };
         // Joined on a character no text holds, so that moving a boundary between two fields is a change (CreateConfigOverlay.snapshot).
         final java.util.function.Supplier<String> snapshot = () -> String.join("\u001f", name.getText(), host.getText(), addresses.getText(),
-                username.getText(), password.getText(), protocol[0], dns.getText(), sni.getText(), random.getText(), certificate.getText(),
+                username.getText(), password.getText(), protocol[0], tlsProfile[0], dns.getText(), sni.getText(), random.getText(), certificate.getText(),
                 String.valueOf(ipv6.isChecked()), String.valueOf(skip.isChecked()), String.valueOf(antiDpi.isChecked()), chosenProfile[0]);
         final String opened = snapshot.get();
 
@@ -2573,6 +2575,17 @@ public final class MainActivity extends Activity {
             });
         });
         form.addView(pair(protocolBox, ui.field(getString(R.string.editor_dns), dns, "editor:dns")), lp(-1, -2));
+        gap(form, 10);
+        TextView[] tlsValue = new TextView[1];
+        form.addView(ui.selectField(getString(R.string.editor_tls_profile), tlsProfileLabel(tlsProfile[0]), "editor:tls", tlsValue, v -> {
+            hideKeyboard();
+            String[] labels = {"Chrome", "Chrome Canary", "Safari", "Firefox", "OkHttp", "OpenSSL", "BoringSSL"};
+            int selected = tlsProfile[0].isEmpty() ? 0 : TlsProfiles.byteOf(tlsProfile[0]);
+            showSelect("editor:tls", labels, selected, which -> {
+                tlsProfile[0] = TlsProfiles.canonical(TlsProfiles.fromByte(which));
+                tlsValue[0].setText(tlsProfileLabel(tlsProfile[0]));
+            });
+        }), lp(-1, -2));
         gap(form, 10);
         form.addView(pair(ui.field(getString(R.string.editor_sni), sni, "editor:sni"), ui.field(getString(R.string.editor_random), random, "editor:random")), lp(-1, -2));
         gap(form, 10);
@@ -2836,7 +2849,7 @@ public final class MainActivity extends Activity {
         SplitProfiles model = splitModel();
         final String edited = model.edited();
         boolean enabled = prefs.getBoolean("split_enabled", false);
-        boolean through = prefs.getBoolean("through", false);
+        boolean through = model.through();
         ToggleView splitSwitch = ui.toggle(enabled, false, "split:enabled");
         splitSwitch.setContentDescription(getString(R.string.text_split_tunnelling));
         splitSwitch.setListener((v, checked) -> {
@@ -2850,7 +2863,7 @@ public final class MainActivity extends Activity {
         body.addView(ui.dropdown(getString(R.string.text_mode), through ? getString(R.string.text_through_vpn_62) : getString(R.string.text_bypass_vpn_61),
                 "split:mode", v -> showSelect("split:mode",
                 new String[]{getString(R.string.text_bypass_vpn_61), getString(R.string.text_through_vpn_62)}, through ? 1 : 0, which -> {
-                    prefs.edit().putBoolean("through", which == 1).apply(); applyCurrentRules(); render();
+                    if (splitEdit(m -> m.setThrough(which == 1))) { applyCurrentRules(); render(); }
                 })), lp(-1, -2));
         for (CharSequence notice : splitNotices(model, enabled, through)) {
             gap(body, 6);
@@ -3190,6 +3203,13 @@ public final class MainActivity extends Activity {
 
     // The profiles.
 
+    private static String tlsProfileLabel(String profile) {
+        String[] labels = {"Chrome", "Chrome Canary", "Safari", "Firefox", "OkHttp", "OpenSSL", "BoringSSL"};
+        if (profile.isEmpty()) return labels[0];
+        int index = TlsProfiles.byteOf(profile);
+        return index < 0 ? profile : labels[index];
+    }
+
     private SplitProfiles splitModel() { return SplitStore.load(splitPrefs, GeoPresets.seed(this)); }
     private boolean splitEdit(Consumer<SplitProfiles> change) {
         boolean saved = SplitStore.edit(splitPrefs, GeoPresets.seed(this), change);
@@ -3331,12 +3351,8 @@ public final class MainActivity extends Activity {
             default: return getString(R.string.split_refused, list);
         }
     }
-    // The app picker (qml/AppPickerOverlay.qml): a card with ← and the title, a search box, and the installed
-    // applications, a row each with the name over its package. One application to a visit: a tap adds it and
-    // the card closes, as does Enter, which adds the first match. They are listed on a worker, and the card
-    // says so meanwhile. The search box has the focus first, as the desktop's does, and on a phone the keyboard comes up; on a TV Down goes
-    // on to the rows. No checkboxes, no icons and no Done, and no file to
-    // choose instead, which Android has no such thing as. Keys: picker:back, picker:search, picker:0, ...
+    // Installed apps are selected in a draft. Apply writes the entire selection
+    // once; Back, Cancel and closing the popup leave saved routing untouched.
     private static final class AppEntry {
         final String label;
         final String pkg;
@@ -3350,12 +3366,19 @@ public final class MainActivity extends Activity {
 
     private final class AppPicker {
         private final List<AppEntry> apps = new ArrayList<>();
+        private final Set<String> selected = new java.util.LinkedHashSet<>();
+        private String profile;
+        private boolean through;
         private boolean scanning = true;
         private Overlay overlay;
         private EditText search;
         private LinearLayout list;
 
         void open() {
+            SplitProfiles model = splitModel();
+            profile = model.edited();
+            through = model.through();
+            selected.addAll(model.apps(profile));
             LinearLayout card = column();
             // As tall as the desktop's card, 460, or as the window leaves room for: whatever the list holds (overlay.height, below).
             card.setMinimumHeight(dp(460));
@@ -3374,7 +3397,7 @@ public final class MainActivity extends Activity {
                 @Override public void onTextChanged(CharSequence text, int start, int before, int count) { }
                 @Override public void afterTextChanged(Editable text) { fill(); }
             });
-            // Enter adds the first match.
+            // Enter toggles the first match without applying the draft.
             search.setOnEditorActionListener((field, action, event) -> {
                 List<AppEntry> matches = matches();
                 if (!matches.isEmpty()) choose(matches.get(0));
@@ -3391,6 +3414,17 @@ public final class MainActivity extends Activity {
             scroll.setFocusable(false);
             scroll.addView(list);
             card.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout buttons = row();
+            buttons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            buttons.setPadding(dp(14), 0, dp(14), dp(14));
+            Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.SECONDARY, 88, "picker:cancel");
+            cancel.setOnClickListener(v -> closeOverlay(overlay));
+            Button apply = ui.button(getString(R.string.picker_apply), Ui.Kind.PRIMARY, 88, "picker:apply");
+            apply.setOnClickListener(v -> apply());
+            buttons.addView(cancel, lp(-2, 32));
+            ui.gapH(buttons, 8);
+            buttons.addView(apply, lp(-2, 32));
+            card.addView(buttons, lp(-1, -2));
             overlay = showOverlay("picker", OverlayLayer.Kind.CARD, card, null, null);
             overlay.width(dp(420)).height(dp(460));
             fill();
@@ -3440,9 +3474,19 @@ public final class MainActivity extends Activity {
             }
             for (int i = 0; i < matching.size(); i++) {
                 AppEntry app = matching.get(i);
-                LinearLayout row = column();
+                LinearLayout row = row();
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(dp(10), 0, dp(10), 0);
+                android.widget.CheckBox check = new android.widget.CheckBox(MainActivity.this);
+                check.setChecked(selected.contains(app.pkg));
+                check.setButtonTintList(new android.content.res.ColorStateList(
+                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{t.accent, t.textFaint}));
+                check.setFocusable(false);
+                check.setClickable(false);
+                check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                check.setTag("picker:check:" + app.pkg);
+                row.addView(check, lp(32, 36));
+                LinearLayout labels = column();
                 TextView name = label(app.label, 13, t.text);
                 name.setSingleLine(true);
                 name.setEllipsize(TextUtils.TruncateAt.END);
@@ -3450,11 +3494,21 @@ public final class MainActivity extends Activity {
                 TextView pkg = label(app.pkg, 11, t.textFaint);
                 pkg.setSingleLine(true);
                 pkg.setEllipsize(TextUtils.TruncateAt.START);
-                row.addView(name, lp(-1, -2));
+                labels.addView(name, lp(-1, -2));
                 // 1 between the two, as the desktop's Column (spacing: 1) has.
                 LinearLayout.LayoutParams pkgLp = lp(-1, -2);
                 pkgLp.topMargin = dp(1);
-                row.addView(pkg, pkgLp);
+                labels.addView(pkg, pkgLp);
+                row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+                row.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+                    @Override public void onInitializeAccessibilityNodeInfo(View view, android.view.accessibility.AccessibilityNodeInfo info) {
+                        super.onInitializeAccessibilityNodeInfo(view, info);
+                        info.setClassName(android.widget.CheckBox.class.getName());
+                        info.setCheckable(true);
+                        info.setChecked(selected.contains(app.pkg));
+                        info.setText(app.label);
+                    }
+                });
                 ui.focus(row, "picker:" + i, Ui.Look.ROW).setOnClickListener(v -> choose(app));
                 LinearLayout.LayoutParams rowLp = lp(-1, 42);
                 rowLp.bottomMargin = dp(2);
@@ -3462,11 +3516,25 @@ public final class MainActivity extends Activity {
             }
         }
 
-        // The application goes in the list of the profile being edited, of those the VPN does not carry, or carries alone;
-        // and the card goes.
         private void choose(AppEntry app) {
             if (overlay.closed) return;
-            editRules(m -> m.addApp(m.edited(), app.pkg), () -> closeOverlay(overlay));
+            if (!selected.remove(app.pkg)) selected.add(app.pkg);
+            android.widget.CheckBox check = list.findViewWithTag("picker:check:" + app.pkg);
+            if (check != null) check.setChecked(selected.contains(app.pkg));
+        }
+
+        private void apply() {
+            if (overlay.closed) return;
+            SplitProfiles current = splitModel();
+            if (!profile.equals(current.edited()) || through != current.through()) {
+                toast(getString(R.string.picker_context_changed));
+                closeOverlay(overlay);
+                return;
+            }
+            editRules(m -> {
+                m.clearApps(profile);
+                for (String pkg : selected) m.addApp(profile, pkg);
+            }, () -> closeOverlay(overlay));
         }
     }
 

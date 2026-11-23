@@ -1,6 +1,8 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "AppSettings.h"
 
+#include <utility>
+
 #include <QSettings>
 #include <QStandardPaths>
 #include <QJsonArray>
@@ -214,6 +216,12 @@ static void loadBypassProfiles(const QSettings &s, AppSettings &out)
     loadProfileMap(s, out);
     loadProfileAppRules(s, out);
     loadProfileGeoLists(s, out);
+    for (auto it = out.profiles.cbegin(); it != out.profiles.cend(); ++it) {
+        // Pre-1.3 stores belong to the mode they were saved with. The other
+        // mode starts empty, including after a deliberately emptied list.
+        out.inactive_profiles.insert(it.key(), s.value("bypass/inactive_profile/" + it.key()).toStringList());
+        out.inactive_profile_app_rules.insert(it.key(), s.value("bypass/inactive_profile_apps/" + it.key()).toStringList());
+    }
     loadProfileOrderAndAssignments(s, out);
 }
 
@@ -254,7 +262,8 @@ AppSettings loadAppSettings() {
     out.killswitch_enabled = s.value("vpn/killswitch_enabled", true).toBool();
     out.killswitch_ports_from_config = s.value("vpn/killswitch_ports_from_config", false).toBool();
     out.domain_bypass_enabled = s.value("bypass/enabled", true).toBool();
-    out.vpn_mode = s.value("bypass/mode", QStringLiteral("general")).toString();
+    out.vpn_mode = s.value("bypass/mode").toString() == QLatin1String("selective")
+            ? QStringLiteral("selective") : QStringLiteral("general");
     out.excluded_routes = s.value("routing/excluded_routes", defaultExcludedRoutes()).toStringList();
     out.excluded_routes.removeIf(isEveryAddressRoute);
     loadBypassProfiles(s, out); // and, inside it, the per-profile application lists
@@ -291,6 +300,12 @@ void saveAppSettings(const AppSettings &cfg) {
     s.remove("bypass/profile_apps");
     for (auto it = cfg.profile_app_rules.constBegin(); it != cfg.profile_app_rules.constEnd(); ++it)
         s.setValue("bypass/profile_apps/" + it.key(), it.value());
+    s.remove("bypass/inactive_profile");
+    s.remove("bypass/inactive_profile_apps");
+    for (auto it = cfg.profiles.cbegin(); it != cfg.profiles.cend(); ++it) {
+        s.setValue("bypass/inactive_profile/" + it.key(), cfg.inactive_profiles.value(it.key()));
+        s.setValue("bypass/inactive_profile_apps/" + it.key(), cfg.inactive_profile_app_rules.value(it.key()));
+    }
     // Set after the lists are written, so a save interrupted half way leaves the
     // pre-1.2.0 key still authoritative rather than an empty list looking final.
     s.setValue("bypass/profile_apps_seeded", true);
@@ -307,4 +322,25 @@ void saveAppSettings(const AppSettings &cfg) {
     s.setValue("hotkeys/disconnect", cfg.hotkey_disconnect);
     s.setValue("vpn/last_config_path", cfg.last_config_path);
     s.setValue("subscriptions/enabled", cfg.subscriptions_enabled);
+}
+
+void AppSettings::setVpnMode(const QString &mode) {
+    const QString normalized = mode == QLatin1String("selective")
+            ? QStringLiteral("selective") : QStringLiteral("general");
+    if (vpn_mode == normalized) return;
+    // Profiles have the same names in both modes, even in a legacy/in-memory
+    // store which has not yet created the inactive lists.
+    QMap<QString, QStringList> nextDomains;
+    QMap<QString, QStringList> nextApps;
+    for (auto it = profiles.cbegin(); it != profiles.cend(); ++it) {
+        nextDomains.insert(it.key(), inactive_profiles.value(it.key()));
+        nextApps.insert(it.key(), inactive_profile_app_rules.value(it.key()));
+    }
+    inactive_profiles = std::move(profiles);
+    inactive_profile_app_rules = std::move(profile_app_rules);
+    profiles = std::move(nextDomains);
+    profile_app_rules = std::move(nextApps);
+    vpn_mode = normalized;
+    domain_bypass_rules = profiles.value(active_profile);
+    app_rules = profile_app_rules.value(active_profile);
 }

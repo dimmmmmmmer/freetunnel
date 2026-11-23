@@ -57,6 +57,11 @@ struct AppSettings {
     QString active_profile = "Default";
     QMap<QString, QStringList> profiles{{"Default", {}}};
     QMap<QString, QStringList> profile_app_rules{{"Default", {}}};
+    // The other mode keeps its own manual lists. Switching swaps both maps
+    // together; profiles/app_rules above always describe vpn_mode.
+    QMap<QString, QStringList> inactive_profiles{{"Default", {}}};
+    QMap<QString, QStringList> inactive_profile_app_rules{{"Default", {}}};
+    void setVpnMode(const QString &mode);
     QStringList profile_order{"Default"};
     // Lists belong to the same routing profile as its manual domain/app rules.
     // A fresh Default starts with Russian sites and IP addresses bypassing VPN.

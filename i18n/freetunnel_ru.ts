@@ -11,10 +11,6 @@
 <context>
     <name>AppPickerOverlay</name>
     <message>
-        <source>Add an application</source>
-        <translation>Добавить приложение</translation>
-    </message>
-    <message>
         <source>Search</source>
         <translation>Поиск</translation>
     </message>
@@ -49,6 +45,18 @@
     <message>
         <source>Looking for installed applications…</source>
         <translation>Ищем установленные приложения…</translation>
+    </message>
+    <message>
+        <source>Choose applications</source>
+        <translation>Выбор приложений</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Применить</translation>
     </message>
 </context>
 <context>
@@ -493,6 +501,10 @@
         <source>Export failed</source>
         <translation>Не удалось экспортировать</translation>
     </message>
+    <message>
+        <source>The routing mode or profile changed. Open the application picker again.</source>
+        <translation>Режим маршрутизации или профиль изменился. Откройте выбор приложений ещё раз.</translation>
+    </message>
 </context>
 <context>
     <name>ConfigImport</name>
@@ -582,6 +594,18 @@
     <message>
         <source>connecting…</source>
         <translation>подключение…</translation>
+    </message>
+    <message>
+        <source>The deep-link is too long for a QR code — export .toml instead</source>
+        <translation>Ссылка слишком длинная для QR-кода — экспортируйте .toml</translation>
+    </message>
+    <message>
+        <source>“%1”</source>
+        <translation>«%1»</translation>
+    </message>
+    <message>
+        <source>Show QR code</source>
+        <translation>Показать QR-код</translation>
     </message>
 </context>
 <context>
@@ -1159,6 +1183,17 @@
     <message>
         <source>The connection is using an unusual number of system resources. The tunnel is being kept up because the kill switch is on — reconnect manually when convenient.</source>
         <translation>Соединение расходует необычно много системных ресурсов. Туннель оставлен поднятым, потому что включён kill switch, — переподключитесь вручную, когда будет удобно.</translation>
+    </message>
+</context>
+<context>
+    <name>QrCodeDialog</name>
+    <message>
+        <source>Scan it with FreeTunnel for Android: + → Scan QR code. It contains the password: show it only to the phone you are adding this server to.</source>
+        <translation>Отсканируйте в FreeTunnel для Android: + → Сканировать QR-код. Код содержит пароль — показывайте его только телефону, на который добавляете сервер.</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Закрыть</translation>
     </message>
 </context>
 <context>

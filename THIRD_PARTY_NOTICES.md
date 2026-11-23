@@ -6,8 +6,8 @@ licensed under their own terms. This file names each of those components, says
 which downloads contain it, and points to the license texts, which are in
 [licenses/](licenses/):
 
-- `licenses/common/`: components in every download (the VPN core's libraries and
-  the Inter typeface).
+- `licenses/common/`: components in every download (the VPN core's libraries,
+  the Inter typeface and the QR Code generator).
 - `licenses/desktop/`: components in the Windows, macOS and Linux downloads.
 - `licenses/android/`: components in the Android app.
 
@@ -105,16 +105,16 @@ downloads.
 ### TrustTunnel client core
 
 - Version, desktop: TrustTunnelClient 1.3.0, commit
-  eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1.
+  232f151ea9864849a422666f1ce73ddc1bb4de3a.
 - Version, Android: TrustTunnelClient 1.3.0, commit
-  eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1. The desktop builds apply
+  232f151ea9864849a422666f1ce73ddc1bb4de3a. The desktop builds apply
   FreeTunnel's changes to it, which are in
   [vendor/trusttunnel/](vendor/trusttunnel/) in FreeTunnel's source. Android
   applies the patches listed in [android/core-source.json](android/core-source.json).
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
-- Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1>
-- Source, Android: <https://github.com/TrustTunnel/TrustTunnelClient/tree/eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1>
+- Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/232f151ea9864849a422666f1ce73ddc1bb4de3a>
+- Source, Android: <https://github.com/TrustTunnel/TrustTunnelClient/tree/232f151ea9864849a422666f1ce73ddc1bb4de3a>
 
 ### NativeLibsCommon
 
@@ -318,7 +318,7 @@ code and a table built from the Public Suffix List.
 - License: BSD-3-Clause, [licenses/common/lwip.txt](licenses/common/lwip.txt)
 - Copyright: Copyright (c) 2001, 2002 Swedish Institute of Computer Science;
   and the other holders listed in [licenses/common/lwip.txt](licenses/common/lwip.txt)
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1/third-party/lwip/lwip>
+- Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/232f151ea9864849a422666f1ce73ddc1bb4de3a/third-party/lwip/lwip>
 
 ### pcap_savefile.h
 
@@ -329,7 +329,7 @@ A header from libpcap that the core uses to write packet captures.
   This product includes software developed by the Computer Systems Engineering
   Group at Lawrence Berkeley Laboratory.
 - Copyright: Copyright (c) 1994, 1995, 1996 The Regents of the University of California
-- Source: <https://github.com/TrustTunnel/TrustTunnelClient/blob/eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1/third-party/pcap_savefile/include/pcap_savefile.h>
+- Source: <https://github.com/TrustTunnel/TrustTunnelClient/blob/232f151ea9864849a422666f1ce73ddc1bb4de3a/third-party/pcap_savefile/include/pcap_savefile.h>
 
 ### Microsoft Detours
 
@@ -441,6 +441,15 @@ Windows only: the frameless window's shadow, corners and snap layouts.
 - Copyright: Copyright (C) 2023-2025 Stdware Collections; Copyright (C)
   2021-2023 wangwenx190 (Yuhang Zhao)
 - Source: <https://github.com/stdware/qwindowkit/tree/35e88f3655720ed0537c7dd1dde243bf4a70c94c>
+
+### QR Code generator in the desktop app
+
+The configuration export menu uses the same QR encoder as Android, in its C++ implementation.
+
+- Version: 1.8.0, commit 720f62bddb7226106071d4728c292cb1df519ceb (`vendor/qrcodegen/`, unchanged)
+- License: MIT, [licenses/common/qrcodegen.txt](licenses/common/qrcodegen.txt)
+- Copyright: Copyright (c) Project Nayuki
+- Source: <https://github.com/nayuki/QR-Code-generator/tree/v1.8.0/cpp>
 
 ### Feather and Lucide icons
 
@@ -625,7 +634,7 @@ wintun.h), the JNI adapter, and the Rust code below. The native library is
 built with the Android NDK's LLVM libc++ (Apache-2.0 WITH LLVM-exception),
 which asks for no notice in compiled form.
 
-- Version: 1.3.0 (TrustTunnelClient commit eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1)
+- Version: 1.3.0 (TrustTunnelClient commit 232f151ea9864849a422666f1ce73ddc1bb4de3a)
 - License: Apache-2.0
 - Copyright: Copyright 2020 Adguard Software Ltd
 - Source: <https://github.com/TrustTunnel/TrustTunnelClient/tree/v1.3.0/platform/android>
@@ -760,7 +769,7 @@ Compile-time annotations for the Tomlj API; not packaged in the app.
 #### QR Code generator
 
 - Version: 1.8.0 (`io.nayuki:qrcodegen:1.8.0`)
-- License: MIT, [licenses/android/qrcodegen.txt](licenses/android/qrcodegen.txt)
+- License: MIT, [licenses/common/qrcodegen.txt](licenses/common/qrcodegen.txt)
 - Copyright: Copyright (c) Project Nayuki
 - Source: <https://github.com/nayuki/QR-Code-generator/tree/v1.8.0/java>
 
@@ -845,7 +854,7 @@ provided.
 Under [licenses/common/](licenses/common/): brotli, chromium-tldregistry,
 cxxopts, Feather-Lucide-icons, fmt, http-parser, Inter-OFL-1.1, klib, ldns,
 libevent, libsodium, libuv, llhttp, lwip, magic_enum, MPL-2.0, nghttp2, nghttp3,
-ngtcp2, nlohmann-json, pcap_savefile, pcre2-10.37, tomlplusplus, zlib.
+ngtcp2, nlohmann-json, pcap_savefile, pcre2-10.37, qrcodegen, tomlplusplus, zlib.
 
 Under [licenses/desktop/](licenses/desktop/): AFL-2.1, AppImage-runtime,
 Detours, GCC-exception-3.1, GPL-3.0, ICU-73, LGPL-2.1, LGPL-3.0,
@@ -853,7 +862,7 @@ Mesa-llvmpipe, Microsoft-redistributables, NSIS, QHotkey,
 Qt-6.9.3-third-party, Wintun.
 
 Under [licenses/android/](licenses/android/): ANTLR-4, BouncyCastle,
-checker-qual, EPL-1.0, ktoml, NOTICE-files, qrcodegen, reactive-streams, slf4j,
+checker-qual, EPL-1.0, ktoml, NOTICE-files, reactive-streams, slf4j,
 ThreeTen-Backport, winnow.
 
 ### ZXing Core (Android QR scanner)

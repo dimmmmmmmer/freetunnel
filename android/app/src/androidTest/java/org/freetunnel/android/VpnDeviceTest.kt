@@ -199,7 +199,8 @@ class VpnDeviceTest {
     private fun exclusions(toml: String): List<Any> = org.tomlj.Toml.parse(toml).getArray("exclusions")!!.toList()
 
     @Test fun staleAppRulesFallBackToFullVpnWithWarning() {
-        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { it.setThrough(true) }
         SplitStore.edit(splitStore(), null) { p -> p.addApp("Default", "not.installed.package"); p.addApp("Default", context.packageName) }
         val plan = RoutingConfig.prepare(context, source, "Default")
         assertTrue(plan.apps.isEmpty()); assertFalse(plan.allowApps); assertNotNull(plan.warning)
@@ -207,7 +208,8 @@ class VpnDeviceTest {
         assertTrue(profiles().apps("Default").contains("not.installed.package"))
     }
     @Test fun anotherProfilesApplicationsDoNotCountForAConfig() {
-        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { it.setThrough(true) }
         val other = context.packageManager.getInstalledApplications(0).map { it.packageName }.first { it != context.packageName }
         SplitStore.edit(splitStore(), null) { p -> p.add("Work"); p.addApp("Work", other) }
         val used = RoutingConfig.prepare(context, source, "Work")
@@ -216,7 +218,8 @@ class VpnDeviceTest {
         assertTrue("Default lists none", unused.apps.isEmpty()); assertNotNull("so Through VPN has nothing", unused.warning)
     }
     @Test fun mixedRulesReachTheRunningNativeAdapterWithoutEnablingFullVpn() {
-        prefs.edit().putBoolean("split_enabled", true).putBoolean("through", true).commit()
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        SplitStore.edit(splitStore(), null) { it.setThrough(true) }
         val other = context.packageManager.getInstalledApplications(0).map { it.packageName }
             .first { it != context.packageName }
         SplitStore.edit(splitStore(), null) { p ->

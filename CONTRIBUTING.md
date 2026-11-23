@@ -105,7 +105,7 @@ this to run the app; the unit tests do not.
 | Tool | Version | Notes |
 | --- | --- | --- |
 | **TrustTunnelClient** upstream checkout | The commit in `scripts/upstream_ref.txt` | [TrustTunnel/TrustTunnelClient](https://github.com/TrustTunnel/TrustTunnelClient) |
-| CMake | 3.25+ | Required by the pinned Qt 6.11 runtime, including unit tests |
+| CMake | 3.25+ | Required by the pinned Qt 6.9.3 runtime, including unit tests |
 | C++ compiler | C++20 | clang recommended for Linux |
 | Qt | 6.8+ (Gui, Qml, Quick, Network, Svg) | CI and releases use 6.9.3, and translation generation needs exactly that (see [Translations (i18n)](#translations-i18n)) |
 | Python 3 + Conan | Conan 2.31.1 | For upstream native deps; same pin as CI |
@@ -426,8 +426,10 @@ app on all three platforms, and `build.yml` checks for them.
 
 ### Vendored core patches
 
-The patches in `vendor/trusttunnel/` change the upstream core. Today there are
-three, all in the core's C++ wrapper (`trusttunnel/`):
+The 18 ordered patches in `vendor/trusttunnel/` extend the wrapper and core,
+including routing priorities, incoming replies, DNS recovery, live policy and
+endpoint changes, hostname logging, TLS session isolation and Android configuration
+lifetimes. The first three expose the wrapper hooks:
 
 | Patch | What it adds |
 | --- | --- |

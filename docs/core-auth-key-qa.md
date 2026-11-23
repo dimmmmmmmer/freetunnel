@@ -1,21 +1,19 @@
 # TrustTunnel 1.3 client random auth-key smoke
 
-An isolated smoke passed between the official TrustTunnelClient 1.3.0-rc.2
-console client and the official TrustTunnel 1.3.0-beta.2 endpoint. The desktop
-pin is now stable TrustTunnelClient 1.3.0
-(`eb3fa9b4cc3456633e17ba3c79ae053f40fff4f1`) and the endpoint pin is 1.3.1.
-Repeat this smoke with those releases before tagging. The endpoint
-and SOCKS listener were bound to `127.0.0.1`; temporary credentials, an
-auth-key rule, and a one-day self-signed certificate were generated for the
-run. No production endpoint, credentials, TUN device, route change, firewall
-rule, or privileged container was used.
+An isolated smoke passed on 2026-11-24 between the official stable
+TrustTunnelClient 1.3.0 console client and TrustTunnel 1.3.1 endpoint. These
+match the versions used by this release. The endpoint and SOCKS listener were
+bound to loopback. Temporary credentials, an auth-key rule and a one-day
+self-signed certificate were generated for the run. No production endpoint,
+credentials, TUN device, route change, firewall rule or privileged container
+was used.
 
 ## Verified release artifacts
 
 | Component | Release commit | Linux x86_64 asset | SHA-256 |
 | --- | --- | --- | --- |
-| TrustTunnelClient | `b1ddbd293e530d8ae49097727030773f964ef2cc` (`v1.3.0-rc.2`) | `trusttunnel_client-v1.3.0-rc.2-linux-x86_64.tar.gz` | `2f4e57b866588ff48cae70ee217b0a420222b265986b1c999543332dac38c08d` |
-| TrustTunnel endpoint | `48f424c0874eb6f6374ee84492c5cd55aa04dca9` (`v1.3.0-beta.2`) | `trusttunnel-v1.3.0-beta.2-linux-x86_64.tar.gz` | `496a27ff72014b883438efab55ffd237183b5ff95d9c341cc0de9d18342a9b11` |
+| TrustTunnelClient | `232f151ea9864849a422666f1ce73ddc1bb4de3a` (`v1.3.0`) | `trusttunnel_client-v1.3.0-linux-x86_64.tar.gz` | `99e764bb2c080f7a60c441b51ad75fa7ec00e6c8a80afe36030af37201ba32f7` |
+| TrustTunnel endpoint | `113cdc89559b9d2698e1477b3d0af89e95c0b7cf` (`v1.3.1`) | `trusttunnel-v1.3.1-linux-x86_64.tar.gz` | `29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97` |
 
 The release assets were downloaded from the official GitHub repositories
 `TrustTunnel/TrustTunnelClient` and `TrustTunnel/TrustTunnel`; each local
@@ -25,22 +23,20 @@ asset download and digest check with:
 ```sh
 mkdir -p /tmp/ft-auth-smoke/bin
 cd /tmp/ft-auth-smoke
-GH_PAGER=cat gh release download v1.3.0-rc.2 --repo TrustTunnel/TrustTunnelClient \
-  --pattern 'trusttunnel_client-v1.3.0-rc.2-linux-x86_64.tar.gz'
-GH_PAGER=cat gh release download v1.3.0-beta.2 --repo TrustTunnel/TrustTunnel \
-  --pattern 'trusttunnel-v1.3.0-beta.2-linux-x86_64.tar.gz'
-echo '2f4e57b866588ff48cae70ee217b0a420222b265986b1c999543332dac38c08d  trusttunnel_client-v1.3.0-rc.2-linux-x86_64.tar.gz' | sha256sum -c -
-echo '496a27ff72014b883438efab55ffd237183b5ff95d9c341cc0de9d18342a9b11  trusttunnel-v1.3.0-beta.2-linux-x86_64.tar.gz' | sha256sum -c -
-tar -xzf trusttunnel_client-v1.3.0-rc.2-linux-x86_64.tar.gz -C bin --strip-components=1
-tar -xzf trusttunnel-v1.3.0-beta.2-linux-x86_64.tar.gz -C bin --strip-components=1
+GH_PAGER=cat gh release download v1.3.0 --repo TrustTunnel/TrustTunnelClient \
+  --pattern 'trusttunnel_client-v1.3.0-linux-x86_64.tar.gz'
+GH_PAGER=cat gh release download v1.3.1 --repo TrustTunnel/TrustTunnel \
+  --pattern 'trusttunnel-v1.3.1-linux-x86_64.tar.gz'
+echo '99e764bb2c080f7a60c441b51ad75fa7ec00e6c8a80afe36030af37201ba32f7  trusttunnel_client-v1.3.0-linux-x86_64.tar.gz' | sha256sum -c -
+echo '29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97  trusttunnel-v1.3.1-linux-x86_64.tar.gz' | sha256sum -c -
+tar -xzf trusttunnel_client-v1.3.0-linux-x86_64.tar.gz -C bin --strip-components=1
+tar -xzf trusttunnel-v1.3.1-linux-x86_64.tar.gz -C bin --strip-components=1
 ```
 
-The endpoint CLI supports `--client-random-auth-key`, and the rc.2 client
-supports a SOCKS5 listener at `[listener.socks]`. The harness pins these exact
-versions for this snapshot; update its version assertions and artifact digests
-when adopting TrustTunnelClient 1.3.0 stable or another endpoint release. The client used `http2`,
-`tls_profile = "default"`, and skipped verification for its temporary local
-certificate.
+The endpoint CLI supports `--client-random-auth-key`, and the client supports
+a SOCKS5 listener at `[listener.socks]`. The harness requires these exact binary
+versions. The client used `http2`, `tls_profile = "boringssl"`, and skipped
+verification only for its temporary local certificate.
 
 ## Test method and result
 
@@ -82,6 +78,8 @@ passed again after these checks were added.
 
 This is an upstream core/client-to-endpoint protocol check. It does not exercise
 FreeTunnel's Qt wrapper, credential-store retrieval, config parsing, UI, or
-packaging. The endpoint binary is from official TrustTunnel 1.3.0-beta.2; the
-client is from TrustTunnelClient 1.3.0-rc.2. A FreeTunnel-wrapper connection to
-an auth-key endpoint remains a separate pre-release manual check.
+packaging. The endpoint binary is from official TrustTunnel 1.3.1; the
+client is from TrustTunnelClient 1.3.0. The desktop tests separately cover
+credential retrieval, refusing export when an auth key cannot be read, and
+preserving the key and TLS profile in shared configurations. This smoke alone
+does not establish a connection through the FreeTunnel GUI.
