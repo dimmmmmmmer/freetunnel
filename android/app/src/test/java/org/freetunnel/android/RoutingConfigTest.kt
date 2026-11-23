@@ -212,6 +212,18 @@ class RoutingConfigTest {
         val result = plan(domains = normalized)
         assertTrue(Toml.parse(result.toml).getArray("exclusions")!!.toList().contains("xn--b1aew.xn--p1ai"))
     }
+    @Test fun singleLabelWildcardsMatchThePinnedCore() {
+        assertEquals("*.ru", SplitRules.core("*.ru"))
+        assertEquals("*.su", SplitRules.core("*.SU."))
+        assertEquals("*.ru", SplitRules.core(".ru"))
+        assertEquals("*.xn--p1ai", SplitRules.core("*.рф"))
+        assertEquals("*.google", SplitRules.core("*.google"))
+        val written = Toml.parse(plan(through = false, domains = listOf("*.ru", "*.su")).toml).getArray("exclusions")!!.toList()
+        assertTrue(written.contains("*.ru"))
+        assertTrue(written.contains("*.su"))
+        for (rejected in listOf("ru", "su", "*.", ".", "google.*", "*.google.*", "*.bad..example", "*.1.2.3.4", "0.0.0.0/0"))
+            assertNull(rejected, SplitRules.core(rejected))
+    }
     @Test fun invalidRulesAreReportedInsteadOfSilentlyDropped() {
         listOf("999.0.0.1", "192.0.2.0/99", "example.com/path", "*.bad..example", "2001:db8::/129").forEach {
             assertThrows(IllegalArgumentException::class.java) { SplitRules.normalize(it) }
@@ -274,6 +286,17 @@ class RoutingConfigTest {
         // At the top level the core never reads it, so it is just another unknown key.
         val topLevel = "client_random_auth_key = \"aabbccdd\"\n$source"
         assertEquals(topLevel, RoutingConfig.cleanImport(topLevel).toml)
+    }
+    @Test fun aTlsProfileIsKeptPerConnectionAndAnUnknownNameIsRefused() {
+        for (line in listOf("tls_profile = \"chrome\"", "tls_profile = \"firefox\"", "tls_profile = \"default\"",
+                "tls_profile = \"boringssl\"")) {
+            val text = withEndpointKey(line)
+            assertEquals(text, RoutingConfig.cleanImport(text).toml)
+        }
+        val refused = assertThrows(RoutingConfig.ImportRefused::class.java) {
+            RoutingConfig.cleanImport(withEndpointKey("tls_profile = \"netscape\""))
+        }
+        assertEquals(R.string.text_tls_profile_unknown, refused.messageResource)
     }
     @Test fun aRealAuthKeyIsRefusedWithItsOwnMessage() {
         // Only the empty string is no key. TrustTunnel's client reads the key as a

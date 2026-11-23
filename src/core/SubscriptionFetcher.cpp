@@ -177,8 +177,6 @@ constexpr const char *kNoUpdates = QT_TRANSLATE_NOOP("SubscriptionFetcher", "Thi
 constexpr const char *kInvalid = QT_TRANSLATE_NOOP("SubscriptionFetcher", "The server sent an invalid update");
 constexpr const char *kNewerFormat =
         QT_TRANSLATE_NOOP("SubscriptionFetcher", "Update FreeTunnel to read this subscription");
-constexpr const char *kNewerCore = QT_TRANSLATE_NOOP(
-        "SubscriptionFetcher", "This subscription needs a newer TrustTunnel core than this version of FreeTunnel uses");
 
 // A 403 is the operator turning updates off, and a 404, 405 or 407 a server with
 // no subscription here: nothing automatic tries again until the user does. So
@@ -208,7 +206,6 @@ constexpr std::pair<Doc, Outcome> kDocumentOutcomes[] = {
     {Doc::TooLarge, {"too_large", Policy::Backoff, kInvalid}},
     {Doc::UnsupportedVersion, {"newer_version", Policy::ManualOnly, kNewerFormat}},
     {Doc::SkipVerification, {"skip_verification", Policy::ManualOnly, kInvalid}},
-    {Doc::NeedsNewerCore, {"needs_newer_core", Policy::ManualOnly, kNewerCore}},
 };
 
 template <typename Key, std::size_t N>

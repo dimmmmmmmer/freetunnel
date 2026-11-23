@@ -15,6 +15,8 @@ final class MemoryBacking implements SplitStore.Backing {
 
     @Override public synchronized boolean contains(String key) { return data.containsKey(key); }
 
+    @Override public synchronized boolean getBoolean(String key) { return Boolean.TRUE.equals(data.get(key)); }
+
     @Override public synchronized String getString(String key) {
         Object value = data.get(key);
         return value instanceof String ? (String) value : null;

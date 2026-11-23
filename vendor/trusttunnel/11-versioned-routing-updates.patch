@@ -1,50 +1,58 @@
+diff --git a/core/CMakeLists.txt b/core/CMakeLists.txt
+index d50b0b6..e8302fa 100644
 --- a/core/CMakeLists.txt
 +++ b/core/CMakeLists.txt
-@@ -90,6 +90,8 @@
+@@ -90,6 +90,8 @@ add_live_test(test_vpn_client_live "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE T
  target_link_libraries(test_vpn_client_live PRIVATE vpnlibs_core)
  add_unit_test(test_dns_routing "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
  target_link_libraries(test_dns_routing PRIVATE vpnlibs_core mock_dns_server)
 +add_unit_test(test_routing_generation "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 +target_link_libraries(test_routing_generation PRIVATE vpnlibs_core)
-
- set(MOCKED_SOURCE_FILES
-         ${SOURCE_FILES}
+ add_unit_test(test_socks_idle_close "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+ target_link_libraries(test_socks_idle_close PRIVATE vpnlibs_core)
+ add_unit_test(test_http2_upstream "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+diff --git a/core/include/vpn/internal/utils.h b/core/include/vpn/internal/utils.h
+index 7cbd5de..3d8af06 100644
 --- a/core/include/vpn/internal/utils.h
 +++ b/core/include/vpn/internal/utils.h
-@@ -39,6 +39,7 @@
+@@ -39,6 +39,7 @@ struct ConnectRequestResult {
      std::optional<ag::VpnConnectAction> action;
      std::string appname;
      int uid = 0;
 +    std::optional<uint64_t> routing_generation;
-
+ 
      [[nodiscard]] std::string to_string() const {
          return str_format("ID=%" PRIu64 " action=%s appname=%s", this->id,
+diff --git a/core/include/vpn/internal/vpn_client.h b/core/include/vpn/internal/vpn_client.h
+index 0913dbd..38362fa 100644
 --- a/core/include/vpn/internal/vpn_client.h
 +++ b/core/include/vpn/internal/vpn_client.h
-@@ -192,6 +192,8 @@
+@@ -196,6 +196,8 @@ public:
      bool bypass_upstream_session_opened = false;
      bool in_disconnect = false;
      VpnMode exclusions_mode = VPN_MODE_GENERAL;
 +    uint64_t routing_generation = 0; // Accessed only on the core loop after init.
 +    std::string routing_exclusions;
-
+ 
      // One of these is handed off from the pinger. An upstream can then snatch it up.
      std::unique_ptr<QuicConnectorResult> quic_connector;
+diff --git a/core/include/vpn/vpn.h b/core/include/vpn/vpn.h
+index 0ec6bb2..7206ef8 100644
 --- a/core/include/vpn/vpn.h
 +++ b/core/include/vpn/vpn.h
-@@ -595,6 +595,8 @@
+@@ -599,6 +599,8 @@ typedef struct {
       */
      VpnQosSettings qos_settings;
  #endif // __APPLE__ && TARGET_OS_IPHONE
 +    /** FreeTunnel: version of the initial routing snapshot (not a TOML setting). */
 +    uint64_t routing_generation;
  } VpnSettings;
-
+ 
  /**
-@@ -747,6 +749,13 @@
+@@ -751,6 +753,13 @@ WIN_EXPORT void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *
   */
  WIN_EXPORT void vpn_update_exclusions(Vpn *vpn, VpnMode mode, ag::VpnStr exclusions);
-
+ 
 +/** FreeTunnel: atomically install a routing generation on the core loop.
 + * Preserve established flows if only the application policy generation changes.
 + */
@@ -55,17 +63,19 @@
  /**
   * Reset all connection with given application UID
   * @param vpn VPN client
+diff --git a/core/src/vpn_client.cpp b/core/src/vpn_client.cpp
+index a0e0803..4c64240 100644
 --- a/core/src/vpn_client.cpp
 +++ b/core/src/vpn_client.cpp
-@@ -277,6 +277,7 @@
+@@ -277,6 +277,7 @@ VpnError VpnClient::init(const VpnSettings *settings) {
          parsed_scannable_ports = ag::parse_scannable_ports(default_settings->exclusions_scannable_ports);
      }
      this->exclusions_scannable_ports = parsed_scannable_ports.value();
 +    this->routing_generation = settings->routing_generation;
      update_exclusions(settings->mode, {settings->exclusions.data, settings->exclusions.size});
-
+ 
      if (settings->tmp_files_base_path != nullptr) {
-@@ -611,6 +612,7 @@
+@@ -611,6 +612,7 @@ void VpnClient::process_client_packets(VpnPackets packets) {
  void VpnClient::update_exclusions(VpnMode mode, std::string_view exclusions) {
      log_client(this, dbg, "Mode={}", magic_enum::enum_name(mode));
      this->exclusions_mode = mode;
@@ -73,9 +83,9 @@
      this->domain_filter.update_exclusions(mode, exclusions);
      if (this->fsm.get_state() == vpn_client::S_CONNECTED) {
          this->tunnel->on_exclusions_updated();
-@@ -618,7 +620,9 @@
+@@ -618,7 +620,9 @@ void VpnClient::update_exclusions(VpnMode mode, std::string_view exclusions) {
  }
-
+ 
  void VpnClient::reset_connections(int uid) {
 -    if (this->fsm.get_state() == vpn_client::S_CONNECTED) {
 +    // Direct flows can remain alive while the endpoint is reconnecting. A
@@ -84,9 +94,9 @@
          this->tunnel->reset_connections(uid);
      }
  }
-@@ -769,6 +773,10 @@
+@@ -769,6 +773,10 @@ void VpnClient::handle_wake() {
  }
-
+ 
  std::optional<VpnConnectAction> VpnClient::finalize_connect_action(ConnectRequestResult request_result) const {
 +    if (request_result.routing_generation.has_value()
 +            && request_result.routing_generation.value() != this->routing_generation) {
@@ -94,12 +104,14 @@
 +    }
      return this->tunnel->finalize_connect_action(std::move(request_result));
  }
-
+ 
+diff --git a/core/src/vpn_manager.cpp b/core/src/vpn_manager.cpp
+index cdb354c..dba6e83 100644
 --- a/core/src/vpn_manager.cpp
 +++ b/core/src/vpn_manager.cpp
-@@ -482,11 +482,17 @@
+@@ -499,11 +499,17 @@ static void vpn_complete_connect_request_task(Vpn *vpn, ConnectRequestResult res
      log_vpn(vpn, dbg, "{}", result.to_string());
-
+ 
      result.action = vpn->client.finalize_connect_action(result);
 +    // Reject before recovery's permissive fallbacks can turn the decision into
 +    // a bypass when the kill switch is off.
@@ -107,27 +119,27 @@
 +        vpn->client.complete_connect_request(result.id, VPN_CA_REJECT);
 +        return;
 +    }
-
+ 
      vpn->fsm.perform_transition(vpn_fsm::CE_COMPLETE_REQUEST, &result);
  }
-
+ 
 -void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
 +static void complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info, std::optional<uint64_t> generation) {
      std::unique_lock l(vpn->stop_guard);
-
+ 
      if (vpn->ev_loop.get() == nullptr) {
-@@ -499,6 +505,7 @@
+@@ -516,6 +522,7 @@ void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
              info->action,
              (info->appname != nullptr) ? info->appname : "",
              info->uid,
 +            generation,
      };
-
+ 
      vpn->submit([vpn, result = std::move(result)]() mutable {
-@@ -506,7 +513,15 @@
+@@ -523,7 +530,15 @@ void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
      });
  }
-
+ 
 -void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
 +void vpn_complete_connect_request(Vpn *vpn, const VpnConnectionInfo *info) {
 +    complete_connect_request(vpn, info, std::nullopt);
@@ -139,24 +151,24 @@
 +
 +static void update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, std::optional<uint64_t> generation) {
      log_vpn(vpn, info, "...");
-
+ 
      std::unique_lock l(vpn->stop_guard);
-@@ -520,12 +535,14 @@
+@@ -537,12 +552,14 @@ void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
          Vpn *vpn;
          VpnMode mode;
          std::string exclusions;
 +        std::optional<uint64_t> generation;
      };
-
+ 
      auto *ctx = new Ctx{
              .vpn = vpn,
              .mode = mode,
              .exclusions = {exclusions.data, exclusions.size},
 +            .generation = generation,
      };
-
+ 
      vpn->update_exclusions_task = event_loop::submit(vpn->ev_loop.get(),
-@@ -535,8 +552,20 @@
+@@ -552,8 +569,20 @@ void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
                              [](void *arg, TaskId) {
                                  auto *ctx = (Ctx *) arg;
                                  ctx->vpn->update_exclusions_task.release();
@@ -179,27 +191,29 @@
                              },
                      .finalize =
                              [](void *arg) {
-@@ -545,6 +574,14 @@
-             });
-
+@@ -564,6 +593,14 @@ void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
      log_vpn(vpn, info, "Done");
-+}
-+
+ }
+ 
 +void vpn_update_exclusions(Vpn *vpn, VpnMode mode, VpnStr exclusions) {
 +    update_routing(vpn, mode, exclusions, std::nullopt);
 +}
 +
 +void vpn_update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, uint64_t generation) {
 +    update_routing(vpn, mode, exclusions, generation);
- }
-
++}
++
  void vpn_reset_connections(Vpn *vpn, int uid) {
+     log_vpn(vpn, info, "UID={}", uid);
+ 
+diff --git a/core/test/test_dns_routing.cpp b/core/test/test_dns_routing.cpp
+index afc1b3b..f4a2a7f 100644
 --- a/core/test/test_dns_routing.cpp
 +++ b/core/test/test_dns_routing.cpp
-@@ -1372,6 +1372,46 @@
+@@ -1372,6 +1372,46 @@ TEST_F(DnsRoutingBase, FreeTunnelSharedResolverRoutesEachQuery) {
      ASSERT_EQ(0, bypass_upstream->connections.size());
  }
-
+ 
 +TEST_F(DnsRoutingBase, FreeTunnelStaleAndFutureAppDecisionsAreRejected) {
 +    for (int proto : {IPPROTO_TCP, IPPROTO_UDP}) {
 +        for (auto mode : {VPN_MODE_GENERAL, VPN_MODE_SELECTIVE}) {
@@ -243,71 +257,9 @@
  TEST_F(DnsRoutingBase, FreeTunnelTcpAndUdpDnsBothUseDomainPolicy) {
      for (int proto : {IPPROTO_TCP, IPPROTO_UDP}) {
          for (auto requested : {VPN_CA_DEFAULT, VPN_CA_FORCE_BYPASS, VPN_CA_FORCE_REDIRECT, VPN_CA_REJECT}) {
---- a/trusttunnel/include/vpn/trusttunnel/client.h
-+++ b/trusttunnel/include/vpn/trusttunnel/client.h
-@@ -45,6 +45,7 @@
-     // the string alive until the core has copied it.
-     std::string app_name;
-     int uid = -1;
-+    std::optional<uint64_t> routing_generation;
- };
-
- struct VpnCallbacks {
-@@ -126,6 +127,7 @@
-     // that calls disconnect(), and never from inside a callback: the core takes
-     // the lock that vpn_stop() holds while it waits for the core's thread.
-     void update_exclusions(VpnMode mode, std::string_view exclusions);
-+    void update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation);
-
-     bool process_client_packets(VpnPackets packets);
-
---- a/trusttunnel/include/vpn/trusttunnel/config.h
-+++ b/trusttunnel/include/vpn/trusttunnel/config.h
-@@ -57,6 +57,7 @@
-
-     ag::LogLevel loglevel = ag::LOG_LEVEL_INFO;
-     ag::VpnMode mode = ag::VPN_MODE_GENERAL;
-+    uint64_t routing_generation = 0; // FreeTunnel internal; never loaded from TOML.
-     bool killswitch_enabled = false;
-     std::string killswitch_allow_ports;
-     bool post_quantum_group_enabled = true;
---- a/trusttunnel/src/client.cpp
-+++ b/trusttunnel/src/client.cpp
-@@ -137,6 +137,12 @@
-     }
- }
-
-+void TrustTunnelClient::update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation) {
-+    if (Vpn *vpn = m_vpn.load()) {
-+        vpn_update_routing(vpn, mode, {exclusions.data(), (uint32_t) exclusions.size()}, generation);
-+    }
-+}
-+
- bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
-     return m_vpn && vpn_process_client_packets(m_vpn, packets);
- }
-@@ -182,6 +188,7 @@
-         settings.ssl_sessions_storage_path = m_config.ssl_session_storage_path->c_str();
-     }
-
-+    settings.routing_generation = m_config.routing_generation;
-     m_vpn = vpn_open(&settings);
-     if (m_vpn == nullptr) {
-         return make_error(ConnectResultError{}, "Failed on create VPN instance");
-@@ -625,7 +632,12 @@
-                                         }
-                                     }
-                                     if (context->vpn) {
--                                        vpn_complete_connect_request(context->vpn, info);
-+                                        if (context->decision.routing_generation.has_value()) {
-+                                            vpn_complete_connect_request_versioned(
-+                                                    context->vpn, info, context->decision.routing_generation.value());
-+                                        } else {
-+                                            vpn_complete_connect_request(context->vpn, info);
-+                                        }
-                                     }
-                                 },
-                         .finalize =
+diff --git a/core/test/test_routing_generation.cpp b/core/test/test_routing_generation.cpp
+new file mode 100644
+index 0000000..1ba3ae0
 --- /dev/null
 +++ b/core/test/test_routing_generation.cpp
 @@ -0,0 +1,72 @@
@@ -383,3 +335,74 @@
 +TEST_F(FreeTunnelRoutingGeneration, BurstReturningToInitialPolicyStillAdvancesVersion) {
 +    burst(true);
 +}
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index fe14866..9256ab9 100644
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
++++ b/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -45,6 +45,7 @@ struct VpnConnectDecision {
+     // the string alive until the core has copied it.
+     std::string app_name;
+     int uid = -1;
++    std::optional<uint64_t> routing_generation;
+ };
+ 
+ struct VpnCallbacks {
+@@ -133,6 +134,7 @@ public:
+     // that calls disconnect(), and never from inside a callback: the core takes
+     // the lock that vpn_stop() holds while it waits for the core's thread.
+     void update_exclusions(VpnMode mode, std::string_view exclusions);
++    void update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation);
+ 
+     bool process_client_packets(VpnPackets packets);
+ 
+diff --git a/trusttunnel/include/vpn/trusttunnel/config.h b/trusttunnel/include/vpn/trusttunnel/config.h
+index 6d0b09d..c3da8fc 100644
+--- a/trusttunnel/include/vpn/trusttunnel/config.h
++++ b/trusttunnel/include/vpn/trusttunnel/config.h
+@@ -59,6 +59,7 @@ struct TrustTunnelConfig {
+ 
+     ag::LogLevel loglevel = ag::LOG_LEVEL_INFO;
+     ag::VpnMode mode = ag::VPN_MODE_GENERAL;
++    uint64_t routing_generation = 0; // FreeTunnel internal; never loaded from TOML.
+     bool killswitch_enabled = false;
+     std::string killswitch_allow_ports;
+     bool post_quantum_group_enabled = true;
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index 66131f6..ae0cc9a 100644
+--- a/trusttunnel/src/client.cpp
++++ b/trusttunnel/src/client.cpp
+@@ -138,6 +138,12 @@ void TrustTunnelClient::update_exclusions(VpnMode mode, std::string_view exclusi
+     }
+ }
+ 
++void TrustTunnelClient::update_routing(VpnMode mode, std::string_view exclusions, uint64_t generation) {
++    if (Vpn *vpn = m_vpn.load()) {
++        vpn_update_routing(vpn, mode, {exclusions.data(), (uint32_t) exclusions.size()}, generation);
++    }
++}
++
+ bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
+     return m_vpn && vpn_process_client_packets(m_vpn, packets);
+ }
+@@ -184,6 +190,7 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_impl(
+         settings.ssl_sessions_storage_path = m_config.ssl_session_storage_path->c_str();
+     }
+ 
++    settings.routing_generation = m_config.routing_generation;
+     m_vpn = vpn_open(&settings);
+     if (m_vpn == nullptr) {
+         return make_error(ConnectResultError{}, "Failed on create VPN instance");
+@@ -627,7 +634,12 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+                                         }
+                                     }
+                                     if (context->vpn) {
+-                                        vpn_complete_connect_request(context->vpn, info);
++                                        if (context->decision.routing_generation.has_value()) {
++                                            vpn_complete_connect_request_versioned(
++                                                    context->vpn, info, context->decision.routing_generation.value());
++                                        } else {
++                                            vpn_complete_connect_request(context->vpn, info);
++                                        }
+                                     }
+                                 },
+                         .finalize =

@@ -177,6 +177,11 @@ add_executable(test_qt_svg_limits test_qt_svg_limits.cpp)
 target_link_libraries(test_qt_svg_limits PRIVATE Qt6::Core Qt6::Gui Qt6::Svg Qt6::Test)
 add_test(NAME qt_svg_limits COMMAND test_qt_svg_limits -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_svg_limits.txt,txt)
 
+add_executable(test_qrmatrix test_qrmatrix.cpp ../src/core/QrMatrix.cpp ../vendor/qrcodegen/qrcodegen.cpp)
+target_include_directories(test_qrmatrix PRIVATE ../include)
+target_link_libraries(test_qrmatrix PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qrmatrix COMMAND test_qrmatrix -o ${CMAKE_CURRENT_BINARY_DIR}/report-qrmatrix.txt,txt)
+
 add_executable(test_safe_fileread
     test_safe_fileread.cpp
     ../src/core/AppUiUtils.cpp
@@ -217,6 +222,8 @@ set(APP_STARTUP_TEST_SOURCES
     ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
+    ../src/core/QrMatrix.cpp
+    ../vendor/qrcodegen/qrcodegen.cpp
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
@@ -298,6 +305,8 @@ set(BACKEND_IMPORT_TEST_SOURCES
     ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
+    ../src/core/QrMatrix.cpp
+    ../vendor/qrcodegen/qrcodegen.cpp
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp
@@ -354,7 +363,7 @@ add_executable(test_backend_deeplink_import
     ../qml.qrc
 )
 target_include_directories(test_backend_deeplink_import PRIVATE
-    . ../include ../include/app ../include/core ../include/vpn)
+    . ../include ../include/app ../include/core ../include/vpn ../src)
 target_compile_definitions(test_backend_deeplink_import PRIVATE FREETUNNEL_VERSION="test" FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_backend_deeplink_import PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test Qt6::Network QHotkey::QHotkey ft_apps ft_desktop)
@@ -810,6 +819,8 @@ set(BACKEND_TEST_SOURCES
     ../src/core/AppImagePath.cpp
     ../src/app/BackendLogs.cpp
     ../src/app/BackendConfig.cpp
+    ../src/core/QrMatrix.cpp
+    ../vendor/qrcodegen/qrcodegen.cpp
     ../src/app/BackendConfigCreate.cpp
     ../src/app/BackendConfigImport.cpp
     ../src/app/BackendConfigShared.cpp

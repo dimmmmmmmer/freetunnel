@@ -2,6 +2,7 @@
 #include "qt_trusttunnel_client.h"
 #include "qt_trusttunnel_platform.h"
 #include "qt_trusttunnel_events.h"
+#include "trusttunnel_tls_profiles.h"
 #include "core/AppRules.h"
 #include "core/ProcessLookup.h"
 #include <QCoreApplication>
@@ -402,6 +403,28 @@ static ag::LogLevel logLevelFromTomlTable(const toml::table &t, ag::LogLevel fal
     return fallback;
 }
 
+// The [endpoint] tls_profile the core would refuse the whole config for, as the
+// message that says so, or empty when it takes it (or ignores it: it reads the key
+// only as a string). Absent or empty means chrome. "default" is boringssl.
+// The value is a file's, shown to the user: cut short and cleaned of line breaks.
+static QString refusedTlsProfileMessage(const toml::table &t)
+{
+    const auto profile = t["endpoint"]["tls_profile"].value<std::string>();
+    if (!profile || profile->empty() || freetunnel::isKnownTlsProfile(*profile))
+        return QString();
+    QString shown = QString::fromStdString(*profile).left(40);
+    for (QChar &ch : shown) {
+        if (!ch.isPrint())
+            ch = QLatin1Char(' ');
+    }
+    QStringList known;
+    for (const std::string_view name : freetunnel::kTrustTunnelTlsProfileChoices)
+        known << QString::fromUtf8(name.data(), static_cast<int>(name.size()));
+    known << QStringLiteral("default");
+    return QtTrustTunnelClient::tr("The config's tls_profile \"%1\" is not one TrustTunnel knows. Use one of: %2.")
+            .arg(shown.trimmed(), known.join(QStringLiteral(", ")));
+}
+
 std::optional<ag::TrustTunnelConfig> QtTrustTunnelClient::parseConfig(const QString &text, QString *error, ag::LogLevel fallbackLevel)
 {
     if (text.isEmpty()) {
@@ -411,6 +434,10 @@ std::optional<ag::TrustTunnelConfig> QtTrustTunnelClient::parseConfig(const QStr
     auto parsed = toml::parse(text.toStdString());
     if (!parsed) {
         *error = tr("Failed parsing config: %1").arg(QString::fromStdString(std::string(parsed.error().description())));
+        return std::nullopt;
+    }
+    if (const QString badProfile = refusedTlsProfileMessage(parsed.table()); !badProfile.isEmpty()) {
+        *error = badProfile;
         return std::nullopt;
     }
     auto config = ag::TrustTunnelConfig::build_config(parsed.table());
@@ -637,7 +664,8 @@ void QtTrustTunnelClient::handleCoreRecovery(const QString &reason)
 }
 
 // A session that has not connected yet waits for recovery only when the kill
-// switch has the core keep trying (vendor patch 03). Without it the core ends the
+// switch has the core keep trying (ConnectOptions::fall_into_recovery, which
+// establishTunnel() sets with the kill switch). Without it the core ends the
 // session and handleCoreDisconnected() says why; with it the session carries on,
 // rightly still Connecting, and this is where the user learns that the server is
 // failing rather than slow. Once per reason, not once per round of retries.

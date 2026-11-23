@@ -1,0 +1,11 @@
+# Nayuki's QR Code generator, its C++ library, as published: qrcodegen.cpp and
+# qrcodegen.hpp, unchanged. The Android app uses the same project's Java library
+# (io.nayuki:qrcodegen:1.8.0 in android/app/build.gradle).
+project=https://github.com/nayuki/QR-Code-generator
+version=1.8.0
+tag=v1.8.0
+tag_commit=720f62bddb7226106071d4728c292cb1df519ceb
+path=cpp
+license=MIT (the notice at the top of each file; licenses/common/qrcodegen.txt)
+
+Imported from alexsys87/freetunnel commit 22bb12d508fe040405662895352fdae2121f60e1.

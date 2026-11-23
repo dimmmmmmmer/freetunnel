@@ -31,22 +31,34 @@ Item {
     }
     function exportPicked(v) {
         if (v === "toml") { tomlSaveDlg.open(); return }
+        if (v === "qr") { showQrCode(); return }
         if (v !== "link") return
         const row = rowOf(cfgRoot.exportPath)
         if (row < 0) return
+        // The backend says why it could not, once (errorOccurred), so this speaks
+        // for success alone; a toast of its own here covered the real reason.
         var lnk = backend.configDeepLink(row)
         if (lnk && lnk.length > 0) {
             backend.copyToClipboard(lnk)
             shell.showToast(qsTr("Deep-link copied — it contains the password, share it carefully"))
-        } else {
-            shell.showToast(qsTr("Couldn’t build deep-link"))
         }
+    }
+    function showQrCode() {
+        const row = rowOf(cfgRoot.exportPath)
+        if (row < 0) return
+        const code = backend.configQrCode(row)
+        // An unreadable credential is reported by the backend, as for Copy.
+        if (code.size === undefined) return
+        if (code.size <= 0)
+            shell.showToast(qsTr("The deep-link is too long for a QR code — export .toml instead"))
+        else
+            shell.showQrCode(qsTr("“%1”").arg(shell.elideMiddle(cfgRoot.exportName, 36)), code.size, code.modules)
     }
     function exportToml(fileUrl) {
         const row = rowOf(cfgRoot.exportPath)
         if (row < 0) return
-        shell.showToast(backend.exportConfigToml(row, fileUrl)
-                        ? qsTr("Config exported — the file contains the password") : qsTr("Export failed"))
+        if (backend.exportConfigToml(row, fileUrl))
+            shell.showToast(qsTr("Config exported — the file contains the password"))
     }
     function deleteConfirmed() {
         const row = rowOf(cfgRoot.deletePath)
@@ -232,7 +244,8 @@ Item {
                             onClicked: {
                                 cfgRoot.exportPath = backend.configPath(index); cfgRoot.exportName = modelData
                                 shell.showSelect(parent,
-                                    [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")}], "",
+                                    [{v: "toml", t: qsTr("Export .toml…")}, {v: "link", t: qsTr("Copy deep-link")},
+                                     {v: "qr", t: qsTr("Show QR code")}], "",
                                     cfgRoot.exportPicked)
                             } } }
                     // A pencil: it opens the editor. It was ⋯, which promises a menu,

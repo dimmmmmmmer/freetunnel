@@ -1,39 +1,8 @@
---- a/trusttunnel/include/vpn/trusttunnel/client.h
-+++ b/trusttunnel/include/vpn/trusttunnel/client.h
-@@ -32,6 +32,8 @@
-     int family = 0;         // AF_INET / AF_INET6, 0 if the source was absent
-     uint16_t src_port = 0;  // host byte order
-     std::string src_ip;     // presentation form, empty if the source was absent
-+    uint16_t dst_port = 0;
-+    std::string dst_ip; // numeric address, empty for a hostname destination
-     std::string app_name;   // what the core already knew; empty on the TUN path
- };
- 
---- a/trusttunnel/src/client.cpp
-+++ b/trusttunnel/src/client.cpp
-@@ -35,6 +35,19 @@
-     out->id = event->id;
-     out->proto = event->proto;
-     out->app_name = safe_to_string_view(event->app_name);
-+    if (event->dst != nullptr && event->dst->type == VPN_AT_ADDR) {
-+        const auto *dst = reinterpret_cast<const sockaddr *>(&event->dst->addr);
-+        char address[INET6_ADDRSTRLEN] = {};
-+        if (dst->sa_family == AF_INET) {
-+            const auto *v4 = reinterpret_cast<const sockaddr_in *>(dst);
-+            out->dst_port = ntohs(v4->sin_port);
-+            if (inet_ntop(AF_INET, &v4->sin_addr, address, sizeof(address))) out->dst_ip = address;
-+        } else if (dst->sa_family == AF_INET6) {
-+            const auto *v6 = reinterpret_cast<const sockaddr_in6 *>(dst);
-+            out->dst_port = ntohs(v6->sin6_port);
-+            if (inet_ntop(AF_INET6, &v6->sin6_addr, address, sizeof(address))) out->dst_ip = address;
-+        }
-+    }
-     if (event->src == nullptr) {
-         return;
-     }
+diff --git a/platform/android/lib/src/main/cpp/lib.cpp b/platform/android/lib/src/main/cpp/lib.cpp
+index 1d09f21..f85cfb2 100644
 --- a/platform/android/lib/src/main/cpp/lib.cpp
 +++ b/platform/android/lib/src/main/cpp/lib.cpp
-@@ -11,11 +11,13 @@
+@@ -11,11 +11,13 @@ static ag::Logger g_logger("TrustTunnelJni");
  class VpnCtx {
  public:
      VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback,
@@ -48,7 +17,7 @@
              , m_native_client(std::move(config), create_callbacks()) {
          env->GetJavaVM(&m_vm);
          this->m_callback_object = {m_vm, callback_object};
-@@ -32,6 +34,7 @@
+@@ -32,6 +34,7 @@ private:
      jmethodID m_verify_callback = nullptr;
      jmethodID m_state_changed_callback = nullptr;
      jmethodID m_connection_info_callback = nullptr;
@@ -56,12 +25,10 @@
  
      ag::TrustTunnelClient m_native_client;
  
-@@ -106,6 +109,31 @@
-         std::string json = ag::ConnectionInfo::to_json(info);
-         LocalRef<jstring> str(env.get(), env->NewStringUTF(json.data()));
+@@ -108,6 +111,31 @@ private:
          env->CallVoidMethod(m_callback_object.get(), m_connection_info_callback, str.get());
-+    }
-+
+     }
+ 
 +    void onConnectRequest(const ag::VpnConnectRequestSnapshot &request, ag::VpnConnectDecision *decision) {
 +        ScopedJniEnv env{m_vm, 4};
 +        LocalRef<jstring> local(env.get(), env->NewStringUTF(request.src_ip.c_str()));
@@ -85,10 +52,12 @@
 +        case 2: decision->action = ag::VPN_CA_FORCE_REDIRECT; break;
 +        default: decision->action = ag::VPN_CA_REJECT; break;
 +        }
-     }
- 
++    }
++
      ag::VpnCallbacks create_callbacks() {
-@@ -126,6 +154,9 @@
+         return {
+                 .protect_handler =
+@@ -126,6 +154,9 @@ private:
                          [this](auto event) {
                              onConnectionInfo(event);
                          },
@@ -98,7 +67,7 @@
          };
      }
  };
-@@ -163,6 +194,10 @@
+@@ -163,6 +194,10 @@ extern "C" JNIEXPORT jlong JNICALL Java_com_adguard_trusttunnel_VpnClient_create
          return 0;
      }
  
@@ -109,7 +78,7 @@
      std::string_view conf = env->GetStringUTFChars(config, nullptr);
      toml::parse_result parse_result = toml::parse(conf);
      if (!parse_result) {
-@@ -178,7 +213,7 @@
+@@ -178,7 +213,7 @@ extern "C" JNIEXPORT jlong JNICALL Java_com_adguard_trusttunnel_VpnClient_create
      ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
  
      auto ctx = std::make_unique<VpnCtx>(env, thiz, protect_socket_method_id, verify_certificate_method_id,
@@ -118,9 +87,11 @@
  
      return (jlong) ctx.release();
  }
+diff --git a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
+index 97abd30..86a1069 100644
 --- a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
 +++ b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
-@@ -81,6 +81,10 @@
+@@ -81,6 +81,10 @@ class VpnClient (
          callbacks?.onConnectionInfo(info)
      }
  
@@ -130,10 +101,12 @@
 +
      // Native methods
      private external fun createNative(config: String): Long;
-     private external fun startNative(nativePtr: Long, tunFd: Int): Boolean;
+     private external fun startNative(nativePtr: Long, tunFd: Int, fallIntoRecovery: Boolean): Boolean;
+diff --git a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt
+index 2332a17..25c57c2 100644
 --- a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt
 +++ b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClientListener.kt
-@@ -5,4 +5,7 @@
+@@ -5,4 +5,7 @@ interface VpnClientListener {
      fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?): Boolean;
      fun onStateChanged(state: Int);
      fun onConnectionInfo(info: String);
@@ -142,3 +115,40 @@
 +                         remoteAddress: String, remotePort: Int): Int = 0
  }
 \ No newline at end of file
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index 9eb2a33..fe14866 100644
+--- a/trusttunnel/include/vpn/trusttunnel/client.h
++++ b/trusttunnel/include/vpn/trusttunnel/client.h
+@@ -32,6 +32,8 @@ struct VpnConnectRequestSnapshot {
+     int family = 0;         // AF_INET / AF_INET6, 0 if the source was absent
+     uint16_t src_port = 0;  // host byte order
+     std::string src_ip;     // presentation form, empty if the source was absent
++    uint16_t dst_port = 0;
++    std::string dst_ip; // numeric address, empty for a hostname destination
+     std::string app_name;   // what the core already knew; empty on the TUN path
+ };
+ 
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index 9ec5877..66131f6 100644
+--- a/trusttunnel/src/client.cpp
++++ b/trusttunnel/src/client.cpp
+@@ -35,6 +35,19 @@ static void ft_fill_connect_snapshot(const VpnConnectRequestEvent *event, VpnCon
+     out->id = event->id;
+     out->proto = event->proto;
+     out->app_name = safe_to_string_view(event->app_name);
++    if (event->dst != nullptr && event->dst->type == VPN_AT_ADDR) {
++        const auto *dst = reinterpret_cast<const sockaddr *>(&event->dst->addr);
++        char address[INET6_ADDRSTRLEN] = {};
++        if (dst->sa_family == AF_INET) {
++            const auto *v4 = reinterpret_cast<const sockaddr_in *>(dst);
++            out->dst_port = ntohs(v4->sin_port);
++            if (inet_ntop(AF_INET, &v4->sin_addr, address, sizeof(address))) out->dst_ip = address;
++        } else if (dst->sa_family == AF_INET6) {
++            const auto *v6 = reinterpret_cast<const sockaddr_in6 *>(dst);
++            out->dst_port = ntohs(v6->sin6_port);
++            if (inet_ntop(AF_INET6, &v6->sin6_addr, address, sizeof(address))) out->dst_ip = address;
++        }
++    }
+     if (event->src == nullptr) {
+         return;
+     }

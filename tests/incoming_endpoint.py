@@ -14,8 +14,8 @@ def endpoint():
     binary = Path(os.environ["INCOMING_ENDPOINT_BIN"]).resolve(strict=True)
     # Verify the executable too, so an overridden environment path cannot
     # execute an arbitrary program. This digest is from the verified official
-    # TrustTunnel 1.1.0 linux-x86_64 archive pinned in incoming-routing.yml.
-    expected = "9bb15f4e30e2ff196cf0aa387462c42387d9405ddfeb5caad133838560fa33cd"
+    # TrustTunnel 1.3.1 linux-x86_64 archive pinned in incoming-routing.yml.
+    expected = "70e0349a55d977f6df8b14e476f8897aa2c1d8d5d441c3cba14f2039b8e35767"
     binary_data = binary.read_bytes()
     if hashlib.sha256(binary_data).hexdigest() != expected:
         raise ValueError("Unexpected incoming-probe endpoint executable")

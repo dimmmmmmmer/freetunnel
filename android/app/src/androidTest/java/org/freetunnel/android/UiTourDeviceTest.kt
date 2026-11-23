@@ -536,7 +536,7 @@ class UiTourDeviceTest {
         return view.width
     }
     // The rows of a list, fields and boxes of text are as wide as their place by design, as the desktop's are; the Home logo is 132 across.
-    private val rowKeys = Regex("(config:\\d+:select|home:pick:\\d+|select:\\d+|add:[a-z]+|picker:\\d+|log:box|home:toggle|editor:cert|editor:name|editor:profile|editor:protocol|editor:certfile)")
+    private val rowKeys = Regex("(config:\\d+:select|home:pick:\\d+|select:\\d+|add:[a-z]+|picker:\\d+|log:box|home:toggle|editor:cert|editor:name|editor:profile|editor:protocol|editor:tls|editor:certfile)")
     private fun tooWide(): String? {
         val focused = act().currentFocus ?: return null
         val key = focused.tag as? String ?: return null
@@ -916,7 +916,8 @@ class UiTourDeviceTest {
         }
         screen("split-through-vpn-notice") {
             // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
-            prefs.edit().putBoolean("through", true).putBoolean("split_enabled", true).commit()
+            prefs.edit().putBoolean("split_enabled", true).commit()
+            SplitStore.edit(SplitPrefs(prefs), null) { it.setThrough(true) }
             val list = org.json.JSONArray(ConfigStore.read(prefs))
             list.getJSONObject(0).put("profile", "Streaming")
             assertTrue(ConfigStore.write(prefs, list.toString()))

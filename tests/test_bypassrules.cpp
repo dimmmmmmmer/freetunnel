@@ -44,6 +44,12 @@ void TestBypassRules::everythingTheUiAcceptsReachesTheCore_data()
     QTest::newRow("punycode idn") << QStringLiteral("xn--e1afmkfd.xn--p1ai");
     QTest::newRow("punycode idn wildcard") << QStringLiteral("*.xn--e1afmkfd.xn--p1ai");
     QTest::newRow("punycode idn in capitals") << QStringLiteral("XN--E1AFMKFD.XN--P1AI");
+    // TrustTunnel 1.1.12 accepts a wildcard of one label. *.google is its own test.
+    QTest::newRow("one label") << QStringLiteral("*.ru");
+    QTest::newRow("one label, leading dot") << QStringLiteral(".su");
+    QTest::newRow("one label, trailing dot") << QStringLiteral("*.RU.");
+    QTest::newRow("one label, idn") << QStringLiteral("*.рф");
+    QTest::newRow("one label, not a public suffix") << QStringLiteral("*.google");
 }
 
 void TestBypassRules::everythingTheUiAcceptsReachesTheCore()
@@ -72,6 +78,11 @@ void TestBypassRules::rejectsWhatIsNotARule_data()
     QTest::newRow("bare dot") << QStringLiteral(".");
     QTest::newRow("bare star") << QStringLiteral("*.");
     QTest::newRow("no tld") << QStringLiteral("localhost");
+    QTest::newRow("bare tld") << QStringLiteral("ru");
+    QTest::newRow("star at the end") << QStringLiteral("google.*");
+    QTest::newRow("star on both sides") << QStringLiteral("*.google.*");
+    QTest::newRow("one character") << QStringLiteral("*.a");
+    QTest::newRow("all digits") << QStringLiteral("*.123");
     QTest::newRow("trailing dot") << QStringLiteral("example.");
     QTest::newRow("space") << QStringLiteral("exa mple.com");
     QTest::newRow("cidr out of range") << QStringLiteral("10.0.0.0/33");
@@ -112,6 +123,12 @@ void TestBypassRules::punycodesInternationalDomains()
              coreBypassRuleFor(QStringLiteral("пример.рф")));
     QCOMPARE(coreBypassRuleFor(QStringLiteral("*.XN--E1AFMKFD.XN--P1AI")),
              QStringLiteral("*.xn--e1afmkfd.xn--p1ai"));
+    // One label reaches the core as a wildcard of that label, in ASCII.
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("*.ru")), QStringLiteral("*.ru"));
+    QCOMPARE(coreBypassRuleFor(QStringLiteral(".su")), QStringLiteral("*.su"));
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("*.RU.")), QStringLiteral("*.ru"));
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("*.рф")), QStringLiteral("*.xn--p1ai"));
+    QCOMPARE(coreBypassRuleFor(QStringLiteral("*.google")), QStringLiteral("*.google"));
 }
 
 void TestBypassRules::sanitizeDropsUnusableRulesAndDuplicates()

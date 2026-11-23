@@ -25,6 +25,7 @@ private slots:
     void theDefaultExcludedRoutesAreExactlyTheSharedFile();
     void roundTrip();
     void profilesPreserveOrder();
+    void modeListsMigrateAndSurviveRestart();
     void geoListsStayWithTheirProfile();
     void geoRefreshSettingMigratesAndValidates();
     void theInsecureTmpLogPathIsMigratedOnLoad();
@@ -344,6 +345,44 @@ void TestAppSettings::hotkeysNobodyChoseAreTurnedOffOnce()
     saveAppSettings(turnedOn);
     QCOMPARE(loadAppSettings().hotkeys_enabled, true);
     QSettings().clear();
+}
+
+void TestAppSettings::modeListsMigrateAndSurviveRestart() {
+    for (const QString &mode : {QStringLiteral("general"), QStringLiteral("selective")}) {
+        QSettings store;
+        store.clear();
+        store.setValue("bypass/mode", mode);
+        store.setValue("bypass/profile_names", QStringList{"Default", "Work"});
+        store.setValue("bypass/profile/Default", QStringList{"old.example"});
+        store.setValue("bypass/profile/Work", QStringList{"10.20.0.0/16"});
+        store.setValue("routing/app_rules", QStringList{"firefox"});
+        auto settings = loadAppSettings();
+        QCOMPARE(settings.domain_bypass_rules, QStringList{"old.example"});
+        QCOMPARE(settings.app_rules, QStringList{"firefox"});
+        settings.profile_geo_lists["Work"] = defaultGeoLists();
+        const QString opposite = mode == "general" ? "selective" : "general";
+        settings.setVpnMode(opposite);
+        QVERIFY(settings.domain_bypass_rules.isEmpty());
+        QVERIFY(settings.app_rules.isEmpty());
+        QVERIFY(settings.profiles.value("Work").isEmpty());
+        settings.profiles["Work"] = {"other.example"};
+        settings.profile_app_rules["Work"] = {"curl"};
+        saveAppSettings(settings);
+        settings = loadAppSettings();
+        QCOMPARE(settings.vpn_mode, opposite);
+        QCOMPARE(settings.profiles.value("Work"), QStringList{"other.example"});
+        settings.setVpnMode(mode);
+        QCOMPARE(settings.domain_bypass_rules, QStringList{"old.example"});
+        QCOMPARE(settings.profiles.value("Work"), QStringList{"10.20.0.0/16"});
+        QCOMPARE(settings.profile_app_rules.value("Work"), QStringList{"firefox"});
+        QCOMPARE(settings.profile_geo_lists.value("Work").size(), 2);
+        QVERIFY(settings.profile_geo_lists.value("Work").first().direction == freetunnel::GeoDirection::Bypass);
+        saveAppSettings(settings);
+        settings = loadAppSettings();
+        settings.setVpnMode(opposite);
+        QCOMPARE(settings.profile_app_rules.value("Work"), QStringList{"curl"});
+        store.clear();
+    }
 }
 
 QTEST_MAIN(TestAppSettings)

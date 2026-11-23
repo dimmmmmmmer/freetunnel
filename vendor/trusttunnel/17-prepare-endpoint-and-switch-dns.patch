@@ -1,11 +1,11 @@
+diff --git a/core/include/vpn/vpn.h b/core/include/vpn/vpn.h
+index d1c08aa..d3a2838 100644
 --- a/core/include/vpn/vpn.h
 +++ b/core/include/vpn/vpn.h
-@@ -663,22 +663,33 @@
-  * @param parameters VPN connect parameters
-  * @return `VpnError` filled with `VpnErrorCode`
+@@ -669,18 +669,29 @@ WIN_EXPORT Vpn *vpn_open(const VpnSettings *settings);
   */
  WIN_EXPORT ag::VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters);
-
+ 
 +/** A complete versioned routing policy committed with an endpoint replacement. */
 +struct VpnRoutingConfig {
 +    VpnMode mode;
@@ -32,16 +32,14 @@
 +WIN_EXPORT ag::VpnError vpn_replace_endpoint(Vpn *vpn, const VpnUpstreamConfig *config,
 +        void (*commit_certificate_policy)(void *), void *arg, const VpnListenerConfig *dns_config = nullptr,
 +        const VpnRoutingConfig *routing = nullptr);
-
+ 
  /**
   * Forcibly initiate the next session recovery attempt. Do nothing if the VPN client is not between
-  * recovery attempts (e.g., not in `VPN_SS_WAITING_RECOVERY` state).
-  * @param vpn VPN client
+diff --git a/core/src/vpn_manager.cpp b/core/src/vpn_manager.cpp
+index dc72f6d..2ff34b6 100644
 --- a/core/src/vpn_manager.cpp
 +++ b/core/src/vpn_manager.cpp
-@@ -13,10 +13,11 @@
-
- #include "common/move_only_function.h"
+@@ -15,6 +15,7 @@
  #include "socks_listener.h"
  #include "tun_device_listener.h"
  #include "vpn/internal/domain_filter.h"
@@ -49,14 +47,10 @@
  #include "vpn/internal/utils.h"
  #include "vpn/utils.h"
  #include "vpn/vpn.h"
- #include "vpn_fsm.h"
- #include "vpn_manager.h"
-@@ -341,27 +342,75 @@
-     log_vpn(vpn, info, "Done");
-
+@@ -354,8 +355,25 @@ VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters) {
      return error;
  }
-
+ 
 -VpnError vpn_replace_endpoint(
 -        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg) {
 +static void apply_routing(Vpn *vpn, VpnMode mode, std::string_view exclusions, std::optional<uint64_t> generation) {
@@ -81,7 +75,7 @@
      if (vpn == nullptr || config == nullptr) {
          return {VPN_EC_INVALID_SETTINGS, "VPN and endpoint configuration are required"};
      }
-     std::unique_lock lock(vpn->stop_guard);
+@@ -363,14 +381,45 @@ VpnError vpn_replace_endpoint(
      if (config->location.endpoints.size > 0 && config->location.endpoints.data == nullptr) {
          return {VPN_EC_INVALID_SETTINGS, "Endpoint array is required"};
      }
@@ -127,11 +121,7 @@
          // Stop all producers that refer to the old endpoint/config first.
          // disconnect() retains the TUN listener and bypass upstream; vpn_stop()
          // would destroy both and must not be used for a server change.
-         vpn->disconnect();
-         vpn->recovery = {};
-@@ -369,16 +418,34 @@
-         vpn->selected_endpoint.reset();
-         vpn->client.tcp_socket.reset();
+@@ -382,12 +431,30 @@ VpnError vpn_replace_endpoint(
          vpn->client.quic_connector.reset();
          vpn->pending_error.reset();
          vpn->update_upstream_config(std::move(replacement));
@@ -161,13 +151,9 @@
 -    return committed ? VpnError{} : VpnError{VPN_EC_EVENT_LOOP_FAILURE, "Endpoint replacement was cancelled"};
 +    return committed ? outcome : VpnError{VPN_EC_EVENT_LOOP_FAILURE, "Endpoint replacement was cancelled"};
  }
-
+ 
  void vpn_force_reconnect(Vpn *vpn) {
-     log_vpn(vpn, info, "...");
-
-@@ -588,24 +655,11 @@
-                     .arg = ctx,
-                     .action =
+@@ -607,20 +674,7 @@ static void update_routing(Vpn *vpn, VpnMode mode, VpnStr exclusions, std::optio
                              [](void *arg, TaskId) {
                                  auto *ctx = (Ctx *) arg;
                                  ctx->vpn->update_exclusions_task.release();
@@ -189,13 +175,11 @@
                              },
                      .finalize =
                              [](void *arg) {
-                                 delete (Ctx *) arg;
-                             },
+diff --git a/core/test/test_vpn_manager_fsm_recovery.cpp b/core/test/test_vpn_manager_fsm_recovery.cpp
+index 1688aab..98d6e6a 100644
 --- a/core/test/test_vpn_manager_fsm_recovery.cpp
 +++ b/core/test/test_vpn_manager_fsm_recovery.cpp
-@@ -701,5 +701,144 @@
-     EXPECT_TRUE(std::holds_alternative<vpn_manager::ConnectFallIntoRecovery>(vpn->connect_retry_info));
-     // The returning uplink must use the recovery policy even before the first
+@@ -709,3 +709,142 @@ TEST_F(ConnectingVpnManagerTest, NetworkReturnsBeforeFirstConnectWithRecoveryPol
      // successful handshake, rather than entering the finite-attempt path.
      ASSERT_TRUE(await_state_change(VPN_SS_RECOVERING));
  }
@@ -338,14 +322,32 @@
 +    EXPECT_EQ(vpn->client.routing_generation, 18u);
 +    EXPECT_EQ(vpn->fsm.get_state(), VPN_SS_CONNECTED);
 +}
+diff --git a/trusttunnel/CMakeLists.txt b/trusttunnel/CMakeLists.txt
+index 3f1f5ac..5443e8a 100644
+--- a/trusttunnel/CMakeLists.txt
++++ b/trusttunnel/CMakeLists.txt
+@@ -331,4 +331,5 @@ include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
+ set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
+ 
+ add_unit_test(test_persistent_ring_buffer "${TEST_DIR}" "" TRUE TRUE)
++add_unit_test(test_endpoint_replacement "${TEST_DIR}" "" TRUE TRUE)
+ add_unit_test(test_trusttunnel_config "${TEST_DIR}" "" TRUE TRUE)
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index 9256ab9..879c2ad 100644
 --- a/trusttunnel/include/vpn/trusttunnel/client.h
 +++ b/trusttunnel/include/vpn/trusttunnel/client.h
-@@ -110,10 +110,26 @@
-      *                              to process packets.
-      */
-     Error<ConnectResultError> connect(ListenerSettings listener_settings);
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <functional>
+ #include <memory>
+ #include <thread>
+ 
+@@ -119,6 +120,22 @@ public:
+     Error<ConnectResultError> connect(ListenerSettings listener_settings, ConnectOptions options);
      Error<ConnectResultError> set_system_dns();
-
+ 
 +    struct PreparedEndpoint;
 +    struct EndpointRouting {
 +        VpnMode mode;
@@ -363,35 +365,29 @@
 +            const std::function<void()> &on_committed = {}, const EndpointRouting *routing = nullptr);
 +
      int disconnect();
-
+ 
      void notify_network_change(VpnNetworkState state);
-
-     void notify_sleep();
+diff --git a/trusttunnel/include/vpn/trusttunnel/config.h b/trusttunnel/include/vpn/trusttunnel/config.h
+index c3da8fc..5b0905e 100644
 --- a/trusttunnel/include/vpn/trusttunnel/config.h
 +++ b/trusttunnel/include/vpn/trusttunnel/config.h
-@@ -36,10 +36,11 @@
-
-     struct SocksListener {
+@@ -40,6 +40,7 @@ struct TrustTunnelConfig {
          std::string username;
          std::string password;
          std::string address;
 +        bool operator==(const SocksListener &) const = default;
      };
-
+ 
      struct TunListener {
-         std::string device_name;
-         std::vector<std::string> included_routes;
-@@ -49,16 +50,19 @@
-         uint32_t tcp_send_buf_size = 0; ///< TCP send buffer size in bytes (0 = compile-time default)
-         std::string bound_if;
+@@ -53,12 +54,15 @@ struct TrustTunnelConfig {
          bool change_system_dns = true;
          bool use_existing = false;
          std::optional<std::string> netns;
 +        bool operator==(const TunListener &) const = default;
      };
-
+ 
      using Listener = std::variant<SocksListener, TunListener>;
-
+ 
      ag::LogLevel loglevel = ag::LOG_LEVEL_INFO;
      ag::VpnMode mode = ag::VPN_MODE_GENERAL;
 +    // Internal opt-in: the embedding adapter protects every core socket. Never read from TOML.
@@ -399,17 +395,15 @@
      uint64_t routing_generation = 0; // FreeTunnel internal; never loaded from TOML.
      bool killswitch_enabled = false;
      std::string killswitch_allow_ports;
-     bool post_quantum_group_enabled = true;
-     bool exclusions_tcp_early_ack_enabled = false;
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index ae0cc9a..c2abf06 100644
 --- a/trusttunnel/src/client.cpp
 +++ b/trusttunnel/src/client.cpp
-@@ -234,45 +234,48 @@
-                         magic_enum::enum_name((VpnErrorCode) error.code)));
-     }
+@@ -239,26 +239,32 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(
      return {};
  }
-
--Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server() {
+ 
+-Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server(ConnectOptions options) {
 +struct TrustTunnelClient::PreparedEndpoint {
 +    TrustTunnelConfig config;
      std::vector<VpnEndpoint> endpoints;
@@ -431,9 +425,9 @@
 -        dst.data = static_cast<uint8_t *>(std::malloc(data_len));
 -        std::memcpy(dst.data, decoded.data(), data_len);
 -    };
--
 +    std::vector<uint8_t> client_random;
 +    std::vector<uint8_t> client_random_mask;
++    std::vector<uint8_t> client_random_auth_key;
 +    VpnConnectParameters parameters{};
 +    bool consumed = false;
 +};
@@ -450,18 +444,18 @@
 +    endpoints.reserve(location.endpoints.size());
 +    prepared.client_random = utils::decode_hex(location.client_random);
 +    prepared.client_random_mask = utils::decode_hex(location.client_random_mask);
++    prepared.client_random_auth_key = utils::decode_hex(location.client_random_auth_key);
+ 
      // A single endpoint to resolve, paired with the parsed hostname/remote_id it belongs to.
      struct ResolveTarget {
-         size_t host_index; // index into `hostnames` / `remote_ids`
-         bool is_relay;
+@@ -267,13 +273,13 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
          std::string address;
      };
      std::vector<ResolveTarget> targets;
 -    targets.reserve(m_config.location.endpoints.size());
--
--    for (const auto &endpoint : m_config.location.endpoints) {
 +    targets.reserve(location.endpoints.size());
-+
+ 
+-    for (const auto &endpoint : m_config.location.endpoints) {
 +    for (const auto &endpoint : location.endpoints) {
          auto pipe_pos = endpoint.hostname.find('|');
          if (!endpoint.custom_sni.empty() && pipe_pos != std::string::npos) {
@@ -472,11 +466,7 @@
          }
          if (!endpoint.custom_sni.empty()) {
              hostnames.emplace_back(endpoint.custom_sni);
-             remote_ids.emplace_back(endpoint.hostname);
-         } else if (pipe_pos != std::string::npos) {
-@@ -302,90 +305,151 @@
-     // Build the endpoints and relays from the resolved addresses.
-     for (size_t i = 0; i < targets.size(); ++i) {
+@@ -307,23 +313,24 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
          const auto &target = targets[i];
          const auto &resolved = resolved_all[i];
          if (resolved.empty()) {
@@ -486,10 +476,15 @@
              continue;
          }
          if (target.is_relay) {
-             // Use only the first resolved address for relay
-             auto &relay = relays.emplace_back(resolved.front());
+-            // Use only the first resolved address for relay
+-            auto &relay = relays.emplace_back(resolved.front());
++            // Use only the first resolved address for relay.
+             // A relay connection used the endpoint profile before relays had their own one: keep it.
+-            relay.tls_profile = m_config.location.tls_profile;
 -            if (!m_config.location.client_random.empty()) {
 -                copy_to_c_buffer(relay.tls_client_random, m_config.location.client_random);
++            auto &relay = relays.emplace_back(resolved.front());
++            relay.tls_profile = location.tls_profile;
 +            if (!location.client_random.empty()) {
 +                relay.tls_client_random = {prepared.client_random.data(), uint32_t(prepared.client_random.size())};
              }
@@ -499,15 +494,22 @@
 +                relay.tls_client_random_mask = {
 +                        prepared.client_random_mask.data(), uint32_t(prepared.client_random_mask.size())};
              }
+-            if (!m_config.location.client_random_auth_key.empty()) {
+-                copy_to_c_buffer(relay.tls_client_random_auth_key, m_config.location.client_random_auth_key);
++            if (!location.client_random_auth_key.empty()) {
++                relay.tls_client_random_auth_key = {
++                        prepared.client_random_auth_key.data(), uint32_t(prepared.client_random_auth_key.size())};
+             }
              continue;
          }
-         for (const auto &addr : resolved) {
-             auto &last_el = endpoints.emplace_back(VpnEndpoint{
+@@ -332,60 +339,131 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
                      .address = addr,
                      .name = hostnames[target.host_index].c_str(),
                      .remote_id = remote_ids[target.host_index].c_str(),
 -                    .has_ipv6 = m_config.location.has_ipv6,
+-                    .tls_profile = m_config.location.tls_profile,
 +                    .has_ipv6 = location.has_ipv6,
++                    .tls_profile = location.tls_profile,
              });
 -            if (!m_config.location.client_random.empty()) {
 -                copy_to_c_buffer(last_el.tls_client_random, m_config.location.client_random);
@@ -520,15 +522,21 @@
 +                last_el.tls_client_random_mask = {
 +                        prepared.client_random_mask.data(), uint32_t(prepared.client_random_mask.size())};
              }
+-            if (!m_config.location.client_random_auth_key.empty()) {
+-                copy_to_c_buffer(last_el.tls_client_random_auth_key, m_config.location.client_random_auth_key);
++            if (!location.client_random_auth_key.empty()) {
++                last_el.tls_client_random_auth_key = {
++                        prepared.client_random_auth_key.data(), uint32_t(prepared.client_random_auth_key.size())};
+             }
          }
      }
-
+ 
      if (endpoints.empty() && relays.empty()) {
 -        return make_error(ConnectResultError{},
 +        return make_error(TrustTunnelClient::ConnectResultError{},
                  "Failed to resolve any endpoint or relay addresses. Check network connectivity and configuration.");
      }
-
+ 
 -    VpnConnectParameters parameters = {
 +    prepared.parameters = {
              .upstream_config =
@@ -550,24 +558,23 @@
                                              .attempts = UINT32_MAX,
                                      },
 -                            .anti_dpi = m_config.location.anti_dpi,
+-                    },
+-            .retry_info =
+-                    {
+-                            .policy =
+-                                    options.fall_into_recovery ? VPN_CRP_FALL_INTO_RECOVERY : VPN_CRP_SEVERAL_ATTEMPTS,
 +                            .anti_dpi = location.anti_dpi,
                      },
      };
-
--    // Added by FreeTunnel: with the kill switch on, a first connect that fails
--    // goes into the core's recovery loop, as a connection that dropped does,
--    // instead of ending the session after a few attempts. The kill switch lives
--    // in this session, so ending it lifted the block for as long as the app took
--    // to build the next one. Errors the core treats as final (authentication,
--    // the server's certificate) still end it. Without the kill switch the core's
--    // default stays: a session that never came up ends, and the app says so and
--    // starts over. Recovery must also handle a network that returns before
--    // the first successful connection. The WAITING_FOR_NETWORK transition
--    // must preserve this policy instead of entering the finite-attempt path
--    // (see the in-session endpoint/recovery patch).
 +    return {};
 +}
-+
+ 
+-    {
+-        VpnError err = vpn_connect(m_vpn, &parameters);
+-        if (err.code != 0) {
+-            return make_error(ConnectResultError{},
+-                    AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(err.text),
+-                            magic_enum::enum_name((VpnErrorCode) err.code)));
 +Result<std::shared_ptr<TrustTunnelClient::PreparedEndpoint>, TrustTunnelClient::ConnectResultError>
 +TrustTunnelClient::prepare_endpoint(TrustTunnelConfig config) {
 +    auto prepared = std::make_shared<PreparedEndpoint>();
@@ -576,34 +583,22 @@
 +    for (const auto &upstream : dns) {
 +        if (upstream.empty() || vpn_validate_dns_upstream(upstream.c_str()) != VPN_DUVS_OK) {
 +            return make_error(ConnectResultError{}, "Invalid DNS upstream");
-+        }
-+    }
+         }
+     }
 +    if (auto error = prepare_upstream(prepared->config.location, *prepared)) {
 +        return error;
 +    }
 +    return prepared;
 +}
 +
-+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server() {
++Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server(ConnectOptions options) {
 +    PreparedEndpoint prepared;
 +    if (auto error = prepare_upstream(m_config.location, prepared)) {
 +        return error;
 +    }
-     if (m_config.killswitch_enabled) {
--        parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;
--    }
--
--    {
--        VpnError err = vpn_connect(m_vpn, &parameters);
--        if (err.code != 0) {
--            return make_error(ConnectResultError{},
--                    AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(err.text),
--                            magic_enum::enum_name((VpnErrorCode) err.code)));
--        }
--    }
--
-+        prepared.parameters.retry_info.policy = VPN_CRP_FALL_INTO_RECOVERY;
-+    }
++    prepared.parameters.retry_info = {
++            .policy = options.fall_into_recovery ? VPN_CRP_FALL_INTO_RECOVERY : VPN_CRP_SEVERAL_ATTEMPTS,
++    };
 +    if (auto error = vpn_connect(m_vpn, &prepared.parameters); error.code != 0) {
 +        return make_error(ConnectResultError{},
 +                AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(error.text),
@@ -611,7 +606,7 @@
 +    }
 +    return {};
 +}
-+
+ 
 +Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::replace_endpoint(
 +        const std::shared_ptr<PreparedEndpoint> &prepared, const std::function<void()> &on_committed,
 +        const EndpointRouting *routing) {
@@ -663,14 +658,10 @@
 +    }
      return {};
  }
-
- VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_settings) {
-     auto &config = std::get<TrustTunnelConfig::TunListener>(m_config.listener);
-@@ -424,19 +488,21 @@
-     for (const auto &route : config.included_routes) {
-         included_routes.emplace_back(route.c_str());
+ 
+@@ -428,15 +505,17 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
      }
-
+ 
      std::vector<std::string> complete_excluded_routes = config.excluded_routes;
 -    for (const auto &endpoint : m_config.location.endpoints) {
 -        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
@@ -694,19 +685,10 @@
 +            }
          }
      }
-
-     std::vector<const char *> excluded_routes;
-     excluded_routes.reserve(complete_excluded_routes.size());
---- a/trusttunnel/CMakeLists.txt
-+++ b/trusttunnel/CMakeLists.txt
-@@ -312,5 +312,7 @@
- link_libraries(vpnlibs_trusttunnel)
- include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
- set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
-
- add_unit_test(test_persistent_ring_buffer "${TEST_DIR}" "" TRUE TRUE)
-+
-+add_unit_test(test_endpoint_replacement "${TEST_DIR}" "" TRUE TRUE)
+ 
+diff --git a/trusttunnel/test/test_endpoint_replacement.cpp b/trusttunnel/test/test_endpoint_replacement.cpp
+new file mode 100644
+index 0000000..8e01b60
 --- /dev/null
 +++ b/trusttunnel/test/test_endpoint_replacement.cpp
 @@ -0,0 +1,115 @@
@@ -774,7 +756,7 @@
 +
 +    void SetUp() override {
 +        client = std::make_unique<TrustTunnelClient>(make_config(), make_callbacks());
-+        auto error = client->connect(TrustTunnelClient::UseProcessPackets{});
++        auto error = client->connect(TrustTunnelClient::UseProcessPackets{}, {.fall_into_recovery = true});
 +        ASSERT_FALSE(error) << (error ? error->str() : "");
 +    }
 +

@@ -60,7 +60,6 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["text_copy", "LogsPage", "Copy"]
 ["text_log_copied", "LogsPage", "Log copied"]
 ["text_subscription_links_are_not_supported_yet", "ConfigImport", "Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive."]
-["text_this_server_needs_a_newer_trusttunnel_core", "ConfigImport", "This server needs a newer TrustTunnel core than this version of FreeTunnel uses."]
 ["update_check", "SettingsPage", "Check for updates"]
 ["update_checking", "Backend", "Checking…"]
 ["update_available", "Backend", "Version %1 is available"]
@@ -76,6 +75,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["import_mixed_name", "Backend", "This name mixes letters from different alphabets."]
 ["import_subscription_note", "ConfigImport", "Subscriptions aren't supported yet: this server won't update itself, and its subscription address isn't saved."]
 ["import_certificate_note", "ConfigImport", "Extra data in the certificate was ignored."]
+["text_tls_profile_unknown", "Backend", "The TLS profile is not one TrustTunnel knows"]
 ["import_confirm", "Main", "Import"]
 ["import_add_copy", "Main", "Add copy"]
 ["import_replace", "Main", "Replace"]
@@ -88,6 +88,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["editor_username", "CreateConfigOverlay", "Username"]
 ["editor_password", "CreateConfigOverlay", "Password"]
 ["editor_protocol", "CreateConfigOverlay", "Protocol"]
+["editor_tls_profile", "CreateConfigOverlay", "TLS profile"]
 ["editor_dns", "CreateConfigOverlay", "DNS servers"]
 ["editor_sni", "CreateConfigOverlay", "Custom SNI"]
 ["editor_random", "CreateConfigOverlay", "Client random (hex)"]
@@ -106,7 +107,9 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["editor_file_too_large", "Backend", "That file is over 1 MB, too large to be a certificate"]
 ["editor_discard_question", "CreateConfigOverlay", "Discard unsaved changes?"]
 ["editor_discard", "CreateConfigOverlay", "Discard"]
-["picker_title", "AppPickerOverlay", "Add an application"]
+["picker_title", "AppPickerOverlay", "Choose applications"]
+["picker_apply", "AppPickerOverlay", "Apply"]
+["picker_context_changed", "Backend", "The routing mode or profile changed. Open the application picker again."]
 ["picker_search", "AppPickerOverlay", "Search"]
 ["picker_scanning", "AppPickerOverlay", "Looking for installed applications…"]
 ["picker_nothing", "AppPickerOverlay", "Nothing matches that."]
@@ -134,8 +137,8 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["export_deep_link", "ConfigsPage", "Copy deep-link"]
 ["config_exported", "ConfigsPage", "Config exported — the file contains the password"]
 ["deep_link_copied", "ConfigsPage", "Deep-link copied — it contains the password, share it carefully"]
-["deep_link_failed", "ConfigsPage", "Couldn’t build deep-link"]
-["export_failed", "ConfigsPage", "Export failed"]
+["deep_link_failed", "Backend", "Couldn’t build deep-link"]
+["export_failed", "Backend", "Export failed"]
 ["config_gone", "ConfigsPage", "That configuration is no longer there."]
 ["settings_language", "SettingsPage", "Language"]
 ["settings_connect_on_startup", "SettingsPage", "Connect on startup"]
@@ -291,6 +294,8 @@ text_the_link_is_damaged
 text_the_link_contains_invalid_text
 text_the_link_contains_an_invalid_certificate
 text_the_link_contains_an_invalid_subscription_address
+## This refusal is Android-only: Android bundles TrustTunnel 1.1.7, while desktop core 1.3 supports client-random auth keys; Android refuses these rather than importing an unusable configuration.
+text_this_server_needs_a_newer_trusttunnel_core
 text_the_configuration_contains_an_invalid_certificate
 text_the_configuration_is_missing_required_server_settings
 text_storage_is_unavailable_saved_data_has_been_preserved

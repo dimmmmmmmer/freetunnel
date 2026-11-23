@@ -72,7 +72,8 @@
     <string name="text_the_link_contains_an_invalid_certificate">"The link contains an invalid certificate"</string>
     <string name="text_the_link_contains_an_invalid_subscription_address">"The link contains an invalid subscription address"</string>
     <string name="text_subscription_links_are_not_supported_yet">"Subscription links aren't supported yet. Ask your provider for a regular link, or update FreeTunnel when subscriptions arrive."</string>
-    <string name="text_this_server_needs_a_newer_trusttunnel_core">"This server needs a newer TrustTunnel core than this version of FreeTunnel uses."</string>
+    <string name="text_this_server_needs_a_newer_trusttunnel_core">"This server uses an auth key, which this version of FreeTunnel does not accept."</string>
+    <string name="text_tls_profile_unknown">"The TLS profile is not one TrustTunnel knows"</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"The configuration contains an invalid certificate"</string>
     <string name="text_the_configuration_is_missing_required_server_settings">"The configuration is missing required server settings"</string>
     <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Applications and addresses are selected. Full VPN protects all selected traffic. Keep one rule type for selective routing."</string>
@@ -171,7 +172,7 @@
     <string name="editor_no_file_picker">This device has no file picker. Paste the certificate into the field.</string>
     <string name="editor_discard_question">"Discard unsaved changes?"</string>
     <string name="editor_discard">"Discard"</string>
-    <string name="picker_title">"Add an application"</string>
+    <string name="picker_title">"Choose applications"</string>
     <string name="picker_search">"Search"</string>
     <string name="picker_scanning">"Looking for installed applications…"</string>
     <string name="picker_nothing">"Nothing matches that."</string>
@@ -280,4 +281,7 @@
     <string name="subscription_stop_question">Stop subscription updates?</string>
     <string name="subscription_host_changed">The subscription changes the server from %1$s to %2$s. Apply?</string>
     <string name="subscription_review">Subscription changed its server. Refresh it to review.</string>
+    <string name="editor_tls_profile">TLS profile</string>
+    <string name="picker_apply">Apply</string>
+    <string name="picker_context_changed">The routing mode or profile changed. Open the application picker again.</string>
 </resources>

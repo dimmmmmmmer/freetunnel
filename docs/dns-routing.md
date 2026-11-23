@@ -1,7 +1,8 @@
 # DNS routing investigation
 
-Tested on 2026-11-15 against the official TrustTunnelClient 1.1.12 executable
-(the version pinned by FreeTunnel), with a real TrustTunnel 1.1.0 endpoint.
+Tested on 2026-11-15 against the official TrustTunnelClient 1.1.12 executable,
+with a real TrustTunnel 1.1.0 endpoint. The endpoint pin is now 1.3.1; the
+steps below use that archive.
 The client, endpoint and two DNS responders ran inside one Docker network
 namespace with no external network. No host DNS, routes or firewall changed.
 
@@ -122,8 +123,8 @@ Prepare the official archives, verify their SHA-256 before extraction:
 
 - Client: `trusttunnel_client-v1.1.12-linux-x86_64.tar.gz`, SHA-256
   `75b7df59351e26462487464de5f3462153e00195f2d40677872fb93a5b44c488`.
-- Endpoint: `trusttunnel-v1.1.0-linux-x86_64.tar.gz`, SHA-256
-  `91c2ea3db7416a01b5258a4c047ec22890490bc55e1b194206031aa75144f0e7`.
+- Endpoint: `trusttunnel-v1.3.1-linux-x86_64.tar.gz`, SHA-256
+  `29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97`.
 
 Mount their extracted directories read-only at `/client` and `/endpoint`, the
 repository's `tests` directory at `/src`, and a temporary log directory at

@@ -153,19 +153,21 @@ void Backend::clearExcludedRoutes() {
 void Backend::resolveSquirrelUpdaterRules() {
     const Qt::CaseSensitivity cs = freetunnel::appPathCaseSensitivity();
     bool changed = false;
-    for (auto it = m_settings.profile_app_rules.begin(); it != m_settings.profile_app_rules.end(); ++it) {
-        QStringList resolved;
-        bool resolvedOne = false;
-        for (const QString &rule : std::as_const(it.value())) {
-            const QString program = freetunnel::squirrelProgramForUpdaterRule(rule);
-            resolvedOne |= !program.isEmpty();
-            const QString kept = program.isEmpty() ? rule : program;
-            if (!resolved.contains(kept, cs))
-                resolved << kept; // the program may have been listed already
-        }
-        if (resolvedOne) {
-            it.value() = resolved;
-            changed = true;
+    for (auto *profiles : {&m_settings.profile_app_rules, &m_settings.inactive_profile_app_rules}) {
+        for (auto it = profiles->begin(); it != profiles->end(); ++it) {
+            QStringList resolved;
+            bool resolvedOne = false;
+            for (const QString &rule : std::as_const(it.value())) {
+                const QString program = freetunnel::squirrelProgramForUpdaterRule(rule);
+                resolvedOne |= !program.isEmpty();
+                const QString kept = program.isEmpty() ? rule : program;
+                if (!resolved.contains(kept, cs))
+                    resolved << kept; // the program may have been listed already
+            }
+            if (resolvedOne) {
+                it.value() = resolved;
+                changed = true;
+            }
         }
     }
     if (!changed)
@@ -190,6 +192,30 @@ bool Backend::addAppRule(const QString &rule) {
     }
     m_settings.app_rules << norm;
     m_settings.profile_app_rules[m_settings.active_profile] = m_settings.app_rules;
+    applyProfileEdit();
+    return true;
+}
+
+bool Backend::setAppRules(const QString &profile, const QString &mode, const QStringList &rules) {
+    if (profile != m_settings.active_profile || mode != m_settings.vpn_mode) {
+        emit errorOccurred(tr("The routing mode or profile changed. Open the application picker again."));
+        return false;
+    }
+    QStringList normalized;
+    for (const QString &rule : rules) {
+        const QString parsed = freetunnel::normalizedAppRule(rule);
+        // An old rule for another OS may be unusable here. Keep it as written
+        // until removed; it must not prevent selecting an additional valid app.
+        const QString norm = parsed.isEmpty() && m_settings.app_rules.contains(rule) ? rule : parsed;
+        if (norm.isEmpty()) {
+            emit errorOccurred(tr("Enter a program name (firefox) or the full path to one"));
+            return false;
+        }
+        if (!normalized.contains(norm, freetunnel::appPathCaseSensitivity())) normalized << norm;
+    }
+    if (normalized == m_settings.app_rules) return true;
+    m_settings.app_rules = normalized;
+    m_settings.profile_app_rules[profile] = normalized;
     applyProfileEdit();
     return true;
 }
@@ -312,16 +338,20 @@ QVariantList Backend::matchingApplications(const QString &query, int limit) {
     return out;
 }
 
-bool Backend::addApplicationFromPath(const QString &pathOrUrl) {
+QString Backend::applicationRuleFromPath(const QString &pathOrUrl) {
     const QString target = freetunnel::resolveApplicationTarget(pathOrUrl);
     if (target.isEmpty()) {
         // Said plainly, because the common case is a document or a folder landing
         // on the window by accident, and "invalid rule" would not explain that.
         emit errorOccurred(tr("That is not a program. Drop an application here, "
                               "or pick one with Choose…"));
-        return false;
     }
-    return addAppRule(target);
+    return target;
+}
+
+bool Backend::addApplicationFromPath(const QString &pathOrUrl) {
+    const QString target = applicationRuleFromPath(pathOrUrl);
+    return !target.isEmpty() && addAppRule(target);
 }
 
 void Backend::removeAppRule(int index) {
@@ -413,6 +443,8 @@ void Backend::addProfile(const QString &name) {
     }
     m_settings.profiles.insert(n, {});
     m_settings.profile_app_rules.insert(n, {});
+    m_settings.inactive_profiles.insert(n, {});
+    m_settings.inactive_profile_app_rules.insert(n, {});
     m_settings.profile_geo_lists.insert(n, {});
     m_settings.profile_order << n;
     m_settings.active_profile = n; // edit the newly created profile
@@ -426,6 +458,8 @@ void Backend::removeProfile(const QString &name) {
     const bool affectedActiveConfig = (activeConfigProfile() == name);
     m_settings.profiles.remove(name);
     m_settings.profile_app_rules.remove(name);
+    m_settings.inactive_profiles.remove(name);
+    m_settings.inactive_profile_app_rules.remove(name);
     m_settings.profile_geo_lists.remove(name);
     syncGeoLists();
     m_settings.profile_order.removeAll(name);
@@ -658,7 +692,7 @@ void Backend::setVpnMode(const QString &mode) {
             ? QStringLiteral("selective")
             : QStringLiteral("general");
     if (m_settings.vpn_mode == normalized) return;
-    m_settings.vpn_mode = normalized;
+    m_settings.setVpnMode(normalized);
     // Mode binds when the tunnel is built, exactly like the other split settings —
     // without the reapply, flipping general↔selective while connected changed
     // nothing until the user reconnected by hand.

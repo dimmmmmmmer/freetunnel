@@ -1,8 +1,8 @@
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index d18e7d6..06617ba 100644
 --- a/core/src/tunnel.cpp
 +++ b/core/src/tunnel.cpp
-@@ -1449,12 +1449,18 @@
-     for (uint64_t id : ids) {
-         VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, id);
+@@ -1485,8 +1485,14 @@ void Tunnel::on_before_endpoint_disconnect(ServerUpstream *upstream) {
          // Only the endpoint is going away. Keep independently routed sockets
          // alive, including direct connections still waiting for their peer.
          // Unclassified/migrating flows must not inherit a direct route here.
@@ -18,11 +18,33 @@
                          || conn->state == CONNS_WAITING_RESPONSE_MIGRATING)) {
              close_client_side_connection(this, conn, -1, false);
          }
-     }
- }
+diff --git a/core/test/test_dns_routing.cpp b/core/test/test_dns_routing.cpp
+index ea3344d..179c694 100644
 --- a/core/test/test_dns_routing.cpp
 +++ b/core/test/test_dns_routing.cpp
-@@ -1559,5 +1559,56 @@
+@@ -1537,27 +1537,78 @@
+ TEST_F(DnsRoutingBase, FreeTunnelUnavailableSelectedFamilyNeverFallsBackToOtherRoute) {
+     for (bool selective : {false, true}) {
+         vpn.update_exclusions(selective ? VPN_MODE_SELECTIVE : VPN_MODE_GENERAL, "@0:vpn.example @1:direct.example");
+         vpn.exclusions_scannable_ports = ag::parse_scannable_ports("80").value();
+         for (bool direct : {false, true}) {
+             redirect_upstream->ip_version_availability.set();
+             bypass_upstream->ip_version_availability.set();
+             (direct ? bypass_upstream : redirect_upstream)->ip_version_availability.reset();
+             const TunnelAddress destination = SocketAddress("[2001:db8::1]:80");
+             uint64_t id = vpn.listener_conn_id_generator.get();
+             ClientConnectRequest event = {id, IPPROTO_TCP, &src, &destination};
+             vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
+             const auto action = vpn.tunnel->finalize_connect_action({.id = id, .action = VPN_CA_DEFAULT});
+             vpn.tunnel->complete_connect_request(id, action);
+             run_event_loop_once();
+             vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &id);
+             const auto request =
+                     AG_FMT("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", direct ? "direct.example" : "vpn.example");
+             ClientRead read = {id, reinterpret_cast<const uint8_t *>(request.data()), request.size(), 0};
+             vpn.tunnel->listener_handler(client_listener, CLIENT_EVENT_READ, &read);
+             EXPECT_LT(read.result, 0);
+             EXPECT_TRUE(bypass_upstream->connections.empty());
              EXPECT_TRUE(redirect_upstream->connections.empty());
              run_event_loop_once();
          }

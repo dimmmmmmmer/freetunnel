@@ -1,15 +1,17 @@
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index 6cc96da..d18e7d6 100644
 --- a/core/src/tunnel.cpp
 +++ b/core/src/tunnel.cpp
-@@ -1437,6 +1437,7 @@
+@@ -1471,6 +1471,7 @@ void Tunnel::on_before_endpoint_disconnect(ServerUpstream *upstream) {
      if (this->vpn->endpoint_upstream.get() != upstream) {
          return;
      }
 +    this->endpoint_upstream_connected = false;
      this->dns_resolver->stop_resolving();
      this->repeat_exclusions_resolve_task.reset();
-
-@@ -1447,12 +1448,15 @@
-
+ 
+@@ -1481,12 +1482,15 @@ void Tunnel::on_before_endpoint_disconnect(ServerUpstream *upstream) {
+ 
      for (uint64_t id : ids) {
          VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, id);
 -        if (conn != nullptr) {
@@ -25,11 +27,11 @@
 -
 -    this->endpoint_upstream_connected = false;
  }
-
+ 
  void Tunnel::on_after_endpoint_disconnect(ServerUpstream *upstream) { // NOLINT(readability-make-member-function-const)
-@@ -1926,6 +1930,10 @@
+@@ -1964,6 +1968,10 @@ bool Tunnel::update_dns_handler_parameters() {
  }
-
+ 
  void Tunnel::on_network_change() {
 +    // Preserve direct sockets only for endpoint-only recovery. After an OS
 +    // network change their bound interface/address may no longer be usable;
@@ -38,26 +40,28 @@
      if (this->dns_handler) {
          this->dns_handler->on_network_change();
      }
+diff --git a/core/test/test_tunnel.cpp b/core/test/test_tunnel.cpp
+index bc5bd19..30f1487 100644
 --- a/core/test/test_tunnel.cpp
 +++ b/core/test/test_tunnel.cpp
-@@ -109,6 +109,7 @@
+@@ -112,6 +112,7 @@ public:
      };
-
+ 
      std::unordered_map<size_t, Connection> connections;
 +    size_t received_bytes = 0;
-
+ 
      TestListener() = default;
      ~TestListener() override = default;
-@@ -137,6 +138,7 @@
+@@ -140,6 +141,7 @@ public:
      }
-
+ 
      ssize_t send(uint64_t, const uint8_t *, size_t length) override {
 +        received_bytes += length;
          return static_cast<ssize_t>(length);
      }
-
-@@ -1036,3 +1038,92 @@
-
+ 
+@@ -1539,3 +1541,92 @@ TEST_F(PreresolveTest, PreresolveMaxQueriesLimitsResolves) {
+ 
      ASSERT_EQ(pending_count(), 3) << "Only max_queries=3 resolves must be queued out of 10 exclusions";
  }
 +

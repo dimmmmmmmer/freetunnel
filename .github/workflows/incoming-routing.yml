@@ -76,7 +76,7 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '17'
@@ -95,10 +95,10 @@ jobs:
       - run: scripts/prepare-trusttunnel-android.sh
       - name: Prepare the isolated real VPN endpoint
         run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/endpoint.tar.gz" https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.1.0/trusttunnel-v1.1.0-linux-x86_64.tar.gz
-          echo "91c2ea3db7416a01b5258a4c047ec22890490bc55e1b194206031aa75144f0e7  $RUNNER_TEMP/endpoint.tar.gz" | sha256sum --check
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/endpoint.tar.gz" https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.3.1/trusttunnel-v1.3.1-linux-x86_64.tar.gz
+          echo "29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97  $RUNNER_TEMP/endpoint.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/endpoint.tar.gz" -C "$RUNNER_TEMP"
-          echo "INCOMING_ENDPOINT_BIN=$RUNNER_TEMP/trusttunnel-v1.1.0-linux-x86_64/trusttunnel_endpoint" >> "$GITHUB_ENV"
+          echo "INCOMING_ENDPOINT_BIN=$RUNNER_TEMP/trusttunnel-v1.3.1-linux-x86_64/trusttunnel_endpoint" >> "$GITHUB_ENV"
           sudo ip address add 10.0.2.2/32 dev lo
           ip route get 10.0.2.2
       - name: Enable KVM

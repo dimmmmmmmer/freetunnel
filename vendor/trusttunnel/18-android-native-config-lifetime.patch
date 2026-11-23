@@ -1,11 +1,11 @@
+diff --git a/platform/android/lib/src/main/cpp/lib.cpp b/platform/android/lib/src/main/cpp/lib.cpp
+index f85cfb2..41fde77 100644
 --- a/platform/android/lib/src/main/cpp/lib.cpp
 +++ b/platform/android/lib/src/main/cpp/lib.cpp
-@@ -196,15 +196,20 @@
-
-     jmethodID connect_request_method_id = env->GetMethodID(callback_class, "onConnectRequest",
+@@ -198,11 +198,16 @@ extern "C" JNIEXPORT jlong JNICALL Java_com_adguard_trusttunnel_VpnClient_create
              "(ILjava/lang/String;ILjava/lang/String;I)I");
      if (!connect_request_method_id) return 0;
-
+ 
 -    std::string_view conf = env->GetStringUTFChars(config, nullptr);
 -    toml::parse_result parse_result = toml::parse(conf);
 +    const char *conf = env->GetStringUTFChars(config, nullptr);
@@ -23,16 +23,14 @@
      }
      auto trusttunnel_config = ag::TrustTunnelConfig::build_config(parse_result);
      if (!trusttunnel_config) {
-         errlog(g_logger, "Failed to process configuration");
-         return 0;
+diff --git a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
+index 86a1069..b2497ec 100644
 --- a/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
 +++ b/platform/android/lib/src/main/java/com/adguard/trusttunnel/VpnClient.kt
-@@ -32,37 +32,41 @@
-     }
-     private var nativePtr: Long = 0
+@@ -34,8 +34,12 @@ class VpnClient (
      private val sync = Any()
-
-     fun start(vpnTunInterface: ParcelFileDescriptor?): Boolean = synchronized(sync) {
+ 
+     fun start(vpnTunInterface: ParcelFileDescriptor?, fallIntoRecovery: Boolean): Boolean = synchronized(sync) {
 +        if (nativePtr != 0L) {
 +            LOG.error("Native client already exists; close it before starting again")
 +            return false
@@ -43,33 +41,30 @@
              LOG.error("Failed to create a native client")
              return false
          }
-
-         return startNative(nativePtr, vpnTunInterface?.detachFd() ?: -1)
+@@ -44,7 +48,7 @@ class VpnClient (
      }
-
+ 
      fun stop() = synchronized(sync) {
 -        if (nativePtr.toInt() == 0) {
 +        if (nativePtr == 0L) {
              LOG.error("Can't stop native client because it was not created")
              return;
          }
-         stopNative(nativePtr);
+@@ -52,7 +56,7 @@ class VpnClient (
      }
-
+ 
      fun notifyNetworkChange(available: Boolean) = synchronized(sync) {
 -        if (nativePtr.toInt() == 0) {
 +        if (nativePtr == 0L) {
              LOG.error("Can't call notifyNetworkChange, native client is not initialized")
              return;
          }
-         notifyNetworkChangeNative(nativePtr, available);
+@@ -60,7 +64,7 @@ class VpnClient (
      }
-
+ 
      override fun close() = synchronized(sync) {
 -        if (nativePtr.toInt() != 0) {
 +        if (nativePtr != 0L) {
              destroyNative(nativePtr);
              nativePtr = 0
          }
-     }
-

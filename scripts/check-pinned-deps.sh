@@ -17,12 +17,15 @@ check() {
   fi
 }
 
-# Android uses the stable source commit plus a reviewed routing patch.
+# Android and desktop share the stable 1.3.0 core, so both read tls_profile.
+# Android applies the subset listed in core-source.json; desktop applies every
+# patch in vendor/trusttunnel/.
 if ! python3 - <<'PYCHECK'
 import json, re
 from pathlib import Path
 pin = json.loads(Path('android/core-source.json').read_text())
 assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
+assert pin['version'] == '1.3.0'
 assert pin['commit'] == Path('scripts/upstream_ref.txt').read_text().strip()
 gradle = Path('android/app/build.gradle').read_text()
 assert "def coreAar = 'trusttunnel-client-android-" + pin['version'] + ".aar'" in gradle

@@ -1,6 +1,6 @@
 {
-  "version": "1.1.12",
-  "commit": "067deb837ed994d6ae902e3bb40b69f6266af216",
+  "version": "1.3.0",
+  "commit": "232f151ea9864849a422666f1ce73ddc1bb4de3a",
   "patches": [
     "vendor/trusttunnel/01-tunnel-stats-handler.patch",
     "vendor/trusttunnel/02-connect-request-handler.patch",

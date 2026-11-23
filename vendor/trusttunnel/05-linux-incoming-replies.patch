@@ -1,3 +1,5 @@
+diff --git a/net/src/os_tunnel_linux.cpp b/net/src/os_tunnel_linux.cpp
+index 756f27a..dbccd28 100644
 --- a/net/src/os_tunnel_linux.cpp
 +++ b/net/src/os_tunnel_linux.cpp
 @@ -12,6 +12,16 @@
@@ -17,7 +19,7 @@
  static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
  static constexpr std::string_view VNC_PORTS = "5900-5920";
  
-@@ -27,7 +37,7 @@
+@@ -27,7 +37,7 @@ static bool sys_cmd_bool(std::string cmd) {
          if (result.value().status != 0) {
              dbglog(logger, "Exit code: {}", result.value().status);
          }
@@ -26,7 +28,7 @@
      }
      dbglog(logger, "{}", result.error()->str());
      return false;
-@@ -277,6 +287,21 @@
+@@ -277,6 +287,21 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
          }
      }
  
@@ -48,7 +50,7 @@
      // Apply routing rules (in netns if specified)
      if (m_sport_supported) {
          if (!ipv4_routes.empty()) {
-@@ -350,6 +375,9 @@
+@@ -350,6 +375,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
  }
  
  void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {

@@ -24,6 +24,7 @@ class QHostAddress;
 
 #include "app/LogModel.h"
 #include "core/AppSettings.h"
+#include "core/CredentialStore.h"
 #include "vpn/vpn_helper_client.h"
 
 class QHotkey;
@@ -176,10 +177,17 @@ public:
     Q_INVOKABLE void importFiles(const QStringList &paths);
     bool importLinkBatch(const QString &text);
     Q_INVOKABLE bool createConfig(const QVariantMap &fields);
-    Q_INVOKABLE QVariantMap configFields(int index) const; // parse a config for editing
+    // Parse a config for editing. With a secret the credential store could not be
+    // asked for, only {path, secretError: the message}: the editor shows it and
+    // closes, as a form made without the secret would save over the config.
+    Q_INVOKABLE QVariantMap configFields(int index);
     // Export: a shareable tt:// deep link, or a full .toml written to disk
-    // (both carry the password — pulled from the OS keychain).
-    Q_INVOKABLE QString configDeepLink(int index) const;
+    // (both carry the password — pulled from the OS keychain). Each says why by
+    // errorOccurred() when it fails, so the window shows only what succeeded; and
+    // neither is made at all when a secret the config has could not be read.
+    Q_INVOKABLE QString configDeepLink(int index);
+    // The same credential-checked link as modules, never copied to the clipboard.
+    Q_INVOKABLE QVariantMap configQrCode(int index);
     // A row's config file, and back. An action that outlives its row — a menu, a
     // save dialog, a confirmation — remembers the file: an import prepends to the
     // list and every row below moves.
@@ -188,7 +196,7 @@ public:
     {
         return path.isEmpty() ? -1 : static_cast<int>(m_paths.indexOf(path));
     }
-    Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl) const;
+    Q_INVOKABLE bool exportConfigToml(int index, const QString &fileUrl);
 
     QObject *logModel() { return &m_logModel; }
     Q_INVOKABLE void clearLogs();
@@ -233,6 +241,8 @@ public:
 
     const QStringList &appRules() const { return m_settings.app_rules; }
     Q_INVOKABLE bool addAppRule(const QString &rule);
+    Q_INVOKABLE bool setAppRules(const QString &profile, const QString &mode, const QStringList &rules);
+    Q_INVOKABLE QString applicationRuleFromPath(const QString &pathOrUrl);
     // Whatever was dropped on the window or picked in the dialog: a program, a
     // .desktop entry, a .lnk shortcut, an .app bundle. Resolved to the program
     // it stands for, because that is the only name a rule can match.
@@ -360,6 +370,11 @@ signals:
 private:
     QString statusText() const; // human-readable state line (log only; QML reads the bool flags)
     void reportPasswordNotStored(); // a save or import the credential store refused
+    // A config's secret the credential store could not be asked for. Asks the store
+    // again (the banner and the wording depend on whether it is there), logs, and
+    // returns what to tell the user; reportSecretNotRead() tells them with a toast.
+    QString noteSecretNotRead(freetunnel::SecretUnreadable which);
+    void reportSecretNotRead(freetunnel::SecretUnreadable which);
     void resolveSquirrelUpdaterRules(); // rules an earlier version stored for Update.exe
     void reloadConfigs();
     void persistSettings();
@@ -404,9 +419,11 @@ private:
         QString oldPath;
         QString target;
         QString password;
+        QString authKey;
         QString tomlBody;
         QString editContent;
         QString editPassword;
+        QString editAuthKey;
         QString editProfile;
         bool editingSnapshot = false;
         int editIndex = -1;
@@ -414,7 +431,8 @@ private:
     void emitCreateConfigError(const QString &parseErr);
     std::optional<int> editIndexForSave(const QVariantMap &f); // createConfig()'s row, or nothing if gone
     bool writeCreatedConfig(const QString &target, const QString &tomlBody,
-                            const QString &password, const QString &previousPassword);
+                            const QString &password, const QString &previousPassword,
+                            const QString &authKey, const QString &previousAuthKey);
     bool finalizeCreatedConfig(const CreatedConfigFinalize &ctx);
     void markConfigPingFailed(int index);
     void runConfigPing(int index, const QHostAddress &ip, quint16 port);
@@ -487,8 +505,8 @@ public:
 private:
     std::atomic<QThread *> m_lastTomlBuildThread{nullptr};
 #endif
-    void onConnectTomlReady(quint64 generation, const QString &toml);
-    void failConnectNoPassword();
+    void onConnectTomlReady(quint64 generation, const freetunnel::ConnectConfig &config);
+    void failConnectWithoutSecrets(freetunnel::ConnectConfig::Problem problem);
 
     VpnHelperClient m_client;
     AppSettings m_settings;

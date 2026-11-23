@@ -370,7 +370,7 @@ class FreeTunnelVpnService : VpnService() {
             descriptor = ParcelFileDescriptor.dup(tun.fileDescriptor)
             if (!blocked) publishState(1)
             collector?.startNotifying(candidate)
-            check(candidate.start(descriptor)) { "VPN core rejected the configuration" }
+            check(candidate.start(descriptor, plan.fallIntoRecovery)) { "VPN core rejected the configuration" }
             // Native construction sets its level from TOML; honor any preference changed during startup.
             configureCoreLogging()
             candidate = null

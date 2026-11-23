@@ -1,3 +1,5 @@
+diff --git a/core/include/vpn/internal/domain_filter.h b/core/include/vpn/internal/domain_filter.h
+index 6019512..b169e56 100644
 --- a/core/include/vpn/internal/domain_filter.h
 +++ b/core/include/vpn/internal/domain_filter.h
 @@ -1,5 +1,7 @@
@@ -8,7 +10,7 @@
  #include <bitset>
  #include <chrono>
  #include <set>
-@@ -75,12 +77,16 @@
+@@ -75,12 +77,16 @@ public:
       * Match address tag against exclusion list. Logic of matching is explained in
       * `VpnSettings.exclusions` description.
       * @param tag address tag
@@ -26,7 +28,7 @@
       * @param domain domain name
       */
      void add_resolved_tag(SockAddrTag tag, std::string domain);
-@@ -115,6 +121,11 @@
+@@ -115,6 +121,11 @@ private:
      struct DomainEntryMalformed {};
      using ParseResult = std::variant<SocketAddress, CidrRange, DomainEntryInfo, PortOnlyEntry, DomainEntryMalformed>;
  
@@ -38,6 +40,8 @@
      VpnMode m_mode = VPN_MODE_GENERAL;
      std::unordered_map<std::string, MatchFlagsSet> m_domains; // key - domain name / value - set of `MatchFlags`
      std::unordered_set<SocketAddress> m_addresses;
+diff --git a/core/src/domain_filter.cpp b/core/src/domain_filter.cpp
+index c1753a5..d0bb518 100644
 --- a/core/src/domain_filter.cpp
 +++ b/core/src/domain_filter.cpp
 @@ -1,4 +1,5 @@
@@ -46,7 +50,7 @@
  
  #include "common/defs.h"
  #include "vpn/internal/utils.h"
-@@ -21,6 +22,9 @@
+@@ -21,6 +22,9 @@ DomainFilter::DomainFilter() = default;
  DomainFilter::~DomainFilter() = default;
  
  DomainFilterValidationStatus DomainFilter::validate_entry(std::string_view entry) {
@@ -56,7 +60,7 @@
      ParseResult result = parse_entry(entry);
      static_assert(std::is_same_v<std::variant_alternative_t<DFVS_OK_ADDR, ParseResult>, SocketAddress>);
      static_assert(std::is_same_v<std::variant_alternative_t<DFVS_OK_CIDR, ParseResult>, CidrRange>);
-@@ -96,7 +100,21 @@
+@@ -96,7 +100,21 @@ bool DomainFilter::update_exclusions(VpnMode mode_, std::string_view exclusions)
      m_exclusion_suspects.clear();
      m_cidr_ranges.clear();
  
@@ -79,7 +83,7 @@
          ParseResult result = parse_entry(entry);
          if (const auto *addr = std::get_if<SocketAddress>(&result); addr != nullptr) {
              log_filter(this, trace, "Entry added in address table: {}", entry);
-@@ -132,10 +150,40 @@
+@@ -132,10 +150,40 @@ bool DomainFilter::update_exclusions(VpnMode mode_, std::string_view exclusions)
          add_entry(buffer);
      }
  
@@ -120,7 +124,7 @@
      bool www_prefixed = starts_with(domain, WWW_PREFIX);
      std::string seek = !www_prefixed ? std::string(domain) : std::string(domain.substr(WWW_PREFIX.length()));
  
-@@ -165,12 +213,37 @@
+@@ -165,12 +213,37 @@ DomainFilterMatchStatus DomainFilter::match_domain(std::string_view domain) cons
      return DFMS_DEFAULT;
  }
  
@@ -159,7 +163,7 @@
      bool found = m_addresses.contains(tag.addr);
      if (!found) {
          found = m_addresses.contains(addr_no_port);
-@@ -222,7 +295,22 @@
+@@ -222,9 +295,24 @@ std::vector<std::string_view> DomainFilter::get_resolvable_exclusions() const {
          }
      }
  
@@ -170,8 +174,8 @@
 +        }
 +    }
      return names;
-+}
-+
+ }
+ 
 +bool DomainFilter::has_policy_rules() const {
 +    for (const auto &filter : m_policy) {
 +        if (filter) {
@@ -179,12 +183,16 @@
 +        }
 +    }
 +    return false;
- }
- 
++}
++
  VpnMode DomainFilter::get_mode() const {
+     return m_mode;
+ }
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index 103fa60..01c8e6e 100644
 --- a/core/src/tunnel.cpp
 +++ b/core/src/tunnel.cpp
-@@ -361,15 +361,20 @@
+@@ -396,15 +396,20 @@ static TunnelDomainLookupAction pass_through_domain_lookup(
      switch (r.status) {
      case DES_NOTFOUND:
          log_conn(tunnel, conn, dbg, "Gave up to find domain name");
@@ -207,7 +215,7 @@
          domain_extractor->reset();
          break;
      }
-@@ -1021,7 +1026,7 @@
+@@ -1055,7 +1060,7 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
              || conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
          conn->action = request_result.action;
      } else if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst); dst != nullptr) {
@@ -216,9 +224,9 @@
          switch (filter_result.status) {
          case DFMS_DEFAULT:
              conn->action = request_result.action;
-@@ -1749,8 +1754,13 @@
+@@ -1783,8 +1788,13 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
+                     "Couldn't find domain name for suspect-to-be-exclusion connection, routing it as usual ({})",
                      encode_to_hex({event->data, std::min(event->length, size_t(517))}));
-             conn->flags.reset(CONNF_FAKE_CONNECTION);
              conn->flags.reset(CONNF_SUSPECT_EXCLUSION);
 +            auto fallback_action = VPN_CA_DEFAULT;
 +            if (this->vpn->domain_filter.has_policy_rules()
@@ -231,9 +239,11 @@
              if (event->result < 0) {
                  listener->turn_read(conn->client_id, false);
                  close_client_side_connection(this, conn, utils::AG_ECONNRESET, /*async*/ true);
+diff --git a/core/test/test_domain_filter.cpp b/core/test/test_domain_filter.cpp
+index 042e8c1..8ef587f 100644
 --- a/core/test/test_domain_filter.cpp
 +++ b/core/test/test_domain_filter.cpp
-@@ -221,3 +221,82 @@
+@@ -221,3 +221,82 @@ TEST(DomainFilterTest, ValidateEntry) {
      ASSERT_EQ(DFVS_OK_PORT, DomainFilter::validate_entry("*:443"));
      ASSERT_EQ(DFVS_OK_PORT, DomainFilter::validate_entry("*:65535"));
  }

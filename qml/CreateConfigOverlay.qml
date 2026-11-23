@@ -51,6 +51,8 @@ Item {
         // Clicking empty card space clears focus from any text field.
         TapHandler { onTapped: cform.forceActiveFocus() }
         property string protocol: "http2"
+        // Per connection. Empty is not used: chrome is the core's default.
+        property string tlsProfile: "chrome"
         property bool ipv6: true
         property bool skipVerification: false
         property bool antiDpi: false
@@ -72,7 +74,7 @@ Item {
         // rebuild the same string, so tryClose() would drop real edits silently.
         function snapshot() {
             return [fName.text, fHost.text, fAddr.text, fUser.text, fPass.text,
-                    protocol, fDns.text, fSni.text, fRandom.text, fCert.text, ipv6,
+                    protocol, tlsProfile, fDns.text, fSni.text, fRandom.text, fAuthKey.text, fCert.text, ipv6,
                     skipVerification, antiDpi, splitProfile].join("\u001f")
         }
         function afterDiscard(action) {
@@ -82,10 +84,39 @@ Item {
         }
         function tryClose() { if (snapshot() !== snap) discardConfirm.open(); else close() }
         function close() { shell.editIndex = -1; shell.overlay = "" }
+        // The stable core's choices. "default" is not one: it is an old alias of BoringSSL.
+        function tlsChoices() {
+            return [
+                {v:"chrome", t:qsTr("Chrome")},
+                {v:"chrome_canary", t:qsTr("Chrome Canary")},
+                {v:"safari", t:qsTr("Safari")},
+                {v:"firefox", t:qsTr("Firefox")},
+                {v:"okhttp", t:qsTr("OkHttp")},
+                {v:"openssl", t:qsTr("OpenSSL")},
+                {v:"boringssl", t:qsTr("BoringSSL")}
+            ]
+        }
+        function tlsLabel(value) {
+            const choices = tlsChoices()
+            for (let i = 0; i < choices.length; ++i) {
+                if (choices[i].v === value)
+                    return choices[i].t
+            }
+            return value
+        }
         // Prefill from the selected config when editing; snapshot for dirty-check.
         Component.onCompleted: {
             if (editing) {
                 var f = backend.configFields(shell.editIndex)
+                if (f.secretError) {
+                    // The password or the auth key could not be read from the
+                    // credential store. A form opened without it looks complete,
+                    // and saving it would write the config over without the
+                    // secret, so there is no form: the reason, and back.
+                    shell.showToast(f.secretError)
+                    Qt.callLater(close)
+                    return
+                }
                 cform.editPath = f.path || ""
                 backend.setConfigOpenInEditor(cform.editPath)
                 cform.subscriptionLinked = backend.hasSubscription(cform.editPath)
@@ -93,8 +124,12 @@ Item {
                 fAddr.text = f.addresses || ""; fUser.text = f.username || ""
                 fPass.text = f.password || ""; fDns.text = f.dns || ""
                 fSni.text = f.customSni || ""; fRandom.text = f.clientRandom || ""
+                fAuthKey.text = f.authKey || ""
                 fCert.text = f.certificate || ""
                 cform.protocol = f.protocol === "http3" ? "http3" : "http2"
+                cform.tlsProfile = f.tlsProfile || "chrome"
+                if (cform.tlsProfile === "default")
+                    cform.tlsProfile = "boringssl"
                 cform.ipv6 = f.allowIpv6 === undefined ? true : f.allowIpv6
                 cform.skipVerification = f.skipVerification === true
                 cform.antiDpi = f.antiDpi === true
@@ -167,9 +202,31 @@ Item {
                     }
                     Field { id: fDns; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("DNS servers"); placeholder: "1.1.1.1, 8.8.8.8"; width: (parent.width - 10) / 2 }
                 }
+                Column { width: parent.width; spacing: 4
+                    Text { text: qsTr("TLS profile"); color: theme.textDim; font.pixelSize: 13 }
+                    Rectangle { id: tlsBox; objectName: "tlsProfileBox"; width: parent.width; height: 34; radius: 8; color: theme.inputBg
+                        border.color: tlsMa.containsMouse ? theme.accent : theme.inputBorder; border.width: 1
+                        Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                               text: cform.tlsLabel(cform.tlsProfile); color: theme.text; font.pixelSize: 14 }
+                        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                               text: "▾"; color: theme.textDim; font.pixelSize: 16 }
+                        MouseArea { id: tlsMa; anchors.fill: parent; hoverEnabled: true
+                            onClicked: shell.showSelect(tlsBox, cform.tlsChoices(), cform.tlsProfile, function(v){ cform.tlsProfile = v }) } }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; color: theme.textFaint; font.pixelSize: 12
+                           text: qsTr("This server only. Leave it on Chrome unless the server asks for another.") }
+                }
                 Row { width: parent.width; spacing: 10
                     Field { id: fSni; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Custom SNI"); width: (parent.width - 10) / 2 }
                     Field { id: fRandom; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Client random (hex)"); width: (parent.width - 10) / 2 }
+                }
+                // The key a server checks the TLS client random against (TrustTunnel
+                // 1.3). Masked like the password, and kept where the password is.
+                Column { width: parent.width; spacing: 4
+                    Field { id: fAuthKey; objectName: "authKeyField"; labelColor: theme.textDim; fieldBg: theme.inputBg; fieldBorder: theme.inputBorder; fieldFocus: theme.accent; textColor: theme.text; placeholderColor: theme.textFaint; label: qsTr("Auth key (hex)"); password: true }
+                    Text { objectName: "authKeyHint"; width: parent.width; wrapMode: Text.WordWrap; color: theme.textFaint; font.pixelSize: 12
+                           text: (fAuthKey.text.length > 0 && fRandom.text.length > 0)
+                                 ? qsTr("Client random is not used while an auth key is set")
+                                 : qsTr("Kept in the system's credential store, like the password") }
                 }
                 Column { width: parent.width; spacing: 4
                     Text { text: qsTr("Split profile"); color: theme.textDim; font.pixelSize: 13 }
@@ -275,6 +332,7 @@ Item {
                                 name: fName.text, hostname: fHost.text, addresses: fAddr.text,
                                 username: fUser.text, password: fPass.text, protocol: cform.protocol,
                                 dns: fDns.text, customSni: fSni.text, clientRandom: fRandom.text,
+                                authKey: fAuthKey.text, tlsProfile: cform.tlsProfile,
                                 allowIpv6: cform.ipv6, skipVerification: cform.skipVerification,
                                 antiDpi: cform.antiDpi, certificate: fCert.text,
                                 splitProfile: cform.splitProfile, editIndex: shell.editIndex,

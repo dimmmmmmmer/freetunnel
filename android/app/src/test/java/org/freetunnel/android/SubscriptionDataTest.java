@@ -18,6 +18,20 @@ public class SubscriptionDataTest {
         assertEquals("changed", result.password); assertEquals("1.1.1.1", result.dns);
         assertEquals("http3", result.protocol); assertTrue(result.antiDpi); assertFalse(result.allowIpv6);
     }
+    @Test public void eachConnectionKeepsItsOwnTlsProfile() throws Exception {
+        JSONObject firefox = doc().put("tls_profile", "firefox");
+        String created = SubscriptionData.apply(firefox.toString().getBytes(StandardCharsets.UTF_8), null).toml;
+        assertTrue(created.contains("tls_profile = \"firefox\"\n"));
+        String kept = SubscriptionData.apply(doc().toString().getBytes(StandardCharsets.UTF_8), created).toml;
+        assertTrue(kept.contains("tls_profile = \"firefox\"\n"));
+        JSONObject alias = doc().put("tls_profile", "default");
+        String boring = SubscriptionData.apply(alias.toString().getBytes(StandardCharsets.UTF_8), created).toml;
+        assertTrue(boring.contains("tls_profile = \"boringssl\"\n"));
+        assertFalse(boring.contains("default"));
+        String chrome = SubscriptionData.apply(doc().put("tls_profile", "").toString().getBytes(StandardCharsets.UTF_8), boring).toml;
+        assertFalse(chrome.contains("tls_profile"));
+        assertThrows(Exception.class, () -> SubscriptionData.apply(doc().put("tls_profile", "netscape").toString().getBytes(StandardCharsets.UTF_8), null));
+    }
     @Test public void badTypesAndSecurityDowngradesAreRejected() throws Exception {
         for (Object[] value : new Object[][]{{"version",true},{"version",2},{"skip_verification",true},{"has_ipv6","false"},{"password",23},{"client_random_auth_key","aabb"},{"address","example.org/path"}}) {
             JSONObject invalid = doc().put((String)value[0],value[1]);

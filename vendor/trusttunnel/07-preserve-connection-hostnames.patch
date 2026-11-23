@@ -1,6 +1,8 @@
+diff --git a/core/src/domain_filter.cpp b/core/src/domain_filter.cpp
+index d0bb518..2181ba4 100644
 --- a/core/src/domain_filter.cpp
 +++ b/core/src/domain_filter.cpp
-@@ -236,6 +236,11 @@
+@@ -236,6 +236,11 @@ DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool def
                      return {.status = DFMS_SUSPECT_EXCLUSION};
                  }
                  match.status = policy_action(tier);
@@ -12,7 +14,7 @@
                  return match;
              }
              pending_domains = pending_domains || !m_policy[tier]->m_domains.empty();
-@@ -262,10 +267,13 @@
+@@ -262,10 +267,13 @@ DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool def
      if (found) {
          log_filter(this, trace, "Address matched against exclusion list: {}", tag.addr);
          result.status = DFMS_EXCLUSION;
@@ -30,9 +32,11 @@
      } else if (m_exclusion_suspects.get(addr_no_port)) {
          result.status = DFMS_SUSPECT_EXCLUSION;
      }
+diff --git a/core/test/test_domain_filter.cpp b/core/test/test_domain_filter.cpp
+index 8ef587f..e3b6b79 100644
 --- a/core/test/test_domain_filter.cpp
 +++ b/core/test/test_domain_filter.cpp
-@@ -300,3 +300,42 @@
+@@ -300,3 +300,42 @@ TEST(MatchTest, FreeTunnelTomlRulesPrecedeGeoLists) {
      EXPECT_EQ(filter.match_domain("example.com"), DFMS_EXCLUSION);
      EXPECT_EQ(filter.match_domain("other.com"), DFMS_DEFAULT);
  }

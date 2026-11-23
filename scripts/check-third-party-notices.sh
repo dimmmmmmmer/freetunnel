@@ -50,10 +50,16 @@ need() {
 
 need "the Qt version (QT_VER in .github/workflows/build.yml)" \
   "Qt $(sed -nE "s/^[[:space:]]*QT_VER:[[:space:]]*'([^']+)'.*/\1/p" .github/workflows/build.yml | head -n 1)"
-need "the TrustTunnelClient commit (scripts/upstream_ref.txt)" \
-  "$(tr -d '[:space:]' < scripts/upstream_ref.txt)"
-need "the NativeLibsCommon commit (scripts/export-patched-boringssl.sh)" \
-  "$(sed -nE 's/^NLC_COMMIT="([0-9a-f]{40})"$/\1/p' scripts/export-patched-boringssl.sh)"
+# The desktop and the Android app run different cores, so these two are checked
+# on the "Source, desktop" lines: the Android lines name other commits, and a
+# desktop line left behind must not pass because the old commit is still
+# named there.
+core="$(tr -d '[:space:]' < scripts/upstream_ref.txt)"
+[ -z "$core" ] || core="Source, desktop: <https://github.com/TrustTunnel/TrustTunnelClient/tree/$core>"
+need "the TrustTunnelClient commit (scripts/upstream_ref.txt)" "$core"
+nlc="$(sed -nE 's/^NLC_COMMIT="([0-9a-f]{40})"$/\1/p' scripts/export-patched-boringssl.sh)"
+[ -z "$nlc" ] || nlc="Source, desktop: <https://github.com/AdguardTeam/NativeLibsCommon/tree/$nlc>"
+need "the NativeLibsCommon commit (scripts/export-patched-boringssl.sh)" "$nlc"
 need "the QHotkey commit (CMakeLists.txt)" \
   "$(sed -nE 's/.*GIT_TAG ([0-9a-f]{40}).*/\1/p' CMakeLists.txt | head -n 1)"
 need "the QWindowKit commit (cmake/QWindowKit.cmake)" \

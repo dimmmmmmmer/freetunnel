@@ -1,28 +1,33 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
-- Preserve pending direct DNS queries when the VPN reconnects; keep VPN-domain queries protected.
+### Highlights
 
-- Desktop: change servers inside the existing session, retaining direct connections when routing rules are unchanged; keep the old server if replacement preparation fails.
-- Core: isolate TLS session caches between servers and preserve the recovery policy when the network returns before the first connection.
-- Android: reject malformed native configurations without crashing and release temporary configuration strings.
+- **Updated desktop and Android to stable TrustTunnel 1.3.0.** Each server has its own TLS profile, selectable in the configuration editor.
+- **Bypass VPN and Through VPN keep separate domain/IP and application lists.** Switching modes restores the chosen mode's rules in every split profile.
+- **Choose several applications in one popup.** Search, check the apps, then Apply; Cancel leaves the saved rules unchanged.
+- **Show a configuration's QR code on Windows, macOS and Linux.** Scan it with FreeTunnel for Android to add the server.
+- **macOS and Linux can install the VPN helper once.** Subsequent connections and signed helper updates need no repeated administrator password.
 
-- Keep established direct TCP/UDP connections alive when the VPN endpoint disconnects and recovers.
+### Changed
 
-- Keep split routing correct for sites sharing an IP address, including direct IPv6 sites when the VPN supports only IPv4.
+- **Authentication keys stay with imported and shared configurations.** Desktop stores them in the system credential store; sharing a key requires a client supporting version 2 links.
+- **Single-label domain masks such as `*.ru` and `*.su` work on desktop and Android.**
+- **Change desktop servers inside the existing session.** Direct connections survive when routing rules are unchanged; failed preparation keeps the old server.
+- **Custom geo lists are added in a dialog.** New installations start with Russian sites and Russian IP addresses set to Bypass VPN.
+- **Connection logs retain known hostnames for geo rules**, including IPv6 matches.
+- **Android releases contain one APK**, named with its version.
 
-- Prevent mixed split-tunnel rules during live edits and connection setup on desktop.
-- Linux: preserve incoming UDP replies from services listening on all addresses and remove the blanket VPN bypass for outgoing connections using service source ports.
-- Keep bypass-domain DNS working during VPN reconnection while the kill switch continues to block VPN-domain DNS.
-- Keep ordinary DNS on its domain's direct or VPN route regardless of letter case, a trailing root dot or application routing rules.
-- macOS and Linux: install the VPN helper once, then connect and apply signed helper updates without repeated administrator prompts.
-- Documented and tested upstream DNS routing in full, selective and bypass modes.
-- Moved custom geo list creation into a dialog.
-- New installations start with Russian sites and Russian IP addresses set to Bypass VPN; removed the Recommended for Russia shortcut.
-- Kept known hostnames in connection logs when routing matches an IPv4 or IPv6 geo rule.
-- Finish pending geo list cache work when closing the desktop app.
-- Android releases now contain one APK, with the version in its filename.
+### Fixed
+
+- **Live split-tunnel edits apply the mode and rules together**, including while a desktop connection is starting.
+- **Bypassed DNS and established direct connections survive VPN recovery.** VPN-domain DNS remains protected by the kill switch.
+- **Domain routing handles shared IP addresses, letter case and trailing dots.** Direct IPv6 destinations work with an IPv4-only VPN.
+- **Linux services listening on all addresses keep their incoming UDP replies outside the tunnel.** New outgoing connections from those source ports keep normal VPN routing.
+- **TLS session caches are isolated between servers**, and reconnecting before the first successful connection preserves the recovery policy.
+- **Android rejects malformed native configurations without crashing**, releases temporary configuration strings and keeps background geo refresh from changing saved routing choices.
+- **Closing the desktop app finishes pending geo-list cache work.**
 
 ## 1.2.5
 

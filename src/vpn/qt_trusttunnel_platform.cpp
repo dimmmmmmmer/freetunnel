@@ -59,6 +59,7 @@ static const QHash<int, QString> &vpnErrorCodeNames()
             {ag::VPN_EC_AUTH_REQUIRED, QStringLiteral("AUTH_REQUIRED")},
             {ag::VPN_EC_LOCATION_UNAVAILABLE, QStringLiteral("LOCATION_UNAVAILABLE")},
             {ag::VPN_EC_CERTIFICATE_VERIFICATION_FAILED, QStringLiteral("CERTIFICATE_VERIFICATION_FAILED")},
+            {ag::VPN_EC_CERTIFICATE_NOT_YET_VALID, QStringLiteral("CERTIFICATE_NOT_YET_VALID")},
             {ag::VPN_EC_EVENT_LOOP_FAILURE, QStringLiteral("EVENT_LOOP_FAILURE")},
             {ag::VPN_EC_INITIAL_CONNECT_FAILED, QStringLiteral("INITIAL_CONNECT_FAILED")},
             {ag::VPN_EC_FATAL_CONNECTIVITY_ERROR, QStringLiteral("FATAL_CONNECTIVITY_ERROR")},

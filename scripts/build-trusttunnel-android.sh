@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ubuntu 24.04, JDK 17, Clang 18, Conan 2.31.1, Rust/cargo-ndk and NDK 29.
-# Builds stable upstream with only the Android routing patch; no core upgrade.
+# Builds the pinned stable TrustTunnelClient, then applies the Android patch list.
 set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 readarray -t pin < <(python3 - "$repo_dir/android/core-source.json" <<'PY'

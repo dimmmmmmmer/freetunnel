@@ -288,17 +288,17 @@ class TvDeviceTest {
                 assertEquals("$name: a box of text at rest", theme.surface, look.restEdge)
             }
             // The editor's select boxes are fields that open a choice.
-            key == "editor:profile" || key == "editor:protocol" -> {
+            key == "editor:profile" || key == "editor:protocol" || key == "editor:tls" -> {
                 assertEquals("$name: the border of a focused select box", theme.accent, look.focusedEdge)
                 assertEquals("$name: the border of a select box at rest", theme.inputBorder, look.restEdge)
                 assertEquals("$name: its fill stays", look.restFill, look.focusedFill)
             }
             // The buttons: the hover colour of the kind.
             key == "confirm:ok" -> assertEquals("$name: the red button goes to the darker red", theme.destructiveHover, look.focusedFill)
-            key == "editor:save" -> assertEquals("$name: Save goes to the darker accent", theme.primaryHover, look.focusedFill)
+            key == "editor:save" || key == "picker:apply" -> assertEquals("$name: Save goes to the darker accent", theme.primaryHover, look.focusedFill)
             // The editor's Cancel is the desktop's only button that dismisses a card (outlined on the page, surface under the pointer); the
             // Receive card has no button at all, and is closed by its back arrow, as the picker's is.
-            key == "editor:cancel" -> assertEquals("$name: a card's dismissing button goes to surface", theme.surface, look.focusedFill)
+            key == "editor:cancel" || key == "picker:cancel" -> assertEquals("$name: a card's dismissing button goes to surface", theme.surface, look.focusedFill)
             view is Button -> assertEquals("$name: a dialog's button goes to surfaceHover", theme.surfaceHover, look.focusedFill)
             // Chips: surfaceHover, and the selected one, which the desktop leaves as it is, a step darker.
             Regex("profile:\\d+|profile:add").matches(key) ->
@@ -1308,7 +1308,7 @@ class TvDeviceTest {
         val a = open()
         onMain { method("editConfig", Int::class.javaPrimitiveType).invoke(a, 0) }
         instrumentation.waitForIdleSync()
-        val keys = listOf("editor:name", "editor:host", "editor:addresses", "editor:username", "editor:password", "editor:protocol", "editor:dns",
+        val keys = listOf("editor:name", "editor:host", "editor:addresses", "editor:username", "editor:password", "editor:protocol", "editor:dns", "editor:tls",
             "editor:sni", "editor:random", "editor:profile", "editor:ipv6", "editor:skip", "editor:antidpi", "editor:cert", "editor:certfile",
             "editor:cancel", "editor:save")
         onMain {
@@ -1320,7 +1320,7 @@ class TvDeviceTest {
             // Top to bottom as the desktop's: the name, the host, the addresses; then two to a line, the user name beside the password,
             // the protocol beside DNS, SNI beside the client random; the profile; the switches; the certificate; the buttons.
             for ((upper, lower) in listOf("editor:name" to "editor:host", "editor:host" to "editor:addresses", "editor:addresses" to "editor:username",
-                    "editor:username" to "editor:protocol", "editor:protocol" to "editor:sni", "editor:sni" to "editor:profile",
+                    "editor:username" to "editor:protocol", "editor:protocol" to "editor:tls", "editor:tls" to "editor:sni", "editor:sni" to "editor:profile",
                     "editor:profile" to "editor:ipv6", "editor:ipv6" to "editor:skip", "editor:skip" to "editor:antidpi", "editor:antidpi" to "editor:cert"))
                 assertTrue("$upper is above $lower", at(upper)[1] < at(lower)[1])
             for ((left, right) in listOf("editor:username" to "editor:password", "editor:protocol" to "editor:dns", "editor:sni" to "editor:random")) {
@@ -1365,7 +1365,7 @@ class TvDeviceTest {
             assertTrue("Save is in what scrolls", scroll.getChildAt(0).let { form -> generateSequence(save as View?) { it.parent as? View }.any { it === form } })
             // The labels are the desktop's.
             for (label in listOf(R.string.editor_name, R.string.editor_host, R.string.editor_addresses, R.string.editor_username, R.string.editor_password,
-                    R.string.editor_protocol, R.string.editor_dns, R.string.editor_sni, R.string.editor_random, R.string.editor_split_profile,
+                    R.string.editor_protocol, R.string.editor_dns, R.string.editor_tls_profile, R.string.editor_sni, R.string.editor_random, R.string.editor_split_profile,
                     R.string.editor_ipv6, R.string.editor_skip_verification, R.string.editor_anti_dpi, R.string.editor_certificate, R.string.editor_load_certificate))
                 assertTrue("The editor says \"${context.getString(label)}\"", descendants(layer).filterIsInstance<TextView>().any { it.text.toString() == context.getString(label) })
             val placeholders = mapOf("editor:name" to context.getString(R.string.editor_name_placeholder), "editor:addresses" to "1.2.3.4:443", "editor:dns" to "1.1.1.1, 8.8.8.8")
@@ -1402,6 +1402,9 @@ class TvDeviceTest {
             root(a).findViewWithTag<ToggleView>("editor:ipv6").performClick()
             root(a).findViewWithTag<ToggleView>("editor:antidpi").performClick()
         }
+        click(a, "editor:tls")
+        eventually("TLS profiles are shown") { overlayTag(a, "select") != null }
+        click(a, "select:3") // Firefox
         click(a, "editor:save")
         (field("validationWorker").get(a) as ExecutorService).submit {}.get(30, TimeUnit.SECONDS)
         eventually("It is saved and the editor closes") { overlayTag(a, "editor") == null }
@@ -1409,6 +1412,7 @@ class TvDeviceTest {
         val parsed = org.tomlj.Toml.parse(toml)
         assertFalse(toml, parsed.hasErrors())
         assertEquals("new.example.com", parsed.getString("endpoint.hostname"))
+        assertEquals("firefox", parsed.getString("endpoint.tls_profile"))
         assertEquals(listOf("5.6.7.8:443", "9.9.9.9:8443"), parsed.getArray("endpoint.addresses")!!.let { x -> (0 until x.size()).map { x.getString(it) } })
         assertEquals("alice", parsed.getString("endpoint.username"))
         assertEquals("p\"w\\d", parsed.getString("endpoint.password"))
@@ -1425,6 +1429,11 @@ class TvDeviceTest {
         assertTrue(toml, toml.contains("exclusions = []"))
         assertEquals("The other config is as it was", source, saved()[1].getString("toml"))
         assertEquals("and the name too", "Profile 0", saved().first().getString("name"))
+        onMain { method("editConfig", Int::class.javaPrimitiveType).invoke(a, 0) }
+        instrumentation.waitForIdleSync()
+        assertEquals("Firefox", onMain { (root(a).findViewWithTag<ViewGroup>("editor:tls").getChildAt(0) as TextView).text.toString() })
+        click(a, "editor:cancel")
+        eventually("Reopening the saved TLS choice is not an edit") { overlayTag(a, "editor") == null }
     }
 
     @Test fun aNewConfigIsWhatTheFormHoldsAndTheDesktopsChecksRefuseWhatIsNot() {
@@ -2852,10 +2861,8 @@ class TvDeviceTest {
         assertEquals("Profile 0", saved().first().getString("name"))
     }
 
-    // The app picker is a card: a search box, rows of a name over a package, no checkboxes, no icons. The search box has the focus
-    // first, on a phone and on a TV. A row adds that one application and closes the picker. While it looks,
-    // it says so; typed into the box, a name or a package narrows the list, and what matches nothing says that.
-    @Test fun theAppPickerAddsOneApplicationAndCloses() {
+    // A selection remains a draft across searches; Apply commits all choices together.
+    @Test fun theAppPickerSavesMultipleApplicationsOnlyOnApply() {
         val a = open()
         if (isTv) leaveTouchMode(a)
         render(a, 2)
@@ -2882,11 +2889,11 @@ class TvDeviceTest {
         // A name over a package, and nothing else.
         val first = onMain {
             val layer = root(a).findViewWithTag<View>("overlay:picker")
-            assertTrue("No checkboxes", descendants(layer).none { it is android.widget.CompoundButton })
+            assertTrue("Rows have checkboxes", descendants(layer).any { it is android.widget.CheckBox })
             // The one picture on the card is the ← before the title (the desktop draws it as a glyph of text); a row has none of an application's.
             assertTrue("No icons", descendants(layer).filterIsInstance<ImageView>().all { it.tag == "picker:back" })
             assertTrue("and none in a row", descendants(layer.findViewWithTag<View>("picker:0")).none { it is ImageView })
-            val texts = descendants(layer.findViewWithTag<View>("picker:0")).filterIsInstance<TextView>().toList()
+            val texts = descendants(layer.findViewWithTag<View>("picker:0")).filterIsInstance<TextView>().filter { it !is android.widget.CompoundButton }.toList()
             assertEquals("A name and a package", 2, texts.size)
             assertEquals("The package is cut at its left", TextUtils.TruncateAt.START, texts[1].ellipsize)
             // 1 between the name and the package, as the desktop's Column (spacing: 1) has, and the header's row 2 lower in its 48.
@@ -2894,7 +2901,7 @@ class TvDeviceTest {
             val header = layer.findViewWithTag<View>("picker:back").parent as View
             assertEquals("The header is 48 high", dp(a, 48f), header.height.toFloat(), dp(a, 1f))
             assertEquals("with 4 above the row: its middle is 26 down", Math.round(4 * a.resources.displayMetrics.density), header.paddingTop)
-            assertEquals("and the card has no Done and no file to choose", 0, descendants(layer).filterIsInstance<Button>().count())
+            assertEquals("Apply and Cancel are available", 2, descendants(layer).filterIsInstance<Button>().filter { it !is android.widget.CompoundButton }.count())
             texts[1].text.toString()
         }
         val search = byKey(a, "picker:search") as EditText
@@ -2909,12 +2916,61 @@ class TvDeviceTest {
                 (v.tag as? String)?.matches(Regex("picker:\\d+")) == true && descendants(v).filterIsInstance<TextView>().any { it.text.toString() == first }
             }.tag as String
         }
-        click(a, row)
-        eventually("One application adds itself and closes the picker") { overlayTag(a, "picker") == null }
+        val savedBefore = profiles().apps(profiles().edited()).toList()
+        // setup() seeds an installed app. A preselected row must be toggled off
+        // before selecting it again; one click would deliberately remove it.
+        assertEquals("Saved choices start checked", first in savedBefore, onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$first").isChecked
+        })
+        if (first in savedBefore) click(a, row)
+        // Hardware Enter sends down and up: together they must toggle only once.
+        onMain {
+            search.requestFocus()
+            search.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+            search.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+        }
+        assertTrue("Enter selects the first choice once", onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$first").isChecked
+        })
+        assertNotNull("Selecting keeps the popup open", overlayTag(a, "picker"))
+        assertEquals("No rules changed before Apply", savedBefore, profiles().apps(profiles().edited()))
+        onMain { search.setText("") }
+        instrumentation.waitForIdleSync()
+        val second = onMain {
+            descendants(root(a).findViewWithTag<View>("overlay:picker")).filterIsInstance<TextView>()
+                .filter { it.ellipsize == TextUtils.TruncateAt.START }
+                .map { it.text.toString() }.first { it != first }
+        }
+        onMain { search.setText(second) }
+        instrumentation.waitForIdleSync()
+        val secondRow = onMain {
+            descendants(root(a).findViewWithTag<View>("overlay:picker")).first { v ->
+                (v.tag as? String)?.matches(Regex("picker:\\d+")) == true &&
+                    v.findViewWithTag<android.widget.CheckBox?>("picker:check:$second") != null
+            }.tag as String
+        }
+        if (second in savedBefore) click(a, secondRow)
+        click(a, secondRow)
+        onMain { search.setText("") }
+        instrumentation.waitForIdleSync()
+        for (pkg in listOf(first, second)) assertTrue("$pkg stays checked after filtering", onMain {
+            root(a).findViewWithTag<android.widget.CheckBox>("picker:check:$pkg").isChecked
+        })
+        assertEquals("Both selections are still a draft", savedBefore, profiles().apps(profiles().edited()))
+        click(a, "picker:apply")
+        eventually("Apply saves the selection and closes the picker") { overlayTag(a, "picker") == null }
+        assertEquals("Apply preserves saved apps and adds both choices",
+            (savedBefore + first + second).toSet(), profiles().apps(profiles().edited()).toSet())
         if (isTv) eventually("The successful save returns focus to Choose") { focusedKey(a) == "apps:choose" }
         assertTrue("It is in the apps the VPN carries or leaves", profiles().apps(profiles().edited()).contains(first))
         assertTrue("and in the old list 1.0.0 reads, which copies the profile the selected config uses", prefs.getStringSet("apps", emptySet())!!.contains(first))
         assertEquals("The page does not change", 2, onMain { field("page").getInt(a) })
+        val savedSelection = profiles().apps(profiles().edited()).toList()
+        click(a, "apps:choose")
+        eventually("The picker opens again") { onMain { root(a).findViewWithTag<View?>("picker:0") != null } }
+        click(a, "picker:0")
+        click(a, "picker:cancel")
+        assertEquals("Cancel discards every pending change", savedSelection, profiles().apps(profiles().edited()))
     }
 
     // The picker is a card 460 high at most, and not the length of the window (it is shorter where a keyboard takes room), and says so
@@ -3027,7 +3083,10 @@ class TvDeviceTest {
     }
     private fun fieldText(a: MainActivity, key: String): String = onMain { root(a).findViewWithTag<EditText>(key).text.toString() }
     // The settings the Split page is about, as the tests need them: on, which way, and the notice's rules.
-    private fun splitOn(through: Boolean) { prefs.edit().putBoolean("split_enabled", true).putBoolean("through", through).commit() }
+    private fun splitOn(through: Boolean) {
+        prefs.edit().putBoolean("split_enabled", true).commit()
+        editProfiles { it.setThrough(through) }
+    }
     private fun refuseSplitSaves(a: MainActivity) {
         field("splitPrefs").set(a, SplitPrefs(preferencesThatFailCommits(1)))
     }
@@ -3586,6 +3645,7 @@ class TvDeviceTest {
     }
 
     @Test fun theNoticeIsAboutTheProfileTheSelectedConfigUsesNotTheOneOnThePage() {
+        splitOn(true)
         editProfiles { p -> p.clearDomains("Default"); p.clearApps("Default"); p.add("Work"); p.addDomains("Work", "work.example"); p.select("Default") }
         seedConfigs("Work", null)
         splitOn(true)

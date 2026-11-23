@@ -1,3 +1,5 @@
+diff --git a/trusttunnel/include/vpn/trusttunnel/client.h b/trusttunnel/include/vpn/trusttunnel/client.h
+index 42fd15a..7b8fc4a 100644
 --- a/trusttunnel/include/vpn/trusttunnel/client.h
 +++ b/trusttunnel/include/vpn/trusttunnel/client.h
 @@ -21,6 +21,30 @@ static constexpr std::string_view WINTUN_DLL_NAME = "wintun";
@@ -43,6 +45,8 @@
  };
  
  class TrustTunnelClient {
+diff --git a/trusttunnel/src/client.cpp b/trusttunnel/src/client.cpp
+index 17cefe0..d7aaefb 100644
 --- a/trusttunnel/src/client.cpp
 +++ b/trusttunnel/src/client.cpp
 @@ -1,7 +1,19 @@
@@ -98,7 +102,7 @@
  TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks)
          : m_config(std::move(config))
          , m_extra_loop(vpn_event_loop_create())
-@@ -510,6 +548,13 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -527,6 +565,13 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
          struct TaskContext {
              VpnConnectionInfo *info;
              Vpn *vpn;
@@ -112,7 +116,7 @@
          };
          auto *task_context = new TaskContext;
          const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
-@@ -518,6 +563,9 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -535,6 +580,9 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
          info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
          task_context->info = info;
          task_context->vpn = m_vpn;
@@ -122,7 +126,7 @@
          vpn_event_loop_submit(m_extra_loop.get(),
                  {
                          .arg = (void *) task_context,
-@@ -525,6 +573,22 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
+@@ -542,6 +590,22 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
                                  [](void *arg, TaskId) {
                                      auto *context = (TaskContext *) arg;
                                      auto *info = context->info;

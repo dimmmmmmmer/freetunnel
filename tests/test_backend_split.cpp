@@ -43,6 +43,7 @@ private slots:
     void removingAProfileFallsConfigsBackToDefault();
     void defaultProfileCannotBeRemoved();
     void vpnModeIsPersistedAndNormalized();
+    void modesKeepIndependentProfilesAndBatchApplications();
     void selectiveModeWithNoRulesKeepsTheFullTunnel();
     void selectiveModeIsInactiveWhileSplitIsOff();
     void appRulesAreRulesToo();
@@ -485,7 +486,7 @@ void TestBackendSplit::appRulesThatMatchNothingAreNotRules()
         QSettings s(QSettings::IniFormat, QSettings::UserScope,
                     QStringLiteral("FreeTunnelTest"), QStringLiteral("BackendSplitTest"));
         s.setValue(QStringLiteral("bypass/profile/Default"), QStringList{});
-        s.setValue(QStringLiteral("bypass/profile_apps/Default"), saved);
+        s.setValue(QStringLiteral("bypass/inactive_profile_apps/Default"), saved);
         s.setValue(QStringLiteral("bypass/profile_apps_seeded"), true);
         s.sync();
     }
@@ -782,6 +783,7 @@ void TestBackendSplit::deletingTheActiveConfigTellsTheSplitPage()
     backend.clearDomains();
     backend.clearAppRules();
     backend.addProfile(QStringLiteral("Work"));
+    backend.setVpnMode(QStringLiteral("selective"));
     QVERIFY(backend.addDomain(QStringLiteral("example.com")));
     const auto config = [](const QString &name, const QString &profile) {
         return QVariantMap{{QStringLiteral("name"), name},
@@ -817,6 +819,40 @@ void TestBackendSplit::thePickersListComesFromABackgroundScan()
     QTRY_VERIFY_WITH_TIMEOUT(backend.installedAppsReady(), 30000);
     QVERIFY(changed.count() >= 1);
     QCOMPARE(backend.installedApplications().size(), freetunnel::installedApplications().size());
+}
+
+void TestBackendSplit::modesKeepIndependentProfilesAndBatchApplications() {
+    Backend backend;
+    backend.clearDomains();
+    backend.clearAppRules();
+    QVERIFY(backend.addDomain("bypass.example"));
+    QVERIFY(backend.addAppRule("firefox"));
+    backend.addProfile("Work");
+    QVERIFY(backend.addDomain("work.example"));
+    backend.setVpnMode("selective");
+    QVERIFY(backend.domains().isEmpty());
+    QVERIFY(backend.appRules().isEmpty());
+    QSignalSpy changes(&backend, &Backend::splitChanged);
+    QVERIFY(backend.setAppRules("Work", "selective", {"curl", "firefox", "curl"}));
+    QCOMPARE(changes.size(), 1);
+    QCOMPARE(backend.appRules(), (QStringList{"curl", "firefox"}));
+    QVERIFY(!backend.setAppRules("Default", "selective", {"wrong"}));
+    QVERIFY(!backend.setAppRules("Work", "general", {"wrong"}));
+    QVERIFY(!backend.setAppRules("Work", "selective", {"valid", ""}));
+    QCOMPARE(backend.appRules(), (QStringList{"curl", "firefox"}));
+    backend.setVpnMode("general");
+    QCOMPARE(backend.domains(), QStringList{"work.example"});
+    QVERIFY(backend.appRules().isEmpty());
+    backend.selectProfile("Default");
+    QCOMPARE(backend.domains(), QStringList{"bypass.example"});
+    QCOMPARE(backend.appRules(), QStringList{"firefox"});
+    backend.removeProfile("Work");
+    backend.setVpnMode("selective");
+    QVERIFY(!backend.profiles().contains("Work"));
+    backend.addProfile("Work");
+    QVERIFY(backend.appRules().isEmpty());
+    backend.setVpnMode("general");
+    QVERIFY(backend.domains().isEmpty());
 }
 
 QTEST_MAIN(TestBackendSplit)

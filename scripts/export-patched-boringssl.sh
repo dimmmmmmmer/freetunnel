@@ -2,10 +2,11 @@
 # Re-export the boringssl conan recipe from a newer NativeLibsCommon on top of
 # the one the upstream bootstrap exported from the pinned NLC.
 #
-# Upstream (v1.1.12) pins native_libs_common/8.2.0 and with it
-# openssl/boring-2026-05-08, and so does dns-libs 2.11.0-alpha.1-3-g3d6359be. NLC's make_ssl.cpp
+# Upstream (v1.3.0) pins native_libs_common/8.2.1 and with it
+# openssl/boring-2026-05-08, and so does dns-libs 2.11.0-alpha.2. NLC's make_ssl.cpp
 # calls SSL_set_server_padding_request, SSL_set_grease_sigalgs_enabled and
-# SSL_set_extension_order, which only NLC's own boringssl patches declare.
+# SSL_set_extension_order, and the client random auth key of core 1.3 needs
+# SSL_set_custom_client_random, which only NLC's own boringssl patches declare.
 # AdGuard's own CI resolves the recipe revision from their internal conan
 # remote; building from plain git the bootstrap exports it from each NLC version
 # the dependencies ask for, and when those differ an older NLC's recipe could be
@@ -26,11 +27,11 @@
 # keeps them from degrading back into a movable ref.
 set -euo pipefail
 
-# NativeLibsCommon v8.2.0 — annotated tag v8.2.0 peeled to its commit
-# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.2.0^{}').
-NLC_COMMIT="c546b329360642576cea25f10bdcbf41d52163df"
+# NativeLibsCommon v8.2.1 — annotated tag v8.2.1 peeled to its commit
+# (git ls-remote https://github.com/AdguardTeam/NativeLibsCommon 'v8.2.1^{}').
+NLC_COMMIT="9d05accbe1f22764350fd5dcd6726244be0b2b96"
 # Digest of conan/recipes/boringssl at that commit (see recipe_digest below).
-# Verified unchanged from NLC 8.1.54: the 8.2.0 update changes the TLS factory, not this recipe.
+# Verified unchanged from NLC 8.2.0: the 8.2.1 update changes the TLS factory, not this recipe.
 NLC_RECIPE_SHA256="985e54fe4cc407953fbd4840cc108ee84606bd7fe6fe0e88a1b0fc1b8d11bbe5"
 NLC_URL="https://github.com/AdguardTeam/NativeLibsCommon.git"
 

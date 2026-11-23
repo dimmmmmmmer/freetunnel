@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 
 // Minimal shell object passed to QML pages (Window API subset).
@@ -40,6 +41,8 @@ public:
     int titlebarSafeTop() const { return 40; }
 
     QString lastToast() const { return m_lastToast; }
+    // Every toast shown, in order, for a test that cares how many there were.
+    QStringList toasts;
     bool openAddMenu = false;
 
     Q_INVOKABLE void showToast(const QString &msg);
@@ -48,6 +51,9 @@ public:
         lastConfirm = message;
     }
     QString lastConfirm;
+    QString qrTitle;
+    int qrSize = 0;
+    Q_INVOKABLE void showQrCode(const QString &title, int size, const QString &) { qrTitle = title; qrSize = size; }
     Q_INVOKABLE void showSelect(QObject *, const QVariant &, const QString &, const QVariant &) {}
     Q_INVOKABLE QString elide(const QString &s, int n) const;
     Q_INVOKABLE QString elideMiddle(const QString &s, int n) const;

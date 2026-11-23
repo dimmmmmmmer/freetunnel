@@ -42,6 +42,14 @@ bool isValidClientRandom(const QString &value) {
     return value.isEmpty() || hex.match(value).hasMatch();
 }
 
+bool isValidClientRandomAuthKey(const QString &value) {
+    // \z, not $: $ also matches before a final newline, and the core would then
+    // fail to decode the text and connect without the key.
+    static const QRegularExpression hex(
+            QRegularExpression::anchoredPattern(QStringLiteral("(?:[0-9a-fA-F]{2})+")));
+    return value.isEmpty() || hex.match(value).hasMatch();
+}
+
 QStringList splitDnsList(const QString &dns) {
     static const QRegularExpression separators(QStringLiteral("[\\s,;]+"));
     return dns.split(separators, Qt::SkipEmptyParts);

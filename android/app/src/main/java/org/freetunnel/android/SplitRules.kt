@@ -54,7 +54,12 @@ object SplitRules {
         val host = v.removePrefix("*.").removePrefix(".").removeSuffix(".")
         val ascii = runCatching { IDN.toASCII(host, IDN.USE_STD3_ASCII_RULES) }.getOrNull() ?: return null
         val labels = ascii.split('.')
-        if (ascii.length > 253 || labels.size < 2 || labels.last().all { it.isDigit() } || labels.last().length < 2 ||
+        // TrustTunnel 1.1.12 DomainFilter::parse_entry takes a wildcard with one label
+        // (*.ru, *.su; its own test accepts *.google) and matches subdomains of that label.
+        // A name with no wildcard still needs two labels. The filter would take "ru", but only
+        // as that name and www.ru, not as every name under .ru.
+        val minLabels = if (wild) 1 else 2
+        if (ascii.length > 253 || labels.size < minLabels || labels.last().all { it.isDigit() } || labels.last().length < 2 ||
             labels.any { !it.matches(Regex("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) }) return null
         return if (wild) "*.$ascii" else ascii
     }

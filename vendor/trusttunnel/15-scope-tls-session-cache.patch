@@ -1,20 +1,174 @@
+diff --git a/core/include/vpn/internal/vpn_client.h b/core/include/vpn/internal/vpn_client.h
+index 38362fa..171024d 100644
+--- a/core/include/vpn/internal/vpn_client.h
++++ b/core/include/vpn/internal/vpn_client.h
+@@ -90,6 +90,7 @@ struct EndpointConnectionConfig {
+     std::string password;
+     IpVersionSet ip_availability;
+     bool anti_dpi = false;
++    TlsSessionCacheScope session_cache_scope{};
+ };
+ 
+ static constexpr const char *LOG_NAME = "VPNCLIENT";
+diff --git a/core/src/http2_upstream.cpp b/core/src/http2_upstream.cpp
+index 19db871..1023787 100644
+--- a/core/src/http2_upstream.cpp
++++ b/core/src/http2_upstream.cpp
+@@ -529,7 +529,8 @@ bool Http2Upstream::open_session(std::optional<Millis> timeout) {
+     SslPtr ssl;
+     if (auto r = make_ssl(verify_callback, this, {TCP_TLS_ALPN_PROTOS, std::size(TCP_TLS_ALPN_PROTOS)},
+                 config->endpoint->name, /*quic*/ MSPT_TLS, endpoint_data, client_random_data, client_random_mask,
+-                client_random_auth_key, to_tls_client_profile(config->endpoint->tls_profile));
++                client_random_auth_key, to_tls_client_profile(config->endpoint->tls_profile),
++                tls_session_cache_scope_for_endpoint(config->session_cache_scope, *config->endpoint));
+             std::holds_alternative<SslPtr>(r)) {
+         ssl = std::move(std::get<SslPtr>(r));
+     } else {
+diff --git a/core/src/http3_upstream.cpp b/core/src/http3_upstream.cpp
+index cb3c27d..34be91e 100644
+--- a/core/src/http3_upstream.cpp
++++ b/core/src/http3_upstream.cpp
+@@ -192,7 +192,8 @@ bool Http3Upstream::open_session(std::optional<Millis>) {
+     if (auto r = make_ssl(verify_callback, this, {QUIC_H3_ALPN_PROTOS, std::size(QUIC_H3_ALPN_PROTOS)},
+                 upstream_config.endpoint->name, /*quic*/ MSPT_NGTCP2, endpoint_data, client_random_data,
+                 client_random_mask, client_random_auth_key,
+-                to_tls_client_profile(upstream_config.endpoint->tls_profile));
++                to_tls_client_profile(upstream_config.endpoint->tls_profile),
++                tls_session_cache_scope_for_endpoint(upstream_config.session_cache_scope, *upstream_config.endpoint));
+             std::holds_alternative<SslPtr>(r)) {
+         ssl = std::move(std::get<SslPtr>(r));
+     } else {
+diff --git a/core/src/vpn_fsm.cpp b/core/src/vpn_fsm.cpp
+index 9b0a52f..add66ca 100644
+--- a/core/src/vpn_fsm.cpp
++++ b/core/src/vpn_fsm.cpp
+@@ -304,6 +304,7 @@ static void run_ping(void *ctx, void *) {
+             .handoff = true,
+             .quic_max_idle_timeout_ms = quic_max_idle_timeout,
+             .quic_version = 0,
++            .session_cache_scope = vpn->session_cache_scope,
+     };
+ 
+     // Speed up recovery if we have already connected through a relay by pinging through the relay in parallel.
+diff --git a/core/src/vpn_manager.cpp b/core/src/vpn_manager.cpp
+index 30b671a..dc72f6d 100644
+--- a/core/src/vpn_manager.cpp
++++ b/core/src/vpn_manager.cpp
+@@ -62,6 +62,7 @@ Vpn::~Vpn() = default;
+ 
+ void Vpn::update_upstream_config(AutoPod<VpnUpstreamConfig, vpn_upstream_config_destroy> config) {
+     this->upstream_config = std::move(config);
++    this->session_cache_scope = make_tls_session_cache_scope();
+ 
+     if (this->upstream_config->location_ping_timeout_ms == 0) {
+         this->upstream_config->location_ping_timeout_ms = DEFAULT_LOCATION_PING_TIMEOUT_MS;
+@@ -128,6 +129,7 @@ vpn_client::EndpointConnectionConfig Vpn::make_client_upstream_config() const {
+             .password = this->upstream_config->password,
+             .ip_availability = ip_availability,
+             .anti_dpi = this->upstream_config->anti_dpi,
++            .session_cache_scope = this->session_cache_scope,
+     };
+ }
+ 
+diff --git a/core/src/vpn_manager.h b/core/src/vpn_manager.h
+index 7f20743..981cbc0 100644
+--- a/core/src/vpn_manager.h
++++ b/core/src/vpn_manager.h
+@@ -107,6 +107,7 @@ struct Vpn {
+     VpnHandler handler = {};
+     DeclPtr<VpnNetworkManager, &vpn_network_manager_destroy> network_manager{vpn_network_manager_get()};
+     AutoPod<VpnUpstreamConfig, vpn_upstream_config_destroy> upstream_config;
++    TlsSessionCacheScope session_cache_scope{};
+     /** The endpoint the client is connected or trying to connect to */
+     std::optional<SelectedEndpoint> selected_endpoint;
+     bool network_changed_before_recovery = false;
+diff --git a/core/test/test_vpn_manager_fsm_recovery.cpp b/core/test/test_vpn_manager_fsm_recovery.cpp
+index cf68fb1..1688aab 100644
+--- a/core/test/test_vpn_manager_fsm_recovery.cpp
++++ b/core/test/test_vpn_manager_fsm_recovery.cpp
+@@ -563,6 +563,7 @@ TEST_F(ConnectedVpnManagerTest, FlappingNetworkKeepsRecovering) {
+ // `initiate_recovery` would measure `elapsed` from a stale (epoch) timestamp and collapse the
+ // inter-attempt backoff delay to zero.
+ TEST_F(ConnectedVpnManagerTest, NetworkChangeRecordsRecoveryAttemptStart) {
++    const auto original_scope = vpn->session_cache_scope;
+     raise_client_event(vpn_client::EVENT_DISCONNECTED);
+     ASSERT_TRUE(await_state_change(VPN_SS_WAITING_RECOVERY));
+ 
+@@ -577,6 +578,7 @@ TEST_F(ConnectedVpnManagerTest, NetworkChangeRecordsRecoveryAttemptStart) {
+     // run_ping cancelled the pending timer and recorded the attempt start time.
+     ASSERT_FALSE(vpn->recovery.task.has_value());
+     ASSERT_GE(vpn->recovery.time.attempt_start_ts, before);
++    EXPECT_EQ(vpn->session_cache_scope, original_scope);
+ 
+     // Fail this attempt; the next throttling computation must measure `elapsed` from the
+     // just-started attempt, so (almost) the full backoff interval remains until the next one.
+@@ -613,6 +615,7 @@ TEST_F(ConnectedVpnManagerTest, ReplaceEndpointKeepsSessionAndCommitsCertificate
+                 && !ctx->vpn->selected_endpoint.has_value() && !ctx->vpn->pinger;
+     };
+     for (int round = 0; round < 2; ++round) {
++        const auto old_scope = vpn->session_cache_scope;
+         context.called = false;
+         std::thread caller([&] {
+             const auto deadline = SteadyClock::now() + Secs{2};
+@@ -636,6 +639,9 @@ TEST_F(ConnectedVpnManagerTest, ReplaceEndpointKeepsSessionAndCommitsCertificate
+         const auto ping = g_infos[test_mock::IDX_LOCATIONS_PINGER_START].get_arg<test_mock::LocationsPingerInfo>(0);
+         ASSERT_EQ(ping->locations.size, 1u);
+         EXPECT_STREQ(ping->locations.data[0].id, "replacement");
++        EXPECT_NE(vpn->session_cache_scope, TlsSessionCacheScope{});
++        EXPECT_NE(vpn->session_cache_scope, old_scope);
++        EXPECT_EQ(ping->session_cache_scope, vpn->session_cache_scope);
+         // Explicit bypass remains usable while the new endpoint is unavailable.
+         VpnConnectionInfo direct{.id = uint64_t(900 + round), .action = VPN_CA_FORCE_BYPASS};
+         vpn_complete_connect_request(vpn, &direct);
+diff --git a/net/CMakeLists.txt b/net/CMakeLists.txt
+index 9e50282..d9dc464 100644
+--- a/net/CMakeLists.txt
++++ b/net/CMakeLists.txt
+@@ -123,5 +123,6 @@ add_live_test(test_locations_pinger_runner "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}
+ add_unit_test(test_dns_utils "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+ add_unit_test(test_tls_serialize "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+ add_unit_test(test_net_utils "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
++add_unit_test(test_tls_session_scope "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+ add_unit_test(test_tls_client_random_auth_key "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+ add_unit_test(test_network_manager "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+diff --git a/net/include/net/locations_pinger.h b/net/include/net/locations_pinger.h
+index c21ff11..64e7af2 100644
+--- a/net/include/net/locations_pinger.h
++++ b/net/include/net/locations_pinger.h
+@@ -19,7 +19,7 @@ namespace ag {
+ 
+ struct LocationsPinger;
+ 
+-typedef struct {
++struct LocationsPingerInfo {
+     // Each connection attempt timeout (if 0, `DEFAULT_PING_TIMEOUT_MS` will be assigned).
+     // Note that there will be several connection attempts, the exact number of which depends
+     // on multiple factors, such as the number of rounds, the number of relay addresses,
+@@ -40,7 +40,8 @@ typedef struct {
+     const VpnRelay *relay_parallel;    // Ping through this relay in parallel with normal pings.
+     uint32_t quic_max_idle_timeout_ms; // QUIC connection max idle timeout. Set `0` to use the default.
+     uint32_t quic_version;             // QUIC version. Set `0` to use the default.
+-} LocationsPingerInfo;
++    TlsSessionCacheScope session_cache_scope{}; // Internal endpoint certificate-policy scope.
++};
+ 
+ typedef struct {
+     const char *id; // location id
+diff --git a/net/include/net/utils.h b/net/include/net/utils.h
+index 490774f..49ce24a 100644
 --- a/net/include/net/utils.h
 +++ b/net/include/net/utils.h
-@@ -1,7 +1,8 @@
+@@ -1,5 +1,6 @@
  #pragma once
-
+ 
 +#include <array>
  #include <cstdint>
  #include <optional>
  #include <string>
- #include <string_view>
- #include <unordered_set>
-@@ -256,13 +257,21 @@
-  * Loads SSL sessions cache from disk
-  * @param path Path to a directory where cache was dumped
+@@ -264,6 +265,13 @@ void dump_session_cache(const std::string &path);
   */
  void load_session_cache(const std::string &path);
-
+ 
 +// A fresh random scope for each endpoint configuration. Zero disables resumption.
 +// Keep the scope during recovery, but replace it whenever certificate policy changes.
 +using TlsSessionCacheScope = std::array<uint8_t, 16>;
@@ -22,36 +176,106 @@
 +TlsSessionCacheScope tls_session_cache_scope_for_endpoint(
 +        const TlsSessionCacheScope &scope, const VpnEndpoint &endpoint);
 +
- std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
+ /**
+  * Map the C-API `VpnTlsProfile` enum onto the shared `ag::tls::TlsClientProfile`.
+  */
+@@ -279,7 +287,8 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
          ag::U8View alpn_protos, const char *sni, MakeSslProtocolType type, ag::U8View endpoint_data = ag::U8View{},
--        ag::Uint8View tls_client_random = ag::U8View{}, ag::Uint8View tls_client_random_mask = ag::U8View{});
-+        ag::Uint8View tls_client_random = ag::U8View{}, ag::Uint8View tls_client_random_mask = ag::U8View{},
+         ag::Uint8View tls_client_random = ag::U8View{}, ag::Uint8View tls_client_random_mask = ag::U8View{},
+         ag::Uint8View tls_client_random_auth_key = ag::U8View{},
+-        ag::tls::TlsClientProfile profile = ag::tls::TlsClientProfile::CHROME);
++        ag::tls::TlsClientProfile profile = ag::tls::TlsClientProfile::CHROME,
 +        TlsSessionCacheScope session_cache_scope = {});
-
+ 
  /**
   * Return name of the group function used in key exchange from OpenSSL NID
-  * @param kex_group OpenSSL NID of the group
-  */
+diff --git a/net/src/locations_pinger.cpp b/net/src/locations_pinger.cpp
+index d45c6a0..34fd5a5 100644
+--- a/net/src/locations_pinger.cpp
++++ b/net/src/locations_pinger.cpp
+@@ -82,6 +82,7 @@ struct LocationsPinger {
+     AutoVpnRelay relay_parallel;
+     uint32_t quic_max_idle_timeout_ms;
+     uint32_t quic_version;
++    TlsSessionCacheScope session_cache_scope{};
+ };
+ 
+ struct FinalizeLocationInfo {
+@@ -263,7 +264,7 @@ static void start_location_ping(LocationsPinger *pinger) {
+             {i->info->endpoints.data, i->info->endpoints.size}, pinger->timeout_ms,
+             {pinger->interfaces.data(), pinger->interfaces.size()}, pinger->rounds, pinger->main_protocol,
+             pinger->anti_dpi, pinger->handoff, {i->info->relays.data, i->info->relays.size}, *pinger->relay_parallel,
+-            pinger->quic_max_idle_timeout_ms, pinger->quic_version};
++            pinger->quic_max_idle_timeout_ms, pinger->quic_version, pinger->session_cache_scope};
+     Ping *ping = ping_start(&ping_info, {ping_handler, pinger});
+ 
+     // Must be extracted before pop_front() invalidates the iterator, and before finalize_location()
+@@ -315,6 +316,7 @@ LocationsPinger *locations_pinger_start(const LocationsPingerInfo *info, Locatio
+     pinger->handoff = info->handoff;
+     pinger->quic_max_idle_timeout_ms = info->quic_max_idle_timeout_ms;
+     pinger->quic_version = info->quic_version;
++    pinger->session_cache_scope = info->session_cache_scope;
+     if (info->relay_parallel) {
+         pinger->relay_parallel = vpn_relay_clone(info->relay_parallel);
+     }
+diff --git a/net/src/ping.cpp b/net/src/ping.cpp
+index 77af76b..52dd19c 100644
+--- a/net/src/ping.cpp
++++ b/net/src/ping.cpp
+@@ -117,6 +117,7 @@ struct Ping {
+ 
+     uint32_t quic_max_idle_timeout_ms;
+     uint32_t quic_version;
++    TlsSessionCacheScope session_cache_scope{};
+ 
+     int minimum_round_timeout_ms;
+ };
+@@ -583,6 +584,7 @@ Ping *ping_start(const PingInfo *info, PingHandler handler) {
+     self->main_protocol = VPN_UP_HTTP2;
+ #endif
+     self->handoff = info->handoff;
++    self->session_cache_scope = info->session_cache_scope;
+     self->rounds_target = info->nrounds ? info->nrounds : DEFAULT_PING_ROUNDS;
+ 
+     self->round_timeout_ms = info->timeout_ms ? info->timeout_ms : DEFAULT_PING_TIMEOUT_MS;
+@@ -730,7 +732,8 @@ bool conn_prepare(Ping *ping, PingConn *conn) {
+     }
+     auto ssl_result = make_ssl(nullptr, nullptr, alpn_protos, conn->endpoint->name,
+             conn->use_quic ? MSPT_NGTCP2 : MSPT_TLS, endpoint_data, client_random_data, client_random_mask,
+-            client_random_auth_key, to_tls_client_profile(tls_profile));
++            client_random_auth_key, to_tls_client_profile(tls_profile),
++            tls_session_cache_scope_for_endpoint(ping->session_cache_scope, *conn->endpoint));
+ 
+     if (!std::holds_alternative<SslPtr>(ssl_result)) {
+         assert(std::holds_alternative<std::string>(ssl_result));
+diff --git a/net/src/ping.h b/net/src/ping.h
+index 5752408..4caa5cf 100644
+--- a/net/src/ping.h
++++ b/net/src/ping.h
+@@ -65,6 +65,7 @@ struct PingInfo {
+     /// QUIC parameters. Set 0 to use defaults.
+     uint32_t quic_max_idle_timeout_ms = 0;
+     uint32_t quic_version = 0;
++    TlsSessionCacheScope session_cache_scope{};
+ };
+ 
+ struct PingHandler {
+diff --git a/net/src/utils.cpp b/net/src/utils.cpp
+index dc99c3f..98298fa 100644
 --- a/net/src/utils.cpp
 +++ b/net/src/utils.cpp
-@@ -5,10 +5,11 @@
- #include <cctype>
- #include <chrono>
+@@ -7,6 +7,7 @@
  #include <cstring>
  #include <filesystem>
  #include <fstream>
 +#include <memory>
  #include <openssl/rand.h>
+ #include <openssl/sha.h>
  #include <set>
- #include <span>
- #include <tuple>
- #include <unordered_map>
-@@ -659,13 +660,57 @@
- };
-
+@@ -655,9 +656,53 @@ public:
  static std::mutex g_session_cache_mutex;
  static LruCache<std::string, SessionAccumulator> g_session_cache;
-
+ 
 -static std::string session_cache_key(std::string_view sni, bool quic) {
 +TlsSessionCacheScope make_tls_session_cache_scope() {
 +    TlsSessionCacheScope scope{};
@@ -101,16 +325,12 @@
 +    SHA256_Update(&hash, scope.data(), scope.size());
 +    SHA256_Update(&hash, sni.data(), sni.size());
 +    SHA256_Final(sni_hash, &hash);
-
+ 
      std::string key;
      key.reserve(SHA256_DIGEST_LENGTH * 2 + 1);
-
-     static constexpr char hex[] = "0123456789ABCDEF";
-@@ -678,13 +723,19 @@
-
-     return key;
+@@ -674,9 +719,15 @@ static std::string session_cache_key(std::string_view sni, bool quic) {
  }
-
+ 
  static int cache_session(SSL *ssl, SSL_SESSION *session, bool quic) {
 +    const int index = session_scope_index();
 +    const auto *scope = index < 0 ? nullptr : static_cast<const TlsSessionCacheScope *>(SSL_get_ex_data(ssl, index));
@@ -125,14 +345,10 @@
          if (auto accum = g_session_cache.get(key)) {
              accum->insert(DeclPtr<SSL_SESSION, &SSL_SESSION_free>{session});
              dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", accum->list().size(), hostname, quic);
-         } else {
-             SessionAccumulator session_accum;
-@@ -704,12 +755,16 @@
-
- static int cache_session_tcp_cb(SSL *ssl, SSL_SESSION *session) {
+@@ -700,8 +751,12 @@ static int cache_session_tcp_cb(SSL *ssl, SSL_SESSION *session) {
      return cache_session(ssl, session, /*quic*/ false);
  }
-
+ 
 -static DeclPtr<SSL_SESSION, &SSL_SESSION_free> pop_session_from_cache(const std::string &sni, bool quic) {
 -    auto key = session_cache_key(sni, quic);
 +static DeclPtr<SSL_SESSION, &SSL_SESSION_free> pop_session_from_cache(
@@ -144,332 +360,42 @@
      std::lock_guard l{g_session_cache_mutex};
      if (auto it = g_session_cache.get(key)) {
          auto session = it->pop();
-         dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", it->list().size(), sni, quic);
-         if (it->size() == 0) {
-@@ -893,17 +948,17 @@
-     }
- }
-
+@@ -944,13 +999,14 @@ std::string_view ssl_get_tls_client_profile_name(const SSL *ssl) {
+ 
  std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
          U8View alpn_protos, const char *sni, MakeSslProtocolType type, U8View endpoint_data, U8View tls_client_random,
--        U8View tls_client_random_mask) {
-+        U8View tls_client_random_mask, TlsSessionCacheScope session_cache_scope) {
+-        U8View tls_client_random_mask, U8View tls_client_random_auth_key, ag::tls::TlsClientProfile profile) {
++        U8View tls_client_random_mask, U8View tls_client_random_auth_key, ag::tls::TlsClientProfile profile,
++        TlsSessionCacheScope session_cache_scope) {
      bool quic = type == MSPT_NGTCP2;
-
+ 
      // Session resumption persistence stays in the client;
      // the shared factory only needs the new-session callback and, if any, a session to resume.
      // The popped session must outlive the make_ssl() call: SSL_set_session() up-refs it.
 -    auto resume_session = pop_session_from_cache(sni, quic);
 +    auto resume_session = pop_session_from_cache(sni, quic, session_cache_scope);
-
-     // This branch does not let the user choose the TLS profile, so it always mimics Chrome.
-     ag::tls::SslInitParameters params{
-             .profile = ag::tls::TlsClientProfile::CHROME,
-             .protocol = quic ? ag::tls::SslProtocol::NGTCP2 : ag::tls::SslProtocol::TLS,
-@@ -922,10 +977,16 @@
-     auto result = ag::tls::make_ssl(params);
-     if (std::holds_alternative<std::string>(result)) {
-         return std::move(std::get<std::string>(result));
+ 
+     // auth-key mode takes priority over the raw tls_client_random/mask: derive the full
+     // 32-byte ClientRandom from the key and the SNI and feed it to the shared
+@@ -1004,6 +1060,12 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
      }
      SslPtr ssl{std::get<ag::tls::SslPtr>(result).release()};
+     SSL_set_ex_data(ssl.get(), tls_client_profile_ex_index(), tls_client_profile_ex_data(profile));
 +    auto scope = std::make_unique<TlsSessionCacheScope>(session_cache_scope);
 +    const int scope_index = session_scope_index();
 +    if (scope_index < 0 || SSL_set_ex_data(ssl.get(), scope_index, scope.get()) != 1) {
 +        return "Failed to bind TLS session-cache scope";
 +    }
 +    scope.release(); // Released by the SSL ex-data destructor.
-
+ 
  #ifdef __mips__
      if (!SSL_set_cipher_list(ssl.get(), "CHACHA20")
-             || !SSL_set_ciphersuites(ssl.get(), "TLS_CHACHA20_POLY1305_SHA256")) {
-         return "Failed to set CHACHA20 cipher";
---- a/net/include/net/locations_pinger.h
-+++ b/net/include/net/locations_pinger.h
-@@ -17,11 +17,11 @@
-  *        - note, that low RTT value does not make endpoint to be selected
-  */
-
- struct LocationsPinger;
-
--typedef struct {
-+struct LocationsPingerInfo {
-     // Each connection attempt timeout (if 0, `DEFAULT_PING_TIMEOUT_MS` will be assigned).
-     // Note that there will be several connection attempts, the exact number of which depends
-     // on multiple factors, such as the number of rounds, the number of relay addresses,
-     // whether fall back from QUIC to TLS happened, etc.
-     uint32_t timeout_ms;
-@@ -38,11 +38,12 @@
-     bool handoff;                      // For internal use. Applications should set this parameter to `false`.
-                                        // If `true`, pass the connection state with the ping result.
-     const VpnRelay *relay_parallel;    // Ping through this relay in parallel with normal pings.
-     uint32_t quic_max_idle_timeout_ms; // QUIC connection max idle timeout. Set `0` to use the default.
-     uint32_t quic_version;             // QUIC version. Set `0` to use the default.
--} LocationsPingerInfo;
-+    TlsSessionCacheScope session_cache_scope{}; // Internal endpoint certificate-policy scope.
-+};
-
- typedef struct {
-     const char *id; // location id
-     int ping_ms;    // selected endpoint's ping (negative if none of the location endpoints successfully pinged)
-     const VpnEndpoint *endpoint; // selected endpoint
---- a/net/src/locations_pinger.cpp
-+++ b/net/src/locations_pinger.cpp
-@@ -80,10 +80,11 @@
-     bool anti_dpi;
-     bool handoff;
-     AutoVpnRelay relay_parallel;
-     uint32_t quic_max_idle_timeout_ms;
-     uint32_t quic_version;
-+    TlsSessionCacheScope session_cache_scope{};
- };
-
- struct FinalizeLocationInfo {
-     LocationsCtx location_ctx;
-     bool is_last_location = false;
-@@ -261,11 +262,11 @@
-     log_location(pinger, i->info->id, dbg, "Starting location ping");
-     PingInfo ping_info = {i->info->id, pinger->loop, pinger->network_manager,
-             {i->info->endpoints.data, i->info->endpoints.size}, pinger->timeout_ms,
-             {pinger->interfaces.data(), pinger->interfaces.size()}, pinger->rounds, pinger->main_protocol,
-             pinger->anti_dpi, pinger->handoff, {i->info->relays.data, i->info->relays.size}, *pinger->relay_parallel,
--            pinger->quic_max_idle_timeout_ms, pinger->quic_version};
-+            pinger->quic_max_idle_timeout_ms, pinger->quic_version, pinger->session_cache_scope};
-     Ping *ping = ping_start(&ping_info, {ping_handler, pinger});
-
-     // Must be extracted before pop_front() invalidates the iterator, and before finalize_location()
-     // is called, since the callback inside it may destroy the pinger.
-     FinalizeLocationInfo info{std::move(*i), pinger->pending_locations.size() == 1 && pinger->locations.empty()};
-@@ -313,10 +314,11 @@
-     pinger->main_protocol = info->main_protocol;
-     pinger->anti_dpi = info->anti_dpi;
-     pinger->handoff = info->handoff;
-     pinger->quic_max_idle_timeout_ms = info->quic_max_idle_timeout_ms;
-     pinger->quic_version = info->quic_version;
-+    pinger->session_cache_scope = info->session_cache_scope;
-     if (info->relay_parallel) {
-         pinger->relay_parallel = vpn_relay_clone(info->relay_parallel);
-     }
-
-     for (size_t i = 0; i < info->locations.size; ++i) {
---- a/net/src/ping.h
-+++ b/net/src/ping.h
-@@ -63,10 +63,11 @@
-     VpnRelay relay_parallel;
-
-     /// QUIC parameters. Set 0 to use defaults.
-     uint32_t quic_max_idle_timeout_ms = 0;
-     uint32_t quic_version = 0;
-+    TlsSessionCacheScope session_cache_scope{};
- };
-
- struct PingHandler {
-     void (*func)(void *arg, const PingResult *result);
-     void *arg;
---- a/net/src/ping.cpp
-+++ b/net/src/ping.cpp
-@@ -115,10 +115,11 @@
-     VpnUpstreamProtocol main_protocol;
-     bool handoff;
-
-     uint32_t quic_max_idle_timeout_ms;
-     uint32_t quic_version;
-+    TlsSessionCacheScope session_cache_scope{};
-
-     int minimum_round_timeout_ms;
- };
-
- // clang-format off
-@@ -581,10 +582,11 @@
-     self->main_protocol = info->main_protocol;
- #else
-     self->main_protocol = VPN_UP_HTTP2;
- #endif
-     self->handoff = info->handoff;
-+    self->session_cache_scope = info->session_cache_scope;
-     self->rounds_target = info->nrounds ? info->nrounds : DEFAULT_PING_ROUNDS;
-
-     self->round_timeout_ms = info->timeout_ms ? info->timeout_ms : DEFAULT_PING_TIMEOUT_MS;
-     self->timer.reset(evtimer_new(vpn_event_loop_get_base(self->loop), on_timer, self.get()));
-
-@@ -705,11 +707,12 @@
-             : Uint8View{conn->endpoint->tls_client_random.data, conn->endpoint->tls_client_random.size};
-     auto client_random_mask = conn->relay->address.sa_family
-             ? Uint8View{conn->relay->tls_client_random_mask.data, conn->relay->tls_client_random_mask.size}
-             : Uint8View{conn->endpoint->tls_client_random_mask.data, conn->endpoint->tls_client_random_mask.size};
-     auto ssl_result = make_ssl(nullptr, nullptr, alpn_protos, conn->endpoint->name,
--            conn->use_quic ? MSPT_NGTCP2 : MSPT_TLS, endpoint_data, client_random_data, client_random_mask);
-+            conn->use_quic ? MSPT_NGTCP2 : MSPT_TLS, endpoint_data, client_random_data, client_random_mask,
-+            tls_session_cache_scope_for_endpoint(ping->session_cache_scope, *conn->endpoint));
-     if (!std::holds_alternative<SslPtr>(ssl_result)) {
-         assert(std::holds_alternative<std::string>(ssl_result));
-         log_conn(ping, conn, dbg, "Failed to create an SSL object: {}", std::get<std::string>(ssl_result));
-         return false;
-     }
---- a/core/include/vpn/internal/vpn_client.h
-+++ b/core/include/vpn/internal/vpn_client.h
-@@ -84,10 +84,11 @@
-     std::chrono::milliseconds health_check_timeout{VPN_DEFAULT_HEALTH_CHECK_TIMEOUT_MS};
-     std::string username;
-     std::string password;
-     IpVersionSet ip_availability;
-     bool anti_dpi = false;
-+    TlsSessionCacheScope session_cache_scope{};
- };
-
- static constexpr const char *LOG_NAME = "VPNCLIENT";
- static constexpr std::string_view DNS_PROXY_LISTENER_USERNAME = "vpn";
-
---- a/core/src/vpn_manager.h
-+++ b/core/src/vpn_manager.h
-@@ -100,10 +100,11 @@
-     DeclPtr<VpnEventLoop, &vpn_event_loop_destroy> ev_loop{vpn_event_loop_create()};
-     vpn_manager::RecoveryInfo recovery = {};
-     VpnHandler handler = {};
-     DeclPtr<VpnNetworkManager, &vpn_network_manager_destroy> network_manager{vpn_network_manager_get()};
-     AutoPod<VpnUpstreamConfig, vpn_upstream_config_destroy> upstream_config;
-+    TlsSessionCacheScope session_cache_scope{};
-     /** The endpoint the client is connected or trying to connect to */
-     std::optional<SelectedEndpoint> selected_endpoint;
-     bool network_changed_before_recovery = false;
-     bool connected_once = false;
-
---- a/core/src/vpn_manager.cpp
-+++ b/core/src/vpn_manager.cpp
-@@ -60,10 +60,11 @@
-
- Vpn::~Vpn() = default;
-
- void Vpn::update_upstream_config(AutoPod<VpnUpstreamConfig, vpn_upstream_config_destroy> config) {
-     this->upstream_config = std::move(config);
-+    this->session_cache_scope = make_tls_session_cache_scope();
-
-     if (this->upstream_config->location_ping_timeout_ms == 0) {
-         this->upstream_config->location_ping_timeout_ms = DEFAULT_LOCATION_PING_TIMEOUT_MS;
-     }
-     if (this->upstream_config->timeout_ms == 0) {
-@@ -117,10 +118,11 @@
-             .health_check_timeout = Millis{this->upstream_config->health_check_timeout_ms},
-             .username = this->upstream_config->username,
-             .password = this->upstream_config->password,
-             .ip_availability = ip_availability,
-             .anti_dpi = this->upstream_config->anti_dpi,
-+            .session_cache_scope = this->session_cache_scope,
-     };
- }
-
- void Vpn::disconnect_client() {
-     switch (this->client_state) {
---- a/core/src/vpn_fsm.cpp
-+++ b/core/src/vpn_fsm.cpp
-@@ -301,10 +301,11 @@
-             .main_protocol = vpn->upstream_config->main_protocol,
-             .anti_dpi = vpn->upstream_config->anti_dpi,
-             .handoff = true,
-             .quic_max_idle_timeout_ms = quic_max_idle_timeout,
-             .quic_version = 0,
-+            .session_cache_scope = vpn->session_cache_scope,
-     };
-
-     // Speed up recovery if we have already connected through a relay by pinging through the relay in parallel.
-     if (vpn->selected_endpoint.has_value() && vpn->selected_endpoint->relay.has_value()
-             && vpn->recovery.time.start_ts != SteadyClock::time_point{}) {
---- a/core/src/http2_upstream.cpp
-+++ b/core/src/http2_upstream.cpp
-@@ -518,11 +518,12 @@
-     U8View client_random_data{config->endpoint->tls_client_random.data, config->endpoint->tls_client_random.size};
-     U8View client_random_mask{
-             config->endpoint->tls_client_random_mask.data, config->endpoint->tls_client_random_mask.size};
-     SslPtr ssl;
-     if (auto r = make_ssl(verify_callback, this, {TCP_TLS_ALPN_PROTOS, std::size(TCP_TLS_ALPN_PROTOS)},
--                config->endpoint->name, /*quic*/ MSPT_TLS, endpoint_data, client_random_data, client_random_mask);
-+                config->endpoint->name, /*quic*/ MSPT_TLS, endpoint_data, client_random_data, client_random_mask,
-+                tls_session_cache_scope_for_endpoint(config->session_cache_scope, *config->endpoint));
-             std::holds_alternative<SslPtr>(r)) {
-         ssl = std::move(std::get<SslPtr>(r));
-     } else {
-         log_upstream(this, err, "{}", std::get<std::string>(r));
-         return false;
---- a/core/src/http3_upstream.cpp
-+++ b/core/src/http3_upstream.cpp
-@@ -182,11 +182,12 @@
-     U8View client_random_mask{upstream_config.endpoint->tls_client_random_mask.data,
-             upstream_config.endpoint->tls_client_random_mask.size};
-     SslPtr ssl;
-     if (auto r = make_ssl(verify_callback, this, {QUIC_H3_ALPN_PROTOS, std::size(QUIC_H3_ALPN_PROTOS)},
-                 upstream_config.endpoint->name, /*quic*/ MSPT_NGTCP2, endpoint_data, client_random_data,
--                client_random_mask);
-+                client_random_mask,
-+                tls_session_cache_scope_for_endpoint(upstream_config.session_cache_scope, *upstream_config.endpoint));
-             std::holds_alternative<SslPtr>(r)) {
-         ssl = std::move(std::get<SslPtr>(r));
-     } else {
-         log_upstream(this, err, "{}", std::get<std::string>(r));
-         return false;
---- a/net/CMakeLists.txt
-+++ b/net/CMakeLists.txt
-@@ -119,6 +119,7 @@
- add_live_test(test_locations_pinger "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
- add_live_test(test_locations_pinger_runner "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
- add_unit_test(test_dns_utils "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
- add_unit_test(test_tls_serialize "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
- add_unit_test(test_net_utils "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
-+add_unit_test(test_tls_session_scope "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
- add_unit_test(test_network_manager "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
---- a/core/test/test_vpn_manager_fsm_recovery.cpp
-+++ b/core/test/test_vpn_manager_fsm_recovery.cpp
-@@ -555,10 +555,11 @@
- // records the recovery attempt start time. The lambda scheduled by `initiate_recovery` never
- // fires in this case, so without recording the timestamp in run_ping the next
- // `initiate_recovery` would measure `elapsed` from a stale (epoch) timestamp and collapse the
- // inter-attempt backoff delay to zero.
- TEST_F(ConnectedVpnManagerTest, NetworkChangeRecordsRecoveryAttemptStart) {
-+    const auto original_scope = vpn->session_cache_scope;
-     raise_client_event(vpn_client::EVENT_DISCONNECTED);
-     ASSERT_TRUE(await_state_change(VPN_SS_WAITING_RECOVERY));
-
-     // The scheduled recovery task hasn't fired yet, so no attempt has started.
-     ASSERT_EQ(SteadyClock::time_point{}, vpn->recovery.time.attempt_start_ts);
-@@ -569,10 +570,11 @@
-     ASSERT_TRUE(wait_state(VPN_SS_RECOVERING));
-
-     // run_ping cancelled the pending timer and recorded the attempt start time.
-     ASSERT_FALSE(vpn->recovery.task.has_value());
-     ASSERT_GE(vpn->recovery.time.attempt_start_ts, before);
-+    EXPECT_EQ(vpn->session_cache_scope, original_scope);
-
-     // Fail this attempt; the next throttling computation must measure `elapsed` from the
-     // just-started attempt, so (almost) the full backoff interval remains until the next one.
-     raise_client_event(vpn_client::EVENT_DISCONNECTED);
-     ASSERT_TRUE(wait_state(VPN_SS_WAITING_RECOVERY));
-@@ -605,10 +607,11 @@
-         ctx->called = true;
-         ctx->old_endpoint_stopped = ctx->vpn->client_state == vpn_manager::CLIS_DISCONNECTED
-                 && !ctx->vpn->selected_endpoint.has_value() && !ctx->vpn->pinger;
-     };
-     for (int round = 0; round < 2; ++round) {
-+        const auto old_scope = vpn->session_cache_scope;
-         context.called = false;
-         std::thread caller([&] {
-             const auto deadline = SteadyClock::now() + Secs{2};
-             while (!vpn_event_loop_is_active(vpn->ev_loop.get()) && SteadyClock::now() < deadline) {
-                 std::this_thread::yield();
-@@ -628,10 +631,13 @@
-         EXPECT_STREQ(vpn->upstream_config->location.endpoints.data[0].name, "new-server");
-         EXPECT_NE(vpn->upstream_config->location.endpoints.data, &endpoint);
-         const auto ping = g_infos[test_mock::IDX_LOCATIONS_PINGER_START].get_arg<test_mock::LocationsPingerInfo>(0);
-         ASSERT_EQ(ping->locations.size, 1u);
-         EXPECT_STREQ(ping->locations.data[0].id, "replacement");
-+        EXPECT_NE(vpn->session_cache_scope, TlsSessionCacheScope{});
-+        EXPECT_NE(vpn->session_cache_scope, old_scope);
-+        EXPECT_EQ(ping->session_cache_scope, vpn->session_cache_scope);
-         // Explicit bypass remains usable while the new endpoint is unavailable.
-         VpnConnectionInfo direct{.id = uint64_t(900 + round), .action = VPN_CA_FORCE_BYPASS};
-         vpn_complete_connect_request(vpn, &direct);
-         loop_once();
-         ASSERT_FALSE(test_mock::g_client.completed_connect_requests.empty());
+diff --git a/net/test/test_tls_session_scope.cpp b/net/test/test_tls_session_scope.cpp
+new file mode 100644
+index 0000000..27cae6e
 --- /dev/null
 +++ b/net/test/test_tls_session_scope.cpp
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,188 @@
 +#include <gtest/gtest.h>
 +
 +#include <openssl/ec.h>
@@ -527,7 +453,8 @@
 +    ag::SslPtr client(Policy &policy, ag::TlsSessionCacheScope scope) {
 +        constexpr uint8_t alpn[] = {2, 'h', '2'};
 +        auto result = ag::make_ssl(
-+                verify_policy, &policy, {alpn, sizeof(alpn)}, "same-server.invalid", ag::MSPT_TLS, {}, {}, {}, scope);
++                verify_policy, &policy, {alpn, sizeof(alpn)}, "same-server.invalid", ag::MSPT_TLS, {}, {}, {}, {},
++                ag::tls::TlsClientProfile::CHROME, scope);
 +        if (!std::holds_alternative<ag::SslPtr>(result)) {
 +            ADD_FAILURE() << std::get<std::string>(result);
 +            return nullptr;

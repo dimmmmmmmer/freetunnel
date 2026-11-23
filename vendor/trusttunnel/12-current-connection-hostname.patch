@@ -1,6 +1,8 @@
+diff --git a/core/include/vpn/internal/domain_filter.h b/core/include/vpn/internal/domain_filter.h
+index b169e56..965c593 100644
 --- a/core/include/vpn/internal/domain_filter.h
 +++ b/core/include/vpn/internal/domain_filter.h
-@@ -78,8 +78,10 @@
+@@ -78,8 +78,10 @@ public:
       * `VpnSettings.exclusions` description.
       * @param tag address tag
       * @param defer_unknown_domain defer lower-priority IP rules while a scannable hostname is unknown
@@ -9,23 +11,25 @@
 -    [[nodiscard]] DomainFilterMatchResult match_tag(const SockAddrTag &tag, bool defer_unknown_domain = false) const;
 +    [[nodiscard]] DomainFilterMatchResult match_tag(
 +            const SockAddrTag &tag, bool defer_unknown_domain = false, bool use_cached_domain = true) const;
-
+ 
      [[nodiscard]] bool has_policy_rules() const;
-
+ 
+diff --git a/core/src/domain_filter.cpp b/core/src/domain_filter.cpp
+index 9545864..67ea1cb 100644
 --- a/core/src/domain_filter.cpp
 +++ b/core/src/domain_filter.cpp
-@@ -230,7 +230,8 @@
+@@ -230,7 +230,8 @@ DomainFilterMatchStatus DomainFilter::match_domain(std::string_view domain) cons
      return DFMS_DEFAULT;
  }
-
+ 
 -DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool defer_unknown_domain) const {
 +DomainFilterMatchResult DomainFilter::match_tag(
 +        const SockAddrTag &tag, bool defer_unknown_domain, bool use_cached_domain) const {
      DomainFilterMatchResult result{.status = DFMS_DEFAULT};
-
+ 
      SocketAddress addr_no_port = tag.addr;
-@@ -238,7 +239,7 @@
-
+@@ -238,7 +239,7 @@ DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool def
+ 
      // Keep the parent DNS cache authoritative across rule updates: policy
      // children are rebuilt, but a known hostname must keep its priority.
 -    const auto known_domain = m_resolved_tags.get(tag);
@@ -33,7 +37,7 @@
      // For a new scannable connection, defer lower-priority IP decisions until
      // its hostname is available. Explicit manual IP rules can decide at once.
      bool pending_domains = false;
-@@ -291,7 +292,7 @@
+@@ -291,7 +292,7 @@ DomainFilterMatchResult DomainFilter::match_tag(const SockAddrTag &tag, bool def
          log_filter(this, dbg, "Cache hit: {}#{} -> {}", tag.addr, tag.appname, *known_domain);
          result.status = match_domain(*known_domain);
          result.domain = *known_domain;
@@ -41,10 +45,12 @@
 +    } else if ((defer_unknown_domain && !m_domains.empty()) || m_exclusion_suspects.get(addr_no_port)) {
          result.status = DFMS_SUSPECT_EXCLUSION;
      }
-
+ 
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index d77055c..6cc96da 100644
 --- a/core/src/tunnel.cpp
 +++ b/core/src/tunnel.cpp
-@@ -361,7 +361,7 @@
+@@ -396,7 +396,7 @@ static TunnelDomainLookupAction pass_through_domain_lookup(
      switch (r.status) {
      case DES_NOTFOUND:
          log_conn(tunnel, conn, dbg, "Gave up to find domain name");
@@ -53,10 +59,10 @@
              action = TDLA_SHUTDOWN;
          }
          domain_extractor->reset();
-@@ -951,6 +951,20 @@
+@@ -985,6 +985,20 @@ static std::shared_ptr<ServerUpstream> select_upstream(
          return -1;
      }
-
+ 
 +    if (upstream.get() == self->vpn->endpoint_upstream.get() && !self->endpoint_upstream_connected) {
 +        log_conn(self, conn, dbg, "Selected VPN route is disconnected; refusing migration");
 +        return -1;
@@ -74,7 +80,7 @@
      log_conn(self, conn, dbg, "Migrating to {} upstream",
              (upstream.get() == self->vpn->endpoint_upstream.get())         ? "VPN endpoint"
                      : (upstream.get() == self->vpn->bypass_upstream.get()) ? "direct"
-@@ -1034,7 +1048,8 @@
+@@ -1068,7 +1082,8 @@ std::optional<VpnConnectAction> Tunnel::finalize_connect_action(ConnectRequestRe
              || conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
          conn->action = request_result.action;
      } else if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst); dst != nullptr) {
@@ -84,7 +90,7 @@
          switch (filter_result.status) {
          case DFMS_DEFAULT:
              conn->action = request_result.action;
-@@ -1086,7 +1101,8 @@
+@@ -1120,7 +1135,8 @@ static std::optional<SocketAddress> select_resolved_destination_address(
          VpnConnectAction action = VPN_CA_DEFAULT;
          // if the action was default, check if the address matches exclusions
          if (!conn->flags.test(CONNF_FORCIBLY_BYPASSED) && !conn->flags.test(CONNF_FORCIBLY_REDIRECTED)) {
@@ -94,7 +100,7 @@
              switch (filter_result.status) {
              case DFMS_DEFAULT:
                  // neither the domain name nor resolved address matched against exclusions,
-@@ -1169,7 +1185,7 @@
+@@ -1203,7 +1219,7 @@ static void on_destination_resolve_result(void *arg, VpnDnsResolveId id, VpnDnsR
      } else if (conn->flags.test(CONNF_FORCIBLY_REDIRECTED)) {
          action = VPN_CA_FORCE_REDIRECT;
      } else {
@@ -103,10 +109,10 @@
          switch (filter_result.status) {
          case DFMS_DEFAULT:
              // neither the domain name nor resolved address matched against exclusions,
-@@ -1256,22 +1272,14 @@
+@@ -1290,22 +1306,14 @@ static bool is_destination_reachable(const Tunnel *self, VpnConnection *conn, Se
          return false;
      }
-
+ 
 -    if (conn->flags.test(CONNF_SUSPECT_EXCLUSION)
 -            // if upstream is not yet connected, it will be decided later whether to
 -            // reject or bypass the connection
@@ -132,10 +138,10 @@
 +                || (self->vpn->bypass_upstream != nullptr
 +                        && self->vpn->bypass_upstream->ip_version_availability.test(*ipv));
      }
-
+ 
      if (upstream != nullptr && !upstream->ip_version_availability.test(*ipv)) {
-@@ -1506,12 +1514,12 @@
-
+@@ -1540,12 +1548,12 @@ void Tunnel::on_exclusions_updated() {
+ 
  bool Tunnel::should_complete_immediately(uint64_t client_id) const {
      const VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, client_id);
 -    // In general mode, conection requests suspected to be to an exclusion host should be completed
@@ -151,8 +157,8 @@
 +            && (conn->flags.test(CONNF_SUSPECT_EXCLUSION) || vpn->exclusions_mode == VPN_MODE_SELECTIVE
                      || conn->addr.dstport() == utils::PLAIN_DNS_PORT_NUMBER);
  }
-
-@@ -1764,7 +1772,11 @@
+ 
+@@ -1798,7 +1806,11 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
              conn->flags.reset(CONNF_SUSPECT_EXCLUSION);
              auto fallback_action = VPN_CA_DEFAULT;
              if (this->vpn->domain_filter.has_policy_rules()
@@ -165,7 +171,7 @@
                  fallback_action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
              }
              event->result = static_cast<int>(initiate_connection_migration(
-@@ -1875,7 +1887,7 @@
+@@ -1913,7 +1925,7 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
          switch (this->icmp_manager.register_request(event->request)) {
          case IM_MSGS_PASS: {
              VpnConnectAction action = VPN_CA_DEFAULT;
@@ -174,9 +180,11 @@
              case DFMS_DEFAULT:
              case DFMS_SUSPECT_EXCLUSION:
                  break;
+diff --git a/core/test/test_dns_routing.cpp b/core/test/test_dns_routing.cpp
+index f4a2a7f..ea3344d 100644
 --- a/core/test/test_dns_routing.cpp
 +++ b/core/test/test_dns_routing.cpp
-@@ -1474,3 +1474,90 @@
+@@ -1474,3 +1474,90 @@ INSTANTIATE_TEST_SUITE_P(FreeTunnel, FreeTunnelDisconnectedDns,
                          CanonicalDnsSample{VPN_MODE_GENERAL, "@0:vpn.example @3:*.example", "vpn.example", true},
                          CanonicalDnsSample{VPN_MODE_SELECTIVE, "@0:vpn.example @3:*.example", "vpn.example", true}),
                  testing::Bool()));
@@ -267,22 +275,23 @@
 +        }
 +    }
 +}
+diff --git a/core/test/test_tunnel.cpp b/core/test/test_tunnel.cpp
 --- a/core/test/test_tunnel.cpp
 +++ b/core/test/test_tunnel.cpp
-@@ -275,6 +275,9 @@
-
+@@ -278,6 +278,9 @@
+ 
      void SetUp() override {
          TunnelTest::SetUp();
 +        // Keep covering optimistic migration on a non-scannable port. Standard
 +        // HTTP/TLS ports now wait for the current hostname before opening a route.
 +        dst = SocketAddress("1.1.1.2:777");
-
+ 
          ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, "localhost"));
-
-@@ -616,18 +619,22 @@
+ 
+@@ -619,18 +622,22 @@
      // 1) Raise the request for connection
      ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
-
+ 
 -    // 2) Establish the connection through VPN endpoint
 -    size_t size_before = redirect_upstream->connections.size();
 -    std::optional<VpnConnectAction> action = tun.finalize_connect_action({client_id, VPN_CA_DEFAULT, "some", 1});
@@ -311,21 +320,33 @@
 +    EXPECT_EQ(redirects, redirect_upstream->connections.size());
 +    EXPECT_EQ(bypasses + 1, bypass_upstream->connections.size());
  }
-
+ 
  static constexpr uint8_t HTTP3_IS_QUIC_CH[] = "\xca\x00\x00\x00\x01\x08"
-@@ -847,7 +854,7 @@
- };
+@@ -848,8 +855,10 @@
+         ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, "*.localhost"));
+     }
 
+-    // Opens a connection and routes it to the VPN endpoint (the mode default in general mode).
++    // Exercise pass-through lookup on an already established, non-fake connection.
++    // Standard HTTP/TLS ports now wait for this flow's hostname before selecting a route.
+     void connect_to_endpoint() {
++        dst = SocketAddress("1.1.1.2:777");
+         m_client_id = vpn.listener_conn_id_generator.get();
+         ASSERT_NO_FATAL_FAILURE(raise_client_connection(m_client_id));
+
+@@ -869,7 +878,7 @@
+ };
+ 
  // Wildcard exclusion without suspects cache still works via on-wire SNI scan
 -// Connection goes to endpoint upstream, ClientHello is read, migration to bypass_upstream occurs
 +// Wait for ClientHello without contacting either route, then select the direct route.
  TEST_F(ExternalSecureDnsTest, WildcardSniScanMigratesToBypass) {
      m_client_id = vpn.listener_conn_id_generator.get();
-
-@@ -858,12 +865,10 @@
+ 
+@@ -880,12 +889,10 @@
      size_t bypass_before = bypass_upstream->connections.size();
      tun.complete_connect_request(m_client_id, action);
-
+ 
 -    // Without early_ack, connection goes to endpoint upstream first
 -    ASSERT_GT(redirect_upstream->connections.size(), redirect_before);
 +    run_event_loop_once();
@@ -338,9 +359,9 @@
      ASSERT_EQ(client_listener->connections[m_client_id].result, CCR_PASS);
      tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &m_client_id);
      ASSERT_TRUE(client_listener->connections[m_client_id].read_enabled);
-@@ -876,10 +881,10 @@
+@@ -898,10 +905,10 @@
      m_bypass_id = bypass_upstream->connections.back();
-
+ 
      tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &m_bypass_id);
 +    run_event_loop_once();
      ASSERT_TRUE(client_listener->connections[m_client_id].read_enabled);
@@ -350,5 +371,43 @@
 +    ASSERT_EQ(redirect_upstream->connections.size(), redirect_before)
 +            << "Excluded TLS site must never contact the VPN endpoint";
  }
-
+ 
  // All port-443 connections go through fake_upstream first so SNI is read before any real endpoint
+@@ -1168,7 +1175,7 @@
+ // The lookup can discover the destination domain from the server certificate when the ClientHello
+ // has no SNI. Discovering an exclusion this way cannot migrate the connection: the client's bytes
+ // have already been forwarded to the current upstream. The connection must be closed, and the
+-// discovered tag must route the next connection to the same destination accordingly.
++// discovered tag is retained for display, but cannot choose a new flow's route.
+ TEST_F(ExternalSecureDnsTest, IncomingExclusionClosesConnection) {
+     static constexpr std::string_view EXCLUDED_DOMAIN = "excluded.example";
+     ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, EXCLUDED_DOMAIN));
+@@ -1192,10 +1199,26 @@
+     ASSERT_EQ(match.status, DFMS_EXCLUSION) << "The discovered domain must be remembered for future connections";
+     ASSERT_EQ(match.domain, EXCLUDED_DOMAIN);
+
++    // An unrelated HTTPS site can share the cached address. Its own SNI must
++    // select the route, even after an excluded server certificate was observed.
++    vpn.exclusions_scannable_ports = ag::parse_scannable_ports("777").value();
+     m_client_id = vpn.listener_conn_id_generator.get();
+     ASSERT_NO_FATAL_FAILURE(raise_client_connection(m_client_id));
+-    std::optional<VpnConnectAction> action = tun.finalize_connect_action({m_client_id, VPN_CA_DEFAULT, "app", 1});
+-    ASSERT_EQ(action, VPN_CA_FORCE_BYPASS) << "The next connection must be routed according to the exclusion";
++    const auto action = tun.finalize_connect_action({m_client_id, VPN_CA_DEFAULT, "app", 1});
++    ASSERT_FALSE(action.has_value());
++    tun.complete_connect_request(m_client_id, action);
++    run_event_loop_once();
++    ASSERT_TRUE(redirect_upstream->connections.empty());
++    ASSERT_TRUE(bypass_upstream->connections.empty());
++    ASSERT_EQ(client_listener->connections[m_client_id].result, CCR_PASS);
++    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &m_client_id);
++
++    const auto fresh_hello = make_tls_client_hello("included.example");
++    ClientRead fresh_read = {m_client_id, fresh_hello.data(), fresh_hello.size(), 0};
++    tun.listener_handler(client_listener, CLIENT_EVENT_READ, &fresh_read);
++    ASSERT_EQ(redirect_upstream->connections.size(), 1);
++    ASSERT_TRUE(bypass_upstream->connections.empty())
++            << "The cached certificate must not bypass a different hostname on the same IP";
+ }
+
+ enum class DomainDetectionFailure {

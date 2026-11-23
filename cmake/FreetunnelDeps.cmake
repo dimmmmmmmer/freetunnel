@@ -21,6 +21,14 @@ macro(freetunnel_link_linux_secrets target)
         endif()
         if(LIBSECRET_FOUND)
             target_compile_definitions(${target} PRIVATE FT_HAVE_LIBSECRET)
+            # secret_password_search_sync() is from libsecret 0.19, and is what
+            # tells an item that is locked from one that is not there
+            # (CredentialStoreLibsecret.cpp). The version pkg-config reports is
+            # the sure way to know the header declares it; the code also asks the
+            # header's own SECRET_CHECK_VERSION, and either is enough.
+            if(LIBSECRET_VERSION VERSION_GREATER_EQUAL 0.19)
+                target_compile_definitions(${target} PRIVATE FT_LIBSECRET_HAS_SEARCH)
+            endif()
             target_sources(${target} PRIVATE
                 ${FREETUNNEL_REPO_ROOT}/src/core/CredentialStoreLibsecret.cpp)
             target_link_libraries(${target} PRIVATE PkgConfig::LIBSECRET)

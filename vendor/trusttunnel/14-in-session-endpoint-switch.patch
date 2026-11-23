@@ -1,11 +1,65 @@
+diff --git a/core/include/vpn/vpn.h b/core/include/vpn/vpn.h
+index 7206ef8..d1c08aa 100644
+--- a/core/include/vpn/vpn.h
++++ b/core/include/vpn/vpn.h
+@@ -669,6 +669,19 @@ WIN_EXPORT Vpn *vpn_open(const VpnSettings *settings);
+  */
+ WIN_EXPORT ag::VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters);
+ 
++/**
++ * Replace the endpoint inside a running session without removing its listener,
++ * routes or direct connections. Validate before interrupting the old endpoint.
++ * The caller must already have resolved the endpoints and arranged their socket
++ * protection; this API does not change OS routes or listener/DNS settings.
++ * Commit optional endpoint certificate policy on the core thread after the old
++ * handshake has stopped and before the new one starts. The callback must not
++ * call VPN APIs or throw. It runs before this function returns, only on success.
++ * Serialize with vpn_close, and never call from a VPN callback.
++ */
++WIN_EXPORT ag::VpnError vpn_replace_endpoint(
++        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg);
++
+ /**
+  * Forcibly initiate the next session recovery attempt. Do nothing if the VPN client is not between
+  * recovery attempts (e.g., not in `VPN_SS_WAITING_RECOVERY` state).
+diff --git a/core/src/vpn_fsm.cpp b/core/src/vpn_fsm.cpp
+index 1b3978c..9b0a52f 100644
+--- a/core/src/vpn_fsm.cpp
++++ b/core/src/vpn_fsm.cpp
+@@ -94,11 +94,13 @@ static constexpr FsmTransitionEntry TRANSITION_TABLE[] = {
+         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   network_lost,             Fsm::DO_NOTHING,               Fsm::SAME_TARGET_STATE,  Fsm::DO_NOTHING},
+         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   connected_once,           prepare_for_recovery_nc,       VPN_SS_WAITING_RECOVERY, raise_state},
+         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   no_connect_attempts,      fail_connect_with_no_attempts, VPN_SS_DISCONNECTED,     raise_state},
++        {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   fall_into_recovery,       prepare_for_recovery_nc,       VPN_SS_WAITING_RECOVERY, raise_state},
+         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   Fsm::OTHERWISE,           retry_connect,                 VPN_SS_CONNECTING,       raise_state},
+ 
+         {Fsm::ANY_SOURCE_STATE,   CE_CLIENT_DISCONNECTED, is_fatal_error,           disconnect_with_error,  VPN_SS_DISCONNECTED,     raise_state},
+         {Fsm::ANY_SOURCE_STATE,   CE_CLIENT_DISCONNECTED, Fsm::OTHERWISE,           prepare_for_recovery,   VPN_SS_WAITING_RECOVERY, raise_state},
+         {Fsm::ANY_SOURCE_STATE,   CE_SHUTDOWN,            Fsm::ANYWAY,              do_disconnect,          VPN_SS_DISCONNECTED,     raise_state},
++        {Fsm::ANY_SOURCE_STATE,   CE_REPLACE_ENDPOINT,    Fsm::ANYWAY,              run_ping,               VPN_SS_RECOVERING,       raise_state},
+         {Fsm::ANY_SOURCE_STATE,   CE_DO_CONNECT,          Fsm::ANYWAY,              on_wrong_connect_state, VPN_SS_DISCONNECTED,     raise_state},
+         {Fsm::ANY_SOURCE_STATE,   CE_START_LISTENING,     Fsm::ANYWAY,              start_listening,        Fsm::SAME_TARGET_STATE,  Fsm::DO_NOTHING},
+ 
+diff --git a/core/src/vpn_fsm.h b/core/src/vpn_fsm.h
+index 5c5c6ef..b61b8e1 100644
+--- a/core/src/vpn_fsm.h
++++ b/core/src/vpn_fsm.h
+@@ -20,6 +20,7 @@ enum ConnectEvent {
+     CE_NETWORK_CHANGE,      // network has been changed
+     CE_START_LISTENING,     // start listening for connections from client
+     CE_ABANDON_ENDPOINT,    // current endpoint is notified of being inactive
++    CE_REPLACE_ENDPOINT,    // replace only the endpoint, retaining the listener and direct flows
+     CE_COMPLETE_REQUEST,    // complete connection request
+ };
+ 
+diff --git a/core/src/vpn_manager.cpp b/core/src/vpn_manager.cpp
+index dba6e83..30b671a 100644
 --- a/core/src/vpn_manager.cpp
 +++ b/core/src/vpn_manager.cpp
-@@ -339,6 +339,42 @@
-     log_vpn(vpn, info, "Done");
-
+@@ -352,6 +352,42 @@ VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters) {
      return error;
-+}
-+
+ }
+ 
 +VpnError vpn_replace_endpoint(
 +        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg) {
 +    if (vpn == nullptr || config == nullptr) {
@@ -40,68 +94,24 @@
 +        vpn->fsm.perform_transition(vpn_fsm::CE_REPLACE_ENDPOINT, nullptr);
 +    });
 +    return committed ? VpnError{} : VpnError{VPN_EC_EVENT_LOOP_FAILURE, "Endpoint replacement was cancelled"};
- }
-
- void vpn_force_reconnect(Vpn *vpn) {
---- a/core/src/vpn_fsm.cpp
-+++ b/core/src/vpn_fsm.cpp
-@@ -93,11 +93,13 @@
-         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   network_lost,             Fsm::DO_NOTHING,               Fsm::SAME_TARGET_STATE,  Fsm::DO_NOTHING},
-         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   connected_once,           prepare_for_recovery_nc,       VPN_SS_WAITING_RECOVERY, raise_state},
-         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   no_connect_attempts,      fail_connect_with_no_attempts, VPN_SS_DISCONNECTED,     raise_state},
-+        {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   fall_into_recovery,       prepare_for_recovery_nc,       VPN_SS_WAITING_RECOVERY, raise_state},
-         {VPN_SS_WAITING_FOR_NETWORK, CE_NETWORK_CHANGE,   Fsm::OTHERWISE,           retry_connect,                 VPN_SS_CONNECTING,       raise_state},
-
-         {Fsm::ANY_SOURCE_STATE,   CE_CLIENT_DISCONNECTED, is_fatal_error,           do_disconnect,          VPN_SS_DISCONNECTED,     raise_state},
-         {Fsm::ANY_SOURCE_STATE,   CE_CLIENT_DISCONNECTED, Fsm::OTHERWISE,           prepare_for_recovery,   VPN_SS_WAITING_RECOVERY, raise_state},
-         {Fsm::ANY_SOURCE_STATE,   CE_SHUTDOWN,            Fsm::ANYWAY,              do_disconnect,          VPN_SS_DISCONNECTED,     raise_state},
-+        {Fsm::ANY_SOURCE_STATE,   CE_REPLACE_ENDPOINT,    Fsm::ANYWAY,              run_ping,               VPN_SS_RECOVERING,       raise_state},
-         {Fsm::ANY_SOURCE_STATE,   CE_DO_CONNECT,          Fsm::ANYWAY,              on_wrong_connect_state, VPN_SS_DISCONNECTED,     raise_state},
-         {Fsm::ANY_SOURCE_STATE,   CE_START_LISTENING,     Fsm::ANYWAY,              start_listening,        Fsm::SAME_TARGET_STATE,  Fsm::DO_NOTHING},
-
---- a/core/src/vpn_fsm.h
-+++ b/core/src/vpn_fsm.h
-@@ -20,6 +20,7 @@
-     CE_NETWORK_CHANGE,      // network has been changed
-     CE_START_LISTENING,     // start listening for connections from client
-     CE_ABANDON_ENDPOINT,    // current endpoint is notified of being inactive
-+    CE_REPLACE_ENDPOINT,    // replace only the endpoint, retaining the listener and direct flows
-     CE_COMPLETE_REQUEST,    // complete connection request
- };
-
---- a/core/include/vpn/vpn.h
-+++ b/core/include/vpn/vpn.h
-@@ -666,6 +666,19 @@
- WIN_EXPORT ag::VpnError vpn_connect(Vpn *vpn, const VpnConnectParameters *parameters);
-
- /**
-+ * Replace the endpoint inside a running session without removing its listener,
-+ * routes or direct connections. Validate before interrupting the old endpoint.
-+ * The caller must already have resolved the endpoints and arranged their socket
-+ * protection; this API does not change OS routes or listener/DNS settings.
-+ * Commit optional endpoint certificate policy on the core thread after the old
-+ * handshake has stopped and before the new one starts. The callback must not
-+ * call VPN APIs or throw. It runs before this function returns, only on success.
-+ * Serialize with vpn_close, and never call from a VPN callback.
-+ */
-+WIN_EXPORT ag::VpnError vpn_replace_endpoint(
-+        Vpn *vpn, const VpnUpstreamConfig *config, void (*commit_certificate_policy)(void *), void *arg);
++}
 +
-+/**
-  * Forcibly initiate the next session recovery attempt. Do nothing if the VPN client is not between
-  * recovery attempts (e.g., not in `VPN_SS_WAITING_RECOVERY` state).
-  * @param vpn VPN client
+ void vpn_force_reconnect(Vpn *vpn) {
+     log_vpn(vpn, info, "...");
+ 
+diff --git a/core/test/test_vpn_manager_fsm_recovery.cpp b/core/test/test_vpn_manager_fsm_recovery.cpp
+index 37be0cc..cf68fb1 100644
 --- a/core/test/test_vpn_manager_fsm_recovery.cpp
 +++ b/core/test/test_vpn_manager_fsm_recovery.cpp
 @@ -7,6 +7,7 @@
-
+ 
  #include "test_mock_c.h"
  #include "vpn/internal/server_upstream.h"
 +#include "vpn/internal/tunnel.h"
  #include "vpn_fsm.h"
  #include "vpn_manager.h"
-
-@@ -577,3 +578,122 @@
+ 
+@@ -583,3 +584,122 @@ TEST_F(ConnectedVpnManagerTest, NetworkChangeRecordsRecoveryAttemptStart) {
      ASSERT_TRUE(wait_state(VPN_SS_WAITING_RECOVERY));
      ASSERT_GT(vpn->recovery.time.to_next, Millis{VPN_DEFAULT_INITIAL_RECOVERY_INTERVAL_MS} / 2);
  }

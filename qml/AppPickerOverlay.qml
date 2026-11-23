@@ -34,19 +34,54 @@ Item {
                enabled: !pickerRoot.shell.windowPopupOpen && !fileDlg.visible
                onActivated: pickerRoot.shell.overlay = "" }
 
+    function focusNext(backwards) {
+        const stops = [searchField, appList, fileLink, pickerButtons.itemAt(0), pickerButtons.itemAt(1)]
+        let current = -1
+        for (let i = 0; i < stops.length; ++i)
+            if (stops[i].activeFocus) current = i
+        stops[(current + (backwards ? stops.length - 1 : 1)) % stops.length].forceActiveFocus()
+    }
+    Shortcut { sequence: "Tab"; enabled: !pickerRoot.shell.windowPopupOpen && !fileDlg.visible
+               onActivated: pickerRoot.focusNext(false) }
+    Shortcut { sequence: "Shift+Tab"; enabled: !pickerRoot.shell.windowPopupOpen && !fileDlg.visible
+               onActivated: pickerRoot.focusNext(true) }
+
     // The scan touches the filesystem, so it happens once rather than on every
     // keystroke in the search field, and on a worker: done here, the first open
     // froze the window, on Windows for as long as every Start Menu shortcut took
     // to resolve. Until it is in the card says so, and whatever was typed
     // meanwhile is applied to the list when it arrives.
     property var allApps: []
+    property var chosenFiles: []
+    property var selected: []
+    property string targetProfile: ""
+    property string targetMode: ""
+    function pathKey(path) { return Qt.platform.os === "linux" ? path : path.toLowerCase() }
+    function selectedIndex(path) {
+        for (let i = 0; i < selected.length; ++i)
+            if (pathKey(selected[i]) === pathKey(path)) return i
+        return -1
+    }
+    function toggle(path) {
+        const next = selected.slice()
+        const index = selectedIndex(path)
+        if (index < 0) next.push(path)
+        else next.splice(index, 1)
+        selected = next
+    }
+    function applySelection() {
+        if (backend.setAppRules(targetProfile, targetMode, selected)) shell.overlay = ""
+    }
     readonly property bool scanning: !backend.installedAppsReady
     function reload() {
-        allApps = backend.installedApplications()
+        allApps = Array.from(backend.installedApplications()).concat(chosenFiles)
         applyFilter(searchField.text)
     }
     onScanningChanged: if (!scanning) reload()
     Component.onCompleted: {
+        targetProfile = backend.activeProfile
+        targetMode = backend.vpnMode
+        selected = Array.from(backend.appRules)
         reload()
         searchField.forceActiveFocus()
     }
@@ -92,7 +127,7 @@ Item {
                     MouseArea { id: backMa; anchors.fill: parent; anchors.margins: -6
                         hoverEnabled: true
                         onClicked: pickerRoot.shell.overlay = "" } }
-                Text { Layout.fillWidth: true; text: qsTr("Add an application")
+                Text { Layout.fillWidth: true; text: qsTr("Choose applications")
                        color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
 
@@ -107,15 +142,9 @@ Item {
                     font.pixelSize: 13; color: theme.text
                     onTextChanged: pickerRoot.applyFilter(text)
                     Keys.onEscapePressed: pickerRoot.shell.overlay = ""
-                    // Enter takes the first match. This one may pass a bare name
-                    // straight through — a sandboxed program's rule IS a bare
-                    // name — because it comes from the list, not from a guess.
-                    onAccepted: {
-                        if (appList.model.length > 0) {
-                            backend.addAppRule(appList.model[0].path)
-                            pickerRoot.shell.overlay = ""
-                        }
-                    }
+                    onAccepted: if (appList.model.length > 0) pickerRoot.toggle(appList.model[0].path)
+                    Keys.onDownPressed: { appList.currentIndex = 0; appList.forceActiveFocus() }
+
                 }
                 Text { anchors.left: parent.left; anchors.leftMargin: 10
                        anchors.verticalCenter: parent.verticalCenter
@@ -128,17 +157,33 @@ Item {
                 Layout.fillWidth: true; Layout.fillHeight: true
                 clip: true; spacing: 2
                 model: []
+                keyNavigationEnabled: true
+                Keys.onSpacePressed: if (currentItem) pickerRoot.toggle(currentItem.modelData.path)
+                Keys.onReturnPressed: if (currentItem) pickerRoot.toggle(currentItem.modelData.path)
                 delegate: Rectangle {
                     required property var modelData
                     width: appList.width; height: 42; radius: 8
                     // Faded, like the rows of every other list, and from the card's
                     // own colour: from "transparent", which is black with no alpha,
                     // a fade would pass through grey.
-                    color: rowMa.containsMouse ? theme.surface : theme.bg
+                    color: rowMa.containsMouse || (ListView.isCurrentItem && appList.activeFocus) ? theme.surface : theme.bg
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: modelData.name
+                    Accessible.checkable: true
+                    Accessible.checked: pickerRoot.selectedIndex(modelData.path) >= 0
+                    Accessible.onToggleAction: pickerRoot.toggle(modelData.path)
+                    Rectangle {
+                        width: 18; height: 18; radius: 4
+                        anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                        color: pickerRoot.selectedIndex(modelData.path) >= 0 ? theme.accent : theme.inputBg
+                        border.width: 1; border.color: theme.inputBorder
+                        Text { anchors.centerIn: parent; text: "✓"; color: theme.accentText; font.pixelSize: 13
+                               visible: pickerRoot.selectedIndex(modelData.path) >= 0 }
+                    }
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left; anchors.leftMargin: 10
+                        anchors.left: parent.left; anchors.leftMargin: 38
                         anchors.right: parent.right; anchors.rightMargin: 10
                         spacing: 1
                         Text { text: modelData.name; color: theme.text; font.pixelSize: 13
@@ -151,10 +196,7 @@ Item {
                     }
                     MouseArea {
                         id: rowMa; anchors.fill: parent; hoverEnabled: true
-                        onClicked: {
-                            backend.addAppRule(modelData.path)
-                            pickerRoot.shell.overlay = ""
-                        }
+                        onClicked: pickerRoot.toggle(modelData.path)
                     }
                 }
             }
@@ -169,16 +211,50 @@ Item {
                 color: theme.textFaint; font.pixelSize: 12; wrapMode: Text.WordWrap
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Repeater {
+                    id: pickerButtons
+                    model: [qsTr("Cancel"), qsTr("Apply")]
+                    delegate: Rectangle {
+                        required property string modelData
+                        required property int index
+                        objectName: index === 0 ? "pickerCancel" : "pickerApply"
+                        width: Math.max(76, buttonText.implicitWidth + 24); height: 32; radius: 8
+                        color: index === 1 ? theme.accent : theme.surface
+                        border.width: activeFocus ? 2 : 0; border.color: theme.text
+                        activeFocusOnTab: true
+                        Accessible.role: Accessible.Button
+                        Accessible.name: modelData
+                        function activate() { if (index === 0) pickerRoot.shell.overlay = ""; else pickerRoot.applySelection() }
+                        Accessible.onPressAction: activate()
+                        Keys.onSpacePressed: activate()
+                        Keys.onReturnPressed: activate()
+                        Text { id: buttonText; anchors.centerIn: parent; text: modelData
+                               color: index === 1 ? theme.accentText : theme.text; font.pixelSize: 13 }
+                        MouseArea { anchors.fill: parent; onClicked: parent.activate() }
+                    }
+                }
+            }
+
             Sep { Layout.fillWidth: true; theme: pickerRoot.theme }
 
             // No wider than its words, so it acts over them and not across the card.
             Text {
+                id: fileLink
                 objectName: "chooseFileLink"
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Link
+                Accessible.name: text
+                Accessible.onPressAction: fileDlg.open()
+                Keys.onReturnPressed: fileDlg.open()
+                Keys.onSpacePressed: fileDlg.open()
                 Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.ceil(implicitWidth)
                 elide: Text.ElideRight
                 text: qsTr("Choose a file instead…"); font.pixelSize: 12
                 color: browseMa.containsMouse ? theme.text : theme.accent
-                font.underline: browseMa.containsMouse
+                font.underline: browseMa.containsMouse || activeFocus
                 MouseArea { id: browseMa; anchors.fill: parent; anchors.margins: -4
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: fileDlg.open() }
@@ -194,8 +270,18 @@ Item {
                      ? [qsTr("Programs and shortcuts (*.exe *.lnk)"), qsTr("All files (*)")]
                      : [qsTr("Applications (*.desktop *.app)"), qsTr("All files (*)")]
         onAccepted: {
-            pickerRoot.backend.addApplicationFromPath(fileDlg.selectedFile.toString())
-            pickerRoot.shell.overlay = ""
+            const path = pickerRoot.backend.applicationRuleFromPath(fileDlg.selectedFile.toString())
+            if (!path) return
+            if (pickerRoot.selectedIndex(path) < 0) pickerRoot.toggle(path)
+            const rows = pickerRoot.allApps.slice()
+            if (!rows.some(function(a) { return pickerRoot.pathKey(a.path) === pickerRoot.pathKey(path) })) {
+                const app = {name: path.split(/[\\/]/).pop(), path: path}
+                rows.push(app)
+                pickerRoot.chosenFiles = pickerRoot.chosenFiles.concat([app])
+                pickerRoot.allApps = rows
+            }
+            searchField.text = ""
+            pickerRoot.applyFilter("")
         }
     }
 }

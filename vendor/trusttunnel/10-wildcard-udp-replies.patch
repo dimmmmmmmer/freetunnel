@@ -1,9 +1,8 @@
+diff --git a/net/src/os_tunnel_linux.cpp b/net/src/os_tunnel_linux.cpp
+index dbccd28..5aef7e0 100644
 --- a/net/src/os_tunnel_linux.cpp
 +++ b/net/src/os_tunnel_linux.cpp
-@@ -14,17 +14,25 @@
- static constexpr auto TABLE_ID = 880;
- // Local replies to connections initiated outside the tunnel must keep their
- // original sockets. Proxying them creates a different UDP source port and
+@@ -17,11 +17,19 @@ static constexpr auto TABLE_ID = 880;
  // cannot reproduce an accepted TCP connection. Reserve one packet-mark bit;
  // do not overwrite other firewall marks or use a source-port allowlist.
  static constexpr std::string_view REPLY_MARK = "0x00800000/0x00800000";
@@ -23,13 +22,7 @@
  static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
  static constexpr std::string_view VNC_PORTS = "5900-5920";
  
- static bool sys_cmd_bool(std::string cmd) {
-     cmd += " 2>&1";
-     dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-@@ -302,22 +310,20 @@
-         }
-     }
- 
+@@ -305,16 +313,14 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
      // Apply routing rules (in netns if specified)
      if (m_sport_supported) {
          if (!ipv4_routes.empty()) {
@@ -50,13 +43,7 @@
                  return false;
              }
          }
-     }
-     return true;
- }
-@@ -372,12 +378,15 @@
-         warnlog(logger, "System DNS servers are set but not applied, retrying");
-         std::this_thread::sleep_for(Secs{1});
-     }
+@@ -375,6 +381,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
  }
  
  void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
@@ -66,6 +53,3 @@
      sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
      sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30799 fwmark {} lookup main", REPLY_MARK));
      sys_cmd_netns_ignore_errors(m_netns, "nft delete table inet freetunnel_reply");
-     // Flush all routes from the project-owned table (stale routes may remain
-     // when the TUN device is externally created and survives client shutdown).
-     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip route flush table {}", table_id));

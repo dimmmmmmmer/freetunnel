@@ -4,7 +4,7 @@
 #include <QString>
 #include <QStringList>
 
-// UI validation: domain (optionally "*.x.y"), IP, or CIDR.
+// UI validation: domain (optionally "*.name", including one label such as "*.ru"), IP, or CIDR.
 bool isValidBypassRule(const QString &rule);
 
 // An IP or CIDR written with "*." or a leading dot, which isValidBypassRule()

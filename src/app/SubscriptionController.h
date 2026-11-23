@@ -23,6 +23,7 @@
 
 #include "core/ConfigImport.h"
 #include "core/ConfigToml.h"
+#include "core/CredentialStore.h"
 #include "core/Subscription.h"
 #include "core/SubscriptionFetcher.h"
 #include "core/SubscriptionStore.h"
@@ -76,7 +77,9 @@ public:
     // empty when the store refused it.
     QString storeAddress(const QString &url);
     void deleteAddress(const QString &sourceId);
-    QString address(const QString &path) const;
+    // What the credential store says of path's address: Found with it, NotFound, or
+    // Error when the store could not be asked, which is not the same as no address.
+    freetunnel::StoredSecret address(const QString &path) const;
     // Links `path` to what `import` added, as fetched or, when `given`, as the link
     // or file gave it after the fetch failed. False when subscriptions.json could
     // not be written, and nothing is linked.

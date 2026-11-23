@@ -1,7 +1,7 @@
 libevent
 Version: 2.1.11-stable, with the patches of AdGuard's conan recipe
 Source: https://github.com/libevent/libevent/tree/release-2.1.11-stable
-Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/c546b329360642576cea25f10bdcbf41d52163df/conan/recipes/libevent
+Patches: https://github.com/AdguardTeam/NativeLibsCommon/tree/9d05accbe1f22764350fd5dcd6726244be0b2b96/conan/recipes/libevent
 License: BSD-3-Clause AND ISC AND MIT
 
 [libevent/libevent@release-2.1.11-stable: LICENSE]

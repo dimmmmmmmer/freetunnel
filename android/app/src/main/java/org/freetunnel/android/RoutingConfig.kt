@@ -108,6 +108,7 @@ object RoutingConfig {
             port != null && port in 1..65535 && address.substringBeforeLast(':').isNotBlank()
         }) { "Укажите addresses в формате адрес:порт" }
         require(endpoint.getString("upstream_protocol")?.let { it in listOf("http2", "http3") } != false) { "Укажите upstream_protocol: http2 или http3" }
+        rejectUnknownTlsProfile(endpoint)
         require(parsed.getString("vpn_mode")?.let { it in listOf("general", "selective") } != false) { "Неизвестный vpn_mode" }
         val rules = generatedRules ?: parsed.getArray("exclusions")?.let { a -> (0 until a.size()).map { a.getString(it) } }.orEmpty()
         require(generated || rules.none { it.startsWith("@") }) { "Routing priorities are reserved for generated configurations" }
@@ -163,6 +164,16 @@ object RoutingConfig {
 
     // A server that can be connected to without its subscription: the four settings
     // a link has to carry, none of them empty, as DeepLinkImport reads them.
+    private fun rejectUnknownTlsProfile(endpoint: TomlTable) {
+        val value = endpoint.get(listOf("tls_profile"))
+        // A value that is not text is not a name, as the desktop reads it: the core
+        // then uses chrome. An unknown name is refused before the file is kept.
+        if (value != null && value !is String) return
+        val name = if (value is String) value else null
+        if (TlsProfiles.canonical(name) == null)
+            throw ImportRefused(R.string.text_tls_profile_unknown)
+    }
+
     private fun hasStaticServer(endpoint: TomlTable): Boolean {
         fun text(name: String) = endpoint.get(listOf(name)) as? String
         val addresses = endpoint.get(listOf("addresses")) as? TomlArray
@@ -231,13 +242,14 @@ object RoutingConfig {
         val parsed = Toml.parse(source, TomlVersion.V1_0_0)
         if (parsed.hasErrors()) return Import(source, false)
         val endpoint = parsed.get(listOf("endpoint")) as? TomlTable ?: return endpointExport(parsed) ?: Import(source, false)
-        // A real auth key needs TrustTunnel 1.3: core 1.1.7 ignores it, and the server
-        // then refuses every connection without saying why. The endpoint writes an
-        // empty one into every export, so only a key with something in it is refused.
-        // Anything else that is there, blank or not a string, is refused too: no core
-        // would read it as no key.
+        // A non-empty client_random_auth_key is still refused. TrustTunnel 1.3.0
+        // reads it, and the desktop accepts it; this app has no control that sets
+        // one. The endpoint writes an empty one into every export, so only a key
+        // with something in it is refused. Anything else that is there, blank or
+        // not a string, is refused too: no core would read it as no key.
         val authKey = endpoint.get(listOf("client_random_auth_key"))
         if (authKey != null && authKey != "") throw ImportRefused(R.string.text_this_server_needs_a_newer_trusttunnel_core)
+        rejectUnknownTlsProfile(endpoint)
         val subscription = subscriptionKeys.any { lookup(parsed, it) != null }
         // With a subscription the server's own settings are optional, as in a link,
         // and a file without them could only work once the subscription is fetched.
@@ -262,7 +274,7 @@ object RoutingConfig {
         return Import(document(root, subscriptionKeys, overrides), subscription, certificate != null)
     }
 
-    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?, val routeAppsInCore: Boolean = false)
+    data class Plan(val toml: String, val apps: List<String>, val allowApps: Boolean, val warning: Int?, val routeAppsInCore: Boolean = false, val fallIntoRecovery: Boolean = false)
 
     /**
      * The plan for a session on this config with the rules of [profile], the split profile it uses: the
@@ -282,7 +294,7 @@ object RoutingConfig {
             val prefix = if (definition.bypass) "@3:" else "@2:"
             GeoRepository.cachedEntries(context, definition).map { prefix + it }
         } else emptyList()
-        return prepare(source, prefs.getBoolean("split_enabled", false), prefs.getBoolean("through", false),
+        return prepare(source, prefs.getBoolean("split_enabled", false), rules.through,
             rules.domains, apps, prefs.getBoolean("killswitch", true),
             ExcludedRoutes.load(prefs.getString(ExcludedRoutes.KEY, null), ExcludedRoutes.defaults(context)), geo,
             prefs.getBoolean("verbose_logs", false) && prefs.getBoolean("logging", true))
@@ -353,6 +365,6 @@ object RoutingConfig {
         // the core does nothing with it, so it is not handed the password in it.
         val result = document(root, subscriptionKeys, mapOf(listOf("listener", "tun", "excluded_routes") to excluded))
         validateGenerated(result)
-        return Plan(result, selectedApps, allowApps, warning, routeAppsInCore)
+        return Plan(result, selectedApps, allowApps, warning, routeAppsInCore, killSwitch)
     }
 }

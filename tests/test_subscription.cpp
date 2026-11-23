@@ -38,7 +38,8 @@ private slots:
     void theProtocolIsHttp2OrHttp3();
     void theFlagsAreBooleans();
     void aSubscriptionNeverSkipsVerification();
-    void anAuthKeyNeedsANewerCore();
+    void anAuthKeyIsTakenWhenItIsWholeBytesOfHex();
+    void theAuthKeyFollowsTheDocumentOnARefresh();
     void eachLimitHoldsAtItsEdge_data();
     void eachLimitHoldsAtItsEdge();
     void theBodyHasALimit();
@@ -339,11 +340,29 @@ void TestSubscription::aSubscriptionNeverSkipsVerification()
     QVERIFY(parse(withField(sub::kMinimal, key, false)).has_value());
 }
 
-void TestSubscription::anAuthKeyNeedsANewerCore()
+// The key a server checks the TLS client random against (core 1.3): taken as a
+// link's tag 0x0F is, whole bytes of hex. One the core cannot decode is dropped by
+// it without a word, and the server then turns the client away, so it is refused
+// here as a damaged document, and the last good config stays.
+void TestSubscription::anAuthKeyIsTakenWhenItIsWholeBytesOfHex()
 {
     const QString key = QStringLiteral("client_random_auth_key");
-    QVERIFY(refusedFor(sub::kAuthKey, SubscriptionDocError::NeedsNewerCore, key));
-    QVERIFY(parse(withField(sub::kMinimal, key, QString())).has_value());
+    const auto doc = parse(sub::kAuthKey);
+    QVERIFY(doc.has_value());
+    QCOMPARE(doc->clientRandomAuthKey, std::optional<QString>(QStringLiteral("aabbccdd")));
+    // A document with no field says nothing about a key, which is not the same as
+    // saying there is none: the endpoint's format has no such field, and a server
+    // that checks a key serves the same document. An empty one says there is none.
+    QVERIFY(!parse(sub::kMinimal)->clientRandomAuthKey.has_value());
+    QCOMPARE(parse(withField(sub::kMinimal, key, QString()))->clientRandomAuthKey,
+             std::optional<QString>(QString()));
+    // The first and last digit of each range, in either case.
+    QCOMPARE(parse(withField(sub::kMinimal, key, QStringLiteral("09afAF")))->clientRandomAuthKey,
+             std::optional<QString>(QStringLiteral("09afAF")));
+    for (const QString &bad : {QStringLiteral("abc"), QStringLiteral("zz"), QStringLiteral(" aabb"),
+                               QStringLiteral("aabb\n"), QStringLiteral("aa bb")})
+        QVERIFY2(refusedFor(withField(sub::kMinimal, key, bad), SubscriptionDocError::Invalid, key),
+                 qPrintable(bad));
     QVERIFY(refusedFor(withField(sub::kMinimal, key, 5), SubscriptionDocError::Invalid, key));
     QVERIFY(refusedFor(withField(sub::kMinimal, key, QJsonValue(QJsonValue::Null)), SubscriptionDocError::Invalid,
                        key));
@@ -898,6 +917,71 @@ void TestSubscription::anUnchangedReplyChangesNothing()
     QVERIFY(applySubscription(withKey, created.password, doc, SubscriptionApplyMode::Refresh).changes.isEmpty());
 }
 
+// The key is kept where the password is - handed on for the credential store,
+// never in the config - but it is the subscription's only when the document says
+// something about it. The endpoint's format has no such field, so a document that
+// is silent leaves the key the config has: refreshing must not delete the key the
+// operator issued, which the server's rules may be the only thing admitting the
+// client with. A rotation, and a document that says there is none, are changes the
+// user hears of by name, never by value.
+void TestSubscription::theAuthKeyFollowsTheDocumentOnARefresh()
+{
+    const SubscriptionDocument doc = parsed(sub::kAuthKey);
+    const SubscriptionApplied created =
+            applySubscription(ConfigToml(), QString(), doc, SubscriptionApplyMode::Creation);
+    QCOMPARE(created.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QVERIFY(created.config.clientRandomAuthKey.isEmpty());
+    QVERIFY2(!buildConfigToml(created.config).contains(QStringLiteral("aabbccdd")),
+             qPrintable(buildConfigToml(created.config)));
+
+    // What the config has now is the store's key, which the caller puts in
+    // `current`; the file holds none. The same key is no change.
+    ConfigToml stored = parseConfigToml(buildConfigToml(created.config));
+    stored.clientRandomAuthKey = QStringLiteral("aabbccdd");
+    QVERIFY(applySubscription(stored, created.password, doc, SubscriptionApplyMode::Refresh).changes.isEmpty());
+
+    const auto onlyChange = [](const SubscriptionApplied &applied) {
+        return applied.changes.size() == 1 && applied.changes.first().field == SubscriptionField::AuthKey
+                && applied.changes.first().oldValue.isEmpty() && applied.changes.first().newValue.isEmpty();
+    };
+    SubscriptionDocument rotated = doc;
+    rotated.clientRandomAuthKey = QStringLiteral("11223344");
+    const SubscriptionApplied r = applySubscription(stored, created.password, rotated, SubscriptionApplyMode::Refresh);
+    QVERIFY(onlyChange(r));
+    QCOMPARE(r.clientRandomAuthKey, QStringLiteral("11223344"));
+    QVERIFY(r.config.clientRandomAuthKey.isEmpty());
+
+    // A server that says it stops checking one: cleared, not kept.
+    SubscriptionDocument dropped = doc;
+    dropped.clientRandomAuthKey = QString();
+    const SubscriptionApplied d = applySubscription(stored, created.password, dropped, SubscriptionApplyMode::Refresh);
+    QVERIFY(onlyChange(d));
+    QVERIFY(d.clientRandomAuthKey.isEmpty());
+
+    // And one that starts to.
+    ConfigToml without = stored;
+    without.clientRandomAuthKey.clear();
+    const SubscriptionApplied s = applySubscription(without, created.password, doc, SubscriptionApplyMode::Refresh);
+    QVERIFY(onlyChange(s));
+    QCOMPARE(s.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+
+    // A document with no word about it, the only kind the endpoint serves: the
+    // key stays, nothing is listed as changed, and what is handed on for the store
+    // is the key the config has. A config with none stays without one.
+    SubscriptionDocument silent = doc;
+    silent.clientRandomAuthKey.reset();
+    const SubscriptionApplied k = applySubscription(stored, created.password, silent, SubscriptionApplyMode::Refresh);
+    QVERIFY(k.changes.isEmpty());
+    QCOMPARE(k.clientRandomAuthKey, QStringLiteral("aabbccdd"));
+    QVERIFY(k.config.clientRandomAuthKey.isEmpty());
+    const SubscriptionApplied n = applySubscription(without, created.password, silent, SubscriptionApplyMode::Refresh);
+    QVERIFY(n.changes.isEmpty());
+    QVERIFY(n.clientRandomAuthKey.isEmpty());
+    // A creation has none to keep; the caller supplies the link's.
+    QVERIFY(applySubscription(ConfigToml(), QString(), silent, SubscriptionApplyMode::Creation)
+                    .clientRandomAuthKey.isEmpty());
+}
+
 void TestSubscription::theCredentialsAndCertificateChangeWithoutValues()
 {
     ConfigToml current = storedConfig();
@@ -1265,6 +1349,8 @@ static QString brokenRule(const SubscriptionDocument &doc)
         return QStringLiteral("certificate");
     if (doc.upstreamProtocol != QLatin1String("http2") && doc.upstreamProtocol != QLatin1String("http3"))
         return QStringLiteral("protocol");
+    if (!isValidClientRandomAuthKey(doc.clientRandomAuthKey.value_or(QString())))
+        return QStringLiteral("auth key");
     return QString();
 }
 

@@ -36,6 +36,59 @@ public final class SplitStoreTest {
         @Override public List<GeoDefinition> get() { calls.incrementAndGet(); return rules; }
     }
 
+    @Test public void legacyListsStayInTheirSavedModeAndBothModesSurviveRestart() {
+        for (boolean through : new boolean[]{false, true}) {
+            MemoryBacking backing = new MemoryBacking().with("through", through)
+                    .with("domains", set("old.example")).with("apps", set("org.old.app"));
+            SplitProfiles first = load(backing);
+            assertEquals(through, first.through());
+            assertEquals(list("old.example"), first.domains("Default"));
+            assertTrue(SplitStore.edit(backing, null, p -> {
+                p.add("Work");
+                p.addDomains("Work", "10.0.0.0/8");
+                p.addApp("Work", "org.work.app");
+                p.setThrough(!through);
+                assertTrue(p.domains("Default").isEmpty());
+                assertTrue(p.apps("Work").isEmpty());
+                p.addDomains("Work", "other.example");
+                p.addApp("Work", "org.other.app");
+            }));
+            SplitStore.Rules other = SplitStore.rules(backing, null, "Work");
+            assertEquals(!through, other.through);
+            assertEquals(list("other.example"), other.domains);
+            assertEquals(list("org.other.app"), other.apps);
+            assertTrue(SplitStore.edit(backing, null, p -> p.setThrough(through)));
+            assertEquals(list("old.example"), load(backing).domains("Default"));
+            assertEquals(list("10.0.0.0/8"), load(backing).domains("Work"));
+            assertEquals(list("org.work.app"), load(backing).apps("Work"));
+            assertTrue(SplitStore.edit(backing, null, p -> { p.remove("Work"); p.add("Work"); p.setThrough(!through); }));
+            assertTrue(load(backing).apps("Work").isEmpty());
+            assertTrue(load(backing).domains("Work").isEmpty());
+        }
+    }
+
+    @Test public void versionOneProfilesMigrateWithoutInvertingTheirRules() throws Exception {
+        String json = "{\"v\":1,\"profiles\":[{\"name\":\"Default\",\"domains\":[\"old.example\"],\"apps\":[\"org.old\"]}]}";
+        MemoryBacking backing = new MemoryBacking().with(SplitStore.KEY, json).with("through", true);
+        assertTrue(load(backing).through());
+        assertEquals(list("org.old"), load(backing).apps("Default"));
+        assertTrue(SplitStore.edit(backing, null, p -> p.setThrough(false)));
+        assertTrue(load(backing).apps("Default").isEmpty());
+        assertTrue(SplitStore.edit(backing, null, p -> p.setThrough(true)));
+        assertEquals(list("old.example"), load(backing).domains("Default"));
+    }
+
+    @Test public void failedModeSwitchKeepsTheOldModeAndRulesTogether() {
+        MemoryBacking backing = new MemoryBacking().with("domains", set("old.example"));
+        load(backing);
+        backing.refuse = true;
+        assertFalse(SplitStore.edit(backing, null, p -> p.setThrough(true)));
+        SplitStore.Rules rules = SplitStore.rules(backing, null, "Default");
+        assertFalse(rules.through);
+        assertEquals(list("old.example"), rules.domains);
+        assertFalse(backing.getBoolean("through"));
+    }
+
     // A new installation.
 
     @Test public void backgroundReadsDoNotInitializeMigrateOrRepairSettings() {
@@ -88,7 +141,7 @@ public final class SplitStoreTest {
         assertNotNull(f.getString(SplitStore.KEY));
         assertEquals("the old lists are a copy of Default", set(), f.set("domains"));
         assertEquals(new HashSet<String>(), f.set("apps"));
-        assertNull("the mode is left to its default, the desktop's Bypass VPN", f.data.get("through"));
+        assertEquals("the saved mode is Bypass VPN", Boolean.FALSE, f.data.get("through"));
         // Made once: the next read is what was saved, and does not ask for the list.
         SplitProfiles again = SplitStore.load(f, recommended);
         assertEquals(1, recommended.calls.get());

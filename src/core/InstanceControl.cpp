@@ -37,7 +37,7 @@ namespace freetunnel {
 
 namespace {
 
-const QString kInstanceAuthKey = QStringLiteral("__freetunnel_instance_auth__");
+const QString kInstanceAuthKey = CredentialStore::keyForInstanceToken();
 
 QString randomInstanceToken()
 {
@@ -68,11 +68,24 @@ QString readInstanceAuthFile()
     return QString::fromUtf8(f.readAll()).trimmed();
 }
 
+// The token in the credential store, or empty when the store holds none or could
+// not be asked. The token is not a config's secret: nothing is connected without
+// it, a second launch just has to find it, and single-instance must go on working
+// where there is no keyring (it has the file below for that). So a store that
+// cannot be asked is read as one that holds nothing, and said so in the debug log.
+QString tokenInTheStore()
+{
+    const StoredSecret stored = CredentialStore::lookup(kInstanceAuthKey);
+    if (stored.failed())
+        qDebug("InstanceControl: the credential store could not be read; using the token file");
+    return stored.found() ? stored.value : QString();
+}
+
 // The token where a second launch would find it: the store's, or the fallback
 // file's when the store holds none.
 QString storedInstanceAuthToken()
 {
-    const QString stored = CredentialStore::loadPassword(kInstanceAuthKey);
+    const QString stored = tokenInTheStore();
     return stored.isEmpty() ? readInstanceAuthFile() : stored;
 }
 
@@ -447,7 +460,8 @@ void sweepLegacyInstanceAuthFile()
     const QString legacyPath = instanceAuthFilePath();
     if (!QFile::exists(legacyPath))
         return;
-    if (!CredentialStore::loadPassword(kInstanceAuthKey).isEmpty())
+    // Only a token the store was asked for and holds makes the file redundant.
+    if (!tokenInTheStore().isEmpty())
         QFile::remove(legacyPath);
 }
 
@@ -455,7 +469,7 @@ bool readInstanceAuthToken(QString *tokenOut)
 {
     if (!tokenOut)
         return false;
-    const QString fromStore = CredentialStore::loadPassword(kInstanceAuthKey);
+    const QString fromStore = tokenInTheStore();
     if (!fromStore.isEmpty()) {
         *tokenOut = fromStore;
         QFile::remove(instanceAuthFilePath()); // drop stale legacy file

@@ -36,7 +36,7 @@ VPN config's allowed ports are enabled; these tests do not disable that policy
 in the application.
 
 The Android test starts the real production service and native core, connects
-to the official TrustTunnel endpoint 1.1.0 over TLS/HTTP2, verifies a temporary
+to the official TrustTunnel endpoint 1.3.1 over TLS/HTTP2, verifies a temporary
 pinned certificate and waits for the production service's connected state.
 The endpoint listens only on runner loopback and is reached via `adb reverse`.
 The workflow verifies the release archive, and the probe verifies the extracted
