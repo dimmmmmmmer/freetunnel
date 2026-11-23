@@ -183,6 +183,9 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["geo_never", "GeoListsBlock", "Never"]
 ["geo_duplicate", "Backend", "This geo list is already in the profile"]
 ["geo_name", "GeoListOverlay", "Name"]
+["geo_list_type", "GeoListOverlay", "List type"]
+["geo_sites", "GeoListOverlay", "Sites"]
+["geo_ips", "GeoListOverlay", "IP addresses"]
 ["geo_add", "GeoListOverlay", "Add"]
 ["geo_bad_source", "Backend", "Enter a name and an HTTPS geo list address"]
 ["geo_limit", "GeoListsBlock", "Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."]
@@ -190,8 +193,7 @@ TABLE
 
 # Every other string, in groups that each say why the desktop has no such text.
 cat > "$TMP/only.txt" <<'ONLY'
-## Android geo form uses a type switch and a single update-failure notice
-geo_ip_list
+## Android uses a single geo update-failure notice
 geo_update_failed
 ## Content descriptions of the controls the desktop draws as icons alone (its nav bar and its logo have no words), and of the + chip
 text_home

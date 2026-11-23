@@ -254,7 +254,9 @@
     <string name="geo_auto">"Обновлять списки"</string>
     <string name="geo_duplicate">"Этот геосписок уже есть в профиле"</string>
     <string name="geo_name">"Название"</string>
-    <string name="geo_ip_list">"Список IP-адресов"</string>
+    <string name="geo_list_type">"Тип списка"</string>
+    <string name="geo_sites">"Сайты"</string>
+    <string name="geo_ips">"IP-адреса"</string>
     <string name="geo_add">"Добавить"</string>
     <string name="geo_bad_source">"Введите название и HTTPS-ссылку на геосписок"</string>
     <string name="geo_limit">"Слишком много правил. Отключите часть геосписков. Пока весь трафик идёт через VPN."</string>

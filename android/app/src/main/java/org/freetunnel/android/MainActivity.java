@@ -3086,6 +3086,17 @@ public final class MainActivity extends Activity {
         editRules(m -> m.putGeoList(m.edited(), definition), afterSave);
     }
 
+    private LinearLayout geoFormDropdown(int label, String key, String[] options, int[] selection) {
+        TextView[] value = new TextView[1];
+        return ui.dropdown(getString(label), options[selection[0]], key, value, v -> {
+            hideKeyboard();
+            showSelect(key, options, selection[0], index -> {
+                selection[0] = index;
+                value[0].setText(options[index]);
+            });
+        });
+    }
+
     private void showGeoForm() {
         if (overlay("geoform") != null) return;
         LinearLayout form = column(); form.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -3093,13 +3104,12 @@ public final class MainActivity extends Activity {
         EditText name = ui.pageInput(getString(R.string.geo_name), "geoform:name");
         EditText source = ui.pageInput("https://…/geosite.dat#category", "geoform:source");
         form.addView(name, lp(-1, 36)); gap(form, 8); form.addView(source, lp(-1, 36));
-        boolean[] ips = {false}; boolean[] bypass = {false};
-        ToggleView kind = ui.toggle(false, false, "geoform:ips");
-        kind.setListener((v, checked) -> ips[0] = checked);
-        form.addView(ui.toggleRow(getString(R.string.geo_ip_list), null, kind), ui.focusRowLp());
-        ToggleView direction = ui.toggle(false, false, "geoform:bypass");
-        direction.setListener((v, checked) -> bypass[0] = checked);
-        form.addView(ui.toggleRow(getString(R.string.text_bypass_vpn_61), null, direction), ui.focusRowLp());
+        int[] kind = {0};
+        int[] direction = {0};
+        form.addView(geoFormDropdown(R.string.geo_list_type, "geoform:kind",
+                new String[]{getString(R.string.geo_sites), getString(R.string.geo_ips)}, kind), lp(-1, -2));
+        form.addView(geoFormDropdown(R.string.geo_route, "geoform:direction",
+                new String[]{getString(R.string.text_through_vpn_62), getString(R.string.text_bypass_vpn_61)}, direction), lp(-1, -2));
         LinearLayout buttons = row();
         final Overlay[] shown = new Overlay[1];
         Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.NEUTRAL, 0, "geoform:cancel");
@@ -3110,7 +3120,7 @@ public final class MainActivity extends Activity {
             String title = name.getText().toString().trim(); String address = source.getText().toString().trim();
             if (title.isEmpty() || GeoLists.parseSource(address) == null) { toast(getString(R.string.geo_bad_source)); return; }
             GeoDefinition definition = new GeoDefinition(java.util.UUID.randomUUID().toString(), title, address,
-                    ips[0] ? GeoLists.Kind.IPS : GeoLists.Kind.SITES, bypass[0], true);
+                    kind[0] == 0 ? GeoLists.Kind.SITES : GeoLists.Kind.IPS, direction[0] == 1, true);
             addGeoDefinition(definition, () -> closeOverlay(shown[0]));
         });
         buttons.addView(add, lp(-2, 32)); form.addView(buttons, lp(-1, -2));

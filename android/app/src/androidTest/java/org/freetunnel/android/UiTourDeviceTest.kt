@@ -910,9 +910,26 @@ class UiTourDeviceTest {
             shot("geo-add-menu", "Add list menu with presets and a custom source")
             activate("select:" + GeoPresets.read(context).size)
             awaitOverlay("geoform")
-            typeInto("geoform:name", "My sites")
-            typeInto("geoform:source", "https://example.org/geosite.dat#category")
-            shot("geo-custom-list", "Custom geo-list form: HTTPS source, type and routing direction")
+            val source = "https://example.invalid/custom-networks.txt"
+            typeInto("geoform:name", "Office")
+            typeInto("geoform:source", source)
+            shot("geo-custom-list", "A new list defaults to Sites and Through VPN")
+            activate("geoform:kind")
+            awaitOverlay("select")
+            shot("geo-custom-type", "List type choices in the custom geo-list form")
+            activate("select:1")
+            activate("geoform:direction")
+            awaitOverlay("select")
+            shot("geo-custom-route", "Route choices in the custom geo-list form")
+            activate("select:1")
+            GeoCache(GeoRepository.directory(context)).store(source, GeoLists.Kind.IPS, true,
+                "192.0.2.0/24".toByteArray())
+            activate("geoform:add")
+            eventually("The custom list must be saved with its chosen type and route") {
+                SplitStore.readSaved(SplitPrefs(prefs))?.geoLists("Default")?.any {
+                    it.name == "Office" && it.source == source && it.kind == GeoLists.Kind.IPS && it.bypass
+                } == true
+            }
         }
         screen("split-through-vpn-notice") {
             // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
