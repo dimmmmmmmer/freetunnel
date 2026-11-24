@@ -6,16 +6,11 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QTextStream>
-#include <QTimer>
 #include <unistd.h>
 
 namespace freetunnel::installed_helper {
@@ -53,88 +48,44 @@ int sudoHelper(const QStringList &args, int timeout = -1)
 
 int elevated(const QStringList &operation)
 {
+    const QString exe = QCoreApplication::applicationFilePath();
 #ifdef Q_OS_MACOS
-    QString command = quote(QCoreApplication::applicationFilePath());
-    for (const QString &arg : operation) command += QLatin1Char(' ') + quote(arg);
-    command.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-    command.replace(QLatin1Char('"'), QStringLiteral("\\\""));
-    return execute(QStringLiteral("/usr/bin/osascript"),
-                   {QStringLiteral("-e"), QStringLiteral("do shell script \"%1\" with administrator privileges").arg(command)});
+    const QStringList command = QStringList{exe} + operation;
 #else
-    QStringList command = linuxHelperCommand(QCoreApplication::applicationFilePath(), runningAppImagePath(), 1, {});
+    QStringList command = linuxHelperCommand(exe, runningAppImagePath(), 1, {});
     command.erase(command.end() - 5, command.end());
     command += operation;
-    return execute(QStringLiteral("/usr/bin/pkexec"), command);
+#endif
+    // Respect existing administrator authorization (including managed hosts).
+    // sudo checks the exact command. An ordinary first run uses the OS dialog.
+    if (execute(QStringLiteral("/usr/bin/sudo"), {QStringLiteral("-n"), QStringLiteral("-v")}, 5000) == 0
+        && execute(QStringLiteral("/usr/bin/sudo"), QStringList{QStringLiteral("-n"), QStringLiteral("--")} + command, 120000) == 0)
+        return 0;
+#ifdef Q_OS_MACOS
+    QString shellCommand;
+    for (const QString &part : command) shellCommand += QLatin1Char(' ') + quote(part);
+    shellCommand.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    shellCommand.replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    return execute(QStringLiteral("/usr/bin/osascript"),
+                   {QStringLiteral("-e"), QStringLiteral("do shell script \"%1\" with administrator privileges").arg(shellCommand)}, 180000);
+#else
+    return execute(QStringLiteral("/usr/bin/pkexec"), command, 180000);
 #endif
 }
 
-bool download(QNetworkAccessManager &manager, const QUrl &url, const QString &path, qint64 limit)
+QDir bundledHelper()
 {
-    QNetworkRequest request(url);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setTransferTimeout(30000);
-    QNetworkReply *reply = manager.get(request);
-    reply->setReadBufferSize(65536);
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) { delete reply; return false; }
-    file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-    qint64 total = 0;
-    bool failed = false;
-    const auto drain = [&] {
-        const QByteArray chunk = reply->readAll();
-        if ((total += chunk.size()) > limit || file.write(chunk) != chunk.size()) {
-            failed = true;
-            reply->abort();
-        }
-    };
-    QEventLoop loop;
-    QTimer deadline;
-    deadline.setSingleShot(true);
-    QObject::connect(&deadline, &QTimer::timeout, reply, &QNetworkReply::abort);
-    QObject::connect(reply, &QNetworkReply::readyRead, &loop, drain);
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    deadline.start(60000);
-    loop.exec();
-    drain();
-    const bool ok = !failed && reply->error() == QNetworkReply::NoError
-            && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200 && file.flush();
-    delete reply;
-    return ok;
+#ifdef Q_OS_MACOS
+    return QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/vpn-helper"));
+#else
+    return QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/../share/freetunnel/vpn-helper"));
+#endif
 }
 
-QByteArray readManifestFile(const QString &path)
+QByteArray readSmall(const QString &path)
 {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.read(65537) : QByteArray();
-}
-
-enum class Preparation { Ready, Unavailable, Refused };
-
-Preparation prepareRuntime(const QTemporaryDir &cache, const QString &ownHash)
-{
-    const QString base = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/helper-%1/")
-            .arg(QStringLiteral(FREETUNNEL_VERSION));
-    QNetworkAccessManager manager;
-    const QString sums = cache.filePath(QStringLiteral("SHA256SUMS.txt"));
-    const QString sig = cache.filePath(QStringLiteral("SHA256SUMS.txt.sig"));
-    const QString archive = cache.filePath(assetName());
-    if (!download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt")), sums, 65536)
-        || !download(manager, QUrl(base + QStringLiteral("SHA256SUMS.txt.sig")), sig, 64)
-        || !download(manager, QUrl(base + assetName()), archive, 768LL * 1024 * 1024))
-        return Preparation::Unavailable;
-    QString error;
-    if (!verifyArchive(archive, readManifestFile(sums), readManifestFile(sig),
-                       QStringLiteral(FREETUNNEL_VERSION), true, &error))
-        return Preparation::Refused;
-    // A locally built executable may share the published version number. Check
-    // compatibility as the user, before presenting an administrator prompt.
-    // Root independently repeats all verification on its own private copy.
-    const QString unpacked = cache.filePath(QStringLiteral("unpacked"));
-    if (!QDir().mkdir(unpacked)
-        || execute(QStringLiteral("/usr/bin/tar"), {QStringLiteral("-xzf"), archive,
-                   QStringLiteral("-C"), unpacked}, 120000) != 0) return Preparation::Refused;
-    return sha256HexOfFile(unpacked + QStringLiteral("/runtime/") + executableRelativePath()) == ownHash
-            ? Preparation::Ready : Preparation::Unavailable;
 }
 
 int authorizeAndStart(const QStringList &args, const QString &uid)
@@ -173,27 +124,45 @@ int launch(int argc, char **argv)
     if (!QFileInfo(QStringLiteral("/usr/bin/sudo")).isExecutable()
         || !QFileInfo(QStringLiteral("/usr/sbin/visudo")).isExecutable())
         return transient(args);
-    const QString ownHash = sha256HexOfFile(app.applicationFilePath());
-    if (ownHash.isEmpty()) return 1;
     const QString uid = QString::number(::getuid());
-    if (sha256HexOfFile(executablePath()) == ownHash) return authorizeAndStart(args, uid);
-    // Only release builds can install a permanent runtime. Development builds
-    // keep the existing prompted helper; they must never silently replace the
-    // administrator's installed copy with unsigned code.
+    const QString installedHash = sha256HexOfFile(executablePath());
+    const QDir bundle = bundledHelper();
+    if (!bundle.exists()) {
+        // The Debian package has already installed the same executable. A
+        // source checkout can still run a single prompted session.
+        if (!installedHash.isEmpty() && installedHash == sha256HexOfFile(app.applicationFilePath()))
+            return authorizeAndStart(args, uid);
+        return transient(args);
+    }
+    const QString sumsName = QStringLiteral("SHA256SUMS.txt");
+    const QString sigName = QStringLiteral("SHA256SUMS.txt.sig");
+    const QByteArray sums = readSmall(bundle.filePath(sumsName));
+    const QByteArray sig = readSmall(bundle.filePath(sigName));
+    // Signing the outer .app seals its new resources and changes its Mach-O
+    // hash. The manifest identifies the executable inside the helper archive.
+    const QString expected = expectedSha256FromSums(sums, QStringLiteral("helper-executable"));
+    if (versionFromSums(sums) != QStringLiteral(FREETUNNEL_VERSION) || expected.size() != 64
+        || !verifyHelperManifest(sums, sig, true))
+        return 1;
+    if (installedHash == expected) return authorizeAndStart(args, uid);
+
     progress("preparing");
+    // A root process cannot read a user-private AppImage FUSE mount. Stage
+    // ordinary files before elevation. Root verifies its own private snapshot.
     QTemporaryDir cache;
     if (!cache.isValid()) return 1;
-    const Preparation prepared = prepareRuntime(cache, ownHash);
-    if (prepared == Preparation::Unavailable) return transient(args);
-    if (prepared == Preparation::Refused) return 1;
+    for (const QString &name : {assetName(), sumsName, sigName}) {
+        if (!QFile::copy(bundle.filePath(name), cache.filePath(name))) return 1;
+    }
+    if (!verifyFileAgainstSums(cache.filePath(assetName()), sums, assetName())) return 1;
     progress("installing");
-    const QStringList installation{cache.filePath(assetName()), cache.filePath(QStringLiteral("SHA256SUMS.txt")),
-                                   cache.filePath(QStringLiteral("SHA256SUMS.txt.sig")), ownHash, uid};
+    const QStringList installation{cache.filePath(assetName()), cache.filePath(sumsName),
+                                   cache.filePath(sigName), expected, uid};
     if (QFileInfo::exists(executablePath()) && sudoHelper({QStringLiteral("check")}, 5000) == 0) {
         if (sudoHelper(QStringList{QStringLiteral("update")} + installation, 120000) != 0)
             return transient(args);
     } else if (elevated(QStringList{QStringLiteral("--install-helper")} + installation) != 0) return 1;
-    if (sha256HexOfFile(executablePath()) != ownHash) return 1;
+    if (sha256HexOfFile(executablePath()) != expected) return 1;
     progress("starting");
     return sudoHelper(QStringList{QStringLiteral("start")} + args);
 }

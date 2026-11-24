@@ -17,6 +17,7 @@ bool validStartArguments(const QStringList &args);
 
 // The archive must be authenticated before anything is extracted. The signed
 // release version and the executable in that archive are checked independently.
+bool verifyHelperManifest(const QByteArray &sums, const QByteArray &signature, bool allowBundledKey);
 bool verifyArchive(const QString &archive, const QByteArray &sums, const QByteArray &signature,
                    const QString &currentVersion, bool allowSameVersion, QString *error);
 

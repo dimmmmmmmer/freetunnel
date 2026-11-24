@@ -317,6 +317,19 @@ jobs:
           test -f upstream/conanfile.py
           test -f upstream/requirements.txt
 
+      - name: Generate a disposable helper signing key for this CI build
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'windows' && !startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/ci-helper.pem"
+          openssl pkey -in "$RUNNER_TEMP/ci-helper.pem" -pubout | awk '
+            BEGIN { print "#pragma once\nnamespace freetunnel {\ninline constexpr auto kBundledHelperSigningPublicKeyPem =" }
+            { print "\"" $0 "\\n\"" }
+            END { print ";\n}" }
+          ' > upstream/FreeTunnel/include/vpn/BundledHelperKey.h
+
       - name: Set up Python
         if: needs.changes.outputs.desktop != 'false'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -969,49 +982,9 @@ jobs:
           grep -qF "$commit" client/THIRD_PARTY_NOTICES.md \
             || echo "::warning::the AppImage runtime is now type2-runtime $commit, which THIRD_PARTY_NOTICES.md does not name: check the libfuse, squashfuse and Alpine versions there and in licenses/desktop/AppImage-runtime.txt"
 
-      # Portable AppImage for distros without .deb integration (Fedora, Arch, etc.).
-      - name: Package AppImage (Linux)
+      - name: Save the deployed AppDir and verified AppImage runtime
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
-        shell: bash -e {0}
-        run: |
-          set -euxo pipefail
-          if [ ! -x AppDir/usr/bin/FreeTunnel ]; then
-            echo "::error::AppDir missing — cannot build AppImage"
-            exit 1
-          fi
-          test -s AppDir/usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md \
-            || { echo "::error::AppDir has no usr/share/doc/freetunnel/THIRD_PARTY_NOTICES.md"; exit 1; }
-          test -s AppDir/usr/share/doc/freetunnel/appimage-runtime.txt && test -s runtime-x86_64 \
-            || { echo "::error::the AppImage runtime was not fetched"; exit 1; }
-          # No FUSE in a container: without this linuxdeploy cannot mount itself.
-          export APPIMAGE_EXTRACT_AND_RUN=1
-          # The runtime the step above fetched and wrote down, which the plugin
-          # passes to appimagetool as --runtime-file. Without it appimagetool
-          # downloads the newest one itself, which the record would not name.
-          export LDAI_RUNTIME_FILE="$PWD/runtime-x86_64"
-          ld=linuxdeploy-x86_64.AppImage
-          PATH="$PWD:$PATH" ./"$ld" --appdir AppDir --output appimage 2>&1 | tee appimage.log
-          if grep -q 'Downloading runtime file' appimage.log; then
-            echo "::error::appimagetool downloaded a runtime instead of using $LDAI_RUNTIME_FILE"
-            exit 1
-          fi
-          # By its exact name, which linuxdeploy builds from the desktop file's
-          # Name and the architecture. It writes it here, beside its own two
-          # AppImages, and this used to take whichever *.AppImage sorted first:
-          # ours, by the luck of the alphabet. Had the output been named anything
-          # else, or not been written at all, linuxdeploy itself would have been
-          # published as the AppImage and signed into SHA256SUMS.txt.
-          appimage=FreeTunnel-x86_64.AppImage
-          if [ ! -f "$appimage" ]; then
-            echo "::error::linuxdeploy did not write $appimage. AppImages here:"
-            ls -la -- *.AppImage || true
-            exit 1
-          fi
-          # Not "linux" in the name, unlike the other artifacts: every AppImage is
-          # for Linux, and the AppImage catalog flags it. The in-app updater picks
-          # the asset by its .AppImage suffix, so older versions still find it.
-          mv "$appimage" "out/freetunnel-x86_64.AppImage"
-          ls -la out
+        run: tar -cf appimage-layout.tar AppDir runtime-x86_64
 
       - name: Build & package universal (macOS)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'macos'
@@ -1100,128 +1073,46 @@ jobs:
           mkdir -p out
           python3 client/scripts/package-unix-helper.py "$APP" \
             out/freetunnel-helper-macos-universal.tar.gz macos
-          RW=out/rw.dmg
-          # Sized from what goes in, rather than a fixed 200m that the bundle
-          # would one day outgrow (create then fails with "No space left on
-          # device"): the .app and the volume icon, a quarter again for the
-          # filesystem's own bookkeeping, and 20 MB for the journal.
-          content_kb=$(( $(du -sk "$APP" | cut -f1) + $(du -sk client/assets/logo.icns | cut -f1) ))
-          rw_kb=$(( content_kb * 5 / 4 + 20 * 1024 ))
-          echo "rw.dmg: ${rw_kb} KB for ${content_kb} KB of content"
-          # Every disk device out/rw.dmg is attached as: the first whole-disk
-          # node of each of its entries in hdiutil info. There can be more than
-          # one. A create that fails leaves the image it made attached, with no
-          # volume mounted, and the attach below then adds a second entry beside
-          # it; detaching only the device our own attach printed let a build
-          # wait out six attempts on an image that was still attached as the
-          # other one:
-          #
-          #   hdiutil: create failed - Resource busy
-          #   ##[error]out/rw.dmg is still attached (as /dev/disk7) after six detach attempts
-          #   (hdiutil info: out/rw.dmg on /dev/disk5, nothing mounted)
-          rw_devices() {
-            hdiutil info 2>/dev/null | awk -v img="/$RW" '
-              /^image-path/ { cur = index($0, img) > 0; first = 1; next }
-              /^=+$/ { cur = 0; next }
-              cur && first && $1 ~ /^\/dev\/disk[0-9]+$/ { print $1; first = 0 }'
-          }
-          # "Resource busy" here is transient and it has failed a build: the .app
-          # was written seconds ago and Spotlight/fseventsd can still be walking
-          # it, and a /Volumes/FreeTunnel or an image left attached by an earlier
-          # attempt holds the volume name. Clean up and retry — the detach below
-          # already does the same thing for the same reason, and a release build
-          # should not die on this.
-          for attempt in 1 2 3 4 5; do
-            hdiutil detach /Volumes/FreeTunnel -force >/dev/null 2>&1 || true
-            for dev in $(rw_devices); do
-              hdiutil detach "$dev" -force >/dev/null 2>&1 || true
-            done
-            if hdiutil create -volname "FreeTunnel" -srcfolder "$APP" -size "${rw_kb}k" \
-                 -ov -format UDRW "$RW"; then
-              break
-            fi
-            if [ "$attempt" = 5 ]; then
-              echo "::error::hdiutil create failed five times — not a transient"
-              exit 1
-            fi
-            echo "hdiutil create failed (attempt $attempt) — retrying in 15 s"
-            sleep 15
-          done
-          ATTACHED=$(hdiutil attach -readwrite -noverify -noautofsck "$RW")
-          echo "$ATTACHED"
-          MOUNT=$(echo "$ATTACHED" | awk '/\/Volumes\// {print $NF; exit}')
-          cp client/assets/logo.icns "$MOUNT/.VolumeIcon.icns"
-          SetFile -a C "$MOUNT/.VolumeIcon.icns"
-          ln -sf /Applications "$MOUNT/Applications"
-          bless --folder "$MOUNT" --openfolder "$MOUNT" --icon "$MOUNT/.VolumeIcon.icns" || true
-          # Spotlight/fseventsd can hold the volume briefly — retry the detach,
-          # but judge the OUTCOME rather than the exit status. The first detach can
-          # report "Resource busy" and still complete a moment later, after which
-          # every retry fails with "No such file or directory" — which is the state
-          # we were asking for. The old loop read that as failure, and its
-          # unguarded -force on the last attempt then killed a release build under
-          # set -eux for having nothing left to do:
-          #
-          #   hdiutil: couldn't eject "disk5" - Resource busy
-          #   hdiutil: detach failed - No such file or directory   (x4, then -force)
-          #   ##[error]Process completed with exit code 1
-          for i in 1 2 3 4 5; do
-            [ -d "$MOUNT" ] || break
-            if hdiutil detach "$MOUNT" >/dev/null 2>&1; then break; fi
-            if [ "$i" = 5 ]; then
-              hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
-            fi
-            sleep 5
-          done
-          if [ -d "$MOUNT" ]; then
-            echo "::error::DMG volume still mounted at $MOUNT after five detach attempts"
-            exit 1
+
+      - name: Prepare the bundled helper manifest
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'windows'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^project\(FreeTunnel VERSION ([0-9.]+).*/\1/p' client/CMakeLists.txt)
+          if [ "$PLATFORM" = macos ]; then
+            exe=build-arm64/FreeTunnel/FreeTunnel.app/Contents/MacOS/FreeTunnel
+            archive=freetunnel-helper-macos-universal.tar.gz
+          else
+            exe=AppDir/usr/bin/FreeTunnel
+            archive=freetunnel-helper-linux-x86_64.tar.gz
           fi
-          # The mount point disappearing is not the same as the image being free.
-          # Unmounting the volume and releasing the disk device behind it are two
-          # steps, and the second does not always follow. On a failed build the
-          # first detach reported an error, the volume went a moment later, and
-          # hdiutil info went on listing out/rw.dmg for the whole thirty seconds
-          # this used to wait. Convert then failed five times with
-          #
-          #   hdiutil: convert failed - Resource temporarily unavailable
-          #
-          # So detach the devices themselves, forcing them on the last attempt,
-          # until the image is not attached at all, and stop with their state if
-          # they never let go.
-          for i in 1 2 3 4 5 6; do
-            devs=$(rw_devices)
-            [ -n "$devs" ] || break
-            for dev in $devs; do
-              if [ "$i" = 6 ]; then
-                hdiutil detach "$dev" -force >/dev/null 2>&1 || true
-              else
-                hdiutil detach "$dev" >/dev/null 2>&1 || true
-              fi
-            done
-            sleep 5
-          done
-          devs=$(rw_devices)
-          if [ -n "$devs" ]; then
-            echo "::error::out/rw.dmg is still attached (as ${devs//$'\n'/ }) after six detach attempts"
-            hdiutil info || true
-            exit 1
+          mkdir helper-manifest
+          {
+            printf '#version=%s\n' "${version:?}"
+            (cd out && shasum -a 256 "$archive")
+            shasum -a 256 "$exe" | awk '{print $1 "  helper-executable"}'
+          } > helper-manifest/SHA256SUMS.txt
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/ci-helper.pem" \
+              -in helper-manifest/SHA256SUMS.txt -out helper-manifest/SHA256SUMS.txt.sig
           fi
-          for i in 1 2 3 4 5; do
-            if hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 \
-                 -o out/${{ matrix.artifact }}.dmg; then
-              break
-            fi
-            if [ "$i" = 5 ]; then
-              echo "::error::hdiutil convert failed five times — not a transient"
-              exit 1
-            fi
-            echo "hdiutil convert failed (attempt $i) — retrying in 10 s; what has it open:"
-            lsof "$RW" || true
-            rm -f out/${{ matrix.artifact }}.dmg
-            sleep 10
-          done
-          rm -f "$RW"
+
+      - name: Upload helper manifest
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: helper-manifest-${{ matrix.platform }}
+          path: helper-manifest/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
+        with:
+          name: appimage-layout
+          path: appimage-layout.tar
+          if-no-files-found: error
 
       - name: Package (Windows)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
@@ -1505,12 +1396,126 @@ jobs:
           # Not taskkill's last exit code, which the runner would otherwise report.
           exit 0
 
+  sign-bundled-helpers:
+    name: Sign bundled release helpers
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, core-pin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Require Tests and Security on the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-release-ci.sh "$GITHUB_SHA" tests.yml security.yml
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: helper-manifest-*
+          path: inputs
+      - name: Sign the manifests without running the packaged code
+        env:
+          ED25519_SIGNING_KEY: ${{ secrets.ED25519_SIGNING_KEY }}
+        run: |
+          set -eu
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "${ED25519_SIGNING_KEY:?}" > "$key"
+          for platform in linux macos; do
+            mkdir -p "signed/$platform"
+            manifest="signed/$platform/SHA256SUMS.txt"
+            cp "inputs/helper-manifest-$platform/SHA256SUMS.txt" "$manifest"
+            test "$(head -1 "$manifest")" = "#version=${GITHUB_REF_NAME#v}"
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "$manifest" -out "$manifest.sig"
+            bash scripts/verify-release-signature.sh include/core/ReleaseSigning.h "$manifest" "$manifest.sig"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-helper-manifests
+          path: signed/
+          if-no-files-found: error
+
+  portable:
+    name: Package and connect (${{ matrix.platform }})
+    needs: [changes, build, sign-bundled-helpers]
+    if: >-
+      !cancelled() && needs.changes.outputs.desktop != 'false' && needs.build.result == 'success' &&
+      (needs.sign-bundled-helpers.result == 'success' || !startsWith(github.ref, 'refs/tags/v'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux, os: ubuntu-24.04, artifact: freetunnel-linux-x86_64 }
+          - { platform: macos, os: macos-15, artifact: freetunnel-macos-universal }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: payload
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: helper-manifest-${{ matrix.platform }}
+          path: inputs/helper-manifest
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: runner.os == 'Linux'
+        with:
+          name: appimage-layout
+          path: inputs
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: signed-helper-manifests
+          path: signed
+      - name: Install the SquashFS packager
+        if: runner.os == 'Linux'
+        run: command -v mksquashfs || sudo apt-get install -y squashfs-tools
+      - name: Build the self-contained installer
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          manifest=inputs/helper-manifest
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then manifest="signed/$PLATFORM"; fi
+          mkdir out
+          if [ "$PLATFORM" = macos ]; then
+            archive=freetunnel-helper-macos-universal.tar.gz
+            tar -xzf "payload/$archive"
+            app=runtime/FreeTunnel.app
+            dest="$app/Contents/Resources/vpn-helper"
+            exe="$app/Contents/MacOS/FreeTunnel"
+          else
+            archive=freetunnel-helper-linux-x86_64.tar.gz
+            tar -xf inputs/appimage-layout.tar
+            dest=AppDir/usr/share/freetunnel/vpn-helper
+            exe=AppDir/usr/bin/FreeTunnel
+          fi
+          test "$(shasum -a 256 "$exe" | cut -d' ' -f1)" = "$(awk '$2 == "helper-executable" {print $1}' "$manifest/SHA256SUMS.txt")"
+          test "$(shasum -a 256 "payload/$archive" | cut -d' ' -f1)" = "$(awk -v a="$archive" '$2 == a {print $1}' "$manifest/SHA256SUMS.txt")"
+          mkdir -p "$dest"
+          cp "$manifest/SHA256SUMS.txt" "$manifest/SHA256SUMS.txt.sig" "payload/$archive" "$dest/"
+          if [ "$PLATFORM" = macos ]; then
+            codesign --force --sign - "$app"
+            codesign --verify --deep --strict "$app"
+            bash scripts/make-dmg.sh "$app"
+          else
+            bash scripts/make-appimage.sh
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: freetunnel-portable-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error
+
   release:
     name: Publish release
     # core-pin refuses a tag whose core is not a stable release. The `if` below
     # has no status function, so a failed need skips this job: nothing is
     # checksummed, signed or published.
-    needs: [build, core-pin]
+    needs: [build, core-pin, portable]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
