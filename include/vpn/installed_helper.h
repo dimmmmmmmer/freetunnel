@@ -7,6 +7,10 @@
 
 namespace freetunnel::installed_helper {
 
+#ifdef Q_OS_LINUX
+inline constexpr char kDebianExecutable[] = "/opt/freetunnel/bin/FreeTunnel";
+#endif
+
 QString rootDirectory();
 QString executableRelativePath();
 QString assetName();
@@ -17,6 +21,7 @@ bool validStartArguments(const QStringList &args);
 
 // The archive must be authenticated before anything is extracted. The signed
 // release version and the executable in that archive are checked independently.
+bool verifyHelperManifest(const QByteArray &sums, const QByteArray &signature, bool allowBundledKey);
 bool verifyArchive(const QString &archive, const QByteArray &sums, const QByteArray &signature,
                    const QString &currentVersion, bool allowSameVersion, QString *error);
 

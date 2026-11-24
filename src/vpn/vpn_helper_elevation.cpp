@@ -343,8 +343,20 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
         }
     });
     m_proc->setStandardErrorFile(QProcess::nullDevice());
-    m_proc->start(exe, {QStringLiteral("--launch-installed-helper"), QStringLiteral("--port"),
-                        QString::number(port), QStringLiteral("--token-file"), tokenPath});
+    QString launcher = exe;
+    QStringList arguments;
+#ifdef Q_OS_LINUX
+    // Start through the runtime so the new launcher inherits its own FUSE
+    // keepalive pipe or, in extract-and-run mode, its runtime parent.
+    const auto image = freetunnel::runningAppImage();
+    if (!image.path.isEmpty()) {
+        launcher = image.path;
+        arguments = image.launchArguments();
+    }
+#endif
+    arguments << QStringLiteral("--launch-installed-helper") << QStringLiteral("--port")
+              << QString::number(port) << QStringLiteral("--token-file") << tokenPath;
+    m_proc->start(launcher, arguments);
     if (m_proc->waitForStarted(5000)) return true;
     if (err) *err = tr("Could not start the VPN helper");
     return false;

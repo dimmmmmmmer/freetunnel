@@ -2,13 +2,18 @@
 #include "core/AppImagePath.h"
 
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QStringList>
 
 #ifdef Q_OS_LINUX
-#include <unistd.h> // getppid
+#include <QSet>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 #endif
 
 namespace freetunnel {
@@ -65,6 +70,75 @@ QString extractionDigest(const QString &path)
 }
 
 #ifdef Q_OS_LINUX
+// Type 2's FUSE daemon runs the AppImage itself. It holds /dev/fuse and
+// writes to a keepalive pipe inherited by AppRun. Neither a filename in the
+// working directory nor an environment variable identifies that daemon.
+QSet<quint64> runtimePipes()
+{
+    QSet<quint64> pipes;
+    for (const QString &name : QDir(QStringLiteral("/proc/self/fd")).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System)) {
+        bool ok = false;
+        const int fd = name.toInt(&ok);
+        struct stat st{};
+        if (ok && ::fstat(fd, &st) == 0 && S_ISFIFO(st.st_mode)
+            && (::fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDONLY)
+            pipes.insert(st.st_ino);
+    }
+    return pipes;
+}
+
+bool matchesFuseConnection(const QString &infoPath, unsigned int device)
+{
+    QFile info(infoPath);
+    if (!info.open(QIODevice::ReadOnly)) return false;
+    for (const QByteArray &line : info.readAll().split('\n')) {
+        if (line.startsWith("fuse_connection:"))
+            return line.mid(sizeof("fuse_connection:") - 1).trimmed() == QByteArray::number(device);
+    }
+    // Older kernels only expose the keepalive pipe shared with AppRun.
+    return true;
+}
+
+bool servesRuntime(const QString &process, const QSet<quint64> &pipes, unsigned int device)
+{
+    const QDir directory(process + QStringLiteral("/fd"));
+    bool sharedPipe = false;
+    bool fuse = false;
+    for (const QString &name : directory.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System)) {
+        const QString path = directory.filePath(name);
+        struct stat st{};
+        if (::stat(QFile::encodeName(path).constData(), &st) != 0) continue;
+        if (S_ISFIFO(st.st_mode) && pipes.contains(st.st_ino)) sharedPipe = true;
+        if (S_ISCHR(st.st_mode) && QFile::symLinkTarget(path) == QLatin1String("/dev/fuse")
+            && matchesFuseConnection(process + QStringLiteral("/fdinfo/") + name, device)) fuse = true;
+    }
+    return fuse && sharedPipe;
+}
+
+QString imageForMountLabel(const QString &label, const QString &exe)
+{
+    // The runtime retains its mount root at fd 1023 when it execs AppRun.
+    struct stat root{};
+    struct stat binary{};
+    if (::fstat(1023, &root) != 0 || !S_ISDIR(root.st_mode)
+        || ::stat(QFile::encodeName(exe).constData(), &binary) != 0 || binary.st_dev != root.st_dev)
+        return {};
+    const auto pipes = runtimePipes();
+    if (pipes.isEmpty() || label.contains(QLatin1Char('/'))) return {};
+    QString image;
+    const QDir proc(QStringLiteral("/proc"));
+    for (const QString &pid : proc.entryList({QStringLiteral("[0-9]*")}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString process = proc.filePath(pid);
+        const QFileInfo candidate(QFile::symLinkTarget(process + QStringLiteral("/exe")));
+        if (candidate.fileName() != label || !candidate.isFile() || !servesRuntime(process, pipes, minor(root.st_dev)))
+            continue;
+        const QString path = candidate.canonicalFilePath();
+        if (!image.isEmpty() && image != path) return {};
+        image = path;
+    }
+    return image;
+}
+
 // The AppImage behind a FUSE mount containing `exe`, as the kernel names it.
 QString mountedAppImagePath(const QString &exe)
 {
@@ -76,11 +150,10 @@ QString mountedAppImagePath(const QString &exe)
     if (source.isEmpty())
         return QString();
 
-    // squashfuse passes the archive as its device name, so for an AppImage the
-    // source is the .AppImage file itself. Other FUSE filesystems put a label
-    // there ("squashfuse", "gvfsd-fuse"); those are not regular files, and a
-    // caller about to elevate must not be handed a guess.
+    // Some FUSE runtimes record the full path. Our type 2 runtime records
+    // only the basename, even when the AppImage was launched by absolute path.
     const QFileInfo info(source);
+    if (!info.isAbsolute()) return imageForMountLabel(source, exe);
     if (!info.isFile())
         return QString();
     return info.canonicalFilePath();
@@ -164,7 +237,7 @@ RunningAppImage runningAppImage()
     const QString exe = QFileInfo(QStringLiteral("/proc/self/exe")).canonicalFilePath();
     if (exe.isEmpty())
         return {};
-    const QString mounted = mountedAppImagePath(exe);
+    static const QString mounted = mountedAppImagePath(exe);
     if (!mounted.isEmpty())
         return {mounted, false};
     const QString extracted = extractedAppImagePath(exe);

@@ -455,7 +455,7 @@ void VpnHelperClient::startHelperConnectRetry()
             return;
         }
         // 60 s for a normal start or password prompt; allow up to four minutes
-        // while a signed installed runtime is downloaded and prepared. The
+        // while the signed bundled runtime is verified and installed. The
         // launcher resets the deadline when it starts the session itself.
         if (++m_tries > (m_preparingInstalledHelper ? 960 : 240)) {
             m_attempt->stop();

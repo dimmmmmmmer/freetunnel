@@ -158,4 +158,17 @@ with tempfile.TemporaryDirectory() as temporary:
     run(installed, "--remove-helper")
     assert not root.exists()
 
+    # A busy postinst may leave the package installed without a matching
+    # helper. Authorize only the launcher's exact one-time recovery command.
+    rule = Path("/etc/sudoers.d/ft-postinst-test")
+    rule.write_text("#1001 ALL=(root) NOPASSWD: /opt/freetunnel/bin/FreeTunnel --install-packaged-helper 1001\n")
+    rule.chmod(0o440)
+    run("visudo", "-c")
+    result = run("runuser", "-u", "helper-a", "--", packaged, "--launch-installed-helper", *start[1:])
+    assert result.stdout.splitlines() == ["installing", "starting"]
+    rule.unlink()
+    as_user("helper-a", "check")
+    as_user("helper-b", "check", success=False)
+    run(installed, "--remove-helper")
+
 print("PASS: signed installation/update, downgrade/tamper rejection, per-user grants, token ownership, busy runtime, removal, package installation")

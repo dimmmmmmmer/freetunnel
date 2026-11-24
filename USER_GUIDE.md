@@ -62,15 +62,10 @@ The VPN requires elevated privileges:
 | Windows, portable or development build | A UAC prompt when the helper starts |
 | macOS, Linux, signed releases | One administrator confirmation to install or authorize the helper for your account; subsequent connections and signed helper updates need no password |
 
-The Debian package installs the helper with the application. macOS and AppImage
-downloads prepare it on first connection. The first setup needs access to the
-release downloads; if a matching helper archive is unavailable, the usual
-session password prompt remains available. Development builds also use that
-prompt. The VPN still stops when you **Quit** FreeTunnel.
-
-FreeTunnel downloads the matching macOS or Linux archive from the separate
-`helper-X.Y.Z` release.
-Install the usual DMG, AppImage or Debian package yourself.
+The DMG and AppImage include the signed VPN helper. FreeTunnel installs it
+locally on the first connection using administrator authorization. The Debian
+package installs it during package setup. Subsequent connections reuse the
+installed helper. The VPN stops when you **Quit** FreeTunnel.
 
 To remove the installed helper, quit FreeTunnel first. On macOS:
 

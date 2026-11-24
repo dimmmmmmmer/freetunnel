@@ -2,6 +2,7 @@
 #include "vpn/installed_helper.h"
 
 #include "core/ReleaseSigning.h"
+#include "vpn/BundledHelperKey.h"
 #include "core/ReleaseVerify.h"
 #include "core/VersionCompare.h"
 #include <QFileInfo>
@@ -80,6 +81,20 @@ bool validStartArguments(const QStringList &args)
             && QFileInfo(args[3]).fileName().startsWith(QLatin1String(".fthelper-"));
 }
 
+bool verifyHelperManifest(const QByteArray &sums, const QByteArray &signature, bool allowBundledKey)
+{
+#ifdef FT_INSTALLED_HELPER_TEST_KEY
+    Q_UNUSED(allowBundledKey)
+    const QByteArray key("-----BEGIN PUBLIC KEY-----\n"
+                         "MCowBQYDK2VwAyEAl/2X8WjH5cSx7grWmqx1lBiAYld85dLQgohY2tlDJ0k=\n"
+                         "-----END PUBLIC KEY-----\n");
+#else
+    const QByteArray key(allowBundledKey ? kBundledHelperSigningPublicKeyPem : kReleaseSigningPublicKeyPem);
+#endif
+    return !sums.isEmpty() && sums.size() <= 65536 && signature.size() == 64
+            && verifyEd25519Signature(sums, signature, key);
+}
+
 bool verifyArchive(const QString &archive, const QByteArray &sums, const QByteArray &signature,
                    const QString &currentVersion, bool allowSameVersion, QString *error)
 {
@@ -87,15 +102,7 @@ bool verifyArchive(const QString &archive, const QByteArray &sums, const QByteAr
         if (error) *error = why;
         return false;
     };
-#ifdef FT_INSTALLED_HELPER_TEST_KEY
-    const QByteArray key("-----BEGIN PUBLIC KEY-----\n"
-                         "MCowBQYDK2VwAyEAl/2X8WjH5cSx7grWmqx1lBiAYld85dLQgohY2tlDJ0k=\n"
-                         "-----END PUBLIC KEY-----\n");
-#else
-    const QByteArray key(kReleaseSigningPublicKeyPem);
-#endif
-    if (sums.isEmpty() || sums.size() > 65536 || signature.size() != 64
-        || !verifyEd25519Signature(sums, signature, key))
+    if (!verifyHelperManifest(sums, signature, allowSameVersion))
         return refuse(QStringLiteral("The helper update has no valid release signature."));
     const QString version = versionFromSums(sums);
     static const QRegularExpression release(QStringLiteral("\\A[0-9]+\\.[0-9]+\\.[0-9]+\\z"));

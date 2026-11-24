@@ -586,7 +586,8 @@ the desktop's `v*` release.
      appends the install notes and a compare link to the previous release;
    - publishes the macOS and Linux helper archives and their signed manifest in
      `helper-X.Y.Z` on the same commit, with Latest disabled. The client requests
-     this exact version. A retry checks the files of an already published helper
+     this exact version in 1.3.0. New DMGs and AppImages carry their own signed
+     helper manifest and archive. A retry checks the files of an already published helper
      release before proceeding;
    - publishes the installers with their own signed manifest in `vX.Y.Z`.
      Public files must match on retry.
