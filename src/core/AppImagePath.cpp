@@ -118,7 +118,8 @@ bool servesRuntime(const QString &process, const QSet<quint64> &pipes, unsigned 
 QString imageForMountLabel(const QString &label, const QString &exe)
 {
     // The runtime retains its mount root at fd 1023 when it execs AppRun.
-    struct stat root{}, binary{};
+    struct stat root{};
+    struct stat binary{};
     if (::fstat(1023, &root) != 0 || !S_ISDIR(root.st_mode)
         || ::stat(QFile::encodeName(exe).constData(), &binary) != 0 || binary.st_dev != root.st_dev)
         return {};

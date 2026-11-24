@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
 
-- The macOS DMG and Linux AppImage include the VPN helper. First connection works without access to GitHub.
+- The macOS DMG and Linux AppImage now include the signed VPN helper. FreeTunnel installs it on the first connection without downloading anything from GitHub and reuses it on subsequent connections.
+- Fixed a macOS packaging issue that invalidated the helper’s code signature after extraction.
+- On Linux, the AppImage can install the helper when launched from a different folder. Debian installations can also finish a deferred helper update from the installed package.
 
 ## 1.3.0
 
