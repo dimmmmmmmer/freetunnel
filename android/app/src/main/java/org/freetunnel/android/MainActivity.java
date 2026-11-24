@@ -3177,32 +3177,15 @@ public final class MainActivity extends Activity {
         return SplitProfiles.DEFAULT.equals(name) ? getString(R.string.split_profile_default) : name;
     }
 
-    // Show fallbacks for the active server's split profile, followed by imported and migrated rules.
     private List<CharSequence> splitNotices(SplitProfiles model, boolean enabled, boolean through) {
         List<CharSequence> notices = new ArrayList<>();
-        if (enabled && through) {
-            if (configs.isEmpty()) {
-                SplitStore.Rules rules = SplitStore.rules(splitPrefs, null, SplitProfiles.DEFAULT);
-                if (rules.domains.isEmpty() && installedApps(rules.apps).isEmpty() && !hasReadyGeoVpn(rules)) notices.add(getString(R.string.split_notice_nothing_no_configs));
-            } else {
-                Config active = activeConfig();
-                String profile = model.effective(active.profile);
-                SplitStore.Rules rules = SplitStore.rules(splitPrefs, null, profile);
-                Integer warning = null;
-                try { warning = RoutingConfig.prepare(active.toml, true, true, rules.domains, installedApps(rules.apps), true).getWarning(); }
-                catch (Exception unusable) { /* a config that does not pass is said so where it is used */ }
-                long geoBytes = 0;
-                for (GeoDefinition definition : rules.geoLists) {
-                    GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
-                    if (definition.enabled && cached != null) geoBytes += cached.routingBytes;
-                }
-                if (geoBytes > 8 * 1024 * 1024) warning = R.string.geo_limit;
-                else if (warning != null && warning == R.string.text_no_through_vpn_rules_full_vpn_is_enabled && hasReadyGeoVpn(rules)) warning = null;
-                String config = ShownText.elideMiddle(ShownText.oneLine(active.name), 36);
-                if (warning != null && warning == R.string.text_no_through_vpn_rules_full_vpn_is_enabled)
-                    notices.add(getString(R.string.split_notice_nothing, config, profileLabel(profile)));
-                else if (warning != null && warning == R.string.geo_limit) notices.add(getString(R.string.geo_limit));
+        if (enabled && through && !configs.isEmpty()) {
+            long geoBytes = 0;
+            for (GeoDefinition definition : model.geoLists(model.effective(activeConfig().profile))) {
+                GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
+                if (definition.enabled && cached != null) geoBytes += cached.routingBytes;
             }
+            if (geoBytes > 8 * 1024 * 1024) notices.add(getString(R.string.geo_limit));
         }
         if (!configs.isEmpty()) {
             try {
@@ -3216,26 +3199,6 @@ public final class MainActivity extends Activity {
         }
         if (prefs.getBoolean(SplitStore.RULES_MIGRATED, false)) notices.add(getString(R.string.legacy_rules_removed));
         return notices;
-    }
-
-    private boolean hasReadyGeoVpn(SplitStore.Rules rules) {
-        for (GeoDefinition definition : rules.geoLists) {
-            GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
-            if (definition.enabled && !definition.bypass && cached != null && !cached.entries.isEmpty()) return true;
-        }
-        return false;
-    }
-
-    // The packages of these that are installed here, other than this app, as the plan will use them.
-    private List<String> installedApps(List<String> packages) {
-        PackageManager pm = getPackageManager();
-        List<String> installed = new ArrayList<>();
-        for (String pkg : packages) {
-            if (pkg.equals(getPackageName())) continue;
-            try { pm.getApplicationInfo(pkg, 0); installed.add(pkg); }
-            catch (PackageManager.NameNotFoundException gone) { /* left out of the plan, kept in the profile */ }
-        }
-        return installed;
     }
 
     // The profiles.

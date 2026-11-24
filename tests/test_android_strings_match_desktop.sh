@@ -126,8 +126,6 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["split_refused", "Backend", "Not a valid domain or subnet: %1"]
 ["split_refused_wildcard", "Backend", "Not a valid domain or subnet: %1. “*.” and a leading dot go only before a domain name; enter an address or subnet without them."]
 ["split_refused_every", "Backend", "Not a valid domain or subnet: %1. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel."]
-["split_notice_nothing", "SplitPage", "“%1” uses the profile “%2”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used."]
-["split_notice_nothing_no_configs", "SplitPage", "Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on."]
 ["editor_split_profile", "CreateConfigOverlay", "Split profile"]
 ["text_disconnecting", "HomePage", "Disconnecting…"]
 ["text_mb_per_s", "HomePage", " MB/s"]

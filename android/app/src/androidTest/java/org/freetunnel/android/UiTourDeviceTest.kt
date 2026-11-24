@@ -848,7 +848,7 @@ class UiTourDeviceTest {
     // ---- Split ----
 
     private fun tourSplit() {
-        // A second profile with rules of its own, and a third with none, for the notice.
+        // A second profile with rules of its own, and a third with no rules.
         SplitStore.edit(SplitPrefs(prefs), null) { profiles ->
             profiles.add("Work")
             profiles.addDomains("Work", "corp.example.com, *.internal.example.net")
@@ -938,8 +938,8 @@ class UiTourDeviceTest {
                 } == true
             }
         }
-        screen("split-through-vpn-notice") {
-            // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
+        screen("split-through-vpn-empty") {
+            // Through VPN with the active server on an empty profile.
             prefs.edit().putBoolean("split_enabled", true).commit()
             SplitStore.edit(SplitPrefs(prefs), null) { it.setThrough(true) }
             val list = org.json.JSONArray(ConfigStore.read(prefs))
@@ -949,7 +949,7 @@ class UiTourDeviceTest {
             goTo(2)
             activate("profile:2")
             settle()
-            shot("split-through-vpn-notice", "Split, Through VPN: the notice that the profile has no rule, and the edited profile in accent")
+            shot("split-through-vpn-empty", "Split, Through VPN: the empty profile with its domain and application controls")
         }
     }
 

@@ -1469,10 +1469,6 @@
         <translation>Очистить</translation>
     </message>
     <message>
-        <source>Add a rule to use &quot;Through VPN&quot; — with an empty list nothing would go through the tunnel, so the full tunnel stays on.</source>
-        <translation>Добавьте правило, чтобы режим «Через VPN» заработал: с пустым списком через туннель не пойдёт ничего, поэтому остаётся полный туннель.</translation>
-    </message>
-    <message>
         <source>Applications — via VPN</source>
         <translation>Приложения — через VPN</translation>
     </message>
@@ -1503,10 +1499,6 @@
     <message>
         <source>domains, comma-separated, then Enter</source>
         <translation>домены через запятую, затем Enter</translation>
-    </message>
-    <message>
-        <source>“%1” uses the profile “%2”, which has no rules that can be used, so &quot;Through VPN&quot; would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used.</source>
-        <translation>«%1» использует профиль «%2», в котором нет ни одного правила, которое можно применить, так что в режиме «Через VPN» через туннель не пошло бы ничего. Полный туннель остаётся, пока в этом профиле не появится такое правило.</translation>
     </message>
 </context>
 <context>

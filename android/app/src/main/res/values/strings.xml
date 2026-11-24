@@ -190,8 +190,6 @@
     <string name="split_refused">"Not a valid domain or subnet: %1$s"</string>
     <string name="split_refused_wildcard">"Not a valid domain or subnet: %1$s. “*.” and a leading dot go only before a domain name; enter an address or subnet without them."</string>
     <string name="split_refused_every">"Not a valid domain or subnet: %1$s. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel."</string>
-    <string name="split_notice_nothing">"“%1$s” uses the profile “%2$s”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used."</string>
-    <string name="split_notice_nothing_no_configs">"Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on."</string>
     <string name="editor_split_profile">"Split profile"</string>
     <string name="text_back">"Back"</string>
     <string name="text_disconnecting">"Disconnecting…"</string>
