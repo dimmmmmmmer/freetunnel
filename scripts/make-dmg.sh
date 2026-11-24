@@ -21,19 +21,14 @@ echo "rw.dmg: ${rw_kb} KB for ${content_kb} KB of content"
 #   ##[error]out/rw.dmg is still attached (as /dev/disk7) after six detach attempts
 #   (hdiutil info: out/rw.dmg on /dev/disk5, nothing mounted)
 rw_devices() {
-  hdiutil info 2>/dev/null | awk -v img="/$RW" '
-    /^image-path/ { cur = index($0, img) > 0; first = 1; next }
+  hdiutil info 2>/dev/null | awk -v img="$(cd out && pwd -P)/rw.dmg" '
+    /^image-path/ { sub(/^image-path[[:space:]]*:[[:space:]]*/, ""); cur = ($0 == img); first = 1; next }
     /^=+$/ { cur = 0; next }
     cur && first && $1 ~ /^\/dev\/disk[0-9]+$/ { print $1; first = 0 }'
 }
-# "Resource busy" here is transient and it has failed a build: the .app
-# was written seconds ago and Spotlight/fseventsd can still be walking
-# it, and a /Volumes/FreeTunnel or an image left attached by an earlier
-# attempt holds the volume name. Clean up and retry — the detach below
-# already does the same thing for the same reason, and a release build
-# should not die on this.
+# Spotlight or an earlier attempt can keep this working image busy.
+# Release its devices before retrying the create.
 for attempt in 1 2 3 4 5; do
-  hdiutil detach /Volumes/FreeTunnel -force >/dev/null 2>&1 || true
   for dev in $(rw_devices); do
     hdiutil detach "$dev" -force >/dev/null 2>&1 || true
   done
@@ -48,9 +43,12 @@ for attempt in 1 2 3 4 5; do
   echo "hdiutil create failed (attempt $attempt) — retrying in 15 s"
   sleep 15
 done
-ATTACHED=$(hdiutil attach -readwrite -noverify -noautofsck "$RW")
-echo "$ATTACHED"
-MOUNT=$(echo "$ATTACHED" | awk '/\/Volumes\// {print $NF; exit}')
+# The system chooses a unique mount point if another FreeTunnel DMG is
+# open. Only operate on the volume returned by this attach.
+MOUNT=$(hdiutil attach -nobrowse -readwrite -noverify -noautofsck -plist "$RW" | python3 -Ic '
+import plistlib, sys
+[mount] = [item["mount-point"] for item in plistlib.loads(sys.stdin.buffer.read())["system-entities"] if "mount-point" in item]
+print(mount)')
 cp "$APP/Contents/Resources/logo.icns" "$MOUNT/.VolumeIcon.icns"
 SetFile -a C "$MOUNT/.VolumeIcon.icns"
 ln -sf /Applications "$MOUNT/Applications"

@@ -113,6 +113,23 @@ int transient(const QStringList &args)
     return process.exitStatus() == QProcess::NormalExit ? process.exitCode() : 1;
 #endif
 }
+
+int launchWithoutBundle(const QStringList &args, const QString &uid, const QString &installedHash)
+{
+    const QFileInfo self(QCoreApplication::applicationFilePath());
+    if (!installedHash.isEmpty() && installedHash == sha256HexOfFile(self.absoluteFilePath()))
+        return authorizeAndStart(args, uid);
+#ifdef Q_OS_LINUX
+    // dpkg can replace the GUI while a session holds the installed helper
+    // lock. Retry its deferred postinst using the root-owned package locally.
+    if (self.canonicalFilePath() == QLatin1String(kDebianExecutable)) {
+        progress("installing");
+        if (elevated({QStringLiteral("--install-packaged-helper"), uid}) != 0) return 1;
+        return authorizeAndStart(args, uid);
+    }
+#endif
+    return transient(args);
+}
 } // namespace
 
 int launch(int argc, char **argv)
@@ -127,13 +144,7 @@ int launch(int argc, char **argv)
     const QString uid = QString::number(::getuid());
     const QString installedHash = sha256HexOfFile(executablePath());
     const QDir bundle = bundledHelper();
-    if (!bundle.exists()) {
-        // The Debian package has already installed the same executable. A
-        // source checkout can still run a single prompted session.
-        if (!installedHash.isEmpty() && installedHash == sha256HexOfFile(app.applicationFilePath()))
-            return authorizeAndStart(args, uid);
-        return transient(args);
-    }
+    if (!bundle.exists()) return launchWithoutBundle(args, uid, installedHash);
     const QString sumsName = QStringLiteral("SHA256SUMS.txt");
     const QString sigName = QStringLiteral("SHA256SUMS.txt.sig");
     const QByteArray sums = readSmall(bundle.filePath(sumsName));

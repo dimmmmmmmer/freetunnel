@@ -186,13 +186,13 @@ bool activate(const QString &unpacked, const QString &hash, quint32 uid)
 }
 
 #ifdef Q_OS_LINUX
-bool installPackaged()
+bool installPackaged(quint32 uid)
 {
-    // Only the package manager (root, not the passwordless command) gets here.
+    // Only an administrator or the package manager can activate the Debian payload.
     // The .deb has already installed this complete runtime under /opt. Copy it
     // while retaining the same activation/locking rules as signed updates.
     const QString source = QStringLiteral("/opt/freetunnel");
-    const QString exe = source + QStringLiteral("/bin/FreeTunnel");
+    const QString exe = QString::fromLatin1(kDebianExecutable);
     if (QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath() != exe
         || !protectedDirectory(source, false)) return false;
     const Lock lock;
@@ -204,8 +204,6 @@ bool installPackaged()
     if (!checkTree(stage.path())) return false;
     const QString hash = sha256HexOfFile(exe);
     if (hash.isEmpty()) return false;
-    quint32 uid = 0;
-    validUserId(qEnvironmentVariable("SUDO_UID"), &uid);
     return activate(stage.path(), hash, uid);
 }
 #endif
@@ -307,7 +305,12 @@ int adminCommand(const QString &mode, const QStringList &args)
 {
     if (mode == QLatin1String("--install-helper")) return install(args, false) ? 0 : 1;
 #ifdef Q_OS_LINUX
-    if (mode == QLatin1String("--install-packaged-helper")) return args.isEmpty() && installPackaged() ? 0 : 1;
+    if (mode == QLatin1String("--install-packaged-helper")) {
+        quint32 uid = 0;
+        if (args.isEmpty()) validUserId(qEnvironmentVariable("SUDO_UID"), &uid);
+        else if (args.size() != 1 || !validUserId(args.first(), &uid)) return 1;
+        return installPackaged(uid) ? 0 : 1;
+    }
 #endif
     if (mode == QLatin1String("--authorize-helper")) return authorize(args) ? 0 : 1;
     if (mode == QLatin1String("--remove-helper")) return args.isEmpty() && removeInstalled() ? 0 : 1;

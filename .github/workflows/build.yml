@@ -1598,6 +1598,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libopengl0 libgl1 libegl1 libxcb-cursor0 libxkbcommon-x11-0 xvfb xauth nftables iproute2
           chmod +x installers/freetunnel-x86_64.AppImage
           echo "PORTABLE_EXE=$PWD/installers/freetunnel-x86_64.AppImage" >> "$GITHUB_ENV"
           if [ ! -r /dev/fuse ]; then echo APPIMAGE_EXTRACT_AND_RUN=1 >> "$GITHUB_ENV"; fi
@@ -1625,9 +1627,14 @@ jobs:
           sudo -- "$helper" --authorize-helper "$(id -u "$user")"
           sudo -u "$user" sudo -n -- "$helper" --installed-helper check
           if sudo -u "$user" sudo -n -- /usr/bin/true; then exit 1; fi
-      - name: Endpoint diagnostics
+      - name: Desktop and endpoint diagnostics
         if: failure()
-        run: tail -80 portable-endpoint.log || true
+        run: |
+          tail -80 portable-endpoint.log || true
+          for data in "$HOME/Library/Application Support" "$HOME/.local/share"; do
+            log="$data/FreeTunnel/FreeTunnel/freetunnel.log"
+            if [ -f "$log" ]; then tail -80 "$log"; fi
+          done
 
   release:
     name: Publish release

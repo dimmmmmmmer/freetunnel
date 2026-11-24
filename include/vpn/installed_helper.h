@@ -7,6 +7,10 @@
 
 namespace freetunnel::installed_helper {
 
+#ifdef Q_OS_LINUX
+inline constexpr char kDebianExecutable[] = "/opt/freetunnel/bin/FreeTunnel";
+#endif
+
 QString rootDirectory();
 QString executableRelativePath();
 QString assetName();
