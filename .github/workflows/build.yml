@@ -1529,6 +1529,8 @@ jobs:
           sparse-checkout: |
             CHANGELOG.md
             /scripts/check-release-ci.sh
+            /scripts/stage-desktop-release.sh
+            /scripts/publish-staged-release.sh
             /scripts/verify-release-signature.sh
             /include/core/ReleaseSigning.h
           sparse-checkout-cone-mode: false
@@ -1559,38 +1561,8 @@ jobs:
             || { echo "::error::the Linux build handed over no gcc-runtime-source.tar"; exit 1; }
           tar -tvf artifacts/gcc-runtime-source.tar
 
-      # Publish SHA256 checksums so users can verify the (unsigned) downloads.
-      # Names match the release asset names (basenames), which is what GitHub
-      # exposes once the nested artifact folders are flattened.
-      - name: Generate checksums
-        run: |
-          set -eux
-          cd artifacts
-          # The signature covers this file, so whatever is in it is what the
-          # signature attests to. Asset names carry no version — every release
-          # calls its installer freetunnel-linux-x86_64.deb — so without this line
-          # the signed bytes say "we built these" and nothing about WHICH release
-          # they came from, and an older release's manifest and signature verify
-          # perfectly when replayed. See docs/security-threats.md.
-          #
-          # Two things decide the exact spelling.
-          #
-          # It starts with '#', because people verify this file by hand with
-          # `sha256sum -c SHA256SUMS.txt`, and coreutils reports any line it
-          # cannot parse as "improperly formatted" — a warning that reads like
-          # tampering, and an outright failure under --strict. It tolerates
-          # comment lines.
-          #
-          # And it carries no space, so it stays a single field: the manifest
-          # parser shipped in existing clients skips lines with fewer than two
-          # fields, which makes this invisible to them rather than something they
-          # mistake for an asset name.
-          echo "#version=${GITHUB_REF_NAME#v}" > SHA256SUMS.txt
-          find . -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name '*.AppImage' -o -name 'freetunnel-helper-*.tar.gz' \) \
-            -exec sha256sum {} + \
-            | awk '{ n=$2; sub(/.*\//,"",n); print $1"  "n }' \
-            | sort -k2 >> SHA256SUMS.txt
-          cat SHA256SUMS.txt
+      - name: Stage installers and helpers with separate versioned manifests
+        run: bash scripts/stage-desktop-release.sh "${GITHUB_REF_NAME#v}" artifacts release-files
 
       # Sign the manifest with the Ed25519 release key so the in-app updater can
       # verify it against the public key compiled into the binary.
@@ -1611,25 +1583,20 @@ jobs:
             echo "unsigned release: deployed clients would reject it as an update." >&2
             exit 1
           fi
-          cd artifacts
-          # umask before the redirect, not chmod after: the shell creates the file
-          # with the ambient mode first, so a chmod afterwards leaves a window in
-          # which the release signing key is readable by anything else on the
-          # runner. It is removed below either way, but not before it is used.
-          (umask 077; printf '%s' "$ED25519_SIGNING_KEY" > ed25519.pem)
-          openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS.txt -out SHA256SUMS.txt.sig
-          rm -f ed25519.pem
-          ls -la SHA256SUMS.txt.sig
+          signing_key="$(mktemp "$RUNNER_TEMP/ed25519.XXXXXX")"
+          trap 'rm -f "$signing_key"' EXIT
+          printf '%s' "$ED25519_SIGNING_KEY" > "$signing_key"
+          for channel in desktop helpers; do
+            manifest="release-files/$channel/SHA256SUMS.txt"
+            openssl pkeyutl -sign -inkey "$signing_key" -rawin -in "$manifest" -out "$manifest.sig"
+          done
 
-      # Signing works with whatever key the secret holds, and nothing above ties
-      # that key to the public one every build compiles in. A secret that stopped
-      # matching include/core/ReleaseSigning.h would publish a release that every
-      # installed copy refuses as an update. So check the signature the way the
-      # updater will, against the header of this very commit, before publishing.
-      - name: Check the signature against the app's public key
+      - name: Check both signatures against the app's public key
         run: |
-          bash scripts/verify-release-signature.sh include/core/ReleaseSigning.h \
-            artifacts/SHA256SUMS.txt artifacts/SHA256SUMS.txt.sig
+          for channel in desktop helpers; do
+            manifest="release-files/$channel/SHA256SUMS.txt"
+            bash scripts/verify-release-signature.sh include/core/ReleaseSigning.h "$manifest" "$manifest.sig"
+          done
 
       # What changed comes from CHANGELOG.md, so every release says something
       # about ITSELF. The install notes are the part that is identical every
@@ -1660,8 +1627,6 @@ jobs:
             echo
             echo "[Downloads and installation help](${{ github.server_url }}/${{ github.repository }}/blob/${GITHUB_REF_NAME}/README.md)"
             echo
-            echo 'The freetunnel-helper-*.tar.gz files are used automatically by FreeTunnel; use the regular installer for your platform.'
-            echo
             if [ -n "$prev" ]; then
               echo
               echo "**Every commit in this release**: ${{ github.server_url }}/${{ github.repository }}/compare/$prev...${GITHUB_REF_NAME}"
@@ -1670,15 +1635,12 @@ jobs:
           echo "--- release body ---"
           cat notes.md
 
-      - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
-        with:
-          files: |
-            artifacts/**/*.deb
-            artifacts/**/*.dmg
-            artifacts/**/*-Setup.exe
-            artifacts/**/*.AppImage
-            artifacts/**/freetunnel-helper-*.tar.gz
-            artifacts/SHA256SUMS.txt
-            artifacts/SHA256SUMS.txt.sig
-          body_path: notes.md
+      - name: Publish the matching helper release first
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-staged-release.sh "helper-${GITHUB_REF_NAME#v}" "$GITHUB_SHA" release-files/helpers
+
+      - name: Publish the desktop installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-staged-release.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" release-files/desktop notes.md
