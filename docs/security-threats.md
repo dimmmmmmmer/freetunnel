@@ -227,9 +227,11 @@ through UAC as before.
   They cannot grant other accounts access or install arbitrary unsigned code
   through this entry point. The initial administrator prompt still authorizes
   the application the user is running; replacing that user-owned application
-  before initial authorization is outside this protection. A development build,
-  or a release whose helper archive cannot be obtained, falls back to the
-  existing prompted session helper.
+  before initial authorization is outside this protection. DMG and AppImage carry the release-signed
+  manifest and archive inside the installed application. A checkout without a
+  bundled helper uses the prompted session helper. Untagged CI installers use
+  a disposable signing key for their initial, administrator-approved install.
+  The passwordless update path always checks the production release key.
 - **Lifecycle:** authorization persists, not an always-running root daemon.
   The helper exits with the GUI. Removal revokes all FreeTunnel per-UID grants;
   it does not edit unrelated sudoers files. See the removal commands in the

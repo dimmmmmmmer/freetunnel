@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The macOS DMG and Linux AppImage include the VPN helper. First connection works without access to GitHub.
+
 ## 1.3.0
 
 ### Highlights
