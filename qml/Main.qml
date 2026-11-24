@@ -68,43 +68,13 @@ Window {
     // exactly what DWM reads to give it corners, a shadow and Snap.
     flags: (isMac || windowsAgent) ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
 
-    // The window's own ✕ normally never quits: on macOS the red traffic-light is
-    // retargeted to hide natively (installMacWindowCloseToTray); on Windows the
-    // custom ✕ minimizes; on Linux on an X server with a usable tray it hides the
-    // window to the tray at once. So a close event that reaches this handler is
-    // usually a real quit — tray «Quit», ⌘Q (macOS), Ctrl+Q / Alt+F4 (Windows).
-    //
-    // The exceptions are a desktop with no system tray, where ✕ does quit (see the
-    // ✕ itself, below), and Linux on an X server with one, where the window
-    // manager's own way of closing a window does what ✕ does. Alt+F4, a taskbar's
-    // Close and Hyprland's killactive and closewindow all arrive here as this same
-    // close event, and they mean "close this window", which for this application is
-    // ✕. Quitting is Ctrl+Q and the tray's Quit.
-    //
-    // There is no telling such a close from the one a desktop sends every window to
-    // log out. Qt 6 on Linux has no session manager to ask (isSavingSession() is
-    // only true inside an XSMP save, which the Qt this is built with cannot take
-    // part in), and no signal that every desktop sends ahead of a logout is known.
-    // So a desktop that logs out by asking each window to close is refused here like
-    // anybody else, and has to end the process itself.
-    //
-    // Only on an X server, XWayland included. On native Wayland there is no such
-    // close to tell from a quit, so it keeps quitting there, as it always did.
+    // The title-bar buttons handle hiding and minimizing directly. A native
+    // close request (including Quit from the Linux dock) ends the application.
     property bool shuttingDown: false
     onClosing: function(close) {
         close.accepted = true
-        if (shuttingDown || backend.applicationClosingDown())
-            return
-        if (win.closeActsLikeTitleBarClose()) {
-            close.accepted = false
-            win.closeFromTitleBar()
-            return
-        }
-        backend.quitApplication()
-    }
-    function closeActsLikeTitleBarClose() {
-        return Qt.platform.os === "linux" && desktop.minimizeCanBeChecked()
-               && desktop.hasTray(win.tray)
+        if (!shuttingDown && !backend.applicationClosingDown())
+            backend.quitApplication()
     }
 
     Connections {
@@ -510,33 +480,15 @@ Window {
     // The window's own buttons, where the desktop puts them. macOS keeps its native
     // traffic lights. On Linux the layout comes from the desktop's button-layout
     // setting, so a group can be empty — or both, on a layout with no buttons.
-    //
-    // Close hides to the tray on Linux/X11 when a tray can hold the window: the
-    // window must not vanish into a taskbar with nothing to bring it back, and the
-    // tray is what brings it back. The hide is immediate, not a minimise followed
-    // by a check: Hyprland and sway have no minimise, and waiting to find that out
-    // left the X looking stuck for 300 ms on every close.
-    //
-    // On Windows the ✕ minimises to the taskbar by default; the setting above can
-    // hide it to the tray instead. Either way the VPN keeps running. On Linux,
-    // without a usable tray (GNOME without an AppIndicator extension, a plain
-    // window manager, or a bar that owns no host), there is no tray icon, no tray
-    // menu and therefore no «Quit» in it. Close quits there, which is what it
-    // means anyway when nothing else is holding the application open. A
-    // window-manager close on native Wayland still quits: there is no X server to
-    // distinguish that close from a logout.
     function toggleMaximized() {
         win.visibility = (win.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
     }
     function closeFromTitleBar() {
-        // On an X server with a usable tray, closing is a hide, at once: no
-        // minimise to ask for, and nothing to wait for. The same test as the
-        // minimise check is what tells this is an X server.
-        if (Qt.platform.os === "linux" && desktop.minimizeCanBeChecked()) {
+        if (Qt.platform.os === "linux") {
             if (desktop.trayCanHoldWindow(win.tray))
                 desktop.hideToTray(win)
             else
-                backend.quitApplication()
+                desktop.minimize(win)
             return
         }
         if (desktop.hasTray(win.tray)) {

@@ -371,15 +371,6 @@ bool DesktopChrome::trayCanHoldWindow(QObject *trayIcon) const
     return !m_trayHost || m_trayHost().value_or(true);
 }
 
-bool DesktopChrome::minimizeCanBeChecked() const
-{
-#ifdef Q_OS_LINUX
-    return runsOnX11();
-#else
-    return false;
-#endif
-}
-
 void DesktopChrome::hideToTray(QObject *window)
 {
     hideWindowToTray(qobject_cast<QWindow *>(window));

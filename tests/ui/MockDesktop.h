@@ -51,9 +51,6 @@ public:
     {
         return hasTray(trayIcon) && m_trayHostRegistered;
     }
-    // Whether a minimise can be checked: an X server, as against native Wayland.
-    // Yes unless a test says otherwise, which is what the shipped builds run on.
-    Q_INVOKABLE bool minimizeCanBeChecked() const { return m_minimizeCanBeChecked; }
 
     // A desktop with a tray (and a host for it, or not), the way a test puts one in
     // front of the window; useRealTray() puts the machine's own back.
@@ -67,7 +64,6 @@ public:
         m_hasTray.reset();
         m_trayHostRegistered = true;
     }
-    void setMinimizeCanBeChecked(bool can) { m_minimizeCanBeChecked = can; }
 
     int menuRequests = 0;
     int bringRequests = 0;
@@ -91,5 +87,4 @@ private:
     Qt::ColorScheme m_colorScheme = Qt::ColorScheme::Unknown;
     std::optional<bool> m_hasTray;
     bool m_trayHostRegistered = true;
-    bool m_minimizeCanBeChecked = true;
 };

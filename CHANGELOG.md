@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2
+
+- On macOS, first-time VPN helper installation now finishes after you approve the administrator prompt.
+- On Linux, Quit from the dock now disconnects the VPN and exits FreeTunnel. The title-bar close button hides the window to the tray, or minimizes it when no tray is available.
+
 ## 1.3.1
 
 - The macOS DMG and Linux AppImage now include the signed VPN helper. FreeTunnel installs it on the first connection without downloading anything from GitHub and reuses it on subsequent connections.
