@@ -7,25 +7,12 @@ commit="${2:?expected the desktop release commit}"
 assets="${3:?expected the staged files}"
 export LC_ALL=C
 
-case "$tag" in
-  helper-*)
-    # A non-forced push refuses to reuse the helper tag for another commit.
-    git push origin "$commit:refs/tags/$tag"
-    title="FreeTunnel helpers ${tag#helper-}"
-    notes=(--notes "Signed VPN helpers for FreeTunnel ${tag#helper-}. The macOS DMG and Linux AppImage include the matching helper.")
-    latest=(--latest=false)
-    ;;
-  v*)
-    git fetch --no-tags origin "refs/tags/$tag"
-    test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$commit"
-    title="$tag"
-    notes=(--notes-file "${4:?expected desktop release notes}")
-    latest=()
-    ;;
-  *) echo "Unexpected release tag: $tag" >&2; exit 1 ;;
-esac
+[[ "$tag" == v[0-9]* ]] || { echo "Unexpected desktop release tag: $tag" >&2; exit 1; }
+notes="${4:?expected desktop release notes}"
+git fetch --no-tags origin "refs/tags/$tag"
+test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$commit"
 if ! draft="$(gh release view "$tag" --json isDraft --jq .isDraft)"; then
-  gh release create "$tag" --verify-tag --draft "${latest[@]}" --title "$title" "${notes[@]}"
+  gh release create "$tag" --verify-tag --draft --title "$tag" --notes-file "$notes"
   draft=true
 fi
 
@@ -43,5 +30,5 @@ if [[ "$(sort <<<"$remote")" != "$expected" ]]; then
   exit 1
 fi
 if [[ "$draft" == true ]]; then
-  gh release edit "$tag" --draft=false "${latest[@]}"
+  gh release edit "$tag" --draft=false
 fi

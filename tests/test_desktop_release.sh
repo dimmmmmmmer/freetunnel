@@ -13,16 +13,13 @@ for name in "${desktop[@]}" "${helpers[@]}" gcc-runtime-source.tar; do
   printf '%s\n' "$name" > "artifacts/$name"
 done
 bash "$root/scripts/stage-desktop-release.sh" 1.4.0 artifacts staged
-for channel in desktop helpers; do
-  manifest="staged/$channel/SHA256SUMS.txt"
-  test "$(head -1 "$manifest")" = '#version=1.4.0'
-  if [[ "$channel" == desktop ]]; then files=("${desktop[@]}"); else files=("${helpers[@]}"); fi
-  diff <(printf '%s\n' "${files[@]}" | sort) <(tail -n +2 "$manifest" | awk '{print $2}' | sort)
-  test ! -e "staged/$channel/gcc-runtime-source.tar"
-done
-mv "artifacts/${helpers[1]}" missing
+manifest=staged/SHA256SUMS.txt
+test "$(head -1 "$manifest")" = '#version=1.4.0'
+diff <(printf '%s\n' "${desktop[@]}" | sort) <(tail -n +2 "$manifest" | awk '{print $2}' | sort)
+diff <(printf '%s\n' SHA256SUMS.txt "${desktop[@]}" | sort) <(cd staged && printf '%s\n' * | sort)
+mv "artifacts/${desktop[1]}" missing
 if bash "$root/scripts/stage-desktop-release.sh" 1.4.0 artifacts incomplete; then
-  echo 'Staged a release without its macOS helper' >&2; exit 1
+  echo 'Staged a release without its macOS installer' >&2; exit 1
 fi
 
 git init --quiet --bare origin.git
@@ -36,7 +33,7 @@ cat > "$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 test "$1" = release
-[[ "$3" == helper-1.4.0 || "$3" == v1.4.0 ]]
+[[ "$3" == v1.4.0 ]]
 case "$2" in
   view)
     state="$(cat "$MOCK_RELEASE/state")"
@@ -49,7 +46,6 @@ case "$2" in
     fi ;;
   create)
     [[ "$*" == *' --draft '* ]]
-    if [[ "$3" == helper-* ]]; then [[ "$*" == *' --latest=false '* ]]; fi
     mkdir "$MOCK_RELEASE" "$MOCK_RELEASE/assets"
     echo true > "$MOCK_RELEASE/state" ;;
   upload)
@@ -60,37 +56,30 @@ case "$2" in
     done ;;
   edit)
     [[ "$*" == *' --draft=false'* ]]
-    if [[ "$3" == helper-* ]]; then [[ "$*" == *' --latest=false' ]]; fi
     echo false > "$MOCK_RELEASE/state" ;;
   *) exit 1 ;;
 esac
 MOCK
 chmod +x "$tmp/bin/gh"
 export PATH="$tmp/bin:$PATH"
-printf signature > "$tmp/staged/helpers/SHA256SUMS.txt.sig"
-publish() { bash "$root/scripts/publish-staged-release.sh" helper-1.4.0 "$1" "$tmp/staged/helpers"; }
-
-publish "$commit"
-test "$(cat "$MOCK_RELEASE/state")" = false
-test "$(git --git-dir="$tmp/origin.git" rev-parse refs/tags/helper-1.4.0)" = "$commit"
-publish "$commit"   # Already public: validate without uploading.
-echo true > "$MOCK_RELEASE/state"
-rm "$MOCK_RELEASE/assets/${helpers[1]}"
-publish "$commit"   # Resume an interrupted draft.
-test -s "$MOCK_RELEASE/assets/${helpers[1]}"
-echo different > "$MOCK_RELEASE/assets/${helpers[0]}"
-if publish "$commit"; then echo 'Overwrote mismatched public assets' >&2; exit 1; fi
-git -c user.name=test -c user.email=test@example.invalid commit --quiet --allow-empty -m next
-if publish "$(git rev-parse HEAD)"; then echo 'Reused a helper tag on another commit' >&2; exit 1; fi
-
-
-export MOCK_RELEASE="$tmp/desktop-release"
 git -c user.name=test -c user.email=test@example.invalid tag -a v1.4.0 "$commit" -m desktop
 git push origin refs/tags/v1.4.0
-printf signature > "$tmp/staged/desktop/SHA256SUMS.txt.sig"
+printf signature > "$tmp/staged/SHA256SUMS.txt.sig"
 printf notes > notes.md
-desktop_release() { bash "$root/scripts/publish-staged-release.sh" v1.4.0 "$1" "$tmp/staged/desktop" notes.md; }
-desktop_release "$commit"
+desktop_release() { bash "$root/scripts/publish-staged-release.sh" v1.4.0 "$1" "$tmp/staged" notes.md; }
+if bash "$root/scripts/publish-staged-release.sh" helper-1.4.0 "$commit" "$tmp/staged" notes.md; then
+  echo 'Accepted a separate helper release' >&2; exit 1
+fi
+test -z "$(git ls-remote --tags origin refs/tags/helper-1.4.0)"
+test ! -e "$MOCK_RELEASE"
 desktop_release "$commit"
 test "$(cat "$MOCK_RELEASE/state")" = false
+desktop_release "$commit"   # Verify the already-public files.
+echo true > "$MOCK_RELEASE/state"
+rm "$MOCK_RELEASE/assets/${desktop[1]}"
+desktop_release "$commit"   # Recover an interrupted draft.
+test -s "$MOCK_RELEASE/assets/${desktop[1]}"
+echo different > "$MOCK_RELEASE/assets/${desktop[0]}"
+if desktop_release "$commit"; then echo 'Overwrote mismatched public assets' >&2; exit 1; fi
+git -c user.name=test -c user.email=test@example.invalid commit --quiet --allow-empty -m next
 if desktop_release "$(git rev-parse HEAD)"; then echo 'Released a different desktop commit' >&2; exit 1; fi

@@ -1304,8 +1304,8 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_clang_tidy_runner.sh)
     endif ()
     if (FT_BASH)
-        add_test(NAME helper_release
-                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_helper_release.sh)
+        add_test(NAME desktop_release
+                 COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_desktop_release.sh)
         add_test(NAME android_release_tag
                  COMMAND ${FT_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/test_android_release_tag.sh)
         add_test(NAME android_signer
