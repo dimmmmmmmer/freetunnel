@@ -54,7 +54,10 @@ def seed_profile(cert, address, password):
 
 
 async def interface():
-    args = ("/sbin/route", "-n", "get", DEST[0]) if MAC else ("ip", "-j", "route", "get", DEST[0])
+    # The Linux reply rules distinguish TCP from UDP. Query the same flow
+    # that open_connection sends, rather than relying on iproute2 defaults.
+    args = (("/sbin/route", "-n", "get", DEST[0]) if MAC else
+            ("ip", "-j", "route", "get", DEST[0], "ipproto", "tcp", "dport", str(DEST[1])))
     process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
     output, _ = await process.communicate()
     assert process.returncode == 0
