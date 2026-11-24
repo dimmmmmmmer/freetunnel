@@ -12,7 +12,7 @@ case "$tag" in
     # A non-forced push refuses to reuse the helper tag for another commit.
     git push origin "$commit:refs/tags/$tag"
     title="FreeTunnel helpers ${tag#helper-}"
-    notes=(--notes "FreeTunnel automatically downloads these macOS and Linux helpers.")
+    notes=(--notes "Signed VPN helpers for FreeTunnel ${tag#helper-}. The macOS DMG and Linux AppImage include the matching helper.")
     latest=(--latest=false)
     ;;
   v*)
