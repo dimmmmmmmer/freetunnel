@@ -15,6 +15,10 @@
 
 #include <fcntl.h>
 #include <pwd.h>
+#ifdef Q_OS_MACOS
+#include <pthread.h>
+#include <signal.h>
+#endif
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -333,6 +337,14 @@ int runCommand(int argc, char **argv, const std::function<int()> &runSession)
     const QString mode = QString::fromLocal8Bit(argv[1]);
     if (mode == QLatin1String("--launch-installed-helper")) return launch(argc, argv);
     if (::geteuid() != 0) return 1;
+#ifdef Q_OS_MACOS
+    // Authorization Services can launch us with SIGCHLD blocked. Qt needs
+    // that signal to notice when tar and visudo exit during installation.
+    sigset_t childExit;
+    sigemptyset(&childExit);
+    sigaddset(&childExit, SIGCHLD);
+    if (pthread_sigmask(SIG_UNBLOCK, &childExit, nullptr) != 0) return 1;
+#endif
     resetRootEnvironment();
     QStringList args;
     for (int i = 2; i < argc; ++i) args << QString::fromLocal8Bit(argv[i]);

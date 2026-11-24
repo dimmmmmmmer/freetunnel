@@ -211,11 +211,6 @@ public:
     // StatusNotifierWatcher and shows no icons. So the host is asked, each time; where
     // it cannot be (a timeout), Qt's word stands.
     Q_INVOKABLE bool trayCanHoldWindow(QObject *trayIcon) const;
-    // Whether minimize() can be checked on this display server, which on Linux means
-    // an X server (XWayland included). Where it cannot, a window manager that drops
-    // the request cannot be told from one that honoured it, and a close that waits
-    // on the answer would wait for ever.
-    Q_INVOKABLE bool minimizeCanBeChecked() const;
 
     // For tests: apply a setting as if the portal had just reported it.
     void applySetting(const QString &ns, const QString &key, const QVariant &value);

@@ -75,7 +75,7 @@ private slots:
     void subscriptionConsentIsQueuedAndCancellationDoesNotFetch();
     void subscriptionRefreshAsksBeforeDiscardingEditorChanges();
     void mainWindowPageNavigation();
-    void closingTheWindowQuitsWhenThereIsNoTray();
+    void clickingTheTitleBarCloseUsesTheAvailableTray();
     void everythingTheWindowsAgentLooksForCanBeFound();
     void theWindowButtonsFollowTheDesktopLayout();
     void theTitleBarStepsAsideForOverlays();
@@ -181,9 +181,8 @@ private slots:
     void theMinimiseButtonStaysAMinimiseWhenMinimizeToTrayIsOn();
     void aTrayWithNoHostIsNotAPlaceToHideTheWindow();
     void theMinimiseButtonNeverHidesOrQuits();
-    void aWindowManagersCloseIsTheCloseButton();
+    void aWindowManagersCloseQuitsWithATray();
     void aWindowManagersCloseQuitsWhenThereIsNoTray();
-    void aWindowManagersCloseQuitsWhereAMinimiseCannotBeChecked();
     void aClosingApplicationIsNotRefused();
     void aMinimiseTheWindowManagerIgnoredIsTakenBack();
     void aMinimiseTheWindowManagerHonouredIsLeftAlone();
@@ -636,16 +635,8 @@ void TestQmlUi::everyComponentLoadsOnItsOwn_data()
         QTest::newRow(p) << QString::fromLatin1(p);
 }
 
-// ✕ minimizes rather than quits, because the tray icon is how you come back and
-// how you quit. Qt.labs.platform shows that icon through a StatusNotifier host
-// or not at all — it has no other implementation available to an application
-// that does not link Qt Widgets — so on GNOME without an AppIndicator extension,
-// or on a plain window manager, there is no icon and no tray menu. Minimizing
-// there can put the window somewhere with nothing to bring it back from.
-//
-// Which way this goes depends on the machine, so the test asks the tray what it
-// is and requires the matching behaviour, rather than assuming either.
-void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
+// Click the title-bar button with the tray availability reported by this platform.
+void TestQmlUi::clickingTheTitleBarCloseUsesTheAvailableTray()
 {
 #ifdef Q_OS_MACOS
     // There is no ✕ of ours there. macOS keeps its native traffic lights, the
@@ -676,6 +667,10 @@ void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
     QVERIFY2(close->isVisible(), "and it has to be on screen for a click to mean anything");
     QVERIFY(!m_backend.applicationClosingDown());
 
+#ifdef Q_OS_LINUX
+    const int hides = m_desktop.hideRequests;
+    const int minimises = m_desktop.minimizeRequests;
+#endif
     // A real click rather than the signal: what is being tested is the handler
     // the button actually has, reached the way a person reaches it.
     const QPointF centre =
@@ -683,13 +678,13 @@ void TestQmlUi::closingTheWindowQuitsWhenThereIsNoTray()
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
     QCoreApplication::processEvents();
 
-    if (trayAvailable) {
-        QVERIFY2(!m_backend.applicationClosingDown(),
-                 "with a tray to minimize alongside, the window must not quit");
-    } else {
-        QVERIFY2(m_backend.applicationClosingDown(),
-                 "with no tray there is no way back and no Quit — so it has to quit");
-    }
+#ifdef Q_OS_LINUX
+    QVERIFY(!m_backend.applicationClosingDown());
+    QCOMPARE(m_desktop.hideRequests, hides + (trayAvailable ? 1 : 0));
+    QCOMPARE(m_desktop.minimizeRequests, minimises + (trayAvailable ? 0 : 1));
+#else
+    QCOMPARE(m_backend.applicationClosingDown(), !trayAvailable);
+#endif
     delete root;
 #endif
 }
@@ -4514,7 +4509,6 @@ void TestQmlUi::theCloseButtonAndATray()
 #else
     const auto restore = qScopeGuard([this] {
         m_desktop.useRealTray();
-        m_desktop.setMinimizeCanBeChecked(true);
         m_backend.setMinimizeToTray(false);
         m_backend.resetShutdown();
     });
@@ -4537,12 +4531,6 @@ void TestQmlUi::theCloseButtonAndATray()
 #ifdef Q_OS_LINUX
     QCOMPARE(m_desktop.hideRequests, hides + 1);
     QCOMPARE(m_desktop.minimizeRequests, minimises);
-    // When Linux cannot verify a minimise, the existing titlebar path still
-    // minimises with this Windows-only preference enabled.
-    m_desktop.setMinimizeCanBeChecked(false);
-    QVERIFY(clickWindowButton(window, "windowCloseButton"));
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
 #else
     QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
     QCOMPARE(m_desktop.hideRequests, hides);
@@ -4649,8 +4637,7 @@ void TestQmlUi::theMinimiseButtonStaysAMinimiseWhenMinimizeToTrayIsOn()
 
 // Qt's tray.available is that a StatusNotifierWatcher is on the bus. A bar can own
 // one and show no icons, and a window hidden to that has nothing to bring it back.
-// On Linux/X11 that is the same as having no tray at all: ✕ quits. Other platforms
-// do not consult the host on this path.
+// On Linux the title-bar close minimizes when the tray has no host.
 void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
 {
 #ifdef Q_OS_LINUX
@@ -4663,13 +4650,15 @@ void TestQmlUi::aTrayWithNoHostIsNotAPlaceToHideTheWindow()
     auto *window = exposed(root);
     QVERIFY(window);
     const int hides = m_desktop.hideRequests;
+    const int minimises = m_desktop.minimizeRequests;
 
     QVERIFY(clickWindowButton(window, "windowCloseButton"));
     QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(m_backend.applicationClosingDown(), "nowhere to hide it, so it quits");
+    QCOMPARE(m_desktop.minimizeRequests, minimises + 1);
+    QVERIFY(!m_backend.applicationClosingDown());
     delete root;
 #else
-    QSKIP("the tray host check is part of the X11 close path");
+    QSKIP("the tray host check is part of the Linux title-bar close path");
 #endif
 }
 
@@ -4707,10 +4696,8 @@ void TestQmlUi::theMinimiseButtonNeverHidesOrQuits()
 #endif
 }
 
-// Hyprland's killactive and closewindow, Alt+F4 and a taskbar's Close all reach
-// the window as a close request, and FreeTunnel took every one for a quit. On
-// Linux with a tray they do what ✕ does. Windows keeps quitting on them.
-void TestQmlUi::aWindowManagersCloseIsTheCloseButton()
+// Dock Quit and Alt+F4 reach the window through the native close event.
+void TestQmlUi::aWindowManagersCloseQuitsWithATray()
 {
     const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
     m_backend.resetShutdown();
@@ -4722,22 +4709,15 @@ void TestQmlUi::aWindowManagersCloseIsTheCloseButton()
     const int minimises = m_desktop.minimizeRequests;
     const int hides = m_desktop.hideRequests;
 
-    window->close();
-#ifdef Q_OS_LINUX
-    QCOMPARE(m_desktop.hideRequests, hides + 1);
-    QCOMPARE(m_desktop.minimizeRequests, minimises);
-    QVERIFY2(!m_backend.applicationClosingDown(), "a close from the window manager must not quit");
-    QVERIFY2(window->isVisible(), "and must not close the window either: it is refused");
-#else
+    QVERIFY(window->close());
     QCOMPARE(m_desktop.minimizeRequests, minimises);
     QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(m_backend.applicationClosingDown(), "Windows and macOS keep quitting on a close request");
-#endif
+    QVERIFY(m_backend.applicationClosingDown());
+    QVERIFY(!window->isVisible());
     delete root;
 }
 
-// With no tray the same close request ends the application on every platform:
-// there is nothing to bring a minimised window back from.
+// A native close also quits with no tray.
 void TestQmlUi::aWindowManagersCloseQuitsWhenThereIsNoTray()
 {
     const auto restore = qScopeGuard([this] { m_desktop.useRealTray(); m_backend.resetShutdown(); });
@@ -4752,33 +4732,6 @@ void TestQmlUi::aWindowManagersCloseQuitsWhenThereIsNoTray()
     window->close();
     QVERIFY(m_backend.applicationClosingDown());
     QCOMPARE(m_desktop.minimizeRequests, minimises);
-    delete root;
-}
-
-// Native Wayland: a minimise there gets no answer, so a compositor with none (sway)
-// would leave the window where it is and a close that waited on it would do
-// nothing. It quits, as it did before.
-void TestQmlUi::aWindowManagersCloseQuitsWhereAMinimiseCannotBeChecked()
-{
-    const auto restore = qScopeGuard([this] {
-        m_desktop.useRealTray();
-        m_desktop.setMinimizeCanBeChecked(true);
-        m_backend.resetShutdown();
-    });
-    m_backend.resetShutdown();
-    m_desktop.useTray(true);
-    m_desktop.setMinimizeCanBeChecked(false);
-    QObject *root = createMainWindow(m_engine);
-    QVERIFY(root);
-    auto *window = exposed(root);
-    QVERIFY(window);
-    const int minimises = m_desktop.minimizeRequests;
-    const int hides = m_desktop.hideRequests;
-
-    window->close();
-    QCOMPARE(m_desktop.minimizeRequests, minimises);
-    QCOMPARE(m_desktop.hideRequests, hides);
-    QVERIFY2(m_backend.applicationClosingDown(), "nothing can say where the window went, so it quits");
     delete root;
 }
 
@@ -5455,8 +5408,6 @@ void TestQmlUi::theDesktopKnowsWhetherThereIsATray()
     QVERIFY(!chrome.hasTray(&icon));
     QVERIFY(!chrome.trayCanHoldWindow(&icon));
     QVERIFY(!chrome.trayCanHoldWindow(nullptr));
-    // Offscreen is not an X server, so a minimise there is not one that can be checked.
-    QVERIFY(!chrome.minimizeCanBeChecked());
 }
 
 // Whether a window hidden for the tray can be got back from it is the host's

@@ -1618,6 +1618,24 @@ jobs:
           else
             python3 tests/installed-helper/portable_vpn.py "$PORTABLE_EXE"
           fi
+      - name: Install the macOS helper with the administrator dialog's signal mask
+        if: runner.os == 'macOS'
+        timeout-minutes: 1
+        run: |
+          set -eu
+          bundle="$(dirname "$PORTABLE_EXE")/../Resources/vpn-helper"
+          expected=$(awk '$2 == "helper-executable" {print $1}' "$bundle/SHA256SUMS.txt")
+          sudo -- "$PORTABLE_EXE" --remove-helper
+          # Authorization Services blocks SIGCHLD in the elevated process.
+          sudo -- /usr/bin/python3 -I -c '
+          import os, signal, sys
+          signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD})
+          os.execv(sys.argv[1], sys.argv[1:])
+          ' "$PORTABLE_EXE" --install-helper "$bundle/freetunnel-helper-macos-universal.tar.gz" \
+            "$bundle/SHA256SUMS.txt" "$bundle/SHA256SUMS.txt.sig" "$expected" "$(id -u)"
+          helper=/Library/PrivilegedHelperTools/org.freetunnel.helper/current/runtime/FreeTunnel.app/Contents/MacOS/FreeTunnel
+          echo "$expected  $helper" | shasum -a 256 -c -
+          sudo -n -- "$helper" --installed-helper check
       - name: Verify the per-user grant on a standard account
         run: |
           set -eu
