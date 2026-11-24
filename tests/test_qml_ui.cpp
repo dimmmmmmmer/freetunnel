@@ -138,7 +138,7 @@ private slots:
     void restoringDefaultRoutesAsksFirst();
     void theKillSwitchPortsSwitchIsBoundToItsSetting();
     void theMinimizeToTraySwitchIsBoundToItsSetting();
-    void theThroughVpnNoticeNamesTheConfigAndItsProfile();
+    void anEmptyThroughVpnProfileShowsTheRuleControlsWithoutABanner();
     void theBuiltInProfileIsShownInTheUsersLanguage();
     void textOnTheAccentIsReadableInTheDarkTheme();
     void headingLinksStayOnANarrowPage_data();
@@ -3451,37 +3451,23 @@ void TestQmlUi::theMinimizeToTraySwitchIsBoundToItsSetting()
     delete root;
 }
 
-// What leaks is the active config's profile, which need not be the one on the
-// page: "add a rule" under a profile that already had rules sent the user adding
-// rules that could not change anything.
-void TestQmlUi::theThroughVpnNoticeNamesTheConfigAndItsProfile()
+void TestQmlUi::anEmptyThroughVpnProfileShowsTheRuleControlsWithoutABanner()
 {
+    const auto previousMode = m_backend.vpnMode();
+    const auto previousDomains = m_backend.domains();
+    const auto previousSplit = m_backend.splitEnabled();
+    const auto restore = qScopeGuard([this, previousMode, previousDomains, previousSplit] {
+        m_backend.setDomains(previousDomains);
+        m_backend.setVpnMode(previousMode);
+        m_backend.setSplitEnabled(previousSplit);
+    });
     m_backend.setSplitEnabled(true);
     m_backend.setVpnMode(QStringLiteral("selective"));
-    const QStringList domains = m_backend.domains();
     m_backend.setDomains({});
-    const auto restore = qScopeGuard([this, domains] {
-        m_backend.setVpnMode(QStringLiteral("general"));
-        m_backend.setDomains(domains);
-    });
-    QVERIFY(m_backend.selectiveModeWouldLeak());
-    QObject *root = loadPage("pages/SplitPage.qml");
-    QVERIFY(root);
-    QObject *notice = root->findChild<QObject *>(QStringLiteral("throughVpnNotice"));
-    QVERIFY(notice);
-    QVERIFY2(shown(notice).contains(QStringLiteral("Test Config")), qPrintable(shown(notice)));
-    QVERIFY2(shown(notice).contains(QStringLiteral("Default")), qPrintable(shown(notice)));
-    // Not "has no rules": the profile may list program rules that cannot be
-    // used here, and they stay listed right under this notice.
-    QVERIFY2(shown(notice).contains(QStringLiteral("no rules that can be used")), qPrintable(shown(notice)));
-
-    // With no config at all there is none to name. The backend then calls the
-    // active one "No config", which the notice used to name as a config.
-    const QStringList saved = m_backend.configs();
-    m_backend.setConfigs({});
-    QVERIFY2(shown(notice).startsWith(QStringLiteral("Add a rule")), qPrintable(shown(notice)));
-    m_backend.setConfigs(saved);
-    delete root;
+    std::unique_ptr<QObject> page(loadPage("pages/SplitPage.qml"));
+    QVERIFY(page);
+    QVERIFY(everyText(page.get()).contains(QStringLiteral("Rules — via VPN")));
+    QVERIFY(!page->findChild<QObject *>(QStringLiteral("throughVpnNotice")));
 }
 
 // The built-in profile is stored under the key "Default", and was shown as that
@@ -4402,6 +4388,8 @@ void TestQmlUi::qrDialogFitsAndClearsItsSecretOnClose()
     QQuickWindow window;
     auto *page = showInWindow(root, window, 400, 500);
     QVERIFY(page);
+    QQuickItem opener(window.contentItem());
+    opener.forceActiveFocus();
     root->setProperty("title", QStringLiteral("A configuration"));
     root->setProperty("size", 177);
     root->setProperty("modules", QString(177 * 177, QLatin1Char('1')));
@@ -4412,9 +4400,17 @@ void TestQmlUi::qrDialogFitsAndClearsItsSecretOnClose()
     QVERIFY(card && code);
     QVERIFY(code->width() > 0 && code->width() <= card->width() - 28);
     QVERIFY(card->height() <= page->height());
-    QVERIFY(QMetaObject::invokeMethod(root, "close"));
+    auto *back = root->findChild<QQuickItem *>(QStringLiteral("qrBack"));
+    QVERIFY(back);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centreOf(back));
+    QTRY_VERIFY(!page->isVisible());
+    QCOMPARE(window.activeFocusItem(), &opener);
     QCOMPARE(root->property("size").toInt(), 0);
     QVERIFY(root->property("modules").toString().isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(root, "open"));
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QTRY_VERIFY(!page->isVisible());
+    QCOMPARE(window.activeFocusItem(), &opener);
     delete root;
 }
 

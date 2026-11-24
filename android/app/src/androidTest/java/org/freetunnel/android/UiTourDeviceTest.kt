@@ -24,6 +24,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Before
@@ -799,6 +800,9 @@ class UiTourDeviceTest {
             activate("add:create")
             awaitOverlay("editor")
             shot("editor-new", "New config: the desktop's form, the name first, the fields two to a line, the switches, the certificate, Cancel and Save at the end")
+            activate("editor:tls")
+            awaitOverlay("select")
+            shot("editor-tls", "The seven per-server TLS profiles, with the current profile checked")
         }
         screen("editor-edit-focused") {
             goTo(1)
@@ -844,7 +848,7 @@ class UiTourDeviceTest {
     // ---- Split ----
 
     private fun tourSplit() {
-        // A second profile with rules of its own, and a third with none, for the notice.
+        // A second profile with rules of its own, and a third with no rules.
         SplitStore.edit(SplitPrefs(prefs), null) { profiles ->
             profiles.add("Work")
             profiles.addDomains("Work", "corp.example.com, *.internal.example.net")
@@ -910,12 +914,32 @@ class UiTourDeviceTest {
             shot("geo-add-menu", "Add list menu with presets and a custom source")
             activate("select:" + GeoPresets.read(context).size)
             awaitOverlay("geoform")
-            typeInto("geoform:name", "My sites")
-            typeInto("geoform:source", "https://example.org/geosite.dat#category")
-            shot("geo-custom-list", "Custom geo-list form: HTTPS source, type and routing direction")
+            val source = "https://example.invalid/custom-networks.txt"
+            assertFalse(onMain { root().findViewWithTag<View>("geoform:add").isEnabled })
+            typeInto("geoform:name", "Office")
+            typeInto("geoform:source", source)
+            assertTrue(onMain { root().findViewWithTag<View>("geoform:add").isEnabled })
+            shot("geo-custom-list", "A new list defaults to Sites and Through VPN")
+            activate("geoform:kind")
+            awaitOverlay("select")
+            shot("geo-custom-type", "List type choices in the custom geo-list form")
+            activate("select:1")
+            activate("geoform:direction")
+            awaitOverlay("select")
+            shot("geo-custom-route", "Route choices in the custom geo-list form")
+            activate("select:1")
+            shot("geo-custom-selected", "The draft IP list will bypass VPN when added")
+            GeoCache(GeoRepository.directory(context)).store(source, GeoLists.Kind.IPS, true,
+                "192.0.2.0/24".toByteArray())
+            activate("geoform:add")
+            eventually("The custom list must be saved with its chosen type and route") {
+                SplitStore.readSaved(SplitPrefs(prefs))?.geoLists("Default")?.any {
+                    it.name == "Office" && it.source == source && it.kind == GeoLists.Kind.IPS && it.bypass
+                } == true
+            }
         }
-        screen("split-through-vpn-notice") {
-            // Through VPN, with the selected config on a profile that has no rule: the desktop's notice.
+        screen("split-through-vpn-empty") {
+            // Through VPN with the active server on an empty profile.
             prefs.edit().putBoolean("split_enabled", true).commit()
             SplitStore.edit(SplitPrefs(prefs), null) { it.setThrough(true) }
             val list = org.json.JSONArray(ConfigStore.read(prefs))
@@ -925,7 +949,7 @@ class UiTourDeviceTest {
             goTo(2)
             activate("profile:2")
             settle()
-            shot("split-through-vpn-notice", "Split, Through VPN: the notice that the profile has no rule, and the edited profile in accent")
+            shot("split-through-vpn-empty", "Split, Through VPN: the empty profile with its domain and application controls")
         }
     }
 
@@ -938,7 +962,16 @@ class UiTourDeviceTest {
             eventually("The applications must be listed", 30_000) {
                 onMain { root().findViewWithTag<TextView?>("picker:status")?.text?.toString() != scanning }
             }
-            shot("app-picker", "The application picker: the search field, rows of name over package")
+            for (i in 0..1) {
+                val key = "picker:$i"
+                val unchecked = onMain {
+                    root().findViewWithTag<ViewGroup?>(key)?.let { row ->
+                        descendants(row).filterIsInstance<android.widget.CheckBox>().firstOrNull()?.isChecked == false
+                    } == true
+                }
+                if (unchecked) activate(key)
+            }
+            shot("app-picker", "Selected applications in the draft, with Cancel and Apply")
         }
     }
 

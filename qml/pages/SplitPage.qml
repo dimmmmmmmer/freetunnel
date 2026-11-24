@@ -33,46 +33,6 @@ Item {
             Dropdown { label: qsTr("Mode"); value: backend.vpnMode; shell: splitRoot.shell; theme: splitRoot.theme
                 model: [{v:"general",t:qsTr("Bypass VPN")},{v:"selective",t:qsTr("Through VPN")}]
                 onPicked: function(v){ backend.vpnMode = v } }
-            // "Through VPN" with no rules would route nothing; the backend keeps the
-            // full tunnel instead. Standing notice rather than a one-off toast: the
-            // mode stays chosen but inactive, so the explanation has to stay visible
-            // for as long as that is true.
-            Rectangle {
-                Layout.fillWidth: true; Layout.topMargin: 6
-                visible: backend.selectiveModeWouldLeak
-                // Layout.preferredHeight, not height: a Rectangle's implicitHeight
-                // is 0, so a ColumnLayout sizes this slot from the first pass —
-                // before the Text has its final width and has re-wrapped — and a
-                // plain height binding never invalidates that. The slot then stays
-                // at the first-pass size while the panel paints the real one, over
-                // the section below it. The Settings banner already does this.
-                Layout.preferredHeight: visible ? warnText.implicitHeight + 16 : 0
-                radius: 8; color: theme.infoBg
-                Text {
-                    id: warnText
-                    objectName: "throughVpnNotice"
-                    anchors.centerIn: parent; width: parent.width - 20
-                    wrapMode: Text.WordWrap; font.pixelSize: 12; color: theme.warn
-                    // One literal, not a concatenation: lupdate can only extract a
-                    // literal argument, and a split string silently drops out of the
-                    // catalogue.
-                    //
-                    // It names the config and the profile it uses. That profile is
-                    // what the tunnel follows, and it need not be the one on screen:
-                    // "add a rule" under a profile that already had rules left the
-                    // user adding rules that could not change anything.
-                    //
-                    // "Rules that can be used", not "rules": a profile can list
-                    // program rules that name nothing on this computer, a Windows
-                    // path in settings moved to a Mac, say. They stay listed under
-                    // this notice and do not count, and "has no rules" over a list
-                    // of them read as a mistake.
-                    text: backend.configs.length === 0
-                          ? qsTr("Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on.")
-                          : qsTr("“%1” uses the profile “%2”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used.")
-                                .arg(backend.activeConfig).arg(splitRoot.profileLabel(backend.activeConfigProfile))
-                }
-            }
             Item { Layout.preferredHeight: 6 }
             SectionLabel { text: qsTr("Profile"); theme: splitRoot.theme }
             Flow {

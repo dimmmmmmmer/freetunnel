@@ -76,7 +76,6 @@
     <string name="text_tls_profile_unknown">"The TLS profile is not one TrustTunnel knows"</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"The configuration contains an invalid certificate"</string>
     <string name="text_the_configuration_is_missing_required_server_settings">"The configuration is missing required server settings"</string>
-    <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Applications and addresses are selected. Full VPN protects all selected traffic. Keep one rule type for selective routing."</string>
     <string name="text_no_through_vpn_rules_full_vpn_is_enabled">"No Through VPN rules: full VPN is enabled."</string>
     <string name="vpn_failure_details">"%1$s. Traffic is unprotected unless Android blocks connections without VPN."</string>
     <string name="app_name">"FreeTunnel"</string>
@@ -191,9 +190,6 @@
     <string name="split_refused">"Not a valid domain or subnet: %1$s"</string>
     <string name="split_refused_wildcard">"Not a valid domain or subnet: %1$s. “*.” and a leading dot go only before a domain name; enter an address or subnet without them."</string>
     <string name="split_refused_every">"Not a valid domain or subnet: %1$s. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel."</string>
-    <string name="split_notice_nothing">"“%1$s” uses the profile “%2$s”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used."</string>
-    <string name="split_notice_nothing_no_configs">"Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on."</string>
-    <string name="split_notice_both">"“%1$s” uses the profile “%2$s”, which lists both applications and domains. Android cannot send both through the tunnel at once, so the full tunnel stays on. Keep rules of one kind in that profile."</string>
     <string name="editor_split_profile">"Split profile"</string>
     <string name="text_back">"Back"</string>
     <string name="text_disconnecting">"Disconnecting…"</string>
@@ -256,7 +252,10 @@
     <string name="geo_auto">"Update lists"</string>
     <string name="geo_duplicate">"This geo list is already in the profile"</string>
     <string name="geo_name">"Name"</string>
-    <string name="geo_ip_list">"List contains IP addresses"</string>
+    <string name="geo_source">"HTTPS address"</string>
+    <string name="geo_list_type">"List type"</string>
+    <string name="geo_sites">"Sites"</string>
+    <string name="geo_ips">"IP addresses"</string>
     <string name="geo_add">"Add"</string>
     <string name="geo_bad_source">"Enter a name and an HTTPS geo list address"</string>
     <string name="geo_limit">"Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."</string>
@@ -282,6 +281,7 @@
     <string name="subscription_host_changed">The subscription changes the server from %1$s to %2$s. Apply?</string>
     <string name="subscription_review">Subscription changed its server. Refresh it to review.</string>
     <string name="editor_tls_profile">TLS profile</string>
+    <string name="editor_tls_hint">"This server only. Leave it on Chrome unless the server asks for another."</string>
     <string name="picker_apply">Apply</string>
     <string name="picker_context_changed">The routing mode or profile changed. Open the application picker again.</string>
 </resources>

@@ -398,8 +398,7 @@ void Backend::reapplyIfEditingActiveProfile() {
 
 // A rule added to or taken from the profile on the Split page. What leaks is the
 // active config's profile, and a warning after each rule added to another one
-// read as though the rule just added did not count; the page's standing notice
-// names both whichever profile is shown.
+// read as though the rule just added did not count.
 void Backend::applyProfileEdit() {
     persistSettings();
     syncGeoLists();

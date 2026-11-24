@@ -89,6 +89,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["editor_password", "CreateConfigOverlay", "Password"]
 ["editor_protocol", "CreateConfigOverlay", "Protocol"]
 ["editor_tls_profile", "CreateConfigOverlay", "TLS profile"]
+["editor_tls_hint", "CreateConfigOverlay", "This server only. Leave it on Chrome unless the server asks for another."]
 ["editor_dns", "CreateConfigOverlay", "DNS servers"]
 ["editor_sni", "CreateConfigOverlay", "Custom SNI"]
 ["editor_random", "CreateConfigOverlay", "Client random (hex)"]
@@ -125,8 +126,6 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["split_refused", "Backend", "Not a valid domain or subnet: %1"]
 ["split_refused_wildcard", "Backend", "Not a valid domain or subnet: %1. “*.” and a leading dot go only before a domain name; enter an address or subnet without them."]
 ["split_refused_every", "Backend", "Not a valid domain or subnet: %1. A subnet ending in /0 is every address: under “Bypass VPN” it would take all of its traffic out of the tunnel."]
-["split_notice_nothing", "SplitPage", "“%1” uses the profile “%2”, which has no rules that can be used, so \"Through VPN\" would send nothing through the tunnel. The full tunnel stays on until that profile has a rule that can be used."]
-["split_notice_nothing_no_configs", "SplitPage", "Add a rule to use \"Through VPN\" — with an empty list nothing would go through the tunnel, so the full tunnel stays on."]
 ["editor_split_profile", "CreateConfigOverlay", "Split profile"]
 ["text_disconnecting", "HomePage", "Disconnecting…"]
 ["text_mb_per_s", "HomePage", " MB/s"]
@@ -183,6 +182,10 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["geo_never", "GeoListsBlock", "Never"]
 ["geo_duplicate", "Backend", "This geo list is already in the profile"]
 ["geo_name", "GeoListOverlay", "Name"]
+["geo_source", "GeoListOverlay", "HTTPS address"]
+["geo_list_type", "GeoListOverlay", "List type"]
+["geo_sites", "GeoListOverlay", "Sites"]
+["geo_ips", "GeoListOverlay", "IP addresses"]
 ["geo_add", "GeoListOverlay", "Add"]
 ["geo_bad_source", "Backend", "Enter a name and an HTTPS geo list address"]
 ["geo_limit", "GeoListsBlock", "Too many geo rules. Disable some lists. The full tunnel stays on until the rules fit."]
@@ -190,8 +193,7 @@ TABLE
 
 # Every other string, in groups that each say why the desktop has no such text.
 cat > "$TMP/only.txt" <<'ONLY'
-## Android geo form uses a type switch and a single update-failure notice
-geo_ip_list
+## Android uses a single geo update-failure notice
 geo_update_failed
 ## Content descriptions of the controls the desktop draws as icons alone (its nav bar and its logo have no words), and of the + chip
 text_home
@@ -227,10 +229,8 @@ vpn_blocked_title
 vpn_blocked_details
 config_validation_error
 
-## Split routing: Android cannot send applications and domains through the tunnel together, and keeps what an older preview saved
-text_applications_and_addresses_are_selected_full_vpn_pro
+## Android routing and migration notices
 text_no_through_vpn_rules_full_vpn_is_enabled
-split_notice_both
 legacy_rules_removed
 imported_routing_rules
 

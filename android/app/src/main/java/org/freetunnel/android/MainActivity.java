@@ -2586,6 +2586,8 @@ public final class MainActivity extends Activity {
                 tlsValue[0].setText(tlsProfileLabel(tlsProfile[0]));
             });
         }), lp(-1, -2));
+        gap(form, 4);
+        form.addView(ui.label(getString(R.string.editor_tls_hint), 12, t().textFaint), lp(-1, -2));
         gap(form, 10);
         form.addView(pair(ui.field(getString(R.string.editor_sni), sni, "editor:sni"), ui.field(getString(R.string.editor_random), random, "editor:random")), lp(-1, -2));
         gap(form, 10);
@@ -3086,35 +3088,79 @@ public final class MainActivity extends Activity {
         editRules(m -> m.putGeoList(m.edited(), definition), afterSave);
     }
 
+    private LinearLayout geoFormDropdown(int label, String key, String[] options, int[] selection) {
+        TextView[] value = new TextView[1];
+        return ui.dropdown(getString(label), options[selection[0]], key, value, v -> {
+            hideKeyboard();
+            showSelect(key, options, selection[0], index -> {
+                selection[0] = index;
+                value[0].setText(options[index]);
+            });
+        });
+    }
+
     private void showGeoForm() {
         if (overlay("geoform") != null) return;
-        LinearLayout form = column(); form.setPadding(dp(16), dp(12), dp(16), dp(12));
-        form.addView(ui.sectionLabel(getString(R.string.geo_add_custom)), lp(-1, -2));
-        EditText name = ui.pageInput(getString(R.string.geo_name), "geoform:name");
-        EditText source = ui.pageInput("https://…/geosite.dat#category", "geoform:source");
-        form.addView(name, lp(-1, 36)); gap(form, 8); form.addView(source, lp(-1, 36));
-        boolean[] ips = {false}; boolean[] bypass = {false};
-        ToggleView kind = ui.toggle(false, false, "geoform:ips");
-        kind.setListener((v, checked) -> ips[0] = checked);
-        form.addView(ui.toggleRow(getString(R.string.geo_ip_list), null, kind), ui.focusRowLp());
-        ToggleView direction = ui.toggle(false, false, "geoform:bypass");
-        direction.setListener((v, checked) -> bypass[0] = checked);
-        form.addView(ui.toggleRow(getString(R.string.text_bypass_vpn_61), null, direction), ui.focusRowLp());
+        LinearLayout card = column();
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
+        card.addView(ui.medium(getString(R.string.geo_add_custom), 16, t().text), lp(-1, -2));
+        gap(card, 14);
+        LinearLayout form = column();
+        EditText name = ui.lineEdit();
+        EditText source = ui.lineEdit();
+        source.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        source.setHint("https://…/geosite.dat#category");
+        name.setImeOptions(EditorInfo.IME_ACTION_NEXT | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        source.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        form.addView(ui.field(getString(R.string.geo_name), name, "geoform:name"), lp(-1, -2));
+        gap(form, 12);
+        form.addView(ui.field(getString(R.string.geo_source), source, "geoform:source"), lp(-1, -2));
+        gap(form, 8);
+        int[] kind = {0};
+        int[] direction = {0};
+        form.addView(geoFormDropdown(R.string.geo_list_type, "geoform:kind",
+                new String[]{getString(R.string.geo_sites), getString(R.string.geo_ips)}, kind), lp(-1, -2));
+        form.addView(geoFormDropdown(R.string.geo_route, "geoform:direction",
+                new String[]{getString(R.string.text_through_vpn_62), getString(R.string.text_bypass_vpn_61)}, direction), lp(-1, -2));
+        CappedScrollView scroll = new CappedScrollView(this);
+        scroll.addView(form);
+        card.addView(scroll, new LinearLayout.LayoutParams(-1, -2, 1));
+        gap(card, 12);
         LinearLayout buttons = row();
+        buttons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         final Overlay[] shown = new Overlay[1];
-        Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.NEUTRAL, 0, "geoform:cancel");
-        cancel.setOnClickListener(v -> closeOverlay(shown[0])); buttons.addView(cancel, lp(-2, 32));
-        ui.gapH(buttons, 8);
-        Button add = ui.button(getString(R.string.geo_add), Ui.Kind.NEUTRAL, 0, "geoform:add");
+        Button cancel = ui.button(getString(R.string.text_cancel), Ui.Kind.SECONDARY, 80, "geoform:cancel");
+        cancel.setOnClickListener(v -> closeOverlay(shown[0]));
+        buttons.addView(cancel, lp(-2, 34));
+        ui.gapH(buttons, 10);
+        Button add = ui.button(getString(R.string.geo_add), Ui.Kind.PRIMARY, 80, "geoform:add");
+        TextWatcher requiredFields = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable text) {
+                boolean ready = !name.getText().toString().trim().isEmpty() && !source.getText().toString().trim().isEmpty();
+                add.setEnabled(ready);
+                add.setAlpha(ready ? 1f : 0.45f);
+            }
+        };
+        name.addTextChangedListener(requiredFields);
+        source.addTextChangedListener(requiredFields);
+        requiredFields.afterTextChanged(name.getText());
         add.setOnClickListener(v -> {
             String title = name.getText().toString().trim(); String address = source.getText().toString().trim();
             if (title.isEmpty() || GeoLists.parseSource(address) == null) { toast(getString(R.string.geo_bad_source)); return; }
             GeoDefinition definition = new GeoDefinition(java.util.UUID.randomUUID().toString(), title, address,
-                    ips[0] ? GeoLists.Kind.IPS : GeoLists.Kind.SITES, bypass[0], true);
+                    kind[0] == 0 ? GeoLists.Kind.SITES : GeoLists.Kind.IPS, direction[0] == 1, true);
             addGeoDefinition(definition, () -> closeOverlay(shown[0]));
         });
-        buttons.addView(add, lp(-2, 32)); form.addView(buttons, lp(-1, -2));
-        shown[0] = showOverlay("geoform", OverlayLayer.Kind.CARD, form, null, null);
+        source.setOnEditorActionListener((v, action, event) -> {
+            if (action != EditorInfo.IME_ACTION_DONE) return false;
+            if (add.isEnabled()) add.performClick();
+            return true;
+        });
+        buttons.addView(add, lp(-2, 34));
+        card.addView(buttons, lp(-1, -2));
+        shown[0] = showOverlay("geoform", OverlayLayer.Kind.CARD, card, null, null);
         shown[0].width(dp(372)); shown[0].defaultKey = "geoform:name";
         shown[0].escape = () -> closeOverlay(shown[0]);
     }
@@ -3131,41 +3177,15 @@ public final class MainActivity extends Activity {
         return SplitProfiles.DEFAULT.equals(name) ? getString(R.string.split_profile_default) : name;
     }
 
-    // What the page says is wrong or worth knowing, one notice each, in this order:
-    //  - Through VPN would route nothing (the desktop's words, naming the config and the profile it uses), worked out by the
-    //    code that builds the plan (RoutingConfig.prepare): its warning for no rules at all. The full tunnel stays on;
-    //  - applications and domains both listed under Through VPN, which Android can not add together (VpnService takes the
-    //    applications and the destinations as an intersection), so the full tunnel stays on then too: Android's own;
-    //  - rules the selected config brings in with it, which count too; and rules an older preview let be saved that were dropped.
     private List<CharSequence> splitNotices(SplitProfiles model, boolean enabled, boolean through) {
         List<CharSequence> notices = new ArrayList<>();
-        if (enabled && through) {
-            if (configs.isEmpty()) {
-                SplitStore.Rules rules = SplitStore.rules(splitPrefs, null, SplitProfiles.DEFAULT);
-                if (rules.domains.isEmpty() && installedApps(rules.apps).isEmpty() && !hasReadyGeoVpn(rules)) notices.add(getString(R.string.split_notice_nothing_no_configs));
-            } else {
-                Config active = activeConfig();
-                String profile = model.effective(active.profile);
-                SplitStore.Rules rules = SplitStore.rules(splitPrefs, null, profile);
-                Integer warning = null;
-                try { warning = RoutingConfig.prepare(active.toml, true, true, rules.domains, installedApps(rules.apps), true).getWarning(); }
-                catch (Exception unusable) { /* a config that does not pass is said so where it is used */ }
-                long geoBytes = 0; boolean anyGeo = false;
-                for (GeoDefinition definition : rules.geoLists) {
-                    GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
-                    if (definition.enabled && cached != null) { geoBytes += cached.routingBytes; anyGeo = true; }
-                }
-                if (geoBytes > 8 * 1024 * 1024) warning = R.string.geo_limit;
-                else if (anyGeo && !installedApps(rules.apps).isEmpty())
-                    warning = R.string.text_applications_and_addresses_are_selected_full_vpn_pro;
-                else if (warning != null && warning == R.string.text_no_through_vpn_rules_full_vpn_is_enabled && hasReadyGeoVpn(rules)) warning = null;
-                String config = ShownText.elideMiddle(ShownText.oneLine(active.name), 36);
-                if (warning != null && warning == R.string.text_no_through_vpn_rules_full_vpn_is_enabled)
-                    notices.add(getString(R.string.split_notice_nothing, config, profileLabel(profile)));
-                else if (warning != null && warning == R.string.text_applications_and_addresses_are_selected_full_vpn_pro)
-                    notices.add(getString(R.string.split_notice_both, config, profileLabel(profile)));
-                else if (warning != null && warning == R.string.geo_limit) notices.add(getString(R.string.geo_limit));
+        if (enabled && through && !configs.isEmpty()) {
+            long geoBytes = 0;
+            for (GeoDefinition definition : model.geoLists(model.effective(activeConfig().profile))) {
+                GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
+                if (definition.enabled && cached != null) geoBytes += cached.routingBytes;
             }
+            if (geoBytes > 8 * 1024 * 1024) notices.add(getString(R.string.geo_limit));
         }
         if (!configs.isEmpty()) {
             try {
@@ -3179,26 +3199,6 @@ public final class MainActivity extends Activity {
         }
         if (prefs.getBoolean(SplitStore.RULES_MIGRATED, false)) notices.add(getString(R.string.legacy_rules_removed));
         return notices;
-    }
-
-    private boolean hasReadyGeoVpn(SplitStore.Rules rules) {
-        for (GeoDefinition definition : rules.geoLists) {
-            GeoCache.Result cached = GeoRepository.get(this).state(definition).cached;
-            if (definition.enabled && !definition.bypass && cached != null && !cached.entries.isEmpty()) return true;
-        }
-        return false;
-    }
-
-    // The packages of these that are installed here, other than this app, as the plan will use them.
-    private List<String> installedApps(List<String> packages) {
-        PackageManager pm = getPackageManager();
-        List<String> installed = new ArrayList<>();
-        for (String pkg : packages) {
-            if (pkg.equals(getPackageName())) continue;
-            try { pm.getApplicationInfo(pkg, 0); installed.add(pkg); }
-            catch (PackageManager.NameNotFoundException gone) { /* left out of the plan, kept in the profile */ }
-        }
-        return installed;
     }
 
     // The profiles.

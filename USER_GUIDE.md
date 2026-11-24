@@ -225,8 +225,8 @@ Under **Applications**, open **Choose…**, check several apps, then press **App
 Selections survive searching for another app; **Cancel** or closing the popup
 discards the draft. This works on desktop, phones and Android TV.
 
-Under *Through VPN* with no rule that can be used, FreeTunnel keeps the full
-tunnel and the page says so, rather than send everything around it.
+In *Through VPN* mode, unmatched traffic goes directly to its destination. If the
+active profile has no usable VPN rule, FreeTunnel uses the tunnel as the default route.
 
 ### Geo lists
 

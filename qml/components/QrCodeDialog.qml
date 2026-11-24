@@ -4,7 +4,7 @@ import QtQuick.Window
 // A config's deep link as a QR code, for a phone to scan (the Android app's Scan QR
 // code, first in its + menu): the Configs page's export menu opens it with the
 // modules Backend::configQrCode made. Window level and modal, as ConfirmDialog is,
-// and dismissed the same ways: Close, Escape, Return, or a click on the dim.
+// and dismissed with Back, Escape, Return, or a click on the dim.
 //
 // The code is always dark on white, whatever the theme: a phone's scanner looks
 // for dark modules on a light ground, and a dark theme's light-on-dark code is one
@@ -27,7 +27,7 @@ Item {
         if (!visible)
             focusBefore = Window.activeFocusItem
         visible = true
-        forceActiveFocus()
+        qrBack.forceActiveFocus()
         qrCanvas.requestPaint()
     }
     function close() { visible = false }
@@ -51,7 +51,7 @@ Item {
     readonly property int quiet: 4
     readonly property int modulePx: size <= 0 ? 0
             : Math.max(1, Math.min(8, Math.floor(Math.min(qrCard.width - 28,
-                height - qrTitle.implicitHeight - qrHint.implicitHeight - 116) / (size + 2 * quiet))))
+                height - qrHeader.height - qrHint.implicitHeight - 72) / (size + 2 * quiet))))
     readonly property int codePx: modulePx * (size + 2 * quiet)
 
     Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45
@@ -67,9 +67,30 @@ Item {
         TapHandler {}
         Column {
             id: qrCol; width: parent.width - 28; anchors.centerIn: parent; spacing: 12
-            Text { id: qrTitle; objectName: "qrTitle"; width: parent.width; wrapMode: Text.Wrap
-                   horizontalAlignment: Text.AlignHCenter
-                   text: qd.title; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
+            Item {
+                id: qrHeader
+                width: parent.width; height: Math.max(24, qrTitle.implicitHeight)
+                Text {
+                    id: qrBack
+                    objectName: "qrBack"
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                    text: "←"; font.pixelSize: 20
+                    color: qrBackMa.containsMouse || activeFocus ? theme.text : theme.textDim
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Back")
+                    Accessible.onPressAction: qd.close()
+                    Keys.onSpacePressed: qd.close()
+                    MouseArea { id: qrBackMa; anchors.fill: parent; anchors.margins: -6
+                                hoverEnabled: true; onClicked: qd.close() }
+                }
+                Text {
+                    id: qrTitle; objectName: "qrTitle"
+                    anchors.left: qrBack.right; anchors.leftMargin: 12; anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter; wrapMode: Text.Wrap
+                    text: qd.title; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium
+                }
+            }
             Rectangle {
                 objectName: "qrCode"
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -104,19 +125,8 @@ Item {
             }
             Text { id: qrHint; objectName: "qrHint"; width: parent.width; wrapMode: Text.Wrap
                    horizontalAlignment: Text.AlignHCenter
-                   text: qsTr("Scan it with FreeTunnel for Android: + → Scan QR code. It contains the password: show it only to the phone you are adding this server to.")
+                   text: qsTr("Scan with FreeTunnel on Android")
                    color: theme.textDim; font.pixelSize: 12 }
-            Rectangle { objectName: "qrCloseButton"
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: Math.max(76, qrCloseText.implicitWidth + 26); height: 32; radius: 8
-                activeFocusOnTab: true
-                Accessible.role: Accessible.Button
-                Accessible.name: qrCloseText.text
-                Accessible.onPressAction: qd.close()
-                color: qrCloseMa.containsMouse ? theme.surfaceHover : theme.surface
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Text { id: qrCloseText; anchors.centerIn: parent; text: qsTr("Close"); color: theme.text; font.pixelSize: 14 }
-                MouseArea { id: qrCloseMa; anchors.fill: parent; hoverEnabled: true; onClicked: qd.close() } }
         }
     }
     // escapeOwner as in ConfirmDialog: a question that comes up over this card (a

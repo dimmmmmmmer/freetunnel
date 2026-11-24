@@ -645,6 +645,10 @@ final class Ui {
      * (their popup opens under the row, not under the words), and are a {@link DropdownValue}.
      */
     LinearLayout dropdown(CharSequence name, CharSequence value, String key, View.OnClickListener open) {
+        return dropdown(name, value, key, null, open);
+    }
+
+    LinearLayout dropdown(CharSequence name, CharSequence value, String key, TextView[] valueOut, View.OnClickListener open) {
         LinearLayout r = row();
         r.setMinimumHeight(dp(42));
         TextView title = label(name, 14, t.text);
@@ -660,6 +664,7 @@ final class Ui {
         shown.setSingleLine(true);
         shown.setEllipsize(TextUtils.TruncateAt.END);
         shown.setMaxWidth(dp(112));
+        if (valueOut != null) valueOut[0] = shown;
         group.addView(shown, lp(-2, -2));
         gapH(group, 4);
         LinearLayout.LayoutParams arrowLp = lp(-2, -2);

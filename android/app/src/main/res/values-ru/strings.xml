@@ -76,7 +76,6 @@
     <string name="text_tls_profile_unknown">"TrustTunnel не знает такой профиль TLS"</string>
     <string name="text_the_configuration_contains_an_invalid_certificate">"Некорректный сертификат в конфигурации"</string>
     <string name="text_the_configuration_is_missing_required_server_settings">"В конфигурации не хватает данных сервера"</string>
-    <string name="text_applications_and_addresses_are_selected_full_vpn_pro">"Выбраны и приложения, и адреса. Для защиты всего выбранного включён полный VPN. Для выборочного режима оставьте один тип правил."</string>
     <string name="text_no_through_vpn_rules_full_vpn_is_enabled">"Нет правил «Через VPN»: включён полный VPN."</string>
     <string name="vpn_failure_details">"%1$s. Трафик идёт без VPN, если системная блокировка без VPN выключена."</string>
     <string name="app_name">"FreeTunnel"</string>
@@ -191,9 +190,6 @@
     <string name="split_refused">"Неверный домен или подсеть: %1$s"</string>
     <string name="split_refused_wildcard">"Неверный домен или подсеть: %1$s. «*.» и точка в начале ставятся только перед доменным именем; введите адрес или подсеть без них."</string>
     <string name="split_refused_every">"Неверный домен или подсеть: %1$s. Подсеть с /0 на конце — это все адреса: в режиме «Без VPN» она вывела бы весь их трафик из туннеля."</string>
-    <string name="split_notice_nothing">"«%1$s» использует профиль «%2$s», в котором нет ни одного правила, которое можно применить, так что в режиме «Через VPN» через туннель не пошло бы ничего. Полный туннель остаётся, пока в этом профиле не появится такое правило."</string>
-    <string name="split_notice_nothing_no_configs">"Добавьте правило, чтобы режим «Через VPN» заработал: с пустым списком через туннель не пойдёт ничего, поэтому остаётся полный туннель."</string>
-    <string name="split_notice_both">"«%1$s» использует профиль «%2$s», в котором есть и приложения, и домены. Android не может направить через туннель и те и другие сразу, поэтому остаётся полный туннель. Оставьте в профиле правила одного вида."</string>
     <string name="editor_split_profile">"Профиль раздельного туннеля"</string>
     <string name="text_back">"Назад"</string>
     <string name="text_disconnecting">"Отключение…"</string>
@@ -254,7 +250,10 @@
     <string name="geo_auto">"Обновлять списки"</string>
     <string name="geo_duplicate">"Этот геосписок уже есть в профиле"</string>
     <string name="geo_name">"Название"</string>
-    <string name="geo_ip_list">"Список IP-адресов"</string>
+    <string name="geo_source">"HTTPS-ссылка"</string>
+    <string name="geo_list_type">"Тип списка"</string>
+    <string name="geo_sites">"Сайты"</string>
+    <string name="geo_ips">"IP-адреса"</string>
     <string name="geo_add">"Добавить"</string>
     <string name="geo_bad_source">"Введите название и HTTPS-ссылку на геосписок"</string>
     <string name="geo_limit">"Слишком много правил. Отключите часть геосписков. Пока весь трафик идёт через VPN."</string>
@@ -280,6 +279,7 @@
     <string name="subscription_host_changed">Подписка меняет сервер с %1$s на %2$s. Применить?</string>
     <string name="subscription_review">В подписке изменился сервер. Обновите её вручную для проверки.</string>
     <string name="editor_tls_profile">Профиль TLS</string>
+    <string name="editor_tls_hint">"Только для этого сервера. Оставьте Chrome, если сервер не просит другой профиль."</string>
     <string name="picker_apply">Применить</string>
     <string name="picker_context_changed">Режим маршрутизации или профиль изменился. Откройте выбор приложений ещё раз.</string>
 </resources>
