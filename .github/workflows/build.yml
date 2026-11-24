@@ -1518,6 +1518,7 @@ jobs:
             archive=freetunnel-helper-macos-universal.tar.gz
             tar -xzf "payload/$archive"
             app=runtime/FreeTunnel.app
+            codesign --verify --deep --strict "$app"
             dest="$app/Contents/Resources/vpn-helper"
             exe="$app/Contents/MacOS/FreeTunnel"
           else
@@ -1568,6 +1569,9 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.portable_test_run || github.run_id }}
           path: installers
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
       - name: Prepare a pinned TrustTunnel endpoint restricted to this runner
         env:
           PLATFORM: ${{ matrix.endpoint }}
@@ -1603,7 +1607,24 @@ jobs:
           cp /etc/hosts "$RUNNER_TEMP/hosts.before"
           trap 'sudo cp "$RUNNER_TEMP/hosts.before" /etc/hosts' EXIT
           echo '127.0.0.1 github.com' | sudo tee -a /etc/hosts
-          python3 tests/installed-helper/portable_vpn.py "$PORTABLE_EXE"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python3 tests/installed-helper/portable_vpn.py "$PORTABLE_EXE"
+          else
+            python3 tests/installed-helper/portable_vpn.py "$PORTABLE_EXE"
+          fi
+      - name: Verify the per-user grant on a standard account
+        run: |
+          set -eu
+          user=nobody
+          helper=/opt/freetunnel-helper/current/runtime/bin/FreeTunnel
+          if [ "$RUNNER_OS" = macOS ]; then
+            user=_www
+            helper=/Library/PrivilegedHelperTools/org.freetunnel.helper/current/runtime/FreeTunnel.app/Contents/MacOS/FreeTunnel
+          fi
+          if sudo -u "$user" sudo -n -- "$helper" --installed-helper check; then exit 1; fi
+          sudo -- "$helper" --authorize-helper "$(id -u "$user")"
+          sudo -u "$user" sudo -n -- "$helper" --installed-helper check
+          if sudo -u "$user" sudo -n -- /usr/bin/true; then exit 1; fi
       - name: Endpoint diagnostics
         if: failure()
         run: tail -80 portable-endpoint.log || true

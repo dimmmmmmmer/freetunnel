@@ -12,7 +12,7 @@ import time
 
 
 @contextmanager
-def endpoint(socks_port=None, log_path="incoming-android-endpoint.log", address="127.0.0.1", password="probe-only"):
+def endpoint(socks_port=None, log_path="incoming-android-endpoint.log", address="127.0.0.1", password=None):
     address = str(ipaddress.IPv4Address(address))
     binary = Path(os.environ["INCOMING_ENDPOINT_BIN"]).resolve(strict=True)
     # Verify the executable too, so an overridden environment path cannot
@@ -34,7 +34,15 @@ def endpoint(socks_port=None, log_path="incoming-android-endpoint.log", address=
                         "-keyout", str(root / "key.pem"), "-out", str(root / "cert.pem"),
                         "-days", "1", "-subj", "/CN=vpn.invalid", "-addext", "subjectAltName=DNS:vpn.invalid"],
                        check=True, capture_output=True)
-        (root / "credentials.toml").write_text(f'[[client]]\nusername = "test"\npassword = "{password}"\n')
+        if password is None:
+            if not ipaddress.IPv4Address(address).is_loopback:
+                raise ValueError("A non-loopback probe requires a fresh credential")
+            # The existing Android instrumentation and DNS fixtures share this
+            # credential only with their own loopback server.
+            credentials = '[[client]]\nusername = "test"\npassword = "probe-only"\n'
+        else:
+            credentials = f'[[client]]\nusername = "test"\npassword = "{password}"\n'
+        (root / "credentials.toml").write_text(credentials)
         (root / "rules.toml").write_text(f'[[rule]]\ncidr = "{address}/32"\naction = "allow"\n'
                                         '[[rule]]\ncidr = "0.0.0.0/0"\naction = "deny"\n')
         (root / "hosts.toml").write_text('[[main_hosts]]\nhostname = "vpn.invalid"\n'

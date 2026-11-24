@@ -422,14 +422,21 @@ if (APPLE)
     target_link_libraries(FreeTunnel PRIVATE "-framework AppKit" "-framework Security")
 endif()
 
-# Bundle assets
+# Data in Contents/MacOS is treated as nested code by codesign. Keep it
+# in Resources so the bundle signature also survives a portable tar archive.
+if(APPLE)
+    set(asset_dir "$<TARGET_BUNDLE_CONTENT_DIR:FreeTunnel>/Resources/assets")
+else()
+    set(asset_dir "$<TARGET_FILE_DIR:FreeTunnel>/assets")
+endif()
 add_custom_command(TARGET FreeTunnel POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${asset_dir}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_LIST_DIR}/assets/logo.png
-        $<TARGET_FILE_DIR:FreeTunnel>/assets/logo.png
+        "${asset_dir}/logo.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${TRUSTTUNNEL_REPO_ROOT}/LICENSE
-        $<TARGET_FILE_DIR:FreeTunnel>/assets/LICENSE
+        "${asset_dir}/LICENSE"
 )
 
 # Lightweight, core-independent unit tests (off by default; the standalone
