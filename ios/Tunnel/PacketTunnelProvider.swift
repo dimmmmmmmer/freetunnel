@@ -111,7 +111,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             stateChangeHandler: { [weak self] value in
                 self?.queue.async { self?.stateChanged(Int(value)) }
             })
-        guard let client, client.start(packetFlow) else {
+        guard let client, client.start(packetFlow, fallIntoRecovery: false) else {
             fail()
             return
         }

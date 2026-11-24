@@ -2,7 +2,7 @@
 +++ b/platform/apple/VpnClient/VpnClient.h
 @@ -17,6 +17,8 @@
  - (instancetype)init NS_UNAVAILABLE;
- - (bool)start:(NEPacketTunnelFlow *)tunnelFlow;
+ - (bool)start:(NEPacketTunnelFlow *)tunnelFlow fallIntoRecovery:(BOOL)fallIntoRecovery;
  - (bool)stop;
 +- (uint64_t)uploadedBytes;
 +- (uint64_t)downloadedBytes;
@@ -57,7 +57,7 @@
                  }
              },
              .state_changed_handler = [stateChangeHandler](ag::VpnStateChangedEvent *event) {
-@@ -275,6 +284,9 @@
+@@ -278,6 +287,9 @@
      return _native_client->disconnect();
  }
  

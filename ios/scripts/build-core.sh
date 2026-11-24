@@ -3,7 +3,13 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 work="${FT_IOS_BUILD_DIR:-$root/ios/.build}"
-ref="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$root/android/core-source.json")"
+read -r ref version < <(python3 - "$root/android/core-source.json" <<'PYTHON'
+import json, sys
+with open(sys.argv[1]) as source:
+    pin = json.load(source)
+print(pin["commit"], pin["version"])
+PYTHON
+)
 [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || exit 1
 mkdir -p "$work"
 if [[ ! -d "$work/upstream/.git" ]]; then git init "$work/upstream"; fi
@@ -39,7 +45,7 @@ for sdk in iphoneos iphonesimulator; do
   target=ios
   [[ "$sdk" == iphonesimulator ]] && target=iphonesimulator
   cmake -S "$work/upstream/platform/apple/VpnClient" -B "$work/core-$sdk" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sdk" \
+    -DCMAKE_BUILD_TYPE=Release -DTT_CLIENT_VERSION="$version" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sdk" \
     -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
     -DTARGET_OS="$target" -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
   cmake --build "$work/core-$sdk" --target VpnClientFramework --parallel 3

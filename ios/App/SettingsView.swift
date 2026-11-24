@@ -118,7 +118,7 @@ struct SettingsView: View {
                         destination: URL(string: "https://github.com/dimmmmmmmer/freetunnel")!)
                     Text("·")
                     Link(
-                        String(localized: "TrustTunnel core ") + "1.1.12",
+                        String(localized: "TrustTunnel core ") + "1.3.0",
                         destination: URL(
                             string: "https://github.com/TrustTunnel/TrustTunnelClient")!)
                 }.font(AppStyle.caption).foregroundStyle(AppStyle.faint).buttonStyle(.plain)
