@@ -328,8 +328,10 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/ci-helper.pem"
-          openssl pkey -in "$RUNNER_TEMP/ci-helper.pem" -pubout | awk '
+          openssl_bin=openssl
+          if [[ "$RUNNER_OS" == macOS ]]; then openssl_bin="$(brew --prefix openssl@3)/bin/openssl"; fi
+          "$openssl_bin" genpkey -algorithm ED25519 -out "$RUNNER_TEMP/ci-helper.pem"
+          "$openssl_bin" pkey -in "$RUNNER_TEMP/ci-helper.pem" -pubout | awk '
             BEGIN { print "#pragma once\nnamespace freetunnel {\ninline constexpr auto kBundledHelperSigningPublicKeyPem =" }
             { print "\"" $0 "\\n\"" }
             END { print ";\n}" }
@@ -1101,7 +1103,9 @@ jobs:
             shasum -a 256 "$exe" | awk '{print $1 "  helper-executable"}'
           } > helper-manifest/SHA256SUMS.txt
           if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
-            openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/ci-helper.pem" \
+            openssl_bin=openssl
+            if [[ "$RUNNER_OS" == macOS ]]; then openssl_bin="$(brew --prefix openssl@3)/bin/openssl"; fi
+            "$openssl_bin" pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/ci-helper.pem" \
               -in helper-manifest/SHA256SUMS.txt -out helper-manifest/SHA256SUMS.txt.sig
           fi
 
@@ -1579,6 +1583,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -eu
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
           volume=$(mktemp -d)
           hdiutil attach -readonly -nobrowse -mountpoint "$volume" installers/freetunnel-macos-universal.dmg
           ditto "$volume/FreeTunnel.app" "$RUNNER_TEMP/FreeTunnel.app"

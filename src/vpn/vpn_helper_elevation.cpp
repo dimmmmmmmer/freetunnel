@@ -343,8 +343,20 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
         }
     });
     m_proc->setStandardErrorFile(QProcess::nullDevice());
-    m_proc->start(exe, {QStringLiteral("--launch-installed-helper"), QStringLiteral("--port"),
-                        QString::number(port), QStringLiteral("--token-file"), tokenPath});
+    QString launcher = exe;
+    QStringList arguments;
+#ifdef Q_OS_LINUX
+    // In extract-and-run mode the AppImage runtime identifies itself as the
+    // parent. Preserve that relationship for the launcher that asks pkexec.
+    const auto image = freetunnel::runningAppImage();
+    if (image.extracted) {
+        launcher = image.path;
+        arguments = image.launchArguments();
+    }
+#endif
+    arguments << QStringLiteral("--launch-installed-helper") << QStringLiteral("--port")
+              << QString::number(port) << QStringLiteral("--token-file") << tokenPath;
+    m_proc->start(launcher, arguments);
     if (m_proc->waitForStarted(5000)) return true;
     if (err) *err = tr("Could not start the VPN helper");
     return false;
