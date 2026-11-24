@@ -346,10 +346,10 @@ bool VpnHelperClient::spawnElevatedHelper(quint16 port, const QString &tokenPath
     QString launcher = exe;
     QStringList arguments;
 #ifdef Q_OS_LINUX
-    // In extract-and-run mode the AppImage runtime identifies itself as the
-    // parent. Preserve that relationship for the launcher that asks pkexec.
+    // Start through the runtime so the new launcher inherits its own FUSE
+    // keepalive pipe or, in extract-and-run mode, its runtime parent.
     const auto image = freetunnel::runningAppImage();
-    if (image.extracted) {
+    if (!image.path.isEmpty()) {
         launcher = image.path;
         arguments = image.launchArguments();
     }

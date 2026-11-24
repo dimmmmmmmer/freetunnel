@@ -17,9 +17,9 @@
 // $APPIMAGE named was then handed to pkexec and executed as root.
 //
 // So ask the kernel instead. The AppImage runtime mounts the payload over FUSE
-// and runs the executable from inside that mount; /proc/self/mountinfo names the
-// file backing the mount, and no amount of environment control changes what the
-// kernel reports there.
+// and runs the executable from that mount. mountinfo identifies its source.
+// If the source is a basename, the runtime daemon at the other end of the
+// inherited FUSE keepalive pipe identifies the full executable path.
 //
 // Without FUSE (--appimage-extract-and-run, or APPIMAGE_EXTRACT_AND_RUN=1) there
 // is no mount. The runtime unpacks into a directory named after the MD5 of the
