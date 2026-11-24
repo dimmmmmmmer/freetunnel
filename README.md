@@ -30,7 +30,7 @@ Get the app from [**Releases**](https://github.com/dimmmmmmmer/freetunnel/releas
 | Mac — Apple Silicon or Intel, macOS 12+ | [freetunnel-macos-universal.dmg](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-macos-universal.dmg) |
 | Linux — Ubuntu 22.04+, Debian 12+ | [freetunnel-linux-x86_64.deb](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-linux-x86_64.deb) |
 | Other Linux distributions with glibc 2.35+ | [freetunnel-x86_64.AppImage](https://github.com/dimmmmmmmer/freetunnel/releases/latest/download/freetunnel-x86_64.AppImage) |
-| Android phone, tablet or TV — Android 8.0+ | [Download APK](https://github.com/dimmmmmmmer/freetunnel/releases/download/android-1.2.5/freetunnel-android-1.2.5.apk) |
+| Android phone, tablet or TV — Android 8.0+ | [Download APK](https://github.com/dimmmmmmmer/freetunnel/releases/download/android-1.3.0/freetunnel-android-1.3.0.apk) |
 
 See [what changed](CHANGELOG.md) for release notes.
 

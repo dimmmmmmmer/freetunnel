@@ -584,8 +584,12 @@ the desktop's `v*` release.
      (`scripts/verify-release-signature.sh`);
    - takes the release notes from the `## X.Y.Z` section of `CHANGELOG.md`, and
      appends the install notes and a compare link to the previous release;
-   - publishes the installers, `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` to
-     GitHub Releases.
+   - publishes the macOS and Linux helper archives and their signed manifest in
+     `helper-X.Y.Z` on the same commit, with Latest disabled. The client requests
+     this exact version. A retry checks the files of an already published helper
+     release before proceeding;
+   - publishes the installers with their own signed manifest in `vX.Y.Z`.
+     Public files must match on retry.
 
 The release stops, and publishes nothing, when:
 

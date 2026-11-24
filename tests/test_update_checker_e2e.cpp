@@ -908,7 +908,8 @@ void TestUpdateCheckerE2e::anAndroidLatestOffersTheNewestDesktopRelease()
     QVERIFY(http.listen());
     qputenv("FT_GITHUB_API_BASE", http.baseUrl().toUtf8());
     const auto unset = qScopeGuard([] { qunsetenv("FT_GITHUB_API_BASE"); });
-    serveReleaseList(http, {otherRelease(QStringLiteral("android-1.0.1")),
+    serveReleaseList(http, {otherRelease(QStringLiteral("helper-9.0.0")),
+                            otherRelease(QStringLiteral("android-1.0.1")),
                             desktopRelease(QStringLiteral("v2.0.0")),
                             desktopRelease(QStringLiteral("v1.5.0"))});
     expectFallbackWarning(QStringLiteral("android-1.0.1"));

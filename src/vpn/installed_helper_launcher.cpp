@@ -112,7 +112,7 @@ enum class Preparation { Ready, Unavailable, Refused };
 
 Preparation prepareRuntime(const QTemporaryDir &cache, const QString &ownHash)
 {
-    const QString base = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/v%1/")
+    const QString base = QStringLiteral("https://github.com/dimmmmmmmer/freetunnel/releases/download/helper-%1/")
             .arg(QStringLiteral(FREETUNNEL_VERSION));
     QNetworkAccessManager manager;
     const QString sums = cache.filePath(QStringLiteral("SHA256SUMS.txt"));

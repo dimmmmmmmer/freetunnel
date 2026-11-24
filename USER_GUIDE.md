@@ -68,8 +68,9 @@ release downloads; if a matching helper archive is unavailable, the usual
 session password prompt remains available. Development builds also use that
 prompt. The VPN still stops when you **Quit** FreeTunnel.
 
-The `freetunnel-helper-*.tar.gz` release files are downloaded automatically by
-FreeTunnel. Install the usual DMG, AppImage or Debian package yourself.
+FreeTunnel downloads the matching macOS or Linux archive from the separate
+`helper-X.Y.Z` release.
+Install the usual DMG, AppImage or Debian package yourself.
 
 To remove the installed helper, quit FreeTunnel first. On macOS:
 
