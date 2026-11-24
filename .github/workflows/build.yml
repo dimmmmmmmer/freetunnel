@@ -1564,7 +1564,7 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.portable_test_run || github.run_id }}
           path: installers
-      - name: Prepare a pinned, loopback-only TrustTunnel endpoint
+      - name: Prepare a pinned TrustTunnel endpoint restricted to this runner
         env:
           PLATFORM: ${{ matrix.endpoint }}
           ARCHIVE_SHA: ${{ matrix.digest }}

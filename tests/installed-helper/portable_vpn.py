@@ -17,7 +17,7 @@ DEST = ("192.0.2.77", 42857)
 MAC = sys.platform == "darwin"
 
 
-async def probe_session(exe, cert, token_path, first, seen, nonce):
+async def probe_session(exe, cert, token_path, first, seen, nonce, address, password):
     token = secrets.token_hex(16)
     token_path.write_text(token)
     token_path.chmod(0o600)
@@ -70,8 +70,8 @@ async def probe_session(exe, cert, token_path, first, seen, nonce):
         # Only the documentation address enters the VPN. The endpoint forwards
         # it to our loopback-only responder; no host interface owns DEST.
         config = (f'vpn_mode = "general"\nkillswitch_enabled = false\n'
-                  '[endpoint]\nhostname = "vpn.invalid"\naddresses = ["127.0.0.1:29443"]\n'
-                  'username = "test"\npassword = "probe-only"\nupstream_protocol = "http2"\nhas_ipv6 = false\n'
+                  f'[endpoint]\nhostname = "vpn.invalid"\naddresses = ["{address}:29443"]\n'
+                  f'username = "test"\npassword = "{password}"\nupstream_protocol = "http2"\nhas_ipv6 = false\n'
                   f'certificate = """{cert.read_text()}"""\n'
                   '[listener.tun]\nchange_system_dns = false\nmtu_size = 1500\n'
                   f'included_routes = ["{DEST[0]}/32"]\nexcluded_routes = []\n')
@@ -117,6 +117,13 @@ async def main(exe):
     assert not installed.exists(), "First connection requires a clean machine"
     # The old network bootstrap would fail here. The endpoint remains reachable.
     assert all(info[4][0] in ("127.0.0.1", "::1") for info in socket.getaddrinfo("github.com", 443))
+    # The production client binds endpoint sockets to the physical uplink.
+    # Use that interface's own IPv4 address. The UDP connect only selects a
+    # source; it sends no packet. The endpoint allows exactly that source.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as uplink:
+        uplink.connect(("192.0.2.1", 9))
+        address = uplink.getsockname()[0]
+    password = secrets.token_hex(24)
     for first in (True, False):
         nonce = secrets.token_bytes(32)
         seen = asyncio.Event()
@@ -141,9 +148,9 @@ async def main(exe):
 
         server = await asyncio.start_server(respond, "127.0.0.1", 0)
         async with server:
-            with endpoint(server.sockets[0].getsockname()[1], "portable-endpoint.log") as cert:
+            with endpoint(server.sockets[0].getsockname()[1], "portable-endpoint.log", address, password) as cert:
                 with tempfile.TemporaryDirectory() as temp:
-                    await probe_session(exe, cert, Path(temp) / ".fthelper-probe", first, seen, nonce)
+                    await probe_session(exe, cert, Path(temp) / ".fthelper-probe", first, seen, nonce, address, password)
         assert (installed / "current/runtime").is_dir()
         print("PASS", "first connection" if first else "reconnection", "authenticated TCP round trip", flush=True)
 

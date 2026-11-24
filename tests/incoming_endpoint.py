@@ -1,6 +1,7 @@
-"""A real, loopback-only TrustTunnel endpoint for isolated routing tests."""
+"""A real TrustTunnel endpoint restricted to the local test host."""
 from contextlib import contextmanager
 import hashlib
+import ipaddress
 import os
 from pathlib import Path
 import socket
@@ -11,7 +12,8 @@ import time
 
 
 @contextmanager
-def endpoint(socks_port=None, log_path="incoming-android-endpoint.log"):
+def endpoint(socks_port=None, log_path="incoming-android-endpoint.log", address="127.0.0.1", password="probe-only"):
+    address = str(ipaddress.IPv4Address(address))
     binary = Path(os.environ["INCOMING_ENDPOINT_BIN"]).resolve(strict=True)
     # Verify the executable too, so an overridden environment path cannot
     # execute an arbitrary program. This digest is from the verified official
@@ -32,12 +34,14 @@ def endpoint(socks_port=None, log_path="incoming-android-endpoint.log"):
                         "-keyout", str(root / "key.pem"), "-out", str(root / "cert.pem"),
                         "-days", "1", "-subj", "/CN=vpn.invalid", "-addext", "subjectAltName=DNS:vpn.invalid"],
                        check=True, capture_output=True)
-        (root / "credentials.toml").write_text('[[client]]\nusername = "test"\npassword = "probe-only"\n')
+        (root / "credentials.toml").write_text(f'[[client]]\nusername = "test"\npassword = "{password}"\n')
+        (root / "rules.toml").write_text(f'[[rule]]\ncidr = "{address}/32"\naction = "allow"\n'
+                                        '[[rule]]\ncidr = "0.0.0.0/0"\naction = "deny"\n')
         (root / "hosts.toml").write_text('[[main_hosts]]\nhostname = "vpn.invalid"\n'
                                         'cert_chain_path = "cert.pem"\nprivate_key_path = "key.pem"\n')
         forward = (f'[forward_protocol.socks5]\naddress = "127.0.0.1:{socks_port}"\nextended_auth = false\n'
                    if socks_port else "[forward_protocol]\ndirect = {}\n")
-        (root / "vpn.toml").write_text('listen_address = "127.0.0.1:29443"\n'
+        (root / "vpn.toml").write_text(f'listen_address = "{address}:29443"\nrules_file = "rules.toml"\n'
                                       'ipv6_available = false\nallow_private_network_connections = true\n'
                                       'credentials_file = "credentials.toml"\n'
                                       '[listen_protocols.http2]\n' + forward)
@@ -49,7 +53,7 @@ def endpoint(socks_port=None, log_path="incoming-android-endpoint.log"):
                 while True:
                     assert process.poll() is None, f"Endpoint exited: see {log_path}"
                     try:
-                        with socket.create_connection(("127.0.0.1", 29443), timeout=0.2):
+                        with socket.create_connection((address, 29443), timeout=0.2):
                             break
                     except OSError:
                         if time.monotonic() >= deadline:
