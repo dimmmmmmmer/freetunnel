@@ -403,9 +403,14 @@ jobs:
             sleep 20
           done
           sudo apt-get update
-          # Launchpad occasionally returns HTTP 503 for a package download.
-          # Retry the fetch; a persistent failure must still fail the build.
-          sudo apt-get -o Acquire::Retries=5 install -y g++-13
+          # Launchpad's PPA pool sometimes returns 503 for only some files.
+          # Use its separate file service for those, with hashes from APT.
+          if ! sudo apt-get -o Acquire::Retries=1 install -y g++-13; then
+            set -o pipefail
+            apt-get --print-uris -o Acquire::ForceHash=SHA256 -y install g++-13 |
+              sudo bash client/scripts/fetch-toolchain-ppa.sh /var/cache/apt/archives
+            sudo apt-get install -y g++-13
+          fi
           # jammy also has GCC 11 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
           # clang prints the path through its own directory (/usr/bin/../lib/…),
