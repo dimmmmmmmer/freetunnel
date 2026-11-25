@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- On Linux, when NetworkManager reports limited IPv6 and working IPv4, applications such as Docker have time to try IPv4 while FreeTunnel determines the split-tunnel route from the TLS hostname.
+- If a connection fails or is cancelled while FreeTunnel is selecting its final route, both sides of the pending connection are cleaned up.
+
 ## 1.3.2
 
 - On macOS, first-time VPN helper installation now finishes after you approve the administrator prompt.

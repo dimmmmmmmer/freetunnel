@@ -1,0 +1,472 @@
+diff --git a/core/include/vpn/internal/vpn_connection.h b/core/include/vpn/internal/vpn_connection.h
+index 8093ffa..a81f6a6 100644
+--- a/core/include/vpn/internal/vpn_connection.h
++++ b/core/include/vpn/internal/vpn_connection.h
+@@ -71,11 +71,12 @@ struct VpnConnection {
+     int proto = 0;
+     std::bitset<width_of<VpnConnectionFlags>()> flags;
+     int uid = 0;
+     DomainExtractor domain_extractor;
+     DomainExtractorResult domain_extractor_result;
+-    uint64_t migrating_client_id = NON_ID;
++    // While migrating, the source holds the candidate server id and the candidate holds the source client id.
++    uint64_t migration_peer_id = NON_ID;
+     std::string app_name;
+     event_loop::AutoTaskId complete_connect_request_task;
+     // This pair of counters is used to make it visible in the logs whether
+     // any traffic has passed through the connection.
+     // The statistics monitor does not replace them because it only operates
+diff --git a/core/src/fake_upstream.cpp b/core/src/fake_upstream.cpp
+index 095bd2f..23aa7fa 100644
+--- a/core/src/fake_upstream.cpp
++++ b/core/src/fake_upstream.cpp
+@@ -1,7 +1,8 @@
+ #include "fake_upstream.h"
+ 
++#include "net/network_manager.h"
+ #include "vpn/internal/vpn_client.h"
+ 
+ namespace ag {
+ 
+ FakeUpstream::FakeUpstream(int id)
+@@ -30,35 +31,54 @@ bool FakeUpstream::open_session(std::optional<Millis>) {
+ void FakeUpstream::close_session() {
+     std::unordered_set<uint64_t> connections;
+     connections.reserve(m_opening_connections.size() + m_closing_connections.size());
+     connections.insert(m_opening_connections.begin(), m_opening_connections.end());
+     connections.insert(m_closing_connections.begin(), m_closing_connections.end());
++    for (const auto &[id, task] : m_delayed_connections) {
++        connections.insert(id);
++    }
+     for (uint64_t conn : connections) {
+         this->close_connection(conn, true, false);
+     }
+ 
+     m_opening_connections.clear();
+     m_closing_connections.clear();
+     m_async_task.reset();
+     m_session_open = false;
+ }
+ 
+-uint64_t FakeUpstream::open_connection(const TunnelAddressPair *, int, std::string_view) {
++uint64_t FakeUpstream::open_connection(const TunnelAddressPair *addr, int proto, std::string_view) {
+     if (!m_session_open) {
+         return NON_ID;
+     }
+ 
+     uint64_t id = this->vpn->upstream_conn_id_generator.get();
++    const auto *dst = std::get_if<SocketAddress>(&addr->dst);
++    if (proto == IPPROTO_TCP && vpn->domain_filter.get_mode() == VPN_MODE_SELECTIVE && dst != nullptr
++            && dst->addr().size() == sizeof(in6_addr) && (dst->addr()[0] & 0xe0) == 0x20
++            && vpn_network_manager_has_limited_ipv6()) {
++        // Only an early ACK can win the application's address race without reaching
++        // a peer. Give it time to start its IPv4 attempt on this degraded uplink.
++        // A client with only this address still gets its original IPv6 connection.
++        m_delayed_connections.emplace(id, event_loop::schedule(vpn->parameters.ev_loop, [this, id]() {
++            m_delayed_connections.at(id).release();
++            m_delayed_connections.erase(id);
++            uint64_t opened = id;
++            handler.func(handler.arg, SERVER_EVENT_CONNECTION_OPENED, &opened);
++        }, Millis{650}));
++        return id;
++    }
+     m_opening_connections.insert(id);
+     if (!m_async_task.has_value()) {
+         m_async_task = event_loop::submit(this->vpn->parameters.ev_loop, {this, on_async_task});
+     }
+ 
+     return id;
+ }
+ 
+ void FakeUpstream::close_connection(uint64_t id, bool, bool async) {
++    m_delayed_connections.erase(id);
+     m_opening_connections.erase(id);
+     if (!async) {
+         this->handler.func(this->handler.arg, SERVER_EVENT_CONNECTION_CLOSED, &id);
+     } else if (m_session_open) {
+         m_closing_connections.insert(id);
+diff --git a/core/src/fake_upstream.h b/core/src/fake_upstream.h
+index 66e5a4e..e3c8e47 100644
+--- a/core/src/fake_upstream.h
++++ b/core/src/fake_upstream.h
+@@ -1,7 +1,8 @@
+ #pragma once
+ 
++#include <unordered_map>
+ #include <unordered_set>
+ 
+ #include "vpn/internal/server_upstream.h"
+ 
+ namespace ag {
+@@ -15,10 +16,11 @@ public:
+     FakeUpstream &operator=(const FakeUpstream &) = delete;
+     FakeUpstream(FakeUpstream &&) = delete;
+     FakeUpstream &operator=(FakeUpstream &&) = delete;
+ 
+ private:
++    std::unordered_map<uint64_t, event_loop::AutoTaskId> m_delayed_connections;
+     std::unordered_set<uint64_t> m_opening_connections;
+     std::unordered_set<uint64_t> m_closing_connections;
+     event_loop::AutoTaskId m_async_task;
+     bool m_session_open = false;
+ 
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index 06617ba..39c296b 100644
+--- a/core/src/tunnel.cpp
++++ b/core/src/tunnel.cpp
+@@ -129,11 +129,11 @@ static void destroy_connection(Tunnel *tunnel, uint64_t client_id, uint64_t serv
+         log_conn(tunnel, conn, dbg, "Destroyed (download={}, upload={})", conn->incoming_bytes, conn->outgoing_bytes);
+ 
+         if (conn->flags.test(CONNF_MONITOR_STATS)) {
+             tunnel->statistics_monitor->unregister_conn(conn->client_id, /*do_report*/ true);
+         }
+-        if (!conn->listener.expired() && conn->listener.lock().get() == tunnel->vpn->client_listener.get()) {
++        if (conn->client_id != NON_ID && !conn->listener.expired() && conn->listener.lock() == tunnel->vpn->client_listener) {
+             VpnTunnelConnectionClosedEvent event{
+                     .id = conn->client_id,
+             };
+             const vpn_client::Handler &handler = tunnel->vpn->parameters.handler;
+             handler.func(handler.arg, vpn_client::EVENT_CONNECTION_CLOSED, &event);
+@@ -585,10 +585,21 @@ static void schedule_send_buffered_data(Tunnel *tunnel, VpnConnection *conn) {
+                         delete (Ctx *) arg;
+                     },
+             });
+ }
+ 
++// A migration candidate has only a server id until its connect succeeds.
++// An error may be the last event it emits (in particular for direct TCP).
++static void abort_migration(Tunnel *self, VpnConnection *candidate) {
++    uint64_t client_id = candidate->migration_peer_id;
++    destroy_connection(self, NON_ID, candidate->server_id);
++    if (auto *source = vpn_connection_get_by_id(self->connections.by_client_id, client_id);
++            source && source->state == CONNS_CONNECTED_MIGRATING) {
++        close_client_side_connection(self, source, utils::AG_ECONNREFUSED, false);
++    }
++}
++
+ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, ServerEvent what, void *data) {
+     switch (what) {
+     case SERVER_EVENT_SESSION_OPENED:
+         if (upstream.get() == this->vpn->endpoint_upstream.get()) {
+             assert(!this->endpoint_upstream_connected);
+@@ -640,20 +651,20 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
+             listener->complete_connect_request(conn->client_id, CCR_PASS);
+             break;
+         }
+         case CONNS_WAITING_RESPONSE_MIGRATING: {
+             VpnConnection *src_conn =
+-                    vpn_connection_get_by_id(this->connections.by_client_id, conn->migrating_client_id);
++                    vpn_connection_get_by_id(this->connections.by_client_id, conn->migration_peer_id);
+             if (src_conn == nullptr) {
+                 log_conn(this, conn, dbg, "Migrating connection closed while had being connecting to another upstream");
+                 upstream->close_connection(id, false, true);
+                 break;
+             }
+ 
+             std::swap(conn->client_id, src_conn->client_id);
+             conn->state = CONNS_CONNECTED;
+-            conn->migrating_client_id = NON_ID;
++            conn->migration_peer_id = NON_ID;
+             add_connection(this, conn);
+             if (conn->proto == IPPROTO_UDP) {
+                 std::swap(((UdpVpnConnection *) conn)->buffered_packets,
+                         ((UdpVpnConnection *) src_conn)->buffered_packets);
+             }
+@@ -697,10 +708,14 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
+             destroy_connection(this, NON_ID, id);
+             break;
+         }
+ 
+         log_conn(this, conn, dbg, "Connection closed");
++        if (conn->state == CONNS_WAITING_RESPONSE_MIGRATING) {
++            abort_migration(this, conn);
++            break;
++        }
+         if (std::shared_ptr<ClientListener> listener;
+                 nullptr != vpn_connection_get_by_id(this->connections.by_client_id, conn->client_id)
+                 && nullptr != (listener = conn->listener.lock())) {
+             vpn_connection_remove(this->connections.by_server_id, conn->server_id);
+             listener->turn_read(conn->client_id, false);
+@@ -852,49 +867,36 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
+         if (conn == nullptr) {
+             destroy_connection(this, NON_ID, event->id);
+             break;
+         }
+ 
+-        bool need_close_client_side = true;
+-
+         switch (conn->state) {
+         case CONNS_WAITING_RESPONSE: {
+             log_conn(this, conn, dbg, "Failed to make tunnel: {} ({})", safe_to_string_view(event->error.text),
+                     event->error.code);
+             break;
+         }
+         case CONNS_WAITING_RESPONSE_MIGRATING: {
+             log_conn(this, conn, dbg, "Failed to switch upstream: {} ({})", safe_to_string_view(event->error.text),
+                     event->error.code);
+ 
+-            VpnConnection *src_conn =
+-                    vpn_connection_get_by_id(this->connections.by_client_id, conn->migrating_client_id);
+-            if (src_conn == nullptr) {
+-                // do nothing
+-            } else {
+-                upstream->close_connection(src_conn->server_id, false, true);
+-            }
+-
+-            if (std::shared_ptr<ServerUpstream> conn_upstream = conn->upstream.lock(); conn_upstream != nullptr) {
+-                conn_upstream->close_connection(conn->server_id, false, true);
+-            }
+-            need_close_client_side = false;
+-            break;
++            uint64_t failed_id = conn->server_id;
++            abort_migration(this, conn);
++            upstream->close_connection(failed_id, false, true);
++            return;
+         }
+         default:
+             log_conn(this, conn, dbg, "Server closed connection in state: {}, with error: {} ({})",
+                     magic_enum::enum_name(conn->state), safe_to_string_view(event->error.text), event->error.code);
+             break;
+         }
+ 
+-        if (need_close_client_side) {
+-            if (nullptr != vpn_connection_get_by_id(this->connections.by_client_id, conn->client_id)) {
+-                vpn_connection_remove(this->connections.by_server_id, conn->server_id);
+-                close_client_side_connection(this, conn, event->error.code, false);
+-            } else {
+-                destroy_connection(this, conn->client_id, conn->server_id);
+-            }
++        if (vpn_connection_get_by_id(this->connections.by_client_id, conn->client_id) != nullptr) {
++            vpn_connection_remove(this->connections.by_server_id, conn->server_id);
++            close_client_side_connection(this, conn, event->error.code, false);
++        } else {
++            destroy_connection(this, conn->client_id, conn->server_id);
+         }
+ 
+         break;
+     }
+     case SERVER_EVENT_ECHO_REPLY: {
+@@ -1017,11 +1019,12 @@ static std::shared_ptr<ServerUpstream> select_upstream(
+     sw_conn->server_id = server_id;
+     sw_conn->listener = conn->listener;
+     sw_conn->upstream = upstream;
+     sw_conn->state = CONNS_WAITING_RESPONSE_MIGRATING;
+     sw_conn->flags.set(CONNF_LOOKINGUP_DOMAIN, conn->flags.test(CONNF_LOOKINGUP_DOMAIN));
+-    sw_conn->migrating_client_id = conn->client_id;
++    sw_conn->migration_peer_id = conn->client_id;
++    conn->migration_peer_id = server_id;
+     sw_conn->app_name = conn->app_name;
+     sw_conn->domain_extractor_result = conn->domain_extractor_result;
+     add_connection(self, sw_conn);
+     if (conn->proto == IPPROTO_UDP) {
+         // do not turn off reads on migrating UDP connections,
+@@ -1688,10 +1691,19 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
+         if (conn == nullptr) {
+             break;
+         }
+ 
+         log_conn(this, conn, dbg, "Connection closed");
++        if (conn->state == CONNS_CONNECTED_MIGRATING) {
++            auto *candidate = vpn_connection_get_by_id(this->connections.by_server_id, conn->migration_peer_id);
++            if (candidate != nullptr && candidate->migration_peer_id == id) {
++                candidate->migration_peer_id = NON_ID;
++                if (auto target = candidate->upstream.lock()) {
++                    target->close_connection(candidate->server_id, false, true);
++                }
++            }
++        }
+         if (conn->flags.test(CONNF_SESSION_CLOSED)
+                 || nullptr == vpn_connection_get_by_id(this->connections.by_server_id, conn->server_id)) {
+             destroy_connection(this, id, conn->server_id);
+             break;
+         }
+diff --git a/core/test/test_tunnel.cpp b/core/test/test_tunnel.cpp
+index 35196e2..6c46c95 100644
+--- a/core/test/test_tunnel.cpp
++++ b/core/test/test_tunnel.cpp
+@@ -270,10 +270,87 @@ TEST_F(TunnelTest, LocalhostConnection) {
+     ClientConnectRequest event = {client_id, connection_protocol, &src, &dst};
+     tun.listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
+     ASSERT_GT(bypass_upstream->connections.size(), 0);
+ }
+ 
++class LimitedIpv6Test : public TunnelTest {
++protected:
++    uint32_t previous_interface = 0;
++    void SetUp() override {
++        TunnelTest::SetUp();
++        previous_interface = vpn_network_manager_get_outbound_interface();
++        vpn_network_manager_set_outbound_interface(42);
++        vpn_network_manager_set_limited_ipv6_interface(42);
++        ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_SELECTIVE, "*.example"));
++    }
++    void TearDown() override {
++        vpn_network_manager_set_limited_ipv6_interface(0);
++        vpn_network_manager_set_outbound_interface(previous_interface);
++        TunnelTest::TearDown();
++    }
++    uint64_t request(const char *address) {
++        uint64_t id = vpn.listener_conn_id_generator.get();
++        dst = SocketAddress(address);
++        raise_client_connection(id);
++        tun.complete_connect_request(id, tun.finalize_connect_action({id, VPN_CA_DEFAULT, "app", 1}));
++        run_event_loop_once();
++        return id;
++    }
++};
++
++TEST_F(LimitedIpv6Test, DualStackClientCanRaceWhileIpv6OnlyStillCompletes) {
++    auto v6 = request("[2001:db8::1]:443");
++    auto v4 = request("192.0.2.1:443");
++    EXPECT_FALSE(client_listener->connections[v6].result);
++    EXPECT_EQ(client_listener->connections[v4].result, CCR_PASS);
++    EXPECT_TRUE(bypass_upstream->connections.empty());
++    EXPECT_TRUE(redirect_upstream->connections.empty());
++
++    vpn_event_loop_exit(ev_loop.get(), Millis{850});
++    vpn_event_loop_run(ev_loop.get());
++    EXPECT_EQ(client_listener->connections[v6].result, CCR_PASS);
++}
++
++TEST_F(LimitedIpv6Test, KnownRoutesWaitForTheirPeer) {
++    dst = SocketAddress("[2001:db8::1]:443");
++    for (bool direct : {true, false}) {
++        auto id = vpn.listener_conn_id_generator.get();
++        ASSERT_NO_FATAL_FAILURE(raise_client_connection(id));
++        auto action = direct ? VPN_CA_FORCE_BYPASS : VPN_CA_FORCE_REDIRECT;
++        tun.complete_connect_request(id, tun.finalize_connect_action({id, action, "app", 1}));
++        run_event_loop_once();
++        EXPECT_FALSE(client_listener->connections[id].result);
++        auto upstream = direct ? bypass_upstream : redirect_upstream;
++        ASSERT_FALSE(upstream->connections.empty());
++        auto peer = upstream->connections.back();
++        tun.upstream_handler(upstream, SERVER_EVENT_CONNECTION_OPENED, &peer);
++        EXPECT_EQ(client_listener->connections[id].result, CCR_PASS);
++    }
++}
++
++TEST_F(LimitedIpv6Test, ClientCanCancelWhileWaiting) {
++    auto id = request("[2001:db8::1]:443");
++    ASSERT_FALSE(client_listener->connections[id].result);
++    client_listener->close_connection(id, false, false);
++    vpn_event_loop_exit(ev_loop.get(), Millis{850});
++    vpn_event_loop_run(ev_loop.get());
++    EXPECT_FALSE(client_listener->connections.contains(id));
++    EXPECT_TRUE(bypass_upstream->connections.empty());
++}
++
++TEST_F(LimitedIpv6Test, LocalAddressesUdpAndNewUplinkKeepNormalTiming) {
++    auto local = request("[fd00::1]:443");
++    EXPECT_EQ(client_listener->connections[local].result, CCR_PASS);
++    connection_protocol = IPPROTO_UDP;
++    auto udp = request("[2001:db8::2]:443");
++    EXPECT_EQ(client_listener->connections[udp].result, CCR_PASS);
++    connection_protocol = IPPROTO_TCP;
++    vpn_network_manager_set_outbound_interface(43);
++    auto healthy = request("[2001:db8::3]:443");
++    EXPECT_EQ(client_listener->connections[healthy].result, CCR_PASS);
++}
++
+ class MigrationTest : public TunnelTest {
+ public:
+     uint64_t client_id = NON_ID;
+     uint64_t redirect_id = NON_ID;
+     uint64_t bypass_id = NON_ID;
+@@ -340,30 +417,38 @@ TEST_F(MigrationTest, Successful) {
+ 
+ TEST_F(MigrationTest, ClosedDuringMigration) {
+     // 4) Connection is closed during the migration
+     tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_CLOSED, &client_id);
+ 
+-    // 5) Complete migration
+-    tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &bypass_id);
++    // Both attempts are cancelled even when the destination never responds.
+     ASSERT_EQ(redirect_upstream->connections.end(),
+             std::find(redirect_upstream->connections.begin(), redirect_upstream->connections.end(), redirect_id));
+     ASSERT_EQ(bypass_upstream->last_send, 0);
+     ASSERT_EQ(bypass_upstream->connections.end(),
+             std::find(bypass_upstream->connections.begin(), bypass_upstream->connections.end(), bypass_id));
+ }
+ 
+ TEST_F(MigrationTest, ConnectionFailed) {
+     // 4) Failed to connect to host directly
+     ServerError err = {bypass_id, {ag::utils::AG_ECONNREFUSED, "refused"}};
+-    tun.upstream_handler(redirect_upstream, SERVER_EVENT_ERROR, &err);
++    tun.upstream_handler(bypass_upstream, SERVER_EVENT_ERROR, &err);
++    EXPECT_FALSE(client_listener->connections.contains(client_id));
+     ASSERT_EQ(redirect_upstream->connections.end(),
+             std::find(redirect_upstream->connections.begin(), redirect_upstream->connections.end(), redirect_id));
+     ASSERT_EQ(bypass_upstream->last_send, 0);
+     ASSERT_EQ(bypass_upstream->connections.end(),
+             std::find(bypass_upstream->connections.begin(), bypass_upstream->connections.end(), bypass_id));
+ }
+ 
++TEST_F(MigrationTest, CandidateClosedWithoutError) {
++    bypass_upstream->close_connection(bypass_id, false, false);
++    EXPECT_FALSE(client_listener->connections.contains(client_id));
++    EXPECT_TRUE(redirect_upstream->connections.empty());
++    EXPECT_TRUE(bypass_upstream->connections.empty());
++    EXPECT_EQ(bypass_upstream->last_send, 0);
++}
++
+ class TestFakeUpstream : public FakeUpstream {
+ public:
+     std::vector<uint64_t> closing_connections;
+ 
+     explicit TestFakeUpstream(std::shared_ptr<ServerUpstream> orig)
+diff --git a/net/include/net/network_manager.h b/net/include/net/network_manager.h
+index 6510adf..4776b37 100644
+--- a/net/include/net/network_manager.h
++++ b/net/include/net/network_manager.h
+@@ -63,10 +63,15 @@ extern "C" WIN_EXPORT void vpn_network_manager_set_outbound_interface(uint32_t i
+ /**
+  * Get the outbound interface for outgoing connections
+  */
+ uint32_t vpn_network_manager_get_outbound_interface();
+ 
++// Set the physical interface on which IPv4 has Internet access and IPv6 is limited.
++// Zero clears the hint. This only affects timing of speculative TCP handshakes.
++void vpn_network_manager_set_limited_ipv6_interface(uint32_t idx);
++bool vpn_network_manager_has_limited_ipv6();
++
+ using VpnTunnelActivityToken = uint64_t;
+ 
+ /** Invalid tunnel activity token. */
+ constexpr VpnTunnelActivityToken VPN_TUNNEL_ACTIVITY_TOKEN_INVALID = 0;
+ 
+diff --git a/net/src/network_manager.cpp b/net/src/network_manager.cpp
+index 54eeaa3..d2f6932 100644
+--- a/net/src/network_manager.cpp
++++ b/net/src/network_manager.cpp
+@@ -27,10 +27,11 @@ static struct NetworkManagerHolder {
+             .socket = nullptr,           // each VPN client has its own socket manager
+     };
+     std::mutex guard;
+     ag::LruTimeoutCache<std::string, bool> app_domain_cache;
+     std::atomic<uint32_t> outbound_interface = 0;
++    std::atomic<uint32_t> limited_ipv6_interface = 0;
+     std::mutex tunnel_activity_guard;
+     std::unordered_set<VpnTunnelActivityToken> tunnel_activity_tokens;
+     VpnTunnelActivityToken next_tunnel_activity_token = 1;
+     std::atomic_size_t tunnel_activity_count = 0;
+ 
+@@ -84,10 +85,19 @@ void vpn_network_manager_set_outbound_interface(uint32_t idx) {
+ 
+ uint32_t vpn_network_manager_get_outbound_interface() {
+     return g_network_manager_holder.outbound_interface;
+ }
+ 
++void vpn_network_manager_set_limited_ipv6_interface(uint32_t idx) {
++    g_network_manager_holder.limited_ipv6_interface = idx;
++}
++
++bool vpn_network_manager_has_limited_ipv6() {
++    uint32_t limited = g_network_manager_holder.limited_ipv6_interface.load();
++    return limited != 0 && limited == vpn_network_manager_get_outbound_interface();
++}
++
+ VpnTunnelActivityToken vpn_network_manager_acquire_tunnel_activity() {
+     std::scoped_lock l(g_network_manager_holder.tunnel_activity_guard);
+     VpnTunnelActivityToken token;
+     do {
+         token = g_network_manager_holder.next_tunnel_activity_token++;

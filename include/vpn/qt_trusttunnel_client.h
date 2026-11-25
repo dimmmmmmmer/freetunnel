@@ -241,6 +241,10 @@ private:
     static int getFdLimit();
     // qt_trusttunnel_uplink.cpp: on Windows, nothing in the core notices the
     // network adapter changing, so these (and the followUplink slot) tell it.
+#ifdef Q_OS_LINUX
+    void refreshPhysicalConnectivity();
+    quint64 m_connectivityQuery = 0;
+#endif
     void startFollowingUplink();
     void resetUplinkTracking();
     void reportUplink(uint32_t ifIndex);

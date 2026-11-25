@@ -24,6 +24,14 @@
 #include "core/NetBind.h"
 #endif
 
+#ifdef Q_OS_LINUX
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusObjectPath>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#endif
+
 #include <QNetworkInterface>
 
 #include <algorithm>
@@ -152,6 +160,10 @@ QtTrustTunnelClient::dnsFailureOutcome(const QString &coreError, QString *error)
 
 void QtTrustTunnelClient::startFollowingUplink()
 {
+#ifdef Q_OS_LINUX
+    ++m_connectivityQuery;
+    ag::vpn_network_manager_set_limited_ipv6_interface(0);
+#endif
     // Constant off Windows outside the tests, which is all a Linux-configured
     // cppcheck sees.
     // cppcheck-suppress knownConditionTrueFalse
@@ -228,3 +240,54 @@ void QtTrustTunnelClient::reportUplink(uint32_t ifIndex)
                                     .arg(QString::fromStdString(dnsErr->str())));
     m_client->notify_network_change(ag::VPN_NS_CONNECTED);
 }
+
+#ifdef Q_OS_LINUX
+void QtTrustTunnelClient::refreshPhysicalConnectivity()
+{
+    const quint64 query = ++m_connectivityQuery;
+    const uint32_t index = ag::vpn_network_manager_get_outbound_interface();
+    const QString iface = QNetworkInterface::interfaceNameFromIndex(static_cast<int>(index));
+    if (iface.isEmpty()) {
+        ag::vpn_network_manager_set_limited_ipv6_interface(0);
+        return;
+    }
+
+    const auto bus = QDBusConnection::systemBus();
+    const QString service = QStringLiteral("org.freedesktop.NetworkManager");
+    auto findDevice = QDBusMessage::createMethodCall(service, QStringLiteral("/org/freedesktop/NetworkManager"),
+                                                     service, QStringLiteral("GetDeviceByIpIface"));
+    findDevice << iface;
+    const auto current = [this, index, query] {
+        return query == m_connectivityQuery && m_fdWatchdogTimer.isActive()
+                && index == ag::vpn_network_manager_get_outbound_interface();
+    };
+    auto *deviceCall = new QDBusPendingCallWatcher(bus.asyncCall(findDevice, 1000), this);
+    connect(deviceCall, &QDBusPendingCallWatcher::finished, this,
+            [this, bus, service, index, current](QDBusPendingCallWatcher *call) {
+        const QDBusPendingReply<QDBusObjectPath> device = *call;
+        call->deleteLater();
+        if (!current())
+            return;
+        if (device.isError()) {
+            ag::vpn_network_manager_set_limited_ipv6_interface(0);
+            return;
+        }
+        auto get = QDBusMessage::createMethodCall(service, device.value().path(),
+                QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("GetAll"));
+        get << QStringLiteral("org.freedesktop.NetworkManager.Device");
+        auto *propsCall = new QDBusPendingCallWatcher(bus.asyncCall(get, 1000), this);
+        connect(propsCall, &QDBusPendingCallWatcher::finished, this,
+                [index, current](QDBusPendingCallWatcher *props) {
+            const QDBusPendingReply<QVariantMap> reply = *props;
+            props->deleteLater();
+            if (!current())
+                return;
+            const auto values = reply.isError() ? QVariantMap{} : reply.value();
+            const auto ipv4 = values.value(QStringLiteral("Ip4Connectivity")).toUInt();
+            const auto ipv6 = values.value(QStringLiteral("Ip6Connectivity")).toUInt();
+            // NMConnectivityState: unknown=0, none=1, portal=2, limited=3, full=4.
+            ag::vpn_network_manager_set_limited_ipv6_interface(ipv4 == 4 && ipv6 >= 1 && ipv6 <= 3 ? index : 0);
+        });
+    });
+}
+#endif

@@ -1011,6 +1011,9 @@ target_include_directories(test_qt_trusttunnel_client PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(test_qt_trusttunnel_client PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::Core Qt6::Network Qt6::Test ft_apps)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(test_qt_trusttunnel_client PRIVATE Qt6::DBus)
+endif()
 add_test(NAME qt_trusttunnel_client COMMAND test_qt_trusttunnel_client -o ${CMAKE_CURRENT_BINARY_DIR}/report-qt_trusttunnel_client.txt,txt)
 
 # Split-tunnel behaviour (routes, profiles, and which edits disturb a live
@@ -1150,6 +1153,9 @@ target_include_directories(freetunnel_test_helper PRIVATE
     mock_core ../include ../include/vpn ../src/vpn)
 target_compile_definitions(freetunnel_test_helper PRIVATE FT_ENABLE_TEST_HOOKS)
 target_link_libraries(freetunnel_test_helper PRIVATE Qt6::Core Qt6::Network ft_apps)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(freetunnel_test_helper PRIVATE Qt6::DBus)
+endif()
 if(WIN32)
     target_sources(freetunnel_test_helper PRIVATE ../src/vpn/vpn_helper_service_win.cpp)
     target_link_libraries(freetunnel_test_helper PRIVATE advapi32)
